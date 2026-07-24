@@ -2500,6 +2500,7 @@ export const TimelineView = memo(function TimelineView({
     callback: (diagnostics: TimelineDiagnostics) => void;
     signature: string;
   } | null>(null);
+  const lastThreadCommitDiagnosticRef = useRef<string | null>(null);
   const scrollDiagnosticsRef = useRef<TimelineScrollDiagnostics>(
     createInitialTimelineScrollDiagnostics()
   );
@@ -2543,6 +2544,34 @@ export const TimelineView = memo(function TimelineView({
     },
     [onDiagnosticLogEntry]
   );
+  useLayoutEffect(() => {
+    if (!("Thread" in timelineKey.kind) || !timelineKeyState) {
+      return;
+    }
+    const signature = [
+      timelineKeyHash,
+      timelineKeyState.actorGeneration,
+      timelineKeyState.generation,
+      timelineKeyState.lastAppliedBatchId ?? "none",
+      items.length
+    ].join(":");
+    if (lastThreadCommitDiagnosticRef.current === signature) {
+      return;
+    }
+    lastThreadCommitDiagnosticRef.current = signature;
+    emitDiagnosticLog(
+      "thread.timeline",
+      `stage=committed actor=${timelineKeyState.actorGeneration} ` +
+        `generation=${timelineKeyState.generation} ` +
+        `batch=${timelineKeyState.lastAppliedBatchId ?? "none"} items=${items.length}`
+    );
+  }, [
+    emitDiagnosticLog,
+    items.length,
+    timelineKey.kind,
+    timelineKeyHash,
+    timelineKeyState
+  ]);
   const emitScrollDiagnostics = useCallback(() => {
     onScrollDiagnosticsChangeRef.current?.(scrollDiagnosticsRef.current);
   }, []);

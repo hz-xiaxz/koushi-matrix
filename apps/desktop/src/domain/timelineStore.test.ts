@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, test } from "vitest";
 
-import type { TimelineItem, TimelineKey } from "./coreEvents";
+import type { TimelineEvent, TimelineItem, TimelineKey } from "./coreEvents";
 import { focusedTimelineKey, roomTimelineKey, timelineItemDomId } from "./coreEvents";
 import { projectTimelineDisplayRows } from "./timelineDisplayProjection";
 import type { TimelineThreadRootOrder } from "./types";
@@ -30,6 +30,7 @@ import {
   applyGlobalResync,
   applyTimelineEvent,
   batchContainsPrepend,
+  classifyTimelineItemsUpdatedApplication,
   createTimelineStore,
   getThreadRootProjections,
   getMediaUploadProgress,
@@ -41,6 +42,7 @@ import {
   applyTimelineEventWithProjectionResult,
   pruneTimelineStore,
   shouldSuppressAutoBackfill,
+  threadTimelineStoreDiagnosticMessage,
   timelineStoreKeyId,
   type TimelineStoreState
 } from "./timelineStore";
@@ -53,6 +55,67 @@ import { TauriIpcMock } from "../test/tauriIpcMock";
 const ACCOUNT_KEY = "@qa-user:example.invalid";
 const KEY: TimelineKey = roomTimelineKey(ACCOUNT_KEY, "!room:example.invalid");
 const LATEST_REPLY: TimelineThreadRootOrder = { kind: "latestReply" };
+
+test("classifies timeline item update admission before store application", () => {
+  const update: Extract<TimelineEvent, { ItemsUpdated: unknown }>["ItemsUpdated"] = {
+    key: KEY,
+    generation: 3,
+    batch_id: 7,
+    diffs: [{ PushBack: { item: makeMsg("$new", "new") } }]
+  };
+
+  expect(classifyTimelineItemsUpdatedApplication(createTimelineStore(), update))
+    .toBe("missing_initial");
+
+  const initialized = applyTimelineEvent(createTimelineStore(), {
+    InitialItems: {
+      request_id: null,
+      key: KEY,
+      actor_generation: 5,
+      generation: 3,
+      items: [makeMsg("$old", "old")]
+    }
+  });
+  expect(classifyTimelineItemsUpdatedApplication(initialized, update)).toBe("applied");
+  expect(
+    classifyTimelineItemsUpdatedApplication(initialized, {
+      ...update,
+      generation: 4
+    })
+  ).toBe("generation_mismatch");
+
+  const applied = applyTimelineEvent(initialized, { ItemsUpdated: update });
+  expect(classifyTimelineItemsUpdatedApplication(applied, update)).toBe("duplicate_batch");
+
+  const awaitingResync = applyTimelineEvent(initialized, {
+    ResyncRequired: { key: KEY, reason: "QueueOverflow" }
+  });
+  expect(classifyTimelineItemsUpdatedApplication(awaitingResync, update))
+    .toBe("awaiting_resync");
+});
+
+test("formats a private-data-free thread store application diagnostic", () => {
+  const update: Extract<TimelineEvent, { ItemsUpdated: unknown }>["ItemsUpdated"] = {
+    key: KEY,
+    generation: 3,
+    batch_id: 7,
+    diffs: [{ PushBack: { item: makeMsg("$new", "new") } }]
+  };
+  const before = applyTimelineEvent(createTimelineStore(), {
+    InitialItems: {
+      request_id: null,
+      key: KEY,
+      actor_generation: 5,
+      generation: 3,
+      items: [makeMsg("$old", "old")]
+    }
+  });
+  const after = applyTimelineEvent(before, { ItemsUpdated: update });
+
+  expect(threadTimelineStoreDiagnosticMessage(before, after, update)).toBe(
+    "stage=store outcome=applied actor=5 generation=3 batch=7 diffs=1 before=1 after=2"
+  );
+});
 
 function makeMsg(id: string, body: string): TimelineItem {
   return {

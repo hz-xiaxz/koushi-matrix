@@ -607,6 +607,50 @@ function applyItemsUpdated(
   return withKeys(store, next);
 }
 
+export type TimelineItemsUpdatedApplication =
+  | "applied"
+  | "missing_initial"
+  | "generation_mismatch"
+  | "duplicate_batch"
+  | "awaiting_resync";
+
+export function classifyTimelineItemsUpdatedApplication(
+  store: TimelineStoreState,
+  payload: Extract<TimelineEvent, { ItemsUpdated: unknown }>["ItemsUpdated"]
+): TimelineItemsUpdatedApplication {
+  const existing = store.keys.get(keyStr(payload.key));
+  if (!existing) {
+    return "missing_initial";
+  }
+  if (existing.generation !== payload.generation) {
+    return "generation_mismatch";
+  }
+  if (existing.lastAppliedBatchId !== null && payload.batch_id <= existing.lastAppliedBatchId) {
+    return "duplicate_batch";
+  }
+  if (existing.awaitingResync) {
+    return "awaiting_resync";
+  }
+  return "applied";
+}
+
+export function threadTimelineStoreDiagnosticMessage(
+  beforeStore: TimelineStoreState,
+  afterStore: TimelineStoreState,
+  payload: Extract<TimelineEvent, { ItemsUpdated: unknown }>["ItemsUpdated"]
+): string {
+  const outcome = classifyTimelineItemsUpdatedApplication(beforeStore, payload);
+  const beforeState = beforeStore.keys.get(keyStr(payload.key));
+  const afterState = afterStore.keys.get(keyStr(payload.key));
+  const actorGeneration = beforeState?.actorGeneration ?? afterState?.actorGeneration ?? 0;
+  const before = beforeState?.items.length ?? 0;
+  const after = afterState?.items.length ?? 0;
+  return (
+    `stage=store outcome=${outcome} actor=${actorGeneration} generation=${payload.generation} ` +
+    `batch=${payload.batch_id} diffs=${payload.diffs.length} before=${before} after=${after}`
+  );
+}
+
 function applyPaginationStateChanged(
   store: TimelineStoreState,
   payload: Extract<
