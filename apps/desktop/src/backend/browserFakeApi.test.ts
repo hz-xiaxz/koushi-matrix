@@ -1583,6 +1583,23 @@ describe("BrowserFakeApi settings preview", () => {
     ).toBe(false);
   });
 
+  test("editing an attachment caption keeps the attachment", async () => {
+    // Core edits a media event's caption in place, so the attachment survives
+    // the edit (issue #328). A fake that cleared it here would hide the bug.
+    const api = createBrowserFakeApi();
+    const roomId = "!room-alpha:example.invalid";
+    await api.selectRoom(roomId);
+
+    const edited = await api.editMessage(roomId, "$budget-file", "Edited caption.");
+
+    expect(
+      edited.timeline.find((message) => message.event_id === "$budget-file")
+    ).toMatchObject({
+      body: "Edited caption.",
+      attachment_filename: "fixture_budget.xlsx"
+    });
+  });
+
   test("models local encryption health probe as Rust-owned state", async () => {
     const api = createBrowserFakeApi();
 

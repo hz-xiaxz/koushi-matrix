@@ -1978,9 +1978,12 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
+    // An edit replaces the visible text only. Core edits a media event's caption
+    // in place, so the attachment survives (issue #328); clearing
+    // attachment_filename here would model data loss the product does not have.
     this.snapshot.timeline = this.snapshot.timeline.map((message) =>
       message.room_id === roomId && message.event_id === eventId
-        ? { ...message, body, attachment_filename: null }
+        ? { ...message, body }
         : message
     );
     return this.getSnapshot();

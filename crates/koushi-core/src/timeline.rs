@@ -17852,16 +17852,16 @@ impl TimelineActor {
             );
             return;
         }
+        // The replacement shape is a Rust-owned decision: the GUI submits only
+        // the new visible text, so core resolves what the target event actually
+        // is before choosing between a caption edit and a text replacement.
+        let items = self.timeline.items().await;
         let mut result = Ok(());
         for item_id in &candidates {
-            let content =
-                matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation::text_plain(
-                    &body,
-                );
-            result = self
-                .timeline
-                .edit(item_id, EditedContent::RoomMessage(content))
-                .await;
+            let target = edit_target_msgtype(&items, item_id);
+            let content = edited_content_for_edit_target(target, &body);
+            trace_message_edit_target(target, &content);
+            result = self.timeline.edit(item_id, content).await;
             match &result {
                 Err(matrix_sdk_ui::timeline::Error::EventNotInTimeline(_)) => continue,
                 _ => break,
@@ -23696,6 +23696,167 @@ pub(crate) fn timeline_item_can_edit(
     has_editable_body: bool,
 ) -> bool {
     is_event_backed && is_own_message && !is_redacted && has_editable_body
+}
+
+/// Shape of a media message, used for the edit decision and its diagnostics.
+///
+/// The presence of a shape is what marks a message type as media; it is the
+/// single list both `msgtype_carries_editable_caption` and the edit diagnostics
+/// read, so the two cannot drift apart.
+#[derive(Clone, Copy)]
+struct MediaMessageShape {
+    encrypted: bool,
+    has_info: bool,
+    has_caption: bool,
+}
+
+fn msgtype_media_shape(msgtype: &MessageType) -> Option<MediaMessageShape> {
+    fn shape(source: &MediaSource, has_info: bool, has_caption: bool) -> Option<MediaMessageShape> {
+        Some(MediaMessageShape {
+            encrypted: matches!(source, MediaSource::Encrypted(_)),
+            has_info,
+            has_caption,
+        })
+    }
+
+    match msgtype {
+        MessageType::Audio(content) => shape(
+            &content.source,
+            content.info.is_some(),
+            content.caption().is_some(),
+        ),
+        MessageType::File(content) => shape(
+            &content.source,
+            content.info.is_some(),
+            content.caption().is_some(),
+        ),
+        MessageType::Image(content) => shape(
+            &content.source,
+            content.info.is_some(),
+            content.caption().is_some(),
+        ),
+        MessageType::Video(content) => shape(
+            &content.source,
+            content.info.is_some(),
+            content.caption().is_some(),
+        ),
+        _ => None,
+    }
+}
+
+/// Whether the SDK can edit this message type's caption in place.
+///
+/// Media message types carry the attachment in the same `m.room.message`
+/// content as the caption, and the caption-preserving SDK path supports exactly
+/// the types that `msgtype_media_shape` recognises.
+fn msgtype_carries_editable_caption(msgtype: &MessageType) -> bool {
+    msgtype_media_shape(msgtype).is_some()
+}
+
+/// Resolve the SDK message type behind an edit target.
+///
+/// `Timeline::edit` locates items by `TimelineEventItemId`, so the same identity
+/// resolves the target here: a local echo by transaction id, a remote event by
+/// event id. Returns `None` when the target is absent from the timeline or is
+/// not an `m.room.message` (state events, polls, stickers).
+fn edit_target_msgtype<'items>(
+    items: &'items eyeball_im::Vector<Arc<SdkTimelineItem>>,
+    item_id: &TimelineEventItemId,
+) -> Option<&'items MessageType> {
+    use matrix_sdk_ui::timeline::TimelineItemKind;
+
+    items.iter().rev().find_map(|item| {
+        let TimelineItemKind::Event(event_item) = item.kind() else {
+            return None;
+        };
+        if event_item.identifier() != *item_id {
+            return None;
+        }
+        event_item
+            .content()
+            .as_message()
+            .map(|message| message.msgtype())
+    })
+}
+
+/// Choose the replacement content for an edit of `body`.
+///
+/// A media message keeps its attachment (`url`/`file`/`info`/`filename`) in the
+/// same content as its caption, so replacing the event with `m.text` drops the
+/// attachment and reads as data loss in the timeline (issue #328). Media rows
+/// therefore edit the caption in place; everything else keeps the plain-text
+/// replacement. This decision stays in core because the GUI submits only the new
+/// visible text and never sees the original Matrix content.
+fn edited_content_for_edit_target(msgtype: Option<&MessageType>, body: &str) -> EditedContent {
+    if msgtype.is_some_and(msgtype_carries_editable_caption) {
+        return EditedContent::MediaCaption {
+            caption: Some(body.to_owned()),
+            formatted_caption: None,
+            mentions: None,
+        };
+    }
+
+    EditedContent::RoomMessage(
+        matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation::text_plain(
+            body,
+        ),
+    )
+}
+
+fn message_edit_target_token(msgtype: Option<&MessageType>) -> &'static str {
+    match msgtype {
+        None => "unresolved",
+        Some(MessageType::Audio(_)) => "audio",
+        Some(MessageType::Emote(_)) => "emote",
+        Some(MessageType::File(_)) => "file",
+        Some(MessageType::Image(_)) => "image",
+        Some(MessageType::Notice(_)) => "notice",
+        Some(MessageType::Text(_)) => "text",
+        Some(MessageType::Video(_)) => "video",
+        Some(_) => "other",
+    }
+}
+
+/// Record which replacement shape an edit chose for its target.
+///
+/// Private-data-free: message type tokens and presence booleans only, never
+/// bodies, captions, filenames, MXC URIs, event ids, or raw SDK errors.
+fn trace_message_edit_target(msgtype: Option<&MessageType>, content: &EditedContent) {
+    let media = msgtype.and_then(msgtype_media_shape);
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Info,
+            "core.timeline_edit",
+            "replacement_selected",
+        )
+        .field(DiagnosticField::token(
+            "target",
+            message_edit_target_token(msgtype),
+        ))
+        .field(DiagnosticField::token(
+            "replacement",
+            match content {
+                EditedContent::MediaCaption { .. } => "media_caption",
+                _ => "text",
+            },
+        ))
+        .field(DiagnosticField::boolean(
+            "has_url",
+            media.is_some_and(|shape| !shape.encrypted),
+        ))
+        .field(DiagnosticField::boolean(
+            "has_file",
+            media.is_some_and(|shape| shape.encrypted),
+        ))
+        .field(DiagnosticField::boolean(
+            "has_info",
+            media.is_some_and(|shape| shape.has_info),
+        ))
+        .field(DiagnosticField::boolean(
+            "has_caption",
+            media.is_some_and(|shape| shape.has_caption),
+        )),
+    );
 }
 
 pub(crate) fn validate_retry_send(
@@ -39797,6 +39958,123 @@ mod tests {
         assert!(!timeline_item_can_edit(true, false, false, true));
         assert!(!timeline_item_can_edit(true, true, true, true));
         assert!(!timeline_item_can_edit(true, true, false, false));
+    }
+
+    // --- Edit replacement shape (issue #328) ---
+
+    fn media_msgtype_fixtures() -> Vec<MessageType> {
+        use matrix_sdk::ruma::events::room::message::{
+            AudioMessageEventContent, FileMessageEventContent, ImageMessageEventContent,
+            VideoMessageEventContent,
+        };
+        use matrix_sdk::ruma::owned_mxc_uri;
+
+        vec![
+            MessageType::Audio(AudioMessageEventContent::plain(
+                "fixture-audio".to_owned(),
+                owned_mxc_uri!("mxc://fixture.invalid/audio"),
+            )),
+            MessageType::File(FileMessageEventContent::plain(
+                "fixture-file".to_owned(),
+                owned_mxc_uri!("mxc://fixture.invalid/file"),
+            )),
+            MessageType::Image(ImageMessageEventContent::plain(
+                "fixture-image".to_owned(),
+                owned_mxc_uri!("mxc://fixture.invalid/image"),
+            )),
+            MessageType::Video(VideoMessageEventContent::plain(
+                "fixture-video".to_owned(),
+                owned_mxc_uri!("mxc://fixture.invalid/video"),
+            )),
+        ]
+    }
+
+    fn non_media_msgtype_fixtures() -> Vec<MessageType> {
+        use matrix_sdk::ruma::events::room::message::{
+            EmoteMessageEventContent, NoticeMessageEventContent, TextMessageEventContent,
+        };
+
+        vec![
+            MessageType::Emote(EmoteMessageEventContent::plain("fixture-emote")),
+            MessageType::Notice(NoticeMessageEventContent::plain("fixture-notice")),
+            MessageType::Text(TextMessageEventContent::plain("fixture-text")),
+        ]
+    }
+
+    #[test]
+    fn edit_replacement_preserves_media_attachment_as_caption() {
+        // A text replacement carries no url/file/info/filename, so it silently
+        // drops the attachment from the edited event (issue #328).
+        for msgtype in media_msgtype_fixtures() {
+            let target = message_edit_target_token(Some(&msgtype));
+            match edited_content_for_edit_target(Some(&msgtype), "edited caption") {
+                EditedContent::MediaCaption {
+                    caption,
+                    formatted_caption,
+                    mentions,
+                } => {
+                    assert_eq!(caption.as_deref(), Some("edited caption"));
+                    assert!(
+                        formatted_caption.is_none(),
+                        "{target}: plain caption edit must not add formatting"
+                    );
+                    assert!(
+                        mentions.is_none(),
+                        "{target}: plain caption edit must not add mentions"
+                    );
+                }
+                other => panic!("{target}: media edit must preserve the attachment, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn edit_replacement_stays_plain_text_for_non_media() {
+        for msgtype in non_media_msgtype_fixtures() {
+            let target = message_edit_target_token(Some(&msgtype));
+            match edited_content_for_edit_target(Some(&msgtype), "edited body") {
+                EditedContent::RoomMessage(content) => match &content.msgtype {
+                    MessageType::Text(text) => assert_eq!(text.body, "edited body"),
+                    other => {
+                        panic!("{target}: text replacement expected, got {:?}", other.msgtype())
+                    }
+                },
+                other => panic!("{target}: text replacement expected, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn edit_replacement_stays_plain_text_for_unresolved_target() {
+        // A target missing from the timeline, or one that is not an
+        // m.room.message, keeps the pre-existing text replacement instead of
+        // guessing a caption edit the SDK would reject.
+        assert!(matches!(
+            edited_content_for_edit_target(None, "edited body"),
+            EditedContent::RoomMessage(_)
+        ));
+    }
+
+    #[test]
+    fn edit_replacement_caption_support_matches_media_projection() {
+        // Both sides of this equality are load-bearing: a type projected with
+        // TimelineItem.media but edited as text loses its attachment, and a type
+        // edited as a caption without media support is rejected by the SDK as an
+        // incompatible edit.
+        for msgtype in media_msgtype_fixtures()
+            .into_iter()
+            .chain(non_media_msgtype_fixtures())
+        {
+            let target = message_edit_target_token(Some(&msgtype));
+            let projects_media = message_projection_from_msgtype(&msgtype, "fixture-body")
+                .media
+                .is_some();
+            assert_eq!(
+                projects_media,
+                msgtype_carries_editable_caption(&msgtype),
+                "{target}: media projection and caption-edit support must agree"
+            );
+        }
     }
 
     // --- Debug redaction of new types ---
