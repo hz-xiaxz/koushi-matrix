@@ -23755,10 +23755,20 @@ fn msgtype_carries_editable_caption(msgtype: &MessageType) -> bool {
 
 /// Resolve the SDK message type behind an edit target.
 ///
-/// `Timeline::edit` locates items by `TimelineEventItemId`, so the same identity
-/// resolves the target here: a local echo by transaction id, a remote event by
-/// event id. Returns `None` when the target is absent from the timeline or is
-/// not an `m.room.message` (state events, polls, stickers).
+/// This mirrors the SDK's own `rfind_event_by_item_id`, which `Timeline::edit`
+/// uses to locate the item: last match wins, an event id matches any item that
+/// carries it (including a local echo the server has already accepted), and a
+/// transaction id matches the local echo that owns it. Comparing
+/// `EventTimelineItem::identifier()` instead would miss a sent local echo looked
+/// up by transaction id, because that item reports its event id.
+///
+/// One SDK case stays out of reach: a remote item's originating transaction id
+/// has no public accessor. Such an item always carries an event id, and
+/// `item_ids_for_event` tries the event id first, so the caption decision still
+/// sees it.
+///
+/// Returns `None` when the target is absent from the timeline or is not an
+/// `m.room.message` (state events, polls, stickers).
 fn edit_target_msgtype<'items>(
     items: &'items eyeball_im::Vector<Arc<SdkTimelineItem>>,
     item_id: &TimelineEventItemId,
@@ -23769,7 +23779,15 @@ fn edit_target_msgtype<'items>(
         let TimelineItemKind::Event(event_item) = item.kind() else {
             return None;
         };
-        if event_item.identifier() != *item_id {
+        let is_target = match item_id {
+            TimelineEventItemId::EventId(event_id) => {
+                event_item.event_id() == Some(event_id.as_ref())
+            }
+            TimelineEventItemId::TransactionId(transaction_id) => {
+                event_item.transaction_id() == Some(transaction_id.as_ref())
+            }
+        };
+        if !is_target {
             return None;
         }
         event_item
