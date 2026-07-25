@@ -25,6 +25,14 @@ with an Element Desktop/Web-like three-pane desktop UX:
   Space appears only in Home. DMs are never assigned to Spaces via
   `m.space.child`/`m.space.parent`; the association is by counterpart space-room
   membership, computed Rust-side as `RoomSummary.dm_space_ids`.
+- Threads are linear. The thread pane's composer sends ordinary thread messages,
+  and thread events expose no reply-composition affordance: no per-event Reply,
+  no Reply in thread, no nested thread. Rich replies authored by Element or
+  another Matrix client still render their quoted context inside a thread, and
+  core keeps a thread-keyed reply an ordinary thread message
+  (`EnforceThread::Threaded(ReplyWithinThread::No)`), so creating a thread rich
+  reply stays unreachable from the product UI. Reply and Reply in thread remain
+  room-timeline actions.
 - A browser-hosted build (Element Web-like deployment of the same core) is a
   potential future target. It is not scheduled, but the architecture must not
   preclude it; see Platform Portability.
