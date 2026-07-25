@@ -1817,6 +1817,61 @@ describe("TimelineView", () => {
     );
   });
 
+  it("records a deduplicated committed thread projection", async () => {
+    const onDiagnosticLogEntry = vi.fn();
+    const threadKey = threadTimelineKey(
+      "@alice:example.invalid",
+      "!room:example.invalid",
+      "$root:example.invalid"
+    );
+    let store = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: threadKey,
+        actor_generation: 5,
+        generation: 3,
+        items: [message("$root:example.invalid", "Thread root")]
+      }
+    });
+    store = applyTimelineEvent(store, {
+      ItemsUpdated: {
+        key: threadKey,
+        generation: 3,
+        batch_id: 7,
+        diffs: [{ PushBack: { item: message("$reply:example.invalid", "Reply") } }]
+      }
+    });
+
+    const view = (
+      <TimelineView
+        timelineKey={threadKey}
+        roomId="!room:example.invalid"
+        transport={baseTransport({})}
+        onReply={vi.fn()}
+        onDiagnosticLogEntry={onDiagnosticLogEntry}
+        timelineStore={store}
+      />
+    );
+    const { rerender } = render(view);
+
+    await waitFor(() => {
+      expect(onDiagnosticLogEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "thread.timeline",
+          message: "stage=committed actor=5 generation=3 batch=7 items=2"
+        })
+      );
+    });
+    rerender(view);
+    expect(
+      onDiagnosticLogEntry.mock.calls.filter(
+        ([entry]) =>
+          entry.source === "thread.timeline" &&
+          entry.message === "stage=committed actor=5 generation=3 batch=7 items=2"
+      )
+    ).toHaveLength(1);
+  });
+
   it("emits private-data-free scroll diagnostics for the mounted timeline", async () => {
     const onScrollDiagnosticsChange = vi.fn();
     let listener: ((payload: CoreEventPayload) => void) | null = null;

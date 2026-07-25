@@ -6676,6 +6676,38 @@ fn record_subscribe_stage(stage: &str, count: Option<usize>) {
     }
 }
 
+fn record_thread_projection(
+    key: &TimelineKey,
+    actor_generation: u64,
+    timeline_generation: TimelineGeneration,
+    batch_id: TimelineBatchId,
+    input_diff_count: usize,
+    projected_diff_count: usize,
+    projected_item_count: usize,
+) {
+    if !matches!(key.kind, TimelineKind::Thread { .. }) {
+        return;
+    }
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "core.thread_timeline", "projected")
+            .field(DiagnosticField::count("actor_generation", actor_generation))
+            .field(DiagnosticField::count(
+                "timeline_generation",
+                timeline_generation.0,
+            ))
+            .field(DiagnosticField::count("batch_id", batch_id.0))
+            .field(DiagnosticField::count(
+                "input_diffs",
+                input_diff_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "projected_diffs",
+                projected_diff_count as u64,
+            ))
+            .field(DiagnosticField::count("items", projected_item_count as u64)),
+    );
+}
+
 fn record_timeline_gap_repair(
     stage: &'static str,
     trigger: &'static str,
@@ -18197,8 +18229,17 @@ impl TimelineActor {
                         }]);
                 }
 
-                let display_diffs = projected_batch.display_diffs;
                 let emitted_batch_id = self.next_batch_id;
+                record_thread_projection(
+                    &self.key,
+                    self.actor_generation,
+                    self.generation,
+                    emitted_batch_id,
+                    sdk_diffs.len(),
+                    projected_batch.display_diffs.len(),
+                    display_projection.display_items().len(),
+                );
+                let display_diffs = projected_batch.display_diffs;
                 let emitted = if restore_active {
                     self.next_batch_id = TimelineBatchId(self.next_batch_id.0 + 1);
                     self.restore_emit_buffer.extend(display_diffs);
@@ -34301,6 +34342,56 @@ mod tests {
                     panic!("live timeline diagnostic collapsed to other: {record:?}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn thread_projection_diagnostic_records_only_thread_batches() {
+        let baseline = koushi_diagnostics::snapshot().records.len();
+        let thread_key = TimelineKey {
+            account_key: AccountKey("@a:test".to_owned()),
+            kind: TimelineKind::Thread {
+                room_id: "!r:test".to_owned(),
+                root_event_id: "$root:test".to_owned(),
+            },
+        };
+
+        record_thread_projection(
+            &thread_key,
+            5,
+            TimelineGeneration(3),
+            TimelineBatchId(7),
+            2,
+            1,
+            11,
+        );
+        record_thread_projection(
+            &room_key(),
+            5,
+            TimelineGeneration(3),
+            TimelineBatchId(8),
+            2,
+            1,
+            11,
+        );
+
+        let records = koushi_diagnostics::snapshot().records;
+        let appended = records[baseline..]
+            .iter()
+            .filter(|record| record.event.source == "core.thread_timeline")
+            .collect::<Vec<_>>();
+        assert_eq!(appended.len(), 1);
+        let event = &appended[0].event;
+        assert_eq!(event.stage, "projected");
+        for key in [
+            "actor_generation",
+            "timeline_generation",
+            "batch_id",
+            "input_diffs",
+            "projected_diffs",
+            "items",
+        ] {
+            assert!(event.fields.iter().any(|field| field.key == key));
         }
     }
 

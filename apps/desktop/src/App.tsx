@@ -77,6 +77,7 @@ import {
   applyTimelineEventWithProjectionResultAndRetention,
   createTimelineStore,
   pruneTimelineStore,
+  threadTimelineStoreDiagnosticMessage,
   timelineStoreKeyId,
   type TimelineStoreState
 } from "./domain/timelineStore";
@@ -1208,6 +1209,7 @@ export function App() {
   const [reportDialog, setReportDialog] = useState<ReportDialogState | null>(null);
   const [reportReasonDraft, setReportReasonDraft] = useState("");
   const [timelineStore, setTimelineStore] = useState<TimelineStoreState>(createTimelineStore);
+  const threadStoreDiagnosticSignaturesRef = useRef<Map<string, string>>(new Map());
   const uiLatencyDiagnostics = useUiLatencyDiagnostics();
   const searchTimer = useRef<number | null>(null);
   const qaSendStarted = useRef(false);
@@ -1404,6 +1406,7 @@ export function App() {
       return;
     }
     timelineStoreSessionKeyRef.current = currentTimelineStoreSessionKey;
+    threadStoreDiagnosticSignaturesRef.current.clear();
     setTimelineStore(createTimelineStore());
   }, [currentTimelineStoreSessionKey]);
 
@@ -1958,6 +1961,25 @@ export function App() {
             payload.event,
             retainedTimelineKeyIdsRef.current
           );
+          if (
+            "ItemsUpdated" in payload.event &&
+            "Thread" in payload.event.ItemsUpdated.key.kind
+          ) {
+            const message = threadTimelineStoreDiagnosticMessage(
+              next,
+              applied.store,
+              payload.event.ItemsUpdated
+            );
+            const keyId = timelineStoreKeyId(payload.event.ItemsUpdated.key);
+            if (threadStoreDiagnosticSignaturesRef.current.get(keyId) !== message) {
+              threadStoreDiagnosticSignaturesRef.current.set(keyId, message);
+              appendDiagnosticLog({
+                timestampMs: Date.now(),
+                source: "thread.timeline",
+                message
+              });
+            }
+          }
           if (
             applied.projection.kind === "applied" &&
             ("Focused" in applied.projection.key.kind ||
