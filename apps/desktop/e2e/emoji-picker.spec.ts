@@ -1,5 +1,5 @@
 /**
- * Headless spec: emoji picker (#79).
+ * Headless spec: emoji picker (#79, #302).
  *
  * Proves that the emoji picker opens from the composer, supports search
  * and keyboard nav, inserts at the caret, and dismisses correctly — all
@@ -14,10 +14,15 @@
  *  7. Picker does not make any network fetch request.
  *  8. Picker does not obstruct the send button (both visible simultaneously).
  *  9. Arrow key navigation then Enter inserts the highlighted emoji.
+ * 10. The picker stays inside the viewport from the main composer, from the
+ *     thread composer, and at a narrow window width (#302 placement).
+ * 11. The rendered grid density matches the keyboard column step (#302).
  */
 
 import { expect, test } from "@playwright/test";
 import { t } from "../src/i18n/messages";
+
+const VIEWPORT_MARGIN_PX = 16;
 
 async function gotoReadyShell(page: import("@playwright/test").Page): Promise<void> {
   await page.goto("/appHarness.html");
@@ -29,6 +34,36 @@ async function openEmojiPicker(page: import("@playwright/test").Page): Promise<v
   await expect(emojiButton).toBeVisible();
   await emojiButton.click();
   await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toBeVisible();
+}
+
+async function openThreadPane(page: import("@playwright/test").Page): Promise<void> {
+  await page.getByRole("button", { name: /2 replies/ }).click();
+  await expect(page.getByText(t("panel.thread"), { exact: true })).toBeVisible();
+}
+
+async function openThreadEmojiPicker(page: import("@playwright/test").Page): Promise<void> {
+  const threadPane = page.locator('aside[aria-label="Context panel"]');
+  const emojiButton = threadPane.getByRole("button", { name: t("composer.emoji") });
+  await expect(emojiButton).toBeVisible();
+  await emojiButton.click();
+  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toBeVisible();
+}
+
+/** Viewport-relative geometry of the open picker. */
+async function pickerViewportMetrics(page: import("@playwright/test").Page) {
+  return page.getByRole("dialog", { name: t("composer.emoji") }).evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      bottom: rect.bottom,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth,
+      width: rect.width
+    };
+  });
 }
 
 test("emoji button opens and closes the picker", async ({ page }) => {
@@ -169,10 +204,76 @@ test("picker uses available room without horizontal scrolling", async ({ page })
     };
   });
 
-  expect(metrics.width).toBeGreaterThanOrEqual(400);
+  // #302 trades the former 420px panel for a denser, narrower grid.
+  expect(metrics.width).toBe(380);
   expect(metrics.height).toBeGreaterThan(360);
   expect(metrics.tabsScrollWidth).toBeLessThanOrEqual(metrics.tabsClientWidth + 1);
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.bodyClientWidth + 1);
+});
+
+test("main composer picker stays inside the viewport", async ({ page }) => {
+  await gotoReadyShell(page);
+  await openEmojiPicker(page);
+
+  const metrics = await pickerViewportMetrics(page);
+  expect(metrics.left).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX - 1);
+  expect(metrics.top).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX - 1);
+  expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth - VIEWPORT_MARGIN_PX + 1);
+  expect(metrics.bottom).toBeLessThanOrEqual(metrics.viewportHeight - VIEWPORT_MARGIN_PX + 1);
+});
+
+test("thread composer picker is not clipped by the thread pane", async ({ page }) => {
+  await gotoReadyShell(page);
+  await openThreadPane(page);
+  await openThreadEmojiPicker(page);
+
+  const metrics = await pickerViewportMetrics(page);
+  expect(metrics.width).toBe(380);
+  expect(metrics.left).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX - 1);
+  expect(metrics.top).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX - 1);
+  expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth - VIEWPORT_MARGIN_PX + 1);
+  expect(metrics.bottom).toBeLessThanOrEqual(metrics.viewportHeight - VIEWPORT_MARGIN_PX + 1);
+  // The picker must not widen the document either.
+  expect(metrics.documentScrollWidth).toBeLessThanOrEqual(metrics.viewportWidth);
+});
+
+test("thread composer picker flips and clamps at a narrow window width", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 620 });
+  await gotoReadyShell(page);
+  await openThreadPane(page);
+  await openThreadEmojiPicker(page);
+
+  const metrics = await pickerViewportMetrics(page);
+  expect(metrics.left).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX - 1);
+  expect(metrics.top).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX - 1);
+  expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth - VIEWPORT_MARGIN_PX + 1);
+  expect(metrics.bottom).toBeLessThanOrEqual(metrics.viewportHeight - VIEWPORT_MARGIN_PX + 1);
+});
+
+test("grid density matches the keyboard column step", async ({ page }) => {
+  await gotoReadyShell(page);
+  await openEmojiPicker(page);
+
+  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const grid = picker.locator(".emoji-picker-grid").first();
+  const columns = await grid.evaluate(
+    (element) => getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length
+  );
+  expect(columns).toBe(10);
+
+  const items = grid.locator(".emoji-picker-item");
+  const firstItem = items.nth(0);
+  const steppedItem = items.nth(columns);
+  const steppedEmoji = await steppedItem.textContent();
+
+  await firstItem.focus();
+  await expect(firstItem).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(steppedItem).toBeFocused();
+
+  await page.keyboard.press("Enter");
+  const composer = page.getByRole("textbox", { name: t("composer.messageComposer") });
+  await expect(composer).toHaveValue(steppedEmoji ?? "");
 });
 
 test("arrow key navigation then Enter inserts the highlighted emoji", async ({ page }) => {

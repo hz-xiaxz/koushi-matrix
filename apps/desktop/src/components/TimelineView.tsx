@@ -782,53 +782,12 @@ function cssEscape(value: string): string {
   return value.replace(/["\\]/g, "\\$&");
 }
 
-type ReactionPickerLayout = {
-  placement: "above" | "below";
-  maxBlockSize: number;
-};
-
-function reactionPickerLayoutForControl(control: HTMLElement): ReactionPickerLayout {
-  const controlRect = control.getBoundingClientRect();
-  const boundary =
-    control.closest<HTMLElement>(".timeline-view") ??
-    control.closest<HTMLElement>(".main-pane");
-  const boundaryRect = boundary?.getBoundingClientRect();
-  const boundaryTop = boundaryRect?.top ?? 0;
-  const boundaryBottom =
-    boundaryRect && boundaryRect.bottom > boundaryRect.top
-      ? boundaryRect.bottom
-      : typeof window === "undefined"
-        ? controlRect.bottom
-        : window.innerHeight;
-  const availableAbove = Math.max(
-    0,
-    controlRect.top - boundaryTop - REACTION_PICKER_GAP_PX
-  );
-  const availableBelow = Math.max(
-    0,
-    boundaryBottom - controlRect.bottom - REACTION_PICKER_GAP_PX
-  );
-
-  if (availableBelow >= REACTION_PICKER_COMFORTABLE_BLOCK_SIZE_PX) {
-    return {
-      placement: "below",
-      maxBlockSize: Math.floor(availableBelow)
-    };
-  }
-  if (availableAbove >= REACTION_PICKER_COMFORTABLE_BLOCK_SIZE_PX) {
-    return {
-      placement: "above",
-      maxBlockSize: Math.floor(availableAbove)
-    };
-  }
-  const placement = availableAbove >= availableBelow ? "above" : "below";
-  return {
-    placement,
-    maxBlockSize: Math.max(
-      0,
-      Math.floor(placement === "above" ? availableAbove : availableBelow)
-    )
-  };
+/**
+ * Surface the reaction picker must stay inside. The picker itself owns flip and
+ * clamp behavior; this only tells it which container bounds the timeline.
+ */
+function reactionPickerBoundaryElement(anchor: Element): Element | null {
+  return anchor.closest(".timeline-view") ?? anchor.closest(".main-pane");
 }
 
 /** Distance (px) from the top edge that triggers automatic backfill. */
@@ -845,8 +804,6 @@ const TIMELINE_MAX_ITEM_HEIGHT_PX = 480;
 const TIMELINE_SCROLL_IDLE_FLUSH_MS = 100;
 const TIMELINE_SCROLL_MAX_DEFER_MS = 500;
 const TIMELINE_SUBSCRIBE_FALLBACK_DELAY_MS = 120;
-const REACTION_PICKER_COMFORTABLE_BLOCK_SIZE_PX = 360;
-const REACTION_PICKER_GAP_PX = 6;
 
 const ignoreComposerKeyAction: ResolveComposerKeyAction = async () => "noop";
 const ignoreSendQueueAction = () => undefined;
@@ -5667,17 +5624,12 @@ export function TimelineItemRow({
   const [isEditing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(item.body ?? "");
   const [isReactionPickerOpen, setReactionPickerOpen] = useState(false);
-  const [reactionPickerLayout, setReactionPickerLayout] = useState<ReactionPickerLayout>({
-    placement: "above",
-    maxBlockSize: REACTION_PICKER_COMFORTABLE_BLOCK_SIZE_PX
-  });
   const [isActionMenuOpen, setActionMenuOpen] = useState(false);
   const [isForwardMenuOpen, setForwardMenuOpen] = useState(false);
   const [actionMenuPlacement, setActionMenuPlacement] = useState<"above" | "below">("above");
   const [revealedSpoilers, setRevealedSpoilers] = useState<ReadonlySet<string>>(
     () => new Set()
   );
-  const reactionControlRef = useRef<HTMLDivElement>(null);
   const reactionTriggerRef = useRef<HTMLButtonElement>(null);
   const actionMenuControlRef = useRef<HTMLDivElement>(null);
   const actionMenuTriggerRef = useRef<HTMLButtonElement>(null);
@@ -5719,24 +5671,6 @@ export function TimelineItemRow({
   }, [isActionMenuOpen]);
 
   useEffect(() => {
-    if (!isReactionPickerOpen) {
-      return;
-    }
-    const handlePointerDown = (event: PointerEvent) => {
-      const control = reactionControlRef.current;
-      if (!control || control.contains(event.target as Node)) {
-        return;
-      }
-      setReactionPickerOpen(false);
-      reactionTriggerRef.current?.focus();
-    };
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-    };
-  }, [isReactionPickerOpen]);
-
-  useEffect(() => {
     if (!isActionMenuOpen) {
       return;
     }
@@ -5755,36 +5689,19 @@ export function TimelineItemRow({
     };
   }, [isActionMenuOpen]);
 
-  const updateReactionPickerLayout = useCallback(() => {
-    const control = reactionControlRef.current;
-    if (control) {
-      setReactionPickerLayout(reactionPickerLayoutForControl(control));
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isReactionPickerOpen) {
-      return;
-    }
-    window.addEventListener("resize", updateReactionPickerLayout);
-    document.addEventListener("scroll", updateReactionPickerLayout, true);
-    return () => {
-      window.removeEventListener("resize", updateReactionPickerLayout);
-      document.removeEventListener("scroll", updateReactionPickerLayout, true);
-    };
-  }, [isReactionPickerOpen, updateReactionPickerLayout]);
-
+  // Outside-press dismissal is owned by EmojiPicker, which knows its own
+  // floating panel: a row-scoped containment check would read the panel's emoji
+  // buttons as outside presses now that the panel renders in the body layer.
   const closeReactionPicker = useCallback(() => {
     setReactionPickerOpen(false);
     reactionTriggerRef.current?.focus();
   }, []);
 
   const toggleReactionPicker = useCallback(() => {
-    updateReactionPickerLayout();
     setActionMenuOpen(false);
     setForwardMenuOpen(false);
     setReactionPickerOpen((current) => !current);
-  }, [updateReactionPickerLayout]);
+  }, []);
 
   const closeActionMenu = useCallback(() => {
     setActionMenuOpen(false);
@@ -6052,7 +5969,11 @@ export function TimelineItemRow({
     onCancelSend(roomId, transactionId);
   }, [onCancelSend, roomId, transactionId]);
   const canShowActionButtons = Boolean(eventId) && !isRedacted;
-  const canShowReply = canShowActionButtons && item.body !== null;
+  // Koushi threads are linear: the thread composer already sends into the open
+  // thread, so a thread-pane row offers no reply-composition affordance. Rich
+  // replies received from other clients still render their quoted context.
+  const canComposeReply = presentationContext !== "thread";
+  const canShowReply = canShowActionButtons && item.body !== null && canComposeReply;
   const canShowReplyInThread = canShowReply && presentationContext === "room";
   const canCopyMessage = Boolean(eventId && item.actions?.can_copy && item.body !== null);
   const canCopyPermalink = Boolean(
@@ -6227,7 +6148,7 @@ export function TimelineItemRow({
       kind: "message",
       canManage: currentUserId === item.sender,
       canReply: canShowReply,
-      hasThread: item.thread_summary != null,
+      hasThread: item.thread_summary != null && canComposeReply,
       senderUserId: item.sender,
       currentUserId: currentUserId ?? "",
       roomId,
@@ -6522,7 +6443,7 @@ export function TimelineItemRow({
       </div>
       <div className="message-actions">
         {!isEditing && canShowActionButtons && item.can_react ? (
-          <div className="reaction-control" ref={reactionControlRef}>
+          <div className="reaction-control">
             <button
               ref={reactionTriggerRef}
               className="message-action"
@@ -6539,10 +6460,8 @@ export function TimelineItemRow({
                 <LazyEmojiPicker
                   anchorRef={reactionTriggerRef}
                   align="end"
-                  placement={reactionPickerLayout.placement}
-                  style={{
-                    "--emoji-picker-max-block-size": `${reactionPickerLayout.maxBlockSize}px`
-                  } as CSSProperties}
+                  placement="below"
+                  resolveBoundaryElement={reactionPickerBoundaryElement}
                   className="timeline-reaction-emoji-picker"
                   onSelect={submitReaction}
                   onClose={closeReactionPicker}

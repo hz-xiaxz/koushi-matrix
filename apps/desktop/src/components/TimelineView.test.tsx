@@ -465,7 +465,7 @@ describe("TimelineView", () => {
     expect(timelineBackfillThresholdForTests(900, false)).toBe(0);
   });
 
-  it("keeps the reaction emoji picker attached to its message row", async () => {
+  it("keeps the reaction emoji picker bound to its message row from the floating layer", async () => {
     const sendReaction = vi.fn(async () => undefined);
     const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
       InitialItems: {
@@ -494,7 +494,10 @@ describe("TimelineView", () => {
     fireEvent.click(screen.getByRole("button", { name: /add reaction/i }));
 
     const picker = await screen.findByRole("dialog", { name: /emoji/i });
-    expect(article!.contains(picker)).toBe(true);
+    // The panel lives in the body-level floating layer so overflow-clipped
+    // panes cannot cut it off, yet the selection still targets this row.
+    expect(article!.contains(picker)).toBe(false);
+    expect(picker.parentElement).toBe(document.body);
 
     fireEvent.click(screen.getByRole("button", { name: /grinning face$/i }));
 
@@ -507,6 +510,41 @@ describe("TimelineView", () => {
     });
   });
 
+  it("dismisses the reaction emoji picker only for presses outside the floating panel", async () => {
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [message("$react-dismiss", "React and dismiss")]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /add reaction/i }));
+    const picker = await screen.findByRole("dialog", { name: /emoji/i });
+
+    // The panel is not a descendant of the row, so a row-scoped containment
+    // check would close it on its own emoji presses.
+    fireEvent.mouseDown(within(picker).getByRole("searchbox"));
+    expect(screen.queryByRole("dialog", { name: /emoji/i })).not.toBeNull();
+
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /emoji/i })).toBeNull();
+    });
+  });
+
   it("opens the reaction emoji picker above when the composer-side space is insufficient", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
       this: HTMLElement
@@ -515,7 +553,10 @@ describe("TimelineView", () => {
       let height = 24;
       if (this.getAttribute("data-testid") === "timeline-view") {
         height = 240;
-      } else if (this.classList.contains("reaction-control")) {
+      } else if (
+        this.classList.contains("reaction-control") ||
+        this.classList.contains("message-action")
+      ) {
         top = 200;
       } else if (this.classList.contains("main-pane")) {
         height = 320;
@@ -706,51 +747,146 @@ describe("TimelineView", () => {
     expectLocalizedTooltip(replyInThreadButton, "スレッドで返信");
   });
 
-  it.each(["thread", "focused"] as const)(
-    "omits reply in thread from %s presentation while preserving ordinary reply",
-    (presentationContext) => {
-      const key =
-        presentationContext === "thread"
-          ? threadTimelineKey(
-              "@alice:example.invalid",
-              "!room:example.invalid",
-              "$thread-root:example.invalid"
-            )
-          : focusedTimelineKey(
-              "@alice:example.invalid",
-              "!room:example.invalid",
-              "$focused:example.invalid"
-            );
-      const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
-        InitialItems: {
-          request_id: null,
-          key,
-          generation: 1,
-          items: [message(`$${presentationContext}-reply`, `${presentationContext} reply`)]
-        }
-      });
+  it("omits reply in thread from focused presentation while preserving ordinary reply", () => {
+    const key = focusedTimelineKey(
+      "@alice:example.invalid",
+      "!room:example.invalid",
+      "$focused:example.invalid"
+    );
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key,
+        generation: 1,
+        items: [message("$focused-reply", "focused reply")]
+      }
+    });
 
-      render(
-        <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
-          <TimelineView
-            presentationContext={presentationContext}
-            timelineKey={key}
-            roomId="!room:example.invalid"
-            transport={baseTransport({})}
-            onReply={vi.fn()}
-            onOpenThread={vi.fn()}
-          />
-        </TimelineStoreContext.Provider>
-      );
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          presentationContext="focused"
+          timelineKey={key}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+          onOpenThread={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
 
-      const row = screen.getByText(`${presentationContext} reply`).closest("article");
-      expect(row).not.toBeNull();
-      expect(
-        within(row!).getByRole("button", { name: "Reply to message" })
-      ).not.toBeNull();
-      expect(within(row!).queryByRole("button", { name: "Reply in thread" })).toBeNull();
-    }
-  );
+    const row = screen.getByText("focused reply").closest("article");
+    expect(row).not.toBeNull();
+    expect(within(row!).getByRole("button", { name: "Reply to message" })).not.toBeNull();
+    expect(within(row!).queryByRole("button", { name: "Reply in thread" })).toBeNull();
+  });
+
+  it("omits every reply-composition affordance from thread presentation", () => {
+    const key = threadTimelineKey(
+      "@alice:example.invalid",
+      "!room:example.invalid",
+      "$thread-root:example.invalid"
+    );
+    const onOpenContextMenu = vi.fn();
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key,
+        generation: 1,
+        items: [
+          {
+            ...message("$thread-reply", "thread reply"),
+            thread_root: "$thread-root:example.invalid",
+            thread_summary: {
+              reply_count: 2,
+              latest_event_id: "$thread-latest:example.invalid",
+              latest_sender: "@bob:example.invalid",
+              latest_sender_label: null,
+              latest_body_preview: "Latest",
+              latest_timestamp_ms: 1_800_000_000_100
+            }
+          }
+        ]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          presentationContext="thread"
+          timelineKey={key}
+          roomId="!room:example.invalid"
+          currentUserId="@alice:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+          onOpenThread={vi.fn()}
+          onOpenContextMenu={onOpenContextMenu}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const row = screen.getByText("thread reply").closest("article");
+    expect(row).not.toBeNull();
+    expect(within(row!).queryByRole("button", { name: "Reply to message" })).toBeNull();
+    expect(within(row!).queryByRole("button", { name: "Reply in thread" })).toBeNull();
+
+    fireEvent.contextMenu(row!);
+    expect(onOpenContextMenu).toHaveBeenCalledTimes(1);
+    const menuItems = onOpenContextMenu.mock.calls[0][2] as Array<{ id: string }>;
+    expect(menuItems.map((item) => item.id)).not.toContain("replyToMessage");
+    expect(menuItems.map((item) => item.id)).not.toContain("openThread");
+    // The menu still has to be useful for the remaining thread-event actions.
+    expect(menuItems.length).toBeGreaterThan(0);
+  });
+
+  it("renders an incoming rich reply quote inside thread presentation", () => {
+    const key = threadTimelineKey(
+      "@alice:example.invalid",
+      "!room:example.invalid",
+      "$thread-root:example.invalid"
+    );
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key,
+        generation: 1,
+        items: [
+          {
+            ...message("$thread-rich-reply", "Rich reply from another client"),
+            thread_root: "$thread-root:example.invalid",
+            in_reply_to_event_id: "$thread-earlier:example.invalid",
+            reply_quote: {
+              event_id: "$thread-earlier:example.invalid",
+              sender: "@bob:example.invalid",
+              sender_label: "Bob",
+              body_preview: "Earlier thread event",
+              state: "ready"
+            }
+          }
+        ]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          presentationContext="thread"
+          timelineKey={key}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+          onOpenThread={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const row = screen.getByText("Rich reply from another client").closest("article");
+    expect(row).not.toBeNull();
+    const quote = row!.querySelector<HTMLElement>(".reply-quote");
+    expect(quote?.getAttribute("data-reply-state")).toBe("ready");
+    expect(quote?.textContent).toContain("Bob");
+    expect(quote?.textContent).toContain("Earlier thread event");
+  });
 
   it("does not expose reply actions for redacted, hidden, or bodyless rows", () => {
     const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
@@ -840,7 +976,10 @@ describe("TimelineView", () => {
       if (this.getAttribute("data-testid") === "timeline-view") {
         top = 120;
         height = 260;
-      } else if (this.classList.contains("reaction-control")) {
+      } else if (
+        this.classList.contains("reaction-control") ||
+        this.classList.contains("message-action")
+      ) {
         top = 320;
       } else if (this.classList.contains("main-pane")) {
         top = 100;
@@ -883,10 +1022,10 @@ describe("TimelineView", () => {
     fireEvent.click(screen.getByRole("button", { name: /add reaction/i }));
 
     const picker = await screen.findByRole("dialog", { name: /emoji/i });
-    expect(picker.style.getPropertyValue("--emoji-picker-max-block-size")).toBe("194px");
+    expect(picker.style.getPropertyValue("block-size")).toBe("194px");
   });
 
-  it("lets the reaction emoji picker use extra vertical room when available", async () => {
+  it("keeps the reaction emoji picker at its preferred block size when there is room", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
       this: HTMLElement
     ) {
@@ -895,7 +1034,10 @@ describe("TimelineView", () => {
       if (this.getAttribute("data-testid") === "timeline-view") {
         top = 80;
         height = 720;
-      } else if (this.classList.contains("reaction-control")) {
+      } else if (
+        this.classList.contains("reaction-control") ||
+        this.classList.contains("message-action")
+      ) {
         top = 160;
       } else if (this.classList.contains("main-pane")) {
         top = 60;
@@ -939,7 +1081,7 @@ describe("TimelineView", () => {
 
     const picker = await screen.findByRole("dialog", { name: /emoji/i });
     expect(picker.classList.contains("is-below")).toBe(true);
-    expect(picker.style.getPropertyValue("--emoji-picker-max-block-size")).toBe("610px");
+    expect(picker.style.getPropertyValue("block-size")).toBe("520px");
   });
 
   it("updates the reaction emoji picker size when the visible space changes", async () => {
@@ -952,7 +1094,10 @@ describe("TimelineView", () => {
       if (this.getAttribute("data-testid") === "timeline-view") {
         top = 120;
         height = 260;
-      } else if (this.classList.contains("reaction-control")) {
+      } else if (
+        this.classList.contains("reaction-control") ||
+        this.classList.contains("message-action")
+      ) {
         top = reactionControlTop;
       } else if (this.classList.contains("main-pane")) {
         top = 100;
@@ -995,14 +1140,14 @@ describe("TimelineView", () => {
     fireEvent.click(screen.getByRole("button", { name: /add reaction/i }));
 
     const picker = await screen.findByRole("dialog", { name: /emoji/i });
-    expect(picker.style.getPropertyValue("--emoji-picker-max-block-size")).toBe("194px");
+    expect(picker.style.getPropertyValue("block-size")).toBe("194px");
 
     reactionControlTop = 150;
     fireEvent(window, new Event("resize"));
 
     await waitFor(() => {
       expect(picker.classList.contains("is-below")).toBe(true);
-      expect(picker.style.getPropertyValue("--emoji-picker-max-block-size")).toBe("200px");
+      expect(picker.style.getPropertyValue("block-size")).toBe("200px");
     });
   });
 
