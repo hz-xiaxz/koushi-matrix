@@ -4526,6 +4526,7 @@ export function App() {
         data-density={displayDensity}
       >
         <TopBar
+          activeRoomName={activeRoom?.display_label ?? null}
           activeSpaceName={activeSpaceName}
           homeserver={snapshot.state.domain.session.homeserver ?? null}
           isBusy={isBusy}

@@ -520,6 +520,44 @@ describe("WorkspaceRail", () => {
   });
 });
 
+describe("TopBar search placeholder", () => {
+  function placeholderFor(
+    searchScope: "allRooms" | "currentSpace" | "currentRoom" | "dms",
+    activeRoomName: string | null = "Design"
+  ): string {
+    cleanup();
+    render(
+      <TopBar
+        activeRoomName={activeRoomName}
+        activeSpaceName="Matrix"
+        isBusy={false}
+        searchInputRef={{ current: null }}
+        searchQuery=""
+        searchScope={searchScope}
+        sync="running"
+        onOpenKeyboardSettings={() => undefined}
+        onRestartSync={() => undefined}
+        onSearchQueryChange={() => undefined}
+        onSearchScopeChange={() => undefined}
+      />
+    );
+    return screen.getByLabelText("Search").getAttribute("placeholder") ?? "";
+  }
+
+  it("names the search target from the selected scope, not the active space", () => {
+    // Saying "Search in Matrix" while the scope is All told the user the search
+    // was narrower than it actually was.
+    expect(placeholderFor("allRooms")).toBe("Search everywhere");
+    expect(placeholderFor("currentSpace")).toBe("Search in Matrix");
+    expect(placeholderFor("currentRoom")).toBe("Search in Design");
+    expect(placeholderFor("dms")).toBe("Search direct messages");
+  });
+
+  it("falls back to the generic label when the scope has no target to name", () => {
+    expect(placeholderFor("currentRoom", null)).toBe("Search");
+  });
+});
+
 describe("TopBar window dragging", () => {
   it("starts window dragging from the titlebar background", () => {
     const onStartWindowDrag = vi.fn();

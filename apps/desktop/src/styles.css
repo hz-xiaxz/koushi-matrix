@@ -1987,9 +1987,13 @@ button:disabled {
 }
 
 .result-button {
+  /* One column, metadata on its own row. A second `auto` column reserved the
+     metadata's full unwrapped width, and in the narrow right Search panel that
+     squeezed `minmax(0, 1fr)` down to zero: the snippet wrapped one word per
+     line and the panel scrolled sideways. */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
   width: 100%;
   padding: 10px 12px;
   border-bottom: 1px solid var(--line);
@@ -1997,13 +2001,22 @@ button:disabled {
   background: transparent;
 }
 
+.result-button > span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
 .result-button:hover {
   background: var(--surface-hover);
 }
 
 .result-meta {
+  /* Now that it owns a row, keeping it on one line is safe: it truncates
+     inside the row instead of stealing width from the snippet. */
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 12px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
