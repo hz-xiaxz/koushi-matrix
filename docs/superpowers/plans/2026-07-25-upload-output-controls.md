@@ -19,32 +19,7 @@ Date: 2026-07-25
 So the encoder is already Rust-owned: #305 is a model change plus a GUI
 redesign, not a move of pixel work into React.
 
-## Target model
-
-Resize and format become independent axes; a prepared variant is identified by
-their combination.
-
-```rust
-pub enum PreparedUploadResize { Original, Half, Quarter, Eighth } // linear scale
-pub enum PreparedUploadFormat { Keep, Png, Jpeg, Webp }           // Keep == source encoding
-
-pub struct StagedUploadOutputSelection {
-    pub resize: PreparedUploadResize,
-    pub format: PreparedUploadFormat,
-}
-```
-
-`StagedUploadPreparation::Ready` keeps `variants` as the completed-combination
-cache and gains `selected: StagedUploadOutputSelection`, `pending:
-Option<StagedUploadOutputSelection>`, and a `generation: u64` fence. The reducer
-resolves a selection to a cached variant, or records it as pending so the GUI can
-show `Recompressing…` without losing the last valid output.
-
-`PreparedUploadVariant` gains `resize` so cache identity is the pair, and
-`Original`/`Keep` stay distinct: resize `Original` preserves dimensions while
-format `Keep` preserves the source encoding.
-
-## Resolved state model
+## Target state model
 
 `PreparedUploadFormat` keeps describing the *actual* encoding of a prepared
 output. Selection gets its own types so `Original` (dimensions) and `Keep`
