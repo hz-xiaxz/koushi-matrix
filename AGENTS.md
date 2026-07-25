@@ -262,6 +262,12 @@ reverse.
   silent external review is not evidence and should not block a verified small
   fix indefinitely. A subagent's "gates passed" claim is not evidence — re-run
   the gate yourself.
+- Read the gate's own exit status, never a pipeline's. `cargo test … | grep …`
+  reports grep's status, and appending anything (`; echo done`, `; true`)
+  reports that instead, so a failing suite looks green. Run
+  `<gate> > /tmp/x.log 2>&1; echo "EXIT=$?"` and report that number. A
+  2026-07-25 change claimed a green `cargo test --workspace` this way and
+  pushed a red DTO golden to CI.
 - Native / manual GUI inspection is the last and weakest layer: a confirmation
   only, never the primary correctness gate.
 
@@ -413,6 +419,17 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   `cargo test -p koushi-state --test core_batch_a_state`,
   `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml core_event_wire_format_matches_checked_in_contract_artifact`,
   and `npm --prefix apps/desktop run typecheck`.
+- A snapshot field change breaks TWO checked-in artifacts, and they are
+  regenerated differently. `apps/desktop/src-tauri/tests/golden/frontend_app_state.json`
+  is rewritten by
+  `UPDATE_GOLDEN=1 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib frontend_app_state_golden`.
+  `apps/desktop/src/domain/coreEvents.generated.json` has no such switch and
+  must be edited to match `serialize_core_event`. Fixing only the first leaves
+  the CoreEvent contract test red, which is what happened on 2026-07-25.
+- Populate the golden fixture with data that exercises the new shape. An empty
+  array or a `None` proves nothing a scalar field would not also satisfy, so a
+  list-valued or optional field needs a real value in the maximally-populated
+  state.
 
 ## State Transport Phase Notes
 
