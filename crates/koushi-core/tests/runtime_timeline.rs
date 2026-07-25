@@ -166,6 +166,8 @@ fn ready_staged_file(id: &str, room_id: &str, position: u64) -> StagedUploadItem
         preparation: StagedUploadPreparation::Ready {
             variants: vec![PreparedUploadVariant {
                 variant_id: variant_id.clone(),
+                resize: Default::default(),
+                format_choice: Default::default(),
                 filename: format!("{id}.txt"),
                 mime_type: "text/plain".to_owned(),
                 byte_count: 32,
@@ -176,7 +178,9 @@ fn ready_staged_file(id: &str, room_id: &str, position: u64) -> StagedUploadItem
                 metadata_stripped: false,
                 thumbnail_refreshed: false,
             }],
-            selected_variant_id: variant_id,
+            selected: Default::default(),
+            pending: None,
+            generation: 0,
         },
     }
 }

@@ -82,9 +82,8 @@ pub use state::{
     SearchScope, SearchState, SecureBackupPassphraseChangeState, SecureBackupSetupState,
     SessionInfo, SessionState, SettingsPatch, SettingsPersistenceState, SettingsState,
     SettingsValues, SoftLogoutReauthState, SpaceSummary, StagedUploadCompressionChoice,
-    StagedUploadFormatChoice, StagedUploadItem, StagedUploadKind,
-    StagedUploadOutputSelection, StagedUploadPreparation, StagedUploadResizeChoice,
-    SyncLifecycleStatus, SyncMode,
+    StagedUploadFormatChoice, StagedUploadItem, StagedUploadKind, StagedUploadOutputSelection,
+    StagedUploadPreparation, StagedUploadResizeChoice, SyncLifecycleStatus, SyncMode,
     SyncModeFailureKind, SyncState, TextDirectionPreference, TextRange, ThemePreference,
     ThreadAttentionState, ThreadListOrder, ThreadPaneState, ThreadRootProjectionActivity,
     ThreadRootProjectionState, ThreadRootProjectionStatus, ThreadsListItem, ThreadsListState,
@@ -101,6 +100,7 @@ pub use state::{
     refresh_room_settings_member_display_projection, refresh_room_summary_display_projection,
     resolve_user_display_name, room_activity_unread_count, room_attention_kind,
     room_attention_summary, room_settings_share_link, sort_threads_list_items,
+    staged_upload_item_with_completed_output,
 };
 pub use submission::{
     ComposerSubmissionTarget, ComposerSubmissionTerminalOutcome, ComposerTarget, SubmissionId,

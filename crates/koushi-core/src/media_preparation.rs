@@ -1,12 +1,14 @@
 use std::{collections::BTreeMap, fmt};
 
 use koushi_media::{
-    ImagePreparationPolicy, PreparedImageFormat, PreparedImageVariant, prepare_image_variants,
+    ImageOutputFormat, ImageOutputRequest, ImagePreparationPolicy, ImageResizeScale,
+    PreparedImageFormat, PreparedImageVariant, prepare_image_output,
 };
 use koushi_state::{
     ComposerTarget, ImageUploadCompressionMode, ImageUploadCompressionPolicy,
     MediaPreparationFailureKind, PreparedUploadFormat, PreparedUploadVariant,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, StagedUploadPreparation,
+    StagedUploadCompressionChoice, StagedUploadFormatChoice, StagedUploadItem, StagedUploadKind,
+    StagedUploadOutputSelection, StagedUploadPreparation, StagedUploadResizeChoice,
 };
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -53,6 +55,18 @@ impl MediaPreparationTransition<'_> {
         staged_id: &str,
     ) -> Option<StageUploadBytesInput> {
         self.registry.source_input(target, staged_id)
+    }
+
+    /// Cache a lazily encoded output and select it for upload.
+    pub fn insert_prepared_output(
+        &mut self,
+        target: &ComposerTarget,
+        staged_id: &str,
+        descriptor: PreparedUploadVariant,
+        bytes: Vec<u8>,
+    ) {
+        self.registry
+            .insert_prepared_output(target, staged_id, descriptor, bytes);
     }
 
     pub fn select_variant(
@@ -174,6 +188,58 @@ impl MediaPreparationRegistry {
             .take(MAX_PREPARATION_BATCH_SIZE)
             .map(|input| self.prepare_one(target, input, mode, policy))
             .collect()
+    }
+
+    /// Cache identity for one resize/format pair.
+    pub fn output_identity(selection: StagedUploadOutputSelection) -> String {
+        ImageOutputRequest {
+            resize: image_resize_scale(selection.resize),
+            format: image_output_format(selection.format),
+        }
+        .identity()
+    }
+
+    /// Encode one pair from a retained source, or `None` when it cannot be
+    /// decoded or encoded.
+    pub fn encode_output(
+        source: &StageUploadBytesInput,
+        selection: StagedUploadOutputSelection,
+        policy: ImageUploadCompressionPolicy,
+    ) -> Option<(PreparedUploadVariant, Vec<u8>)> {
+        let request = ImageOutputRequest {
+            resize: image_resize_scale(selection.resize),
+            format: image_output_format(selection.format),
+        };
+        let variant = prepare_image_output(
+            &source.bytes,
+            &source.filename,
+            request,
+            &ImagePreparationPolicy {
+                target_long_edge: u32::try_from(policy.target_long_edge).unwrap_or(u32::MAX),
+                quality_percent: policy.quality_percent,
+            },
+        )
+        .ok()?;
+        let descriptor = descriptor_from_image_variant(&variant, source.bytes.len(), selection);
+        Some((descriptor, variant.bytes))
+    }
+
+    /// Cache a lazily encoded pair and select it, so the upload uses its exact
+    /// bytes.
+    pub fn insert_prepared_output(
+        &mut self,
+        target: &ComposerTarget,
+        staged_id: &str,
+        descriptor: PreparedUploadVariant,
+        bytes: Vec<u8>,
+    ) {
+        let variant_id = descriptor.variant_id.clone();
+        self.variants.insert(
+            (target.clone(), staged_id.to_owned(), variant_id.clone()),
+            CachedVariant { descriptor, bytes },
+        );
+        self.selected
+            .insert((target.clone(), staged_id.to_owned()), variant_id);
     }
 
     pub fn select_variant(
@@ -366,70 +432,63 @@ impl MediaPreparationRegistry {
             return self.store_original_file(target, input, byte_count);
         }
 
-        let prepared = prepare_image_variants(
-            &input.bytes,
-            &input.filename,
-            &input.mime_type,
-            &ImagePreparationPolicy {
-                target_long_edge: u32::try_from(policy.target_long_edge).unwrap_or(u32::MAX),
-                quality_percent: policy.quality_percent,
+        // #305: the staging dialog always asks, so preparation encodes exactly
+        // the untouched output (scale 1, source encoding). Every other
+        // resize/format pair is encoded lazily when the user selects it.
+        let encode_policy = ImagePreparationPolicy {
+            target_long_edge: u32::try_from(policy.target_long_edge).unwrap_or(u32::MAX),
+            quality_percent: policy.quality_percent,
+        };
+        let _ = mode;
+        let selected = StagedUploadOutputSelection::default();
+        let request = ImageOutputRequest {
+            resize: image_resize_scale(selected.resize),
+            format: image_output_format(selected.format),
+        };
+        let Ok(variant) =
+            prepare_image_output(&input.bytes, &input.filename, request, &encode_policy)
+        else {
+            return staged_failure(
+                target,
+                input,
+                byte_count,
+                MediaPreparationFailureKind::Encode,
+            );
+        };
+        let descriptor = descriptor_from_image_variant(&variant, input.bytes.len(), selected);
+        self.variants.insert(
+            (
+                target.clone(),
+                input.staged_id.clone(),
+                descriptor.variant_id.clone(),
+            ),
+            CachedVariant {
+                descriptor: descriptor.clone(),
+                bytes: variant.bytes,
             },
         );
-        let variants = match prepared {
-            Ok(variants) => variants,
-            Err(_) => {
-                return staged_failure(
-                    target,
-                    input,
-                    byte_count,
-                    MediaPreparationFailureKind::Encode,
-                );
-            }
-        };
-        let original_len = input.bytes.len();
-        let selected_variant_id = select_initial_variant(&variants, mode);
-        let descriptors = variants
-            .into_iter()
-            .map(|variant| {
-                let descriptor = descriptor_from_image_variant(&variant, original_len);
-                self.variants.insert(
-                    (
-                        target.clone(),
-                        input.staged_id.clone(),
-                        descriptor.variant_id.clone(),
-                    ),
-                    CachedVariant {
-                        descriptor: descriptor.clone(),
-                        bytes: variant.bytes,
-                    },
-                );
-                descriptor
-            })
-            .collect::<Vec<_>>();
         self.selected.insert(
             (target.clone(), input.staged_id.clone()),
-            selected_variant_id.clone(),
+            descriptor.variant_id.clone(),
         );
-        let selected = descriptors
-            .iter()
-            .find(|variant| variant.variant_id == selected_variant_id)
-            .expect("selected prepared variant exists");
         StagedUploadItem {
             staged_id: input.staged_id,
             room_id: target.room_id().to_owned(),
             position: input.position,
-            filename: selected.filename.clone(),
-            mime_type: selected.mime_type.clone(),
-            byte_count: selected.byte_count,
+            filename: descriptor.filename.clone(),
+            mime_type: descriptor.mime_type.clone(),
+            byte_count: descriptor.byte_count,
             kind: StagedUploadKind::Image {
-                width: selected.width,
-                height: selected.height,
+                width: descriptor.width,
+                height: descriptor.height,
             },
             caption: None,
             compression_choice: StagedUploadCompressionChoice::Original,
             preparation: StagedUploadPreparation::Ready {
-                variants: descriptors,
-                selected_variant_id,
+                variants: vec![descriptor],
+                selected,
+                pending: None,
+                generation: 0,
             },
         }
     }
@@ -440,8 +499,12 @@ impl MediaPreparationRegistry {
         input: StageUploadBytesInput,
         byte_count: u64,
     ) -> StagedUploadItem {
+        // A non-image attachment is only ever its untouched self.
+        let selected = StagedUploadOutputSelection::default();
         let descriptor = PreparedUploadVariant {
             variant_id: "original".to_owned(),
+            resize: selected.resize,
+            format_choice: selected.format,
             filename: input.filename.clone(),
             mime_type: normalized_mime(&input.mime_type),
             byte_count,
@@ -479,7 +542,9 @@ impl MediaPreparationRegistry {
             compression_choice: StagedUploadCompressionChoice::NotApplicable,
             preparation: StagedUploadPreparation::Ready {
                 variants: vec![descriptor],
-                selected_variant_id: "original".to_owned(),
+                selected,
+                pending: None,
+                generation: 0,
             },
         }
     }
@@ -544,9 +609,34 @@ fn staged_failure(
     }
 }
 
+/// Map a state-level resize choice onto the encoder's linear scale.
+fn image_resize_scale(resize: StagedUploadResizeChoice) -> ImageResizeScale {
+    match resize {
+        StagedUploadResizeChoice::Original => ImageResizeScale::Original,
+        StagedUploadResizeChoice::Half => ImageResizeScale::Half,
+        StagedUploadResizeChoice::Quarter => ImageResizeScale::Quarter,
+        StagedUploadResizeChoice::Eighth => ImageResizeScale::Eighth,
+    }
+}
+
+/// Map a state-level format choice onto the encoder's output format.
+fn image_output_format(format: StagedUploadFormatChoice) -> ImageOutputFormat {
+    match format {
+        StagedUploadFormatChoice::Keep => ImageOutputFormat::Keep,
+        StagedUploadFormatChoice::Png => ImageOutputFormat::Png,
+        StagedUploadFormatChoice::Jpeg => ImageOutputFormat::Jpeg,
+        StagedUploadFormatChoice::Webp => ImageOutputFormat::WebP,
+    }
+}
+
+/// Project one encoded output, tagged with the pair it was prepared for.
+///
+/// `savings_percent` and the reported dimensions describe these exact bytes, so
+/// the dialog never shows an estimate.
 fn descriptor_from_image_variant(
     variant: &PreparedImageVariant,
     original_len: usize,
+    selection: StagedUploadOutputSelection,
 ) -> PreparedUploadVariant {
     let byte_count = u64::try_from(variant.bytes.len()).unwrap_or(u64::MAX);
     let savings_percent = if original_len == 0 {
@@ -556,6 +646,8 @@ fn descriptor_from_image_variant(
     };
     PreparedUploadVariant {
         variant_id: variant.id.clone(),
+        resize: selection.resize,
+        format_choice: selection.format,
         filename: variant.filename.clone(),
         mime_type: variant.mime_type.clone(),
         byte_count,
@@ -571,21 +663,6 @@ fn descriptor_from_image_variant(
         metadata_stripped: variant.metadata_stripped,
         thumbnail_refreshed: variant.thumbnail_refreshed,
     }
-}
-
-fn select_initial_variant(
-    variants: &[PreparedImageVariant],
-    mode: ImageUploadCompressionMode,
-) -> String {
-    if mode == ImageUploadCompressionMode::Never {
-        return "original".to_owned();
-    }
-    variants
-        .iter()
-        .find(|variant| variant.recommended)
-        .or_else(|| variants.first())
-        .map(|variant| variant.id.clone())
-        .unwrap_or_else(|| "original".to_owned())
 }
 
 fn normalized_mime(mime_type: &str) -> String {

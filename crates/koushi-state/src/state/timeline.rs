@@ -275,9 +275,7 @@ pub enum StagedUploadFormatChoice {
 }
 
 /// The two independent axes that identify one prepared output.
-#[derive(
-    Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StagedUploadOutputSelection {
     pub resize: StagedUploadResizeChoice,
@@ -327,6 +325,54 @@ impl fmt::Debug for PreparedUploadVariant {
 #[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct UploadStagingStore {
     pub items: std::collections::BTreeMap<(ComposerTarget, String), StagedUploadItem>,
+}
+
+/// Build the item that adopts a completed encode, or `None` when the result is
+/// stale.
+///
+/// The fence lives here, not in the transport layer: a caller that ran the
+/// encode outside the store still cannot let a slow result overwrite the output
+/// the user is currently waiting for.
+pub fn staged_upload_item_with_completed_output(
+    item: &StagedUploadItem,
+    prepared: PreparedUploadVariant,
+    completed_generation: u64,
+) -> Option<StagedUploadItem> {
+    let StagedUploadPreparation::Ready {
+        variants,
+        selected,
+        generation,
+        ..
+    } = &item.preparation
+    else {
+        return None;
+    };
+    if completed_generation != *generation
+        || prepared.resize != selected.resize
+        || prepared.format_choice != selected.format
+    {
+        return None;
+    }
+    let mut variants = variants.clone();
+    variants.retain(|variant| {
+        variant.resize != prepared.resize || variant.format_choice != prepared.format_choice
+    });
+    variants.push(prepared.clone());
+    let mut next = item.clone();
+    next.filename = prepared.filename.clone();
+    next.mime_type = prepared.mime_type.clone();
+    next.byte_count = prepared.byte_count;
+    next.kind = StagedUploadKind::Image {
+        width: prepared.width,
+        height: prepared.height,
+    };
+    next.preparation = StagedUploadPreparation::Ready {
+        variants,
+        selected: *selected,
+        pending: None,
+        generation: *generation,
+    };
+    Some(next)
 }
 
 impl UploadStagingStore {

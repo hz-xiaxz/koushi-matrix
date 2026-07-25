@@ -670,12 +670,17 @@ impl fmt::Debug for AppCommand {
                 .field("staged_id", &"StagedUploadId(..)")
                 .field("compression_choice", compression_choice)
                 .finish(),
-            Self::SelectStagedUploadVariant { request_id, .. } => formatter
-                .debug_struct("SelectStagedUploadVariant")
+            Self::SelectStagedUploadOutput {
+                request_id,
+                selection,
+                ..
+            } => formatter
+                .debug_struct("SelectStagedUploadOutput")
                 .field("request_id", request_id)
                 .field("target", &"ComposerTarget(..)")
                 .field("staged_id", &"StagedUploadId(..)")
-                .field("variant_id", &"PreparedVariantId(..)")
+                // The chosen axes are not private data; the filename is.
+                .field("selection", selection)
                 .finish(),
             Self::ClearUploadStaging { request_id, .. } => formatter
                 .debug_struct("ClearUploadStaging")

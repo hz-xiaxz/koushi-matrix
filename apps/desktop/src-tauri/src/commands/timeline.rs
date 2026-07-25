@@ -860,51 +860,135 @@ pub async fn stage_upload_bytes(
 }
 
 #[tauri::command]
-pub async fn select_staged_upload_variant(
+pub async fn select_staged_upload_output(
     target: koushi_state::ComposerTarget,
     staged_id: String,
-    variant_id: String,
+    selection: koushi_state::StagedUploadOutputSelection,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let mut media = state.runtime.media_preparation().transition().await;
-    if !composer_target_is_active(&state.runtime.attach().snapshot(), &target) {
+    let snapshot = state.runtime.attach().snapshot();
+    if !composer_target_is_active(&snapshot, &target) {
         return current_snapshot(state.inner()).await;
     }
-    if !media.select_variant(&target, &staged_id, &variant_id) {
-        return current_snapshot(state.inner()).await;
-    }
+    let initial_account = account_key_from_app_state(&snapshot);
+    let policy = snapshot
+        .settings
+        .values
+        .media
+        .image_upload_compression_policy;
+    let variant_id =
+        koushi_core::media_preparation::MediaPreparationRegistry::output_identity(selection);
+
+    // Record the choice first: Rust owns which output uploads, and an
+    // unprepared pair becomes `pending` under a fresh generation.
+    let cached = {
+        let mut media = state.runtime.media_preparation().transition().await;
+        media.select_variant(&target, &staged_id, &variant_id)
+    };
     let mut event_conn = state.runtime.attach();
     let request_id = event_conn.next_request_id();
     event_conn
-        .command(CoreCommand::App(AppCommand::SelectStagedUploadVariant {
+        .command(CoreCommand::App(AppCommand::SelectStagedUploadOutput {
             request_id,
             target: target.clone(),
             staged_id: staged_id.clone(),
-            variant_id: variant_id.clone(),
+            selection,
         }))
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
+    let selection_matches = |snapshot: &koushi_state::AppState| {
+        staged_uploads_for_target(snapshot, &target).is_some_and(|items| {
+            items.iter().any(|item| {
+                item.staged_id == staged_id
+                    && matches!(
+                        &item.preparation,
+                        koushi_state::StagedUploadPreparation::Ready { selected, .. }
+                            if selected == &selection
+                    )
+            })
+        })
+    };
     wait_for_upload_staging_snapshot(
         &mut event_conn,
         request_id,
-        |snapshot| {
-            staged_uploads_for_target(snapshot, &target).is_some_and(|items| {
-                items.iter().any(|item| {
-                    item.staged_id == staged_id
-                        && matches!(
-                            &item.preparation,
-                            koushi_state::StagedUploadPreparation::Ready {
-                                selected_variant_id,
-                                ..
-                            } if selected_variant_id == &variant_id
-                        )
-                })
-            })
-        },
-        "prepared upload variant did not update",
+        selection_matches,
+        "staged upload output selection did not update",
     )
     .await?;
+    if cached {
+        return current_snapshot(state.inner()).await;
+    }
+
+    // Encode the newly requested pair. The generation captured here is what
+    // makes a slower encode lose to a newer selection.
+    let Some((generation, source)) =
+        staged_output_generation(&event_conn.snapshot(), &target, &staged_id).zip(
+            state
+                .runtime
+                .media_preparation()
+                .transition()
+                .await
+                .source_input(&target, &staged_id),
+        )
+    else {
+        return current_snapshot(state.inner()).await;
+    };
+    let encoded = tokio::task::spawn_blocking(move || {
+        koushi_core::media_preparation::MediaPreparationRegistry::encode_output(
+            &source, selection, policy,
+        )
+    })
+    .await
+    .map_err(|_| "attachment output encoding did not complete".to_owned())?;
+    let Some((descriptor, bytes)) = encoded else {
+        return current_snapshot(state.inner()).await;
+    };
+
+    let current = state.runtime.attach().snapshot();
+    if account_key_from_app_state(&current) != initial_account
+        || !composer_target_is_active(&current, &target)
+    {
+        return current_snapshot(state.inner()).await;
+    }
+    let Some(item) = staged_uploads_for_target(&current, &target).and_then(|items| {
+        items
+            .iter()
+            .find(|item| item.staged_id == staged_id)
+            .cloned()
+    }) else {
+        return current_snapshot(state.inner()).await;
+    };
+    // The state-owned fence decides whether this result is still wanted.
+    let Some(replacement) = koushi_state::staged_upload_item_with_completed_output(
+        &item,
+        descriptor.clone(),
+        generation,
+    ) else {
+        return current_snapshot(state.inner()).await;
+    };
+    state
+        .runtime
+        .media_preparation()
+        .transition()
+        .await
+        .insert_prepared_output(&target, &staged_id, descriptor, bytes);
+    replace_staged_upload_item(state.inner(), &target, &staged_id, replacement).await?;
     current_snapshot(state.inner()).await
+}
+
+/// Generation of the staged item's current output selection.
+fn staged_output_generation(
+    snapshot: &koushi_state::AppState,
+    target: &koushi_state::ComposerTarget,
+    staged_id: &str,
+) -> Option<u64> {
+    staged_uploads_for_target(snapshot, target)?
+        .iter()
+        .find(|item| item.staged_id == staged_id)
+        .and_then(|item| match &item.preparation {
+            koushi_state::StagedUploadPreparation::Ready { generation, .. } => Some(*generation),
+            _ => None,
+        })
 }
 
 #[tauri::command]

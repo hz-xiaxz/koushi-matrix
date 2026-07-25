@@ -19,11 +19,11 @@ use crate::state::{
     RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji,
     ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope,
     SessionInfo, SettingsPatch, SettingsValues, SpaceSummary, StagedUploadCompressionChoice,
-    StagedUploadOutputSelection,
-    StagedUploadItem, SyncLifecycleStatus, SyncMode, TimelineContinuityInspection,
-    TimelineGapRepairFailureKind, TimelineMediaDownloadState, TimelineMediaGalleryItem,
-    TimelineScrollAnchor, TrustOperationFailureKind, UserProfile, VerificationCancelReason,
-    VerificationGateFailureKind, VerificationGateState, VerificationMethod, VerificationTarget,
+    StagedUploadItem, StagedUploadOutputSelection, SyncLifecycleStatus, SyncMode,
+    TimelineContinuityInspection, TimelineGapRepairFailureKind, TimelineMediaDownloadState,
+    TimelineMediaGalleryItem, TimelineScrollAnchor, TrustOperationFailureKind, UserProfile,
+    VerificationCancelReason, VerificationGateFailureKind, VerificationGateState,
+    VerificationMethod, VerificationTarget,
 };
 
 #[derive(Clone, Eq, PartialEq)]

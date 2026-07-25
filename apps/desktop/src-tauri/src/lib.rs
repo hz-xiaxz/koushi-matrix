@@ -1270,7 +1270,7 @@ pub fn run() {
             commands::timeline::schedule_send,
             commands::timeline::stage_uploads,
             commands::timeline::stage_upload_bytes,
-            commands::timeline::select_staged_upload_variant,
+            commands::timeline::select_staged_upload_output,
             commands::timeline::retry_staged_upload_preparation,
             commands::timeline::use_original_staged_upload,
             commands::timeline::prepared_upload_preview,
