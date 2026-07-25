@@ -63,30 +63,31 @@ other than the bytes that would be uploaded.
    artifact, `browserFakeApi.ts`, `tauriIpcMock.ts`, `appHarnessMain.tsx`, and
    the DTO serialization-contract tests.
 
-## Open decision resolved: the compression setting picks an initial pair
+## Decided: always ask, default scale 1
 
-`prepare_image_variants` compresses by long edge (2048) plus a `recommended`
-flag, which does not correspond to any 1/2-1/8 linear scale. Two ways to keep
-`SettingsValues.media.image_upload_compression` working:
+Maintainer decision (2026-07-25): the staging dialog always asks. There is no
+automatic compression path for staged uploads.
 
-1. Keep the legacy policy output alongside axis-based outputs in `variants`.
-   Rejected: `variants` would hold entries with no `(resize, format)` identity,
-   which reintroduces exactly the opaque-variant model #305 removes, and the
-   dialog could not describe what will be uploaded.
-2. Let the setting choose only the *initial selection*, expressed on the new
-   axes, and retire the long-edge policy for staged uploads. Chosen: one cache
-   identity, one encoder path, and every displayed number describes bytes the
-   dialog can reproduce.
+- The initial selection is always `(Original, Keep)` — scale 1, source encoding.
+- The user then explicitly picks `1/2`, `1/4`, or `1/8`, and a format.
+- Aspect ratio is fixed: both dimensions are divided by the same divisor, which
+  is what `scale_linearly` already does (integer division, floored at 1px).
 
-Initial selection mapping: `Never` → `(Original, Keep)`;
-`Ask` / `Always` → `(Half, Keep)`.
+Why not keep the existing setting-driven behavior: `prepare_image_variants`
+compresses by long edge (2048), so its output is neither `Original` nor `1/2`
+for a given image (4000x3000 becomes 2048x1536 ~ 0.512; 1284x918 is left
+untouched). Labelling that output as one of the four choices would be false, and
+keeping it beside axis-based outputs would preserve exactly the opaque-variant
+model #305 removes. Mapping `Always` onto `(Half, Keep)` was rejected because it
+would newly shrink images the long-edge policy deliberately left alone.
 
-This changes automatic compression output for staged uploads (a halved image
-instead of a long-edge-2048 image), so the image-compression Rust tests, the
-`image_compress=ok` core token expectations, and the
-`local-image-compression` Linux lane assertions must move with it in the same
-change. `prepare_image_variants` stays for any non-staging caller; if none
-remain after the migration, delete it rather than leaving two encoder policies.
+Consequence to carry out with the implementation: `SettingsValues.media
+.image_upload_compression` stops influencing staged upload preparation. A
+setting that no longer changes behavior must not stay visible, so its settings
+UI, DTO/TS mirrors, persistence backfill, the image-compression Rust tests, the
+`image_compress=ok` core token, and the `local-image-compression` Linux lane all
+need to be retired or repointed at the dialog in the same change. Treat that as
+part of #305 scope, not a follow-up, so no dead preference remains.
 
 ## GUI work
 
