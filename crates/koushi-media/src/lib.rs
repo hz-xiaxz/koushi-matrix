@@ -51,8 +51,139 @@ pub struct PreparedImageVariant {
 pub enum ImagePreparationError {
     #[error("empty image source")]
     Empty,
+    #[error("image decoding failed")]
+    Decode,
     #[error("image encoding failed")]
     Encode,
+}
+
+/// Linear scale applied to both dimensions of the source image.
+///
+/// This is independent of the output encoding: `Original` preserves the source
+/// dimensions, while [`ImageOutputFormat::Keep`] preserves the source encoding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImageResizeScale {
+    Original,
+    Half,
+    Quarter,
+    Eighth,
+}
+
+impl ImageResizeScale {
+    /// Divisor applied to each dimension.
+    pub const fn divisor(self) -> u32 {
+        match self {
+            Self::Original => 1,
+            Self::Half => 2,
+            Self::Quarter => 4,
+            Self::Eighth => 8,
+        }
+    }
+
+    /// Stable token used in cache identities and diagnostics.
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::Half => "half",
+            Self::Quarter => "quarter",
+            Self::Eighth => "eighth",
+        }
+    }
+}
+
+/// Requested output encoding. `Keep` re-encodes in the source format.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImageOutputFormat {
+    Keep,
+    Png,
+    Jpeg,
+    WebP,
+}
+
+impl ImageOutputFormat {
+    /// Stable token used in cache identities and diagnostics.
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Keep => "keep",
+            Self::Png => "png",
+            Self::Jpeg => "jpeg",
+            Self::WebP => "webp",
+        }
+    }
+}
+
+/// One independently chosen output: a linear resize plus an encoding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageOutputRequest {
+    pub resize: ImageResizeScale,
+    pub format: ImageOutputFormat,
+}
+
+impl ImageOutputRequest {
+    /// Cache identity for this exact combination.
+    pub fn identity(&self) -> String {
+        format!("{}-{}", self.resize.token(), self.format.token())
+    }
+}
+
+/// Encode exactly one requested output.
+///
+/// The returned dimensions and bytes always describe the same image, so a
+/// caller can report the size that will be uploaded instead of an estimate.
+/// Encoding is deterministic for a given request, which is what makes the
+/// request's [`ImageOutputRequest::identity`] usable as a cache key.
+pub fn prepare_image_output(
+    source: &[u8],
+    filename: &str,
+    request: ImageOutputRequest,
+    policy: &ImagePreparationPolicy,
+) -> Result<PreparedImageVariant, ImagePreparationError> {
+    if source.is_empty() {
+        return Err(ImagePreparationError::Empty);
+    }
+    let guessed = image::guess_format(source).ok();
+    let source_format = prepared_format(guessed);
+    let decodable = matches!(
+        source_format,
+        PreparedImageFormat::Png | PreparedImageFormat::Jpeg | PreparedImageFormat::WebP
+    ) && !animated_webp(source)
+        && !animated_png(source);
+    if !decodable {
+        return Err(ImagePreparationError::Decode);
+    }
+    let decoded = decode_with_limits(source, guessed.expect("recognized image format"))
+        .map_err(|_| ImagePreparationError::Decode)?;
+    let target_format = match request.format {
+        ImageOutputFormat::Keep => source_format,
+        ImageOutputFormat::Png => PreparedImageFormat::Png,
+        ImageOutputFormat::Jpeg => PreparedImageFormat::Jpeg,
+        ImageOutputFormat::WebP => PreparedImageFormat::WebP,
+    };
+    let scaled = scale_linearly(&decoded, request.resize);
+    let mut variant = encoded_variant(
+        &request.identity(),
+        filename,
+        target_format,
+        &scaled,
+        policy.quality_percent,
+    )?;
+    variant.recommended = false;
+    Ok(variant)
+}
+
+/// Halve each dimension per scale step, never below one pixel.
+fn scale_linearly(image: &DynamicImage, resize: ImageResizeScale) -> DynamicImage {
+    let divisor = resize.divisor();
+    if divisor <= 1 {
+        return image.clone();
+    }
+    let (width, height) = image.dimensions();
+    let target_width = (width / divisor).max(1);
+    let target_height = (height / divisor).max(1);
+    if (target_width, target_height) == (width, height) {
+        return image.clone();
+    }
+    image.resize_exact(target_width, target_height, FilterType::Lanczos3)
 }
 
 pub fn prepare_image_variants(
