@@ -1384,6 +1384,13 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   gap was fixed somewhere between then and now without the note being updated —
   which is exactly the drift the new CI gate prevents. Do not re-add it to a
   known-failures list without a fresh failing run.
+- `e2e/basic-operations.spec.ts:959` ("Explore searches public rooms and joins
+  only after Rust snapshot updates") failed once during #328 verification: the
+  `Join this room?` preview dialog was never found. It is a flake, not a product
+  break — the same commit passed a full serialized re-run (210/210), passed in
+  isolation, and passed a full run with the only changed frontend file reverted.
+  One occurrence is a re-check, not a known failure; if it recurs, investigate
+  how the preview dialog opens rather than the directory query itself.
 - `e2e/basic-operations.spec.ts:2811` ("pin and unpin actions render the Tauri
   snapshot response without a manual state event") is flaky in the FULL parallel
   Playwright run but passes deterministically in isolation
