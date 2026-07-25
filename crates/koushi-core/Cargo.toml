@@ -53,6 +53,9 @@ qa-bin = []
 # no-op for them.
 koushi-core = { path = ".", features = ["test-hooks"] }
 koushi-sdk = { path = "../koushi-sdk", features = ["test-hooks"] }
+# Decodable PNG fixtures for upload-output preparation tests. Already a
+# workspace dependency: koushi-media encodes with it in production.
+image.workspace = true
 matrix-sdk = { workspace = true, features = ["testing"] }
 matrix-sdk-test = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "rt", "sync", "time", "macros", "test-util"] }

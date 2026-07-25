@@ -687,6 +687,7 @@ export function UploadStagingDialog({
   onSelectOutput,
   onRetryPreparation,
   onUseOriginal,
+  onSendAttachments,
   loadPreview
 }: {
   items: StagedUploadItem[];
@@ -698,6 +699,12 @@ export function UploadStagingDialog({
   ) => void | Promise<void>;
   onRetryPreparation: (stagedId: string) => void | Promise<void>;
   onUseOriginal: (stagedId: string) => void | Promise<void>;
+  /**
+   * Sends the staged attachments. This is deliberately separate from the
+   * composer's send: it never touches the message draft, just as the composer's
+   * send never touches these attachments.
+   */
+  onSendAttachments: () => void | Promise<void>;
   loadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
 }) {
   return (
@@ -768,7 +775,30 @@ export function UploadStagingDialog({
           </article>
         ))}
       </div>
+      <div className="upload-staging-actions">
+        <button
+          className="dialog-button primary upload-staging-send"
+          type="button"
+          disabled={!uploadStagingItemsAreSendable(items)}
+          onClick={() => void onSendAttachments()}
+        >
+          {t("upload.sendAttachments")}
+        </button>
+      </div>
     </section>
+  );
+}
+
+/**
+ * Attachments may be sent once every item has a prepared output and none is
+ * still recompressing, so the bytes that upload are the ones the dialog shows.
+ */
+function uploadStagingItemsAreSendable(items: StagedUploadItem[]): boolean {
+  return (
+    items.length > 0 &&
+    items.every(
+      (item) => item.preparation.kind === "ready" && item.preparation.pending == null
+    )
   );
 }
 

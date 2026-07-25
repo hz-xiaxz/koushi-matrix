@@ -4610,7 +4610,9 @@ test("attach control stages media caption and renders Rust-owned media progress"
     .getByRole("textbox", { name: "Caption for media-fixture.txt" })
     .fill("single **event** caption");
   await expect.poll(() => invocationCount(page, "upload_media")).toBe(0);
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  // Attachments are sent from the staging panel; the composer send is
+  // for the message text only.
+  await page.getByRole("button", { name: "Send attachments" }).click();
 
   await expect.poll(() => invocationCount(page, "send_prepared_uploads")).toBe(1);
   await expect.poll(() => invocationCount(page, "send_text")).toBe(0);
@@ -4844,7 +4846,9 @@ test("paste/drop upload UX stages ordinary files for the captured main composer 
       caption: "caption from staging"
     });
 
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  // Attachments are sent from the staging panel; the composer send is
+  // for the message text only.
+  await page.getByRole("button", { name: "Send attachments" }).click();
   await expect.poll(() => invocationCount(page, "send_prepared_uploads")).toBe(1);
   await expect.poll(() => invocationCount(page, "send_text")).toBe(0);
   await expect
@@ -5004,7 +5008,9 @@ test("resize and format are chosen independently before the send action", async 
   await expect(dialog.getByRole("status", { name: "Upload result" })).toHaveCount(1);
 
   const selectionCountBeforeSend = await invocationCount(page, "select_staged_upload_output");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  // Attachments are sent from the staging panel; the composer send is
+  // for the message text only.
+  await page.getByRole("button", { name: "Send attachments" }).click();
   await expect.poll(() => invocationCount(page, "send_prepared_uploads")).toBe(1);
   await expect.poll(() => invocationCount(page, "select_staged_upload_output")).toBe(
     selectionCountBeforeSend
@@ -5813,7 +5819,8 @@ test("thread composer delayed write is root isolated across churn", async ({
       items: [{ filename: "thread-fixture.pdf", mimeType: "application/pdf" }]
     });
   await expect(page.getByText("thread-fixture.pdf", { exact: true })).toBeVisible();
-  await contextPanel.getByRole("button", { name: "Send", exact: true }).click();
+  // Thread attachments are sent from the thread's staging panel too.
+  await contextPanel.getByRole("button", { name: "Send attachments" }).click();
   await expect.poll(() => invocationCount(page, "send_prepared_uploads")).toBe(1);
   await expect
     .poll(async () =>

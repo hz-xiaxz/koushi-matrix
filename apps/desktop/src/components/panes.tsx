@@ -614,6 +614,7 @@ export function TimelinePane({
   onClearUploadStaging,
   onUpdateStagedUploadCaption,
   onSelectStagedUploadOutput,
+  onSendStagedAttachments,
   onLoadStagedUploadPreview,
   onRetryStagedUploadPreparation = () => undefined,
   onUseOriginalStagedUpload = () => undefined,
@@ -657,6 +658,7 @@ export function TimelinePane({
     stagedId: string,
     selection: StagedUploadOutputSelection
   ) => void | Promise<void>;
+  onSendStagedAttachments: () => void | Promise<void>;
   onLoadStagedUploadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
   onRetryStagedUploadPreparation?: (stagedId: string) => void | Promise<void>;
   onUseOriginalStagedUpload?: (stagedId: string) => void | Promise<void>;
@@ -752,6 +754,7 @@ export function TimelinePane({
   const onClearUploadStagingStable = useStableEvent(onClearUploadStaging);
   const onUpdateStagedUploadCaptionStable = useStableEvent(onUpdateStagedUploadCaption);
   const onSelectStagedUploadOutputStable = useStableEvent(onSelectStagedUploadOutput);
+  const onSendStagedAttachmentsStable = useStableEvent(onSendStagedAttachments);
   const onLoadStagedUploadPreviewStable = useStableEvent(onLoadStagedUploadPreview);
   const onRetryStagedUploadPreparationStable = useStableEvent(onRetryStagedUploadPreparation);
   const onUseOriginalStagedUploadStable = useStableEvent(onUseOriginalStagedUpload);
@@ -955,6 +958,7 @@ export function TimelinePane({
           onClear={onClearUploadStagingStable}
           onUpdateCaption={onUpdateStagedUploadCaptionStable}
           onSelectOutput={onSelectStagedUploadOutputStable}
+          onSendAttachments={onSendStagedAttachmentsStable}
           onRetryPreparation={onRetryStagedUploadPreparationStable}
           onUseOriginal={onUseOriginalStagedUploadStable}
           loadPreview={onLoadStagedUploadPreviewStable}
@@ -963,7 +967,6 @@ export function TimelinePane({
       <Composer
         composerMode={composerModeForComposer}
         hasStagedUploads={stagedUploads.length > 0}
-        stagedUploadsReady={stagedUploads.every((item) => item.preparation.kind === "ready")}
         isSending={Boolean(snapshot.state.ui.timeline.composer.pending_transaction_id)}
         mentionCandidates={mentionCandidates}
         mentionIntent={mentionIntent}

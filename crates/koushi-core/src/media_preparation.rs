@@ -695,6 +695,118 @@ mod tests {
         }
     }
 
+    /// Decodable PNG fixture for output-preparation tests.
+    fn png_input(id: &str, width: u32, height: u32) -> StageUploadBytesInput {
+        use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+        let image = RgbaImage::from_fn(width, height, |x, y| {
+            Rgba([(x % 251) as u8, (y % 239) as u8, 120, 255])
+        });
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut bytes, ImageFormat::Png)
+            .expect("encode fixture");
+        StageUploadBytesInput {
+            staged_id: id.to_owned(),
+            position: 1,
+            filename: "shot.png".to_owned(),
+            mime_type: "image/png".to_owned(),
+            bytes: bytes.into_inner(),
+        }
+    }
+
+    /// #305 regression guard: after a lazily encoded pair is selected, the send
+    /// path must still resolve prepared bytes. `send_prepared_uploads` fails
+    /// outright when `selected_upload` returns `None`.
+    #[test]
+    fn selecting_a_lazily_encoded_output_keeps_prepared_upload_bytes_available() {
+        let target = target(None);
+        let mut registry = MediaPreparationRegistry::default();
+        let staged = registry.prepare_items(
+            &target,
+            vec![png_input("staged-1", 64, 32)],
+            ImageUploadCompressionPolicy::default(),
+        );
+        let item = staged.first().expect("one staged image").clone();
+        assert!(
+            registry.selected_upload(&target, "staged-1").is_some(),
+            "staging must leave prepared bytes available"
+        );
+
+        let selection = StagedUploadOutputSelection {
+            resize: StagedUploadResizeChoice::Half,
+            format: StagedUploadFormatChoice::Keep,
+        };
+        let variant_id = MediaPreparationRegistry::output_identity(selection);
+        assert!(
+            !registry.select_variant(&target, "staged-1", &variant_id),
+            "the newly requested pair must not be cached yet"
+        );
+
+        let source = registry
+            .source_input(&target, "staged-1")
+            .expect("the source is retained for lazy encoding");
+        let (descriptor, bytes) = MediaPreparationRegistry::encode_output(
+            &source,
+            selection,
+            ImageUploadCompressionPolicy::default(),
+        )
+        .expect("the requested pair must encode");
+        registry.insert_prepared_output(&target, "staged-1", descriptor.clone(), bytes);
+
+        let prepared = registry
+            .selected_upload(&target, "staged-1")
+            .expect("send must still resolve prepared bytes after a lazy encode");
+        assert_eq!(prepared.descriptor.variant_id, variant_id);
+        assert_eq!(prepared.descriptor.width, Some(32));
+        assert_eq!(prepared.descriptor.height, Some(16));
+        assert_eq!(
+            prepared.bytes.len() as u64,
+            prepared.descriptor.byte_count,
+            "the reported byte count must describe the bytes that upload"
+        );
+
+        // Drive the same order production uses: the selection reaches state
+        // first, then the encode is adopted under the generation state handed
+        // out at selection time.
+        let mut store = koushi_state::UploadStagingStore::default();
+        store
+            .items
+            .insert((target.clone(), "staged-1".to_owned()), item);
+        let selected_item = store
+            .select_output(&target, "staged-1", selection)
+            .expect("selecting an unprepared pair must be accepted");
+        let (pending, generation) = match &selected_item.preparation {
+            StagedUploadPreparation::Ready {
+                pending,
+                generation,
+                ..
+            } => (*pending, *generation),
+            other => panic!("staged image must stay ready, got {other:?}"),
+        };
+        assert_eq!(
+            pending,
+            Some(selection),
+            "an unprepared pair must be reported as pending"
+        );
+
+        let adopted = store
+            .complete_output(&target, "staged-1", descriptor, generation)
+            .expect("the completed output must be adopted");
+        assert_eq!(
+            adopted.byte_count, prepared.descriptor.byte_count,
+            "state and registry must describe the same output"
+        );
+        match &adopted.preparation {
+            StagedUploadPreparation::Ready {
+                pending, variants, ..
+            } => {
+                assert!(pending.is_none(), "adopting the output must clear pending");
+                assert_eq!(variants.len(), 2, "both outputs stay cached for reuse");
+            }
+            other => panic!("staged image must stay ready, got {other:?}"),
+        }
+    }
+
     #[test]
     fn registry_isolates_equal_ids_by_target_and_clears_bytes() {
         let mut registry = MediaPreparationRegistry::default();
