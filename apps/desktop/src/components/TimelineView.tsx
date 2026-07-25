@@ -5395,7 +5395,7 @@ export const TimelineView = memo(function TimelineView({
       </div>
       {roomSignals && roomSignals.typing_user_ids.length > 0 ? (
         <div className="typing-indicator" dir="auto">
-          {formatTypingUsers(roomSignals.typing_user_ids)}
+          {formatTypingUsers(roomSignals.typing_user_ids, profileUsers)}
         </div>
       ) : null}
       {messageSource ? (
@@ -7018,12 +7018,26 @@ function messageSourceJson(source: TimelineMessageSource): unknown {
   };
 }
 
-function formatTypingUsers(userIds: string[]): string {
+function formatTypingUsers(
+  userIds: string[],
+  profileUsers: Record<string, UserProfile> = {}
+): string {
   const [firstUser] = userIds;
   if (userIds.length === 1 && firstUser) {
-    return t("timeline.typingOne", { user: firstUser });
+    return t("timeline.typingOne", {
+      user: profileDisplayLabel(profileUsers[firstUser], firstUser)
+    });
   }
   return t("timeline.typingMany", { count: userIds.length });
+}
+
+function profileDisplayLabel(profile: UserProfile | undefined, userId: string): string {
+  return (
+    profile?.display_label?.trim() ||
+    profile?.display_name?.trim() ||
+    profile?.original_display_label.trim() ||
+    userId
+  );
 }
 
 function formatReceiptDetails(receipts: LiveReadReceipt[], overflowCount: number): string[] {
