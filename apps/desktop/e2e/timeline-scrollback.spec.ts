@@ -1304,7 +1304,10 @@ test("measurement commit compensates the local anchor before paint", async ({ pa
   expect(Math.abs(afterTop - beforeTop)).toBeLessThanOrEqual(ANCHOR_PIXEL_TOLERANCE);
   const diagnostics = await page.evaluate(() => window.__harness.scrollDiagnostics());
   expect(diagnostics?.heightModelCommits ?? 0).toBeGreaterThan(0);
-  expect(diagnostics?.latestFrame?.changedMeasuredRowCount ?? 0).toBeGreaterThan(0);
+  // Not `latestFrame`: frames with no measured-row change follow the commit
+  // immediately, so reading the last frame races them (green locally, red on a
+  // CI runner). The cumulative counter answers the same question.
+  expect(diagnostics?.changedMeasuredRows ?? 0).toBeGreaterThan(0);
 });
 
 test("active upward input keeps the anchor stable when prepend arrives", async ({ page }) => {

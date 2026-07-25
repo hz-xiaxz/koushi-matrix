@@ -95,6 +95,10 @@ function diagnosticsSinceBaseline(
       current.measurementFlushes,
       baseline.measurementFlushes
     ),
+    changedMeasuredRows: subtractCounter(
+      current.changedMeasuredRows,
+      baseline.changedMeasuredRows
+    ),
     maxAnchorTopDeltaPx:
       current.maxAnchorTopDeltaPx > baseline.maxAnchorTopDeltaPx
         ? current.maxAnchorTopDeltaPx
