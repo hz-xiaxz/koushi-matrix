@@ -42,6 +42,7 @@ import type {
   StageUploadBytesRequestItem,
   SettingsPatch,
   StagedUploadItem,
+  StagedUploadOutputSelection,
   StagedUploadCompressionChoice,
   UploadStagingRequestItem
 } from "../domain/types";
@@ -2438,29 +2439,44 @@ mock.setCommandResponse("stage_upload_bytes", ({ target, items }: {
   ]);
   return setCurrentSnapshot(next);
 });
-mock.setCommandResponse("select_staged_upload_variant", ({ target, stagedId, variantId }: {
+mock.setCommandResponse("select_staged_upload_output", ({ target, stagedId, selection }: {
   target: ComposerTarget;
   stagedId: string;
-  variantId: string;
+  selection: StagedUploadOutputSelection;
 }) => {
   const items = stagedUploadsForTarget(currentSnapshot, target);
   if (items === null) return currentSnapshot;
   const nextItems = items.map((item) => {
     if (item.staged_id !== stagedId || item.preparation.kind !== "ready") return item;
-    const selected = item.preparation.variants.find((variant) => variant.variant_id === variantId);
-    if (!selected) return item;
+    const prepared = item.preparation.variants.find(
+      (variant) =>
+        variant.resize === selection.resize && variant.format_choice === selection.format
+    );
+    // Mirrors the Rust store: an already-prepared pair is adopted immediately,
+    // an unprepared pair becomes pending under a fresh generation.
+    if (!prepared) {
+      return {
+        ...item,
+        preparation: {
+          ...item.preparation,
+          selected: selection,
+          pending: selection,
+          generation: item.preparation.generation + 1
+        }
+      };
+    }
     return {
       ...item,
-      filename: selected.filename,
-      mime_type: selected.mime_type,
-      byte_count: selected.byte_count,
+      filename: prepared.filename,
+      mime_type: prepared.mime_type,
+      byte_count: prepared.byte_count,
       kind:
         item.kind.kind === "image"
-          ? { kind: "image" as const, width: selected.width, height: selected.height }
+          ? { kind: "image" as const, width: prepared.width, height: prepared.height }
           : item.kind,
       preparation: {
         ...item.preparation,
-        selected: { resize: selected.resize, format: selected.format_choice },
+        selected: selection,
         pending: null
       }
     };
