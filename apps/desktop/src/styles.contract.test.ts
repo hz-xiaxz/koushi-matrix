@@ -442,19 +442,44 @@ describe("styles.css token system", () => {
       "--receipt-overflow-min-inline-size",
       "--receipt-overflow-padding-inline"
     ]);
-    expectBlockUses(selectorBlock(".receipt-tooltip"), [
+    // #314: the reader popup is a viewport-fixed floating panel. Its position
+    // and size come from resolveFloatingPlacement, so offset, size, and the
+    // hover transition tokens no longer belong to this block. The tokens stay
+    // defined because `.reaction-tooltip` is still a row-local popup.
+    const readerPopupBlock = selectorBlock(".receipt-tooltip");
+    expect(readerPopupBlock).toContain("position: fixed");
+    expectBlockUses(readerPopupBlock, [
       "--receipt-tooltip-z-index",
-      "--receipt-tooltip-offset-block",
       "--receipt-tooltip-gap",
-      "--receipt-tooltip-min-inline-size",
-      "--receipt-tooltip-max-inline-size",
-      "--receipt-tooltip-max-viewport-inline-size",
       "--receipt-tooltip-padding-block",
       "--receipt-tooltip-padding-inline",
-      "--receipt-tooltip-font-size",
+      "--receipt-tooltip-font-size"
+    ]);
+    for (const rowLocalOnly of [
+      "--receipt-tooltip-offset-block",
       "--receipt-tooltip-translate-block",
       "--motion-tooltip-duration"
+    ]) {
+      expect(readerPopupBlock).not.toContain(rowLocalOnly);
+    }
+    expectBlockUses(selectorBlock(".reaction-tooltip"), [
+      "--receipt-tooltip-offset-block",
+      "--receipt-tooltip-min-inline-size"
     ]);
+  });
+
+  test("hover actions float over the row instead of the timestamp flow", () => {
+    const block = selectorBlock(".message > .message-actions-floating");
+    expect(block).toContain("position: absolute");
+    expectBlockUses(block, [
+      "--message-actions-z-index",
+      "--message-actions-inset-block",
+      "--message-actions-inset-inline",
+      "--message-actions-gap",
+      "--message-actions-padding"
+    ]);
+    // The row is the positioning context, so the pill stays inside the pane.
+    expect(selectorBlock(".message")).toContain("position: relative");
   });
 
   test("message source dialog stays above other overlays and exposes labeled copy buttons", () => {

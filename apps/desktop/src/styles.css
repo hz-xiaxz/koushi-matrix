@@ -5,6 +5,12 @@
 @import "twemoji-colr-font/twemoji.css";
 
 :root {
+  /* #314 hover actions: a floating pill on the row's trailing edge. */
+  --message-actions-z-index: 6;
+  --message-actions-inset-block: -10px;
+  --message-actions-inset-inline: 8px;
+  --message-actions-gap: 2px;
+  --message-actions-padding: 2px;
   /* #305 upload output controls: ~24-28px segments inside a ~30-34px control. */
   --upload-output-control-size: 32px;
   --upload-output-option-size: 26px;
@@ -2303,6 +2309,8 @@ button:disabled {
 }
 
 .message {
+  /* Positioning context for the floating hover actions. */
+  position: relative;
   display: grid;
   grid-template-columns: var(--message-avatar-column-inline-size) minmax(0, 1fr);
   gap: 12px;
@@ -2433,11 +2441,21 @@ button:disabled {
   opacity: 0;
 }
 
-.message > .message-actions {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: start;
-  justify-self: end;
+/* Hover actions float over the row's trailing edge instead of sharing the
+   header line with the sender and timestamp, which is what let them cover the
+   timestamp in a narrow pane. Anchored inside the row, so they stay within the
+   pane without needing their own floating layer. */
+.message > .message-actions-floating {
+  position: absolute;
+  z-index: var(--message-actions-z-index);
+  inset-block-start: var(--message-actions-inset-block);
+  inset-inline-end: var(--message-actions-inset-inline);
+  gap: var(--message-actions-gap);
+  padding: var(--message-actions-padding);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  box-shadow: 0 6px 16px rgb(15 27 45 / 14%);
 }
 
 .message:hover .message-actions,
@@ -3311,18 +3329,14 @@ button:disabled {
   background: var(--surface-hover);
 }
 
+/* #314: rendered in the body-level floating layer and positioned from measured
+   viewport coordinates, so an overflow-clipped pane cannot cut it off. React
+   owns open/closed, so there is no hover-gated visibility here. */
 .receipt-tooltip {
-  position: absolute;
+  position: fixed;
   z-index: var(--receipt-tooltip-z-index);
-  inset-inline-start: 0;
-  inset-block-end: calc(100% + var(--receipt-tooltip-offset-block));
   display: grid;
   gap: var(--receipt-tooltip-gap);
-  min-inline-size: var(--receipt-tooltip-min-inline-size);
-  max-inline-size: min(
-    var(--receipt-tooltip-max-inline-size),
-    var(--receipt-tooltip-max-viewport-inline-size)
-  );
   padding-block: var(--receipt-tooltip-padding-block);
   padding-inline: var(--receipt-tooltip-padding-inline);
   border: 1px solid var(--line);
@@ -3333,21 +3347,8 @@ button:disabled {
   font-size: var(--receipt-tooltip-font-size);
   font-weight: 600;
   line-height: 1.35;
-  opacity: 0;
+  overflow: hidden;
   pointer-events: none;
-  transform: translateY(var(--receipt-tooltip-translate-block));
-  transition:
-    opacity var(--motion-tooltip-duration) ease,
-    transform var(--motion-tooltip-duration) ease;
-  visibility: hidden;
-}
-
-.message-receipts:hover .receipt-tooltip,
-.message-receipts:focus-within .receipt-tooltip,
-.message-receipts:focus .receipt-tooltip {
-  opacity: 1;
-  transform: translateY(0);
-  visibility: visible;
 }
 
 .typing-indicator {

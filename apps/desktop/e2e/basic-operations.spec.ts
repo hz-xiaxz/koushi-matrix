@@ -5156,12 +5156,36 @@ test("read receipt avatars render from Rust projection with overflow and tooltip
   await expect(receipts.locator(".receipt-reader-avatar").nth(1)).toHaveText("DA");
   await expect(receipts.locator(".receipt-overflow")).toHaveText("+1");
 
+  // #314: the reader popup lives in the body-level floating layer so a clipped
+  // pane cannot cut it off, so it is no longer a descendant of the row.
   await receipts.hover();
-  await expect(receipts.locator(".receipt-tooltip")).toBeVisible();
-  await expect(receipts.locator(".receipt-tooltip")).toContainText("Alice");
-  await expect(receipts.locator(".receipt-tooltip")).toContainText("Dana");
-  await expect(receipts.locator(".receipt-tooltip")).toContainText("Bob");
-  await expect(receipts.locator(".receipt-tooltip")).toContainText("1 more");
+  const readerPopup = page.locator("body > .receipt-tooltip");
+  await expect(readerPopup).toBeVisible();
+  await expect(receipts.locator(".receipt-tooltip")).toHaveCount(0);
+  for (const reader of ["Alice", "Dana", "Bob", "1 more"]) {
+    await expect(readerPopup).toContainText(reader);
+  }
+
+  // Keyboard users reach the same popup, and it stays inside the viewport.
+  await page.mouse.move(0, 0);
+  await expect(readerPopup).toHaveCount(0);
+  await receipts.focus();
+  await expect(readerPopup).toBeVisible();
+  const metrics = await readerPopup.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth
+    };
+  });
+  expect(metrics.left).toBeGreaterThanOrEqual(0);
+  expect(metrics.top).toBeGreaterThanOrEqual(0);
+  expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth);
+  expect(metrics.bottom).toBeLessThanOrEqual(metrics.viewportHeight);
 });
 
 test("redact message invokes redact_message and shows the redacted placeholder", async ({
