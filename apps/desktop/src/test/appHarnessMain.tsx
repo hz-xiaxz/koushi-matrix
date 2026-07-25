@@ -680,7 +680,9 @@ function preparedHarnessItem(
   const originalMime = item.mimeType.trim() || "application/octet-stream";
   const image = originalMime.startsWith("image/");
   const original = {
-    variant_id: "original",
+    variant_id: "original-keep",
+    resize: "original" as const,
+    format_choice: "keep" as const,
     filename: item.filename,
     mime_type: originalMime,
     byte_count: item.bytes.length,
@@ -695,7 +697,9 @@ function preparedHarnessItem(
     ? [
         original,
         {
-          variant_id: "webp-2048",
+          variant_id: "half-webp",
+          resize: "half" as const,
+          format_choice: "webp" as const,
           filename: item.filename.replace(/\.[^.]+$/, "") + ".webp",
           mime_type: "image/webp",
           byte_count: Math.max(1, Math.floor(item.bytes.length / 2)),
@@ -711,7 +715,7 @@ function preparedHarnessItem(
   for (const variant of variants) {
     preparedUploadBytes.set(
       preparedUploadKey(target, item.stagedId, variant.variant_id),
-      variant.variant_id === "original"
+      variant.resize === "original" && variant.format_choice === "keep"
         ? [...item.bytes]
         : item.bytes.slice(0, variant.byte_count)
     );
@@ -733,7 +737,9 @@ function preparedHarnessItem(
     preparation: {
       kind: "ready",
       variants,
-      selected_variant_id: selected.variant_id
+      selected: { resize: "original", format: "keep" },
+      pending: null,
+      generation: 0
     }
   };
 }
@@ -2453,7 +2459,11 @@ mock.setCommandResponse("select_staged_upload_variant", ({ target, stagedId, var
         item.kind.kind === "image"
           ? { kind: "image" as const, width: selected.width, height: selected.height }
           : item.kind,
-      preparation: { ...item.preparation, selected_variant_id: variantId }
+      preparation: {
+        ...item.preparation,
+        selected: { resize: selected.resize, format: selected.format_choice },
+        pending: null
+      }
     };
   });
   return setCurrentSnapshot(replaceStagedUploadsForTarget(currentSnapshot, target, nextItems));
@@ -2472,14 +2482,20 @@ mock.setCommandResponse("use_original_staged_upload", ({ target, stagedId }: {
   if (items === null) return currentSnapshot;
   const nextItems = items.map((item) => {
     if (item.staged_id !== stagedId || item.preparation.kind !== "ready") return item;
-    const original = item.preparation.variants.find((variant) => variant.variant_id === "original");
+    const original = item.preparation.variants.find(
+      (variant) => variant.resize === "original" && variant.format_choice === "keep"
+    );
     return original
       ? {
           ...item,
           filename: original.filename,
           mime_type: original.mime_type,
           byte_count: original.byte_count,
-          preparation: { ...item.preparation, selected_variant_id: "original" }
+          preparation: {
+            ...item.preparation,
+            selected: { resize: "original" as const, format: "keep" as const },
+            pending: null
+          }
         }
       : item;
   });

@@ -17,7 +17,8 @@ import type {
   CreateRoomVisibility,
   InviteScopeSelection,
   InviteWorkflowState,
-  StagedUploadItem
+  StagedUploadItem,
+  StagedUploadOutputSelection
 } from "../domain/types";
 import {
   ICON_SIZE,
@@ -681,7 +682,7 @@ export function UploadStagingDialog({
   items,
   onClear,
   onUpdateCaption,
-  onSelectVariant,
+  onSelectOutput,
   onRetryPreparation,
   onUseOriginal,
   loadPreview
@@ -689,7 +690,10 @@ export function UploadStagingDialog({
   items: StagedUploadItem[];
   onClear: () => void | Promise<void>;
   onUpdateCaption: (stagedId: string, caption: string) => void | Promise<void>;
-  onSelectVariant: (stagedId: string, variantId: string) => void | Promise<void>;
+  onSelectOutput: (
+    stagedId: string,
+    selection: StagedUploadOutputSelection
+  ) => void | Promise<void>;
   onRetryPreparation: (stagedId: string) => void | Promise<void>;
   onUseOriginal: (stagedId: string) => void | Promise<void>;
   loadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
@@ -759,8 +763,17 @@ export function UploadStagingDialog({
                     className="dialog-button upload-variant-button"
                     type="button"
                     key={variant.variant_id}
-                    aria-pressed={item.preparation.kind === "ready" && item.preparation.selected_variant_id === variant.variant_id}
-                    onClick={() => void onSelectVariant(item.staged_id, variant.variant_id)}
+                    aria-pressed={
+                      item.preparation.kind === "ready" &&
+                      item.preparation.selected.resize === variant.resize &&
+                      item.preparation.selected.format === variant.format_choice
+                    }
+                    onClick={() =>
+                      void onSelectOutput(item.staged_id, {
+                        resize: variant.resize,
+                        format: variant.format_choice
+                      })
+                    }
                   >
                     <strong>{variant.format === "original" ? t("upload.original") : variant.format.toUpperCase()}</strong>
                     <span>
@@ -792,8 +805,18 @@ function PreparedUploadPreview({
   loadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // The preview follows the Rust-owned selection: find the prepared output for
+  // the selected pair. While a pair is `pending` there is none yet, so the
+  // previously loaded preview stays on screen.
   const selectedVariantId =
-    item.preparation.kind === "ready" ? item.preparation.selected_variant_id : null;
+    item.preparation.kind === "ready"
+      ? item.preparation.variants.find(
+          (variant) =>
+            item.preparation.kind === "ready" &&
+            variant.resize === item.preparation.selected.resize &&
+            variant.format_choice === item.preparation.selected.format
+        )?.variant_id ?? null
+      : null;
 
   useEffect(() => {
     let cancelled = false;

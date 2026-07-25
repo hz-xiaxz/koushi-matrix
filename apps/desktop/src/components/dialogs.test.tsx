@@ -40,7 +40,7 @@ function dialog(items: StagedUploadItem[], onUpdateCaption = vi.fn()) {
       items={items}
       onClear={vi.fn()}
       onUpdateCaption={onUpdateCaption}
-      onSelectVariant={vi.fn()}
+      onSelectOutput={vi.fn()}
       onRetryPreparation={vi.fn()}
       onUseOriginal={vi.fn()}
       loadPreview={vi.fn(async () => [])}
@@ -67,7 +67,9 @@ describe("UploadStagingDialog", () => {
           stagedImage("before", {
             kind: "ready",
             variants: [],
-            selected_variant_id: "original"
+            selected: { resize: "original", format: "keep" },
+      pending: null,
+      generation: 0
           })
         ],
         onUpdateCaption

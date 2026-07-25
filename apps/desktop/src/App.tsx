@@ -160,6 +160,7 @@ import type {
   InviteScopeSelection,
   InviteWorkflowState,
   MentionIntent,
+  StagedUploadOutputSelection,
   ResolveComposerKeyAction,
   RoomModerationAction,
   RoomNotificationMode,
@@ -3410,14 +3411,17 @@ export function App() {
     );
   }
 
-  async function selectStagedUploadVariant(stagedId: string, variantId: string): Promise<void> {
+  async function selectStagedUploadOutput(
+    stagedId: string,
+    selection: StagedUploadOutputSelection
+  ): Promise<void> {
     const roomId = snapshot?.state.ui.timeline.room_id;
     if (!roomId) return;
     setSnapshot(
-      await api.selectStagedUploadVariant(
+      await api.selectStagedUploadOutput(
         { kind: "main", room_id: roomId },
         stagedId,
-        variantId
+        selection
       )
     );
   }
@@ -3810,17 +3814,17 @@ export function App() {
     );
   }
 
-  async function selectThreadStagedUploadVariant(
+  async function selectThreadStagedUploadOutput(
     roomId: string,
     rootEventId: string,
     stagedId: string,
-    variantId: string
+    selection: StagedUploadOutputSelection
   ) {
     setSnapshot(
-      await api.selectStagedUploadVariant(
+      await api.selectStagedUploadOutput(
         { kind: "thread", room_id: roomId, root_event_id: rootEventId },
         stagedId,
-        variantId
+        selection
       )
     );
   }
@@ -4558,8 +4562,8 @@ export function App() {
             onUpdateStagedUploadCaption={(stagedId, caption) => {
               void updateStagedUploadCaption(stagedId, caption);
             }}
-            onSelectStagedUploadVariant={(stagedId, variantId) => {
-              void selectStagedUploadVariant(stagedId, variantId);
+            onSelectStagedUploadOutput={(stagedId, selection) => {
+              void selectStagedUploadOutput(stagedId, selection);
             }}
             onLoadStagedUploadPreview={loadStagedUploadPreview}
             onRetryStagedUploadPreparation={(stagedId) => {
@@ -4762,8 +4766,8 @@ export function App() {
           onThreadUpdateStagedUploadCaption={(roomId, rootEventId, stagedId, caption) => {
             void updateThreadStagedUploadCaption(roomId, rootEventId, stagedId, caption);
           }}
-          onThreadSelectStagedUploadVariant={(roomId, rootEventId, stagedId, variantId) => {
-            void selectThreadStagedUploadVariant(roomId, rootEventId, stagedId, variantId);
+          onThreadSelectStagedUploadOutput={(roomId, rootEventId, stagedId, selection) => {
+            void selectThreadStagedUploadOutput(roomId, rootEventId, stagedId, selection);
           }}
           onThreadLoadStagedUploadPreview={loadThreadStagedUploadPreview}
           onThreadRetryStagedUploadPreparation={(roomId, rootEventId, stagedId) => {

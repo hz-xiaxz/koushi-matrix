@@ -1081,8 +1081,22 @@ export type ComposerTarget =
 
 export type PreparedUploadFormat = "original" | "png" | "jpeg" | "webp";
 
+/** Linear scale chosen for the upload; both dimensions share the divisor. */
+export type StagedUploadResizeChoice = "original" | "half" | "quarter" | "eighth";
+
+/** Encoding chosen for the upload; `keep` preserves the source encoding. */
+export type StagedUploadFormatChoice = "keep" | "png" | "jpeg" | "webp";
+
+/** The two independent axes that identify one prepared output. */
+export interface StagedUploadOutputSelection {
+  resize: StagedUploadResizeChoice;
+  format: StagedUploadFormatChoice;
+}
+
 export interface PreparedUploadVariant {
   variant_id: string;
+  resize: StagedUploadResizeChoice;
+  format_choice: StagedUploadFormatChoice;
   filename: string;
   mime_type: string;
   byte_count: number;
@@ -1096,7 +1110,17 @@ export interface PreparedUploadVariant {
 
 export type StagedUploadPreparation =
   | { kind: "preparing" }
-  | { kind: "ready"; variants: PreparedUploadVariant[]; selected_variant_id: string }
+  | {
+      kind: "ready";
+      /** Completed combinations, reused immediately when re-selected. */
+      variants: PreparedUploadVariant[];
+      /** The single owner of which output will be uploaded. */
+      selected: StagedUploadOutputSelection;
+      /** Set while `selected` has no prepared output yet. */
+      pending?: StagedUploadOutputSelection | null;
+      /** Fences stale encodes so the latest selection wins. */
+      generation: number;
+    }
   | {
       kind: "failed";
       failure_kind: "empty" | "unsupported" | "decode" | "encode" | "missingPreparedBytes";

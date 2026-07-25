@@ -2,6 +2,7 @@ import { type FormEvent, type RefObject } from "react";
 import { MoreHorizontal, X } from "lucide-react";
 import { t } from "../i18n/messages";
 import type {
+  StagedUploadOutputSelection,
   AttachmentFilter,
   AttachmentScope,
   AttachmentSort,
@@ -146,7 +147,7 @@ export function ContextualRightPanel({
   onThreadRetryStagedUploadPreparation = () => undefined,
   onThreadReplySend,
   onThreadScheduleSend,
-  onThreadSelectStagedUploadVariant = () => undefined,
+  onThreadSelectStagedUploadOutput = () => undefined,
   onThreadUseOriginalStagedUpload = () => undefined,
   onThreadUpdateStagedUploadCaption = () => undefined,
   threadComposerMentionIntents = {},
@@ -288,11 +289,11 @@ export function ContextualRightPanel({
     sendAtMs: number,
     body: string
   ) => void;
-  onThreadSelectStagedUploadVariant?: (
+  onThreadSelectStagedUploadOutput?: (
     roomId: string,
     rootEventId: string,
     stagedId: string,
-    variantId: string
+    selection: StagedUploadOutputSelection
   ) => void;
   onThreadUseOriginalStagedUpload?: (
     roomId: string,
@@ -731,12 +732,12 @@ export function ContextualRightPanel({
               caption
             )
           }
-          onSelectVariant={(stagedId, variantId) =>
-            onThreadSelectStagedUploadVariant(
+          onSelectOutput={(stagedId, selection) =>
+            onThreadSelectStagedUploadOutput(
               threadRoomId,
               rootEventId,
               stagedId,
-              variantId
+              selection
             )
           }
           onRetryPreparation={(stagedId) =>
