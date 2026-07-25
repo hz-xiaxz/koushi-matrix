@@ -85,7 +85,7 @@ describe("TimelinePane render isolation", () => {
         onAttachFiles: noop,
         onClearUploadStaging: noop,
         onUpdateStagedUploadCaption: noop,
-        onSelectStagedUploadVariant: noop,
+        onSelectStagedUploadOutput: noop,
         onLoadStagedUploadPreview: async () => [],
         onComposerDraftChange: noop,
         onMentionIntentChange: noop,
@@ -230,7 +230,7 @@ describe("TimelinePane render isolation", () => {
         onAttachFiles: noop,
         onClearUploadStaging: noop,
         onUpdateStagedUploadCaption: noop,
-        onSelectStagedUploadVariant: noop,
+        onSelectStagedUploadOutput: noop,
         onLoadStagedUploadPreview: async () => [],
         onComposerDraftChange: noop,
         onMentionIntentChange: noop,
@@ -290,7 +290,6 @@ function makeSnapshot(): DesktopSnapshot {
               encrypted_url_previews_enabled: false
             },
             media: {
-              image_upload_compression: "never",
               image_upload_compression_policy: {
                 threshold_bytes: 1048576,
                 threshold_long_edge: 2560,

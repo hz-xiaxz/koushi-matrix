@@ -31,6 +31,7 @@ import type {
   SearchScopeKind,
   SettingsPatch,
   StagedUploadCompressionChoice,
+  StagedUploadOutputSelection,
   StageUploadBytesRequestItem,
   UploadStagingRequestItem,
   AttachmentFilter,
@@ -381,15 +382,15 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("stage_upload_bytes", { target, items });
   }
 
-  async selectStagedUploadVariant(
+  async selectStagedUploadOutput(
     target: ComposerTarget,
     stagedId: string,
-    variantId: string
+    selection: StagedUploadOutputSelection
   ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("select_staged_upload_variant", {
+    return invoke<DesktopSnapshot>("select_staged_upload_output", {
       target,
       stagedId,
-      variantId
+      selection
     });
   }
 

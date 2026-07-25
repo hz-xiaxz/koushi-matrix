@@ -4943,7 +4943,7 @@ test("room media gallery opens a viewer from Rust-owned gallery projection", asy
   await expect(viewer).toHaveCount(0);
 });
 
-test("image variants are prepared and selected before the send action", async ({ page }) => {
+test("resize and format are chosen independently before the send action", async ({ page }) => {
   await gotoReadyShell(page);
   await page.evaluate(() => window.__harness.clearInvocations());
 
@@ -4957,30 +4957,56 @@ test("image variants are prepared and selected before the send action", async ({
   const dialog = page.getByRole("dialog", { name: "Upload attachments" });
   await expect(dialog).toBeVisible();
   await expect.poll(() => invocationCount(page, "stage_upload_bytes")).toBe(1);
-  await expect(dialog.getByRole("button", { name: /Original/ })).toBeVisible();
-  const webpVariant = dialog.getByRole("button", { name: /WEBP/ });
-  await expect(webpVariant).toContainText("image/webp");
-  await expect(webpVariant).toContainText("50% smaller");
+
+  // Two independent compact controls, not per-variant cards, and no MIME text.
+  const resize = dialog.getByRole("radiogroup", { name: "Resize" });
+  const format = dialog.getByRole("radiogroup", { name: "Format" });
+  await expect(resize.getByRole("radio")).toHaveCount(4);
+  await expect(format.getByRole("radio")).toHaveCount(4);
+  await expect(dialog.locator(".upload-variant-button")).toHaveCount(0);
+  await expect(dialog).not.toContainText("image/webp");
+
+  // Staging always starts untouched.
+  await expect(resize.getByRole("radio", { name: "Original" })).toHaveAttribute(
+    "aria-checked",
+    "true"
+  );
+  await expect(format.getByRole("radio", { name: "Keep" })).toHaveAttribute(
+    "aria-checked",
+    "true"
+  );
   await expect.poll(() => invocationCount(page, "prepared_upload_preview")).toBeGreaterThanOrEqual(1);
 
-  await dialog.getByRole("button", { name: /Original/ }).click();
-  await expect.poll(() => invocationCount(page, "select_staged_upload_variant")).toBe(1);
-  await webpVariant.click();
-  await expect.poll(() => invocationCount(page, "select_staged_upload_variant")).toBe(2);
-  await expect(webpVariant).toHaveAttribute("aria-pressed", "true");
+  // Each axis dispatches the whole pair, keeping the other axis intact.
+  await resize.getByRole("radio", { name: "1/2" }).click();
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__harness.invocationsOf("select_staged_upload_variant").at(-1)?.args)
+      page.evaluate(() =>
+        window.__harness.invocationsOf("select_staged_upload_output").at(-1)?.args
+      )
     )
     .toMatchObject({
       target: { kind: "main", room_id: "!harness-room:example.invalid" },
-      variantId: "webp-2048"
+      selection: { resize: "half", format: "keep" }
     });
+  await format.getByRole("radio", { name: "WebP" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() =>
+        window.__harness.invocationsOf("select_staged_upload_output").at(-1)?.args
+      )
+    )
+    .toMatchObject({ selection: { resize: "half", format: "webp" } });
 
-  const selectionCountBeforeSend = await invocationCount(page, "select_staged_upload_variant");
+  // The preview viewport stays mounted throughout, and the result is summarized
+  // exactly once.
+  await expect(dialog.locator(".upload-preview-viewport")).toHaveCount(1);
+  await expect(dialog.getByRole("status", { name: "Upload result" })).toHaveCount(1);
+
+  const selectionCountBeforeSend = await invocationCount(page, "select_staged_upload_output");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => invocationCount(page, "send_prepared_uploads")).toBe(1);
-  await expect.poll(() => invocationCount(page, "select_staged_upload_variant")).toBe(
+  await expect.poll(() => invocationCount(page, "select_staged_upload_output")).toBe(
     selectionCountBeforeSend
   );
   expect(await invocationCount(page, "upload_media")).toBe(0);

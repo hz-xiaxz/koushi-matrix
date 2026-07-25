@@ -970,22 +970,8 @@ async function runLocalImageCompressionScenario() {
       "local GUI image compression timeline room"
     );
 
-    const userSettings = await session.browser.$('button[aria-label="User settings"]');
-    await userSettings.waitForDisplayed({ timeout: timeoutMs });
-    await userSettings.click();
-    const alwaysCompressionSelector =
-      '//section[@aria-label="Media"]//button[normalize-space()="Always"]';
-    const alwaysCompression = await session.browser.$(alwaysCompressionSelector);
-    await alwaysCompression.waitForDisplayed({ timeout: timeoutMs });
-    await alwaysCompression.click();
-    await waitForElementAttribute(
-      session.browser,
-      alwaysCompressionSelector,
-      "aria-pressed",
-      "true",
-      timeoutMs,
-      "image compression Always setting"
-    );
+    // #305: image output is chosen per attachment in the staging dialog, so this
+    // lane drives those controls instead of a retired settings preference.
     await selectRoomByName(session.browser, "QA Seed Room", timeoutMs);
     await waitForActiveRoomName(session.browser, "QA Seed Room", timeoutMs);
 
@@ -1016,6 +1002,27 @@ async function runLocalImageCompressionScenario() {
       );
     }
 
+    // Choose 1/2 and JPEG in the staging dialog, then prove the row that lands
+    // is exactly the selected output rather than the source image.
+    const halfOption = await session.browser.$(
+      '//div[@role="radiogroup" and @aria-label="Resize"]//button[normalize-space()="1/2"]'
+    );
+    await halfOption.waitForDisplayed({ timeout: timeoutMs });
+    await halfOption.click();
+    const jpegOption = await session.browser.$(
+      '//div[@role="radiogroup" and @aria-label="Format"]//button[normalize-space()="JPEG"]'
+    );
+    await jpegOption.waitForDisplayed({ timeout: timeoutMs });
+    await jpegOption.click();
+    await waitForElementAttribute(
+      session.browser,
+      '//div[@role="status" and @aria-label="Upload result"]',
+      "data-upload-output-state",
+      "ready",
+      timeoutMs,
+      "staged upload output recompression"
+    );
+
     const sendButton = await session.browser.$('button[aria-label="Send"]');
     await sendButton.waitForDisplayed({ timeout: timeoutMs });
     await sendButton.click();
@@ -1031,13 +1038,10 @@ async function runLocalImageCompressionScenario() {
       {
         filename: jpgFilename,
         mimetype: "image/jpeg",
-        dimensions: "2048x7"
+        dimensions: "1500x5"
       },
       timeoutMs
     );
-    if ((await elementCount(session.browser, 'div[role="dialog"][aria-label="Compress image"]')) > 0) {
-      throw new Error("local GUI Always compression unexpectedly opened the ask dialog");
-    }
 
     await recordLocalGuiEvidence(session);
     console.log("gui_local_image_compress=ok");

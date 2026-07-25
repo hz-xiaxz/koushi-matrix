@@ -176,7 +176,6 @@ function snapshotForPanelMode(
               encrypted_url_previews_enabled: false
             },
             media: {
-              image_upload_compression: "never",
               image_upload_compression_policy: {
                 threshold_bytes: 1048576,
                 threshold_long_edge: 2560,

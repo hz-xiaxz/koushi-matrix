@@ -56,7 +56,6 @@ fn app_state_carries_default_non_secret_settings() {
     assert_eq!(
         state.settings.values.media,
         MediaSettings {
-            image_upload_compression: ImageUploadCompressionMode::Ask,
             ..MediaSettings::default()
         }
     );
@@ -102,7 +101,6 @@ fn settings_loaded_replaces_values_without_requiring_a_session() {
             encrypted_url_previews_enabled: true,
         },
         media: MediaSettings {
-            image_upload_compression: ImageUploadCompressionMode::Always,
             ..MediaSettings::default()
         },
         timeline: TimelineSettings {
@@ -204,7 +202,6 @@ fn settings_values_deserialize_legacy_without_media_as_default_ask() {
     assert_eq!(
         values.media,
         MediaSettings {
-            image_upload_compression: ImageUploadCompressionMode::Ask,
             ..MediaSettings::default()
         }
     );
@@ -220,7 +217,7 @@ fn settings_values_deserialize_legacy_without_timeline_as_default_true() {
   "keyboard": { "composer_send_shortcut": "enter" },
   "notifications": { "desktop_notifications": true, "sound": true, "badges": true },
   "display": { "code_block_wrap": true, "hide_redacted": true },
-  "media": { "image_upload_compression": "ask" }
+  "media": {}
 }
 "#,
     )
@@ -290,7 +287,7 @@ fn missing_timeline_settings_backfill_auto_load_to_true() {
       "keyboard": {"composer_send_shortcut": "enter"},
       "notifications": {"desktop_notifications": true, "sound": true, "badges": true},
       "display": {"code_block_wrap": true, "hide_redacted": true},
-      "media": {"image_upload_compression": "ask"}
+      "media": {}
     }"#;
     let values: koushi_state::SettingsValues = serde_json::from_str(json).unwrap();
     assert!(values.timeline.auto_load_older_messages);
@@ -305,7 +302,7 @@ fn explicit_false_auto_load_older_messages_is_preserved() {
       "keyboard": {"composer_send_shortcut": "enter"},
       "notifications": {"desktop_notifications": true, "sound": true, "badges": true},
       "display": {"code_block_wrap": true, "hide_redacted": true},
-      "media": {"image_upload_compression": "ask"},
+      "media": {},
       "timeline": {"auto_load_older_messages": false}
     }"#;
     let values: koushi_state::SettingsValues = serde_json::from_str(json).unwrap();
@@ -431,7 +428,6 @@ fn hide_redacted_patch_is_rust_owned_and_persisted() {
 fn image_upload_compression_patch_is_rust_owned_and_persisted() {
     let mut state = AppState::default();
     let media_settings = MediaSettings {
-        image_upload_compression: ImageUploadCompressionMode::Ask,
         ..MediaSettings::default()
     };
 

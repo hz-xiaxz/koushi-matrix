@@ -40,7 +40,6 @@ import type {
   InviteTargetCandidate,
   InviteScopeSelection,
   InviteWorkflowState,
-  ImageUploadCompressionMode,
   InvitePreview,
   RoomPermissionFacts,
   RoomSummary,
@@ -64,6 +63,7 @@ import type {
   SubmissionResponse,
   StagedUploadCompressionChoice,
   StagedUploadItem,
+  StagedUploadOutputSelection,
   StageUploadBytesRequestItem,
   TimelineMessage,
   ThreadsListItem,
@@ -194,10 +194,10 @@ export interface DesktopApi {
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
   ): Promise<DesktopSnapshot>;
-  selectStagedUploadVariant(
+  selectStagedUploadOutput(
     target: ComposerTarget,
     stagedId: string,
-    variantId: string
+    selection: StagedUploadOutputSelection
   ): Promise<DesktopSnapshot>;
   retryStagedUploadPreparation(target: ComposerTarget, stagedId: string): Promise<DesktopSnapshot>;
   useOriginalStagedUpload(target: ComposerTarget, stagedId: string): Promise<DesktopSnapshot>;
@@ -1540,12 +1540,7 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
     const staged = items.map((item, index) => {
-      const prepared = browserPreparedUploadItem(
-        target,
-        item,
-        index,
-        this.snapshot.state.domain.settings.values.media.image_upload_compression
-      );
+      const prepared = browserPreparedUploadItem(target, item, index);
       if (prepared.preparation.kind === "ready") {
         prepared.preparation.variants.forEach((variant) => {
           this.preparedUploadBytes.set(
@@ -1564,31 +1559,49 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
-  async selectStagedUploadVariant(
+  async selectStagedUploadOutput(
     target: ComposerTarget,
     stagedId: string,
-    variantId: string
+    selection: StagedUploadOutputSelection
   ): Promise<DesktopSnapshot> {
     const items = browserStagedUploadsForTarget(this.snapshot, target);
     const next = items.map((item) => {
       if (item.staged_id !== stagedId || item.preparation.kind !== "ready") {
         return item;
       }
-      const selected = item.preparation.variants.find((variant) => variant.variant_id === variantId);
-      return selected
-        ? {
-            ...item,
-            filename: selected.filename,
-            mime_type: selected.mime_type,
-            byte_count: selected.byte_count,
-            kind: {
-              kind: "image" as const,
-              width: selected.width,
-              height: selected.height
-            },
-            preparation: { ...item.preparation, selected_variant_id: variantId }
+      const prepared = item.preparation.variants.find(
+        (variant) =>
+          variant.resize === selection.resize && variant.format_choice === selection.format
+      );
+      // Mirrors the Rust store: an already-prepared pair is adopted at once, an
+      // unprepared pair becomes pending under a fresh generation.
+      if (!prepared) {
+        return {
+          ...item,
+          preparation: {
+            ...item.preparation,
+            selected: selection,
+            pending: selection,
+            generation: item.preparation.generation + 1
           }
-        : item;
+        };
+      }
+      return {
+        ...item,
+        filename: prepared.filename,
+        mime_type: prepared.mime_type,
+        byte_count: prepared.byte_count,
+        kind: {
+          kind: "image" as const,
+          width: prepared.width,
+          height: prepared.height
+        },
+        preparation: {
+          ...item.preparation,
+          selected: selection,
+          pending: null
+        }
+      };
     });
     setBrowserStagedUploadsForTarget(this.snapshot, target, next);
     return this.getSnapshot();
@@ -1624,11 +1637,22 @@ class BrowserFakeApi implements DesktopApi {
         width: item.kind.kind === "image" ? item.kind.width : null,
         height: item.kind.kind === "image" ? item.kind.height : null,
         format: "original" as const,
+        resize: "original" as const,
+        format_choice: "keep" as const,
         savings_percent: 0,
         metadata_stripped: false,
         thumbnail_refreshed: false
       };
-      return { ...item, preparation: { kind: "ready" as const, variants: [variant], selected_variant_id: "original" } };
+      return {
+        ...item,
+        preparation: {
+          kind: "ready" as const,
+          variants: [variant],
+          selected: { resize: "original" as const, format: "keep" as const },
+          pending: null,
+          generation: 0
+        }
+      };
     });
     setBrowserStagedUploadsForTarget(this.snapshot, target, items);
     return this.getSnapshot();
@@ -3796,13 +3820,14 @@ function browserPreparedUploadKey(
 function browserPreparedUploadItem(
   target: ComposerTarget,
   item: StageUploadBytesRequestItem,
-  index: number,
-  mode: ImageUploadCompressionMode
+  index: number
 ): StagedUploadItem {
   const mime = item.mimeType.trim() || "application/octet-stream";
   const imageFormat = browserImageFormat(mime);
   const original: PreparedUploadVariant = {
-    variant_id: "original",
+    variant_id: "original-keep",
+    resize: "original",
+    format_choice: "keep",
     filename: item.filename || "attachment",
     mime_type: mime,
     byte_count: item.bytes.length,
@@ -3827,7 +3852,8 @@ function browserPreparedUploadItem(
   } else if (imageFormat === "webp") {
     variants.push(browserSyntheticVariant(item, "resized-webp", "webp", "image/webp", 25));
   }
-  const selected = mode === "never" ? original : variants[variants.length - 1] ?? original;
+  // Staging always asks and starts at the untouched output (#305).
+  const selected = original;
   return {
     staged_id: item.stagedId,
     room_id: target.room_id,
@@ -3843,7 +3869,9 @@ function browserPreparedUploadItem(
     preparation: {
       kind: "ready",
       variants,
-      selected_variant_id: selected.variant_id
+      selected: { resize: "original", format: "keep" },
+      pending: null,
+      generation: 0
     }
   };
 }
@@ -3859,6 +3887,10 @@ function browserSyntheticVariant(
   const stem = item.filename.replace(/\.[^.]*$/, "") || "attachment";
   return {
     variant_id: variantId,
+    // The browser fake mirrors the axis identity: synthetic variants stand in
+    // for the halved output in each format.
+    resize: "half",
+    format_choice: format,
     filename: `${stem}.${extension}`,
     mime_type: mimeType,
     byte_count: Math.max(1, Math.floor(item.bytes.length * (1 - savingsPercent / 100))),
@@ -4163,7 +4195,6 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         encrypted_url_previews_enabled: true
       },
       media: {
-        image_upload_compression: "ask",
         image_upload_compression_policy: {
           threshold_bytes: 1048576,
           threshold_long_edge: 2560,

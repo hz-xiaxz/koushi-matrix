@@ -114,6 +114,19 @@ export type MessageId =
   | "upload.previewAlt"
   | "upload.savings"
   | "upload.sizeChoice"
+  | "upload.resizeChoice"
+  | "upload.formatChoice"
+  | "upload.resizeOriginal"
+  | "upload.resizeHalf"
+  | "upload.resizeQuarter"
+  | "upload.resizeEighth"
+  | "upload.formatKeep"
+  | "upload.formatWebp"
+  | "upload.formatJpeg"
+  | "upload.formatPng"
+  | "upload.outputSummary"
+  | "upload.recompressing"
+  | "upload.outputReady"
   | "window.title"
   | "context.editMessage"
   | "context.addToFavourites"
@@ -421,11 +434,6 @@ export type MessageId =
   | "settings.densityComfortable"
   | "settings.codeBlockWrap"
   | "settings.hideRedacted"
-  | "settings.media"
-  | "settings.compressImages"
-  | "settings.compressImagesAlways"
-  | "settings.compressImagesAsk"
-  | "settings.compressImagesNever"
   | "settings.notificationBadges"
   | "settings.notificationDesktop"
   | "settings.notificationSound"
@@ -1117,6 +1125,19 @@ const en: Catalog = {
   "upload.previewAlt": "Prepared attachment preview",
   "upload.savings": "{percent}% smaller",
   "upload.sizeChoice": "Upload size",
+  "upload.resizeChoice": "Resize",
+  "upload.formatChoice": "Format",
+  "upload.resizeOriginal": "Original",
+  "upload.resizeHalf": "1/2",
+  "upload.resizeQuarter": "1/4",
+  "upload.resizeEighth": "1/8",
+  "upload.formatKeep": "Keep",
+  "upload.formatWebp": "WebP",
+  "upload.formatJpeg": "JPEG",
+  "upload.formatPng": "PNG",
+  "upload.outputSummary": "Upload result",
+  "upload.recompressing": "Recompressing…",
+  "upload.outputReady": "Ready",
   "window.title": "Koushi",
   "context.editMessage": "Edit",
   "context.addToFavourites": "Add to Favourites",
@@ -1442,11 +1463,6 @@ const en: Catalog = {
   "timeline.linkPreviewHide": "Hide preview",
   "timeline.linkPreviewFailed": "Could not load preview",
   "timeline.linkPreviewLoading": "Loading preview…",
-  "settings.media": "Media",
-  "settings.compressImages": "Compress images",
-  "settings.compressImagesAlways": "Always",
-  "settings.compressImagesAsk": "Ask",
-  "settings.compressImagesNever": "Never",
   "settings.notificationBadges": "Badges",
   "settings.notificationDesktop": "Desktop notifications",
   "settings.notificationSound": "Sound",
@@ -2024,6 +2040,19 @@ const ja: Catalog = {
   "upload.previewAlt": "準備済み添付のプレビュー",
   "upload.savings": "{percent}% 削減",
   "upload.sizeChoice": "アップロードサイズ",
+  "upload.resizeChoice": "リサイズ",
+  "upload.formatChoice": "形式",
+  "upload.resizeOriginal": "元のまま",
+  "upload.resizeHalf": "1/2",
+  "upload.resizeQuarter": "1/4",
+  "upload.resizeEighth": "1/8",
+  "upload.formatKeep": "そのまま",
+  "upload.formatWebp": "WebP",
+  "upload.formatJpeg": "JPEG",
+  "upload.formatPng": "PNG",
+  "upload.outputSummary": "出力結果",
+  "upload.recompressing": "再圧縮中…",
+  "upload.outputReady": "準備完了",
   "window.title": "Koushi（光子・格子）",
   "context.editMessage": "編集",
   "context.addToFavourites": "お気に入りに追加",
@@ -2348,11 +2377,6 @@ const ja: Catalog = {
   "timeline.linkPreviewHide": "プレビューを非表示",
   "timeline.linkPreviewFailed": "プレビューを読み込めませんでした",
   "timeline.linkPreviewLoading": "プレビューを読み込み中…",
-  "settings.media": "メディア",
-  "settings.compressImages": "画像を圧縮",
-  "settings.compressImagesAlways": "常に圧縮",
-  "settings.compressImagesAsk": "毎回確認",
-  "settings.compressImagesNever": "圧縮しない",
   "settings.notificationBadges": "バッジ",
   "settings.notificationDesktop": "デスクトップ通知",
   "settings.notificationSound": "サウンド",

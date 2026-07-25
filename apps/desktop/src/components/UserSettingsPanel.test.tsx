@@ -28,7 +28,6 @@ describe("UserSettingsPanel", () => {
         encrypted_url_previews_enabled: false
       },
       media: {
-        image_upload_compression: "never",
         image_upload_compression_policy: {
           threshold_bytes: 1048576,
           threshold_long_edge: 2560,
@@ -211,11 +210,9 @@ describe("UserSettingsPanel", () => {
     expect(markup).toContain("Typography");
     expect(markup).toContain("UI font");
     expect(markup).toContain("Emoji font");
-    expect(markup).toContain("Media");
-    expect(markup).toContain("Compress images");
-    expect(markup).toContain("Always");
-    expect(markup).toContain("Ask");
-    expect(markup).toContain("Never");
+    // #305 retired the Media section: image output is chosen per attachment in
+    // the upload staging dialog, so no compression preference is rendered here.
+    expect(markup).not.toContain("Compress images");
     expect(markup).toContain("Notifications");
     expect(markup).toContain("Desktop notifications");
     expect(markup).toContain("Sound");

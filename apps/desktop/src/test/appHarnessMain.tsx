@@ -42,6 +42,7 @@ import type {
   StageUploadBytesRequestItem,
   SettingsPatch,
   StagedUploadItem,
+  StagedUploadOutputSelection,
   StagedUploadCompressionChoice,
   UploadStagingRequestItem
 } from "../domain/types";
@@ -227,7 +228,6 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         encrypted_url_previews_enabled: true
       },
       media: {
-        image_upload_compression: "ask",
         image_upload_compression_policy: {
           threshold_bytes: 1048576,
           threshold_long_edge: 2560,
@@ -680,7 +680,9 @@ function preparedHarnessItem(
   const originalMime = item.mimeType.trim() || "application/octet-stream";
   const image = originalMime.startsWith("image/");
   const original = {
-    variant_id: "original",
+    variant_id: "original-keep",
+    resize: "original" as const,
+    format_choice: "keep" as const,
     filename: item.filename,
     mime_type: originalMime,
     byte_count: item.bytes.length,
@@ -695,7 +697,9 @@ function preparedHarnessItem(
     ? [
         original,
         {
-          variant_id: "webp-2048",
+          variant_id: "half-webp",
+          resize: "half" as const,
+          format_choice: "webp" as const,
           filename: item.filename.replace(/\.[^.]+$/, "") + ".webp",
           mime_type: "image/webp",
           byte_count: Math.max(1, Math.floor(item.bytes.length / 2)),
@@ -711,13 +715,13 @@ function preparedHarnessItem(
   for (const variant of variants) {
     preparedUploadBytes.set(
       preparedUploadKey(target, item.stagedId, variant.variant_id),
-      variant.variant_id === "original"
+      variant.resize === "original" && variant.format_choice === "keep"
         ? [...item.bytes]
         : item.bytes.slice(0, variant.byte_count)
     );
   }
-  const mode = currentSnapshot.state.domain.settings.values.media.image_upload_compression;
-  const selected = image && mode !== "never" ? variants[1] : original;
+  // Staging always asks and starts at the untouched output (#305).
+  const selected = original;
   return {
     staged_id: item.stagedId,
     room_id: target.room_id,
@@ -733,7 +737,9 @@ function preparedHarnessItem(
     preparation: {
       kind: "ready",
       variants,
-      selected_variant_id: selected.variant_id
+      selected: { resize: "original", format: "keep" },
+      pending: null,
+      generation: 0
     }
   };
 }
@@ -2433,27 +2439,46 @@ mock.setCommandResponse("stage_upload_bytes", ({ target, items }: {
   ]);
   return setCurrentSnapshot(next);
 });
-mock.setCommandResponse("select_staged_upload_variant", ({ target, stagedId, variantId }: {
+mock.setCommandResponse("select_staged_upload_output", ({ target, stagedId, selection }: {
   target: ComposerTarget;
   stagedId: string;
-  variantId: string;
+  selection: StagedUploadOutputSelection;
 }) => {
   const items = stagedUploadsForTarget(currentSnapshot, target);
   if (items === null) return currentSnapshot;
   const nextItems = items.map((item) => {
     if (item.staged_id !== stagedId || item.preparation.kind !== "ready") return item;
-    const selected = item.preparation.variants.find((variant) => variant.variant_id === variantId);
-    if (!selected) return item;
+    const prepared = item.preparation.variants.find(
+      (variant) =>
+        variant.resize === selection.resize && variant.format_choice === selection.format
+    );
+    // Mirrors the Rust store: an already-prepared pair is adopted immediately,
+    // an unprepared pair becomes pending under a fresh generation.
+    if (!prepared) {
+      return {
+        ...item,
+        preparation: {
+          ...item.preparation,
+          selected: selection,
+          pending: selection,
+          generation: item.preparation.generation + 1
+        }
+      };
+    }
     return {
       ...item,
-      filename: selected.filename,
-      mime_type: selected.mime_type,
-      byte_count: selected.byte_count,
+      filename: prepared.filename,
+      mime_type: prepared.mime_type,
+      byte_count: prepared.byte_count,
       kind:
         item.kind.kind === "image"
-          ? { kind: "image" as const, width: selected.width, height: selected.height }
+          ? { kind: "image" as const, width: prepared.width, height: prepared.height }
           : item.kind,
-      preparation: { ...item.preparation, selected_variant_id: variantId }
+      preparation: {
+        ...item.preparation,
+        selected: selection,
+        pending: null
+      }
     };
   });
   return setCurrentSnapshot(replaceStagedUploadsForTarget(currentSnapshot, target, nextItems));
@@ -2472,14 +2497,20 @@ mock.setCommandResponse("use_original_staged_upload", ({ target, stagedId }: {
   if (items === null) return currentSnapshot;
   const nextItems = items.map((item) => {
     if (item.staged_id !== stagedId || item.preparation.kind !== "ready") return item;
-    const original = item.preparation.variants.find((variant) => variant.variant_id === "original");
+    const original = item.preparation.variants.find(
+      (variant) => variant.resize === "original" && variant.format_choice === "keep"
+    );
     return original
       ? {
           ...item,
           filename: original.filename,
           mime_type: original.mime_type,
           byte_count: original.byte_count,
-          preparation: { ...item.preparation, selected_variant_id: "original" }
+          preparation: {
+            ...item.preparation,
+            selected: { resize: "original" as const, format: "keep" as const },
+            pending: null
+          }
         }
       : item;
   });

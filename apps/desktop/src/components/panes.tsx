@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { t } from "../i18n/messages";
 import type {
+  StagedUploadOutputSelection,
   ActivityMarkReadTarget,
   ActivityRow,
   ActivityState,
@@ -612,7 +613,7 @@ export function TimelinePane({
   onAttachFiles,
   onClearUploadStaging,
   onUpdateStagedUploadCaption,
-  onSelectStagedUploadVariant,
+  onSelectStagedUploadOutput,
   onLoadStagedUploadPreview,
   onRetryStagedUploadPreparation = () => undefined,
   onUseOriginalStagedUpload = () => undefined,
@@ -652,7 +653,10 @@ export function TimelinePane({
   onAttachFiles: (files: File[]) => void | Promise<void>;
   onClearUploadStaging: () => void | Promise<void>;
   onUpdateStagedUploadCaption: (stagedId: string, caption: string) => void | Promise<void>;
-  onSelectStagedUploadVariant: (stagedId: string, variantId: string) => void | Promise<void>;
+  onSelectStagedUploadOutput: (
+    stagedId: string,
+    selection: StagedUploadOutputSelection
+  ) => void | Promise<void>;
   onLoadStagedUploadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
   onRetryStagedUploadPreparation?: (stagedId: string) => void | Promise<void>;
   onUseOriginalStagedUpload?: (stagedId: string) => void | Promise<void>;
@@ -747,7 +751,7 @@ export function TimelinePane({
   const onAttachFilesStable = useStableEvent(onAttachFiles);
   const onClearUploadStagingStable = useStableEvent(onClearUploadStaging);
   const onUpdateStagedUploadCaptionStable = useStableEvent(onUpdateStagedUploadCaption);
-  const onSelectStagedUploadVariantStable = useStableEvent(onSelectStagedUploadVariant);
+  const onSelectStagedUploadOutputStable = useStableEvent(onSelectStagedUploadOutput);
   const onLoadStagedUploadPreviewStable = useStableEvent(onLoadStagedUploadPreview);
   const onRetryStagedUploadPreparationStable = useStableEvent(onRetryStagedUploadPreparation);
   const onUseOriginalStagedUploadStable = useStableEvent(onUseOriginalStagedUpload);
@@ -950,7 +954,7 @@ export function TimelinePane({
           items={stagedUploads}
           onClear={onClearUploadStagingStable}
           onUpdateCaption={onUpdateStagedUploadCaptionStable}
-          onSelectVariant={onSelectStagedUploadVariantStable}
+          onSelectOutput={onSelectStagedUploadOutputStable}
           onRetryPreparation={onRetryStagedUploadPreparationStable}
           onUseOriginal={onUseOriginalStagedUploadStable}
           loadPreview={onLoadStagedUploadPreviewStable}

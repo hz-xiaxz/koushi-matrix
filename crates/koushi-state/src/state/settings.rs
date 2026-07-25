@@ -352,9 +352,13 @@ impl Default for DisplaySettings {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// Media settings.
+///
+/// #305 retired the automatic-compression mode: the staging dialog always asks
+/// and starts at the untouched output, so there is no preference left to store.
+/// The policy remains because the encoder still reads its quality value and the
+/// direct upload path still reads its thresholds.
 pub struct MediaSettings {
-    #[serde(default)]
-    pub image_upload_compression: ImageUploadCompressionMode,
     #[serde(default)]
     pub image_upload_compression_policy: ImageUploadCompressionPolicy,
 }
@@ -362,12 +366,18 @@ pub struct MediaSettings {
 impl Default for MediaSettings {
     fn default() -> Self {
         Self {
-            image_upload_compression: ImageUploadCompressionMode::Ask,
             image_upload_compression_policy: ImageUploadCompressionPolicy::default(),
         }
     }
 }
 
+/// Per-item compression choice payload.
+///
+/// This is no longer a stored preference: #305 retired the settings field. It
+/// survives only as the `StagedUploadCompressionChoice::Compressed` payload, and
+/// that path is unreachable from the product UI now that the staging dialog
+/// offers explicit resize/format pairs, so it is a candidate for removal after a
+/// dedicated audit of the upload-staging command surface.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ImageUploadCompressionMode {

@@ -163,11 +163,12 @@ pub use timeline::{
     MAX_PERSISTED_COMPOSER_DRAFT_ROOM_COUNT, MAX_PERSISTED_COMPOSER_DRAFT_THREAD_COUNT,
     MediaGalleryStore, MediaPreparationFailureKind, PendingComposerSendKind, PreparedUploadFormat,
     PreparedUploadVariant, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem,
-    ScheduledSendStore, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
-    StagedUploadPreparation, TimelineContinuityInspection, TimelineContinuityState,
+    ScheduledSendStore, StagedUploadCompressionChoice, StagedUploadFormatChoice, StagedUploadItem,
+    StagedUploadKind, StagedUploadOutputSelection, StagedUploadPreparation,
+    StagedUploadResizeChoice, TimelineContinuityInspection, TimelineContinuityState,
     TimelineGapRepairFailureKind, TimelineMediaGalleryItem, TimelineMediaGalleryMedia,
     TimelineMediaGallerySource, TimelineMediaGalleryThumbnail, TimelineMediaKind,
-    TimelinePaneState, UploadStagingStore,
+    TimelinePaneState, UploadStagingStore, staged_upload_item_with_completed_output,
 };
 
 // ── Re-exports: thread ──────────────────────────────────────────────────────

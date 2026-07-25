@@ -45,7 +45,7 @@ impl CoreCommand {
                 | AppCommand::SetUploadStaging { request_id, .. }
                 | AppCommand::UpdateStagedUploadCaption { request_id, .. }
                 | AppCommand::UpdateStagedUploadCompression { request_id, .. }
-                | AppCommand::SelectStagedUploadVariant { request_id, .. }
+                | AppCommand::SelectStagedUploadOutput { request_id, .. }
                 | AppCommand::ClearUploadStaging { request_id, .. }
                 | AppCommand::ScheduleSend { request_id, .. }
                 | AppCommand::CancelScheduledSend { request_id, .. }
@@ -339,7 +339,7 @@ impl CoreCommand {
                     | AppCommand::AcceptComposerDraft { .. }
                     | AppCommand::UpdateStagedUploadCaption { .. }
                     | AppCommand::UpdateStagedUploadCompression { .. }
-                    | AppCommand::SelectStagedUploadVariant { .. }
+                    | AppCommand::SelectStagedUploadOutput { .. }
                     | AppCommand::ClearUploadStaging { .. }
                     | AppCommand::RebuildSearchIndex { .. }
                     | AppCommand::SetRoomUrlPreviewOverride { .. }
@@ -404,11 +404,11 @@ pub enum AppCommand {
         staged_id: String,
         compression_choice: StagedUploadCompressionChoice,
     },
-    SelectStagedUploadVariant {
+    SelectStagedUploadOutput {
         request_id: RequestId,
         target: koushi_state::ComposerTarget,
         staged_id: String,
-        variant_id: String,
+        selection: koushi_state::StagedUploadOutputSelection,
     },
     ClearUploadStaging {
         request_id: RequestId,
@@ -670,12 +670,17 @@ impl fmt::Debug for AppCommand {
                 .field("staged_id", &"StagedUploadId(..)")
                 .field("compression_choice", compression_choice)
                 .finish(),
-            Self::SelectStagedUploadVariant { request_id, .. } => formatter
-                .debug_struct("SelectStagedUploadVariant")
+            Self::SelectStagedUploadOutput {
+                request_id,
+                selection,
+                ..
+            } => formatter
+                .debug_struct("SelectStagedUploadOutput")
                 .field("request_id", request_id)
                 .field("target", &"ComposerTarget(..)")
                 .field("staged_id", &"StagedUploadId(..)")
-                .field("variant_id", &"PreparedVariantId(..)")
+                // The chosen axes are not private data; the filename is.
+                .field("selection", selection)
                 .finish(),
             Self::ClearUploadStaging { request_id, .. } => formatter
                 .debug_struct("ClearUploadStaging")

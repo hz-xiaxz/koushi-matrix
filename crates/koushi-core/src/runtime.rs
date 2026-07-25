@@ -2905,17 +2905,17 @@ impl AppActor {
                     self.handle_app_effects(request_id, effects).await;
                     true
                 }
-                AppCommand::SelectStagedUploadVariant {
+                AppCommand::SelectStagedUploadOutput {
                     request_id,
                     target,
                     staged_id,
-                    variant_id,
+                    selection,
                 } => {
                     let effects = self
-                        .reduce_app_action(AppAction::UploadStagingVariantSelected {
+                        .reduce_app_action(AppAction::UploadStagingOutputSelected {
                             target,
                             staged_id,
-                            variant_id,
+                            selection,
                         })
                         .await;
                     self.handle_app_effects(request_id, effects).await;

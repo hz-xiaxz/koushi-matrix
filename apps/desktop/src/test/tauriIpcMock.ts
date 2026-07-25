@@ -174,7 +174,6 @@ function defaultSnapshotResponse() {
             encrypted_url_previews_enabled: true
           },
           media: {
-            image_upload_compression: "ask",
             image_upload_compression_policy: {
               threshold_bytes: 1048576,
               threshold_long_edge: 2560,
