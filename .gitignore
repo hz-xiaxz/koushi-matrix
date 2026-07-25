@@ -13,3 +13,7 @@ artifacts/
 # Playwright artifacts
 apps/desktop/test-results/
 apps/desktop/playwright-report/
+# Playwright writes these next to its CWD, which is the repo root when someone
+# runs `npx playwright test` from there instead of apps/desktop.
+/test-results/
+/playwright-report/

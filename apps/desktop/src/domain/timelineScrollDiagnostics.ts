@@ -71,7 +71,18 @@ export interface TimelineScrollDiagnostics {
   rangeCommits: number;
   heightModelCommits: number;
   measurementFlushes: number;
+  /** Rows still waiting for a height commit — a gauge, decremented on flush. */
   pendingMeasuredRows: number;
+  /**
+   * Total measured-row changes seen across frames.
+   *
+   * `latestFrame` only carries the most recent frame, and frames with no
+   * measured-row change follow a commit immediately, so a test asking "did a
+   * measurement commit change any rows?" through `latestFrame` races the next
+   * frame. This counter is monotonic and baseline-subtractable, like
+   * `heightModelCommits`.
+   */
+  changedMeasuredRows: number;
   scrollWrites: Record<TimelineScrollWriteReason, number>;
   maxAnchorTopDeltaPx: number;
   latestFrame: TimelineScrollFrameSample | null;
@@ -107,6 +118,7 @@ export function createInitialTimelineScrollDiagnostics(): TimelineScrollDiagnost
     heightModelCommits: 0,
     measurementFlushes: 0,
     pendingMeasuredRows: 0,
+    changedMeasuredRows: 0,
     scrollWrites: emptyWriteCounts(),
     maxAnchorTopDeltaPx: 0,
     latestFrame: null,
@@ -170,6 +182,8 @@ export function recordTimelineScrollFrame(
       diagnostics.pendingMeasuredRows,
       sample.changedMeasuredRowCount
     ),
+    changedMeasuredRows:
+      diagnostics.changedMeasuredRows + Math.max(0, sample.changedMeasuredRowCount),
     maxAnchorTopDeltaPx: Math.max(
       diagnostics.maxAnchorTopDeltaPx,
       Math.abs(Math.round(sample.anchorTopDeltaPx))

@@ -1311,6 +1311,39 @@ before GA. Do not open feature issues for these without re-deciding scope here.
 
 ## Headless UI (Playwright) Flakes
 
+- The browser-headless tier is a CI gate as of 2026-07-25: the
+  `Browser headless (Playwright DOM tier)` job runs `npx playwright test` on
+  every pull request. Before that it ran only when someone remembered, and a
+  stale IPC-argument assertion introduced by #319 sat red on `main` until #323
+  found it by hand. Keep the suite green; a red spec is now a blocked merge,
+  not a note for later.
+- `playwright.config.ts` pins `workers: 1`. `fullyParallel: false` alone still
+  spreads FILES across workers, and every flake recorded below was traced to
+  those workers contending for the single shared Vite harness server. Do not
+  raise the worker count to speed up a run: the whole suite finishes in about
+  three minutes serialized, and the parallel-contention flakes come straight
+  back.
+- The three entries below are kept as root-cause history. All of them passed in
+  a full 208-test serialized run on 2026-07-25, including the a11y spec that was
+  previously recorded as an outright pre-existing failure. Treat them as
+  explanations of a fixed failure mode, not as currently-expected failures — if
+  one of them goes red again, it is a regression to investigate.
+- Assert scroll/render diagnostics on a CUMULATIVE counter, never on
+  `latestFrame`. `TimelineScrollDiagnostics.latestFrame` is overwritten every
+  frame, and `TimelineView` emits frames carrying zeroes right after the frame
+  you care about (the height-compensation effect and the active-scroll range
+  recomposition both report `changedMeasuredRowCount: 0`). An assertion like
+  `latestFrame.changedMeasuredRowCount > 0` therefore depends on the read
+  landing before the next frame: it passed locally and failed on a CI runner in
+  2026-07-25 PR #324. Counters such as `heightModelCommits`,
+  `measurementFlushes`, and `changedMeasuredRows` are monotonic and
+  baseline-subtracted by the harness, so they answer the same question without
+  the race. `pendingMeasuredRows` is NOT one of them — it is a gauge that is
+  decremented on flush and reset to zero. When a new per-frame fact needs a
+  test, add the matching cumulative counter in
+  `apps/desktop/src/domain/timelineScrollDiagnostics.ts` and subtract it in
+  `harnessMain.tsx` rather than reaching into `latestFrame`.
+
 - A red full local Playwright run is not automatically scope for the active PR.
   First classify each failure: introduced by the current diff, changed-area
   regression, shared fixture/harness drift, local browser/actionability
@@ -1344,13 +1377,13 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   mock). The `reply send does not repair product state by cancelling reply mode`
   regression added in that remediation passes deterministically in isolation.
 - `e2e/desktop-shell-a11y.spec.ts:18` ("the three-pane shell exposes landmarks
-  and reachable keyboard focus stops") is a PRE-EXISTING failure: the
-  `complementary` landmark named "Context panel" is not found/visible at the
-  default `/` harness state. It fails identically on a clean checkout of the
-  pre-#77-83 base commit, so it is not introduced by the #77-83 dogfood work.
-  This a11y spec had been silently red (it predates CI gating). Track a
-  separate fix for the default right-panel landmark; do not treat it as a
-  #77-83 regression.
+  and reachable keyboard focus stops") was recorded as a PRE-EXISTING failure:
+  the `complementary` landmark named "Context panel" was not found/visible at
+  the default `/` harness state, and it failed identically on a clean checkout
+  of the pre-#77-83 base commit. It passes as of 2026-07-25, so the landmark
+  gap was fixed somewhere between then and now without the note being updated —
+  which is exactly the drift the new CI gate prevents. Do not re-add it to a
+  known-failures list without a fresh failing run.
 - `e2e/basic-operations.spec.ts:2811` ("pin and unpin actions render the Tauri
   snapshot response without a manual state event") is flaky in the FULL parallel
   Playwright run but passes deterministically in isolation
