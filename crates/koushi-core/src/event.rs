@@ -5,12 +5,12 @@ use std::fmt;
 
 use koushi_state::{
     ActivityStream, ActivityTab, AppState, AttachmentResult, AvatarImage, AvatarThumbnailState,
-    CrossSigningStatus, DirectoryQuery, DirectoryRoomSummary, IdentityResetState,
-    InviteDestinationResult, JapaneseCatalogProfile, KeyBackupStatus, LocalEncryptionHealth,
-    MediaTransferProgress, NativeAttentionDispatchId, NativeAttentionSummary, OperationFailureKind,
-    PinnedEvent, PresenceKind, ProfileState, ReplyQuote, RoomModerationAction,
-    RoomSettingsSnapshot, RoomTagKind, SessionState, SubmissionId, SyncMode, ThreadsListItem,
-    VerificationFlowState, resolve_user_display_name,
+    CrossSigningStatus, DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary,
+    IdentityResetState, InviteDestinationResult, JapaneseCatalogProfile, KeyBackupStatus,
+    LocalEncryptionHealth, MediaTransferProgress, NativeAttentionDispatchId,
+    NativeAttentionSummary, OperationFailureKind, PinnedEvent, PresenceKind, ProfileState,
+    ReplyQuote, RoomModerationAction, RoomSettingsSnapshot, RoomTagKind, SessionState,
+    SubmissionId, SyncMode, ThreadsListItem, VerificationFlowState, resolve_user_display_name,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -690,6 +690,10 @@ pub enum RoomEvent {
         rooms: Vec<DirectoryRoomSummary>,
         next_batch: Option<String>,
     },
+    DirectoryPreviewLoaded {
+        request_id: RequestId,
+        room: DirectoryRoomPreview,
+    },
     RoomSettingsLoaded {
         request_id: RequestId,
         settings: RoomSettingsSnapshot,
@@ -833,6 +837,11 @@ impl fmt::Debug for RoomEvent {
                 .field("request_id", request_id)
                 .field("query", &"DirectoryQuery(..)")
                 .field("rooms_count", &rooms.len())
+                .finish(),
+            Self::DirectoryPreviewLoaded { request_id, room } => formatter
+                .debug_struct("DirectoryPreviewLoaded")
+                .field("request_id", request_id)
+                .field("room", room)
                 .finish(),
             Self::RoomSettingsLoaded { request_id, .. } => formatter
                 .debug_struct("RoomSettingsLoaded")
@@ -2110,6 +2119,7 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
         | RoomEvent::PinEventCompleted { .. }
         | RoomEvent::UnpinEventCompleted { .. }
         | RoomEvent::DirectoryQueryCompleted { .. }
+        | RoomEvent::DirectoryPreviewLoaded { .. }
         | RoomEvent::RoomMemberModerated { .. }
         | RoomEvent::RoomMemberRoleUpdated { .. }
         | RoomEvent::RoomKeyReshared { .. }

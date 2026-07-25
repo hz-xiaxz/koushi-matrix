@@ -15,6 +15,7 @@ import {
 import { type MessageId, t } from "../i18n/messages";
 import type {
   CreateRoomVisibility,
+  DirectoryPreviewState,
   InviteScopeSelection,
   InviteWorkflowState,
   StagedUploadFormatChoice,
@@ -27,6 +28,7 @@ import {
   formatUploadBytes,
   formatUploadDimensions,
   captionBody,
+  operationFailureLabel,
   type ImageUploadVariantKindPayload,
   type ImageCompressionPlan
 } from "../app/uiShared";
@@ -996,6 +998,117 @@ function PreparedUploadPreview({
       {recompressing ? (
         <span className="upload-preview-progress" role="presentation" />
       ) : null}
+    </div>
+  );
+}
+
+// ===== DirectoryPreviewDialog =====
+
+/**
+ * Confirm what a room actually is before joining it.
+ *
+ * Everything shown is Rust-projected `DirectoryPreviewState`; this component
+ * decides nothing about joinability, it only renders the projection and
+ * dispatches the two decisions the user can make.
+ */
+export function DirectoryPreviewDialog({
+  isBusy,
+  preview,
+  onCancel,
+  onConfirm
+}: {
+  isBusy: boolean;
+  preview: Exclude<DirectoryPreviewState, { kind: "closed" }>;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const title = t("directory.previewTitle");
+
+  function onDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+    }
+  }
+
+  const room = preview.kind === "ready" ? preview.room : null;
+  const isSpace = room?.room_type === "m.space";
+  const alias = room?.canonical_alias?.trim() || null;
+  const displayName =
+    room === null
+      ? null
+      : room.name.trim() ||
+        alias ||
+        t(isSpace ? "directory.unnamedSpace" : "directory.unnamedRoom");
+  const alreadyJoined = room?.membership === "joined";
+  // Only an outright invite-only rule makes a plain join pointless. `unknown`
+  // stays offered: the server simply did not say, and refusing on silence
+  // would block rooms that do accept the join.
+  const joinBlockedReason: MessageId | null = alreadyJoined
+    ? "directory.previewAlreadyJoined"
+    : room?.joinability === "inviteOnly"
+      ? "directory.previewInviteOnly"
+      : room?.joinability === "restricted"
+        ? "directory.previewRestricted"
+        : room?.joinability === "unknown"
+          ? "directory.previewUnknownJoinRule"
+          : null;
+  const canConfirm = room !== null && !isBusy;
+
+  return (
+    <div
+      className="dialog-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onKeyDown={onDialogKeyDown}
+    >
+      <div className="dialog-box directory-preview">
+        <div className="dialog-title">{title}</div>
+        {preview.kind === "loading" ? (
+          <div className="directory-preview-status">{t("directory.previewLoading")}</div>
+        ) : null}
+        {preview.kind === "failed" ? (
+          <div className="directory-preview-status" role="alert">
+            {t("directory.previewFailed", {
+              reason: operationFailureLabel(preview.failureKind)
+            })}
+          </div>
+        ) : null}
+        {room && displayName ? (
+          <div className="directory-preview-room">
+            <h2 className="directory-preview-name">
+              <span>{displayName}</span>
+              {isSpace ? (
+                <span className="directory-result-type">{t("directory.spaceBadge")}</span>
+              ) : null}
+            </h2>
+            {alias ? <div className="directory-preview-alias">{alias}</div> : null}
+            {room.topic ? <p className="directory-preview-topic">{room.topic}</p> : null}
+            <div className="directory-preview-meta">
+              {t("directory.memberCount", { count: String(room.joined_members) })}
+            </div>
+            {joinBlockedReason ? (
+              <div className="directory-preview-note">{t(joinBlockedReason)}</div>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="dialog-actions">
+          <button type="button" className="ghost" onClick={onCancel}>
+            {t("directory.previewCancel")}
+          </button>
+          {room ? (
+            <button
+              type="button"
+              className="primary"
+              disabled={!canConfirm}
+              onClick={onConfirm}
+            >
+              {alreadyJoined ? t("directory.previewOpenRoom") : t("directory.join")}
+            </button>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }

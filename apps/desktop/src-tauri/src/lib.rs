@@ -1339,6 +1339,8 @@ pub fn run() {
             commands::room::create_room,
             commands::room::create_space,
             commands::directory::join_directory_room,
+            commands::directory::preview_join_target,
+            commands::directory::dismiss_directory_preview,
             commands::room::set_space_child,
             commands::room::join_room,
             commands::room::accept_invite,
@@ -2135,7 +2137,8 @@ mod tests {
         };
         use koushi_state::{
             ActivityRow, ActivityStream, ActivityTab, AppState, AttachmentKind, AttachmentResult,
-            AvatarThumbnailState, DirectoryQuery, DirectoryRoomSummary, IdentityResetAuthType,
+            AvatarThumbnailState, DirectoryPreviewJoinability, DirectoryPreviewMembership,
+            DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary, IdentityResetAuthType,
             IdentityResetState, JapaneseCatalogProfile, LocalEncryptionHealth,
             MediaTransferProgress, NativeAttentionCapabilities, NativeAttentionCapability,
             NativeAttentionSummary, PresenceKind, ReplyQuote, ReplyQuoteState,
@@ -2974,6 +2977,21 @@ mod tests {
                 next_batch: Some("page-3".to_owned()),
             }))
             .expect("serialize directory query completion");
+        let directory_preview_loaded =
+            serialize_core_event(&CoreEvent::Room(RoomEvent::DirectoryPreviewLoaded {
+                request_id,
+                room: DirectoryRoomPreview {
+                    room_id: "!previewed:example.test".to_owned(),
+                    canonical_alias: Some("#previewed:example.test".to_owned()),
+                    room_type: Some("m.space".to_owned()),
+                    name: "Previewed Space".to_owned(),
+                    topic: Some("Directory preview sample".to_owned()),
+                    joined_members: 12,
+                    joinability: DirectoryPreviewJoinability::Restricted,
+                    membership: DirectoryPreviewMembership::Invited,
+                },
+            }))
+            .expect("serialize room directory preview loaded event");
         let room_settings_snapshot = RoomSettingsSnapshot {
             room_id: "!r:example.test".to_owned(),
             name: Some("Room Settings Sample".to_owned()),
@@ -3415,6 +3433,7 @@ mod tests {
             "searchCrawlFailed": search_crawl_failed,
             "stateDeltaSearchCrawlerQueued": state_delta,
             "roomDirectoryQueryCompleted": directory_query_completed,
+            "roomDirectoryPreviewLoaded": directory_preview_loaded,
             "roomDirectMessageStarted": room_direct_message_started,
             "roomInviteAccepted": room_invite_accepted,
             "roomInviteDeclined": room_invite_declined,
@@ -3554,6 +3573,7 @@ mod tests {
             "nativeAttentionSummaryUpdated",
             "operationFailedSessionNotFound",
             "roomDirectMessageStarted",
+            "roomDirectoryPreviewLoaded",
             "roomDirectoryQueryCompleted",
             "roomInviteAccepted",
             "roomInviteDeclined",

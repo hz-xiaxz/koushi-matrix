@@ -118,7 +118,9 @@ pub use activity::{
 
 // ── Re-exports: directory ───────────────────────────────────────────────────
 pub use directory::{
-    DirectoryJoinState, DirectoryQuery, DirectoryQueryState, DirectoryRoomSummary, DirectoryState,
+    DirectoryJoinState, DirectoryPreviewJoinability, DirectoryPreviewMembership,
+    DirectoryPreviewState, DirectoryQuery, DirectoryQueryState, DirectoryRoomPreview,
+    DirectoryRoomSummary, DirectoryState,
 };
 
 // ── Re-exports: room_management ─────────────────────────────────────────────

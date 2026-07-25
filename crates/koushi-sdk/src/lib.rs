@@ -5898,7 +5898,9 @@ pub struct MatrixRoomPreview {
 }
 
 /// Project an SDK room preview into the private-data-minimized DTO.
-fn matrix_room_preview_from_sdk(preview: matrix_sdk::room_preview::RoomPreview) -> MatrixRoomPreview {
+fn matrix_room_preview_from_sdk(
+    preview: matrix_sdk::room_preview::RoomPreview,
+) -> MatrixRoomPreview {
     use matrix_sdk::ruma::room::JoinRuleSummary;
 
     let joinability = match preview.join_rule {
@@ -8070,22 +8072,20 @@ mod tests {
     use super::{
         LOCAL_USER_ALIASES_ACCOUNT_DATA_TYPE, MatrixClientSession, MatrixConversationActivity,
         MatrixConversationActivitySource, MatrixCreateRoomOptions, MatrixCreateRoomParentSpace,
-        MatrixCreateRoomVisibility, MatrixEventCacheError, MatrixLocalUserAliases,
+        MatrixCreateRoomVisibility, MatrixEventCacheError, MatrixJoinTarget,
+        MatrixLocalUserAliases, MatrixPreviewJoinability, MatrixPreviewMembership,
         MatrixPublicRoomDirectoryQuery, MatrixPublicRoomDirectoryRoom, MatrixRoomHistoryVisibility,
         MatrixRoomJoinRule, MatrixRoomMemberRole, MatrixRoomModerationAction,
-        MatrixRoomPermissionFacts, MatrixRoomSettingChange, MatrixRoomSettingsSnapshot,
-        MatrixRoomTagInfo, MatrixRoomTags, MatrixSearchIndexKey, MatrixSearchIndexStoreConfig,
-        SYNC_INVITE_PROBE_TIMEOUT, SdkUnreadTrace, SessionInfo, create_public_directory_room,
-        MatrixJoinTarget, MatrixPreviewJoinability, MatrixPreviewMembership,
-        MatrixRoomOperationError, create_room_request, matrix_room_preview_from_sdk,
-        matrix_public_room_from_chunk,
-        get_room_settings_snapshot, join_room_target, resolve_join_target,
-        matrix_conversation_activity_source, matrix_room_list_room_from_counts,
-        matrix_room_member_role, moderate_room_member, newest_conversation_activity,
-        normalized_local_user_aliases, query_public_room_directory,
-        room_settings_snapshot_with_change, room_settings_snapshot_with_member_power_level,
-        trace_sdk_conversation_activity, trace_sdk_unread_snapshot, update_room_member_power_level,
-        update_room_setting,
+        MatrixRoomOperationError, MatrixRoomPermissionFacts, MatrixRoomSettingChange,
+        MatrixRoomSettingsSnapshot, MatrixRoomTagInfo, MatrixRoomTags, MatrixSearchIndexKey,
+        MatrixSearchIndexStoreConfig, SYNC_INVITE_PROBE_TIMEOUT, SdkUnreadTrace, SessionInfo,
+        create_public_directory_room, create_room_request, get_room_settings_snapshot,
+        join_room_target, matrix_conversation_activity_source, matrix_public_room_from_chunk,
+        matrix_room_list_room_from_counts, matrix_room_member_role, matrix_room_preview_from_sdk,
+        moderate_room_member, newest_conversation_activity, normalized_local_user_aliases,
+        query_public_room_directory, resolve_join_target, room_settings_snapshot_with_change,
+        room_settings_snapshot_with_member_power_level, trace_sdk_conversation_activity,
+        trace_sdk_unread_snapshot, update_room_member_power_level, update_room_setting,
     };
 
     #[test]

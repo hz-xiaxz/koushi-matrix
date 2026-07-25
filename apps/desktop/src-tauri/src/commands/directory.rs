@@ -48,7 +48,8 @@ pub async fn join_directory_room(
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
     let request_id = event_conn.next_request_id();
-    let Some(command) = build_join_directory_room_command(request_id, room_id_or_alias, via_servers)
+    let Some(command) =
+        build_join_directory_room_command(request_id, room_id_or_alias, via_servers)
     else {
         update_qa_window_title_from_state(&app, state.inner()).await;
         return current_snapshot(state.inner()).await;
@@ -65,6 +66,59 @@ pub async fn join_directory_room(
         request_id,
         &joined_room_id,
         SELECT_ROOM_EVENT_TIMEOUT,
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn preview_join_target(
+    room_id_or_alias: String,
+    via_servers: Vec<String>,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    let Some(command) =
+        build_preview_join_target_command(request_id, room_id_or_alias, via_servers)
+    else {
+        update_qa_window_title_from_state(&app, state.inner()).await;
+        return current_snapshot(state.inner()).await;
+    };
+
+    event_conn
+        .command(command)
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    wait_for_room_operation(
+        &mut event_conn,
+        request_id,
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        |event, expected_request_id| {
+            matches!(
+                event,
+                RoomEvent::DirectoryPreviewLoaded { request_id, .. } if *request_id == expected_request_id
+            )
+        },
+        "directory preview did not complete",
+        "directory preview failed",
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn dismiss_directory_preview(
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        build_dismiss_directory_preview_command(request_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;

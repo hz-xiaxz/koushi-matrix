@@ -863,6 +863,20 @@ class TauriDesktopApi implements DesktopApi {
     });
   }
 
+  async previewJoinTarget(
+    roomIdOrAlias: string,
+    viaServers: string[] = []
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("preview_join_target", {
+      roomIdOrAlias,
+      viaServers
+    });
+  }
+
+  async dismissDirectoryPreview(): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("dismiss_directory_preview", {});
+  }
+
   async joinRoom(roomId: string): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("join_room", { roomId });
   }

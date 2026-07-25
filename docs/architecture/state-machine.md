@@ -1948,9 +1948,9 @@ stateDiagram-v2
 
 ## Public Directory
 
-Public room directory state is Rust-owned and split into two independent
-submachines so a query result can stay visible while a join is pending or
-failed:
+Public room directory state is Rust-owned and split into three independent
+submachines so a query result can stay visible while a preview is open or a
+join is pending or failed:
 
 ```mermaid
 stateDiagram-v2
@@ -1963,6 +1963,22 @@ stateDiagram-v2
     Querying --> QueryClosed: LogoutRequested/SwitchAccountRequested/SessionCleared
     Results --> QueryClosed: LogoutRequested/SwitchAccountRequested/SessionCleared
     Failed --> QueryClosed: LogoutRequested/SwitchAccountRequested/SessionCleared
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> PreviewClosed
+    PreviewClosed --> Loading: DirectoryPreviewRequested
+    Loading --> Ready: DirectoryPreviewLoaded [matching request_id]
+    Loading --> PreviewFailed: DirectoryPreviewFailed [matching request_id, target, via_servers]
+    Ready --> Loading: DirectoryPreviewRequested
+    PreviewFailed --> Loading: DirectoryPreviewRequested
+    Loading --> PreviewClosed: DirectoryPreviewDismissed/DirectoryJoinRequested
+    Ready --> PreviewClosed: DirectoryPreviewDismissed/DirectoryJoinRequested
+    PreviewFailed --> PreviewClosed: DirectoryPreviewDismissed/DirectoryJoinRequested
+    Loading --> PreviewClosed: LogoutRequested/SwitchAccountRequested/SessionCleared
+    Ready --> PreviewClosed: LogoutRequested/SwitchAccountRequested/SessionCleared
+    PreviewFailed --> PreviewClosed: LogoutRequested/SwitchAccountRequested/SessionCleared
 ```
 
 ```mermaid
@@ -1980,26 +1996,38 @@ stateDiagram-v2
   `Failed`. Results include `DirectoryRoomSummary` rows, canonical alias when
   supplied by the homeserver, and an optional pagination token. React must not
   synthesize query completion, pagination, or failure state.
-- `AppState.directory.join` carries `Idle`, `Joining`, or `Failed`. Join is
-  alias-based; the SDK wrapper rejects bare room IDs for this directory flow.
-  GUI code passes the canonical alias and optional server hint from the Rust
-  directory result.
-- Query and join actions are accepted only with a `Ready` session. Stale query
-  completions are ignored unless their `request_id` matches the current
-  `Querying` state. Join success is accepted only when its `request_id`
-  matches the current `Joining` state; join failure is accepted only when its
-  `request_id`, alias, and server hint match the current `Joining` state.
+- `AppState.directory.preview` carries `Closed`, `Loading`, `Ready`, or
+  `Failed`. Every stage keeps the `room_id_or_alias` and `via_servers` that
+  were used, because the join that follows must reuse exactly what resolved
+  the preview. `Ready` carries a `DirectoryRoomPreview` whose `joinability`
+  and `membership` are coarse Rust-owned buckets; React renders them and must
+  not derive join legality from a raw join rule.
+- `AppState.directory.join` carries `Idle`, `Joining`, or `Failed`. The target
+  is `#alias:server` or `!id:server` with an optional list of via servers; a
+  public space frequently has no canonical alias, so GUI code falls back to
+  the room id rather than leaving a result findable but unjoinable.
+- Query, preview, and join actions are accepted only with a `Ready` session.
+  Stale query completions are ignored unless their `request_id` matches the
+  current `Querying` state. A preview load is accepted only when its
+  `request_id` matches the current `Loading` state; a preview failure must
+  additionally match the target and via servers. Join success is accepted only
+  when its `request_id` matches the current `Joining` state; join failure is
+  accepted only when its `request_id`, target, and via servers match.
+- Requesting a join closes the preview: the decision has been made, so the
+  dialog must not outlive it.
 - `RoomActor` routes `RoomCommand::QueryDirectory` through the SDK public-room
   directory API and emits `RoomEvent::DirectoryQueryCompleted` on success.
-  `RoomCommand::JoinDirectoryRoom` routes through SDK join-by-alias/server
+  `RoomCommand::PreviewJoinTarget` routes through the SDK room-preview API and
+  emits `RoomEvent::DirectoryPreviewLoaded`.
+  `RoomCommand::JoinDirectoryRoom` routes through SDK join-by-id-or-alias
   APIs and emits `RoomEvent::RoomJoined` on success. Failures are coarse
   `RoomFailureKind` / `OperationFailureKind` values only; raw SDK errors,
   aliases, server names, query text, and page tokens must not appear in Debug
   output or QA stdout.
-- Logout, account switch, or session clear resets both submachines to
-  `query=Closed` and `join=Idle`.
-- Headless core QA covers this with the `directory` scenario and private-data-
-  free tokens `directory_query=ok` and `directory_join=ok`.
+- Logout, account switch, or session clear resets all three submachines to
+  `query=Closed`, `preview=Closed`, and `join=Idle`.
+- Headless core QA covers query and join with the `directory` scenario and
+  private-data-free tokens `directory_query=ok` and `directory_join=ok`.
 
 ## Package A Auth And Security
 

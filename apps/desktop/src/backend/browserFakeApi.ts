@@ -308,6 +308,8 @@ export interface DesktopApi {
   submitSearch(query: string, scope: SearchScopeKind): Promise<DesktopSnapshot>;
   queryDirectory(query: DirectoryQuery): Promise<DesktopSnapshot>;
   joinDirectoryRoom(roomIdOrAlias: string, viaServers?: string[]): Promise<DesktopSnapshot>;
+  previewJoinTarget(roomIdOrAlias: string, viaServers?: string[]): Promise<DesktopSnapshot>;
+  dismissDirectoryPreview(): Promise<DesktopSnapshot>;
   joinRoom(roomId: string): Promise<DesktopSnapshot>;
   loadRoomSettings(roomId: string): Promise<DesktopSnapshot>;
   repairRoomTimeline(roomId: string): Promise<DesktopSnapshot>;
@@ -2363,6 +2365,53 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
+  async previewJoinTarget(
+    roomIdOrAlias: string,
+    viaServers: string[] = []
+  ): Promise<DesktopSnapshot> {
+    if (!this.canUseSyncedViews() || roomIdOrAlias.trim().length === 0) {
+      return this.getSnapshot();
+    }
+
+    const requestId = this.nextRequestId();
+    const normalizedTarget = roomIdOrAlias.trim();
+    const normalizedViaServers = viaServers
+      .map((server) => server.trim())
+      .filter((server) => server.length > 0);
+    this.snapshot.state.domain.directory.preview = {
+      kind: "loading",
+      request_id: requestId,
+      room_id_or_alias: normalizedTarget,
+      via_servers: normalizedViaServers
+    };
+
+    await Promise.resolve();
+
+    const label = normalizedTarget.replace(/^[#!]/, "").split(":")[0] ?? "";
+    this.snapshot.state.domain.directory.preview = {
+      kind: "ready",
+      request_id: requestId,
+      room_id_or_alias: normalizedTarget,
+      via_servers: normalizedViaServers,
+      room: {
+        room_id: normalizedTarget.startsWith("!") ? normalizedTarget : "!previewed:fake.local",
+        canonical_alias: normalizedTarget.startsWith("#") ? normalizedTarget : null,
+        room_type: null,
+        name: label,
+        topic: null,
+        joined_members: 3,
+        joinability: "open",
+        membership: "none"
+      }
+    };
+    return this.getSnapshot();
+  }
+
+  async dismissDirectoryPreview(): Promise<DesktopSnapshot> {
+    this.snapshot.state.domain.directory.preview = { kind: "closed" };
+    return this.getSnapshot();
+  }
+
   async joinDirectoryRoom(roomIdOrAlias: string, viaServers: string[] = []): Promise<DesktopSnapshot> {
     if (!this.canUseSyncedViews() || roomIdOrAlias.trim().length === 0) {
       return this.getSnapshot();
@@ -2373,6 +2422,9 @@ class BrowserFakeApi implements DesktopApi {
     const normalizedViaServers = viaServers
       .map((server) => server.trim())
       .filter((server) => server.length > 0);
+    // The Rust reducer closes the preview when a join is requested; the fake
+    // must not leave a dialog standing over a joining room.
+    this.snapshot.state.domain.directory.preview = { kind: "closed" };
     this.snapshot.state.domain.directory.join = {
       kind: "joining",
       request_id: requestId,
@@ -4224,6 +4276,7 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
 function defaultDirectoryState(): DesktopSnapshot["state"]["domain"]["directory"] {
   return {
     query: { kind: "closed" },
+    preview: { kind: "closed" },
     join: { kind: "idle" }
   };
 }

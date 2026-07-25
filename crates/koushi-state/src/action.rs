@@ -9,21 +9,21 @@ use crate::state::{
     AccountManagementOperation, ActivityMarkReadTarget, ActivityRow, ActivityStream, ActivityTab,
     AttachmentFilter, AttachmentResult, AttachmentScope, AttachmentSort, AuthFailureKind,
     AvatarThumbnailState, BasicOperationRequest, CrossSigningStatus, CurrentDeviceTrustState,
-    DelegatedAuthLinks, DeviceSessionSummary, DirectoryQuery, DirectoryRoomSummary,
-    E2eeRecoveryState, FilesViewScope, IdentityResetAuthType, InviteDestinationResult,
-    InviteScopeSelection, JapaneseCatalogProfile, LiveEventReceipts, LocalEncryptionHealth,
-    LoginAttemptId, LoginFlow, NativeAttentionDispatchId, NativeAttentionSoundOutcome,
-    NativeAttentionState, NavigationState, OperationFailureKind, OwnProfile, PinnedEvent,
-    PresenceKind, ProfileUpdateRequest, RecoveryKeyDeliveryState, RecoveryMethod, RoomListFilter,
-    RoomListProjection, RoomModerationAction, RoomPreferencesState, RoomSettingChange,
-    RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji,
-    ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope,
-    SessionInfo, SettingsPatch, SettingsValues, SpaceSummary, StagedUploadCompressionChoice,
-    StagedUploadItem, StagedUploadOutputSelection, SyncLifecycleStatus, SyncMode,
-    TimelineContinuityInspection, TimelineGapRepairFailureKind, TimelineMediaDownloadState,
-    TimelineMediaGalleryItem, TimelineScrollAnchor, TrustOperationFailureKind, UserProfile,
-    VerificationCancelReason, VerificationGateFailureKind, VerificationGateState,
-    VerificationMethod, VerificationTarget,
+    DelegatedAuthLinks, DeviceSessionSummary, DirectoryQuery, DirectoryRoomPreview,
+    DirectoryRoomSummary, E2eeRecoveryState, FilesViewScope, IdentityResetAuthType,
+    InviteDestinationResult, InviteScopeSelection, JapaneseCatalogProfile, LiveEventReceipts,
+    LocalEncryptionHealth, LoginAttemptId, LoginFlow, NativeAttentionDispatchId,
+    NativeAttentionSoundOutcome, NativeAttentionState, NavigationState, OperationFailureKind,
+    OwnProfile, PinnedEvent, PresenceKind, ProfileUpdateRequest, RecoveryKeyDeliveryState,
+    RecoveryMethod, RoomListFilter, RoomListProjection, RoomModerationAction, RoomPreferencesState,
+    RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags,
+    SasEmoji, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, SearchResult,
+    SearchScope, SessionInfo, SettingsPatch, SettingsValues, SpaceSummary,
+    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
+    SyncLifecycleStatus, SyncMode, TimelineContinuityInspection, TimelineGapRepairFailureKind,
+    TimelineMediaDownloadState, TimelineMediaGalleryItem, TimelineScrollAnchor,
+    TrustOperationFailureKind, UserProfile, VerificationCancelReason, VerificationGateFailureKind,
+    VerificationGateState, VerificationMethod, VerificationTarget,
 };
 
 #[derive(Clone, Eq, PartialEq)]
@@ -532,6 +532,22 @@ pub enum AppAction {
         query: DirectoryQuery,
         kind: OperationFailureKind,
     },
+    DirectoryPreviewRequested {
+        request_id: u64,
+        room_id_or_alias: String,
+        via_servers: Vec<String>,
+    },
+    DirectoryPreviewLoaded {
+        request_id: u64,
+        room: DirectoryRoomPreview,
+    },
+    DirectoryPreviewFailed {
+        request_id: u64,
+        room_id_or_alias: String,
+        via_servers: Vec<String>,
+        kind: OperationFailureKind,
+    },
+    DirectoryPreviewDismissed,
     DirectoryJoinRequested {
         request_id: u64,
         room_id_or_alias: String,
@@ -1210,6 +1226,34 @@ impl fmt::Debug for AppAction {
                 .field("query", query)
                 .field("kind", kind)
                 .finish(),
+            Self::DirectoryPreviewRequested {
+                request_id,
+                via_servers,
+                ..
+            } => formatter
+                .debug_struct("DirectoryPreviewRequested")
+                .field("request_id", request_id)
+                .field("room_id_or_alias", &"RoomIdOrAlias(..)")
+                .field("via_server_count", &via_servers.len())
+                .finish(),
+            Self::DirectoryPreviewLoaded { request_id, room } => formatter
+                .debug_struct("DirectoryPreviewLoaded")
+                .field("request_id", request_id)
+                .field("room", room)
+                .finish(),
+            Self::DirectoryPreviewFailed {
+                request_id,
+                via_servers,
+                kind,
+                ..
+            } => formatter
+                .debug_struct("DirectoryPreviewFailed")
+                .field("request_id", request_id)
+                .field("room_id_or_alias", &"RoomIdOrAlias(..)")
+                .field("via_server_count", &via_servers.len())
+                .field("kind", kind)
+                .finish(),
+            Self::DirectoryPreviewDismissed => formatter.write_str("DirectoryPreviewDismissed"),
             Self::DirectoryJoinRequested {
                 request_id,
                 via_servers,

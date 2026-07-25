@@ -142,6 +142,24 @@
             "second.example.invalid"
           ]
         },
+        "preview": {
+          "kind": "ready",
+          "request_id": 9,
+          "room": {
+            "canonical_alias": "#fixture-preview:example.invalid",
+            "joinability": "restricted",
+            "joined_members": 12,
+            "membership": "invited",
+            "name": "Fixture Previewed Space",
+            "room_id": "!fixture-preview:example.invalid",
+            "room_type": "m.space",
+            "topic": "Fixture preview topic"
+          },
+          "room_id_or_alias": "!fixture-preview:example.invalid",
+          "via_servers": [
+            "preview.example.invalid"
+          ]
+        },
         "query": {
           "kind": "results",
           "next_batch": null,
