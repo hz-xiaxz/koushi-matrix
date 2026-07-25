@@ -44,6 +44,32 @@ show `Recompressing…` without losing the last valid output.
 `Original`/`Keep` stay distinct: resize `Original` preserves dimensions while
 format `Keep` preserves the source encoding.
 
+## Resolved state model
+
+`PreparedUploadFormat` keeps describing the *actual* encoding of a prepared
+output. Selection gets its own types so `Original` (dimensions) and `Keep`
+(encoding) cannot be confused:
+
+```rust
+pub enum StagedUploadResizeChoice { Original, Half, Quarter, Eighth }
+pub enum StagedUploadFormatChoice { Keep, Png, Jpeg, Webp }
+pub struct StagedUploadOutputSelection { resize: …, format: … }
+```
+
+`PreparedUploadVariant` gains `resize` and `format_choice` so the GUI matches a
+selection to a cached output without parsing `variant_id`.
+
+`StagedUploadPreparation::Ready { variants, selected, pending, generation }` has
+exactly one owner of "which output": `selected`. `variants` is the completed
+cache; a selection whose pair is absent is simply not prepared yet, which is
+what `pending` reports. `selected_variant_id` is removed — two fields that must
+agree would be duplicate state.
+
+While `pending` is set, React keeps the preview image it already loaded (that is
+presentation state it owns) and the summary shows the preparation state instead
+of stale numbers, so displayed dimensions and byte size never describe anything
+other than the bytes that would be uploaded.
+
 ## Rust work
 
 1. `koushi-media`: add a single-combination entry point that decodes once,
