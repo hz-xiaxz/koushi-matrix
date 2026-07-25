@@ -60,14 +60,17 @@ use std::{
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::{
     MatrixClientSession, MatrixCreateRoomOptions, MatrixCreateRoomParentSpace,
-    MatrixCreateRoomVisibility, MatrixPublicRoomDirectoryQuery, MatrixPublicRoomDirectoryRoom,
-    MatrixRoomHistoryVisibility, MatrixRoomJoinRule, MatrixRoomListRoom, MatrixRoomListSnapshot,
-    MatrixRoomListSpace, MatrixRoomMemberRole, MatrixRoomMemberSummary, MatrixRoomModerationAction,
-    MatrixRoomOperationError, MatrixRoomPermissionFacts, MatrixRoomSettingChange,
-    MatrixRoomSettingsSnapshot, MatrixRoomTagKind, MatrixRoomTags, MatrixUserTrustState,
+    MatrixCreateRoomVisibility, MatrixPreviewJoinability, MatrixPreviewMembership,
+    MatrixPublicRoomDirectoryQuery, MatrixPublicRoomDirectoryRoom, MatrixRoomHistoryVisibility,
+    MatrixRoomJoinRule, MatrixRoomListRoom, MatrixRoomListSnapshot, MatrixRoomListSpace,
+    MatrixRoomMemberRole, MatrixRoomMemberSummary, MatrixRoomModerationAction,
+    MatrixRoomOperationError, MatrixRoomPermissionFacts, MatrixRoomPreview,
+    MatrixRoomSettingChange, MatrixRoomSettingsSnapshot, MatrixRoomTagKind, MatrixRoomTags,
+    MatrixUserTrustState,
 };
 use koushi_state::{
-    AppAction, AvatarImage, AvatarThumbnailState, BasicOperationRequest, DirectoryQuery,
+    AppAction, AvatarImage, AvatarThumbnailState, BasicOperationRequest,
+    DirectoryPreviewJoinability, DirectoryPreviewMembership, DirectoryQuery, DirectoryRoomPreview,
     DirectoryRoomSummary, INVITE_ALREADY_IN_SPACE_MESSAGE, InviteDestination,
     InviteDestinationResult, InviteDestinationResultKind, InvitePreview, InviteScopeSelection,
     OperationFailureKind, PinnedEvent, RoomHistoryVisibility, RoomJoinRule, RoomMemberRole,
@@ -461,6 +464,18 @@ impl RoomActor {
             }
             RoomCommand::QueryDirectory { request_id, query } => {
                 self.handle_query_directory(request_id, query).await;
+            }
+            RoomCommand::PreviewJoinTarget {
+                request_id,
+                room_id_or_alias,
+                via_servers,
+            } => {
+                self.handle_preview_join_target(request_id, room_id_or_alias, via_servers)
+                    .await;
+            }
+            RoomCommand::DismissDirectoryPreview { request_id: _ } => {
+                self.reduce_reliable(vec![AppAction::DirectoryPreviewDismissed])
+                    .await;
             }
             RoomCommand::JoinDirectoryRoom {
                 request_id,
@@ -1045,6 +1060,61 @@ impl RoomActor {
                 self.reduce_reliable(vec![AppAction::DirectoryQueryFailed {
                     request_id: request_id.sequence,
                     query,
+                    kind: operation_failure_kind(kind),
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
+            }
+        }
+    }
+
+    async fn handle_preview_join_target(
+        &self,
+        request_id: RequestId,
+        room_id_or_alias: String,
+        via_servers: Vec<String>,
+    ) {
+        self.reduce_reliable(vec![AppAction::DirectoryPreviewRequested {
+            request_id: request_id.sequence,
+            room_id_or_alias: room_id_or_alias.clone(),
+            via_servers: via_servers.clone(),
+        }])
+        .await;
+        let Some(session) = &self.session else {
+            self.reduce_reliable(vec![AppAction::DirectoryPreviewFailed {
+                request_id: request_id.sequence,
+                room_id_or_alias,
+                via_servers,
+                kind: OperationFailureKind::Sdk,
+            }])
+            .await;
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+
+        let target = koushi_sdk::MatrixJoinTarget {
+            room_id_or_alias: room_id_or_alias.clone(),
+            via_servers: via_servers.clone(),
+        };
+        match koushi_sdk::preview_join_target(session, &target).await {
+            Ok(preview) => {
+                let room = directory_room_preview_from_sdk(preview);
+                self.reduce_reliable(vec![AppAction::DirectoryPreviewLoaded {
+                    request_id: request_id.sequence,
+                    room: room.clone(),
+                }])
+                .await;
+                self.emit(CoreEvent::Room(RoomEvent::DirectoryPreviewLoaded {
+                    request_id,
+                    room,
+                }));
+            }
+            Err(error) => {
+                let kind = classify_room_error(&error);
+                self.reduce_reliable(vec![AppAction::DirectoryPreviewFailed {
+                    request_id: request_id.sequence,
+                    room_id_or_alias,
+                    via_servers,
                     kind: operation_failure_kind(kind),
                 }])
                 .await;
@@ -2844,6 +2914,28 @@ fn directory_room_summary_from_sdk(room: MatrixPublicRoomDirectoryRoom) -> Direc
         joined_members: room.joined_members,
         world_readable: room.world_readable,
         guest_can_join: room.guest_can_join,
+    }
+}
+
+fn directory_room_preview_from_sdk(preview: MatrixRoomPreview) -> DirectoryRoomPreview {
+    DirectoryRoomPreview {
+        room_id: preview.room_id,
+        canonical_alias: preview.canonical_alias,
+        room_type: preview.room_type,
+        name: preview.name,
+        topic: preview.topic,
+        joined_members: preview.joined_members,
+        joinability: match preview.joinability {
+            MatrixPreviewJoinability::Open => DirectoryPreviewJoinability::Open,
+            MatrixPreviewJoinability::InviteOnly => DirectoryPreviewJoinability::InviteOnly,
+            MatrixPreviewJoinability::Restricted => DirectoryPreviewJoinability::Restricted,
+            MatrixPreviewJoinability::Unknown => DirectoryPreviewJoinability::Unknown,
+        },
+        membership: match preview.membership {
+            MatrixPreviewMembership::Joined => DirectoryPreviewMembership::Joined,
+            MatrixPreviewMembership::Invited => DirectoryPreviewMembership::Invited,
+            MatrixPreviewMembership::None => DirectoryPreviewMembership::None,
+        },
     }
 }
 

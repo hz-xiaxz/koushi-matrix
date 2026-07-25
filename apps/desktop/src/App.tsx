@@ -218,6 +218,7 @@ import {
   CreateEntityDialog,
   type CreateRoomDialogOptions,
   DiagnosticDialog,
+  DirectoryPreviewDialog,
   InviteTargetsDialog,
   ReportReasonDialog,
   UserIdDialog
@@ -2765,7 +2766,7 @@ export function App() {
       case "empty":
         return;
       case "join":
-        await joinDirectoryTarget(submission.roomIdOrAlias, submission.viaServers);
+        await previewJoinTarget(submission.roomIdOrAlias, submission.viaServers);
         return;
       case "user":
         // A person is not joinable, and creating a DM would invite them; leave
@@ -2776,8 +2777,16 @@ export function App() {
     }
   }
 
-  async function joinDirectoryTarget(roomIdOrAlias: string, viaServers: string[]) {
-    if (snapshot?.state.domain.directory.join.kind === "joining") {
+  /**
+   * Show what a target actually is before joining it.
+   *
+   * Every way of naming a room — a link, a typed id, a directory result — comes
+   * through here, so the user never joins something sight unseen and the two
+   * entry points cannot drift apart.
+   */
+  async function previewJoinTarget(roomIdOrAlias: string, viaServers: string[]) {
+    const directory = snapshot?.state.domain.directory;
+    if (directory?.join.kind === "joining" || directory?.preview.kind === "loading") {
       return;
     }
     const joined = snapshot?.state.domain.rooms.find(
@@ -2787,18 +2796,45 @@ export function App() {
       await selectRoom(joined.room_id);
       return;
     }
-    const nextSnapshot = await api.joinDirectoryRoom(roomIdOrAlias, viaServers);
+    setSnapshot(await api.previewJoinTarget(roomIdOrAlias, viaServers));
+  }
+
+  /** Join the previewed room, reusing exactly the target that resolved it. */
+  async function confirmDirectoryJoin() {
+    const preview = snapshot?.state.domain.directory.preview;
+    if (preview?.kind !== "ready") {
+      return;
+    }
+    // A room already in the list is navigation. A preview that reports
+    // membership the room list has not caught up to still goes through join,
+    // which is idempotent and is what makes the local state catch up.
+    const joined = snapshot?.state.domain.rooms.find(
+      (room) => room.room_id === preview.room.room_id
+    );
+    if (joined) {
+      await dismissDirectoryPreview();
+      await selectRoom(joined.room_id);
+      return;
+    }
+    const nextSnapshot = await api.joinDirectoryRoom(
+      preview.room_id_or_alias,
+      preview.via_servers
+    );
     setPrimaryView("timeline");
     setSnapshot(nextSnapshot);
+  }
+
+  async function dismissDirectoryPreview() {
+    setSnapshot(await api.dismissDirectoryPreview());
   }
 
   /**
    * Open a Matrix entity a message linked to.
    *
    * An already-joined room is plain navigation. Anything else is handed to the
-   * Rust-owned directory query/join state machine by seeding Explore with the
-   * target, so joining a linked room uses exactly the same path as joining a
-   * searched one instead of growing a second join flow.
+   * Rust-owned directory preview/join state machine by seeding Explore with the
+   * target, so a linked room uses exactly the same path as a searched one
+   * instead of growing a second join flow.
    */
   async function openMatrixTarget(target: MatrixPermalinkTarget) {
     if (target.kind !== "room") {
@@ -2812,7 +2848,7 @@ export function App() {
       return;
     }
     setDirectorySearchDraft(target.roomIdOrAlias);
-    await joinDirectoryTarget(target.roomIdOrAlias, target.viaServers);
+    await previewJoinTarget(target.roomIdOrAlias, target.viaServers);
   }
 
   async function joinDirectoryRoom(room: DirectoryRoomSummary) {
@@ -2824,7 +2860,7 @@ export function App() {
     const alias = room.canonical_alias?.trim() || null;
     const target = alias ?? room.room_id;
     const viaServer = serverNameFromMatrixId(target);
-    await joinDirectoryTarget(target, viaServer ? [viaServer] : []);
+    await previewJoinTarget(target, viaServer ? [viaServer] : []);
   }
 
   function openCreateDialog(kind: "room" | "space") {
@@ -5005,6 +5041,18 @@ export function App() {
           y={contextMenu.y}
           onAction={runContextMenuAction}
           onClose={() => setContextMenu(null)}
+        />
+      ) : null}
+      {snapshot.state.domain.directory.preview.kind !== "closed" ? (
+        <DirectoryPreviewDialog
+          isBusy={isBusy || snapshot.state.domain.directory.join.kind === "joining"}
+          preview={snapshot.state.domain.directory.preview}
+          onCancel={() => {
+            void dismissDirectoryPreview();
+          }}
+          onConfirm={() => {
+            void confirmDirectoryJoin();
+          }}
         />
       ) : null}
       {createDialog ? (

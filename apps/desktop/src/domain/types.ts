@@ -872,6 +872,7 @@ export type ActivityMarkReadTarget =
 
 export interface DirectoryState {
   query: DirectoryQueryState;
+  preview: DirectoryPreviewState;
   join: DirectoryJoinState;
 }
 
@@ -891,6 +892,54 @@ export type DirectoryQueryState =
       query: DirectoryQuery;
       failureKind: OperationFailureKind;
     };
+
+/** What the user is shown before committing to a join. The target and via
+ * servers are carried through every stage because the join that follows must
+ * reuse exactly what resolved the preview. */
+export type DirectoryPreviewState =
+  | { kind: "closed" }
+  | {
+      kind: "loading";
+      request_id: number;
+      /** `#alias:server` or `!id:server`. */
+      room_id_or_alias: string;
+      via_servers: string[];
+    }
+  | {
+      kind: "ready";
+      request_id: number;
+      room_id_or_alias: string;
+      via_servers: string[];
+      room: DirectoryRoomPreview;
+    }
+  | {
+      kind: "failed";
+      request_id: number;
+      room_id_or_alias: string;
+      via_servers: string[];
+      failureKind: OperationFailureKind;
+    };
+
+/** Whether a plain join is expected to work. Restricted and knock variants
+ * collapse into coarse buckets; the exact join rule is server policy. */
+export type DirectoryPreviewJoinability = "open" | "inviteOnly" | "restricted" | "unknown";
+
+/** Membership the current account already has in the previewed room. */
+export type DirectoryPreviewMembership = "joined" | "invited" | "none";
+
+export interface DirectoryRoomPreview {
+  room_id: string;
+  canonical_alias: string | null;
+  /** Matrix `room_type`, e.g. `m.space`. Absent for an ordinary room. */
+  room_type: string | null;
+  /** Empty when the room has no name; the GUI supplies a type-appropriate
+   * fallback rather than Rust inventing prose. */
+  name: string;
+  topic: string | null;
+  joined_members: number;
+  joinability: DirectoryPreviewJoinability;
+  membership: DirectoryPreviewMembership;
+}
 
 export type DirectoryJoinState =
   | { kind: "idle" }

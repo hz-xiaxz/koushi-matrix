@@ -1,8 +1,9 @@
 use crate::{
     effect::{AppEffect, UiEvent},
     state::{
-        AppState, DirectoryJoinState, DirectoryQuery, DirectoryQueryState, FocusedContextState,
-        ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
+        AppState, DirectoryJoinState, DirectoryPreviewState, DirectoryQuery, DirectoryQueryState,
+        FocusedContextState, ThreadAttentionState, ThreadPaneState, ThreadsListState,
+        TimelinePaneState,
     },
 };
 
@@ -71,6 +72,88 @@ pub(crate) fn handle_directory_query_failed(
     vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)]
 }
 
+pub(crate) fn handle_directory_preview_requested(
+    state: &mut AppState,
+    request_id: u64,
+    room_id_or_alias: String,
+    via_servers: Vec<String>,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
+
+    state.directory.preview = DirectoryPreviewState::Loading {
+        request_id,
+        room_id_or_alias,
+        via_servers,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)]
+}
+
+pub(crate) fn handle_directory_preview_loaded(
+    state: &mut AppState,
+    request_id: u64,
+    room: crate::state::DirectoryRoomPreview,
+) -> Vec<AppEffect> {
+    let DirectoryPreviewState::Loading {
+        request_id: current_request_id,
+        room_id_or_alias,
+        via_servers,
+    } = &state.directory.preview
+    else {
+        return Vec::new();
+    };
+    if *current_request_id != request_id {
+        return Vec::new();
+    }
+
+    state.directory.preview = DirectoryPreviewState::Ready {
+        request_id,
+        room_id_or_alias: room_id_or_alias.clone(),
+        via_servers: via_servers.clone(),
+        room,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)]
+}
+
+pub(crate) fn handle_directory_preview_failed(
+    state: &mut AppState,
+    request_id: u64,
+    room_id_or_alias: String,
+    via_servers: Vec<String>,
+    kind: crate::state::OperationFailureKind,
+) -> Vec<AppEffect> {
+    if !matches!(
+        &state.directory.preview,
+        DirectoryPreviewState::Loading {
+            request_id: current_request_id,
+            room_id_or_alias: current_target,
+            via_servers: current_via_servers,
+        } if *current_request_id == request_id
+            && *current_target == room_id_or_alias
+            && *current_via_servers == via_servers
+    ) {
+        return Vec::new();
+    }
+
+    state.directory.preview = DirectoryPreviewState::Failed {
+        request_id,
+        room_id_or_alias,
+        via_servers,
+        kind,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)]
+}
+
+pub(crate) fn handle_directory_preview_dismissed(state: &mut AppState) -> Vec<AppEffect> {
+    if state.directory.preview == DirectoryPreviewState::Closed {
+        return Vec::new();
+    }
+
+    state.directory.preview = DirectoryPreviewState::Closed;
+    vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)]
+}
+
 pub(crate) fn handle_directory_join_requested(
     state: &mut AppState,
     request_id: u64,
@@ -81,6 +164,8 @@ pub(crate) fn handle_directory_join_requested(
         return Vec::new();
     }
 
+    // The decision has been made; the preview must not outlive it.
+    state.directory.preview = DirectoryPreviewState::Closed;
     state.directory.join = DirectoryJoinState::Joining {
         request_id,
         room_id_or_alias,

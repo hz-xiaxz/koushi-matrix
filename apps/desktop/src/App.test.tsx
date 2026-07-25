@@ -1439,9 +1439,9 @@ describe("desktop integration source guards", () => {
     const joinEnd = source.indexOf("function openCreateDialog", joinStart);
     const joinSource = source.slice(joinStart, joinEnd);
 
-    // A result row joins through the one shared target path, so a link click
+    // A result row goes through the one shared preview path, so a link click
     // and a directory Join cannot drift into different join behavior.
-    expect(joinSource).toContain("joinDirectoryTarget(");
+    expect(joinSource).toContain("previewJoinTarget(");
     // A public space often has no alias, so the row falls back to the room id
     // rather than becoming findable but unjoinable.
     expect(joinSource).toContain("alias ?? room.room_id");
@@ -1449,13 +1449,33 @@ describe("desktop integration source guards", () => {
     expect(joinSource).not.toContain("previousRoomIds");
     expect(joinSource).not.toContain("api.selectRoom(");
 
-    const sharedStart = source.indexOf("async function joinDirectoryTarget");
-    const sharedEnd = source.indexOf("async function joinDirectoryRoom", sharedStart);
-    const sharedSource = source.slice(sharedStart, sharedEnd);
+    const confirmStart = source.indexOf("async function confirmDirectoryJoin");
+    const confirmEnd = source.indexOf("async function dismissDirectoryPreview", confirmStart);
+    const confirmSource = source.slice(confirmStart, confirmEnd);
 
-    expect(sharedSource).toContain("api.joinDirectoryRoom(");
-    expect(sharedSource).toContain('setPrimaryView("timeline")');
-    expect(sharedSource).toContain("setSnapshot(nextSnapshot)");
+    // The join must reuse the Rust-owned target that resolved the preview,
+    // not re-derive one in React.
+    expect(confirmSource).toContain("preview.room_id_or_alias");
+    expect(confirmSource).toContain("preview.via_servers");
+    expect(confirmSource).toContain("api.joinDirectoryRoom(");
+    expect(confirmSource).toContain('setPrimaryView("timeline")');
+    expect(confirmSource).toContain("setSnapshot(nextSnapshot)");
+  });
+
+  test("naming a room opens the Rust-owned preview instead of joining it outright", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const previewStart = source.indexOf("async function previewJoinTarget");
+    const previewEnd = source.indexOf("async function confirmDirectoryJoin", previewStart);
+    const previewSource = source.slice(previewStart, previewEnd);
+
+    expect(previewSource).toContain("api.previewJoinTarget(");
+    // Joining from here would put the user in a room they never saw.
+    expect(previewSource).not.toContain("api.joinDirectoryRoom(");
+
+    // Both entry points must reach the preview, never the join directly.
+    const openStart = source.indexOf("async function openMatrixTarget");
+    const openEnd = source.indexOf("async function joinDirectoryRoom", openStart);
+    expect(source.slice(openStart, openEnd)).toContain("previewJoinTarget(");
   });
 
   test("room mark-as-read prefers the room latest event over stale markers", () => {

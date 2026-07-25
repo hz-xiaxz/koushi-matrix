@@ -964,6 +964,9 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
     window.__harness.setCommandResponse("query_directory", () =>
       window.__harness.currentSnapshot()
     );
+    window.__harness.setCommandResponse("preview_join_target", () =>
+      window.__harness.currentSnapshot()
+    );
     window.__harness.setCommandResponse("join_directory_room", () =>
       window.__harness.currentSnapshot()
     );
@@ -1012,6 +1015,7 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
                 {
                   room_id: "!public-result:example.invalid",
                   canonical_alias: "#public-result:example.invalid",
+                  room_type: null,
                   name: "Public Search Result",
                   topic: "Rust-owned public directory result",
                   avatar_url: null,
@@ -1022,6 +1026,7 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
               ],
               next_batch: null
             },
+            preview: { kind: "closed" },
             join: { kind: "idle" }
           }
         }
@@ -1033,14 +1038,69 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
   await expect(page.getByRole("heading", { name: "Public Search Result" })).toBeVisible();
   await page.getByRole("button", { name: "Join Public Search Result" }).click();
 
+  // A result row must open the Rust-owned preview, not put the user straight
+  // into a room they have not seen.
+  await expect.poll(() => invocationCount(page, "preview_join_target")).toBeGreaterThanOrEqual(1);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("preview_join_target")[0]?.args)
+    )
+    .toEqual({
+      roomIdOrAlias: "#public-result:example.invalid",
+      viaServers: ["example.invalid"]
+    });
+  expect(await invocationCount(page, "join_directory_room")).toBe(0);
+  await expect(page.getByRole("dialog", { name: "Join this room?" })).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          directory: {
+            ...snapshot.state.domain.directory,
+            preview: {
+              kind: "ready",
+              request_id: 45,
+              room_id_or_alias: "#public-result:example.invalid",
+              via_servers: ["example.invalid"],
+              room: {
+                room_id: "!public-result:example.invalid",
+                canonical_alias: "#public-result:example.invalid",
+                room_type: "m.space",
+                name: "Public Search Result",
+                topic: "Rust-owned public directory result",
+                joined_members: 12,
+                joinability: "open",
+                membership: "none"
+              }
+            }
+          }
+        }
+      }
+    });
+    window.__harness.pushStateChanged();
+  });
+
+  const previewDialog = page.getByRole("dialog", { name: "Join this room?" });
+  await expect(previewDialog).toBeVisible();
+  await expect(previewDialog.getByText("Rust-owned public directory result")).toBeVisible();
+  await expect(previewDialog.getByText("12 members")).toBeVisible();
+  await expect(previewDialog.getByText("Space", { exact: true })).toBeVisible();
+
+  await previewDialog.getByRole("button", { name: "Join", exact: true }).click();
+
   await expect.poll(() => invocationCount(page, "join_directory_room")).toBeGreaterThanOrEqual(1);
   await expect
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("join_directory_room")[0]?.args)
     )
     .toEqual({
-      alias: "#public-result:example.invalid",
-      viaServer: "example.invalid"
+      roomIdOrAlias: "#public-result:example.invalid",
+      viaServers: ["example.invalid"]
     });
 
   const roomsSection = page.locator('[data-room-section="rooms"]');
@@ -1079,6 +1139,7 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
           rooms: [...snapshot.state.domain.rooms, joinedRoom],
           directory: {
             ...snapshot.state.domain.directory,
+            preview: { kind: "closed" },
             join: { kind: "idle" }
           }
         }

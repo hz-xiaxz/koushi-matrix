@@ -165,6 +165,8 @@ impl CoreCommand {
                 | RoomCommand::PinEvent { request_id, .. }
                 | RoomCommand::UnpinEvent { request_id, .. }
                 | RoomCommand::QueryDirectory { request_id, .. }
+                | RoomCommand::PreviewJoinTarget { request_id, .. }
+                | RoomCommand::DismissDirectoryPreview { request_id }
                 | RoomCommand::JoinDirectoryRoom { request_id, .. }
                 | RoomCommand::LoadRoomSettings { request_id, .. }
                 | RoomCommand::ReshareRoomKey { request_id, .. }
@@ -1831,6 +1833,16 @@ pub enum RoomCommand {
         request_id: RequestId,
         query: DirectoryQuery,
     },
+    PreviewJoinTarget {
+        request_id: RequestId,
+        /// `#alias:server` or `!id:server`.
+        room_id_or_alias: String,
+        /// Servers to try when the homeserver does not already know the room.
+        via_servers: Vec<String>,
+    },
+    DismissDirectoryPreview {
+        request_id: RequestId,
+    },
     JoinDirectoryRoom {
         request_id: RequestId,
         /// `#alias:server` or `!id:server`.
@@ -2032,6 +2044,20 @@ impl fmt::Debug for RoomCommand {
                 )
                 .field("limit", &query.limit)
                 .field("since", &query.since.as_ref().map(|_| "PageToken(..)"))
+                .finish(),
+            Self::PreviewJoinTarget {
+                request_id,
+                via_servers,
+                ..
+            } => formatter
+                .debug_struct("PreviewJoinTarget")
+                .field("request_id", request_id)
+                .field("room_id_or_alias", &"RoomIdOrAlias(..)")
+                .field("via_server_count", &via_servers.len())
+                .finish(),
+            Self::DismissDirectoryPreview { request_id } => formatter
+                .debug_struct("DismissDirectoryPreview")
+                .field("request_id", request_id)
                 .finish(),
             Self::JoinDirectoryRoom { request_id, .. } => formatter
                 .debug_struct("JoinDirectoryRoom")

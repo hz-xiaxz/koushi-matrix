@@ -1,7 +1,8 @@
 use koushi_state::{
-    AppAction, AppEffect, AppState, DirectoryJoinState, DirectoryQuery, DirectoryQueryState,
-    DirectoryRoomSummary, DirectoryState, OperationFailureKind, SessionInfo, SessionState, UiEvent,
-    reduce,
+    AppAction, AppEffect, AppState, DirectoryJoinState, DirectoryPreviewJoinability,
+    DirectoryPreviewMembership, DirectoryPreviewState, DirectoryQuery, DirectoryQueryState,
+    DirectoryRoomPreview, DirectoryRoomSummary, DirectoryState, OperationFailureKind, SessionInfo,
+    SessionState, UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -156,6 +157,7 @@ fn directory_query_lifecycle_is_request_correlated() {
                 request_id: 7,
                 query: query.clone(),
             },
+            preview: DirectoryPreviewState::Closed,
             join: DirectoryJoinState::Idle,
         }
     );
@@ -456,4 +458,254 @@ fn directory_actions_require_ready_session_and_logout_clears_state() {
     reduce(&mut state, AppAction::LogoutFinished);
 
     assert_eq!(state.directory, DirectoryState::default());
+}
+
+fn preview() -> DirectoryRoomPreview {
+    DirectoryRoomPreview {
+        room_id: "!previewed:example.invalid".to_owned(),
+        canonical_alias: Some("#previewed:example.invalid".to_owned()),
+        room_type: Some("m.space".to_owned()),
+        name: "Synthetic Space".to_owned(),
+        topic: Some("Synthetic space topic".to_owned()),
+        joined_members: 12,
+        joinability: DirectoryPreviewJoinability::Open,
+        membership: DirectoryPreviewMembership::None,
+    }
+}
+
+#[test]
+fn directory_preview_is_request_correlated_and_keeps_the_join_target() {
+    let mut state = ready_state();
+    let target = "!previewed:example.invalid".to_owned();
+    let via = vec!["example.invalid".to_owned()];
+
+    let effects = reduce(
+        &mut state,
+        AppAction::DirectoryPreviewRequested {
+            request_id: 31,
+            room_id_or_alias: target.clone(),
+            via_servers: via.clone(),
+        },
+    );
+
+    assert_eq!(
+        state.directory.preview,
+        DirectoryPreviewState::Loading {
+            request_id: 31,
+            room_id_or_alias: target.clone(),
+            via_servers: via.clone(),
+        }
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)]
+    );
+
+    assert_eq!(
+        reduce(
+            &mut state,
+            AppAction::DirectoryPreviewLoaded {
+                request_id: 32,
+                room: preview(),
+            },
+        ),
+        Vec::new()
+    );
+    assert!(matches!(
+        state.directory.preview,
+        DirectoryPreviewState::Loading { request_id: 31, .. }
+    ));
+
+    let effects = reduce(
+        &mut state,
+        AppAction::DirectoryPreviewLoaded {
+            request_id: 31,
+            room: preview(),
+        },
+    );
+
+    // Joining must reuse the exact target/via that resolved the preview, so the
+    // ready state carries them instead of making the GUI re-derive them.
+    assert_eq!(
+        state.directory.preview,
+        DirectoryPreviewState::Ready {
+            request_id: 31,
+            room_id_or_alias: target,
+            via_servers: via,
+            room: preview(),
+        }
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)]
+    );
+}
+
+#[test]
+fn directory_preview_failure_is_rust_owned_and_dismiss_closes_it() {
+    let mut state = ready_state();
+    let target = "#missing:example.invalid".to_owned();
+
+    reduce(
+        &mut state,
+        AppAction::DirectoryPreviewRequested {
+            request_id: 33,
+            room_id_or_alias: target.clone(),
+            via_servers: Vec::new(),
+        },
+    );
+    let effects = reduce(
+        &mut state,
+        AppAction::DirectoryPreviewFailed {
+            request_id: 33,
+            room_id_or_alias: target.clone(),
+            via_servers: Vec::new(),
+            kind: OperationFailureKind::NotFound,
+        },
+    );
+
+    assert_eq!(
+        state.directory.preview,
+        DirectoryPreviewState::Failed {
+            request_id: 33,
+            room_id_or_alias: target,
+            via_servers: Vec::new(),
+            kind: OperationFailureKind::NotFound,
+        }
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)]
+    );
+
+    let effects = reduce(&mut state, AppAction::DirectoryPreviewDismissed);
+    assert_eq!(state.directory.preview, DirectoryPreviewState::Closed);
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)]
+    );
+
+    // Dismissing nothing is not a state change worth notifying the GUI about.
+    assert_eq!(
+        reduce(&mut state, AppAction::DirectoryPreviewDismissed),
+        Vec::new()
+    );
+}
+
+#[test]
+fn joining_closes_the_preview_so_the_dialog_does_not_outlive_the_decision() {
+    let mut state = ready_state();
+    let target = "!previewed:example.invalid".to_owned();
+
+    reduce(
+        &mut state,
+        AppAction::DirectoryPreviewRequested {
+            request_id: 34,
+            room_id_or_alias: target.clone(),
+            via_servers: Vec::new(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::DirectoryPreviewLoaded {
+            request_id: 34,
+            room: preview(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::DirectoryJoinRequested {
+            request_id: 35,
+            room_id_or_alias: target,
+            via_servers: Vec::new(),
+        },
+    );
+
+    assert_eq!(state.directory.preview, DirectoryPreviewState::Closed);
+}
+
+#[test]
+fn directory_preview_needs_a_ready_session_and_is_cleared_on_logout() {
+    let mut signed_out = AppState::default();
+    assert_eq!(
+        reduce(
+            &mut signed_out,
+            AppAction::DirectoryPreviewRequested {
+                request_id: 36,
+                room_id_or_alias: "#synthetic:example.invalid".to_owned(),
+                via_servers: Vec::new(),
+            },
+        ),
+        Vec::new()
+    );
+    assert_eq!(signed_out.directory, DirectoryState::default());
+
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::DirectoryPreviewRequested {
+            request_id: 37,
+            room_id_or_alias: "#synthetic:example.invalid".to_owned(),
+            via_servers: Vec::new(),
+        },
+    );
+    reduce(&mut state, AppAction::LogoutFinished);
+
+    assert_eq!(state.directory, DirectoryState::default());
+}
+
+#[test]
+fn directory_preview_debug_output_redacts_private_room_values() {
+    let private_preview = DirectoryRoomPreview {
+        room_id: "!private-preview:example.invalid".to_owned(),
+        canonical_alias: Some("#private-preview:example.invalid".to_owned()),
+        room_type: Some("m.space".to_owned()),
+        name: "Private Preview Room".to_owned(),
+        topic: Some("Private preview topic".to_owned()),
+        joined_members: 5,
+        joinability: DirectoryPreviewJoinability::InviteOnly,
+        membership: DirectoryPreviewMembership::Invited,
+    };
+
+    let debug_values = [
+        format!("{private_preview:?}"),
+        format!(
+            "{:?}",
+            DirectoryPreviewState::Ready {
+                request_id: 38,
+                room_id_or_alias: "#private-preview:example.invalid".to_owned(),
+                via_servers: vec!["private.example.invalid".to_owned()],
+                room: private_preview.clone(),
+            }
+        ),
+        format!(
+            "{:?}",
+            AppAction::DirectoryPreviewRequested {
+                request_id: 39,
+                room_id_or_alias: "#private-preview:example.invalid".to_owned(),
+                via_servers: vec!["private.example.invalid".to_owned()],
+            }
+        ),
+        format!(
+            "{:?}",
+            AppAction::DirectoryPreviewLoaded {
+                request_id: 40,
+                room: private_preview,
+            }
+        ),
+    ];
+
+    for debug in debug_values {
+        for secret in [
+            "private-preview",
+            "Private Preview Room",
+            "Private preview topic",
+            "private.example.invalid",
+        ] {
+            assert!(
+                !debug.contains(secret),
+                "directory preview Debug output must not leak private room values"
+            );
+        }
+    }
 }

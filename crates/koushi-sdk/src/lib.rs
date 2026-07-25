@@ -5857,6 +5857,92 @@ pub async fn query_public_room_directory(
     })
 }
 
+/// Coarse joinability of a previewed room, for deciding what to offer.
+///
+/// The exact join rule is server policy; the GUI only needs to know whether a
+/// plain Join is expected to work, so restricted/knock variants collapse here.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixPreviewJoinability {
+    /// Anyone may join.
+    Open,
+    /// An invite (or a knock) is required first.
+    InviteOnly,
+    /// Joining depends on membership of another room.
+    Restricted,
+    /// The server did not report a join rule.
+    Unknown,
+}
+
+/// Membership the current account already has in a previewed room.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixPreviewMembership {
+    Joined,
+    Invited,
+    /// Not a member, or the room is unknown to this account.
+    None,
+}
+
+/// A private-data-minimized preview of a room the user has not joined.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MatrixRoomPreview {
+    pub room_id: String,
+    pub canonical_alias: Option<String>,
+    /// Matrix `room_type`, e.g. `m.space`. Absent for an ordinary room.
+    pub room_type: Option<String>,
+    /// Empty when the room has no name; the caller supplies the fallback.
+    pub name: String,
+    pub topic: Option<String>,
+    pub joined_members: u64,
+    pub joinability: MatrixPreviewJoinability,
+    pub membership: MatrixPreviewMembership,
+}
+
+/// Project an SDK room preview into the private-data-minimized DTO.
+fn matrix_room_preview_from_sdk(
+    preview: matrix_sdk::room_preview::RoomPreview,
+) -> MatrixRoomPreview {
+    use matrix_sdk::ruma::room::JoinRuleSummary;
+
+    let joinability = match preview.join_rule {
+        Some(JoinRuleSummary::Public) => MatrixPreviewJoinability::Open,
+        Some(JoinRuleSummary::Invite | JoinRuleSummary::Knock | JoinRuleSummary::Private) => {
+            MatrixPreviewJoinability::InviteOnly
+        }
+        Some(JoinRuleSummary::Restricted(_) | JoinRuleSummary::KnockRestricted(_)) => {
+            MatrixPreviewJoinability::Restricted
+        }
+        _ => MatrixPreviewJoinability::Unknown,
+    };
+    let membership = match preview.state {
+        Some(matrix_sdk::RoomState::Joined) => MatrixPreviewMembership::Joined,
+        Some(matrix_sdk::RoomState::Invited) => MatrixPreviewMembership::Invited,
+        _ => MatrixPreviewMembership::None,
+    };
+    MatrixRoomPreview {
+        room_id: preview.room_id.to_string(),
+        canonical_alias: preview.canonical_alias.map(|alias| alias.to_string()),
+        room_type: preview.room_type.map(|room_type| room_type.to_string()),
+        name: preview.name.unwrap_or_default(),
+        topic: preview.topic,
+        joined_members: preview.num_joined_members,
+        joinability,
+        membership,
+    }
+}
+
+pub async fn preview_join_target(
+    session: &MatrixClientSession,
+    target: &MatrixJoinTarget,
+) -> Result<MatrixRoomPreview, MatrixRoomOperationError> {
+    let (room_or_alias, via) = resolve_join_target(target)?;
+    let preview = session
+        .client()
+        .get_room_preview(room_or_alias.as_ref(), via)
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    Ok(matrix_room_preview_from_sdk(preview))
+}
+
 /// A room to join, as named by a directory result or a `matrix.to` link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MatrixJoinTarget {
@@ -7986,21 +8072,20 @@ mod tests {
     use super::{
         LOCAL_USER_ALIASES_ACCOUNT_DATA_TYPE, MatrixClientSession, MatrixConversationActivity,
         MatrixConversationActivitySource, MatrixCreateRoomOptions, MatrixCreateRoomParentSpace,
-        MatrixCreateRoomVisibility, MatrixEventCacheError, MatrixLocalUserAliases,
+        MatrixCreateRoomVisibility, MatrixEventCacheError, MatrixJoinTarget,
+        MatrixLocalUserAliases, MatrixPreviewJoinability, MatrixPreviewMembership,
         MatrixPublicRoomDirectoryQuery, MatrixPublicRoomDirectoryRoom, MatrixRoomHistoryVisibility,
         MatrixRoomJoinRule, MatrixRoomMemberRole, MatrixRoomModerationAction,
-        MatrixRoomPermissionFacts, MatrixRoomSettingChange, MatrixRoomSettingsSnapshot,
-        MatrixRoomTagInfo, MatrixRoomTags, MatrixSearchIndexKey, MatrixSearchIndexStoreConfig,
-        SYNC_INVITE_PROBE_TIMEOUT, SdkUnreadTrace, SessionInfo, create_public_directory_room,
-        MatrixJoinTarget, MatrixRoomOperationError, create_room_request,
-        matrix_public_room_from_chunk,
-        get_room_settings_snapshot, join_room_target, resolve_join_target,
-        matrix_conversation_activity_source, matrix_room_list_room_from_counts,
-        matrix_room_member_role, moderate_room_member, newest_conversation_activity,
-        normalized_local_user_aliases, query_public_room_directory,
-        room_settings_snapshot_with_change, room_settings_snapshot_with_member_power_level,
-        trace_sdk_conversation_activity, trace_sdk_unread_snapshot, update_room_member_power_level,
-        update_room_setting,
+        MatrixRoomOperationError, MatrixRoomPermissionFacts, MatrixRoomSettingChange,
+        MatrixRoomSettingsSnapshot, MatrixRoomTagInfo, MatrixRoomTags, MatrixSearchIndexKey,
+        MatrixSearchIndexStoreConfig, SYNC_INVITE_PROBE_TIMEOUT, SdkUnreadTrace, SessionInfo,
+        create_public_directory_room, create_room_request, get_room_settings_snapshot,
+        join_room_target, matrix_conversation_activity_source, matrix_public_room_from_chunk,
+        matrix_room_list_room_from_counts, matrix_room_member_role, matrix_room_preview_from_sdk,
+        moderate_room_member, newest_conversation_activity, normalized_local_user_aliases,
+        query_public_room_directory, resolve_join_target, room_settings_snapshot_with_change,
+        room_settings_snapshot_with_member_power_level, trace_sdk_conversation_activity,
+        trace_sdk_unread_snapshot, update_room_member_power_level, update_room_setting,
     };
 
     #[test]
@@ -9268,6 +9353,61 @@ mod tests {
             resolve_join_target(&target),
             Err(MatrixRoomOperationError::InvalidServerName)
         ));
+    }
+
+    fn sdk_room_preview(
+        join_rule: Option<matrix_sdk::ruma::room::JoinRuleSummary>,
+        state: Option<matrix_sdk::RoomState>,
+    ) -> matrix_sdk::room_preview::RoomPreview {
+        matrix_sdk::room_preview::RoomPreview {
+            room_id: matrix_sdk::ruma::room_id!("!previewed:example.invalid").to_owned(),
+            canonical_alias: None,
+            name: None,
+            topic: None,
+            avatar_url: None,
+            num_joined_members: 7,
+            num_active_members: None,
+            room_type: Some(matrix_sdk::ruma::room::RoomType::Space),
+            join_rule,
+            is_world_readable: None,
+            state,
+            is_direct: None,
+            heroes: None,
+        }
+    }
+
+    #[test]
+    fn preview_reports_an_invite_only_room_as_not_plainly_joinable() {
+        let preview = matrix_room_preview_from_sdk(sdk_room_preview(
+            Some(matrix_sdk::ruma::room::JoinRuleSummary::Invite),
+            None,
+        ));
+
+        // Offering a plain Join here would produce a silent forbidden failure.
+        assert_eq!(preview.joinability, MatrixPreviewJoinability::InviteOnly);
+        assert_eq!(preview.membership, MatrixPreviewMembership::None);
+    }
+
+    #[test]
+    fn preview_reports_existing_membership_so_the_gui_navigates_instead_of_joining() {
+        let preview = matrix_room_preview_from_sdk(sdk_room_preview(
+            Some(matrix_sdk::ruma::room::JoinRuleSummary::Public),
+            Some(matrix_sdk::RoomState::Joined),
+        ));
+
+        assert_eq!(preview.membership, MatrixPreviewMembership::Joined);
+        assert_eq!(preview.joinability, MatrixPreviewJoinability::Open);
+    }
+
+    #[test]
+    fn preview_keeps_the_room_type_and_leaves_an_unnamed_room_unlabelled() {
+        let preview = matrix_room_preview_from_sdk(sdk_room_preview(None, None));
+
+        assert_eq!(preview.room_type.as_deref(), Some("m.space"));
+        assert_eq!(preview.name, "");
+        // No join rule reported is not the same as "anyone may join".
+        assert_eq!(preview.joinability, MatrixPreviewJoinability::Unknown);
+        assert_eq!(preview.joined_members, 7);
     }
 
     #[test]

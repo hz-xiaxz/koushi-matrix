@@ -7,6 +7,7 @@ use super::errors::OperationFailureKind;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DirectoryState {
     pub query: DirectoryQueryState,
+    pub preview: DirectoryPreviewState,
     pub join: DirectoryJoinState,
 }
 
@@ -65,6 +66,139 @@ impl fmt::Debug for DirectoryQueryState {
                 .field("kind", kind)
                 .finish(),
         }
+    }
+}
+
+/// What the user is shown before committing to a join.
+///
+/// The target and via servers are carried through every stage because the join
+/// that follows must reuse exactly what resolved the preview.
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DirectoryPreviewState {
+    #[default]
+    Closed,
+    Loading {
+        request_id: u64,
+        /// `#alias:server` or `!id:server`.
+        room_id_or_alias: String,
+        via_servers: Vec<String>,
+    },
+    Ready {
+        request_id: u64,
+        room_id_or_alias: String,
+        via_servers: Vec<String>,
+        room: DirectoryRoomPreview,
+    },
+    Failed {
+        request_id: u64,
+        room_id_or_alias: String,
+        via_servers: Vec<String>,
+        #[serde(rename = "failureKind")]
+        kind: OperationFailureKind,
+    },
+}
+
+impl fmt::Debug for DirectoryPreviewState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Closed => formatter.write_str("Closed"),
+            Self::Loading {
+                request_id,
+                via_servers,
+                ..
+            } => formatter
+                .debug_struct("Loading")
+                .field("request_id", request_id)
+                .field("room_id_or_alias", &"RoomIdOrAlias(..)")
+                .field("via_server_count", &via_servers.len())
+                .finish(),
+            Self::Ready {
+                request_id,
+                via_servers,
+                room,
+                ..
+            } => formatter
+                .debug_struct("Ready")
+                .field("request_id", request_id)
+                .field("room_id_or_alias", &"RoomIdOrAlias(..)")
+                .field("via_server_count", &via_servers.len())
+                .field("room", room)
+                .finish(),
+            Self::Failed {
+                request_id,
+                via_servers,
+                kind,
+                ..
+            } => formatter
+                .debug_struct("Failed")
+                .field("request_id", request_id)
+                .field("room_id_or_alias", &"RoomIdOrAlias(..)")
+                .field("via_server_count", &via_servers.len())
+                .field("kind", kind)
+                .finish(),
+        }
+    }
+}
+
+/// Whether a plain join is expected to work.
+///
+/// The exact join rule is server policy; the GUI only needs to know whether to
+/// offer Join, so restricted and knock variants collapse into coarse buckets.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DirectoryPreviewJoinability {
+    /// Anyone may join.
+    Open,
+    /// An invite (or a knock) is required first.
+    InviteOnly,
+    /// Joining depends on membership of another room.
+    Restricted,
+    /// The server did not report a join rule.
+    Unknown,
+}
+
+/// Membership the current account already has in the previewed room.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DirectoryPreviewMembership {
+    Joined,
+    Invited,
+    /// Not a member, or the room is unknown to this account.
+    None,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DirectoryRoomPreview {
+    pub room_id: String,
+    pub canonical_alias: Option<String>,
+    /// Matrix `room_type`, e.g. `m.space`. Absent for an ordinary room.
+    pub room_type: Option<String>,
+    /// Empty when the room has no name. The GUI supplies a type-appropriate
+    /// fallback; inventing one here would hardcode prose.
+    pub name: String,
+    pub topic: Option<String>,
+    pub joined_members: u64,
+    pub joinability: DirectoryPreviewJoinability,
+    pub membership: DirectoryPreviewMembership,
+}
+
+impl fmt::Debug for DirectoryRoomPreview {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DirectoryRoomPreview")
+            .field("room_id", &"RoomId(..)")
+            .field(
+                "canonical_alias",
+                &self.canonical_alias.as_ref().map(|_| "RoomAlias(..)"),
+            )
+            .field("room_type", &self.room_type)
+            .field("name", &"RoomName(..)")
+            .field("topic", &self.topic.as_ref().map(|_| "RoomTopic(..)"))
+            .field("joined_members", &self.joined_members)
+            .field("joinability", &self.joinability)
+            .field("membership", &self.membership)
+            .finish()
     }
 }
 

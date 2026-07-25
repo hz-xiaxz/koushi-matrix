@@ -599,6 +599,7 @@ export type RoomEvent =
         next_batch: string | null;
       };
     }
+  | { DirectoryPreviewLoaded: { request_id: RequestId; room: DirectoryRoomPreview } }
   | { RoomSettingsLoaded: { request_id: RequestId; settings: RoomSettingsSnapshot } }
   | { RoomSettingUpdated: { request_id: RequestId; settings: RoomSettingsSnapshot } }
   | {
@@ -662,6 +663,26 @@ export interface DirectoryRoomSummary {
   joined_members: number;
   world_readable: boolean;
   guest_can_join: boolean;
+}
+
+/** Whether a plain join is expected to work. Restricted and knock variants
+ * collapse into coarse buckets; the exact join rule is server policy. */
+export type DirectoryPreviewJoinability = "open" | "inviteOnly" | "restricted" | "unknown";
+
+/** Membership the current account already has in the previewed room. */
+export type DirectoryPreviewMembership = "joined" | "invited" | "none";
+
+export interface DirectoryRoomPreview {
+  room_id: string;
+  canonical_alias: string | null;
+  /** Matrix `room_type`, e.g. `m.space`. Absent for an ordinary room. */
+  room_type: string | null;
+  /** Empty when the room has no name; the GUI supplies the fallback. */
+  name: string;
+  topic: string | null;
+  joined_members: number;
+  joinability: DirectoryPreviewJoinability;
+  membership: DirectoryPreviewMembership;
 }
 
 export interface RoomSettingsSnapshot {

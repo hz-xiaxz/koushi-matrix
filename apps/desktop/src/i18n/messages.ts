@@ -234,6 +234,15 @@ export type MessageId =
   | "directory.joinRoom"
   | "directory.memberCount"
   | "directory.noAlias"
+  | "directory.previewAlreadyJoined"
+  | "directory.previewCancel"
+  | "directory.previewFailed"
+  | "directory.previewInviteOnly"
+  | "directory.previewLoading"
+  | "directory.previewOpenRoom"
+  | "directory.previewRestricted"
+  | "directory.previewTitle"
+  | "directory.previewUnknownJoinRule"
   | "directory.noResults"
   | "directory.results"
   | "directory.search"
@@ -1256,6 +1265,15 @@ const en: Catalog = {
   "directory.joinRoom": "Join {name}",
   "directory.memberCount": "{count} members",
   "directory.noAlias": "No canonical alias",
+  "directory.previewAlreadyJoined": "You are already in this room",
+  "directory.previewCancel": "Cancel",
+  "directory.previewFailed": "Could not load this room: {reason}",
+  "directory.previewInviteOnly": "Invite only",
+  "directory.previewLoading": "Loading room details",
+  "directory.previewOpenRoom": "Open",
+  "directory.previewRestricted": "Members of another room only",
+  "directory.previewTitle": "Join this room?",
+  "directory.previewUnknownJoinRule": "The server did not report who may join",
   "directory.noResults": "No public rooms found",
   "directory.results": "Public room results",
   "directory.search": "Search",
@@ -2177,6 +2195,15 @@ const ja: Catalog = {
   "directory.joinRoom": "{name}に参加",
   "directory.memberCount": "メンバー {count} 人",
   "directory.noAlias": "正規エイリアスなし",
+  "directory.previewAlreadyJoined": "すでに参加しています",
+  "directory.previewCancel": "キャンセル",
+  "directory.previewFailed": "ルーム情報を取得できません: {reason}",
+  "directory.previewInviteOnly": "招待制",
+  "directory.previewLoading": "ルーム情報を読み込み中",
+  "directory.previewOpenRoom": "開く",
+  "directory.previewRestricted": "別のルームのメンバーのみ",
+  "directory.previewTitle": "このルームに参加しますか？",
+  "directory.previewUnknownJoinRule": "参加条件がサーバから返されませんでした",
   "directory.noResults": "公開ルームが見つかりません",
   "directory.results": "公開ルームの結果",
   "directory.search": "検索",

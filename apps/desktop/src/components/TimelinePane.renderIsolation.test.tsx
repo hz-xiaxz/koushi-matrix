@@ -397,7 +397,11 @@ function makeSnapshot(): DesktopSnapshot {
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },
         qr_login: { kind: "idle" },
-        directory: { query: { kind: "closed" }, join: { kind: "idle" } },
+        directory: {
+        query: { kind: "closed" },
+        preview: { kind: "closed" },
+        join: { kind: "idle" },
+      },
         room_management: { selected_room_id: null, settings: null, operation: { kind: "idle" } },
         activity: { kind: "closed" },
         thread_attention: { kind: "closed" },

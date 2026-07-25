@@ -287,6 +287,27 @@
     },
     "kind": "Room"
   },
+  "roomDirectoryPreviewLoaded": {
+    "event": {
+      "DirectoryPreviewLoaded": {
+        "request_id": {
+          "connection_id": 3,
+          "sequence": 7
+        },
+        "room": {
+          "canonical_alias": "#previewed:example.test",
+          "joinability": "restricted",
+          "joined_members": 12,
+          "membership": "invited",
+          "name": "Previewed Space",
+          "room_id": "!previewed:example.test",
+          "room_type": "m.space",
+          "topic": "Directory preview sample"
+        }
+      }
+    },
+    "kind": "Room"
+  },
   "roomDirectoryQueryCompleted": {
     "event": {
       "DirectoryQueryCompleted": {

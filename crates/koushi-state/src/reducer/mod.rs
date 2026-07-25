@@ -546,6 +546,34 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             query,
             kind,
         } => directory::handle_directory_query_failed(state, request_id, query, kind),
+        AppAction::DirectoryPreviewRequested {
+            request_id,
+            room_id_or_alias,
+            via_servers,
+        } => directory::handle_directory_preview_requested(
+            state,
+            request_id,
+            room_id_or_alias,
+            via_servers,
+        ),
+        AppAction::DirectoryPreviewLoaded { request_id, room } => {
+            directory::handle_directory_preview_loaded(state, request_id, room)
+        }
+        AppAction::DirectoryPreviewFailed {
+            request_id,
+            room_id_or_alias,
+            via_servers,
+            kind,
+        } => directory::handle_directory_preview_failed(
+            state,
+            request_id,
+            room_id_or_alias,
+            via_servers,
+            kind,
+        ),
+        AppAction::DirectoryPreviewDismissed => {
+            directory::handle_directory_preview_dismissed(state)
+        }
         AppAction::DirectoryJoinRequested {
             request_id,
             room_id_or_alias,

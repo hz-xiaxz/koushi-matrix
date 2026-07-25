@@ -2458,28 +2458,57 @@ pub(crate) fn build_query_directory_command(
     })
 }
 
+pub(crate) fn build_preview_join_target_command(
+    request_id: koushi_core::RequestId,
+    room_id_or_alias: String,
+    via_servers: Vec<String>,
+) -> Option<CoreCommand> {
+    let (room_id_or_alias, via_servers) = normalize_join_target(room_id_or_alias, via_servers)?;
+    Some(CoreCommand::Room(RoomCommand::PreviewJoinTarget {
+        request_id,
+        room_id_or_alias,
+        via_servers,
+    }))
+}
+
+pub(crate) fn build_dismiss_directory_preview_command(
+    request_id: koushi_core::RequestId,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::DismissDirectoryPreview { request_id })
+}
+
 pub(crate) fn build_join_directory_room_command(
     request_id: koushi_core::RequestId,
     room_id_or_alias: String,
     via_servers: Vec<String>,
 ) -> Option<CoreCommand> {
+    let (room_id_or_alias, via_servers) = normalize_join_target(room_id_or_alias, via_servers)?;
+    Some(CoreCommand::Room(RoomCommand::JoinDirectoryRoom {
+        request_id,
+        room_id_or_alias,
+        via_servers,
+    }))
+}
+
+/// Preview and join name the same target, so they normalize it the same way.
+///
+/// A blank server name is not a routing hint, and keeping duplicates would make
+/// the homeserver retry the same server.
+fn normalize_join_target(
+    room_id_or_alias: String,
+    via_servers: Vec<String>,
+) -> Option<(String, Vec<String>)> {
     let room_id_or_alias = room_id_or_alias.trim().to_owned();
     if room_id_or_alias.is_empty() {
         return None;
     }
-    // A blank server name is not a routing hint, and keeping duplicates would
-    // make the homeserver retry the same server.
     let mut seen = std::collections::BTreeSet::new();
     let via_servers = via_servers
         .into_iter()
         .filter_map(|server| optional_non_blank(Some(server)))
         .filter(|server| seen.insert(server.clone()))
         .collect::<Vec<_>>();
-    Some(CoreCommand::Room(RoomCommand::JoinDirectoryRoom {
-        request_id,
-        room_id_or_alias,
-        via_servers,
-    }))
+    Some((room_id_or_alias, via_servers))
 }
 
 pub(crate) fn build_join_room_command(

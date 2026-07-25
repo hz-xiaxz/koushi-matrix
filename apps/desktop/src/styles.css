@@ -7385,3 +7385,58 @@ kbd {
 .timeline-gap-row.failed {
   border-color: var(--color-danger, #b42318);
 }
+
+.directory-preview {
+  gap: 12px;
+}
+
+.directory-preview-status {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.directory-preview-room {
+  display: grid;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.directory-preview-name {
+  display: flex;
+  align-items: center;
+  /* The badge must stay readable, so only the name is allowed to ellipsize. */
+  gap: var(--directory-result-badge-gap);
+  min-inline-size: 0;
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.directory-preview-name > span:first-child {
+  overflow: hidden;
+  min-inline-size: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-preview-alias,
+.directory-preview-meta {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.directory-preview-topic {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.directory-preview-note {
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 700;
+}
