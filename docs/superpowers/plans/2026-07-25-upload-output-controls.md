@@ -63,6 +63,31 @@ other than the bytes that would be uploaded.
    artifact, `browserFakeApi.ts`, `tauriIpcMock.ts`, `appHarnessMain.tsx`, and
    the DTO serialization-contract tests.
 
+## Open decision resolved: the compression setting picks an initial pair
+
+`prepare_image_variants` compresses by long edge (2048) plus a `recommended`
+flag, which does not correspond to any 1/2-1/8 linear scale. Two ways to keep
+`SettingsValues.media.image_upload_compression` working:
+
+1. Keep the legacy policy output alongside axis-based outputs in `variants`.
+   Rejected: `variants` would hold entries with no `(resize, format)` identity,
+   which reintroduces exactly the opaque-variant model #305 removes, and the
+   dialog could not describe what will be uploaded.
+2. Let the setting choose only the *initial selection*, expressed on the new
+   axes, and retire the long-edge policy for staged uploads. Chosen: one cache
+   identity, one encoder path, and every displayed number describes bytes the
+   dialog can reproduce.
+
+Initial selection mapping: `Never` → `(Original, Keep)`;
+`Ask` / `Always` → `(Half, Keep)`.
+
+This changes automatic compression output for staged uploads (a halved image
+instead of a long-edge-2048 image), so the image-compression Rust tests, the
+`image_compress=ok` core token expectations, and the
+`local-image-compression` Linux lane assertions must move with it in the same
+change. `prepare_image_variants` stays for any non-staging caller; if none
+remain after the migration, delete it rather than leaving two encoder policies.
+
 ## GUI work
 
 - One compact toolbar above the preview: a Resize radiogroup (Original, 1/2,
