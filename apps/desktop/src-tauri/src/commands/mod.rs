@@ -2832,7 +2832,9 @@ async fn image_upload_compression_contract_from_snapshot(
         .values
         .media;
     (
-        media.image_upload_compression,
+        // #305 retired the stored mode. The direct upload path keeps the former
+        // default so its behavior matches a user who never changed the setting.
+        ImageUploadCompressionMode::default(),
         ImageUploadCompressionPolicy {
             threshold_bytes: media.image_upload_compression_policy.threshold_bytes,
             threshold_long_edge: media.image_upload_compression_policy.threshold_long_edge,

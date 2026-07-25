@@ -1071,9 +1071,12 @@ mod tests {
             value["state"]["domain"]["room_notification_settings"],
             json!({})
         );
-        assert_eq!(
-            value["state"]["domain"]["settings"]["values"]["media"]["image_upload_compression"],
-            json!("ask")
+        // #305 retired the stored compression mode; only the encoder policy
+        // crosses the boundary now.
+        assert!(
+            value["state"]["domain"]["settings"]["values"]["media"]["image_upload_compression"]
+                .is_null(),
+            "the retired compression mode must not reappear in the snapshot"
         );
         assert_eq!(
             value["state"]["domain"]["settings"]["values"]["media"]["image_upload_compression_policy"],

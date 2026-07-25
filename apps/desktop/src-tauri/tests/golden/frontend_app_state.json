@@ -482,7 +482,6 @@
             "text_direction": "auto"
           },
           "media": {
-            "image_upload_compression": "ask",
             "image_upload_compression_policy": {
               "quality_percent": 82,
               "target_long_edge": 2048,

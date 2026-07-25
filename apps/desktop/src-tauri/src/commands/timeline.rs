@@ -774,7 +774,6 @@ pub async fn stage_upload_bytes(
     }
 
     let snapshot = event_conn.snapshot();
-    let mode = snapshot.settings.values.media.image_upload_compression;
     let policy = snapshot
         .settings
         .values
@@ -795,7 +794,7 @@ pub async fn stage_upload_bytes(
     let preparation_target = target.clone();
     let preparation = tokio::task::spawn_blocking(move || {
         let mut registry = koushi_core::media_preparation::MediaPreparationRegistry::default();
-        let items = registry.prepare_items(&preparation_target, core_inputs, mode, policy);
+        let items = registry.prepare_items(&preparation_target, core_inputs, policy);
         (registry, items)
     })
     .await;
@@ -1003,7 +1002,6 @@ pub async fn retry_staged_upload_preparation(
         return current_snapshot(state.inner()).await;
     }
     let initial_account = account_key_from_app_state(&snapshot);
-    let mode = snapshot.settings.values.media.image_upload_compression;
     let policy = snapshot
         .settings
         .values
@@ -1022,7 +1020,7 @@ pub async fn retry_staged_upload_preparation(
     let retry = tokio::task::spawn_blocking(move || {
         let mut registry = koushi_core::media_preparation::MediaPreparationRegistry::default();
         let replacement = registry
-            .prepare_items(&retry_target, vec![source], mode, policy)
+            .prepare_items(&retry_target, vec![source], policy)
             .into_iter()
             .next();
         (registry, replacement)

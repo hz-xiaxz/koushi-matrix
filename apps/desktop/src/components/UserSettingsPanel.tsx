@@ -45,11 +45,9 @@ import type {
   EmojiPreference,
   DisplayPlatform,
   FontPreference,
-  ImageUploadCompressionMode,
   IdentityResetState,
   KeyBackupStatus,
   LocalEncryptionState,
-  MediaSettings,
   NotificationSettings,
   RecoveryKeyDeliveryState,
   RoomSummary,
@@ -187,10 +185,9 @@ export function UserSettingsPanel({
   const selectedTheme = settings.values.appearance.theme;
   const selectedFont = settings.values.typography.font;
   const selectedEmoji = settings.values.typography.emoji;
+  const selectedTimeline = settings.values.timeline;
   const selectedNotifications = settings.values.notifications;
   const selectedDisplay = settings.values.display;
-  const selectedMedia = settings.values.media;
-  const selectedTimeline = settings.values.timeline;
   const isSaving = settings.persistence.kind === "saving";
   const [displayNameDraft, setDisplayNameDraft] = useState(profile.own.display_name ?? "");
   const panelRef = useRef<HTMLElement | null>(null);
@@ -572,39 +569,6 @@ export function UserSettingsPanel({
             current={selectedDisplay}
             onSelect={onUpdateSettings}
           />
-        </div>
-      </section>
-
-      <section id="settings-media" className="settings-section" aria-label={t("settings.media")}>
-        <div className="settings-section-heading">
-          <h3>{t("settings.media")}</h3>
-          {isSaving ? <span className="settings-save-state">{t("settings.saving")}</span> : null}
-        </div>
-        <div className="settings-control-row">
-          <span>{t("settings.compressImages")}</span>
-          <div className="segmented-control" role="group" aria-label={t("settings.compressImages")}>
-            <ImageCompressionButton
-              label={t("settings.compressImagesAlways")}
-              selected={selectedMedia.image_upload_compression === "always"}
-              value="always"
-              current={selectedMedia}
-              onSelect={onUpdateSettings}
-            />
-            <ImageCompressionButton
-              label={t("settings.compressImagesAsk")}
-              selected={selectedMedia.image_upload_compression === "ask"}
-              value="ask"
-              current={selectedMedia}
-              onSelect={onUpdateSettings}
-            />
-            <ImageCompressionButton
-              label={t("settings.compressImagesNever")}
-              selected={selectedMedia.image_upload_compression === "never"}
-              value="never"
-              current={selectedMedia}
-              onSelect={onUpdateSettings}
-            />
-          </div>
         </div>
       </section>
 
@@ -2849,40 +2813,6 @@ function EmojiButton({
       onClick={() => {
         if (!selected) {
           onSelect({ typography: { font: currentFont, emoji: value } });
-        }
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
-function ImageCompressionButton({
-  label,
-  selected,
-  value,
-  current,
-  onSelect
-}: {
-  label: string;
-  selected: boolean;
-  value: ImageUploadCompressionMode;
-  current: MediaSettings;
-  onSelect: (patch: SettingsPatch) => void;
-}) {
-  return (
-    <button
-      className={`segmented-control-option ${selected ? "is-selected" : ""}`}
-      type="button"
-      aria-pressed={selected}
-      onClick={() => {
-        if (!selected) {
-          onSelect({
-            media: {
-              ...current,
-              image_upload_compression: value
-            }
-          });
         }
       }}
     >

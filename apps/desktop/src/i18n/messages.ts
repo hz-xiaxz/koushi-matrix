@@ -434,11 +434,6 @@ export type MessageId =
   | "settings.densityComfortable"
   | "settings.codeBlockWrap"
   | "settings.hideRedacted"
-  | "settings.media"
-  | "settings.compressImages"
-  | "settings.compressImagesAlways"
-  | "settings.compressImagesAsk"
-  | "settings.compressImagesNever"
   | "settings.notificationBadges"
   | "settings.notificationDesktop"
   | "settings.notificationSound"
@@ -1468,11 +1463,6 @@ const en: Catalog = {
   "timeline.linkPreviewHide": "Hide preview",
   "timeline.linkPreviewFailed": "Could not load preview",
   "timeline.linkPreviewLoading": "Loading preview…",
-  "settings.media": "Media",
-  "settings.compressImages": "Compress images",
-  "settings.compressImagesAlways": "Always",
-  "settings.compressImagesAsk": "Ask",
-  "settings.compressImagesNever": "Never",
   "settings.notificationBadges": "Badges",
   "settings.notificationDesktop": "Desktop notifications",
   "settings.notificationSound": "Sound",
@@ -2387,11 +2377,6 @@ const ja: Catalog = {
   "timeline.linkPreviewHide": "プレビューを非表示",
   "timeline.linkPreviewFailed": "プレビューを読み込めませんでした",
   "timeline.linkPreviewLoading": "プレビューを読み込み中…",
-  "settings.media": "メディア",
-  "settings.compressImages": "画像を圧縮",
-  "settings.compressImagesAlways": "常に圧縮",
-  "settings.compressImagesAsk": "毎回確認",
-  "settings.compressImagesNever": "圧縮しない",
   "settings.notificationBadges": "バッジ",
   "settings.notificationDesktop": "デスクトップ通知",
   "settings.notificationSound": "サウンド",

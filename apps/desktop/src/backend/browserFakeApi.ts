@@ -40,7 +40,6 @@ import type {
   InviteTargetCandidate,
   InviteScopeSelection,
   InviteWorkflowState,
-  ImageUploadCompressionMode,
   InvitePreview,
   RoomPermissionFacts,
   RoomSummary,
@@ -1541,12 +1540,7 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
     const staged = items.map((item, index) => {
-      const prepared = browserPreparedUploadItem(
-        target,
-        item,
-        index,
-        this.snapshot.state.domain.settings.values.media.image_upload_compression
-      );
+      const prepared = browserPreparedUploadItem(target, item, index);
       if (prepared.preparation.kind === "ready") {
         prepared.preparation.variants.forEach((variant) => {
           this.preparedUploadBytes.set(
@@ -3826,8 +3820,7 @@ function browserPreparedUploadKey(
 function browserPreparedUploadItem(
   target: ComposerTarget,
   item: StageUploadBytesRequestItem,
-  index: number,
-  mode: ImageUploadCompressionMode
+  index: number
 ): StagedUploadItem {
   const mime = item.mimeType.trim() || "application/octet-stream";
   const imageFormat = browserImageFormat(mime);
@@ -3859,7 +3852,8 @@ function browserPreparedUploadItem(
   } else if (imageFormat === "webp") {
     variants.push(browserSyntheticVariant(item, "resized-webp", "webp", "image/webp", 25));
   }
-  const selected = mode === "never" ? original : variants[variants.length - 1] ?? original;
+  // Staging always asks and starts at the untouched output (#305).
+  const selected = original;
   return {
     staged_id: item.stagedId,
     room_id: target.room_id,
@@ -4201,7 +4195,6 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         encrypted_url_previews_enabled: true
       },
       media: {
-        image_upload_compression: "ask",
         image_upload_compression_policy: {
           threshold_bytes: 1048576,
           threshold_long_edge: 2560,

@@ -169,24 +169,22 @@ impl MediaPreparationRegistry {
         &mut self,
         target: &ComposerTarget,
         inputs: Vec<StageUploadBytesInput>,
-        mode: ImageUploadCompressionMode,
         policy: ImageUploadCompressionPolicy,
     ) -> Vec<StagedUploadItem> {
         self.clear_target(target);
-        self.prepare_items(target, inputs, mode, policy)
+        self.prepare_items(target, inputs, policy)
     }
 
     pub fn prepare_items(
         &mut self,
         target: &ComposerTarget,
         inputs: Vec<StageUploadBytesInput>,
-        mode: ImageUploadCompressionMode,
         policy: ImageUploadCompressionPolicy,
     ) -> Vec<StagedUploadItem> {
         inputs
             .into_iter()
             .take(MAX_PREPARATION_BATCH_SIZE)
-            .map(|input| self.prepare_one(target, input, mode, policy))
+            .map(|input| self.prepare_one(target, input, policy))
             .collect()
     }
 
@@ -370,7 +368,6 @@ impl MediaPreparationRegistry {
         &mut self,
         target: &ComposerTarget,
         staged_id: &str,
-        mode: ImageUploadCompressionMode,
         policy: ImageUploadCompressionPolicy,
     ) -> Option<StagedUploadItem> {
         let input = self
@@ -378,7 +375,7 @@ impl MediaPreparationRegistry {
             .get(&(target.clone(), staged_id.to_owned()))?
             .clone();
         self.remove_prepared_variants(target, staged_id);
-        Some(self.prepare_one(target, input, mode, policy))
+        Some(self.prepare_one(target, input, policy))
     }
 
     pub fn use_original(
@@ -409,7 +406,6 @@ impl MediaPreparationRegistry {
         &mut self,
         target: &ComposerTarget,
         input: StageUploadBytesInput,
-        mode: ImageUploadCompressionMode,
         policy: ImageUploadCompressionPolicy,
     ) -> StagedUploadItem {
         self.sources
@@ -439,7 +435,6 @@ impl MediaPreparationRegistry {
             target_long_edge: u32::try_from(policy.target_long_edge).unwrap_or(u32::MAX),
             quality_percent: policy.quality_percent,
         };
-        let _ = mode;
         let selected = StagedUploadOutputSelection::default();
         let request = ImageOutputRequest {
             resize: image_resize_scale(selected.resize),
@@ -706,18 +701,8 @@ mod tests {
         let main = target(None);
         let thread = target(Some("$root"));
         let policy = ImageUploadCompressionPolicy::default();
-        registry.prepare_target(
-            &main,
-            vec![file("shared", b"main")],
-            ImageUploadCompressionMode::Never,
-            policy,
-        );
-        registry.prepare_target(
-            &thread,
-            vec![file("shared", b"thread")],
-            ImageUploadCompressionMode::Never,
-            policy,
-        );
+        registry.prepare_target(&main, vec![file("shared", b"main")], policy);
+        registry.prepare_target(&thread, vec![file("shared", b"thread")], policy);
 
         assert_eq!(
             registry.selected_upload(&main, "shared").unwrap().bytes,
@@ -742,7 +727,6 @@ mod tests {
         let items = registry.prepare_target(
             &target,
             vec![file("private-stage", b"")],
-            ImageUploadCompressionMode::Ask,
             ImageUploadCompressionPolicy::default(),
         );
         assert!(matches!(
@@ -798,12 +782,7 @@ mod tests {
             (&thread, "thread"),
             (&stale_thread, "stale"),
         ] {
-            let items = registry.prepare_target(
-                target,
-                vec![file(id, id.as_bytes())],
-                ImageUploadCompressionMode::Never,
-                policy,
-            );
+            let items = registry.prepare_target(target, vec![file(id, id.as_bytes())], policy);
             staged.push(((*target).clone(), items[0].clone()));
         }
         let mut snapshot = koushi_state::AppState::default();
@@ -839,7 +818,6 @@ mod tests {
         let items = registry.prepare_target(
             &target,
             vec![file("private", b"first account")],
-            ImageUploadCompressionMode::Never,
             ImageUploadCompressionPolicy::default(),
         );
         snapshot
@@ -873,19 +851,9 @@ mod tests {
         let target = target(None);
         let policy = ImageUploadCompressionPolicy::default();
         let mut committed = MediaPreparationRegistry::default();
-        committed.prepare_items(
-            &target,
-            vec![file("first", b"first")],
-            ImageUploadCompressionMode::Never,
-            policy,
-        );
+        committed.prepare_items(&target, vec![file("first", b"first")], policy);
         let mut later = MediaPreparationRegistry::default();
-        later.prepare_items(
-            &target,
-            vec![file("second", b"second")],
-            ImageUploadCompressionMode::Never,
-            policy,
-        );
+        later.prepare_items(&target, vec![file("second", b"second")], policy);
 
         committed.merge_prepared(later);
 

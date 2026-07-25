@@ -229,7 +229,6 @@ export interface DisplaySettings {
 }
 
 export interface MediaSettings {
-  image_upload_compression: ImageUploadCompressionMode;
   image_upload_compression_policy: ImageUploadCompressionPolicy;
 }
 

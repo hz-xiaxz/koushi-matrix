@@ -227,7 +227,6 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         encrypted_url_previews_enabled: true
       },
       media: {
-        image_upload_compression: "ask",
         image_upload_compression_policy: {
           threshold_bytes: 1048576,
           threshold_long_edge: 2560,
@@ -720,8 +719,8 @@ function preparedHarnessItem(
         : item.bytes.slice(0, variant.byte_count)
     );
   }
-  const mode = currentSnapshot.state.domain.settings.values.media.image_upload_compression;
-  const selected = image && mode !== "never" ? variants[1] : original;
+  // Staging always asks and starts at the untouched output (#305).
+  const selected = original;
   return {
     staged_id: item.stagedId,
     room_id: target.room_id,
