@@ -16,8 +16,8 @@ use matrix_sdk::room::MessagesOptions;
 use matrix_sdk::ruma::api::Direction;
 use serde_json::Value;
 
+use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 use crate::executor;
-use crate::messages_backpressure::MessagesBackpressure;
 use crate::search::SearchIndexMessage;
 use crate::startup_trace::{self, StartupPhase};
 
@@ -90,19 +90,15 @@ fn trace_crawler_page(
 
 pub(crate) fn spawn_history_crawl_page(
     session: Arc<koushi_sdk::MatrixClientSession>,
-    messages_backpressure: MessagesBackpressure,
+    account_work: AccountWorkScheduler,
     checkpoint: HistoryCrawlCheckpoint,
 ) -> executor::JoinHandle<HistoryCrawlPageResult> {
-    executor::spawn(run_history_crawl_page(
-        session,
-        messages_backpressure,
-        checkpoint,
-    ))
+    executor::spawn(run_history_crawl_page(session, account_work, checkpoint))
 }
 
 async fn run_history_crawl_page(
     session: Arc<koushi_sdk::MatrixClientSession>,
-    messages_backpressure: MessagesBackpressure,
+    account_work: AccountWorkScheduler,
     mut checkpoint: HistoryCrawlCheckpoint,
 ) -> HistoryCrawlPageResult {
     if checkpoint.settings.speed == SearchCrawlerSpeed::Paused {
@@ -139,7 +135,7 @@ async fn run_history_crawl_page(
     options.from = checkpoint.from_token.clone();
 
     let messages = {
-        let permit = messages_backpressure.acquire_crawler().await;
+        let permit = account_work.acquire(AccountWorkKind::SearchCrawl).await;
         let page_started = Some(startup_trace::now());
         let page_result = tokio::select! {
             biased;
@@ -681,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn history_crawler_page_runner_acquires_crawler_messages_backpressure() {
+    fn history_crawler_page_runner_acquires_the_search_crawl_work_kind() {
         let source = include_str!("search_crawler.rs");
         let page_runner = source
             .split(concat!("async fn run", "_history", "_crawl", "_page"))
@@ -692,8 +688,8 @@ mod tests {
             })
             .expect("bounded page runner should exist");
         let acquire_offset = page_runner
-            .find("acquire_crawler")
-            .expect("crawler page runner must acquire crawler /messages backpressure");
+            .find("AccountWorkKind::SearchCrawl")
+            .expect("crawler page runner must acquire the named search-crawl work kind");
         // The page fetch is inside a tokio::select! branch; match the select form.
         let messages_offset = page_runner
             .find(concat!(
@@ -703,7 +699,7 @@ mod tests {
 
         assert!(
             acquire_offset < messages_offset,
-            "crawler page runner must acquire /messages backpressure before room.messages"
+            "crawler page runner must acquire its scheduler permit before room.messages"
         );
     }
 

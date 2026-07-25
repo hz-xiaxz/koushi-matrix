@@ -1155,7 +1155,7 @@ pub struct AccountActor {
     navigation_projection: NavigationProjectionIngress,
     /// Account-wide gate for `/rooms/{roomId}/messages` requests. Timeline
     /// pagination has priority over background search-history crawling.
-    messages_backpressure: crate::messages_backpressure::MessagesBackpressure,
+    account_work: crate::account_work::AccountWorkScheduler,
     activity_resolution_task: Option<crate::executor::JoinHandle<()>>,
     /// Application data directory for cached preview images.
     data_dir: std::path::PathBuf,
@@ -1260,7 +1260,7 @@ impl AccountActor {
         // Spawn RoomActor once at AccountActor creation. It starts with no
         // session and waits for RoomMessage::SyncStarted.
         let room_actor = crate::room::RoomActor::spawn(action_tx.clone(), event_tx.clone());
-        let messages_backpressure = crate::messages_backpressure::MessagesBackpressure::default();
+        let account_work = crate::account_work::AccountWorkScheduler::default();
         let (navigation_projection, navigation_projection_rx) =
             NavigationProjectionIngress::channel();
         // Spawn TimelineManagerActor. It starts with no session; the session
@@ -1269,7 +1269,7 @@ impl AccountActor {
             action_tx.clone(),
             event_tx.clone(),
             Some(data_dir.clone()),
-            messages_backpressure.clone(),
+            account_work.clone(),
             Some(navigation_projection_rx),
         );
         let actor = AccountActor {
@@ -1313,7 +1313,7 @@ impl AccountActor {
             read_persistence_task: None,
             read_persistence_session_generation: 0,
             navigation_projection: navigation_projection.clone(),
-            messages_backpressure,
+            account_work,
             activity_resolution_task: None,
             data_dir,
             link_preview_policy: initial_link_preview_policy,
@@ -1408,7 +1408,7 @@ impl AccountActor {
                         continue;
                     };
                     let action_tx = self.action_tx.clone();
-                    let backpressure = self.messages_backpressure.clone();
+                    let backpressure = self.account_work.clone();
                     self.activity_resolution_task = Some(crate::executor::spawn(async move {
                         let outcome = crate::activity_resolution::resolve_activity_requests(
                             &session,
@@ -2907,7 +2907,7 @@ impl AccountActor {
             session.clone(),
             self.action_tx.clone(),
             self.event_tx.clone(),
-            self.messages_backpressure.clone(),
+            self.account_work.clone(),
         );
         let search_index_tx = search_handle.index_sender();
 
@@ -2980,7 +2980,7 @@ impl AccountActor {
             search_index_tx,
             Some(self.data_dir.clone()),
             self.link_preview_policy.clone(),
-            self.messages_backpressure.clone(),
+            self.account_work.clone(),
             Some(self.navigation_projection.subscribe()),
         );
 
@@ -7252,7 +7252,7 @@ impl AccountActor {
             self.action_tx.clone(),
             self.event_tx.clone(),
             Some(self.data_dir.clone()),
-            self.messages_backpressure.clone(),
+            self.account_work.clone(),
             Some(self.navigation_projection.subscribe()),
         );
         self.record_lifecycle_probe("stop_threads_manager");
@@ -12867,14 +12867,14 @@ mod tests {
         let (self_tx, command_rx) = mpsc::channel(16);
         let data_dir_path = store.data_dir().to_path_buf();
         let room_actor = crate::room::RoomActor::spawn(action_tx.clone(), event_tx.clone());
-        let messages_backpressure = crate::messages_backpressure::MessagesBackpressure::default();
+        let account_work = crate::account_work::AccountWorkScheduler::default();
         let (navigation_projection, navigation_projection_rx) =
             NavigationProjectionIngress::channel();
         let timeline_manager = crate::timeline::TimelineManagerActor::spawn(
             action_tx.clone(),
             event_tx.clone(),
             Some(data_dir_path.clone()),
-            messages_backpressure.clone(),
+            account_work.clone(),
             Some(navigation_projection_rx),
         );
         let mut actor = AccountActor {
@@ -12912,7 +12912,7 @@ mod tests {
             read_persistence_task: None,
             read_persistence_session_generation: 0,
             navigation_projection,
-            messages_backpressure,
+            account_work,
             activity_resolution_task: None,
             data_dir: data_dir_path,
             link_preview_policy: LinkPreviewContext::default(),

@@ -8,6 +8,7 @@
 //! Migration spec: `docs/superpowers/specs/2026-06-12-headless-core-runtime-design.md`.
 
 pub mod account;
+pub(crate) mod account_work;
 mod activity_resolution;
 pub(crate) mod cached_image;
 mod causal_projection;
@@ -22,7 +23,6 @@ pub mod link_preview;
 mod live_catchup;
 mod live_tail_freshness;
 pub mod media_preparation;
-pub(crate) mod messages_backpressure;
 pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 pub mod room;
