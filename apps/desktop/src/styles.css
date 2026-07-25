@@ -4510,6 +4510,19 @@ mark {
   border-color: var(--brand);
 }
 
+/* The staging panel owns its own send: it dispatches the attachments and never
+   the composer draft, so the two actions stay distinguishable. */
+.upload-staging-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-block-start: 4px;
+}
+
+.upload-staging-send:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* #305 compact output controls: two segmented groups plus one summary, on a
    single row when there is space, wrapping as groups rather than as cards. */
 .upload-output-toolbar {

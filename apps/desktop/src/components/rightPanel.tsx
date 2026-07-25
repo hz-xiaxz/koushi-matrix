@@ -148,6 +148,7 @@ export function ContextualRightPanel({
   onThreadReplySend,
   onThreadScheduleSend,
   onThreadSelectStagedUploadOutput = () => undefined,
+  onThreadSendStagedAttachments = () => undefined,
   onThreadUseOriginalStagedUpload = () => undefined,
   onThreadUpdateStagedUploadCaption = () => undefined,
   threadComposerMentionIntents = {},
@@ -295,6 +296,7 @@ export function ContextualRightPanel({
     stagedId: string,
     selection: StagedUploadOutputSelection
   ) => void;
+  onThreadSendStagedAttachments?: (roomId: string, rootEventId: string) => void;
   onThreadUseOriginalStagedUpload?: (
     roomId: string,
     rootEventId: string,
@@ -652,9 +654,6 @@ export function ContextualRightPanel({
   const threadDraft = threadComposerDraftOverride ?? threadComposer?.draft ?? "";
   const threadSendPending = Boolean(threadComposer?.pending_transaction_id);
   const threadStagedUploads = threadState.kind === "open" ? threadState.staged_uploads ?? [] : [];
-  const threadUploadsReady = threadStagedUploads.every(
-    (item) => item.preparation.kind === "ready"
-  );
   const threadMentionIntent =
     (threadDraftKeyValue ? threadComposerMentionIntents[threadDraftKeyValue] : undefined) ?? {
       targets: []
@@ -732,6 +731,9 @@ export function ContextualRightPanel({
               caption
             )
           }
+          onSendAttachments={() =>
+            onThreadSendStagedAttachments(threadRoomId, rootEventId)
+          }
           onSelectOutput={(stagedId, selection) =>
             onThreadSelectStagedUploadOutput(
               threadRoomId,
@@ -764,7 +766,6 @@ export function ContextualRightPanel({
         }
         isSending={threadSendPending}
         hasStagedUploads={threadStagedUploads.length > 0}
-        stagedUploadsReady={threadUploadsReady}
         mentionCandidates={mentionCandidatesFromSnapshot(snapshot)}
         mentionIntent={threadMentionIntent}
         resolveComposerKeyAction={onResolveComposerKeyAction}

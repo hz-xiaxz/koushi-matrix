@@ -73,7 +73,6 @@ export const Composer = memo(function Composer({
   canEdit = true,
   composerMode,
   hasStagedUploads = false,
-  stagedUploadsReady = true,
   isSending,
   mentionCandidates = [],
   mentionIntent = EMPTY_MENTION_INTENT,
@@ -94,7 +93,6 @@ export const Composer = memo(function Composer({
   canEdit?: boolean;
   composerMode: ComposerModeProp;
   hasStagedUploads?: boolean;
-  stagedUploadsReady?: boolean;
   isSending: boolean;
   mentionCandidates?: MentionCandidate[];
   mentionIntent?: MentionIntent;
@@ -400,11 +398,9 @@ export const Composer = memo(function Composer({
     });
     const resolverOptions = {
       autocomplete_open: autocompleteOpen,
-      send_enabled:
-        canEdit &&
-        !isSending &&
-        (intent.value.trim().length > 0 || hasStagedUploads) &&
-        (!hasStagedUploads || stagedUploadsReady)
+      // Text-only: staged attachments are sent from the staging panel, so
+      // Enter must never dispatch them implicitly.
+      send_enabled: canEdit && !isSending && intent.value.trim().length > 0
     };
     if (shouldLetNativeImeHandleComposerKeyEvent(keyEvent)) {
       void resolveComposerKeyAction(surface, keyEvent, resolverOptions)
@@ -638,15 +634,10 @@ export const Composer = memo(function Composer({
           ) : null}
         </div>
         <button
-          className={`send-button ${(localValue.trim() || hasStagedUploads) && (!hasStagedUploads || stagedUploadsReady) && !isSending ? "ready" : ""} ${isSending ? "is-sending" : ""}`}
+          className={`send-button ${localValue.trim() && !isSending ? "ready" : ""} ${isSending ? "is-sending" : ""}`}
           type="button"
           aria-label={isSending ? t("action.sending") : t("action.send")}
-          disabled={
-            !canEdit ||
-            isSending ||
-            (!localValue.trim() && !hasStagedUploads) ||
-            (hasStagedUploads && !stagedUploadsReady)
-          }
+          disabled={!canEdit || isSending || !localValue.trim()}
           onClick={() => onSend(localValue)}
         >
           <Send size={ICON_SIZE.input} />
@@ -779,7 +770,6 @@ function ThreadComposer({
   draft,
   draftKey,
   hasStagedUploads = false,
-  stagedUploadsReady = true,
   isSending,
   mentionCandidates = [],
   mentionIntent = EMPTY_MENTION_INTENT,
@@ -795,7 +785,6 @@ function ThreadComposer({
   draft: string;
   draftKey: string;
   hasStagedUploads?: boolean;
-  stagedUploadsReady?: boolean;
   isSending: boolean;
   mentionCandidates?: MentionCandidate[];
   mentionIntent?: MentionIntent;
@@ -813,7 +802,6 @@ function ThreadComposer({
       canEdit={canEdit}
       composerMode={{ kind: "plain" }}
       hasStagedUploads={hasStagedUploads}
-      stagedUploadsReady={stagedUploadsReady}
       isSending={isSending}
       mentionCandidates={mentionCandidates}
       mentionIntent={mentionIntent}

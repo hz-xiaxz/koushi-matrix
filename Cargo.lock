@@ -3108,6 +3108,7 @@ dependencies = [
  "eyeball",
  "eyeball-im",
  "futures-util",
+ "image",
  "koushi-core",
  "koushi-diagnostics",
  "koushi-key",

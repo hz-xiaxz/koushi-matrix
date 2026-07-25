@@ -41,6 +41,7 @@ function dialog(items: StagedUploadItem[], onUpdateCaption = vi.fn()) {
       onClear={vi.fn()}
       onUpdateCaption={onUpdateCaption}
       onSelectOutput={vi.fn()}
+      onSendAttachments={vi.fn()}
       onRetryPreparation={vi.fn()}
       onUseOriginal={vi.fn()}
       loadPreview={vi.fn(async () => [])}
@@ -227,6 +228,7 @@ describe("UploadStagingDialog resize and format controls", () => {
         onSelectOutput={onSelectOutput}
         onRetryPreparation={vi.fn()}
         onUseOriginal={vi.fn()}
+        onSendAttachments={vi.fn()}
         loadPreview={vi.fn(async () => [])}
       />
     );
@@ -284,5 +286,84 @@ describe("UploadStagingDialog resize and format controls", () => {
     const viewport = document.querySelector(".upload-preview-viewport");
     expect(viewport).not.toBeNull();
     expect(viewport?.getAttribute("data-recompressing")).toBe("true");
+  });
+});
+
+describe("UploadStagingDialog send action", () => {
+  function readyItem(stagedId = "staged-1") {
+    return stagedImage(
+      "",
+      {
+        kind: "ready",
+        variants: [preparedVariant("original", "keep")],
+        selected: { resize: "original", format: "keep" },
+        pending: null,
+        generation: 0
+      },
+      stagedId
+    );
+  }
+
+  function sendableDialog(
+    items: StagedUploadItem[],
+    onSendAttachments = vi.fn()
+  ) {
+    return (
+      <UploadStagingDialog
+        items={items}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        onSendAttachments={onSendAttachments}
+        loadPreview={vi.fn(async () => [])}
+      />
+    );
+  }
+
+  it("owns a distinctly labeled send action for the attachments", () => {
+    const onSendAttachments = vi.fn();
+    render(sendableDialog([readyItem()], onSendAttachments));
+
+    // A second button literally named "Send" on the same screen is what made
+    // the two actions indistinguishable.
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    const send = screen.getByRole("button", { name: "Send attachments" });
+    fireEvent.click(send);
+    expect(onSendAttachments).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to send while an output is still recompressing", () => {
+    const onSendAttachments = vi.fn();
+    render(
+      sendableDialog(
+        [
+          stagedImage("", {
+            kind: "ready",
+            variants: [preparedVariant("original", "keep")],
+            selected: { resize: "half", format: "keep" },
+            pending: { resize: "half", format: "keep" },
+            generation: 1
+          })
+        ],
+        onSendAttachments
+      )
+    );
+
+    const send = screen.getByRole<HTMLButtonElement>("button", {
+      name: "Send attachments"
+    });
+    expect(send.disabled).toBe(true);
+    fireEvent.click(send);
+    expect(onSendAttachments).not.toHaveBeenCalled();
+  });
+
+  it("refuses to send while any attachment is still preparing", () => {
+    render(sendableDialog([readyItem(), stagedImage("", { kind: "preparing" }, "staged-2")]));
+
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Send attachments" }).disabled
+    ).toBe(true);
   });
 });

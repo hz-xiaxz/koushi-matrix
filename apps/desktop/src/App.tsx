@@ -3031,58 +3031,73 @@ export function App() {
     return composerDraftLifecycleRegistryRef.current!.snapshot(scope)?.revision ?? lease.revision;
   }
 
+  /**
+   * Sends the staged attachments only.
+   *
+   * Deliberately separate from `sendText`: the composer draft is never read,
+   * sent, or cleared here, just as `sendText` never dispatches attachments.
+   */
+  async function sendStagedAttachments() {
+    const roomId = snapshot?.state.ui.timeline.room_id;
+    const account = readyComposerDraftAccountOwner(snapshot);
+    const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
+    const target: ComposerTarget | null = roomId ? { kind: "main", room_id: roomId } : null;
+    const uploads = snapshot?.state.ui.timeline.staged_uploads ?? [];
+    if (!roomId || !target || !account || !accountOwner || uploads.length === 0) {
+      return;
+    }
+    if (uploads.some((item) => item.preparation.kind !== "ready")) {
+      return;
+    }
+    const scope = composerDraftScope(account, target);
+    const admitted = beginComposerOperation(scope);
+    if (!admitted) return;
+    const draftRevision = currentComposerDraftRevision(scope, admitted.lease);
+    if (!reserveComposerAcceptedRevision(admitted, draftRevision)) return;
+    const localRevisionAtSubmission = mainComposerOverlayRef.current?.revision;
+    for (const item of uploads) {
+      latestTextOperationQueueRef.current.invalidate(
+        `caption:main:${roomId}:${item.staged_id}`
+      );
+    }
+    let response;
+    try {
+      response = await api.sendPreparedUploads(
+        account,
+        admitted.lease.leaseId,
+        admitted.lease.rendererGeneration,
+        target,
+        draftRevision
+      );
+    } catch {
+      settleComposerOperation(admitted);
+      return;
+    }
+    const canApply = composerOperationCanApply(admitted, draftRevision);
+    if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
+    const accepted =
+      response.acceptedRevision !== null &&
+      compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
+    const hasNewerDraft =
+      mainComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
+    if (accepted && !hasNewerDraft) {
+      cancelComposerDraftPersist(scope);
+      clearLocalComposerDraft(scope);
+      setComposerMentions(EMPTY_MENTION_INTENT);
+      updateComposerTypingSignal(roomId, "");
+    }
+    setSnapshot(response.snapshot);
+  }
+
   async function sendText(bodyOverride?: string) {
     const roomId = snapshot?.state.ui.timeline.room_id;
     const body = bodyOverride ?? composerDraft;
     const account = readyComposerDraftAccountOwner(snapshot);
     const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
     const target: ComposerTarget | null = roomId ? { kind: "main", room_id: roomId } : null;
-    const uploads = snapshot?.state.ui.timeline.staged_uploads ?? [];
-    if (!roomId || !target || !account || !accountOwner || (!body.trim() && uploads.length === 0)) {
-      return;
-    }
-    if (uploads.length > 0) {
-      if (uploads.some((item) => item.preparation.kind !== "ready")) {
-        return;
-      }
-      const scope = composerDraftScope(account, target);
-      const admitted = beginComposerOperation(scope);
-      if (!admitted) return;
-      const draftRevision = currentComposerDraftRevision(scope, admitted.lease);
-      if (!reserveComposerAcceptedRevision(admitted, draftRevision)) return;
-      const localRevisionAtSubmission = mainComposerOverlayRef.current?.revision;
-      for (const item of uploads) {
-        latestTextOperationQueueRef.current.invalidate(
-          `caption:main:${roomId}:${item.staged_id}`
-        );
-      }
-      let response;
-      try {
-        response = await api.sendPreparedUploads(
-          account,
-          admitted.lease.leaseId,
-          admitted.lease.rendererGeneration,
-          target,
-          draftRevision
-        );
-      } catch {
-        settleComposerOperation(admitted);
-        return;
-      }
-      const canApply = composerOperationCanApply(admitted, draftRevision);
-      if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
-      const accepted =
-        response.acceptedRevision !== null &&
-        compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
-      const hasNewerDraft =
-        mainComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
-      if (accepted && !hasNewerDraft) {
-        cancelComposerDraftPersist(scope);
-        clearLocalComposerDraft(scope);
-        setComposerMentions(EMPTY_MENTION_INTENT);
-        updateComposerTypingSignal(roomId, "");
-      }
-      setSnapshot(response.snapshot);
+    // Text only. Staged attachments have their own send in the staging panel,
+    // so this never dispatches them and never leaves the draft silently unsent.
+    if (!roomId || !target || !account || !accountOwner || !body.trim()) {
       return;
     }
     // Reply semantics are Rust-owned: dispatch sendReply when the composer is
@@ -3608,12 +3623,8 @@ export function App() {
     if (nextSnapshot) setSnapshot(nextSnapshot);
   }
 
-  async function sendThreadReply(
-    roomId: string,
-    rootEventId: string,
-    body: string,
-    mentionIntent: MentionIntent
-  ) {
+  /** Sends the open thread's staged attachments only; the draft is untouched. */
+  async function sendThreadStagedAttachments(roomId: string, rootEventId: string) {
     const thread = snapshot?.state.ui.thread;
     const account = readyComposerDraftAccountOwner(snapshot);
     const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
@@ -3624,48 +3635,60 @@ export function App() {
       thread.root_event_id === rootEventId
         ? thread.staged_uploads ?? []
         : [];
-    if (!account || !accountOwner) {
+    if (!account || !accountOwner || uploads.length === 0) {
       return;
     }
-    if (uploads.length > 0) {
-      if (uploads.some((item) => item.preparation.kind !== "ready")) return;
-      const scope = composerDraftScope(account, target);
-      const admitted = beginComposerOperation(scope);
-      if (!admitted) return;
-      const draftRevision = currentComposerDraftRevision(scope, admitted.lease);
-      if (!reserveComposerAcceptedRevision(admitted, draftRevision)) return;
-      const localRevisionAtSubmission = threadComposerOverlayRef.current?.revision ?? null;
-      for (const item of uploads) {
-        latestTextOperationQueueRef.current.invalidate(
-          `caption:thread:${roomId}:${rootEventId}:${item.staged_id}`
-        );
-      }
-      let response;
-      try {
-        response = await api.sendPreparedUploads(
-          account,
-          admitted.lease.leaseId,
-          admitted.lease.rendererGeneration,
-          target,
-          draftRevision
-        );
-      } catch {
-        settleComposerOperation(admitted);
-        return;
-      }
-      const canApply = composerOperationCanApply(admitted, draftRevision);
-      if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
-      const accepted =
-        response.acceptedRevision !== null &&
-        compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
-      const hasNewerDraft =
-        threadComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
-      if (accepted && !hasNewerDraft) {
-        cancelThreadComposerDraftPersist(scope);
-        clearLocalThreadComposerDraft(scope);
-        clearThreadComposerMentions(roomId, rootEventId);
-      }
-      setSnapshot(response.snapshot);
+    if (uploads.some((item) => item.preparation.kind !== "ready")) return;
+    const scope = composerDraftScope(account, target);
+    const admitted = beginComposerOperation(scope);
+    if (!admitted) return;
+    const draftRevision = currentComposerDraftRevision(scope, admitted.lease);
+    if (!reserveComposerAcceptedRevision(admitted, draftRevision)) return;
+    const localRevisionAtSubmission = threadComposerOverlayRef.current?.revision ?? null;
+    for (const item of uploads) {
+      latestTextOperationQueueRef.current.invalidate(
+        `caption:thread:${roomId}:${rootEventId}:${item.staged_id}`
+      );
+    }
+    let response;
+    try {
+      response = await api.sendPreparedUploads(
+        account,
+        admitted.lease.leaseId,
+        admitted.lease.rendererGeneration,
+        target,
+        draftRevision
+      );
+    } catch {
+      settleComposerOperation(admitted);
+      return;
+    }
+    const canApply = composerOperationCanApply(admitted, draftRevision);
+    if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
+    const accepted =
+      response.acceptedRevision !== null &&
+      compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
+    const hasNewerDraft =
+      threadComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
+    if (accepted && !hasNewerDraft) {
+      cancelThreadComposerDraftPersist(scope);
+      clearLocalThreadComposerDraft(scope);
+      clearThreadComposerMentions(roomId, rootEventId);
+    }
+    setSnapshot(response.snapshot);
+  }
+
+  async function sendThreadReply(
+    roomId: string,
+    rootEventId: string,
+    body: string,
+    mentionIntent: MentionIntent
+  ) {
+    const account = readyComposerDraftAccountOwner(snapshot);
+    const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
+    const target: ComposerTarget = { kind: "thread", room_id: roomId, root_event_id: rootEventId };
+    // Text only: thread attachments are sent from the staging panel.
+    if (!account || !accountOwner || !body.trim()) {
       return;
     }
     const submissionController = submissionRegistryRef.current!.forTarget(
@@ -4565,6 +4588,9 @@ export function App() {
             onSelectStagedUploadOutput={(stagedId, selection) => {
               void selectStagedUploadOutput(stagedId, selection);
             }}
+            onSendStagedAttachments={() => {
+              void sendStagedAttachments();
+            }}
             onLoadStagedUploadPreview={loadStagedUploadPreview}
             onRetryStagedUploadPreparation={(stagedId) => {
               void retryStagedUploadPreparation(stagedId);
@@ -4768,6 +4794,9 @@ export function App() {
           }}
           onThreadSelectStagedUploadOutput={(roomId, rootEventId, stagedId, selection) => {
             void selectThreadStagedUploadOutput(roomId, rootEventId, stagedId, selection);
+          }}
+          onThreadSendStagedAttachments={(roomId, rootEventId) => {
+            void sendThreadStagedAttachments(roomId, rootEventId);
           }}
           onThreadLoadStagedUploadPreview={loadThreadStagedUploadPreview}
           onThreadRetryStagedUploadPreparation={(roomId, rootEventId, stagedId) => {

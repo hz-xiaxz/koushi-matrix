@@ -127,6 +127,7 @@ export type MessageId =
   | "upload.outputSummary"
   | "upload.recompressing"
   | "upload.outputReady"
+  | "upload.sendAttachments"
   | "window.title"
   | "context.editMessage"
   | "context.addToFavourites"
@@ -1138,6 +1139,7 @@ const en: Catalog = {
   "upload.outputSummary": "Upload result",
   "upload.recompressing": "Recompressing…",
   "upload.outputReady": "Ready",
+  "upload.sendAttachments": "Send attachments",
   "window.title": "Koushi",
   "context.editMessage": "Edit",
   "context.addToFavourites": "Add to Favourites",
@@ -2053,6 +2055,7 @@ const ja: Catalog = {
   "upload.outputSummary": "出力結果",
   "upload.recompressing": "再圧縮中…",
   "upload.outputReady": "準備完了",
+  "upload.sendAttachments": "添付を送信",
   "window.title": "Koushi（光子・格子）",
   "context.editMessage": "編集",
   "context.addToFavourites": "お気に入りに追加",
