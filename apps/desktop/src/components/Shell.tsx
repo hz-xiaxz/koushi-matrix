@@ -80,7 +80,36 @@ function shouldStartTitlebarDrag(event: MouseEvent<HTMLElement>): boolean {
   return !event.target.closest("button, input, select, textarea, a, label");
 }
 
+/**
+ * Name the search target the scope actually covers.
+ *
+ * The placeholder used to be derived from the active space no matter what the
+ * scope selector said, so `All` read as `Search in <space>` and told the user
+ * the search was narrower than it was.
+ */
+function searchScopePlaceholder(
+  scope: SearchScopeKind,
+  activeSpaceName: string,
+  activeRoomName: string | null
+): string {
+  switch (scope) {
+    case "allRooms":
+      return t("workspace.searchEverywhere");
+    case "dms":
+      return t("workspace.searchDms");
+    case "currentRoom": {
+      const roomName = activeRoomName?.trim();
+      // With no room selected there is no target to name; claiming one would
+      // be worse than the generic label.
+      return roomName ? t("workspace.searchInRoom", { roomName }) : t("workspace.search");
+    }
+    case "currentSpace":
+      return t("workspace.searchPlaceholder", { spaceName: activeSpaceName });
+  }
+}
+
 export function TopBar({
+  activeRoomName = null,
   activeSpaceName,
   homeserver,
   isBusy,
@@ -96,6 +125,7 @@ export function TopBar({
   onSearchScopeChange,
   onStartWindowDrag = () => undefined
 }: {
+  activeRoomName?: string | null;
   activeSpaceName: string;
   homeserver?: string | null;
   isBusy: boolean;
@@ -148,7 +178,7 @@ export function TopBar({
           value={searchQuery}
           syncKey="workspace-search"
           dir="auto"
-          placeholder={t("workspace.searchPlaceholder", { spaceName: activeSpaceName })}
+          placeholder={searchScopePlaceholder(searchScope, activeSpaceName, activeRoomName)}
           onChange={(event) => onSearchQueryChange(event.target.value)}
         />
       </label>
