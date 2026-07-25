@@ -17,6 +17,13 @@ const HARNESS_PORT = 5183;
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
+  // One worker, not just one test per file. Playwright still spreads FILES
+  // across workers when `fullyParallel` is false, and every flake recorded in
+  // AGENTS.md was traced to those workers contending for the one shared Vite
+  // harness server — a stale `get_snapshot` landing in another file's test.
+  // Serializing removes that contention by construction and keeps CI and a
+  // local run identical; the whole suite still finishes in a few minutes.
+  workers: 1,
   retries: 0,
   reporter: [["list"]],
   use: {
