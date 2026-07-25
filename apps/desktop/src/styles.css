@@ -1778,7 +1778,10 @@ button:disabled {
   grid-row: 3;
 }
 
-.timeline-scroll:has(.message-action-menu, .message-forward-menu, .timeline-reaction-emoji-picker) > .message-list {
+/* The reaction emoji picker is not listed here: it renders in the body-level
+   floating layer, so it never needs the message list lifted above the sticky
+   timeline navigation. */
+.timeline-scroll:has(.message-action-menu, .message-forward-menu) > .message-list {
   position: relative;
   z-index: 12;
 }
@@ -4190,35 +4193,23 @@ mark {
   position: relative;
 }
 
+/* Body-level floating layer: the panel escapes overflow-clipped panes and is
+   positioned by EmojiPicker from measured viewport coordinates. The sizes here
+   are the pre-measurement defaults; resolveEmojiPickerPlacement then sets the
+   exact inline/block size and physical offsets inline. */
 .emoji-picker {
-  position: absolute;
+  position: fixed;
   z-index: 80;
   display: grid;
   grid-template-rows: auto auto 1fr;
-  inline-size: min(420px, calc(100vw - 32px));
-  block-size: min(var(--emoji-picker-max-block-size, 520px), calc(100vh - 32px));
+  inline-size: min(380px, calc(100vw - 32px));
+  block-size: min(520px, calc(100vh - 32px));
   min-block-size: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
   box-shadow: 0 16px 32px rgb(15 27 45 / 18%);
-}
-
-.emoji-picker.is-above {
-  inset-block-end: calc(100% + 6px);
-}
-
-.emoji-picker.is-below {
-  inset-block-start: calc(100% + 6px);
-}
-
-.emoji-picker.align-start {
-  inset-inline-start: 0;
-}
-
-.emoji-picker.align-end {
-  inset-inline-end: 0;
 }
 
 .timeline-reaction-emoji-picker {
@@ -4307,7 +4298,9 @@ mark {
 
 .emoji-picker-grid {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  /* Column count is owned by EMOJI_PICKER_GRID_COLUMNS in EmojiPicker.tsx so
+     the grid and the ArrowUp/ArrowDown step cannot drift apart. */
+  grid-template-columns: repeat(var(--emoji-picker-columns, 10), minmax(0, 1fr));
   gap: 2px;
 }
 

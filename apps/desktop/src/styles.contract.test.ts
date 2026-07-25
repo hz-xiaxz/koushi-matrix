@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, test } from "vitest";
 
+import {
+  EMOJI_PICKER_BLOCK_SIZE_PX,
+  EMOJI_PICKER_GRID_COLUMNS,
+  EMOJI_PICKER_INLINE_SIZE_PX
+} from "./components/EmojiPicker";
+
 const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const shellSource = readFileSync(new URL("./components/Shell.tsx", import.meta.url), "utf8");
@@ -196,17 +202,32 @@ describe("styles.css token system", () => {
 
   test("timeline message action menus can stack above sticky timeline navigation", () => {
     const block = selectorBlock(
-      ".timeline-scroll:has(.message-action-menu, .message-forward-menu, .timeline-reaction-emoji-picker) > .message-list"
+      ".timeline-scroll:has(.message-action-menu, .message-forward-menu) > .message-list"
     );
     expect(block).toContain("position: relative;");
     expect(block).toContain("z-index: 12;");
+    // The reaction emoji picker renders in the body-level floating layer, so it
+    // must not need the message list lifted for it.
+    expect(css).not.toContain(":has(.message-action-menu, .message-forward-menu, .timeline-reaction-emoji-picker)");
   });
 
-  test("emoji picker has a roomy fixed-format layout without horizontal body scroll", () => {
+  test("emoji picker floats over clipped panes with a compact fixed-format layout", () => {
     const pickerBlock = selectorBlock(".emoji-picker");
-    expect(pickerBlock).toContain("inline-size: min(420px, calc(100vw - 32px));");
+    // Viewport-fixed so an overflow-clipped pane cannot cut the panel off; the
+    // exact rectangle is measured by resolveEmojiPickerPlacement.
+    expect(pickerBlock).toContain("position: fixed;");
     expect(pickerBlock).toContain(
-      "block-size: min(var(--emoji-picker-max-block-size, 520px), calc(100vh - 32px));"
+      `inline-size: min(${EMOJI_PICKER_INLINE_SIZE_PX}px, calc(100vw - 32px));`
+    );
+    expect(pickerBlock).toContain(
+      `block-size: min(${EMOJI_PICKER_BLOCK_SIZE_PX}px, calc(100vh - 32px));`
+    );
+    expect(pickerBlock).not.toContain("--emoji-picker-max-block-size");
+
+    // The grid column count has a single owner in EmojiPicker.tsx.
+    const gridBlock = selectorBlock(".emoji-picker-grid");
+    expect(gridBlock).toContain(
+      `grid-template-columns: repeat(var(--emoji-picker-columns, ${EMOJI_PICKER_GRID_COLUMNS}), minmax(0, 1fr));`
     );
 
     const tabsBlock = selectorBlock(".emoji-picker-tabs");

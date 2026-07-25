@@ -5453,6 +5453,98 @@ test("thread summary chip opens a thread timeline from keyed CoreEvents", async 
   ).toBeVisible();
 });
 
+test("thread pane rows expose no reply composition while room rows still do", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+
+  // The room timeline keeps both reply affordances.
+  const roomRow = page
+    .getByRole("main", { name: t("timeline.conversation") })
+    .locator('[data-event-id="$seed-event:example.invalid"]')
+    .first();
+  await roomRow.hover();
+  await expect(
+    roomRow.getByRole("button", { name: t("timeline.replyToMessage") })
+  ).toBeVisible();
+  await expect(
+    roomRow.getByRole("button", { name: t("timeline.replyInThread") })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: /2 replies/ }).click();
+  await expect(page.getByText(t("panel.thread"), { exact: true })).toBeVisible();
+
+  const threadEventId = "$thread-reply-actions:example.invalid";
+  const threadKey = threadTimelineKey(
+    "@harness-user:example.invalid",
+    "!harness-room:example.invalid",
+    "$seed-event:example.invalid"
+  );
+  await page.evaluate(({ key, eventId }) => {
+    window.__harness.pushCoreEvent({
+      kind: "Timeline",
+      event: {
+        InitialItems: {
+          request_id: null,
+          key,
+          generation: 1,
+          items: [
+            {
+              id: { Event: { event_id: eventId } },
+              sender: "@thread-user:example.invalid",
+              body: "Thread event without reply affordances",
+              timestamp_ms: 1_800_000_000_300,
+              in_reply_to_event_id: "$seed-event:example.invalid",
+              thread_root: "$seed-event:example.invalid",
+              thread_summary: null,
+              reactions: [],
+              can_react: true,
+              is_redacted: false,
+              is_hidden: false,
+              can_redact: false,
+              is_edited: false,
+              can_edit: false
+            }
+          ]
+        }
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+  }, { key: threadKey, eventId: threadEventId });
+
+  const threadRow = page
+    .locator(`aside[aria-label="Context panel"] [data-event-id="${threadEventId}"]`)
+    .first();
+  await expect(threadRow).toBeVisible();
+  await threadRow.hover();
+
+  // Reactions stay available in the thread pane; reply composition does not.
+  await expect(threadRow.getByRole("button", { name: t("timeline.addReaction") })).toBeVisible();
+  await expect(
+    threadRow.getByRole("button", { name: t("timeline.replyToMessage") })
+  ).toHaveCount(0);
+  await expect(
+    threadRow.getByRole("button", { name: t("timeline.replyInThread") })
+  ).toHaveCount(0);
+
+  // A context menu opened on a thread row must never expose the hidden action
+  // through another path. The thread pane currently wires no message context
+  // menu at all, so this asserts the absent menu items rather than the menu.
+  await threadRow.click({ button: "right" });
+  const contextMenu = page.locator(".context-menu");
+  await expect(
+    contextMenu.getByRole("menuitem", { name: t("timeline.replyToMessage") })
+  ).toHaveCount(0);
+  await expect(
+    contextMenu.getByRole("menuitem", { name: t("context.openThread") })
+  ).toHaveCount(0);
+
+  // The thread composer stays in its ordinary thread-send mode.
+  await expect(
+    page.locator('aside[aria-label="Context panel"] .composer-reply-banner')
+  ).toHaveCount(0);
+});
+
 test("empty thread timeline initial generation zero triggers thread backfill", async ({
   page
 }) => {

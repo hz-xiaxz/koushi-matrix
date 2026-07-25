@@ -22018,6 +22018,11 @@ fn timeline_item_should_be_hidden_for_key(
     timeline_item_should_be_hidden(has_renderable_content, is_redacted)
 }
 
+/// Koushi threads are linear, so a thread-keyed reply command is always an
+/// ordinary thread message: the relation is threaded and the target event is
+/// never promoted to a rich reply. The product UI offers no thread-pane reply
+/// action, and this projection keeps a thread rich reply unreachable even if a
+/// caller passes a non-root target.
 fn reply_enforce_thread_for_key(key: &TimelineKey) -> EnforceThread {
     match key.kind {
         TimelineKind::Thread { .. } => EnforceThread::Threaded(ReplyWithinThread::No),
