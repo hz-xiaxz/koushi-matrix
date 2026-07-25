@@ -6054,7 +6054,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             request_id: set_child_id,
             space_id: space_id.clone(),
             child_room_id: room_id.clone(),
-            via_servers: via_servers.clone(),
+            via_server: via_server.clone(),
         }))
         .await
         .map_err(|e| format!("submit set space child: {e}"))?;
@@ -7742,7 +7742,7 @@ async fn set_space_child_for_qa(
         request_id,
         space_id: space_id.to_owned(),
         child_room_id: child_room_id.to_owned(),
-        via_servers: via_servers.to_owned(),
+        via_server: via_server.to_owned(),
     }))
     .await
     .map_err(|e| format!("{label}: submit set space child failed: {e}"))?;
