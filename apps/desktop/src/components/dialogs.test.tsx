@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StagedUploadItem } from "../domain/types";
@@ -146,5 +146,143 @@ describe("dialog IME submit handling", () => {
     fireEvent.submit(container.querySelector("form")!);
 
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+// --- #305: compact resize/format controls ---
+
+function preparedVariant(
+  resize: "original" | "half" | "quarter" | "eighth",
+  formatChoice: "keep" | "png" | "jpeg" | "webp",
+  overrides: Partial<{ byte_count: number; width: number; height: number; savings_percent: number }> = {}
+) {
+  return {
+    variant_id: `${resize}-${formatChoice}`,
+    resize,
+    format_choice: formatChoice,
+    filename: `synthetic.${formatChoice === "keep" ? "png" : formatChoice}`,
+    mime_type: formatChoice === "keep" ? "image/png" : `image/${formatChoice}`,
+    byte_count: overrides.byte_count ?? 128,
+    width: overrides.width ?? 1284,
+    height: overrides.height ?? 918,
+    format: (formatChoice === "keep" ? "original" : formatChoice) as
+      | "original"
+      | "png"
+      | "jpeg"
+      | "webp",
+    savings_percent: overrides.savings_percent ?? 0,
+    metadata_stripped: false,
+    thumbnail_refreshed: false
+  };
+}
+
+describe("UploadStagingDialog resize and format controls", () => {
+  it("offers the four scales and four formats as compact radiogroups", () => {
+    render(
+      dialog([
+        stagedImage("", {
+          kind: "ready",
+          variants: [preparedVariant("original", "keep")],
+          selected: { resize: "original", format: "keep" },
+          pending: null,
+          generation: 0
+        })
+      ])
+    );
+
+    const resize = screen.getByRole("radiogroup", { name: "Resize" });
+    expect(
+      ["Original", "1/2", "1/4", "1/8"].map(
+        (label) => within(resize).getByRole("radio", { name: label }).getAttribute("aria-checked")
+      )
+    ).toEqual(["true", "false", "false", "false"]);
+
+    const format = screen.getByRole("radiogroup", { name: "Format" });
+    expect(
+      ["Keep", "WebP", "JPEG", "PNG"].map(
+        (label) => within(format).getByRole("radio", { name: label }).getAttribute("aria-checked")
+      )
+    ).toEqual(["true", "false", "false", "false"]);
+
+    // No large per-variant cards and no MIME strings survive.
+    expect(document.querySelector(".upload-variant-button")).toBeNull();
+    expect(screen.queryByText(/image\/png/)).toBeNull();
+  });
+
+  it("dispatches the chosen pair without changing the rendered selection itself", () => {
+    const onSelectOutput = vi.fn();
+    render(
+      <UploadStagingDialog
+        items={[
+          stagedImage("", {
+            kind: "ready",
+            variants: [preparedVariant("original", "keep")],
+            selected: { resize: "original", format: "keep" },
+            pending: null,
+            generation: 0
+          })
+        ]}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={onSelectOutput}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        loadPreview={vi.fn(async () => [])}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "1/2" }));
+    expect(onSelectOutput).toHaveBeenCalledWith("staged-1", {
+      resize: "half",
+      format: "keep"
+    });
+    fireEvent.click(screen.getByRole("radio", { name: "JPEG" }));
+    expect(onSelectOutput).toHaveBeenLastCalledWith("staged-1", {
+      resize: "original",
+      format: "jpeg"
+    });
+    // Rust owns the selection: the pressed state still reflects the snapshot.
+    expect(
+      screen.getByRole("radio", { name: "Original" }).getAttribute("aria-checked")
+    ).toBe("true");
+  });
+
+  it("summarizes the selected output once and reports recompression", () => {
+    const ready = stagedImage("", {
+      kind: "ready",
+      variants: [preparedVariant("half", "jpeg", { byte_count: 4096, width: 642, height: 459, savings_percent: 60 })],
+      selected: { resize: "half", format: "jpeg" },
+      pending: null,
+      generation: 1
+    });
+    const { rerender } = render(dialog([ready]));
+
+    const summary = screen.getByRole("status", { name: "Upload result" });
+    expect(summary.textContent).toContain("642");
+    expect(summary.textContent).toContain("459");
+    expect(summary.textContent).toContain("60% smaller");
+    expect(summary.textContent).not.toContain("image/jpeg");
+
+    rerender(
+      dialog([
+        stagedImage("", {
+          kind: "ready",
+          variants: [preparedVariant("half", "jpeg", { byte_count: 4096, width: 642, height: 459 })],
+          selected: { resize: "quarter", format: "jpeg" },
+          pending: { resize: "quarter", format: "jpeg" },
+          generation: 2
+        })
+      ])
+    );
+
+    // While recompressing, the summary reports the state instead of numbers
+    // that would describe bytes nobody is going to upload.
+    const pendingSummary = screen.getByRole("status", { name: "Upload result" });
+    expect(pendingSummary.textContent).toContain("Recompressing…");
+    expect(pendingSummary.getAttribute("data-upload-output-state")).toBe("recompressing");
+    // The preview viewport stays mounted at a stable height.
+    const viewport = document.querySelector(".upload-preview-viewport");
+    expect(viewport).not.toBeNull();
+    expect(viewport?.getAttribute("data-recompressing")).toBe("true");
   });
 });

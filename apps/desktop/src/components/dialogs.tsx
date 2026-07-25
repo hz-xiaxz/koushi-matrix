@@ -12,13 +12,15 @@ import {
   Image as ImageIcon,
   X
 } from "lucide-react";
-import { t } from "../i18n/messages";
+import { type MessageId, t } from "../i18n/messages";
 import type {
   CreateRoomVisibility,
   InviteScopeSelection,
   InviteWorkflowState,
+  StagedUploadFormatChoice,
   StagedUploadItem,
-  StagedUploadOutputSelection
+  StagedUploadOutputSelection,
+  StagedUploadResizeChoice
 } from "../domain/types";
 import {
   ICON_SIZE,
@@ -757,37 +759,136 @@ export function UploadStagingDialog({
                 </div>
               </div>
             ) : item.kind.kind === "image" ? (
-              <div className="upload-staging-choice" role="group" aria-label={t("upload.sizeChoice")}>
-                {item.preparation.variants.map((variant) => (
-                  <button
-                    className="dialog-button upload-variant-button"
-                    type="button"
-                    key={variant.variant_id}
-                    aria-pressed={
-                      item.preparation.kind === "ready" &&
-                      item.preparation.selected.resize === variant.resize &&
-                      item.preparation.selected.format === variant.format_choice
-                    }
-                    onClick={() =>
-                      void onSelectOutput(item.staged_id, {
-                        resize: variant.resize,
-                        format: variant.format_choice
-                      })
-                    }
-                  >
-                    <strong>{variant.format === "original" ? t("upload.original") : variant.format.toUpperCase()}</strong>
-                    <span>
-                      {formatUploadBytes(variant.byte_count)} · {formatPreparedDimensions(variant.width, variant.height)} · {variant.mime_type}
-                      {variant.savings_percent > 0 ? ` · ${t("upload.savings", { percent: variant.savings_percent })}` : ""}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <UploadOutputToolbar
+                item={item}
+                preparation={item.preparation}
+                onSelectOutput={onSelectOutput}
+              />
             ) : null}
           </article>
         ))}
       </div>
     </section>
+  );
+}
+
+/** Resize options, in the order the toolbar renders them. */
+const UPLOAD_RESIZE_OPTIONS: ReadonlyArray<{
+  value: StagedUploadResizeChoice;
+  labelId: MessageId;
+}> = [
+  { value: "original", labelId: "upload.resizeOriginal" },
+  { value: "half", labelId: "upload.resizeHalf" },
+  { value: "quarter", labelId: "upload.resizeQuarter" },
+  { value: "eighth", labelId: "upload.resizeEighth" }
+];
+
+/** Format options, in the order the toolbar renders them. */
+const UPLOAD_FORMAT_OPTIONS: ReadonlyArray<{
+  value: StagedUploadFormatChoice;
+  labelId: MessageId;
+}> = [
+  { value: "keep", labelId: "upload.formatKeep" },
+  { value: "webp", labelId: "upload.formatWebp" },
+  { value: "jpeg", labelId: "upload.formatJpeg" },
+  { value: "png", labelId: "upload.formatPng" }
+];
+
+/**
+ * Two independent compact segmented controls plus one result summary.
+ *
+ * The pressed state comes from the Rust-owned selection, never from a local
+ * click: a click only dispatches the chosen pair.
+ */
+function UploadOutputToolbar({
+  item,
+  preparation,
+  onSelectOutput
+}: {
+  item: StagedUploadItem;
+  preparation: Extract<StagedUploadItem["preparation"], { kind: "ready" }>;
+  onSelectOutput: (
+    stagedId: string,
+    selection: StagedUploadOutputSelection
+  ) => void | Promise<void>;
+}) {
+  const { selected } = preparation;
+  const prepared = preparation.variants.find(
+    (variant) =>
+      variant.resize === selected.resize && variant.format_choice === selected.format
+  );
+  const recompressing = preparation.pending != null && prepared === undefined;
+  return (
+    <div className="upload-output-toolbar">
+      <div
+        className="upload-output-group"
+        role="radiogroup"
+        aria-label={t("upload.resizeChoice")}
+      >
+        <span className="upload-output-group-label">{t("upload.resizeChoice")}</span>
+        {UPLOAD_RESIZE_OPTIONS.map((option) => (
+          <button
+            className="upload-output-option"
+            type="button"
+            key={option.value}
+            role="radio"
+            aria-checked={selected.resize === option.value}
+            onClick={() =>
+              void onSelectOutput(item.staged_id, {
+                resize: option.value,
+                format: selected.format
+              })
+            }
+          >
+            {t(option.labelId)}
+          </button>
+        ))}
+      </div>
+      <div
+        className="upload-output-group"
+        role="radiogroup"
+        aria-label={t("upload.formatChoice")}
+      >
+        <span className="upload-output-group-label">{t("upload.formatChoice")}</span>
+        {UPLOAD_FORMAT_OPTIONS.map((option) => (
+          <button
+            className="upload-output-option"
+            type="button"
+            key={option.value}
+            role="radio"
+            aria-checked={selected.format === option.value}
+            onClick={() =>
+              void onSelectOutput(item.staged_id, {
+                resize: selected.resize,
+                format: option.value
+              })
+            }
+          >
+            {t(option.labelId)}
+          </button>
+        ))}
+      </div>
+      <div
+        className="upload-output-summary"
+        role="status"
+        aria-label={t("upload.outputSummary")}
+        data-upload-output-state={recompressing ? "recompressing" : "ready"}
+      >
+        {recompressing ? (
+          <span>{t("upload.recompressing")}</span>
+        ) : prepared ? (
+          <>
+            <span>{formatPreparedDimensions(prepared.width, prepared.height)}</span>
+            <span>{formatUploadBytes(prepared.byte_count)}</span>
+            {prepared.savings_percent > 0 ? (
+              <span>{t("upload.savings", { percent: prepared.savings_percent })}</span>
+            ) : null}
+          </>
+        ) : (
+          <span>{t("upload.preparing")}</span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -818,18 +919,30 @@ function PreparedUploadPreview({
         )?.variant_id ?? null
       : null;
 
+  const recompressing =
+    item.preparation.kind === "ready" &&
+    item.preparation.pending != null &&
+    selectedVariantId === null;
+
   useEffect(() => {
     let cancelled = false;
     let objectUrl: string | null = null;
-    setPreviewUrl(null);
     if (!selectedVariantId) {
+      // Keep the last valid preview on screen: clearing it here would blank the
+      // viewport while a new pair is still encoding, or after a failure.
       return;
     }
     void loadPreview(item.staged_id, selectedVariantId)
       .then((bytes) => {
         if (cancelled || bytes.length === 0) return;
         objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: item.mime_type }));
-        setPreviewUrl(objectUrl);
+        // Swap image and metadata together: the summary reads the same
+        // Rust-owned prepared output this URL was built from.
+        setPreviewUrl((previous) => {
+          if (previous) URL.revokeObjectURL(previous);
+          return objectUrl;
+        });
+        objectUrl = null;
       })
       .catch(() => undefined);
     return () => {
@@ -838,9 +951,21 @@ function PreparedUploadPreview({
     };
   }, [item.mime_type, item.staged_id, loadPreview, selectedVariantId]);
 
-  return previewUrl ? (
-    <img className="upload-staging-preview" src={previewUrl} alt={t("upload.previewAlt")} />
-  ) : (
-    <div className="upload-staging-preview-placeholder" aria-label={t("upload.previewAlt")} />
+  // One fixed-height viewport that never collapses: recompression dims the
+  // current preview instead of unmounting it.
+  return (
+    <div
+      className="upload-preview-viewport"
+      data-recompressing={recompressing ? "true" : undefined}
+    >
+      {previewUrl ? (
+        <img className="upload-staging-preview" src={previewUrl} alt={t("upload.previewAlt")} />
+      ) : (
+        <div className="upload-staging-preview-placeholder" aria-label={t("upload.previewAlt")} />
+      )}
+      {recompressing ? (
+        <span className="upload-preview-progress" role="presentation" />
+      ) : null}
+    </div>
   );
 }

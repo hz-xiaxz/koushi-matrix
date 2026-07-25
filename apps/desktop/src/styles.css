@@ -5,6 +5,13 @@
 @import "twemoji-colr-font/twemoji.css";
 
 :root {
+  /* #305 upload output controls: ~24-28px segments inside a ~30-34px control. */
+  --upload-output-control-size: 32px;
+  --upload-output-option-size: 26px;
+  --upload-output-option-gap: 2px;
+  --upload-output-group-padding: 3px;
+  --upload-output-toolbar-gap: 8px;
+  --upload-preview-viewport-size: 240px;
   color-scheme: light dark;
 
   --font-system-ui:
@@ -4503,42 +4510,103 @@ mark {
   border-color: var(--brand);
 }
 
-.upload-staging-choice {
+/* #305 compact output controls: two segmented groups plus one summary, on a
+   single row when there is space, wrapping as groups rather than as cards. */
+.upload-output-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--upload-output-toolbar-gap);
+  align-items: center;
 }
 
-.upload-staging-choice .dialog-button[aria-pressed="true"] {
+.upload-output-group {
+  display: flex;
+  gap: var(--upload-output-option-gap);
+  align-items: center;
+  min-block-size: var(--upload-output-control-size);
+  padding: var(--upload-output-group-padding);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-hover);
+}
+
+.upload-output-group-label {
+  padding-inline: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.upload-output-option {
+  min-inline-size: var(--upload-output-option-size);
+  block-size: var(--upload-output-option-size);
+  padding-inline: 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.upload-output-option[aria-checked="true"] {
   color: var(--brand-contrast);
-  border-color: var(--brand);
   background: var(--brand);
+}
+
+.upload-output-option:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.upload-output-summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-inline-start: auto;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* One viewport that keeps its height across conversions: the preview is dimmed
+   while recompressing, never unmounted or collapsed. */
+.upload-preview-viewport {
+  position: relative;
+  display: grid;
+  block-size: var(--upload-preview-viewport-size);
+  overflow: hidden;
+  border-radius: 7px;
+}
+
+.upload-preview-viewport[data-recompressing="true"] .upload-staging-preview,
+.upload-preview-viewport[data-recompressing="true"] .upload-staging-preview-placeholder {
+  opacity: 0.45;
+}
+
+.upload-preview-progress {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline: 0;
+  block-size: 3px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--brand),
+    transparent
+  );
 }
 
 .upload-staging-preview,
 .upload-staging-preview-placeholder {
   width: 100%;
-  max-height: 240px;
+  block-size: 100%;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface);
   object-fit: contain;
 }
 
-.upload-staging-preview-placeholder {
-  min-height: 96px;
-}
-
-.upload-variant-button {
-  display: grid;
-  gap: 2px;
-  min-width: 150px;
-  height: auto;
-  padding-block: 7px;
-  text-align: start;
-}
-
-.upload-variant-button span,
 .upload-staging-status {
   color: var(--text-faint);
   font-size: 11px;

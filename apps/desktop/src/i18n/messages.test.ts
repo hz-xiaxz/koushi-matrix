@@ -236,6 +236,14 @@ describe("i18n message catalog", () => {
 
 const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
   "auth.failureForbidden",
+  // Scale fractions and image-format names are not prose: "1/2" and "JPEG"
+  // read the same in both catalogs, and translating them would be wrong.
+  "upload.resizeHalf",
+  "upload.resizeQuarter",
+  "upload.resizeEighth",
+  "upload.formatWebp",
+  "upload.formatJpeg",
+  "upload.formatPng",
   "auth.failureNetwork",
   "auth.failureSdk",
   "auth.failureTimeout",
