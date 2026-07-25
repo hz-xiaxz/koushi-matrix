@@ -89,6 +89,31 @@ UI, DTO/TS mirrors, persistence backfill, the image-compression Rust tests, the
 need to be retired or repointed at the dialog in the same change. Treat that as
 part of #305 scope, not a follow-up, so no dead preference remains.
 
+## Retirement scope (verified 2026-07-25)
+
+`media` holds two separate things, and only one of them is inert:
+
+- `image_upload_compression: ImageUploadCompressionMode` (`Never`/`Ask`/
+  `Always`) no longer affects anything: staging always asks and always starts at
+  `(Original, Keep)`. **Retire it** — the enum, the `SettingsValues` field, the
+  `SettingsPatch` entry, the User settings control and its catalog keys, the
+  DTO/TS mirrors, and every fixture that sets it.
+- `image_upload_compression_policy` (threshold/target/quality) is still live:
+  `prepare_image_output` reads `quality_percent` for JPEG/WebP encoding, and
+  `build_upload_media_command` still reads the thresholds. **Keep it**, but
+  rename away from "compression" if it survives the UI work, since it is now an
+  encoder policy rather than an automatic-compression policy.
+
+The `local-image-compression` Linux lane drives the retired control ("set
+Compress images to Always"), so it must be repointed at the staging dialog:
+attach the synthetic wide PNG, pick `1/2` and `JPEG`, and assert the Rust-owned
+media row reports the selected output. Do not simply delete the lane; it is the
+only virtual-display proof that a chosen output is what actually uploads.
+
+Order the commits UI-first: the toolbar has to exist before the old control is
+removed, otherwise the tree has a moment with no way to choose compression at
+all.
+
 ## GUI work
 
 - One compact toolbar above the preview: a Resize radiogroup (Original, 1/2,
