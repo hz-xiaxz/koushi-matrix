@@ -67,6 +67,12 @@ import {
 } from "react";
 
 import { getActiveLocale, t } from "../i18n/messages";
+import {
+  FloatingLayer,
+  floatingPlacementStyle,
+  useFloatingPlacement,
+  useHoverFocusPopup
+} from "./floatingLayer";
 import { useRecoverableImageSource } from "./avatarImage";
 import { findQueryHighlightRange } from "./searchHighlight";
 import { Tooltip } from "./Tooltip";
@@ -6406,42 +6412,18 @@ export function TimelineItemRow({
               </div>
             ) : null}
             {receiptTotalCount > 0 ? (
-              <div
-                className="message-receipts"
-                aria-label={receiptAriaLabel}
-                tabIndex={0}
+              <ReceiptReaders
+                ariaLabel={receiptAriaLabel}
+                details={receiptDetails}
+                overflowCount={receiptOverflowCount}
+                receipts={receipts}
                 title={receiptTitle}
-              >
-                <span className="receipt-avatars" aria-hidden="true">
-                  {receipts.map((receipt) => {
-                    const sourceUrl = receiptAvatarSource(receipt);
-                    return (
-                      <span className="receipt-reader-avatar" key={receipt.user_id}>
-                        {sourceUrl ? (
-                          <img src={sourceUrl} alt={receiptDisplayName(receipt)} />
-                        ) : (
-                          <span dir="auto">{receiptInitials(receipt)}</span>
-                        )}
-                      </span>
-                    );
-                  })}
-                  {receiptOverflowCount > 0 ? (
-                    <span className="receipt-overflow">+{receiptOverflowCount}</span>
-                  ) : null}
-                </span>
-                <span className="receipt-tooltip" role="tooltip">
-                  {receiptDetails.map((detail, index) => (
-                    <span key={`${detail}:${index}`} dir="auto">
-                      {detail}
-                    </span>
-                  ))}
-                </span>
-              </div>
+              />
             ) : null}
           </div>
         ) : null}
       </div>
-      <div className="message-actions">
+      <div className="message-actions message-actions-floating">
         {!isEditing && canShowActionButtons && item.can_react ? (
           <div className="reaction-control">
             <button
@@ -6794,6 +6776,89 @@ function paginationStateBackfillCompletionReason(state: PaginationState): string
     return "pagination_end_reached";
   }
   return "pagination_failed";
+}
+
+/** Reader popup width; the panel narrows to the pane when it is smaller. */
+const RECEIPT_POPUP_INLINE_SIZE_PX = 260;
+const RECEIPT_POPUP_BLOCK_SIZE_PX = 132;
+
+/**
+ * Read-receipt avatar stack plus its reader popup.
+ *
+ * The popup renders in the body-level floating layer: the thread pane is
+ * overflow-clipped, so a row-local popup gets cut off at the pane edge. Hover
+ * and focus open the same popup so keyboard users reach what pointer users see.
+ */
+function ReceiptReaders({
+  ariaLabel,
+  details,
+  overflowCount,
+  receipts,
+  title
+}: {
+  ariaLabel: string;
+  details: string[];
+  overflowCount: number;
+  receipts: LiveReadReceipt[];
+  title: string;
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const { open, triggerProps } = useHoverFocusPopup();
+  const placement = useFloatingPlacement({
+    align: "end",
+    anchorRef,
+    blockSize: RECEIPT_POPUP_BLOCK_SIZE_PX,
+    inlineSize: RECEIPT_POPUP_INLINE_SIZE_PX,
+    placement: "above",
+    resolveBoundaryElement: receiptPopupBoundaryElement
+  });
+
+  return (
+    <div
+      ref={anchorRef}
+      className="message-receipts"
+      aria-label={ariaLabel}
+      tabIndex={0}
+      title={title}
+      {...triggerProps}
+    >
+      <span className="receipt-avatars" aria-hidden="true">
+        {receipts.map((receipt) => {
+          const sourceUrl = receiptAvatarSource(receipt);
+          return (
+            <span className="receipt-reader-avatar" key={receipt.user_id}>
+              {sourceUrl ? (
+                <img src={sourceUrl} alt={receiptDisplayName(receipt)} />
+              ) : (
+                <span dir="auto">{receiptInitials(receipt)}</span>
+              )}
+            </span>
+          );
+        })}
+        {overflowCount > 0 ? <span className="receipt-overflow">+{overflowCount}</span> : null}
+      </span>
+      {open && details.length > 0 ? (
+        <FloatingLayer>
+          <span
+            className="receipt-tooltip"
+            role="tooltip"
+            style={floatingPlacementStyle(placement)}
+          >
+            {details.map((detail, index) => (
+              <span key={`${detail}:${index}`} dir="auto">
+                {detail}
+              </span>
+            ))}
+          </span>
+        </FloatingLayer>
+      ) : null}
+    </div>
+  );
+}
+
+/** Surface the reader popup must stay inside. */
+function receiptPopupBoundaryElement(anchor: Element): Element | null {
+  return anchor.closest(".thread-pane") ?? anchor.closest(".main-pane");
 }
 
 function timelineKindDiagnosticLabel(key: TimelineKey): "room" | "thread" | "focused" {

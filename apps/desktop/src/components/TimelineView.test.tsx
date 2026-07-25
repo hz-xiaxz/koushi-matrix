@@ -5564,6 +5564,148 @@ describe("TimelineView", () => {
     });
   });
 
+  it("opens the reader popup in the floating layer so a clipped pane cannot cut it", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+
+    // A narrow, overflow-clipped container stands in for the thread pane.
+    const pane = document.createElement("div");
+    pane.className = "thread-pane";
+    pane.style.overflow = "hidden";
+    pane.style.width = "320px";
+    document.body.appendChild(pane);
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        presentationContext="thread"
+        liveSignals={{
+          presence: {},
+          rooms: {
+            "!room:example.invalid": {
+              fully_read_event_id: null,
+              typing_user_ids: [],
+              receipts_by_event: {
+                "$seen": {
+                  total_count: 1,
+                  overflow_count: 0,
+                  readers: [
+                    {
+                      user_id: "@ken:example.invalid",
+                      display_name: "Ken Inayoshi",
+                      original_display_label: "Ken Inayoshi",
+                      avatar: null,
+                      timestamp_ms: 1_800_000_000_000
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }}
+        onReply={vi.fn()}
+      />,
+      { container: pane }
+    );
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [message("$seen", "Seen message")]
+          }
+        }
+      });
+    });
+
+    const receipts = await waitFor(() => {
+      const node = pane.querySelector<HTMLElement>(".message-receipts");
+      expect(node).not.toBeNull();
+      return node!;
+    });
+
+    // Closed by default; the details are not a row-local always-rendered child.
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+
+    fireEvent.focus(receipts);
+    const tooltip = await waitFor(() => {
+      const node = document.querySelector<HTMLElement>('[role="tooltip"]');
+      expect(node).not.toBeNull();
+      return node!;
+    });
+    expect(tooltip.textContent).toContain("Ken Inayoshi");
+    // The popup must escape the clipped pane, so it cannot be a descendant.
+    expect(pane.contains(tooltip)).toBe(false);
+    expect(tooltip.parentElement).toBe(document.body);
+
+    fireEvent.blur(receipts);
+    await waitFor(() => {
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    });
+
+    pane.remove();
+  });
+
+  it("keeps hover actions out of the timestamp's flow", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [message("$acts", "Message with actions")]
+          }
+        }
+      });
+    });
+
+    const row = await waitFor(() => {
+      const node = screen.getByText("Message with actions").closest<HTMLElement>("article");
+      expect(node).not.toBeNull();
+      return node!;
+    });
+    const actions = row.querySelector<HTMLElement>(".message-actions");
+    const timestamp = row.querySelector<HTMLElement>(".message-timestamp");
+    expect(actions).not.toBeNull();
+    expect(timestamp).not.toBeNull();
+
+    // The actions float over the row instead of sharing the header row with the
+    // timestamp, which is what let them cover it in a narrow pane.
+    expect(actions!.parentElement).toBe(row);
+    expect(timestamp!.closest(".message-actions")).toBeNull();
+    expect(actions!.classList.contains("message-actions-floating")).toBe(true);
+  });
+
   it("surfaces reaction senders in a hoverable tooltip using profile labels", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
