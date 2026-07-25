@@ -996,6 +996,25 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   dispatches such as mark-read/read-receipt sends. Receipt, read-marker,
   typing, and presence values themselves remain Rust-owned
   `AppState.live_signals`.
+- Popups anchored to a control inside a pane render in the shared body-level
+  floating layer. `EmojiPicker` portals to `document.body` and positions itself
+  from `resolveEmojiPickerPlacement`, which owns flip, clamp, RTL mirroring, and
+  panel size. Callers pass preferences only (`placement`, `align`, and an
+  optional boundary-container resolver for surfaces such as the timeline
+  reaction picker); they must not compute their own placement or max size. An
+  anchored popup is clipped by pane boundaries and `body { overflow: hidden }`,
+  and two placement owners drift apart.
+- When a popup moves into a floating layer, delete any ancestor-containment
+  outside-press handler left in its former parent. A row- or pane-scoped
+  `contains()` check reads the portaled panel's own controls as outside presses
+  and closes the popup before the click lands; the 2026-07-25 #302 change hit
+  exactly this and silently stopped `send_reaction` until the reaction
+  browser-headless test caught it. Outside-press dismissal belongs to the
+  component that owns the panel.
+- Rendered geometry that keyboard navigation depends on needs one owner.
+  `EMOJI_PICKER_GRID_COLUMNS` feeds both `--emoji-picker-columns` and the
+  ArrowUp/ArrowDown step, and `styles.contract.test.ts` pins the CSS fallback to
+  that constant so the grid and the keyboard step cannot disagree.
 
 ## E2EE Trust Phase A Notes
 
