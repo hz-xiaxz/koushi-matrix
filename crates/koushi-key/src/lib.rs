@@ -15,6 +15,7 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 pub const LOCAL_UNLOCK_SECRET_LEN: usize = 32;
+pub const VAULT_MASTER_KEY_LEN: usize = 32;
 
 const SDK_STORE_INFO: &[u8] = b"koushi-desktop:sdk-store";
 const SEARCH_INDEX_INFO: &[u8] = b"koushi-desktop:search-index";
@@ -25,6 +26,7 @@ const ROOM_PREFERENCES_INFO: &[u8] = b"koushi-desktop:room-preferences";
 const READ_STATE_OUTBOX_INFO: &[u8] = b"koushi-desktop:read-state-outbox";
 const LAST_SESSION_ACCOUNT_NAME: &str = "koushi-desktop:last-session:v1";
 const SAVED_SESSIONS_ACCOUNT_NAME: &str = "koushi-desktop:saved-sessions:v1";
+const CREDENTIAL_VAULT_KEY_ACCOUNT_NAME: &str = "koushi-desktop:credential-vault-key:v1";
 
 pub fn last_session_account_name() -> &'static str {
     LAST_SESSION_ACCOUNT_NAME
@@ -32,6 +34,10 @@ pub fn last_session_account_name() -> &'static str {
 
 pub fn saved_sessions_account_name() -> &'static str {
     SAVED_SESSIONS_ACCOUNT_NAME
+}
+
+pub fn credential_vault_key_account_name() -> &'static str {
+    CREDENTIAL_VAULT_KEY_ACCOUNT_NAME
 }
 
 #[derive(Debug, Error)]
@@ -126,20 +132,68 @@ impl<T: CredentialBackend + ?Sized> CredentialBackend for Arc<T> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct InMemoryCredentialBackend {
     inner: Arc<Mutex<InMemoryCredentialBackendState>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct InMemoryCredentialBackendState {
     entries: BTreeMap<(String, String), String>,
     error: Option<CredentialBackendErrorKind>,
+    delete_error: Option<CredentialBackendErrorKind>,
+    get_password_count: usize,
 }
 
 impl InMemoryCredentialBackend {
     pub fn set_error(&self, error: CredentialBackendErrorKind) {
         self.inner.lock().expect("in-memory backend mutex").error = Some(error);
+    }
+
+    pub fn clear_error(&self) {
+        self.inner.lock().expect("in-memory backend mutex").error = None;
+    }
+
+    pub fn set_delete_error(&self, error: CredentialBackendErrorKind) {
+        self.inner
+            .lock()
+            .expect("in-memory backend mutex")
+            .delete_error = Some(error);
+    }
+
+    pub fn clear_delete_error(&self) {
+        self.inner
+            .lock()
+            .expect("in-memory backend mutex")
+            .delete_error = None;
+    }
+
+    pub fn get_password_count(&self) -> usize {
+        self.inner
+            .lock()
+            .expect("in-memory backend mutex")
+            .get_password_count
+    }
+
+    pub fn contains_entry(&self, service_name: &str, account_name: &str) -> bool {
+        self.inner
+            .lock()
+            .expect("in-memory backend mutex")
+            .entries
+            .contains_key(&(service_name.to_owned(), account_name.to_owned()))
+    }
+}
+
+impl fmt::Debug for InMemoryCredentialBackend {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state = self.inner.lock().map_err(|_| fmt::Error)?;
+        formatter
+            .debug_struct("InMemoryCredentialBackend")
+            .field("entry_count", &state.entries.len())
+            .field("has_error", &state.error.is_some())
+            .field("has_delete_error", &state.delete_error.is_some())
+            .field("get_password_count", &state.get_password_count)
+            .finish()
     }
 }
 
@@ -166,7 +220,8 @@ impl CredentialBackend for InMemoryCredentialBackend {
         service_name: &str,
         account_name: &str,
     ) -> Result<String, CredentialBackendErrorKind> {
-        let state = self.inner.lock().expect("in-memory backend mutex");
+        let mut state = self.inner.lock().expect("in-memory backend mutex");
+        state.get_password_count += 1;
         if let Some(error) = state.error {
             return Err(error);
         }
@@ -184,6 +239,9 @@ impl CredentialBackend for InMemoryCredentialBackend {
     ) -> Result<(), CredentialBackendErrorKind> {
         let mut state = self.inner.lock().expect("in-memory backend mutex");
         if let Some(error) = state.error {
+            return Err(error);
+        }
+        if let Some(error) = state.delete_error {
             return Err(error);
         }
         state
@@ -478,6 +536,45 @@ impl fmt::Debug for StoredMatrixSession {
     }
 }
 
+pub struct CredentialVaultMasterKey {
+    key: Zeroizing<[u8; VAULT_MASTER_KEY_LEN]>,
+}
+
+impl CredentialVaultMasterKey {
+    pub fn generate() -> Self {
+        Self {
+            key: Zeroizing::new(rand::random()),
+        }
+    }
+
+    pub fn to_storage_string(&self) -> Zeroizing<String> {
+        Zeroizing::new(STANDARD.encode(&self.key[..]))
+    }
+
+    pub fn from_storage_string(value: &str) -> Result<Self, LocalSecretError> {
+        let decoded = Zeroizing::new(STANDARD.decode(value)?);
+        if decoded.len() != VAULT_MASTER_KEY_LEN {
+            return Err(LocalSecretError::InvalidSecretLength {
+                expected: VAULT_MASTER_KEY_LEN,
+                actual: decoded.len(),
+            });
+        }
+        let mut key = Zeroizing::new([0; VAULT_MASTER_KEY_LEN]);
+        key.copy_from_slice(decoded.as_slice());
+        Ok(Self { key })
+    }
+
+    pub fn as_bytes(&self) -> &[u8; VAULT_MASTER_KEY_LEN] {
+        &self.key
+    }
+}
+
+impl fmt::Debug for CredentialVaultMasterKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("CredentialVaultMasterKey(..)")
+    }
+}
+
 pub struct LocalUnlockSecret {
     secret: Zeroizing<[u8; LOCAL_UNLOCK_SECRET_LEN]>,
 }
@@ -589,10 +686,20 @@ impl LocalUnlockSecret {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CredentialStore<B> {
     service_name: String,
     backend: B,
+}
+
+impl<B> fmt::Debug for CredentialStore<B> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CredentialStore")
+            .field("service_name", &self.service_name)
+            .field("backend", &"<redacted>")
+            .finish()
+    }
 }
 
 impl<B: CredentialBackend> CredentialStore<B> {
@@ -616,6 +723,23 @@ impl<B: CredentialBackend> CredentialStore<B> {
                 storage_string.as_str(),
             )
             .map_err(LocalSecretError::CredentialBackend)
+    }
+
+    pub fn save_vault_master_key(
+        &self,
+        key: &CredentialVaultMasterKey,
+    ) -> Result<(), LocalSecretError> {
+        let storage_string = key.to_storage_string();
+        self.save_raw(CREDENTIAL_VAULT_KEY_ACCOUNT_NAME, storage_string.as_str())
+    }
+
+    pub fn load_vault_master_key(&self) -> Result<CredentialVaultMasterKey, LocalSecretError> {
+        let stored_key = Zeroizing::new(self.load_raw(CREDENTIAL_VAULT_KEY_ACCOUNT_NAME)?);
+        CredentialVaultMasterKey::from_storage_string(stored_key.as_str())
+    }
+
+    pub fn delete_vault_master_key(&self) -> Result<(), LocalSecretError> {
+        self.delete_raw(CREDENTIAL_VAULT_KEY_ACCOUNT_NAME)
     }
 
     pub fn load(&self, key_id: &SessionKeyId) -> Result<LocalUnlockSecret, LocalSecretError> {
@@ -745,7 +869,55 @@ pub fn is_locked_or_inaccessible_error(error: &LocalSecretError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::LocalUnlockSecret;
+    use super::{
+        CredentialStore, CredentialVaultMasterKey, InMemoryCredentialBackend, LocalUnlockSecret,
+        credential_vault_key_account_name,
+    };
+
+    #[test]
+    fn credential_vault_master_key_round_trips_without_debug_exposure() {
+        let key = CredentialVaultMasterKey::generate();
+        let encoded = key.to_storage_string();
+        let restored =
+            CredentialVaultMasterKey::from_storage_string(encoded.as_str()).expect("decode key");
+
+        assert_eq!(restored.as_bytes(), key.as_bytes());
+        assert!(!format!("{key:?}").contains(encoded.as_str()));
+        assert_eq!(
+            credential_vault_key_account_name(),
+            "koushi-desktop:credential-vault-key:v1"
+        );
+    }
+
+    #[test]
+    fn credential_vault_master_key_store_counts_one_read() {
+        let backend = InMemoryCredentialBackend::default();
+        let store = CredentialStore::with_backend("service", backend.clone());
+        let key = CredentialVaultMasterKey::generate();
+
+        store.save_vault_master_key(&key).expect("save key");
+        let restored = store.load_vault_master_key().expect("load key");
+
+        assert_eq!(restored.as_bytes(), key.as_bytes());
+        assert_eq!(backend.get_password_count(), 1);
+        assert!(backend.contains_entry("service", credential_vault_key_account_name()));
+    }
+
+    #[test]
+    fn credential_store_debug_redacts_backend_entries() {
+        let backend = InMemoryCredentialBackend::default();
+        let store = CredentialStore::with_backend("service", backend.clone());
+        let key = CredentialVaultMasterKey::generate();
+        let encoded = key.to_storage_string();
+        store.save_vault_master_key(&key).expect("save key");
+
+        let backend_debug = format!("{backend:?}");
+        let store_debug = format!("{store:?}");
+        assert!(!backend_debug.contains(encoded.as_str()));
+        assert!(!store_debug.contains(encoded.as_str()));
+        assert!(!backend_debug.contains(credential_vault_key_account_name()));
+        assert!(!store_debug.contains(credential_vault_key_account_name()));
+    }
 
     #[test]
     fn read_state_outbox_uses_a_dedicated_hkdf_domain() {

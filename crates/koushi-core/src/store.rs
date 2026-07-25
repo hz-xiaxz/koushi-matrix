@@ -132,9 +132,13 @@ impl StoreActor {
         data_dir: impl Into<PathBuf>,
         os_backend: Arc<dyn koushi_key::CredentialBackend>,
     ) -> Self {
+        let data_dir = data_dir.into();
         Self {
-            credential_store: CredentialStoreBackend::resolve_with_os_backend(os_backend),
-            data_dir: data_dir.into(),
+            credential_store: CredentialStoreBackend::resolve_with_os_backend(
+                data_dir.clone(),
+                os_backend,
+            ),
+            data_dir,
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_io_probe: Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -1046,14 +1050,17 @@ impl CredentialStoreBackend {
         ))
     }
 
-    fn resolve_with_os_backend(os_backend: Arc<dyn koushi_key::CredentialBackend>) -> Self {
+    fn resolve_with_os_backend(
+        data_dir: PathBuf,
+        os_backend: Arc<dyn koushi_key::CredentialBackend>,
+    ) -> Self {
         #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
         if let Ok(dir) = std::env::var(ENV_FILE_CREDENTIAL_STORE_DIR) {
             let dir = PathBuf::from(dir);
             record_file_credential_store_active();
             return Self::FileDir(FileCredentialStore::new(dir));
         }
-        Self::OsKeychain(OsCredentialStore::with_backend(os_backend))
+        Self::OsKeychain(OsCredentialStore::with_backend(data_dir, os_backend))
     }
 
     fn load(
@@ -1230,42 +1237,48 @@ impl CredentialStoreBackend {
             Self::InMemory(store) => store.forget_saved_session(key_id),
         }
     }
-
-    /// Expose the underlying `CredentialStore` (for OS keychain backend).
-    pub fn as_os_credential_store(
-        &self,
-    ) -> Option<&CredentialStore<Arc<dyn koushi_key::CredentialBackend>>> {
-        match self {
-            Self::OsKeychain(store) => Some(store.primary()),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
-            Self::FileDir(_) => None,
-            Self::InMemory(_) => None,
-        }
-    }
 }
 
 /// OS keychain credential store for the shipped product service.
 #[derive(Clone)]
 pub struct OsCredentialStore {
     primary: CredentialStore<Arc<dyn koushi_key::CredentialBackend>>,
+    vault_file: crate::credential_vault::CredentialVaultFile,
+    vault_state: Arc<Mutex<Option<OsCredentialVaultState>>>,
+}
+
+struct OsCredentialVaultState {
+    master_key: Option<koushi_key::CredentialVaultMasterKey>,
+    data: crate::credential_vault::CredentialVaultData,
 }
 
 impl OsCredentialStore {
-    fn with_backend(backend: Arc<dyn koushi_key::CredentialBackend>) -> Self {
+    fn with_backend(
+        data_dir: impl AsRef<std::path::Path>,
+        backend: Arc<dyn koushi_key::CredentialBackend>,
+    ) -> Self {
         Self {
             primary: CredentialStore::with_backend(CREDENTIAL_STORE_SERVICE_NAME, backend),
+            vault_file: crate::credential_vault::CredentialVaultFile::new(
+                data_dir
+                    .as_ref()
+                    .join("credentials")
+                    .join("credentials.v1.enc"),
+            ),
+            vault_state: Arc::new(Mutex::new(None)),
         }
-    }
-
-    fn primary(&self) -> &CredentialStore<Arc<dyn koushi_key::CredentialBackend>> {
-        &self.primary
     }
 
     fn load(
         &self,
         key_id: &SessionKeyId,
     ) -> Result<LocalUnlockSecret, koushi_key::LocalSecretError> {
-        self.primary.load(key_id)
+        self.read_vault(|data| {
+            let stored = data
+                .local_unlock_secret(key_id)
+                .ok_or_else(missing_credential_error)?;
+            LocalUnlockSecret::from_storage_string(stored)
+        })
     }
 
     fn save(
@@ -1273,11 +1286,14 @@ impl OsCredentialStore {
         key_id: &SessionKeyId,
         secret: &LocalUnlockSecret,
     ) -> Result<(), koushi_key::LocalSecretError> {
-        self.primary.save(key_id, secret)
+        let stored = secret.to_storage_string();
+        self.mutate_vault(|data| {
+            data.upsert_local_unlock_secret(key_id.clone(), stored.as_str());
+        })
     }
 
     fn delete(&self, key_id: &SessionKeyId) -> Result<(), koushi_key::LocalSecretError> {
-        self.primary.delete(key_id)
+        self.mutate_vault(|data| data.delete_local_unlock_secret(key_id))
     }
 
     fn save_matrix_session(
@@ -1285,58 +1301,251 @@ impl OsCredentialStore {
         key_id: &SessionKeyId,
         session: &koushi_key::StoredMatrixSession,
     ) -> Result<(), koushi_key::LocalSecretError> {
-        self.primary.save_matrix_session(key_id, session)
+        self.mutate_vault(|data| {
+            data.upsert_matrix_session(key_id.clone(), session.as_str());
+        })
     }
 
     fn load_matrix_session(
         &self,
         key_id: &SessionKeyId,
     ) -> Result<koushi_key::StoredMatrixSession, koushi_key::LocalSecretError> {
-        self.primary.load_matrix_session(key_id)
+        self.read_vault(|data| {
+            data.matrix_session(key_id)
+                .map(koushi_key::StoredMatrixSession::new)
+                .ok_or_else(missing_credential_error)
+        })
     }
 
     fn delete_matrix_session(
         &self,
         key_id: &SessionKeyId,
     ) -> Result<(), koushi_key::LocalSecretError> {
-        self.primary.delete_matrix_session(key_id)
+        self.mutate_vault(|data| data.delete_matrix_session(key_id))
     }
 
     fn save_last_session(&self, key_id: &SessionKeyId) -> Result<(), koushi_key::LocalSecretError> {
-        self.primary.save_last_session(key_id)
+        self.mutate_vault(|data| data.set_last_session(Some(key_id.clone())))
     }
 
     fn load_last_session(&self) -> Result<Option<SessionKeyId>, koushi_key::LocalSecretError> {
-        self.primary.load_last_session()
+        self.read_vault(|data| Ok(data.last_session().cloned()))
     }
 
     fn delete_last_session(&self) -> Result<(), koushi_key::LocalSecretError> {
-        self.primary.delete_last_session()
+        self.mutate_vault(|data| data.set_last_session(None))
     }
 
     fn load_saved_sessions(
         &self,
     ) -> Result<koushi_key::SavedSessionIndex, koushi_key::LocalSecretError> {
-        self.primary.load_saved_sessions()
+        self.read_vault(|data| Ok(data.saved_sessions()))
     }
 
     fn remember_saved_session(
         &self,
         key_id: &SessionKeyId,
     ) -> Result<(), koushi_key::LocalSecretError> {
-        let mut index = self.load_saved_sessions()?;
-        index.upsert(key_id.clone());
-        self.primary.save_saved_sessions(&index)
+        self.mutate_vault(|data| data.remember_session(key_id.clone()))
     }
 
     fn forget_saved_session(
         &self,
         key_id: &SessionKeyId,
     ) -> Result<(), koushi_key::LocalSecretError> {
-        let mut index = self.load_saved_sessions()?;
-        index.remove(key_id);
-        self.primary.save_saved_sessions(&index)
+        self.mutate_vault(|data| data.forget_session(key_id))
     }
+
+    fn read_vault<T>(
+        &self,
+        read: impl FnOnce(
+            &crate::credential_vault::CredentialVaultData,
+        ) -> Result<T, koushi_key::LocalSecretError>,
+    ) -> Result<T, koushi_key::LocalSecretError> {
+        let mut state = self
+            .vault_state
+            .lock()
+            .map_err(|_| unavailable_credential_error())?;
+        self.initialize_vault(&mut state)?;
+        read(
+            &state
+                .as_ref()
+                .expect("vault is initialized before reads")
+                .data,
+        )
+    }
+
+    fn mutate_vault(
+        &self,
+        mutate: impl FnOnce(&mut crate::credential_vault::CredentialVaultData),
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        let mut state = self
+            .vault_state
+            .lock()
+            .map_err(|_| unavailable_credential_error())?;
+        self.initialize_vault(&mut state)?;
+        let current = state.as_mut().expect("vault is initialized before writes");
+        if current.master_key.is_none() {
+            let master_key = koushi_key::CredentialVaultMasterKey::generate();
+            self.primary.save_vault_master_key(&master_key)?;
+            current.master_key = Some(master_key);
+        }
+        let mut next = current.data.clone();
+        mutate(&mut next);
+        self.vault_file
+            .store(
+                current
+                    .master_key
+                    .as_ref()
+                    .expect("master key was installed before vault write"),
+                &next,
+            )
+            .map_err(vault_error_to_local_secret_error)?;
+        current.data = next;
+        self.retry_legacy_cleanup(current);
+        Ok(())
+    }
+
+    fn initialize_vault(
+        &self,
+        state: &mut Option<OsCredentialVaultState>,
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        if state.is_some() {
+            return Ok(());
+        }
+        let master_key = match self.primary.load_vault_master_key() {
+            Ok(master_key) => Some(master_key),
+            Err(error) if koushi_key::is_missing_credential_error(&error) => None,
+            Err(error) => return Err(error),
+        };
+        if self.vault_file.exists() {
+            let master_key = master_key.ok_or_else(missing_credential_error)?;
+            let mut data = self
+                .vault_file
+                .load(&master_key)
+                .map_err(vault_error_to_local_secret_error)?;
+            let pending = data.legacy_cleanup_pending().to_vec();
+            if !pending.is_empty() && self.cleanup_legacy_credentials(&pending) {
+                let mut cleaned = data.clone();
+                cleaned.clear_legacy_cleanup_pending();
+                if self.vault_file.store(&master_key, &cleaned).is_ok() {
+                    data = cleaned;
+                }
+            }
+            *state = Some(OsCredentialVaultState {
+                master_key: Some(master_key),
+                data,
+            });
+            return Ok(());
+        }
+
+        let saved_sessions = self.primary.load_saved_sessions()?;
+        let last_session = self.primary.load_last_session()?;
+        let mut legacy_keys = saved_sessions.sessions().to_vec();
+        if let Some(last_session) = last_session.as_ref()
+            && !legacy_keys.contains(last_session)
+        {
+            legacy_keys.push(last_session.clone());
+        }
+        if legacy_keys.is_empty() {
+            *state = Some(OsCredentialVaultState {
+                master_key,
+                data: crate::credential_vault::CredentialVaultData::default(),
+            });
+            return Ok(());
+        }
+
+        let mut data = crate::credential_vault::CredentialVaultData::default();
+        data.set_last_session(last_session);
+        for key_id in &legacy_keys {
+            let session = self.primary.load_matrix_session(key_id)?;
+            let secret = self.primary.load(key_id)?;
+            data.remember_session(key_id.clone());
+            data.upsert_matrix_session(key_id.clone(), session.as_str());
+            let stored_secret = secret.to_storage_string();
+            data.upsert_local_unlock_secret(key_id.clone(), stored_secret.as_str());
+        }
+        data.set_legacy_cleanup_pending(legacy_keys.clone());
+        let master_key = match master_key {
+            Some(master_key) => master_key,
+            None => {
+                let master_key = koushi_key::CredentialVaultMasterKey::generate();
+                self.primary.save_vault_master_key(&master_key)?;
+                master_key
+            }
+        };
+        self.vault_file
+            .store(&master_key, &data)
+            .map_err(vault_error_to_local_secret_error)?;
+        let mut verified = self
+            .vault_file
+            .load(&master_key)
+            .map_err(vault_error_to_local_secret_error)?;
+        if self.cleanup_legacy_credentials(&legacy_keys) {
+            let mut cleaned = verified.clone();
+            cleaned.clear_legacy_cleanup_pending();
+            if self.vault_file.store(&master_key, &cleaned).is_ok() {
+                verified = cleaned;
+            }
+        }
+        *state = Some(OsCredentialVaultState {
+            master_key: Some(master_key),
+            data: verified,
+        });
+        Ok(())
+    }
+
+    fn retry_legacy_cleanup(&self, current: &mut OsCredentialVaultState) {
+        let pending = current.data.legacy_cleanup_pending().to_vec();
+        if pending.is_empty() || !self.cleanup_legacy_credentials(&pending) {
+            return;
+        }
+        let Some(master_key) = current.master_key.as_ref() else {
+            return;
+        };
+        let mut cleaned = current.data.clone();
+        cleaned.clear_legacy_cleanup_pending();
+        if self.vault_file.store(master_key, &cleaned).is_ok() {
+            current.data = cleaned;
+        }
+    }
+
+    fn cleanup_legacy_credentials(&self, key_ids: &[SessionKeyId]) -> bool {
+        let mut succeeded = true;
+        for key_id in key_ids {
+            succeeded &= self.primary.delete_matrix_session(key_id).is_ok();
+            succeeded &= self.primary.delete(key_id).is_ok();
+        }
+        succeeded &= self.primary.delete_last_session().is_ok();
+        succeeded &= self.primary.delete_saved_sessions().is_ok();
+        succeeded
+    }
+}
+
+fn missing_credential_error() -> koushi_key::LocalSecretError {
+    koushi_key::LocalSecretError::CredentialBackend(
+        koushi_key::CredentialBackendErrorKind::MissingCredential,
+    )
+}
+
+fn unavailable_credential_error() -> koushi_key::LocalSecretError {
+    koushi_key::LocalSecretError::CredentialBackend(
+        koushi_key::CredentialBackendErrorKind::Unavailable,
+    )
+}
+
+fn vault_error_to_local_secret_error(
+    error: crate::credential_vault::CredentialVaultError,
+) -> koushi_key::LocalSecretError {
+    let kind = match error {
+        crate::credential_vault::CredentialVaultError::Unavailable => {
+            koushi_key::CredentialBackendErrorKind::Unavailable
+        }
+        crate::credential_vault::CredentialVaultError::Corrupt => {
+            koushi_key::CredentialBackendErrorKind::Corrupt
+        }
+    };
+    koushi_key::LocalSecretError::CredentialBackend(kind)
 }
 
 fn local_secret_error_health(error: &koushi_key::LocalSecretError) -> LocalEncryptionHealth {
@@ -1708,10 +1917,456 @@ mod tests {
     }
 
     #[test]
+    fn migrated_credential_vault_reads_keychain_once() {
+        let data_dir = tempdir().expect("tempdir");
+        let backend = koushi_key::InMemoryCredentialBackend::default();
+        let master_key_store = koushi_key::CredentialStore::with_backend(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            backend.clone(),
+        );
+        let master_key = koushi_key::CredentialVaultMasterKey::generate();
+        master_key_store
+            .save_vault_master_key(&master_key)
+            .expect("seed master key");
+        let alice = make_key_id();
+        let bob = SessionKeyId {
+            homeserver: "https://test.example.com".to_owned(),
+            user_id: "@bob:test.example.com".to_owned(),
+            device_id: "DEVICE2".to_owned(),
+        };
+        let mut vault = crate::credential_vault::CredentialVaultData::default();
+        vault.set_last_session(Some(alice.clone()));
+        vault.upsert_matrix_session(alice.clone(), "alice-session");
+        vault.remember_session(alice.clone());
+        vault.upsert_local_unlock_secret(
+            alice.clone(),
+            LocalUnlockSecret::generate().to_storage_string().as_str(),
+        );
+        vault.upsert_matrix_session(bob.clone(), "bob-session");
+        vault.remember_session(bob.clone());
+        vault.upsert_local_unlock_secret(
+            bob.clone(),
+            LocalUnlockSecret::generate().to_storage_string().as_str(),
+        );
+        crate::credential_vault::CredentialVaultFile::new(
+            data_dir
+                .path()
+                .join("credentials")
+                .join("credentials.v1.enc"),
+        )
+        .store(&master_key, &vault)
+        .expect("seed credential vault");
+
+        let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend.clone()));
+        let credentials = actor.credential_backend();
+        assert_eq!(
+            credentials.load_last_session().expect("last session"),
+            Some(alice.clone())
+        );
+        assert_eq!(
+            credentials
+                .load_saved_sessions()
+                .expect("saved sessions")
+                .sessions(),
+            &[alice.clone(), bob.clone()]
+        );
+        assert_eq!(
+            credentials
+                .load_matrix_session(&alice)
+                .expect("alice session")
+                .as_str(),
+            "alice-session"
+        );
+        actor.account_store_config(&alice).expect("alice store");
+        actor
+            .account_search_index_config(&alice)
+            .expect("alice search");
+        actor
+            .load_composer_drafts(&alice)
+            .expect("alice composer drafts");
+        actor
+            .load_scheduled_sends(&alice)
+            .expect("alice scheduled sends");
+        actor.load_navigation(&alice).expect("alice navigation");
+        actor
+            .load_room_preferences(&alice)
+            .expect("alice room preferences");
+        actor
+            .load_read_state_outbox(&alice)
+            .expect("alice read state outbox");
+        assert_eq!(
+            credentials
+                .load_matrix_session(&bob)
+                .expect("bob session")
+                .as_str(),
+            "bob-session"
+        );
+        actor.account_store_config(&bob).expect("bob store");
+
+        assert_eq!(backend.get_password_count(), 1);
+    }
+
+    fn seed_legacy_credentials(
+        backend: &koushi_key::InMemoryCredentialBackend,
+        key_id: &SessionKeyId,
+    ) -> LocalUnlockSecret {
+        let store = koushi_key::CredentialStore::with_backend(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            backend.clone(),
+        );
+        let secret = LocalUnlockSecret::generate();
+        store.save(key_id, &secret).expect("seed legacy unlock");
+        store
+            .save_matrix_session(
+                key_id,
+                &koushi_key::StoredMatrixSession::new("legacy-session"),
+            )
+            .expect("seed legacy session");
+        store
+            .remember_saved_session(key_id)
+            .expect("seed legacy index");
+        store
+            .save_last_session(key_id)
+            .expect("seed legacy pointer");
+        secret
+    }
+
+    #[test]
+    fn legacy_credentials_migrate_without_losing_session() {
+        let data_dir = tempdir().expect("tempdir");
+        let backend = koushi_key::InMemoryCredentialBackend::default();
+        let key_id = make_key_id();
+        let first_secret = seed_legacy_credentials(&backend, &key_id);
+        let second_key_id = SessionKeyId {
+            homeserver: "https://test.example.com".to_owned(),
+            user_id: "@bob:test.example.com".to_owned(),
+            device_id: "DEVICE2".to_owned(),
+        };
+        let second_secret = seed_legacy_credentials(&backend, &second_key_id);
+        koushi_key::CredentialStore::with_backend(CREDENTIAL_STORE_SERVICE_NAME, backend.clone())
+            .save_last_session(&key_id)
+            .expect("restore first account as last session");
+
+        let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend.clone()));
+        let credentials = actor.credential_backend();
+        assert_eq!(
+            credentials.load_last_session().expect("migrated pointer"),
+            Some(key_id.clone())
+        );
+        assert_eq!(
+            credentials
+                .load_matrix_session(&key_id)
+                .expect("migrated session")
+                .as_str(),
+            "legacy-session"
+        );
+        let migrated_first_secret = credentials
+            .load(&key_id)
+            .expect("migrated unlock secret")
+            .to_storage_string();
+        let expected_first_secret = first_secret.to_storage_string();
+        assert_eq!(
+            migrated_first_secret.as_str(),
+            expected_first_secret.as_str()
+        );
+        assert_eq!(
+            credentials
+                .load_matrix_session(&second_key_id)
+                .expect("second migrated session")
+                .as_str(),
+            "legacy-session"
+        );
+        let migrated_second_secret = credentials
+            .load(&second_key_id)
+            .expect("second migrated unlock secret")
+            .to_storage_string();
+        let expected_second_secret = second_secret.to_storage_string();
+        assert_eq!(
+            migrated_second_secret.as_str(),
+            expected_second_secret.as_str()
+        );
+        assert!(
+            data_dir
+                .path()
+                .join("credentials")
+                .join("credentials.v1.enc")
+                .is_file()
+        );
+        assert!(backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            koushi_key::credential_vault_key_account_name()
+        ));
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            koushi_key::last_session_account_name()
+        ));
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            &key_id.matrix_session_account_name()
+        ));
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            &key_id.local_unlock_account_name()
+        ));
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            &second_key_id.matrix_session_account_name()
+        ));
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            &second_key_id.local_unlock_account_name()
+        ));
+    }
+
+    #[test]
+    fn legacy_credentials_missing_entry_preserves_legacy_index() {
+        let data_dir = tempdir().expect("tempdir");
+        let backend = koushi_key::InMemoryCredentialBackend::default();
+        let complete_key_id = make_key_id();
+        let _complete_secret = seed_legacy_credentials(&backend, &complete_key_id);
+        let key_id = SessionKeyId {
+            homeserver: "https://test.example.com".to_owned(),
+            user_id: "@incomplete:test.example.com".to_owned(),
+            device_id: "INCOMPLETE".to_owned(),
+        };
+        let legacy = koushi_key::CredentialStore::with_backend(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            backend.clone(),
+        );
+        legacy
+            .remember_saved_session(&key_id)
+            .expect("seed incomplete legacy index");
+
+        let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend.clone()));
+        assert!(actor.credential_backend().load_saved_sessions().is_err());
+        assert!(backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            koushi_key::saved_sessions_account_name()
+        ));
+        assert!(backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            &complete_key_id.matrix_session_account_name()
+        ));
+        assert!(backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            &complete_key_id.local_unlock_account_name()
+        ));
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            koushi_key::credential_vault_key_account_name()
+        ));
+        assert!(
+            !data_dir
+                .path()
+                .join("credentials")
+                .join("credentials.v1.enc")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn legacy_credentials_resume_with_existing_master_key() {
+        let data_dir = tempdir().expect("tempdir");
+        let backend = koushi_key::InMemoryCredentialBackend::default();
+        let key_id = make_key_id();
+        let _ = seed_legacy_credentials(&backend, &key_id);
+        let key_store = koushi_key::CredentialStore::with_backend(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            backend.clone(),
+        );
+        key_store
+            .save_vault_master_key(&koushi_key::CredentialVaultMasterKey::generate())
+            .expect("seed orphan master key");
+
+        let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend));
+        assert_eq!(
+            actor
+                .credential_backend()
+                .load_last_session()
+                .expect("resumed migration"),
+            Some(key_id)
+        );
+    }
+
+    #[test]
+    fn legacy_credentials_delete_failure_keeps_vault_authoritative() {
+        let data_dir = tempdir().expect("tempdir");
+        let backend = koushi_key::InMemoryCredentialBackend::default();
+        let key_id = make_key_id();
+        let _ = seed_legacy_credentials(&backend, &key_id);
+        backend.set_delete_error(koushi_key::CredentialBackendErrorKind::Unavailable);
+
+        let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend.clone()));
+        assert_eq!(
+            actor
+                .credential_backend()
+                .load_matrix_session(&key_id)
+                .expect("new vault remains authoritative")
+                .as_str(),
+            "legacy-session"
+        );
+        assert!(backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            &key_id.matrix_session_account_name()
+        ));
+        assert!(
+            data_dir
+                .path()
+                .join("credentials")
+                .join("credentials.v1.enc")
+                .is_file()
+        );
+
+        drop(actor);
+        backend.clear_delete_error();
+        let restarted = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend.clone()));
+        assert_eq!(
+            restarted
+                .credential_backend()
+                .load_matrix_session(&key_id)
+                .expect("vault restores while retrying cleanup")
+                .as_str(),
+            "legacy-session"
+        );
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            &key_id.matrix_session_account_name()
+        ));
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            &key_id.local_unlock_account_name()
+        ));
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            koushi_key::saved_sessions_account_name()
+        ));
+    }
+
+    #[test]
+    fn credential_vault_concurrent_initialization_reads_keychain_once() {
+        let data_dir = tempdir().expect("tempdir");
+        let backend = koushi_key::InMemoryCredentialBackend::default();
+        let key_store = koushi_key::CredentialStore::with_backend(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            backend.clone(),
+        );
+        let master_key = koushi_key::CredentialVaultMasterKey::generate();
+        key_store
+            .save_vault_master_key(&master_key)
+            .expect("seed master key");
+        crate::credential_vault::CredentialVaultFile::new(
+            data_dir
+                .path()
+                .join("credentials")
+                .join("credentials.v1.enc"),
+        )
+        .store(
+            &master_key,
+            &crate::credential_vault::CredentialVaultData::default(),
+        )
+        .expect("seed vault");
+        let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend.clone()));
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let threads = (0..8)
+            .map(|_| {
+                let actor = actor.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    actor
+                        .credential_backend()
+                        .load_saved_sessions()
+                        .expect("concurrent vault read");
+                })
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            thread.join().expect("join reader");
+        }
+
+        assert_eq!(backend.get_password_count(), 1);
+    }
+
+    #[test]
+    fn credential_vault_initialization_retries_after_transient_keychain_failure() {
+        let data_dir = tempdir().expect("tempdir");
+        let backend = koushi_key::InMemoryCredentialBackend::default();
+        backend.set_error(koushi_key::CredentialBackendErrorKind::LockedOrInaccessible);
+        let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend.clone()));
+
+        actor
+            .credential_backend()
+            .load_saved_sessions()
+            .expect_err("locked keychain");
+        backend.clear_error();
+
+        assert!(
+            actor
+                .credential_backend()
+                .load_saved_sessions()
+                .expect("retry after unlocking keychain")
+                .sessions()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn fresh_saved_session_list_does_not_create_key_or_vault() {
+        let data_dir = tempdir().expect("tempdir");
+        let backend = koushi_key::InMemoryCredentialBackend::default();
+        let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend.clone()));
+
+        assert!(
+            actor
+                .credential_backend()
+                .load_saved_sessions()
+                .expect("empty saved sessions")
+                .sessions()
+                .is_empty()
+        );
+        assert!(!backend.contains_entry(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            koushi_key::credential_vault_key_account_name()
+        ));
+        assert!(
+            !data_dir
+                .path()
+                .join("credentials")
+                .join("credentials.v1.enc")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn credential_vault_corrupt_file_is_not_overwritten() {
+        let data_dir = tempdir().expect("tempdir");
+        let backend = koushi_key::InMemoryCredentialBackend::default();
+        let key_store = koushi_key::CredentialStore::with_backend(
+            CREDENTIAL_STORE_SERVICE_NAME,
+            backend.clone(),
+        );
+        key_store
+            .save_vault_master_key(&koushi_key::CredentialVaultMasterKey::generate())
+            .expect("seed master key");
+        let path = data_dir
+            .path()
+            .join("credentials")
+            .join("credentials.v1.enc");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+        let corrupt = b"not-a-credential-vault".to_vec();
+        std::fs::write(&path, &corrupt).expect("seed corrupt vault");
+
+        let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend));
+        assert!(actor.credential_backend().load_saved_sessions().is_err());
+        assert_eq!(std::fs::read(path).expect("read corrupt vault"), corrupt);
+    }
+
+    #[test]
     fn os_keychain_does_not_read_legacy_matrix_desktop_service() {
+        let data_dir = tempdir().expect("tempdir");
         let backend = koushi_key::InMemoryCredentialBackend::default();
         let backend_dyn: Arc<dyn koushi_key::CredentialBackend> = Arc::new(backend);
-        let store = OsCredentialStore::with_backend(backend_dyn.clone());
+        let store = OsCredentialStore::with_backend(data_dir.path(), backend_dyn.clone());
         let key_id = make_key_id();
         let secret = LocalUnlockSecret::generate();
 
