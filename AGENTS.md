@@ -1328,6 +1328,21 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   previously recorded as an outright pre-existing failure. Treat them as
   explanations of a fixed failure mode, not as currently-expected failures — if
   one of them goes red again, it is a regression to investigate.
+- Assert scroll/render diagnostics on a CUMULATIVE counter, never on
+  `latestFrame`. `TimelineScrollDiagnostics.latestFrame` is overwritten every
+  frame, and `TimelineView` emits frames carrying zeroes right after the frame
+  you care about (the height-compensation effect and the active-scroll range
+  recomposition both report `changedMeasuredRowCount: 0`). An assertion like
+  `latestFrame.changedMeasuredRowCount > 0` therefore depends on the read
+  landing before the next frame: it passed locally and failed on a CI runner in
+  2026-07-25 PR #324. Counters such as `heightModelCommits`,
+  `measurementFlushes`, and `changedMeasuredRows` are monotonic and
+  baseline-subtracted by the harness, so they answer the same question without
+  the race. `pendingMeasuredRows` is NOT one of them — it is a gauge that is
+  decremented on flush and reset to zero. When a new per-frame fact needs a
+  test, add the matching cumulative counter in
+  `apps/desktop/src/domain/timelineScrollDiagnostics.ts` and subtract it in
+  `harnessMain.tsx` rather than reaching into `latestFrame`.
 
 - A red full local Playwright run is not automatically scope for the active PR.
   First classify each failure: introduced by the current diff, changed-area
