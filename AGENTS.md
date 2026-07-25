@@ -175,6 +175,38 @@ Follow the normative design-simplicity rules in
 `docs/policies/engineering-rules.md`: do not add defensive machinery without a
 reproduced failure or named invariant.
 
+## Account Work Scheduler Notes
+
+- App-owned work that competes for the homeserver goes through the Rust-owned
+  account scheduler in `crates/koushi-core/src/account_work.rs`. Call sites name
+  a semantic `AccountWorkKind`; `AccountWorkKind::policy()` is the only place
+  priority numbers, scheduling class, concurrency, and batch bounds live. Do not
+  add another endpoint gate and do not pass raw priority numbers around.
+- The three classes are normative. Interactive work (`MessageSend`,
+  `UserRoomOperation`) never queues: it takes `begin_interactive` for the SDK
+  enqueue only, which asks worse-priority preemptible work to yield and keeps a
+  yielding job from re-contending until the enqueue completes. Foreground work
+  (`VisibleGapRepair`, `ExplicitPagination`) is preemptible by better priority
+  but is never deferred behind an interactive enqueue. Background work
+  (`OffscreenGapRepair`, `SearchCrawl`, `Maintenance`) yields to everything
+  better and waits for an interactive enqueue.
+- Permit cancellation is cooperative and is not a failure. Finish the current
+  bounded batch, keep the checkpoint, drop the permit, and re-enter scheduling.
+  One permit means one bounded batch: gap repair acquires per batch and releases
+  before local projection settlement so a send never waits for it.
+- The vendored SDK exposes no cancellation argument for
+  `repair_timeline_gap_with_projection` (unlike live-tail refresh), so Phase A
+  yields between batches and does not abort an in-flight request. Do not patch
+  vendored SDK for this without a recorded upstream-feedback decision.
+- Scheduler diagnostics use source `core.account_work` with stages `queued`,
+  `started`, `preempted`, `yielded`, `completed`. They are private-data-free:
+  work id, kind token, priority, preemptible flag, queue wait, run time, batch
+  and item counts only — never room/event/user ids or raw SDK errors.
+- Fast focused checks are `cargo test -p koushi-core --lib account_work` and
+  `cargo test -p koushi-core --lib gap_repair_work_kind_follows_reported_visibility`.
+- The implementation plan and the deliberate Phase A limits are in
+  [docs/superpowers/plans/2026-07-25-account-work-scheduler-phase-a.md](docs/superpowers/plans/2026-07-25-account-work-scheduler-phase-a.md).
+
 ## Verification Discipline (verify-first, no human eyes)
 
 Correctness is guaranteed by reproducible headless verification, never by manual

@@ -116,6 +116,7 @@ use matrix_sdk_ui::timeline::{
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
+use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 #[cfg(test)]
 use crate::causal_projection::{CAUSAL_PROJECTION_DOMAIN_BIT, CAUSAL_PROJECTION_SERIAL_MAX};
 use crate::causal_projection::{
@@ -148,7 +149,6 @@ use crate::live_tail_freshness::{
     FOREGROUND_LIVE_TAIL_LIMIT, LiveTailFreshnessState, LiveTailRefreshCoordinator,
     LiveTailSchedulerAction,
 };
-use crate::messages_backpressure::MessagesBackpressure;
 use crate::read_state::{
     ReadAdmissionDiagnostic, ReadAdmissionStatus, ReadCompletionDiagnostic,
     ReadCompletionDisposition, ReadNetworkOutcome, ReadOperation, ReadOperationFence,
@@ -2502,7 +2502,7 @@ pub struct TimelineManagerActor {
     data_dir: Option<std::path::PathBuf>,
     /// URL preview policy broadcast from AppState.
     link_preview_policy: LinkPreviewContext,
-    messages_backpressure: MessagesBackpressure,
+    account_work: AccountWorkScheduler,
     /// Room-root hydration is shared across replacement actors so SyncStarted
     /// cannot restart a failed/pending bounded lookup.
     thread_root_projection_service: Arc<Mutex<ThreadRootProjectionService>>,
@@ -2596,7 +2596,7 @@ impl TimelineManagerActor {
         action_tx: mpsc::Sender<Vec<AppAction>>,
         event_tx: broadcast::Sender<CoreEvent>,
         data_dir: Option<std::path::PathBuf>,
-        messages_backpressure: MessagesBackpressure,
+        account_work: AccountWorkScheduler,
         navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
     ) -> TimelineManagerHandle {
         let (tx, msg_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
@@ -2627,7 +2627,7 @@ impl TimelineManagerActor {
             ignored_user_ids: std::collections::BTreeSet::new(),
             data_dir,
             link_preview_policy: LinkPreviewContext::default(),
-            messages_backpressure,
+            account_work,
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
@@ -2661,7 +2661,7 @@ impl TimelineManagerActor {
         search_index_tx: mpsc::Sender<SearchIndexMessage>,
         data_dir: Option<std::path::PathBuf>,
         link_preview_policy: LinkPreviewContext,
-        messages_backpressure: MessagesBackpressure,
+        account_work: AccountWorkScheduler,
         navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
     ) -> TimelineManagerHandle {
         let (tx, msg_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
@@ -2704,7 +2704,7 @@ impl TimelineManagerActor {
             ignored_user_ids: std::collections::BTreeSet::new(),
             data_dir,
             link_preview_policy,
-            messages_backpressure,
+            account_work,
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
@@ -2749,11 +2749,18 @@ impl TimelineManagerActor {
         payload: TimelineSendEnqueuePayload,
     ) -> oneshot::Receiver<()> {
         let (preflight_started_tx, preflight_started_rx) = oneshot::channel();
+        let account_work = self.account_work.clone();
         self.spawn_send_enqueue_future(registration, async move {
             if !await_submission_admission(admission).await {
                 return Err(TimelineFailureKind::QueueOverflow);
             }
             let _ = preflight_started_tx.send(());
+            // Interactive: the guard never queues, so admission and the local
+            // echo stay immediate. Holding it across the SDK enqueue asks
+            // background history work to yield and keeps a yielding job from
+            // re-contending until the enqueue completes. It is deliberately not
+            // held for remote settlement.
+            let _interactive = account_work.begin_interactive(AccountWorkKind::MessageSend);
             enqueue_timeline_send(context, payload).await
         });
         preflight_started_rx
@@ -4961,7 +4968,7 @@ impl TimelineManagerActor {
             self.ignored_user_ids.clone(),
             self.data_dir.clone(),
             self.link_preview_policy.for_room(key.room_id()),
-            self.messages_backpressure.clone(),
+            self.account_work.clone(),
             Arc::clone(&self.thread_root_projection_service),
             Arc::clone(&self.replay_known_thread_root_projections),
             Arc::clone(&self.timeline_actor_generations),
@@ -9578,9 +9585,14 @@ fn recover_obsolete_gap_settlement(
     true
 }
 
-fn timeline_gap_repair_budget(trigger: TimelineGapRepairTrigger) -> MatrixTimelineGapRepairBudget {
+/// One bounded batch per scheduler permit. The event bound comes from the work
+/// policy so the batch size has a single owner.
+fn timeline_gap_repair_budget(
+    trigger: TimelineGapRepairTrigger,
+    work_kind: AccountWorkKind,
+) -> MatrixTimelineGapRepairBudget {
     MatrixTimelineGapRepairBudget {
-        event_limit: 64,
+        event_limit: work_kind.policy().batch_limit,
         cached_chunk_limit: match trigger {
             TimelineGapRepairTrigger::LiveTailSnapshot => 0,
             TimelineGapRepairTrigger::Automatic
@@ -10023,6 +10035,43 @@ fn should_record_gap_repair_evaluation(
     }
     *previous = Some(next);
     true
+}
+
+/// Classify one gap-repair batch for the account-wide scheduler.
+///
+/// A gap the viewport reported as visible, and an explicitly requested repair,
+/// are foreground work. Live-edge and nearest-live-edge repair for the selected
+/// room is background: it must not delay a send or visible pagination.
+/// Events the batch actually projected, for scheduler diagnostics only.
+fn gap_repair_batch_events(
+    result: &Result<MatrixTimelineGapRepairResult, MatrixTimelineGapError>,
+) -> u64 {
+    match result {
+        Ok(result) => match result.outcome {
+            MatrixTimelineGapRepairOutcome::Progress { events }
+            | MatrixTimelineGapRepairOutcome::BoundariesJoined { events }
+            | MatrixTimelineGapRepairOutcome::StartReached { events } => events as u64,
+            MatrixTimelineGapRepairOutcome::Deferred { .. }
+            | MatrixTimelineGapRepairOutcome::Stale
+            | MatrixTimelineGapRepairOutcome::Failed => 0,
+        },
+        Err(_) => 0,
+    }
+}
+
+fn gap_repair_work_kind(
+    trigger: TimelineGapRepairTrigger,
+    candidate: Option<ProjectedGapCandidate>,
+) -> AccountWorkKind {
+    if matches!(trigger, TimelineGapRepairTrigger::Manual) {
+        return AccountWorkKind::VisibleGapRepair;
+    }
+    match candidate.map(|candidate| candidate.relation) {
+        Some(ProjectedGapRelation::ExplicitVisible | ProjectedGapRelation::IntersectsViewport) => {
+            AccountWorkKind::VisibleGapRepair
+        }
+        Some(ProjectedGapRelation::NearestLiveEdge) | None => AccountWorkKind::OffscreenGapRepair,
+    }
 }
 
 fn select_projected_gap_candidate(
@@ -11225,7 +11274,11 @@ mod timeline_gap_repair_tracker_tests {
             GapRepairViewportWakeDecision::IdleUnchangedCandidate { .. }
         ));
         assert_eq!(
-            timeline_gap_repair_budget(TimelineGapRepairTrigger::Automatic).cached_chunk_limit,
+            timeline_gap_repair_budget(
+                TimelineGapRepairTrigger::Automatic,
+                AccountWorkKind::OffscreenGapRepair
+            )
+            .cached_chunk_limit,
             1
         );
     }
@@ -11348,26 +11401,164 @@ mod timeline_gap_repair_tracker_tests {
 
     #[test]
     fn automatic_and_manual_repair_use_separate_cache_budgets() {
+        // The event bound comes from the work policy; only the cache budget
+        // varies by trigger.
+        for (trigger, work_kind) in [
+            (
+                TimelineGapRepairTrigger::Automatic,
+                AccountWorkKind::OffscreenGapRepair,
+            ),
+            (
+                TimelineGapRepairTrigger::LiveEdge,
+                AccountWorkKind::OffscreenGapRepair,
+            ),
+            (
+                TimelineGapRepairTrigger::Manual,
+                AccountWorkKind::VisibleGapRepair,
+            ),
+        ] {
+            assert_eq!(
+                timeline_gap_repair_budget(trigger, work_kind),
+                MatrixTimelineGapRepairBudget {
+                    event_limit: work_kind.policy().batch_limit,
+                    cached_chunk_limit: 1,
+                }
+            );
+        }
         assert_eq!(
-            timeline_gap_repair_budget(TimelineGapRepairTrigger::Automatic),
-            MatrixTimelineGapRepairBudget {
-                event_limit: 64,
-                cached_chunk_limit: 1,
-            }
+            timeline_gap_repair_budget(
+                TimelineGapRepairTrigger::LiveTailSnapshot,
+                AccountWorkKind::OffscreenGapRepair
+            )
+            .cached_chunk_limit,
+            0,
+            "live-tail snapshots must not load cached chunks"
+        );
+    }
+
+    #[test]
+    fn send_enqueue_takes_the_interactive_guard_before_the_sdk_enqueue() {
+        let source = include_str!("timeline.rs");
+        let spawn_source = source
+            .split("fn spawn_send_enqueue(")
+            .nth(1)
+            .and_then(|section| {
+                section
+                    .split("fn handle_send_enqueue_worker_completion")
+                    .next()
+            })
+            .expect("send enqueue spawner should exist");
+        let guard_offset = spawn_source
+            .find("begin_interactive(AccountWorkKind::MessageSend)")
+            .expect("send enqueue must take the interactive work guard");
+        let enqueue_offset = spawn_source
+            .find("enqueue_timeline_send(context, payload)")
+            .expect("send enqueue must still call the SDK enqueue");
+        assert!(
+            guard_offset < enqueue_offset,
+            "the interactive guard must be held across the SDK enqueue"
+        );
+        assert!(
+            spawn_source
+                .find("preflight_started_tx.send(())")
+                .expect("admission must still be acknowledged before the guard")
+                < guard_offset,
+            "send admission and local echo must not wait for the scheduler"
+        );
+    }
+
+    #[test]
+    fn gap_repair_takes_a_scheduler_permit_around_one_bounded_batch() {
+        let source = include_str!("timeline.rs");
+        // Split on an assembled literal so this test's own source cannot match
+        // the anchor ahead of the production function.
+        let repair_source = source
+            .split(concat!("async fn start", "_timeline", "_gap", "_repair"))
+            .nth(1)
+            .and_then(|section| {
+                section
+                    .split(concat!(
+                        "async fn handle",
+                        "_timeline",
+                        "_gap",
+                        "_repair",
+                        "_finished"
+                    ))
+                    .next()
+            })
+            .expect("gap repair starter should exist");
+        let acquire_offset = repair_source
+            .find("account_work.acquire(work_kind)")
+            .expect("gap repair must take a permit for its work kind");
+        let repair_offset = repair_source
+            .find("repair_room_timeline_gap(")
+            .expect("gap repair must still call the SDK repair");
+        let yield_offset = repair_source
+            .find("permit.record_yield(1,")
+            .expect("gap repair must report the bounded batch it yielded after");
+        assert!(
+            acquire_offset < repair_offset && repair_offset < yield_offset,
+            "gap repair must acquire, run one bounded batch, then yield"
+        );
+        let settlement_offset = repair_source
+            .find("wait_for_gap_repair_projection_with_timeout")
+            .expect("gap repair must still wait for projection settlement");
+        assert!(
+            yield_offset < settlement_offset,
+            "the permit must be released before local projection settlement"
+        );
+    }
+
+    #[test]
+    fn gap_repair_work_kind_follows_reported_visibility() {
+        use super::{ProjectedGapCandidate, ProjectedGapRelation};
+        let gap_id = TimelineGapId {
+            topology_revision: 1,
+            ordinal: 0,
+        };
+        for relation in [
+            ProjectedGapRelation::ExplicitVisible,
+            ProjectedGapRelation::IntersectsViewport,
+        ] {
+            assert_eq!(
+                gap_repair_work_kind(
+                    TimelineGapRepairTrigger::Automatic,
+                    Some(ProjectedGapCandidate {
+                        id: gap_id,
+                        relation
+                    })
+                ),
+                AccountWorkKind::VisibleGapRepair
+            );
+        }
+        assert_eq!(
+            gap_repair_work_kind(
+                TimelineGapRepairTrigger::Automatic,
+                Some(ProjectedGapCandidate {
+                    id: gap_id,
+                    relation: ProjectedGapRelation::NearestLiveEdge
+                })
+            ),
+            AccountWorkKind::OffscreenGapRepair
         );
         assert_eq!(
-            timeline_gap_repair_budget(TimelineGapRepairTrigger::LiveEdge),
-            MatrixTimelineGapRepairBudget {
-                event_limit: 64,
-                cached_chunk_limit: 1,
-            }
+            gap_repair_work_kind(TimelineGapRepairTrigger::LiveEdge, None),
+            AccountWorkKind::OffscreenGapRepair,
+            "live-edge repair for the selected room stays background"
         );
         assert_eq!(
-            timeline_gap_repair_budget(TimelineGapRepairTrigger::Manual),
-            MatrixTimelineGapRepairBudget {
-                event_limit: 64,
-                cached_chunk_limit: 1,
-            }
+            gap_repair_work_kind(TimelineGapRepairTrigger::Manual, None),
+            AccountWorkKind::VisibleGapRepair,
+            "an explicitly requested repair is foreground even without a candidate"
+        );
+        // Background repair must never outrank a send or visible pagination.
+        assert!(
+            AccountWorkKind::OffscreenGapRepair.policy().priority
+                > AccountWorkKind::ExplicitPagination.policy().priority
+        );
+        assert!(
+            AccountWorkKind::VisibleGapRepair.policy().priority
+                > AccountWorkKind::MessageSend.policy().priority
         );
     }
 
@@ -12015,7 +12206,7 @@ mod timeline_gap_repair_tracker_tests {
             search_index_tx,
             None,
             LinkPreviewContext::default(),
-            MessagesBackpressure::default(),
+            AccountWorkScheduler::default(),
             None,
         );
         let committed_from_response_sequence = client
@@ -12847,7 +13038,7 @@ mod timeline_gap_repair_tracker_tests {
             Default::default(),
             None,
             LinkPreviewContext::default(),
-            MessagesBackpressure::default(),
+            AccountWorkScheduler::default(),
             Arc::new(Mutex::new(ThreadRootProjectionService::default())),
             Arc::new(Mutex::new(
                 ReplayKnownThreadRootProjectionRegistry::default(),
@@ -13732,7 +13923,7 @@ struct TimelineActor {
     next_pagination_serial: u64,
     /// Application data directory for cached preview images.
     data_dir: Option<std::path::PathBuf>,
-    messages_backpressure: MessagesBackpressure,
+    account_work: AccountWorkScheduler,
     restore_anchor: Option<RestoreTimelineAnchorState>,
     next_restore_anchor_serial: u64,
     /// Buffered `TimelineDiff`s accumulated during a restore walk. While
@@ -14185,7 +14376,7 @@ impl TimelineActor {
         ignored_user_ids: std::collections::BTreeSet<String>,
         data_dir: Option<std::path::PathBuf>,
         link_preview_policy: LinkPreviewContext,
-        messages_backpressure: MessagesBackpressure,
+        account_work: AccountWorkScheduler,
         thread_root_projection_service: Arc<Mutex<ThreadRootProjectionService>>,
         replay_known_thread_root_projections: Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
         timeline_actor_generations: Arc<TimelineActorGenerationGate>,
@@ -14250,7 +14441,9 @@ impl TimelineActor {
         if should_hydrate_empty_initial_room_timeline(&key.kind, initial_sdk_items.len()) {
             let gate_started = Some(std::time::Instant::now());
             let hydrate_result = {
-                let _permit = messages_backpressure.acquire_timeline().await;
+                let _permit = account_work
+                    .acquire(AccountWorkKind::ExplicitPagination)
+                    .await;
                 let gate_wait = gate_started.map(|started| started.elapsed());
                 trace_timeline_paginate(
                     "initial_hydrate_gate_acquired",
@@ -14547,7 +14740,7 @@ impl TimelineActor {
             pagination_task: None,
             next_pagination_serial: 0,
             data_dir,
-            messages_backpressure,
+            account_work,
             restore_anchor: None,
             next_restore_anchor_serial: 0,
             restore_emit_buffer: Vec::new(),
@@ -16115,7 +16308,9 @@ impl TimelineActor {
         let session = self.session.clone();
         let timeline = self.timeline.clone();
         let actor_tx = self.msg_tx.clone();
-        let budget = timeline_gap_repair_budget(trigger);
+        let work_kind = gap_repair_work_kind(trigger, self.gap_repair.last_projected_candidate);
+        let account_work = self.account_work.clone();
+        let budget = timeline_gap_repair_budget(trigger, work_kind);
         let actor_generation = self.actor_generation;
         let timeline_generation = self.generation;
         let projection_operation = historical_causal_projection_operation(serial);
@@ -16124,14 +16319,22 @@ impl TimelineActor {
         #[cfg(test)]
         let completion_pause = self.test_gap_repair_completion_pause.take();
         self.gap_work_task = Some(executor::spawn(async move {
-            let mut result = session
-                .repair_room_timeline_gap(
-                    &descriptor,
-                    budget,
-                    actor_generation,
-                    projection_operation.encode_transport(),
-                )
-                .await;
+            // One bounded batch per permit: the slot is released before local
+            // projection settlement so a send or visible pagination does not
+            // wait for it, and the next batch re-enters scheduling.
+            let mut result = {
+                let permit = account_work.acquire(work_kind).await;
+                let outcome = session
+                    .repair_room_timeline_gap(
+                        &descriptor,
+                        budget,
+                        actor_generation,
+                        projection_operation.encode_transport(),
+                    )
+                    .await;
+                permit.record_yield(1, gap_repair_batch_events(&outcome));
+                outcome
+            };
             if let Some(projection_batch) = result
                 .as_ref()
                 .ok()
@@ -16589,7 +16792,7 @@ impl TimelineActor {
         let timeline_actor_generations = self.timeline_actor_generations.clone();
         let actor_generation = self.actor_generation;
         let actor_tx = self.msg_tx.clone();
-        let messages_backpressure = self.messages_backpressure.clone();
+        let account_work = self.account_work.clone();
         let task = executor::spawn(async move {
             let completion = Self::paginate_once_for(
                 request_id,
@@ -16598,7 +16801,7 @@ impl TimelineActor {
                 event_tx,
                 timeline_actor_generations,
                 actor_generation,
-                messages_backpressure,
+                account_work,
                 direction,
                 event_count,
             )
@@ -16633,7 +16836,7 @@ impl TimelineActor {
             self.event_tx.clone(),
             self.timeline_actor_generations.clone(),
             self.actor_generation,
-            self.messages_backpressure.clone(),
+            self.account_work.clone(),
             direction,
             event_count,
         )
@@ -16649,7 +16852,7 @@ impl TimelineActor {
         event_tx: broadcast::Sender<CoreEvent>,
         timeline_actor_generations: Arc<TimelineActorGenerationGate>,
         actor_generation: u64,
-        messages_backpressure: MessagesBackpressure,
+        account_work: AccountWorkScheduler,
         direction: PaginationDirection,
         event_count: u16,
     ) -> PaginationCompletion {
@@ -16675,7 +16878,9 @@ impl TimelineActor {
         };
         let gate_started = Some(std::time::Instant::now());
         let result = {
-            let _permit = messages_backpressure.acquire_timeline().await;
+            let _permit = account_work
+                .acquire(AccountWorkKind::ExplicitPagination)
+                .await;
             let gate_wait = gate_started.map(|t| t.elapsed());
             let gate_ms = gate_wait.map(|duration| duration.as_millis());
             trace_timeline_paginate(
@@ -17610,6 +17815,9 @@ impl TimelineActor {
             );
             return;
         }
+        let _interactive = self
+            .account_work
+            .begin_interactive(AccountWorkKind::MessageSend);
         let mut result = Ok(());
         for item_id in &candidates {
             result = self.timeline.redact(item_id, None).await;
@@ -17647,6 +17855,9 @@ impl TimelineActor {
             return;
         }
 
+        let _interactive = self
+            .account_work
+            .begin_interactive(AccountWorkKind::MessageSend);
         let mut result: Result<(), matrix_sdk_ui::timeline::Error> = Ok(());
         for item_id in &candidates {
             result = self
@@ -26715,7 +26926,7 @@ mod tests {
             action_tx,
             event_tx,
             None,
-            MessagesBackpressure::default(),
+            AccountWorkScheduler::default(),
             None,
         );
         let mut registration = SendCompletionRegistration::begin(
@@ -27818,7 +28029,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
-            messages_backpressure: MessagesBackpressure::default(),
+            account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: thread_root_projection_service.clone(),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
             replay_known_thread_root_projections: replay_known_thread_root_projections.clone(),
@@ -29266,7 +29477,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
-            messages_backpressure: MessagesBackpressure::default(),
+            account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
@@ -29994,7 +30205,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
-            messages_backpressure: MessagesBackpressure::default(),
+            account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
@@ -32039,7 +32250,7 @@ mod tests {
             Default::default(),
             None,
             LinkPreviewContext::default(),
-            manager.messages_backpressure.clone(),
+            manager.account_work.clone(),
             Arc::clone(&manager.thread_root_projection_service),
             Arc::clone(&manager.replay_known_thread_root_projections),
             Arc::clone(&manager.timeline_actor_generations),
@@ -32380,7 +32591,7 @@ mod tests {
                 BTreeSet::new(),
                 None,
                 LinkPreviewContext::default(),
-                MessagesBackpressure::default(),
+                AccountWorkScheduler::default(),
                 Arc::new(Mutex::new(ThreadRootProjectionService::default())),
                 Arc::new(Mutex::new(
                     ReplayKnownThreadRootProjectionRegistry::default(),
@@ -32589,7 +32800,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
-            messages_backpressure: MessagesBackpressure::default(),
+            account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
@@ -32762,7 +32973,7 @@ mod tests {
             action_tx,
             event_tx,
             None,
-            MessagesBackpressure::default(),
+            AccountWorkScheduler::default(),
             None,
         );
         let (acknowledged, acknowledgement) = tokio::sync::oneshot::channel();
@@ -32987,7 +33198,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
-            messages_backpressure: MessagesBackpressure::default(),
+            account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
@@ -33065,7 +33276,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
-            messages_backpressure: MessagesBackpressure::default(),
+            account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
@@ -34447,7 +34658,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
-            messages_backpressure: MessagesBackpressure::default(),
+            account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
@@ -34642,7 +34853,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
-            messages_backpressure: MessagesBackpressure::default(),
+            account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
@@ -36125,7 +36336,7 @@ mod tests {
     }
 
     #[test]
-    fn timeline_pagination_uses_account_wide_messages_backpressure() {
+    fn timeline_pagination_uses_the_account_work_scheduler() {
         let source = include_str!("timeline.rs");
         let pagination_source = source
             .split("async fn handle_paginate")
@@ -36133,19 +36344,19 @@ mod tests {
             .and_then(|section| section.split("async fn handle_send_text").next())
             .expect("pagination handler should exist");
         let acquire_offset = pagination_source
-            .find("acquire_timeline")
-            .expect("timeline pagination must acquire the shared /messages backpressure permit");
+            .find("AccountWorkKind::ExplicitPagination")
+            .expect("timeline pagination must acquire the named explicit-pagination kind");
         let paginate_offset = pagination_source
             .find("paginate_backwards")
             .expect("timeline pagination must still call SDK pagination");
 
         assert!(
-            source.contains("MessagesBackpressure"),
-            "Timeline actors must carry the shared account-wide /messages backpressure handle"
+            source.contains("AccountWorkScheduler"),
+            "Timeline actors must carry the shared account-wide work scheduler handle"
         );
         assert!(
             acquire_offset < paginate_offset,
-            "timeline pagination must acquire account-wide /messages backpressure before SDK pagination"
+            "timeline pagination must take its scheduler permit before SDK pagination"
         );
     }
 

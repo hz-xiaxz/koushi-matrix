@@ -3,7 +3,7 @@ use std::fmt;
 use koushi_sdk::{MatrixClientSession, MatrixTimelineError, MatrixTimelineItem};
 use koushi_state::{ActivityRow, OperationFailureKind};
 
-use crate::messages_backpressure::MessagesBackpressure;
+use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 
 const PAGE_SIZE: u16 = 50;
 const MAX_PAGES: usize = 32;
@@ -52,7 +52,7 @@ impl fmt::Debug for ActivityResolutionRequest {
 pub(crate) async fn resolve_activity_requests(
     session: &MatrixClientSession,
     requests: &[ActivityResolutionRequest],
-    backpressure: &MessagesBackpressure,
+    backpressure: &AccountWorkScheduler,
 ) -> ActivityResolutionOutcome {
     let mut outcome = ActivityResolutionOutcome::default();
     for request in requests {
@@ -64,7 +64,7 @@ pub(crate) async fn resolve_activity_requests(
 async fn resolve_activity_request(
     session: &MatrixClientSession,
     request: &ActivityResolutionRequest,
-    backpressure: &MessagesBackpressure,
+    backpressure: &AccountWorkScheduler,
 ) -> Result<Vec<ActivityRow>, OperationFailureKind> {
     let mut subscription = None;
     for _ in 0..MAX_ATTEMPTS {
@@ -96,7 +96,9 @@ async fn resolve_activity_request(
 
         let mut page_result = None;
         for _ in 0..MAX_ATTEMPTS {
-            let permit = backpressure.acquire_timeline().await;
+            // Stale-unread history hydration is not visible work: it takes the
+            // background band so it cannot delay pagination or a send.
+            let permit = backpressure.acquire(AccountWorkKind::SearchCrawl).await;
             let result = pagination.paginate_backwards(PAGE_SIZE).await;
             drop(permit);
             match result {

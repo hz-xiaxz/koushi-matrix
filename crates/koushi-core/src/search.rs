@@ -60,12 +60,12 @@ use koushi_state::{
 };
 use tokio::sync::{broadcast, mpsc};
 
+use crate::account_work::AccountWorkScheduler;
 use crate::command::{SearchCommand, SearchScope};
 use crate::event::{CoreEvent, SearchEvent, SearchResultItem};
 use crate::executor;
 use crate::failure::{CoreFailure, SearchFailureKind};
 use crate::ids::RequestId;
-use crate::messages_backpressure::MessagesBackpressure;
 use crate::search_crawler::{HistoryCrawlCheckpoint, HistoryCrawlPageResult};
 
 /// Maximum number of candidates requested from the SDK ngram index.
@@ -505,7 +505,7 @@ pub(crate) struct SearchActor {
     /// Read-ahead actor messages drained from `msg_rx` while coalescing a burst
     /// of pending search queries. Non-query messages stay in order here.
     deferred_messages: VecDeque<SearchActorMessage>,
-    messages_backpressure: MessagesBackpressure,
+    account_work: AccountWorkScheduler,
     /// Element-style checkpoint queue for history crawling. The actor starts
     /// exactly one bounded `/messages` page at a time; unfinished rooms are
     /// pushed to the back so other rooms get a turn before the next page.
@@ -543,7 +543,7 @@ impl SearchActor {
         session: Arc<MatrixClientSession>,
         action_tx: mpsc::Sender<Vec<AppAction>>,
         event_tx: broadcast::Sender<CoreEvent>,
-        messages_backpressure: MessagesBackpressure,
+        account_work: AccountWorkScheduler,
     ) -> SearchActorHandle {
         let (tx, msg_rx) = mpsc::channel(64);
         let (index_tx, index_rx) = mpsc::channel(SEARCH_INDEX_MUTATION_QUEUE);
@@ -556,7 +556,7 @@ impl SearchActor {
             event_tx,
             msg_rx,
             deferred_messages: VecDeque::new(),
-            messages_backpressure,
+            account_work,
             crawl_queue: VecDeque::new(),
             queued_crawl_rooms: HashSet::new(),
             available_crawl_rooms: HashSet::new(),
@@ -1176,7 +1176,7 @@ impl SearchActor {
         }
         let handle = crate::search_crawler::spawn_history_crawl_page(
             self.session.clone(),
-            self.messages_backpressure.clone(),
+            self.account_work.clone(),
             checkpoint.clone(),
         );
         self.active_crawl_checkpoint = Some(checkpoint);
@@ -1993,7 +1993,7 @@ mod tests {
     }
 
     #[test]
-    fn search_actor_history_crawler_uses_account_wide_messages_backpressure() {
+    fn search_actor_history_crawler_uses_account_wide_account_work() {
         let source = include_str!("search.rs");
         let start_page_source = source
             .split(concat!("fn start", "_next", "_history", "_crawl", "_page"))
@@ -2012,11 +2012,11 @@ mod tests {
             .expect("crawler page starter should exist");
 
         assert!(
-            source.contains("MessagesBackpressure"),
+            source.contains("AccountWorkScheduler"),
             "SearchActor must carry the shared account-wide /messages backpressure handle"
         );
         assert!(
-            start_page_source.contains("messages_backpressure.clone()"),
+            start_page_source.contains("account_work.clone()"),
             "each search crawler page must receive the shared /messages backpressure handle"
         );
     }
