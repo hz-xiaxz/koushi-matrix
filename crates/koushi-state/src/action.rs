@@ -19,6 +19,7 @@ use crate::state::{
     RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji,
     ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope,
     SessionInfo, SettingsPatch, SettingsValues, SpaceSummary, StagedUploadCompressionChoice,
+    StagedUploadOutputSelection,
     StagedUploadItem, SyncLifecycleStatus, SyncMode, TimelineContinuityInspection,
     TimelineGapRepairFailureKind, TimelineMediaDownloadState, TimelineMediaGalleryItem,
     TimelineScrollAnchor, TrustOperationFailureKind, UserProfile, VerificationCancelReason,
@@ -829,10 +830,10 @@ pub enum AppAction {
         staged_id: String,
         compression_choice: StagedUploadCompressionChoice,
     },
-    UploadStagingVariantSelected {
+    UploadStagingOutputSelected {
         target: crate::ComposerTarget,
         staged_id: String,
-        variant_id: String,
+        selection: StagedUploadOutputSelection,
     },
     UploadStagingCleared {
         target: crate::ComposerTarget,

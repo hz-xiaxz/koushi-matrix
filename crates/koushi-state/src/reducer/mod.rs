@@ -873,11 +873,11 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             staged_id,
             compression_choice,
         ),
-        AppAction::UploadStagingVariantSelected {
+        AppAction::UploadStagingOutputSelected {
             target,
             staged_id,
-            variant_id,
-        } => timeline::handle_upload_staging_variant_selected(state, target, staged_id, variant_id),
+            selection,
+        } => timeline::handle_upload_staging_output_selected(state, target, staged_id, selection),
         AppAction::UploadStagingCleared { target } => {
             timeline::handle_upload_staging_cleared(state, target)
         }

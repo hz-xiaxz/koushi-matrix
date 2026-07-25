@@ -45,7 +45,7 @@ impl CoreCommand {
                 | AppCommand::SetUploadStaging { request_id, .. }
                 | AppCommand::UpdateStagedUploadCaption { request_id, .. }
                 | AppCommand::UpdateStagedUploadCompression { request_id, .. }
-                | AppCommand::SelectStagedUploadVariant { request_id, .. }
+                | AppCommand::SelectStagedUploadOutput { request_id, .. }
                 | AppCommand::ClearUploadStaging { request_id, .. }
                 | AppCommand::ScheduleSend { request_id, .. }
                 | AppCommand::CancelScheduledSend { request_id, .. }
@@ -339,7 +339,7 @@ impl CoreCommand {
                     | AppCommand::AcceptComposerDraft { .. }
                     | AppCommand::UpdateStagedUploadCaption { .. }
                     | AppCommand::UpdateStagedUploadCompression { .. }
-                    | AppCommand::SelectStagedUploadVariant { .. }
+                    | AppCommand::SelectStagedUploadOutput { .. }
                     | AppCommand::ClearUploadStaging { .. }
                     | AppCommand::RebuildSearchIndex { .. }
                     | AppCommand::SetRoomUrlPreviewOverride { .. }
@@ -404,11 +404,11 @@ pub enum AppCommand {
         staged_id: String,
         compression_choice: StagedUploadCompressionChoice,
     },
-    SelectStagedUploadVariant {
+    SelectStagedUploadOutput {
         request_id: RequestId,
         target: koushi_state::ComposerTarget,
         staged_id: String,
-        variant_id: String,
+        selection: koushi_state::StagedUploadOutputSelection,
     },
     ClearUploadStaging {
         request_id: RequestId,

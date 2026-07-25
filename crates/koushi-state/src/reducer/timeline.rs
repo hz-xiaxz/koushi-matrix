@@ -493,18 +493,18 @@ pub(crate) fn handle_upload_staging_cleared(
     refresh_and_emit_upload_target(state, &target)
 }
 
-pub(crate) fn handle_upload_staging_variant_selected(
+pub(crate) fn handle_upload_staging_output_selected(
     state: &mut AppState,
     target: crate::ComposerTarget,
     staged_id: String,
-    variant_id: String,
+    selection: crate::state::StagedUploadOutputSelection,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) || !composer_target_is_active(state, &target) {
         return Vec::new();
     }
     if state
         .upload_staging
-        .select_variant(&target, &staged_id, &variant_id)
+        .select_output(&target, &staged_id, selection)
         .is_none()
     {
         return Vec::new();

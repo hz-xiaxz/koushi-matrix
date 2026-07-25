@@ -211,8 +211,16 @@ pub enum StagedUploadPreparation {
     #[default]
     Preparing,
     Ready {
+        /// Completed combinations, reused immediately when re-selected.
         variants: Vec<PreparedUploadVariant>,
-        selected_variant_id: String,
+        /// The single owner of "which output will be uploaded".
+        selected: StagedUploadOutputSelection,
+        /// Set while `selected` has no prepared output yet.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pending: Option<StagedUploadOutputSelection>,
+        /// Fences stale encode results so the latest selection wins.
+        #[serde(default)]
+        generation: u64,
     },
     Failed {
         failure_kind: MediaPreparationFailureKind,
@@ -230,6 +238,7 @@ pub enum MediaPreparationFailureKind {
     MissingPreparedBytes,
 }
 
+/// Actual encoding of a prepared output.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PreparedUploadFormat {
@@ -239,9 +248,51 @@ pub enum PreparedUploadFormat {
     Webp,
 }
 
+/// Linear scale the user chose for the upload, applied to both dimensions.
+///
+/// Independent of the encoding: `Original` preserves the source dimensions,
+/// while [`StagedUploadFormatChoice::Keep`] preserves the source encoding.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StagedUploadResizeChoice {
+    #[default]
+    Original,
+    Half,
+    Quarter,
+    Eighth,
+}
+
+/// Encoding the user chose for the upload. `Keep` re-encodes in the source
+/// format.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StagedUploadFormatChoice {
+    #[default]
+    Keep,
+    Png,
+    Jpeg,
+    Webp,
+}
+
+/// The two independent axes that identify one prepared output.
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedUploadOutputSelection {
+    pub resize: StagedUploadResizeChoice,
+    pub format: StagedUploadFormatChoice,
+}
+
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PreparedUploadVariant {
     pub variant_id: String,
+    /// Resize axis this output was prepared for.
+    #[serde(default)]
+    pub resize: StagedUploadResizeChoice,
+    /// Format axis this output was prepared for, as chosen (not as resolved).
+    #[serde(default)]
+    pub format_choice: StagedUploadFormatChoice,
     pub filename: String,
     pub mime_type: String,
     pub byte_count: u64,
@@ -258,6 +309,8 @@ impl fmt::Debug for PreparedUploadVariant {
         formatter
             .debug_struct("PreparedUploadVariant")
             .field("variant_id", &"PreparedVariantId(..)")
+            .field("resize", &self.resize)
+            .field("format_choice", &self.format_choice)
             .field("filename", &"MediaFilename(..)")
             .field("mime_type", &self.mime_type)
             .field("byte_count", &self.byte_count)
@@ -346,33 +399,99 @@ impl UploadStagingStore {
         Some(item.clone())
     }
 
-    pub fn select_variant(
+    /// Choose one output by its resize/format pair.
+    ///
+    /// A pair that is already prepared is adopted immediately and describes the
+    /// bytes that will be uploaded. A pair that is not prepared becomes
+    /// `pending` under a fresh generation, so the last completed output keeps
+    /// describing the upload until the new one lands and the latest selection
+    /// wins over any encode still in flight.
+    pub fn select_output(
         &mut self,
         target: &ComposerTarget,
         staged_id: &str,
-        variant_id: &str,
+        selection: StagedUploadOutputSelection,
     ) -> Option<StagedUploadItem> {
         let item = self
             .items
             .get_mut(&(target.clone(), staged_id.to_owned()))?;
         let StagedUploadPreparation::Ready {
             variants,
-            selected_variant_id,
+            selected,
+            pending,
+            generation,
         } = &mut item.preparation
         else {
             return None;
         };
-        let selected = variants
+        *selected = selection;
+        match variants
             .iter()
-            .find(|variant| variant.variant_id == variant_id)?
-            .clone();
-        *selected_variant_id = selected.variant_id;
-        item.filename = selected.filename;
-        item.mime_type = selected.mime_type;
-        item.byte_count = selected.byte_count;
+            .find(|variant| {
+                variant.resize == selection.resize && variant.format_choice == selection.format
+            })
+            .cloned()
+        {
+            Some(prepared) => {
+                *pending = None;
+                item.filename = prepared.filename;
+                item.mime_type = prepared.mime_type;
+                item.byte_count = prepared.byte_count;
+                item.kind = StagedUploadKind::Image {
+                    width: prepared.width,
+                    height: prepared.height,
+                };
+            }
+            None => {
+                *pending = Some(selection);
+                *generation = generation.saturating_add(1);
+            }
+        }
+        Some(item.clone())
+    }
+
+    /// Adopt a completed encode, unless a newer selection superseded it.
+    ///
+    /// Returns `None` for a stale generation so a slow encode can never
+    /// overwrite the output the user is currently waiting for.
+    pub fn complete_output(
+        &mut self,
+        target: &ComposerTarget,
+        staged_id: &str,
+        prepared: PreparedUploadVariant,
+        completed_generation: u64,
+    ) -> Option<StagedUploadItem> {
+        let item = self
+            .items
+            .get_mut(&(target.clone(), staged_id.to_owned()))?;
+        let StagedUploadPreparation::Ready {
+            variants,
+            selected,
+            pending,
+            generation,
+        } = &mut item.preparation
+        else {
+            return None;
+        };
+        if completed_generation != *generation {
+            return None;
+        }
+        let matches_selection =
+            prepared.resize == selected.resize && prepared.format_choice == selected.format;
+        if !matches_selection {
+            return None;
+        }
+        variants.retain(|variant| {
+            variant.resize != prepared.resize || variant.format_choice != prepared.format_choice
+        });
+        variants.push(prepared.clone());
+        *pending = None;
+        item.filename = prepared.filename;
+        item.mime_type = prepared.mime_type;
+        item.byte_count = prepared.byte_count;
         item.kind = StagedUploadKind::Image {
-            width: selected.width,
-            height: selected.height,
+            width: prepared.width,
+            height: prepared.height,
         };
         Some(item.clone())
     }
