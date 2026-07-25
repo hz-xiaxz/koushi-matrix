@@ -10014,4 +10014,67 @@ describe("TimelineView", () => {
     expect(statusRow.querySelector(".message-reactions")).toBeTruthy();
     expect(statusRow.querySelector(".message-receipts")).toBeTruthy();
   });
+
+  it("renders typing indicators with room display labels when available", async () => {
+    const transport = baseTransport({});
+    const liveSignals: LiveSignalsState = {
+      rooms: {
+        "!room:example.invalid": {
+          receipts_by_event: {},
+          fully_read_event_id: null,
+          typing_user_ids: ["@hironeishida:matrix.org"]
+        }
+      },
+      presence: {}
+    };
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+        liveSignals={liveSignals}
+        profileUsers={{
+          "@hironeishida:matrix.org": {
+            user_id: "@hironeishida:matrix.org",
+            display_name: "Hirone Ishida",
+            display_label: "Hirone Ishida",
+            original_display_label: "Hirone Ishida",
+            mention_search_terms: [],
+            avatar: null
+          }
+        }}
+      />
+    );
+
+    expect(screen.getByText("Hirone Ishida is typing")).toBeTruthy();
+    expect(screen.queryByText("@hironeishida:matrix.org is typing")).toBeNull();
+  });
+
+  it("falls back to the Matrix user id for typing indicators without profile data", async () => {
+    const transport = baseTransport({});
+    const liveSignals: LiveSignalsState = {
+      rooms: {
+        "!room:example.invalid": {
+          receipts_by_event: {},
+          fully_read_event_id: null,
+          typing_user_ids: ["@unknown:example.invalid"]
+        }
+      },
+      presence: {}
+    };
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+        liveSignals={liveSignals}
+      />
+    );
+
+    expect(screen.getByText("@unknown:example.invalid is typing")).toBeTruthy();
+  });
 });
