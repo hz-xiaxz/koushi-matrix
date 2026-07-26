@@ -260,7 +260,6 @@ export type MessageId =
   | "directory.searchFailed"
   | "directory.searching"
   | "directory.searchPlaceholder"
-  | "directory.searchPublicRooms"
   | "directory.searchServer"
   | "directory.searchServerPlaceholder"
   | "directory.spaceBadge"
@@ -1311,7 +1310,6 @@ const en: Catalog = {
   "directory.spaceBadge": "Space",
   "directory.unnamedRoom": "Unnamed room",
   "directory.unnamedSpace": "Unnamed space",
-  "directory.searchPublicRooms": "Search public rooms",
   "directory.worldReadable": "World readable",
   "invite.accept": "Accept invite",
   "invite.decline": "Decline invite",
@@ -2256,7 +2254,6 @@ const ja: Catalog = {
   "directory.spaceBadge": "スペース",
   "directory.unnamedRoom": "名前のないルーム",
   "directory.unnamedSpace": "名前のないスペース",
-  "directory.searchPublicRooms": "公開ルームを検索",
   "directory.worldReadable": "誰でも閲覧可",
   "invite.accept": "招待を承認",
   "invite.decline": "招待を辞退",
