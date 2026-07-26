@@ -226,6 +226,10 @@ describe("ExplorePane public discovery", () => {
 
     render(
       <ExplorePane
+        addressDraft=""
+        addressNotice={null}
+        onAddressChange={vi.fn()}
+        onSubmitAddress={vi.fn()}
         isBusy={false}
         queryDraft=""
         serverDraft=""
@@ -251,6 +255,10 @@ describe("ExplorePane public discovery", () => {
 
     render(
       <ExplorePane
+        addressDraft=""
+        addressNotice={null}
+        onAddressChange={vi.fn()}
+        onSubmitAddress={vi.fn()}
         isBusy={false}
         queryDraft=""
         serverDraft=""
@@ -275,6 +283,10 @@ describe("ExplorePane public discovery", () => {
 
     render(
       <ExplorePane
+        addressDraft=""
+        addressNotice={null}
+        onAddressChange={vi.fn()}
+        onSubmitAddress={vi.fn()}
         isBusy={false}
         queryDraft=""
         serverDraft=""

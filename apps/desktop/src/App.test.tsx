@@ -97,7 +97,9 @@ describe("ContextualRightPanel", () => {
       />
     );
 
-    expect(markup).toContain('aria-label="Home"');
+    // #330: the label names unread messages and invites when either is present,
+    // so match the name's start rather than the whole attribute.
+    expect(markup).toContain('aria-label="Home');
     expect(markup).not.toContain('aria-label="Activity"');
     expect(markup).toContain('role="separator"');
     expect(markup).toContain('aria-label="Create space"');
@@ -1393,7 +1395,9 @@ describe("desktop integration source guards", () => {
     expect(paneSource).toContain('aria-label={t("panel.people")}');
     expect(paneSource).toContain("onOpenPeopleStable");
     expect(paneSource).toContain('aria-label={t("mediaGallery.open")}');
-    expect(paneSource).toContain("showThreadsHeader");
+    // #330: the header is the only entry point to a room's threads now, so it is
+    // offered unconditionally rather than gated on unread thread attention.
+    expect(paneSource).not.toContain("showThreadsHeader");
     expect(paneSource).toContain("onOpenThreadsStable");
   });
 

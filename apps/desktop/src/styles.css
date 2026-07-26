@@ -2025,6 +2025,39 @@ button:disabled {
   color: var(--text-muted);
 }
 
+/* #330: Explore states its two actions separately — paste an address, or search
+   a public directory — instead of overloading one field. */
+.directory-section > h2 {
+  margin: 0;
+  padding: 16px 20px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.directory-section > .directory-search {
+  border-bottom: none;
+}
+
+/* The address form has no server column, so it must not inherit the search
+   grid's empty third track. */
+.directory-address-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.directory-field-helper {
+  margin: 0;
+  padding: 0 20px 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.directory-section:not(:last-of-type) {
+  border-bottom: 1px solid var(--line);
+}
+
 .directory-search {
   display: grid;
   /* Term, directory server, then the submit button. The server column is

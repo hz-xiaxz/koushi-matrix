@@ -165,6 +165,18 @@ async function gotoReadyShell(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: "Reply to message" }).first()).toBeVisible();
 }
 
+/**
+ * Explore and Invites are account-global, so they render only at Home (#330).
+ * The harness boots with a space selected.
+ */
+async function selectAccountHome(page: Page): Promise<void> {
+  await page
+    .getByRole("navigation", { name: "Workspaces" })
+    .getByRole("button", { name: /^Home/ })
+    .click();
+  await expect(page.getByRole("main", { name: "Activity" })).toBeVisible();
+}
+
 async function gotoSignedOutAuth(page: Page): Promise<void> {
   await gotoReadyShell(page);
   await page.evaluate(() => {
@@ -214,7 +226,14 @@ async function gotoSignedOutAuth(page: Page): Promise<void> {
       },
       sidebar: {
         active_space_id: null,
-        account_home: { display_name: "Home", unread_count: 0, highlight_count: 0, is_active: true },
+        account_home: {
+          display_name: "Home",
+          unread_count: 0,
+          highlight_count: 0,
+          invite_count: 0,
+          attention_count: 0,
+          is_active: true
+        },
         space_rail: [],
         space_rooms: [],
         global_dms: [],
@@ -887,7 +906,8 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
     window.__harness.clearInvocations();
   });
 
-  await page.getByRole("button", { name: "Invites" }).click();
+  await selectAccountHome(page);
+  await page.getByRole("button", { name: "Invites", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Invites" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Seeded Invite" })).toBeVisible();
   await expect(page.getByText("Synthetic Inviter", { exact: true })).toBeVisible();
@@ -921,7 +941,8 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
       scope: { kind: "roomOnly" }
     });
 
-  await page.getByRole("button", { name: "Invites" }).click();
+  await selectAccountHome(page);
+  await page.getByRole("button", { name: "Invites", exact: true }).click();
   await page.getByRole("main", { name: "Invites" }).getByRole("button", { name: "New DM" }).click();
   const userIdInput = page.getByRole("textbox", { name: "Matrix user ID" });
   await expect(userIdInput).toBeVisible();
@@ -973,12 +994,13 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
     window.__harness.clearInvocations();
   });
 
-  await page.getByRole("button", { name: "Explore" }).click();
+  await selectAccountHome(page);
+  await page.getByRole("button", { name: "Explore", exact: true }).click();
   await expect(page.getByRole("main", { name: "Explore" })).toBeVisible();
 
-  const searchInput = page.getByRole("searchbox", { name: "Search public rooms" });
+  const searchInput = page.getByRole("searchbox", { name: "Search term" });
   await searchInput.fill("public");
-  await page.getByRole("button", { name: "Search public rooms" }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
 
   await expect.poll(() => invocationCount(page, "query_directory")).toBeGreaterThanOrEqual(1);
   await expect
@@ -2238,6 +2260,8 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
           ...snapshot.sidebar.account_home,
           is_active: false,
           unread_count: 1,
+          // The rail badge renders the Rust-owned total; no invites here (#330).
+          attention_count: 1,
           highlight_count: 1
         },
         active_space_id: null,
@@ -2556,12 +2580,18 @@ test("notification attention snapshot drives room, space, thread, and click rout
   const attentionSpace = page.getByRole("button", { name: "Attention Space" });
   await expect(attentionSpace).toHaveAttribute("data-count", "4");
   await expect(attentionSpace).not.toHaveAttribute("data-mention-count", "1");
-  const sidebarThreadsButton = page
-    .getByRole("complementary", { name: "Rooms" })
+  // #330: thread attention renders on the room-header entry point. This fixture
+  // tracks a thread in `!attention-room` while `!quiet-low` is open, so the
+  // header carries no badge — the removed sidebar entry showed that count
+  // regardless of which room was open, which is the cross-scope display this
+  // issue set out to remove.
+  const headerThreadsButton = page
+    .locator(".channel-actions")
     .getByRole("button", { name: "Threads" });
-  await expect(sidebarThreadsButton).toHaveAttribute("data-count", "2");
-  await expect(sidebarThreadsButton).toHaveAttribute("data-mention-count", "1");
-  await expect(sidebarThreadsButton).toHaveAttribute("data-live-count", "3");
+  await expect(headerThreadsButton).toBeVisible();
+  await expect(headerThreadsButton).not.toHaveAttribute("data-count", /.+/);
+  await expect(headerThreadsButton).not.toHaveAttribute("data-mention-count", /.+/);
+  await expect(headerThreadsButton).not.toHaveAttribute("data-live-count", /.+/);
   await expect(page).toHaveTitle("Koushi · 4 unread");
 
   await attentionRoom.click();
@@ -8218,7 +8248,10 @@ test("thread attention renders one Rust count in the root and header and clears 
   });
 
   await expect(page.getByRole("button", { name: /View new replies/ })).toHaveCount(0);
-  await expect(threadsButton).toHaveCount(0);
+  // #330: the header button is the only entry point to this room's threads, so
+  // acknowledgement clears its badge rather than removing the button.
+  await expect(threadsButton).toBeVisible();
+  await expect(threadsButton).not.toHaveAttribute("data-count", /.+/);
 });
 
 test("rail Home and sidebar Threads navigation buttons dispatch Rust-owned commands", async ({
@@ -8228,7 +8261,13 @@ test("rail Home and sidebar Threads navigation buttons dispatch Rust-owned comma
   await page.evaluate(() => window.__harness.clearInvocations());
 
   const sidebar = page.getByRole("complementary", { name: t("workspace.rooms") });
-  await sidebar.getByRole("button", { name: t("workspace.threads") }).click();
+  // #330: a room's thread list is opened from the room header, where "this room"
+  // is implied, rather than from a sidebar entry that looked space-scoped.
+  await expect(sidebar.getByRole("button", { name: t("workspace.threads") })).toHaveCount(0);
+  await page
+    .locator(".channel-actions")
+    .getByRole("button", { name: t("workspace.threads") })
+    .click();
   await expect.poll(() => invocationCount(page, "open_threads_list")).toBeGreaterThanOrEqual(1);
   await expect
     .poll(async () =>
@@ -8237,19 +8276,19 @@ test("rail Home and sidebar Threads navigation buttons dispatch Rust-owned comma
     .toEqual({ roomId: HARNESS_ROOM_ID });
 
   await page.evaluate(() => window.__harness.clearInvocations());
-  await sidebar.getByRole("button", { name: t("workspace.explore") }).click();
-  await expect(page.getByRole("main", { name: t("workspace.explore") })).toBeVisible();
-
   await page
     .getByRole("navigation", { name: t("workspace.workspaces") })
-    .getByRole("button", { name: t("workspace.home"), exact: true })
+    .getByRole("button", { name: /^Home/ })
     .click();
   await expect.poll(() => invocationCount(page, "select_space")).toBeGreaterThanOrEqual(1);
   await expect
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("select_space")[0]?.args))
     .toEqual({ spaceId: null });
   await expect(page.getByRole("main", { name: t("workspace.activity") })).toBeVisible();
-  await expect(sidebar.getByRole("button", { name: t("workspace.threads") })).toHaveCount(0);
+
+  // Explore is account-global, so it becomes reachable only at Home.
+  await sidebar.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
+  await expect(page.getByRole("main", { name: t("workspace.explore") })).toBeVisible();
 });
 
 test("URL previews global toggle invokes update_settings", async ({ page }) => {

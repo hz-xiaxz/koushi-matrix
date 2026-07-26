@@ -62,3 +62,21 @@ describe("resolveDirectorySubmission", () => {
     expect(resolveDirectorySubmission("   ")).toEqual({ kind: "empty" });
   });
 });
+
+describe("pasted user ids", () => {
+  it("a bare MXID names a person, not a search term", () => {
+    // Classifying it as a search returned "no public rooms found", which reads
+    // as if the person did not exist (#330).
+    expect(resolveDirectorySubmission("@someone:example.invalid")).toEqual({
+      kind: "user",
+      userId: "@someone:example.invalid"
+    });
+  });
+
+  it("an @ without a server part is still just text to search for", () => {
+    expect(resolveDirectorySubmission("@someone")).toEqual({
+      kind: "search",
+      term: "@someone"
+    });
+  });
+});

@@ -78,3 +78,71 @@ test("the Home rail badge totals unread messages and invites separately in its l
     "the badge shows the Rust-owned total of unread messages plus invites"
   ).toBe(unread + invites);
 });
+
+test("Explore separates joining by address from searching a public directory", async ({
+  page
+}) => {
+  await page.goto("/");
+  await expect(page.getByRole("complementary", { name: t("workspace.rooms") })).toBeVisible();
+  await selectHome(page);
+  await page.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
+
+  const explore = page.getByRole("main", { name: t("workspace.explore") });
+  await expect(explore).toBeVisible();
+
+  // Both actions are visible and separately labelled, instead of one field
+  // labelled for search silently also accepting addresses.
+  await expect(
+    explore.getByRole("textbox", { name: t("directory.addressLabel") })
+  ).toBeVisible();
+  await expect(
+    explore.getByRole("searchbox", { name: t("directory.searchTermLabel") })
+  ).toBeVisible();
+  await expect(
+    explore.getByRole("textbox", { name: t("directory.searchServer") })
+  ).toBeVisible();
+  await expect(explore.getByText(t("directory.searchServerHelper"))).toBeVisible();
+});
+
+test("a user id in the address field is explained, not silently ignored", async ({ page }) => {
+  await page.goto("/");
+  await selectHome(page);
+  await page.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
+
+  const explore = page.getByRole("main", { name: t("workspace.explore") });
+  await explore
+    .getByRole("textbox", { name: t("directory.addressLabel") })
+    .fill("@someone:example.invalid");
+  await explore.getByRole("button", { name: t("directory.preview") }).click();
+
+  await expect(explore.getByText(t("directory.addressIsUser"))).toBeVisible();
+});
+
+test("ordinary words in the address field are reported as not an address", async ({ page }) => {
+  await page.goto("/");
+  await selectHome(page);
+  await page.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
+
+  const explore = page.getByRole("main", { name: t("workspace.explore") });
+  await explore
+    .getByRole("textbox", { name: t("directory.addressLabel") })
+    .fill("just some words");
+  await explore.getByRole("button", { name: t("directory.preview") }).click();
+
+  await expect(explore.getByText(t("directory.addressNotRecognized"))).toBeVisible();
+});
+
+test("directory results state whether each hit is a room or a space", async ({ page }) => {
+  await page.goto("/");
+  await selectHome(page);
+  await page.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
+
+  const explore = page.getByRole("main", { name: t("workspace.explore") });
+  await explore.getByRole("searchbox", { name: t("directory.searchTermLabel") }).fill("public");
+  await explore.getByRole("button", { name: t("directory.search"), exact: true }).click();
+
+  const results = explore.getByRole("region", { name: t("directory.results") });
+  await expect(results.locator(".directory-result").first()).toBeVisible();
+  const badges = results.locator(".directory-result-type");
+  expect(await badges.count()).toBe(await results.locator(".directory-result").count());
+});

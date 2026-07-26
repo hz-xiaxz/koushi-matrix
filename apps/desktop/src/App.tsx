@@ -1192,6 +1192,13 @@ export function App() {
   const [directorySearchDraft, setDirectorySearchDraft] = useState("");
   // Blank means the user's own homeserver directory.
   const [directoryServerDraft, setDirectoryServerDraft] = useState("");
+  // #330: joining by address is its own Explore section, so it has its own
+  // draft. Preview and join state stay Rust-owned; this notice only explains
+  // input that never became a target.
+  const [directoryAddressDraft, setDirectoryAddressDraft] = useState("");
+  const [directoryAddressNotice, setDirectoryAddressNotice] = useState<
+    "user" | "notRecognized" | null
+  >(null);
   const [newDmDialogOpen, setNewDmDialogOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [runtimeDiagnosticSnapshot, setRuntimeDiagnosticSnapshot] =
@@ -2751,11 +2758,11 @@ export function App() {
   }
 
   /**
-   * Submit the Explore field.
+   * Submit the Explore search field.
    *
-   * A link or a sigil-qualified id names one room, so it is joined directly; a
-   * directory text search cannot find a room addressed by id at all. Ordinary
-   * words stay a search.
+   * A full address pasted here still routes to preview rather than returning
+   * "no public rooms found": a directory text search cannot find a room
+   * addressed by id at all, so refusing it would only punish the paste (#330).
    */
   async function submitDirectorySearch() {
     if (isBusy) {
@@ -2766,14 +2773,43 @@ export function App() {
       case "empty":
         return;
       case "join":
+        setDirectoryAddressNotice(null);
         await previewJoinTarget(submission.roomIdOrAlias, submission.viaServers);
         return;
       case "user":
-        // A person is not joinable, and creating a DM would invite them; leave
-        // that to an explicit action rather than a submitted search field.
+        setDirectoryAddressNotice("user");
         return;
       case "search":
+        setDirectoryAddressNotice(null);
         await queryDirectory(submission.term);
+    }
+  }
+
+  /**
+   * Submit the Explore address field.
+   *
+   * Shares `resolveDirectorySubmission` with the search field so the two entry
+   * points cannot classify the same string differently. Ordinary words are not
+   * an address, and a user id is not joinable, so both are explained rather
+   * than silently ignored.
+   */
+  async function submitDirectoryAddress() {
+    if (isBusy) {
+      return;
+    }
+    const submission = resolveDirectorySubmission(directoryAddressDraft);
+    switch (submission.kind) {
+      case "empty":
+        return;
+      case "join":
+        setDirectoryAddressNotice(null);
+        await previewJoinTarget(submission.roomIdOrAlias, submission.viaServers);
+        return;
+      case "user":
+        setDirectoryAddressNotice("user");
+        return;
+      case "search":
+        setDirectoryAddressNotice("notRecognized");
     }
   }
 
@@ -4630,10 +4666,16 @@ export function App() {
           />
         ) : primaryView === "explore" ? (
           <ExplorePane
+            addressDraft={directoryAddressDraft}
+            addressNotice={directoryAddressNotice}
             isBusy={isBusy}
             queryDraft={directorySearchDraft}
             serverDraft={directoryServerDraft}
             snapshot={snapshot}
+            onAddressChange={(value) => {
+              setDirectoryAddressDraft(value);
+              setDirectoryAddressNotice(null);
+            }}
             onJoinRoom={(room) => {
               void joinDirectoryRoom(room);
             }}
@@ -4641,6 +4683,9 @@ export function App() {
             onServerChange={setDirectoryServerDraft}
             onSearch={() => {
               void submitDirectorySearch();
+            }}
+            onSubmitAddress={() => {
+              void submitDirectoryAddress();
             }}
           />
         ) : primaryView === "invites" ? (

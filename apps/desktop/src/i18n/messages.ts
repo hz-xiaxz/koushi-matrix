@@ -246,6 +246,17 @@ export type MessageId =
   | "directory.noResults"
   | "directory.results"
   | "directory.search"
+  | "directory.addressHelper"
+  | "directory.addressIsUser"
+  | "directory.addressLabel"
+  | "directory.addressNotRecognized"
+  | "directory.addressPlaceholder"
+  | "directory.joinSectionTitle"
+  | "directory.preview"
+  | "directory.roomBadge"
+  | "directory.searchSectionTitle"
+  | "directory.searchServerHelper"
+  | "directory.searchTermLabel"
   | "directory.searchFailed"
   | "directory.searching"
   | "directory.searchPlaceholder"
@@ -1281,10 +1292,21 @@ const en: Catalog = {
   "directory.noResults": "No public rooms found",
   "directory.results": "Public room results",
   "directory.search": "Search",
+  "directory.joinSectionTitle": "Join a room or space",
+  "directory.addressLabel": "Matrix address or link",
+  "directory.addressPlaceholder": "#room:server or https://matrix.to/#/...",
+  "directory.addressHelper": "Room aliases, room IDs, and matrix.to links are supported.",
+  "directory.preview": "Preview",
+  "directory.addressIsUser": "This is a user ID. Start a DM from New DM instead.",
+  "directory.addressNotRecognized": "This does not look like a Matrix address or link.",
+  "directory.searchSectionTitle": "Search public rooms and spaces",
+  "directory.searchTermLabel": "Search term",
+  "directory.searchServerHelper": "Searches only the public directory of the selected server.",
+  "directory.roomBadge": "Room",
   "directory.searchFailed": "Search failed: {reason}",
   "directory.searching": "Searching",
   "directory.searchPlaceholder": "Room name, topic, or a room link",
-  "directory.searchServer": "Directory server",
+  "directory.searchServer": "Search on server",
   "directory.searchServerPlaceholder": "Your server",
   "directory.spaceBadge": "Space",
   "directory.unnamedRoom": "Unnamed room",
@@ -2215,10 +2237,21 @@ const ja: Catalog = {
   "directory.noResults": "公開ルームが見つかりません",
   "directory.results": "公開ルームの結果",
   "directory.search": "検索",
+  "directory.joinSectionTitle": "ルームまたはスペースに参加",
+  "directory.addressLabel": "Matrix アドレスまたはリンク",
+  "directory.addressPlaceholder": "#room:server または https://matrix.to/#/...",
+  "directory.addressHelper": "ルームエイリアス、ルーム ID、matrix.to リンクに対応しています。",
+  "directory.preview": "プレビュー",
+  "directory.addressIsUser": "これはユーザー ID です。新規 DM から DM を開始してください。",
+  "directory.addressNotRecognized": "Matrix アドレスまたはリンクとして認識できません。",
+  "directory.searchSectionTitle": "公開ルーム・スペースを検索",
+  "directory.searchTermLabel": "検索語",
+  "directory.searchServerHelper": "選択したサーバーの公開ディレクトリのみを検索します。",
+  "directory.roomBadge": "ルーム",
   "directory.searchFailed": "検索に失敗: {reason}",
   "directory.searching": "検索中",
   "directory.searchPlaceholder": "ルーム名・トピック・ルームのリンク",
-  "directory.searchServer": "ディレクトリサーバ",
+  "directory.searchServer": "検索するサーバ",
   "directory.searchServerPlaceholder": "自分のサーバ",
   "directory.spaceBadge": "スペース",
   "directory.unnamedRoom": "名前のないルーム",
