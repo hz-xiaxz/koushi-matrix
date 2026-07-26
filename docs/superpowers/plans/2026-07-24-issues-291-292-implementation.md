@@ -274,7 +274,7 @@ for #291 and one implementation commit for #292, then open one non-squash PR.
    starvation behavior, exactly-once correlated outcomes, monotonic target
    ordering, persistence limits, account isolation, and private-data-free
    `Debug` output.
-3. Run an external Codex diff review using the repository recipe; verify rather
+3. Self-review the finished diff per the AGENTS.md recipe; verify rather
    than blindly adopt each finding.
 4. Commit the complete #292 implementation, tests, and canon amendments:
 

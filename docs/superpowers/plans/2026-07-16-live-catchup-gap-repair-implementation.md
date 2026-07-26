@@ -356,7 +356,7 @@ Run the Task 6 command fresh. Expected: exit zero and both closed tokens.
 
 - [ ] **Step 4: Run the required private external diff reviews**
 
-Generate separate SDK and Koushi diffs, include untracked files and root pin/module files, and feed them to `codex review -` with the repository-rule, architecture, state-machine, security/privacy, and contract priorities from `AGENTS.md`. Verify every finding before adopting or rejecting it.
+Generate separate SDK and Koushi diffs, include untracked files and root pin/module files, and review them against the repository-rule, architecture, state-machine, security/privacy, and contract priorities in `AGENTS.md`. Verify every finding before adopting or rejecting it.
 
 - [ ] **Step 5: Publish the SDK fork PR**
 

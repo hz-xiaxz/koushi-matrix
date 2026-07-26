@@ -188,7 +188,7 @@
 - [ ] Add or update a private-data-free headless local-server scenario for verified restore, provisional rejection, recovery, two-device SAS, and trust loss. Use synthetic IDs/content and assert explicit success tokens.
 - [ ] Run all focused acceptance tests from Tasks 2-9 and save their exact pass counts for the PR body.
 - [ ] Run repository format, `git diff --check`, Rust workspace/core/Tauri suites, frontend unit tests, typecheck, ESLint, IPC contract, and relevant Playwright/local-server gates.
-- [ ] Generate `git diff origin/main...HEAD`, run the repository-prescribed external `codex review -`, and evaluate every finding against the canon. Luna fixes all verified Critical/Important issues RED-first; reviewers re-review until approved.
+- [ ] Generate `git diff origin/main...HEAD` and review it against the canon in-session. Luna fixes all verified Critical/Important issues RED-first; reviewers re-review until approved.
 - [ ] Rebase or merge current `origin/main` into the batch branch without rewriting published history, rerun affected gates, push once, and create one PR with `Closes #241` and `Closes #191` only when every acceptance criterion has direct evidence.
 - [ ] Wait for GitHub Actions. Inspect and repair any failing check from its logs, rerun locally, push, and wait again.
 - [ ] Merge with `gh pr merge <number> --merge --delete-branch`, never squash. Verify the merge commit is on `origin/main`, the PR is MERGED, and both issues are CLOSED.

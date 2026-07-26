@@ -1924,29 +1924,17 @@ Expected: composer and scheduled-send private-data-free success tokens from
 git diff origin/main...HEAD > /tmp/issue-294-review.diff
 ```
 
-Create `/tmp/issue-294-review-prompt.txt` containing:
-
-```text
-Review this diff against REPOSITORY_RULES.md, AGENTS.md,
+Read the captured diff against REPOSITORY_RULES.md, AGENTS.md,
 docs/architecture/overview.md, docs/architecture/state-machine.md,
 docs/policies/engineering-rules.md,
-docs/superpowers/specs/2026-07-24-composer-revision-bounds-design.md, and
-docs/superpowers/plans/2026-07-24-composer-revision-bounds-implementation.md.
-Prioritize repository-rule consistency, Rust/Tauri best practices,
-security/privacy, then state-machine/wire correctness. Verify that all old
-revision producers are lease-covered before lifecycle eviction, u128
-exhaustion fails before side effects, schema artifacts are exact, and no
-private data is exposed. Propose canon amendments for rule gaps. Keep the
-review private-data-free.
-```
+docs/superpowers/specs/2026-07-24-composer-revision-bounds-design.md, and this
+plan. Prioritize repository-rule consistency, Rust/Tauri best practices,
+security/privacy, then state-machine/wire correctness. Specifically confirm that
+all old revision producers are lease-covered before lifecycle eviction, that
+u128 exhaustion fails before side effects, that schema artifacts are exact, and
+that no private data is exposed. Amend the canon for rule gaps.
 
-Run:
-
-```bash
-cat /tmp/issue-294-review-prompt.txt /tmp/issue-294-review.diff | codex review -
-```
-
-Expected: review output is captured in the work log. Verify every finding
+Expected: review notes are captured in the work log. Verify every finding
 against source/tests. Fix blocking findings with a new RED test, rerun the
 focused and full gates, and commit one narrowly scoped review-fix commit.
 

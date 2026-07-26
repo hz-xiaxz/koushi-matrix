@@ -550,7 +550,7 @@ git commit -m "feat: delay automatic history crawl ~60s at startup (#123, Phase 
 
 ## Verification (controller, GO-gated)
 
-After Tasks 1–4 pass their gates and codex review, the controller re-runs the Phase A lane (requires maintainer GO; the persistent QA device is kept):
+After Tasks 1–4 pass their gates and diff review, the controller re-runs the Phase A lane (requires maintainer GO; the persistent QA device is kept):
 
 ```
 npm --prefix apps/desktop run qa:real-homeserver -- --scenario=startup_latency
@@ -560,4 +560,4 @@ Expected in run 2: `koushi.startup phase=paginate ... gate_ms=` ≈ 0 (was ~1473
 
 ## Execution Handoff
 
-Implementation is delegated to a Sonnet agent (subagent-driven), one task at a time; the controller (Opus) independently re-verifies every gate, runs a codex review of the diff, and then the GO-gated lane re-run, before opening the PR.
+Implementation is delegated to a Sonnet agent (subagent-driven), one task at a time; the controller (Opus) independently re-verifies every gate, reviews the diff, and then the GO-gated lane re-run, before opening the PR.

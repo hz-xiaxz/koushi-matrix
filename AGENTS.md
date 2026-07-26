@@ -253,15 +253,12 @@ reverse.
   group; classify whether the problem is fixture drift, a missing DTO mirror,
   unstable Playwright actionability, or product behavior. Repair the shared
   helper/contract boundary before rerunning the broad gate.
-- Use external diff review deliberately, not reflexively. Prefer local,
-  reproducible gates plus a direct self-review for small, well-scoped fixes.
-  Escalate to the external auditor (codex) for broad cross-boundary changes,
-  security/privacy-sensitive changes, reducer/state-machine rewrites,
-  substantial work primarily authored by non-frontier agents, or when local
-  reasoning finds a concrete uncertainty that review can answer. A timed-out or
-  silent external review is not evidence and should not block a verified small
-  fix indefinitely. A subagent's "gates passed" claim is not evidence — re-run
-  the gate yourself.
+- There is no external diff review. Review is owned by the agent that will
+  push: read the finished diff yourself before opening a PR, and treat local
+  reproducible gates plus that reading as the review. Reading your own diff is
+  not a formality — the #328 fix had a second real bug (an `identifier()`
+  comparison that missed a sent local echo) that no test covered. A subagent's
+  "gates passed" claim is not evidence — re-run the gate yourself.
 - Read the gate's own exit status, never a pipeline's. `cargo test … | grep …`
   reports grep's status, and appending anything (`; echo done`, `; true`)
   reports that instead, so a failing suite looks green. Run
@@ -293,75 +290,38 @@ npm --prefix apps/desktop run lint
 If the gate finds a new surface, migrate it to the shared primitive. Do not add
 a per-file exception or local composition workaround.
 
-## Codex Diff Review Recipe
+## Diff Self-Review
 
-The preferred external auditor is OpenAI `codex` (the `codex` CLI). Use it at a
-low frequency, when the change is broad or risky enough to justify the latency:
-substantial changes authored by non-frontier agents, cross-layer Rust/Tauri/TS
-contract changes, state-machine or reducer rewrites, security/privacy-sensitive
-changes, or unclear root-cause analysis. Do not run it after every small
-mechanical patch or let a timeout replace owned verification.
-
-Generate the diff and pipe it to `codex review -`:
+There is no external review tool. Before opening a PR, read the branch's own
+finished diff and judge it against the canon yourself.
 
 ```bash
-cd /home/shinaoka/projects/Matrix/matrix-desktop
-git diff <base-commit-sha>..HEAD > /tmp/review.diff
-codex review - < /tmp/review.diff
+git diff origin/main...HEAD
+git status --short   # untracked files are absent from git diff entirely
 ```
 
-Codex's Linux sandbox may fail to run `git diff` itself, so generate the diff
-in the parent shell and feed it through stdin. Use `-` as the prompt argument
-to read from stdin.
+Priorities, in order:
 
-Add custom instructions by including them in the prompt before the diff. Write
-the prompt to a file and concatenate:
+1. Repository-rule consistency — `REPOSITORY_RULES.md`,
+   `docs/architecture/overview.md`, `docs/architecture/state-machine.md` when
+   reducers change, `docs/policies/engineering-rules.md`, this file, and the
+   relevant dated plan.
+2. Rust/Tauri best practices and consistency with the surrounding code.
+3. Security and privacy — secret leakage, private data in Debug/logs/QA output.
+4. Contract correctness — state machine, command/event, and DTO shapes.
 
-```bash
-cat > /tmp/review-prompt.txt <<'EOF'
-Review this diff against REPOSITORY_RULES.md, docs/architecture/overview.md,
-docs/architecture/state-machine.md (if reducers changed),
-docs/policies/engineering-rules.md, AGENTS.md, and the relevant dated plan.
-Prioritize, in order: repository-rule consistency, Rust/Tauri best practices,
-security/privacy risks, then contract correctness.
-Propose canon amendments when a finding is caused by a rule gap.
-Keep the review private-data-free.
-EOF
-cat /tmp/review-prompt.txt /tmp/review.diff | codex review -
-```
+Scope notes that repeatedly matter:
 
-Run long reviews in the background:
+- Read `Cargo.toml` and `src/lib.rs` alongside a change that adds feature gates,
+  changes module visibility, or exposes test-only APIs. Judging the change
+  without them invents problems that are not there.
+- Include new files explicitly. `git diff` alone is empty for untracked paths,
+  so a review that only reads it can miss an entire new module.
+- When a finding is caused by a canon gap rather than this change, amend the
+  canon too — see the rule-update requirement in `REPOSITORY_RULES.md`.
 
-```bash
-cat /tmp/review-prompt.txt /tmp/review.diff | codex review - > /tmp/codex-review.txt 2>&1
-```
-
-Prompt contents to include:
-
-- Ask for consistency with `REPOSITORY_RULES.md`,
-  `docs/architecture/overview.md`, `docs/architecture/state-machine.md` when
-  reducers change, `docs/policies/engineering-rules.md`, `AGENTS.md`, and the
-  relevant dated implementation plan.
-- Ask the auditor to prioritize, in order: repository-rule consistency,
-  Rust/Tauri best practices, security/privacy risks, then contract
-  correctness.
-- Ask the auditor to propose canon amendments when a finding is caused by a
-  rule gap rather than only patching the immediate code.
-- Remind the auditor to keep the review private-data-free.
-
-Important review-scope notes:
-
-- Include `Cargo.toml` and `src/lib.rs` in the review input when the change
-  adds feature gates, changes module visibility, or exposes test-only APIs.
-  A diff that omits these files may produce false-positive reports about
-  missing feature declarations or visibility issues.
-- Include untracked new files explicitly; `git diff` alone is empty for them.
-- Keep prompts private-data-free: use only synthetic fixture data, never real
-  account credentials, room/event IDs, message bodies, raw SDK errors, or
-  local paths.
-
-External review findings are suggestions to verify, not automatic orders. The
-main agent decides whether to adopt, escalate, or defer each proposal.
+Self-review is load-bearing, not a formality: reading the finished #328 diff
+surfaced a second real bug that the passing tests did not cover.
 
 ## Cost-Controlled Agent Delegation
 
@@ -1886,7 +1846,7 @@ before GA. Do not open feature issues for these without re-deciding scope here.
 - `npm --prefix apps/desktop run qa:mac-gui` controls the Tauri window through
   macOS `System Events`. If it fails with `AppleScript timed out while
   controlling System Events`, grant Accessibility permission to the app running
-  the agent, such as Codex, Terminal, or iTerm, then restart that app.
+  the agent, such as Claude Code, Terminal, or iTerm, then restart that app.
 - If Accessibility is already enabled but the same timeout repeats, check
   Privacy & Security > Automation and allow the same app to control
   `System Events`. Restart the agent app after changing either permission.
@@ -1911,8 +1871,9 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   Otherwise opening User Settings can read the macOS Keychain and show a
   confirmation prompt, which blocks unattended automation.
 - Do not use `Cmd+Q` to stop the Tauri app from GUI smoke. If focus slips, the
-  shortcut can reach Codex and trigger the "Quit Codex?" confirmation dialog.
-  Let the script's process-group cleanup stop `tauri dev` and the app instead.
+  shortcut reaches the app running the agent and raises its own quit
+  confirmation dialog, which blocks unattended automation. Let the script's
+  process-group cleanup stop `tauri dev` and the app instead.
 
 ## Real Account Smoke Failures
 

@@ -89,7 +89,7 @@ positioned gap state without exposing SDK tokens or identifiers.
       homeserver scenario.
 - [ ] Confirm `rg "remove_room|reset_room_timeline_cache"` has no normal repair
       path and inspect `git diff --check`.
-- [ ] Run the repository Codex diff-review recipe against `origin/main`; verify
-      or fix each actionable finding.
+- [ ] Review the finished diff against `origin/main`; verify or fix each
+      actionable finding.
 - [ ] Commit in reviewable layers, push, open a PR closing #260, monitor CI,
       address failures, and merge non-squash after all required checks pass.

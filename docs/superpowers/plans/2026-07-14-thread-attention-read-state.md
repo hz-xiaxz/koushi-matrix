@@ -69,7 +69,7 @@
 - Review and GitHub operations only
 
 - [ ] Commit the verified change and generate the complete base-to-HEAD diff, including new files.
-- [ ] Run the repository-mandated private-data-free `codex review -` against repository rules, architecture, state machine, engineering policy, AGENTS, and this plan.
+- [ ] Review the finished diff against repository rules, architecture, state machine, engineering policy, AGENTS, and this plan.
 - [ ] Resolve every verified in-scope finding and rerun affected gates.
 - [ ] Push the dedicated branch, open a PR linked to #258, and monitor required checks.
 - [ ] Fix in-scope CI failures; when green, merge with a non-squash merge.

@@ -514,9 +514,10 @@ To reduce conflicts on these files:
   reducers change, `docs/policies/engineering-rules.md`, `AGENTS.md`, and the
   relevant dated plan). The review must include the verification output and
   any security/privacy-sensitive surfaces.
-- **Prefer `codex` as the auditor.** When scheduling an external review, use
-  the `codex` CLI as the first choice. Other frontier models may be used only
-  when `codex` is unavailable or explicitly declined by the user.
+- **External review tools are not used.** Do not schedule, run, or wait on an
+  external CLI reviewer. The reviewing frontier model is the agent already in
+  the session: it reads the finished diff against the canon itself. Do not
+  suggest an external review as a next step or treat its absence as a gap.
 - **Review focus areas.** The auditor must prioritize, in order:
   1. Consistency with repository rules and canon documents.
   2. Consistency with Rust/Tauri best practices and the existing codebase.
@@ -532,19 +533,19 @@ To reduce conflicts on these files:
 - **Review findings are implementation tasks, not optional suggestions.** The
   implementing agent or the main agent must address blocking issues and
   re-run the relevant gates before landing the change on `main`.
-- **Frontier-model-authored implementation is exempt from mandatory external
-  review**, but the author should still run the full gate set and perform a
-  self-audit before claiming completion. If the frontier model is uncertain
-  about a cross-boundary decision, it must escalate to the user or pause for
-  review before proceeding.
+- **Frontier-model-authored implementation is reviewed by its own author.** Run
+  the full gate set and read the finished diff against the canon before claiming
+  completion. If the frontier model is uncertain about a cross-boundary
+  decision, it must escalate to the user or pause before proceeding rather than
+  deferring the judgement to a later reviewer.
 - **Audit scope is proportional to risk.** A narrow module-local patch may
   need only a quick diff check; a parallel Phase A integration that touches
   shared enums, reducers, command/event variants, Tauri DTOs, TypeScript wire,
   and generated contracts needs a thorough cross-boundary audit.
-- **Keep review prompts scoped and private-data-free.** Review prompts must
-  include only synthetic fixture data; real account credentials, room IDs,
-  event IDs, message bodies, raw SDK errors, and local paths must never be
-  sent to an external review model.
+- **Keep review material scoped and private-data-free.** Anything written for
+  review — subagent prompts, review notes, PR bodies, issue comments — must use
+  only synthetic fixture data; real account credentials, room IDs, event IDs,
+  message bodies, raw SDK errors, and local paths must never appear in it.
 
 ## Documentation And Work Records
 
