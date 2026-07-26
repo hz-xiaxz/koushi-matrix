@@ -713,6 +713,7 @@ fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "upload_staging=ok",
             "media_gallery=ok",
             "recv_media=ok",
+            "media_caption_edit=ok",
         ],
         QaStage::LiveSignals => &[
             "read_receipt=ok",
@@ -808,6 +809,7 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "upload_staging=ok",
         "media_gallery=ok",
         "recv_media=ok",
+        "media_caption_edit=ok",
         "read_receipt=ok",
         "fully_read=ok",
         "typing=ok",
@@ -6054,7 +6056,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             request_id: set_child_id,
             space_id: space_id.clone(),
             child_room_id: room_id.clone(),
-            via_servers: via_servers.clone(),
+            via_server: via_server.clone(),
         }))
         .await
         .map_err(|e| format!("submit set space child: {e}"))?;
@@ -7742,7 +7744,7 @@ async fn set_space_child_for_qa(
         request_id,
         space_id: space_id.to_owned(),
         child_room_id: child_room_id.to_owned(),
-        via_servers: via_servers.to_owned(),
+        via_server: via_server.to_owned(),
     }))
     .await
     .map_err(|e| format!("{label}: submit set space child failed: {e}"))?;
@@ -14301,6 +14303,7 @@ async fn run_media_stage(
 ) -> Result<(), String> {
     const MEDIA_BYTES: &[u8] = b"koushi-desktop synthetic media fixture";
     const MEDIA_CAPTION: &str = "matrix desktop media caption";
+    const MEDIA_CAPTION_EDITED: &str = "matrix desktop media caption edited";
 
     let expected_account = match conn_a.snapshot().session {
         koushi_state::SessionState::Ready(info) => {
@@ -14389,7 +14392,88 @@ async fn run_media_stage(
     .await?;
     println!("recv_media=ok");
 
+    // Editing a captioned media message must replace only the caption. A
+    // text-only replacement drops the attachment and reads as data loss in the
+    // timeline (issue #328), so assert the author's own projected row keeps its
+    // media metadata while the body becomes the new caption.
+    let edit_caption_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Timeline(TimelineCommand::EditText {
+            request_id: edit_caption_id,
+            key: key_a.clone(),
+            event_id: media_event_id.clone(),
+            body: MEDIA_CAPTION_EDITED.to_owned(),
+        }))
+        .await
+        .map_err(|e| format!("submit media caption edit: {e}"))?;
+
+    wait_for_media_caption_edit(
+        conn_a,
+        key_a,
+        edit_caption_id,
+        &media_event_id,
+        MEDIA_CAPTION_EDITED,
+        "media caption edit",
+    )
+    .await?;
+    println!("media_caption_edit=ok");
+
     Ok(())
+}
+
+/// Wait for the `Set` diff that applies a media caption edit and require the
+/// attachment projection to survive it (issue #328). Only presence of the media
+/// projection is checked; no MXC URI, filename, or caption text is printed.
+async fn wait_for_media_caption_edit(
+    conn: &mut CoreConnection,
+    key: &TimelineKey,
+    request_id: koushi_core::ids::RequestId,
+    event_id: &str,
+    edited_caption: &str,
+    label: &str,
+) -> Result<(), String> {
+    let timeout = Duration::from_secs(60);
+    loop {
+        let event = tokio::time::timeout(timeout, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for caption edit Set diff"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
+                key: ref ev_key,
+                diffs,
+                ..
+            }) if ev_key == key => {
+                for diff in &diffs {
+                    let koushi_core::event::TimelineDiff::Set { item, .. } = diff else {
+                        continue;
+                    };
+                    let targets_event = matches!(
+                        &item.id,
+                        koushi_core::event::TimelineItemId::Event { event_id: id }
+                        if id == event_id
+                    );
+                    if !targets_event || item.body.as_deref() != Some(edited_caption) {
+                        continue;
+                    }
+                    if item.media.is_none() {
+                        return Err(format!(
+                            "{label}: edited media row lost its attachment projection"
+                        ));
+                    }
+                    return Ok(());
+                }
+            }
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == request_id => {
+                return Err(format!("{label}: caption edit failed: {failure:?}"));
+            }
+            _ => continue,
+        }
+    }
 }
 
 async fn run_link_preview_stage(
@@ -20858,6 +20942,7 @@ mod tests {
                 "upload_staging=ok",
                 "media_gallery=ok",
                 "recv_media=ok",
+                "media_caption_edit=ok",
                 "read_receipt=ok",
                 "fully_read=ok",
                 "typing=ok",
@@ -21359,6 +21444,7 @@ mod tests {
                 "upload_staging=ok",
                 "media_gallery=ok",
                 "recv_media=ok",
+                "media_caption_edit=ok",
                 "restore_cleanup=ok",
             ]
         );
@@ -21518,6 +21604,7 @@ mod tests {
                 "upload_staging=ok",
                 "media_gallery=ok",
                 "recv_media=ok",
+                "media_caption_edit=ok",
                 "read_receipt=ok",
                 "fully_read=ok",
                 "typing=ok",

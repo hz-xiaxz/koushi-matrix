@@ -1384,6 +1384,13 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   gap was fixed somewhere between then and now without the note being updated —
   which is exactly the drift the new CI gate prevents. Do not re-add it to a
   known-failures list without a fresh failing run.
+- `e2e/basic-operations.spec.ts:959` ("Explore searches public rooms and joins
+  only after Rust snapshot updates") failed once during #328 verification: the
+  `Join this room?` preview dialog was never found. It is a flake, not a product
+  break — the same commit passed a full serialized re-run (210/210), passed in
+  isolation, and passed a full run with the only changed frontend file reverted.
+  One occurrence is a re-check, not a known failure; if it recurs, investigate
+  how the preview dialog opens rather than the directory query itself.
 - `e2e/basic-operations.spec.ts:2811` ("pin and unpin actions render the Tauri
   snapshot response without a manual state event") is flaky in the FULL parallel
   Playwright run but passes deterministically in isolation
@@ -1433,11 +1440,26 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   should assert the selected variant payload and also check that command Debug
   output redacts filenames, captions, media bytes, and thumbnail bytes.
 - The local core media lane prints `upload_staging=ok` and `media_gallery=ok`
-  with `send_media=ok`, `media_caption=ok`, `image_compress=ok`, and
-  `recv_media=ok`. Those tokens prove the Rust-owned upload-staging/gallery
-  contracts only; codec/canvas/native transform behavior and the visible
-  drag-drop/paste/gallery/viewer workflow must be covered by browser-headless
-  plus Linux virtual-display evidence.
+  with `send_media=ok`, `media_caption=ok`, `image_compress=ok`,
+  `recv_media=ok`, and `media_caption_edit=ok`. Those tokens prove the
+  Rust-owned upload-staging/gallery contracts only; codec/canvas/native
+  transform behavior and the visible drag-drop/paste/gallery/viewer workflow
+  must be covered by browser-headless plus Linux virtual-display evidence.
+- The replacement shape of an edit is Rust-owned. The GUI submits only the new
+  visible text, so `handle_edit_text` resolves the target's SDK message type and
+  chooses `EditedContent::MediaCaption` for media (`m.image`, `m.file`,
+  `m.audio`, `m.video`) and a plain-text replacement for everything else. A
+  media event carries its attachment in the same `m.room.message` content as its
+  caption, so a text replacement drops `url`/`file`/`info`/`filename` — that was
+  issue #328. The msgtypes routed to the caption path must stay exactly the set
+  that `message_projection_from_msgtype` projects with `TimelineItem.media`;
+  `edit_replacement_caption_support_matches_media_projection` pins that
+  equality. Do not let the webview pass a msgtype or reconstruct media content.
+- Fakes must not model this as data loss either: `browserFakeApi.editMessage`
+  keeps `attachment_filename`, because clearing it hid #328 from the frontend
+  tier while the real product path was broken.
+- Focused checks are `cargo test -p koushi-core --lib edit_replacement_` and
+  `npm --prefix apps/desktop run test -- --run src/backend/browserFakeApi.test.ts`.
 - `TimelinePaneState` includes `staged_uploads` and `media_gallery`. When the
   Rust snapshot adds fields, update the TypeScript snapshot fixtures and
   `apps/desktop/src-tauri/src/dto.rs` serialization-contract tests in the same

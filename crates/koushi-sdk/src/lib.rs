@@ -6203,6 +6203,13 @@ pub async fn load_pinned_event_ids(
         .collect())
 }
 
+/// Replace a text event's body.
+///
+/// Text-only by construction: the replacement carries no media payload, so
+/// pointing this at an `m.image`/`m.file`/`m.audio`/`m.video` event would drop
+/// its attachment (issue #328). The product edit path is
+/// `TimelineCommand::EditText`, which resolves the target's message type and
+/// edits a media caption in place instead.
 pub async fn edit_text_message(
     session: &MatrixClientSession,
     room_id: &str,
