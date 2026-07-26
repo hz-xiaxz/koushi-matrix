@@ -196,5 +196,5 @@ pub fn prepare_image_variants(
 - [ ] Run focused Rust, Tauri, Vitest, Playwright, IPC, typecheck, wasm, secret scan, and `git diff --check` gates.
 - [ ] Run local Conduit and Tuwunel media/thread core scenarios with both core backends.
 - [ ] Run packaged Linux OS-drop GUI evidence. Run existing macOS/Windows packaged gates or record required CI jobs; do not claim cross-platform acceptance without them.
-- [ ] Generate the complete branch diff including new files and run `codex review -` against repository canon, this design, and both plans. Verify and resolve findings.
+- [ ] Generate the complete branch diff including new files and review it against repository canon, this design, and both plans. Verify and resolve findings.
 - [ ] Rebase/merge current `origin/main`, rerun affected gates, push once, open one PR with all four `Closes` lines, wait for CI, fix failures, and merge with `gh pr merge --merge --delete-branch`.

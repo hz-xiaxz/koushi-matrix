@@ -62,5 +62,5 @@
 - [ ] Prove encrypted round-trip, legacy migration, restart hydration, both completion orders, and accepted-empty persistence.
 - [ ] Run IME inventory/controller tests and composer submission correlation regressions.
 - [ ] Run state/core/Tauri/frontend focused suites, lint, typecheck, build, secret scan, SDK guard, `git diff --check`, and repository release gates applicable to the diff.
-- [ ] Generate the complete diff and run the independent `codex review -` canon/security/contract review; resolve only verified findings.
+- [ ] Generate the complete diff and review it for canon/security/contract issues; resolve only verified findings.
 - [ ] Commit, push, open one PR with `Closes #293`, monitor CI, fix change-caused failures, merge with repository policy, and verify #293 closed plus the merge commit on `origin/main`.

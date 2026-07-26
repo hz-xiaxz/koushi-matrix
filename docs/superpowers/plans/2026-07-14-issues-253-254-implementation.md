@@ -186,7 +186,7 @@ Testing Library, Playwright, CSS contract tests, local Conduit/Tuwunel QA.
    PATH=/tmp/koushi-desktop-local-qa-bin:$PATH npm --prefix apps/desktop run qa:headless-local -- --server=conduit --scenario=gate_restore --core --core-backend=both --timeout-ms=240000
    ```
 
-4. Generate a complete diff including new files and run `codex review -`
+4. Generate a complete diff including new files and review it
    against repository canon and both issue acceptance criteria. Verify every
    finding before adopting or rejecting it.
 5. Re-run affected gates after any review fix and commit the final changes.

@@ -348,7 +348,7 @@ are emitted.
 - [ ] **Step 4: Run the required external diff reviews**
 
 Generate separate SDK and Koushi diffs including root pin/module files and new
-files. Feed each to `codex review -` with the repository-rule, architecture,
+files. Review each against the repository-rule, architecture,
 state-machine, Rust/Tauri, security/privacy, and relevant-plan priorities from
 `AGENTS.md`. Verify every finding before changing code.
 

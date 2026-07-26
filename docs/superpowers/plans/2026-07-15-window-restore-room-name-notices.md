@@ -63,5 +63,5 @@
 - [ ] Run `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib window_state`.
 - [ ] Run `cargo test -p koushi-core --lib room_name_notice` and `cargo test -p koushi-core --lib state_event_notice`.
 - [ ] Run the focused Vitest command, desktop typecheck, and `node scripts/check-tauri-adapter-boundary.mjs`.
-- [ ] Generate `git diff origin/main...HEAD` and run the repository's private-data-free `codex review -` recipe against repository rules and this plan.
+- [ ] Generate `git diff origin/main...HEAD` and read the finished diff yourself against repository rules and this plan.
 - [ ] Resolve verified findings, repeat affected gates, push `codex/issues-246-256`, and open one PR with `Closes #246` and `Closes #256`.
