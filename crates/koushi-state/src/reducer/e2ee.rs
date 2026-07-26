@@ -3,7 +3,7 @@ use crate::{
     state::{
         AppState, AuthFailureKind, CrossSigningStatus, IdentityResetState, KeyBackupStatus,
         ProvisionalPhase, QrLoginState, RoomKeyExportState, RoomKeyImportState, SasEmoji,
-        SecureBackupPassphraseChangeState, SecureBackupSetupState, SessionState,
+        SecureBackupPassphraseChangeState, SecureBackupSetupState, SessionState, SyncState,
         TrustOperationFailureKind, VerificationAccountKind, VerificationCancelReason,
         VerificationFlowState, VerificationGateFailureKind, VerificationGateState,
         VerificationMethod, VerificationMethodCapability, VerificationTarget,
@@ -138,12 +138,11 @@ pub(crate) fn handle_e2ee_recovery_succeeded(state: &mut AppState) -> Vec<AppEff
         return Vec::new();
     }
     let info = info.clone();
-    state.session = SessionState::Provisional {
-        info,
-        phase: ProvisionalPhase::RecheckingTrust { failure: None },
-    };
+    state.session = SessionState::Ready(info.clone());
+    state.sync = SyncState::Starting;
     vec![
-        AppEffect::CheckCurrentDeviceTrust,
+        AppEffect::PersistSession(info),
+        AppEffect::StartSync,
         AppEffect::EmitUiEvent(UiEvent::SessionChanged),
     ]
 }
@@ -199,9 +198,11 @@ pub(crate) fn handle_e2ee_recovery_state_changed(
             vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
         }
         crate::state::E2eeRecoveryState::Enabled | crate::state::E2eeRecoveryState::Disabled => {
+            if matches!(state.session, SessionState::Verifying { .. }) {
+                return Vec::new();
+            }
             let info = match &state.session {
-                SessionState::AwaitingVerification { info, .. }
-                | SessionState::Verifying { info, .. } => info.clone(),
+                SessionState::AwaitingVerification { info, .. } => info.clone(),
                 _ => return Vec::new(),
             };
             state.session = SessionState::Provisional {

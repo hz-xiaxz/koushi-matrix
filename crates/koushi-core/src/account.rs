@@ -104,6 +104,7 @@ const SEARCH_UNAVAILABLE_MESSAGE: &str = "search unavailable";
 const SERVER_LOGOUT_TIMEOUT: Duration = Duration::from_secs(10);
 const ACCOUNT_HYDRATION_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFICATION_METHOD_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+const AUTHORITATIVE_TRUST_RECHECK_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(8);
 const IDENTITY_RESET_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 const INCOMING_VERIFICATION_OBSERVER_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 const OIDC_REDIRECT_URI: &str = "koushi-desktop://auth/callback";
@@ -291,7 +292,7 @@ async fn run_read_persistence_worker(
 }
 
 fn record_verification_admission_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record_and_stderr(event);
+    koushi_diagnostics::record(event);
 }
 
 fn verification_admission_event(
@@ -313,7 +314,7 @@ fn current_device_trust_token(trust: koushi_state::CurrentDeviceTrustState) -> &
 }
 
 fn record_verification_method_discovery_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record_and_stderr(event);
+    koushi_diagnostics::record(event);
 }
 
 fn verification_method_discovery_event(
@@ -887,7 +888,7 @@ fn sas_verification_event(stage: &'static str, flow_id: u64) -> DiagnosticEvent 
 }
 
 fn record_sas_verification_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record_and_stderr(event);
+    koushi_diagnostics::record(event);
 }
 
 fn verification_request_state_token(
@@ -1693,16 +1694,34 @@ impl AccountActor {
                         self.session.is_some(),
                     ) && owned_matches
                     {
-                        if let Some(owned) = self.verification_method_discovery_task.take() {
-                            let _ = owned.task.await;
-                        }
+                        let _ = self.verification_method_discovery_task.take();
                         match result {
                             VerificationMethodDiscoveryResult::Discovered(gate) => {
                                 self.verification_method_discovery_failed = false;
+                                record_verification_method_discovery_event(
+                                    verification_method_discovery_event(
+                                        "success_projecting",
+                                        generation,
+                                        serial,
+                                    )
+                                    .field(
+                                        DiagnosticField::count(
+                                            "method_count",
+                                            gate.methods.len() as u64,
+                                        ),
+                                    ),
+                                );
                                 self.send_actions(vec![AppAction::VerificationMethodsDiscovered(
                                     gate,
                                 )])
                                 .await;
+                                record_verification_method_discovery_event(
+                                    verification_method_discovery_event(
+                                        "success_projected",
+                                        generation,
+                                        serial,
+                                    ),
+                                );
                             }
                             VerificationMethodDiscoveryResult::Failed(kind) => {
                                 self.verification_method_discovery_failed = true;
@@ -6780,6 +6799,16 @@ impl AccountActor {
         self.stop_recovery_task().await;
         let generation = self.trust_generation;
         let flow_id = request_id.sequence;
+        record_verification_method_discovery_event(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.recovery", "submit_received")
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::count("flow_id", flow_id))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )),
+        );
         let tx = self.self_tx.clone();
         let task = crate::executor::spawn(async move {
             let result = koushi_sdk::recover_e2ee(&session, &request).await;
@@ -6799,6 +6828,16 @@ impl AccountActor {
             request_id,
             task,
         });
+        record_verification_method_discovery_event(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.recovery", "task_started")
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::count("flow_id", flow_id))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )),
+        );
     }
 
     async fn handle_recovery_finished(
@@ -6831,11 +6870,24 @@ impl AccountActor {
         let account_key = AccountKey(session.info.user_id.clone());
         match result {
             Ok(()) => {
-                // SDK success remains gated; the subsequent authoritative
-                // trust observation is the only promotion authority.
+                record_verification_method_discovery_event(
+                    DiagnosticEvent::new(DiagnosticLevel::Debug, "core.recovery", "succeeded")
+                        .field(DiagnosticField::count("generation", generation))
+                        .field(DiagnosticField::count("flow_id", flow_id))
+                        .field(DiagnosticField::request_id(
+                            "request_id",
+                            request_id.connection_id.0,
+                            request_id.sequence,
+                        )),
+                );
+                if !self
+                    .promote_recovered_session_runtime(generation, flow_id, request_id)
+                    .await
+                {
+                    return;
+                }
                 self.send_actions(vec![AppAction::E2eeRecoverySucceeded])
                     .await;
-                self.request_authoritative_trust_recheck().await;
                 self.send_actions(vec![AppAction::RestoreKeyBackupRequested {
                     request_id: request_id.sequence,
                     version: None,
@@ -6876,6 +6928,16 @@ impl AccountActor {
                 for event in events {
                     self.emit(event);
                 }
+                record_verification_method_discovery_event(
+                    DiagnosticEvent::new(DiagnosticLevel::Debug, "core.recovery", "completed")
+                        .field(DiagnosticField::count("generation", generation))
+                        .field(DiagnosticField::count("flow_id", flow_id))
+                        .field(DiagnosticField::request_id(
+                            "request_id",
+                            request_id.connection_id.0,
+                            request_id.sequence,
+                        )),
+                );
                 self.emit(CoreEvent::Account(AccountEvent::RecoveryCompleted {
                     request_id,
                     account_key,
@@ -6883,6 +6945,16 @@ impl AccountActor {
             }
             Err(error) => {
                 let kind = classify_recovery_error(&error);
+                record_verification_method_discovery_event(
+                    DiagnosticEvent::new(DiagnosticLevel::Debug, "core.recovery", "failed")
+                        .field(DiagnosticField::count("generation", generation))
+                        .field(DiagnosticField::count("flow_id", flow_id))
+                        .field(DiagnosticField::request_id(
+                            "request_id",
+                            request_id.connection_id.0,
+                            request_id.sequence,
+                        )),
+                );
                 // Project failure: Recovering → NeedsRecovery.
                 self.send_actions(vec![AppAction::E2eeRecoveryFailed {
                     message: "recovery failed".to_owned(),
@@ -6891,6 +6963,59 @@ impl AccountActor {
                 self.emit_failure(request_id, CoreFailure::RecoveryFailed { kind });
             }
         }
+    }
+
+    async fn promote_recovered_session_runtime(
+        &mut self,
+        generation: u64,
+        flow_id: u64,
+        request_id: RequestId,
+    ) -> bool {
+        let (Some(session), Some(key_id)) = (self.session.clone(), self.session_key_id.clone())
+        else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return false;
+        };
+        record_verification_method_discovery_event(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.recovery", "promoting")
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::count("flow_id", flow_id))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )),
+        );
+        if self.persist_session(&session, &key_id).await.is_err() {
+            self.send_actions(vec![AppAction::SessionPersistenceFailed {
+                message: "session persistence failed".to_owned(),
+            }])
+            .await;
+            return false;
+        }
+        self.provisional_persistable = None;
+        self.stop_provisional_runtime().await;
+        self.start_incoming_verification_observer(session.clone())
+            .await;
+        self.spawn_sync_actor(session.clone()).await;
+        self.spawn_account_hydration(session.clone());
+        self.start_recovery_observer(session.clone());
+        self.start_session_change_observer(session);
+        self.session_promoted = true;
+        for event in std::mem::take(&mut self.pending_ready_events) {
+            self.emit(event);
+        }
+        record_verification_method_discovery_event(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.recovery", "promoted")
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::count("flow_id", flow_id))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )),
+        );
+        true
     }
 
     async fn stop_recovery_task(&mut self) -> Option<u64> {
@@ -6902,16 +7027,88 @@ impl AccountActor {
     }
 
     async fn request_authoritative_trust_recheck(&self) {
-        let Some(session) = self.session.as_ref() else {
+        let Some((generation, trust)) = self
+            .settle_authoritative_trust_recheck(AUTHORITATIVE_TRUST_RECHECK_SETTLEMENT_TIMEOUT)
+            .await
+        else {
             return;
         };
         let _ = self
             .self_tx
-            .send(AccountMessage::CurrentDeviceTrustChanged {
-                generation: self.trust_generation,
-                trust: session.current_device_trust(),
-            })
+            .send(AccountMessage::CurrentDeviceTrustChanged { generation, trust })
             .await;
+    }
+
+    async fn settle_authoritative_trust_recheck(
+        &self,
+        timeout: Duration,
+    ) -> Option<(u64, koushi_state::CurrentDeviceTrustState)> {
+        let Some(session) = self.session.as_ref() else {
+            return None;
+        };
+        let generation = self.trust_generation;
+        let started = Instant::now();
+        let mut observation = session.observe_current_device_trust();
+        let mut latest = observation.current;
+        record_verification_method_discovery_event(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.trust_recheck", "started")
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::token(
+                    "initial_trust",
+                    current_device_trust_token(latest),
+                )),
+        );
+        if matches!(latest, koushi_state::CurrentDeviceTrustState::Verified) {
+            record_verification_method_discovery_event(
+                DiagnosticEvent::new(DiagnosticLevel::Debug, "core.trust_recheck", "finished")
+                    .field(DiagnosticField::count("generation", generation))
+                    .field(DiagnosticField::token(
+                        "trust",
+                        current_device_trust_token(latest),
+                    ))
+                    .field(DiagnosticField::boolean("timed_out", false))
+                    .field(DiagnosticField::milliseconds(
+                        "elapsed_ms",
+                        started.elapsed().as_millis(),
+                    )),
+            );
+            return Some((generation, latest));
+        }
+
+        let mut timed_out = false;
+        while !matches!(latest, koushi_state::CurrentDeviceTrustState::Verified) {
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
+                timed_out = true;
+                break;
+            }
+            let remaining = timeout.saturating_sub(elapsed);
+            match crate::executor::timeout(remaining, observation.updates.next()).await {
+                Ok(Some(next)) => {
+                    latest = next;
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    timed_out = true;
+                    break;
+                }
+            }
+        }
+        let trust = latest;
+        record_verification_method_discovery_event(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.trust_recheck", "finished")
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::token(
+                    "trust",
+                    current_device_trust_token(trust),
+                ))
+                .field(DiagnosticField::boolean("timed_out", timed_out))
+                .field(DiagnosticField::milliseconds(
+                    "elapsed_ms",
+                    started.elapsed().as_millis(),
+                )),
+        );
+        Some((generation, trust))
     }
 
     async fn perform_logout(
@@ -12506,6 +12703,29 @@ mod tests {
         assert!(
             !production_source.contains("action_tx.try_send(actions)"),
             "AccountActor reducer actions must not be dropped through try_send"
+        );
+    }
+
+    #[test]
+    fn verification_method_discovery_completion_projects_without_awaiting_sender_task() {
+        let source = include_str!("account.rs");
+        let production_source = source
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .expect("production source should precede tests");
+        let completion_arm = production_source
+            .split("AccountMessage::VerificationMethodsDiscovered")
+            .nth(1)
+            .and_then(|rest| rest.split("AccountMessage::RecoveryFinished").next())
+            .expect("verification method discovery completion arm should exist");
+
+        assert!(
+            !completion_arm.contains("owned.task.await"),
+            "the completion arm is handling a message sent by the discovery task; awaiting that task before projection can leave the gate stuck in DiscoveringMethods"
+        );
+        assert!(
+            completion_arm.contains("success_projected"),
+            "successful discovery projection must be diagnosable after completion_received"
         );
     }
 

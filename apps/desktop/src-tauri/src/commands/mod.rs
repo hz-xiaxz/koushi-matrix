@@ -216,6 +216,18 @@ impl SelectEventSource for CoreConnection {
 /// Read the latest `AppStateSnapshot` and convert to `FrontendDesktopSnapshot`.
 async fn current_snapshot(state: &CoreRuntimeState) -> Result<FrontendDesktopSnapshot, String> {
     let snapshot = state.connection.lock().await.versioned_snapshot();
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "desktop.snapshot", "current")
+            .field(DiagnosticField::count("generation", snapshot.generation))
+            .field(DiagnosticField::token(
+                "session",
+                session_diagnostic_label(&snapshot.state.session),
+            ))
+            .field(DiagnosticField::boolean(
+                "rooms_available",
+                !snapshot.state.rooms.is_empty(),
+            )),
+    );
     Ok(FrontendDesktopSnapshot::from_versioned(
         snapshot.state,
         snapshot.generation,
@@ -273,13 +285,26 @@ pub(crate) fn qa_window_title_string(
 }
 
 fn qa_session_label(session: &koushi_state::SessionState) -> &'static str {
+    session_diagnostic_label(session)
+}
+
+fn session_diagnostic_label(session: &koushi_state::SessionState) -> &'static str {
     use koushi_state::SessionState;
     match session {
         SessionState::SignedOut => "signedOut",
         SessionState::Restoring => "restoring",
         SessionState::SwitchingAccount { .. } => "switchingAccount",
         SessionState::Authenticating { .. } => "authenticating",
-        SessionState::Provisional { .. } => "provisional",
+        SessionState::Provisional { phase, .. } => match phase {
+            koushi_state::ProvisionalPhase::CheckingTrust => "provisionalCheckingTrust",
+            koushi_state::ProvisionalPhase::DiscoveringMethods => "provisionalDiscoveringMethods",
+            koushi_state::ProvisionalPhase::RecheckingTrust { failure: None } => {
+                "provisionalRecheckingTrust"
+            }
+            koushi_state::ProvisionalPhase::RecheckingTrust { failure: Some(_) } => {
+                "provisionalRecheckingTrustFailed"
+            }
+        },
         SessionState::AwaitingVerification { .. } => "awaitingVerification",
         SessionState::Verifying { .. } => "verifying",
         SessionState::AwaitingBootstrapConfirmation { .. } => "awaitingBootstrapConfirmation",
@@ -433,11 +458,14 @@ fn snapshot_has_authenticated_session(snapshot: &koushi_state::AppState) -> bool
 
 fn snapshot_has_login_transport_terminal(snapshot: &koushi_state::AppState) -> bool {
     matches!(
-        snapshot.session,
-        koushi_state::SessionState::Provisional { .. }
-            | koushi_state::SessionState::AwaitingVerification { .. }
+        &snapshot.session,
+        koushi_state::SessionState::Provisional {
+            phase: koushi_state::ProvisionalPhase::RecheckingTrust { failure: Some(_) },
+            ..
+        } | koushi_state::SessionState::AwaitingVerification { .. }
             | koushi_state::SessionState::Verifying { .. }
             | koushi_state::SessionState::AwaitingBootstrapConfirmation { .. }
+            | koushi_state::SessionState::Rejecting { .. }
     ) || snapshot_has_authenticated_session(snapshot)
 }
 
@@ -897,6 +925,15 @@ pub(crate) async fn submit_recovery_request(
     secret: AuthSecret,
 ) -> Result<(), String> {
     let request_id = next_request_id(state).await;
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "desktop.recovery", "submit").field(
+            DiagnosticField::request_id(
+                "request_id",
+                request_id.connection_id.0,
+                request_id.sequence,
+            ),
+        ),
+    );
     submit_core_command(state, build_submit_recovery_command(request_id, secret)).await?;
     update_qa_window_title_from_state(&app, state).await;
     Ok(())
@@ -7294,6 +7331,21 @@ mod tests {
             },
         };
         assert!(snapshot_has_login_transport_terminal(&state));
+    }
+
+    #[test]
+    fn login_transport_does_not_complete_while_discovering_verification_methods() {
+        let mut state = koushi_state::AppState::default();
+        state.session = koushi_state::SessionState::Provisional {
+            info: koushi_state::SessionInfo {
+                homeserver: "https://example.invalid".into(),
+                user_id: "@u:example.invalid".into(),
+                device_id: "D".into(),
+            },
+            phase: koushi_state::ProvisionalPhase::DiscoveringMethods,
+        };
+
+        assert!(!snapshot_has_login_transport_terminal(&state));
     }
 
     #[test]

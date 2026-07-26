@@ -823,6 +823,39 @@ function startSessionVerificationWindowDrag(): void {
   void getCurrentWindow().startDragging().catch(() => undefined);
 }
 
+function provisionalPhaseKind(
+  phase: import("./domain/types").ProvisionalPhase | undefined
+): "checkingTrust" | "discoveringMethods" | "recheckingTrust" | null {
+  if (phase === "checkingTrust" || phase === "discoveringMethods") {
+    return phase;
+  }
+  if (!phase || typeof phase !== "object") {
+    return null;
+  }
+  if ("kind" in phase) {
+    return phase.kind;
+  }
+  if ("recheckingTrust" in phase) {
+    return "recheckingTrust";
+  }
+  return null;
+}
+
+function provisionalPhaseFailure(
+  phase: import("./domain/types").ProvisionalPhase | undefined
+): import("./domain/types").VerificationGateFailureKind | null {
+  if (!phase || typeof phase !== "object") {
+    return null;
+  }
+  if ("kind" in phase && phase.kind === "recheckingTrust") {
+    return phase.failureKind ?? null;
+  }
+  if ("recheckingTrust" in phase) {
+    return phase.recheckingTrust.failureKind ?? null;
+  }
+  return null;
+}
+
 export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onStartWindowDrag = startSessionVerificationWindowDrag, operations = { startOwnUserSas: () => api.startOwnUserSas(), submitRecovery: (secret) => api.submitRecovery(secret), retryCurrentDeviceTrustDiscovery: () => api.retryCurrentDeviceTrustDiscovery() } }: { snapshot: DesktopSnapshot; onSnapshot: (snapshot: DesktopSnapshot) => void; onSignOut: () => void; onStartWindowDrag?: () => void; operations?: { startOwnUserSas: () => Promise<DesktopSnapshot>; submitRecovery: (secret: string) => Promise<DesktopSnapshot>; retryCurrentDeviceTrustDiscovery: () => Promise<DesktopSnapshot> } }) {
   const session = snapshot.state.domain.session;
   const recoveryRef = useRef<HTMLInputElement>(null);
@@ -832,12 +865,12 @@ export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onSta
   const methods = session.gate?.methods ?? [];
   const awaiting = session.kind === "awaitingVerification";
   const sasVerifying = session.kind === "verifying" && session.method === "existingDeviceSas";
-  const checking = session.kind === "provisional" && session.phase === "checkingTrust";
-  const discovering = session.kind === "provisional" && session.phase === "discoveringMethods";
-  const rechecking = session.kind === "provisional" && typeof session.phase === "object" && "recheckingTrust" in session.phase;
-  const preparationFailure = session.kind === "provisional" && typeof session.phase === "object" && "recheckingTrust" in session.phase
-    ? session.phase.recheckingTrust.failureKind
-    : null;
+  const phaseKind = session.kind === "provisional" ? provisionalPhaseKind(session.phase) : null;
+  const checking = phaseKind === "checkingTrust";
+  const discovering = phaseKind === "discoveringMethods";
+  const rechecking = phaseKind === "recheckingTrust";
+  const preparationFailure =
+    session.kind === "provisional" ? provisionalPhaseFailure(session.phase) : null;
   const activelyVerifying = session.kind === "verifying";
   const [gateOperation, setGateOperation] = useState<"recovery" | "sas" | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);

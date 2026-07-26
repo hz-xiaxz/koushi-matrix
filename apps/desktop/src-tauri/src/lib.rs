@@ -875,6 +875,26 @@ fn forwarded_webview_events_for_core_event(
     }
 
     if let CoreEvent::StateDelta(delta) = event {
+        let requires_snapshot_refresh = delta.changed.session.is_some();
+        let session_token = delta
+            .changed
+            .session
+            .as_ref()
+            .map(bridge_session_state_token)
+            .unwrap_or("unchanged");
+        koushi_diagnostics::record(
+            DiagnosticEvent::new(
+                DiagnosticLevel::Debug,
+                "desktop.event_bridge",
+                "state_delta",
+            )
+            .field(DiagnosticField::count("generation", delta.generation))
+            .field(DiagnosticField::boolean(
+                "session_changed",
+                requires_snapshot_refresh,
+            ))
+            .field(DiagnosticField::token("session", session_token)),
+        );
         forwarded.push(ForwardedWebviewEvent {
             event_name: CORE_EVENT_NAME,
             payload: serde_json::json!({
@@ -883,6 +903,12 @@ fn forwarded_webview_events_for_core_event(
                 "changed": FrontendDesktopSnapshotDelta::from(delta.clone()).changed,
             }),
         });
+        if requires_snapshot_refresh {
+            forwarded.push(ForwardedWebviewEvent {
+                event_name: STATE_EVENT_NAME,
+                payload: serde_json::Value::String("stateChanged".to_owned()),
+            });
+        }
     }
 
     if let Some(payload) = serialize_core_event(event) {
@@ -893,6 +919,34 @@ fn forwarded_webview_events_for_core_event(
     }
 
     forwarded
+}
+
+fn bridge_session_state_token(session: &koushi_state::SessionState) -> &'static str {
+    match session {
+        koushi_state::SessionState::SignedOut => "signed_out",
+        koushi_state::SessionState::Restoring => "restoring",
+        koushi_state::SessionState::SwitchingAccount { .. } => "switching_account",
+        koushi_state::SessionState::Authenticating { .. } => "authenticating",
+        koushi_state::SessionState::Provisional { phase, .. } => match phase {
+            koushi_state::ProvisionalPhase::CheckingTrust => "provisional_checking_trust",
+            koushi_state::ProvisionalPhase::DiscoveringMethods => "provisional_discovering_methods",
+            koushi_state::ProvisionalPhase::RecheckingTrust { failure: None } => {
+                "provisional_rechecking_trust"
+            }
+            koushi_state::ProvisionalPhase::RecheckingTrust { failure: Some(_) } => {
+                "provisional_rechecking_trust_failed"
+            }
+        },
+        koushi_state::SessionState::AwaitingVerification { .. } => "awaiting_verification",
+        koushi_state::SessionState::Verifying { .. } => "verifying",
+        koushi_state::SessionState::AwaitingBootstrapConfirmation { .. } => {
+            "awaiting_bootstrap_confirmation"
+        }
+        koushi_state::SessionState::Rejecting { .. } => "rejecting",
+        koushi_state::SessionState::Ready(_) => "ready",
+        koushi_state::SessionState::Locked(_) => "locked",
+        koushi_state::SessionState::LoggingOut => "logging_out",
+    }
 }
 
 fn diffs_net_count_change(diffs: &[koushi_core::TimelineDiff]) -> i64 {
@@ -1689,6 +1743,49 @@ mod tests {
             forwarded[0].payload["changed"]["state"]["ui"]["navigation"]["active_space_id"],
             json!("!space:example.invalid")
         );
+    }
+
+    #[test]
+    fn session_state_delta_forwarding_also_requests_snapshot_refresh() {
+        use koushi_core::{CoreEvent, build_state_delta};
+        use koushi_state::{AppState, ProvisionalPhase, SessionInfo, SessionState};
+        use serde_json::json;
+
+        let timeline_items_count = AtomicUsize::new(17);
+        let mut previous = AppState::default();
+        previous.session = SessionState::Provisional {
+            info: SessionInfo {
+                homeserver: "https://example.test".to_owned(),
+                user_id: "@u:example.test".to_owned(),
+                device_id: "DEV".to_owned(),
+            },
+            phase: ProvisionalPhase::CheckingTrust,
+        };
+        let mut next = previous.clone();
+        next.session = SessionState::Provisional {
+            info: SessionInfo {
+                homeserver: "https://example.test".to_owned(),
+                user_id: "@u:example.test".to_owned(),
+                device_id: "DEV".to_owned(),
+            },
+            phase: ProvisionalPhase::DiscoveringMethods,
+        };
+        let delta = build_state_delta(1, &previous, &next).expect("session delta");
+
+        let forwarded = forwarded_webview_events_for_core_event(
+            &CoreEvent::StateDelta(delta),
+            &timeline_items_count,
+        );
+
+        assert_eq!(forwarded.len(), 2);
+        assert_eq!(forwarded[0].event_name, CORE_EVENT_NAME);
+        assert_eq!(forwarded[0].payload["kind"], json!("StateDelta"));
+        assert_eq!(
+            forwarded[0].payload["changed"]["state"]["domain"]["session"]["phase"]["kind"],
+            json!("discoveringMethods")
+        );
+        assert_eq!(forwarded[1].event_name, STATE_EVENT_NAME);
+        assert_eq!(forwarded[1].payload, json!("stateChanged"));
     }
 
     #[test]

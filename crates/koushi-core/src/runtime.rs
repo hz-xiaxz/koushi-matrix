@@ -134,6 +134,83 @@ fn app_loop_trace(arm: &'static str, count: u32, clone_ms: u128, total: std::tim
     );
 }
 
+fn session_state_diagnostic_token(session: &SessionState) -> &'static str {
+    match session {
+        SessionState::SignedOut => "signed_out",
+        SessionState::Restoring => "restoring",
+        SessionState::SwitchingAccount { .. } => "switching_account",
+        SessionState::Authenticating { .. } => "authenticating",
+        SessionState::Provisional { phase, .. } => match phase {
+            koushi_state::ProvisionalPhase::CheckingTrust => "provisional_checking_trust",
+            koushi_state::ProvisionalPhase::DiscoveringMethods => "provisional_discovering_methods",
+            koushi_state::ProvisionalPhase::RecheckingTrust { failure: None } => {
+                "provisional_rechecking_trust"
+            }
+            koushi_state::ProvisionalPhase::RecheckingTrust { failure: Some(_) } => {
+                "provisional_rechecking_trust_failed"
+            }
+        },
+        SessionState::AwaitingVerification { .. } => "awaiting_verification",
+        SessionState::Verifying { .. } => "verifying",
+        SessionState::AwaitingBootstrapConfirmation { .. } => "awaiting_bootstrap_confirmation",
+        SessionState::Rejecting { .. } => "rejecting",
+        SessionState::Ready(_) => "ready",
+        SessionState::Locked(_) => "locked",
+        SessionState::LoggingOut => "logging_out",
+    }
+}
+
+fn session_projection_action_token(action: &AppAction) -> Option<&'static str> {
+    match action {
+        AppAction::LoginSucceeded { .. } => Some("login_succeeded"),
+        AppAction::CurrentDeviceTrustChanged(_) => Some("current_device_trust_changed"),
+        AppAction::AuthoritativeDeviceTrustChanged { .. } => {
+            Some("authoritative_device_trust_changed")
+        }
+        AppAction::VerificationMethodsDiscovered(_) => Some("verification_methods_discovered"),
+        AppAction::VerificationMethodDiscoveryFailed { .. } => {
+            Some("verification_method_discovery_failed")
+        }
+        AppAction::VerificationMethodDiscoveryRetryStarted { .. } => {
+            Some("verification_method_discovery_retry_started")
+        }
+        AppAction::VerificationMethodSubmitted { .. } => Some("verification_method_submitted"),
+        AppAction::E2eeRecoverySubmitted { .. } => Some("e2ee_recovery_submitted"),
+        AppAction::E2eeRecoverySucceeded => Some("e2ee_recovery_succeeded"),
+        AppAction::E2eeRecoveryFailed { .. } => Some("e2ee_recovery_failed"),
+        AppAction::E2eeRecoveryStateChanged { .. } => Some("e2ee_recovery_state_changed"),
+        AppAction::VerificationGateAttemptFailed { .. } => Some("verification_gate_attempt_failed"),
+        AppAction::VerificationSessionRejected { .. } => Some("verification_session_rejected"),
+        _ => None,
+    }
+}
+
+fn record_session_projection_diagnostic(
+    action: &'static str,
+    before: &SessionState,
+    after: &SessionState,
+    effect_count: usize,
+) {
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.session_projection",
+            "action_reduced",
+        )
+        .field(DiagnosticField::token("action", action))
+        .field(DiagnosticField::token(
+            "before",
+            session_state_diagnostic_token(before),
+        ))
+        .field(DiagnosticField::token(
+            "after",
+            session_state_diagnostic_token(after),
+        ))
+        .field(DiagnosticField::boolean("changed", before != after))
+        .field(DiagnosticField::count("effect_count", effect_count as u64)),
+    );
+}
+
 fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
     let room_list_trace = match &action {
         AppAction::RoomListUpdated { rooms, .. } => {
@@ -1883,9 +1960,23 @@ impl AppActor {
                         let active_room_before_reduce =
                             self.state.navigation.active_room_id.clone();
                         let room_timeline_before_reduce = self.current_room_timeline_key();
+                        let session_projection_action =
+                            session_projection_action_token(&action);
+                        let session_before_reduce = session_projection_action
+                            .map(|_| self.state.session.clone());
                         let action_for_navigation_cleanup = action.clone();
                         let (post_projection_effects, deferred_reducer_side_effects) =
                             self.reduce_app_action_state(action);
+                        if let (Some(action_token), Some(session_before)) =
+                            (session_projection_action, session_before_reduce.as_ref())
+                        {
+                            record_session_projection_diagnostic(
+                                action_token,
+                                session_before,
+                                &self.state.session,
+                                post_projection_effects.len(),
+                            );
+                        }
                         let active_room_changed = active_room_before_reduce
                             != self.state.navigation.active_room_id;
                         let replacement_room_for_cleanup = navigation_replacement_room_for_cleanup(
@@ -4558,11 +4649,24 @@ impl AppActor {
         else {
             return;
         };
+        let session_changed = delta.changed.session.is_some();
+        let session_token = delta
+            .changed
+            .session
+            .as_ref()
+            .map(session_state_diagnostic_token)
+            .unwrap_or("unchanged");
         self.state_generation = delta.generation;
         let _ = self.snapshot_tx.send(VersionedAppStateSnapshot {
             generation: self.state_generation,
             state: self.state.clone(),
         });
+        koushi_diagnostics::record(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.state_delta", "published")
+                .field(DiagnosticField::count("generation", self.state_generation))
+                .field(DiagnosticField::boolean("session_changed", session_changed))
+                .field(DiagnosticField::token("session", session_token)),
+        );
         self.emit(CoreEvent::StateDelta(delta));
         // Legacy compatibility for core/headless consumers that still wait on
         // full snapshots. The Tauri webview adapter ignores this event on the

@@ -11,10 +11,43 @@ const provisionalPhaseCases: Array<[ProvisionalPhase, string, boolean]> = [
   [{ recheckingTrust: { failureKind: "timeout" } }, "Finishing sign-in…", true],
 ];
 
+const taggedProvisionalPhaseCases: Array<[ProvisionalPhase, string, boolean]> = [
+  [{ kind: "checkingTrust" } as ProvisionalPhase, "Checking device trust…", false],
+  [{ kind: "discoveringMethods" } as ProvisionalPhase, "Discovering verification methods…", true],
+  [
+    { kind: "recheckingTrust", failureKind: "timeout" } as ProvisionalPhase,
+    "Finishing sign-in…",
+    true,
+  ],
+];
+
 describe("SessionVerificationGate interactions", () => {
   afterEach(cleanup);
 
   test.each(provisionalPhaseCases)("renders provisional phase %j with phase-specific retry availability", async (phase, copy, retryVisible) => {
+    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    snapshot.state.domain.session = {
+      kind: "provisional",
+      user_id: "@u:example.invalid",
+      homeserver: "https://example.invalid",
+      device_id: "D",
+      phase,
+    };
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={{ startOwnUserSas: async () => snapshot, submitRecovery: async () => snapshot, retryCurrentDeviceTrustDiscovery: async () => snapshot }}
+      />
+    );
+
+    expect(screen.getByText(copy)).toBeTruthy();
+    const retry = screen.queryByRole("button", { name: "Retry" });
+    expect(Boolean(retry)).toBe(retryVisible);
+  });
+
+  test.each(taggedProvisionalPhaseCases)("renders Rust-tagged provisional phase %j with phase-specific retry availability", async (phase, copy, retryVisible) => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.domain.session = {
       kind: "provisional",

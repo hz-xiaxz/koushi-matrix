@@ -408,7 +408,13 @@ export type VerificationMethod = VerificationMethodCapability;
 export type VerificationAccountKind = "existingIdentity" | "newIdentity" | "unknown";
 export type VerificationGateFailureKind = "network" | "cancelled" | "mismatch" | "forbidden" | "timeout" | "sdk" | "noProofMethod";
 export interface VerificationGateState { methods: VerificationMethodCapability[]; account_kind: VerificationAccountKind; failureKind?: VerificationGateFailureKind | null }
-export type ProvisionalPhase = "checkingTrust" | "discoveringMethods" | { recheckingTrust: { failureKind?: VerificationGateFailureKind | null } };
+export type ProvisionalPhase =
+  | "checkingTrust"
+  | "discoveringMethods"
+  | { recheckingTrust: { failureKind?: VerificationGateFailureKind | null } }
+  | { kind: "checkingTrust" }
+  | { kind: "discoveringMethods" }
+  | { kind: "recheckingTrust"; failureKind?: VerificationGateFailureKind | null };
 
 export interface SessionState {
   kind:

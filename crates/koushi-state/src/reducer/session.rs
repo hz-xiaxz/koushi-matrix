@@ -107,11 +107,14 @@ pub(crate) fn handle_current_device_trust_changed(
         };
     }
 
-    // Unknown/Unverified is the expected authoritative state while an active
-    // proof attempt is in flight. Do not destroy its method, flow correlation,
-    // or SAS projection; only Verified may complete the gate.
-    if matches!(state.session, SessionState::Verifying { .. })
-        && trust != CurrentDeviceTrustState::Verified
+    // Unknown/Unverified is the expected authoritative state while a proof
+    // attempt is available or in flight. Do not destroy the discovered method
+    // list, selected method, flow correlation, or SAS projection; only Verified
+    // may complete the gate.
+    if matches!(
+        state.session,
+        SessionState::AwaitingVerification { .. } | SessionState::Verifying { .. }
+    ) && trust != CurrentDeviceTrustState::Verified
     {
         return Vec::new();
     }
