@@ -128,6 +128,75 @@ jobs:
       - name: cargo-machete (unused deps)
         run: cargo machete
 
+  core-homeserver:
+    # Runs the Rust core against a real local homeserver. Nothing else in CI
+    # exercises this tier, which is how #334 shipped: most focused scenarios
+    # timed out at login while `--scenario=all` (the only one anybody ran by
+    # hand) stayed green. Kept a separate job so it builds in parallel with the
+    # Rust job rather than serialising behind it, keeps its own dependency
+    # cache, and names itself when it fails.
+    name: Core homeserver QA (conduit)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Rust toolchain (1.96.0)
+        uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          shared-key: koushi-core-homeserver-ci
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev zstd
+      - name: Submodule sync guard
+        run: node scripts/check-sdk-submodule.mjs
+      - name: Install Conduit
+        # Same prebuilt artifact the committed Linux GUI image pins, so CI and
+        # the local lane run the same homeserver build.
+        env:
+          CONDUIT_URL: https://gitlab.com/api/v4/projects/famedly%2Fconduit/jobs/artifacts/master/raw/x86_64-unknown-linux-musl?job=artifacts
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl --proto '=https' --tlsv1.2 -fsSLo "$HOME/.local/bin/conduit" "$CONDUIT_URL"
+          chmod 0755 "$HOME/.local/bin/conduit"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Verify Conduit is runnable
+        run: conduit --version
+      - name: QA binary unit tests
+        # Also the only compile check for the QA binaries: a plain
+        # `cargo test --workspace` skips them because both bin targets set
+        # `required-features = ["qa-bin"]`, which is how a broken
+        # `RoomCommand::SetSpaceChild` call sat on main undetected.
+        run: cargo test -p koushi-core --features qa-bin --bin headless-core-qa
+      - name: Core scenario — login and sync
+        run: |
+          node scripts/desktop-headless-local-qa.mjs --run \
+            --server=conduit --scenario=login_sync --core --core-backend=probed \
+            --timeout-ms=600000
+      - name: Core scenario — media
+        run: |
+          node scripts/desktop-headless-local-qa.mjs --run \
+            --server=conduit --scenario=media --core --core-backend=probed \
+            --timeout-ms=600000
+      - name: Upload QA logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-homeserver-qa-logs
+          # Token-only QA output; the runner refuses to print child output that
+          # fails its private-data validation.
+          path: |
+            .local-secrets/headless-local-qa/**/core-*.log
+            .local-secrets/headless-local-qa/**/sdk-*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   windows-overlay-acl:
     name: Windows overlay ACL IPC
     runs-on: windows-latest
