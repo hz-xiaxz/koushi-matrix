@@ -5,7 +5,7 @@ use koushi_state::{
     RoomNotificationMode, RoomNotificationSettings, RoomSummary, RoomTags, SearchCrawlerSettings,
     SessionInfo, SessionState, SpaceSummary, ThreadPaneState, TimelinePaneState,
     TimelineScrollAnchorEdge, UiEvent, UserProfile, compose_sidebar,
-    compose_sidebar_with_room_notification_settings, compute_room_list_projection,
+    compose_sidebar_with_account_facts, compute_room_list_projection,
     native_attention_state_from_rooms, reduce,
 };
 use serde_json::json;
@@ -1289,11 +1289,12 @@ fn sidebar_aggregate_badges_ignore_muted_rooms_but_room_items_keep_counts() {
         },
     )]);
 
-    let sidebar = compose_sidebar_with_room_notification_settings(
+    let sidebar = compose_sidebar_with_account_facts(
         None,
         &spaces(),
         &rooms(),
         &notification_settings,
+        0,
     );
 
     assert_eq!(
@@ -1311,6 +1312,81 @@ fn sidebar_aggregate_badges_ignore_muted_rooms_but_room_items_keep_counts() {
     assert_eq!(sidebar.space_rail[0].highlight_count, 0);
     assert_eq!(sidebar.space_unread_count, 2);
     assert_eq!(sidebar.dm_unread_count, 3);
+}
+
+#[test]
+fn home_attention_counts_invites_separately_from_unread_messages() {
+    // #330: the Home rail badge is unread messages plus pending invites, but the
+    // two must stay separately readable — the accessible label names them
+    // individually, and `unread_count` keeps meaning only messages.
+    let without_invites = compose_sidebar_with_account_facts(None, &spaces(), &rooms(), &HashMap::new(), 0);
+    assert_eq!(without_invites.account_home.unread_count, 10);
+    assert_eq!(without_invites.account_home.invite_count, 0);
+    assert_eq!(
+        without_invites.account_home.attention_count, 10,
+        "with no invites the total is the unread message count"
+    );
+
+    let with_invites = compose_sidebar_with_account_facts(None, &spaces(), &rooms(), &HashMap::new(), 2);
+    assert_eq!(
+        with_invites.account_home.unread_count, 10,
+        "invites must not be folded into the unread message count"
+    );
+    assert_eq!(with_invites.account_home.invite_count, 2);
+    assert_eq!(with_invites.account_home.attention_count, 12);
+
+    assert_eq!(
+        with_invites.space_rail[0].unread_count, without_invites.space_rail[0].unread_count,
+        "space rail badges stay space unread only"
+    );
+}
+
+#[test]
+fn home_attention_counts_invites_even_when_every_room_is_muted() {
+    // Invites are account-level, so a muted room silencing the message count
+    // must not silence the invite count with it.
+    let muted = HashMap::from([
+        (
+            "room-a".to_owned(),
+            RoomNotificationSettings {
+                mode: RoomNotificationMode::Mute,
+                ..RoomNotificationSettings::default()
+            },
+        ),
+        (
+            "global-room".to_owned(),
+            RoomNotificationSettings {
+                mode: RoomNotificationMode::Mute,
+                ..RoomNotificationSettings::default()
+            },
+        ),
+        (
+            "dm-a".to_owned(),
+            RoomNotificationSettings {
+                mode: RoomNotificationMode::Mute,
+                ..RoomNotificationSettings::default()
+            },
+        ),
+    ]);
+
+    let sidebar = compose_sidebar_with_account_facts(None, &spaces(), &rooms(), &muted, 3);
+
+    assert_eq!(sidebar.account_home.unread_count, 0);
+    assert_eq!(sidebar.account_home.invite_count, 3);
+    assert_eq!(sidebar.account_home.attention_count, 3);
+}
+
+#[test]
+fn compose_sidebar_without_invites_reports_no_pending_invites() {
+    // The three-argument wrapper has no invite input, so it must report zero
+    // rather than guess — its callers are projections that do not own invites.
+    let sidebar = compose_sidebar(None, &spaces(), &rooms());
+
+    assert_eq!(sidebar.account_home.invite_count, 0);
+    assert_eq!(
+        sidebar.account_home.attention_count, sidebar.account_home.unread_count,
+        "with no invite input the total is the unread message count"
+    );
 }
 
 #[test]

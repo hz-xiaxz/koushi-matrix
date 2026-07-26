@@ -48,10 +48,17 @@ pub struct FrontendDesktopSnapshot {
 
 impl From<AppState> for FrontendDesktopSnapshot {
     fn from(state: AppState) -> Self {
-        let sidebar = koushi_state::compose_sidebar(
+        // Use the same account facts the delta path uses
+        // (`koushi_core::state_delta`). Composing from rooms and spaces alone
+        // silently dropped mute filtering and the invite count, so a full
+        // snapshot and a delta reported different Home badge values for the
+        // same state.
+        let sidebar = koushi_state::compose_sidebar_with_account_facts(
             state.navigation.active_space_id.as_deref(),
             &state.spaces,
             &state.rooms,
+            &state.room_notification_settings,
+            state.invites.len() as u64,
         );
         Self {
             state_generation: None,
@@ -1338,6 +1345,93 @@ mod tests {
     }
 
     #[test]
+    fn frontend_snapshot_serializes_home_invite_and_attention_counts() {
+        // #330: the Home rail badge renders `attention_count`, and its accessible
+        // label names unread messages and invites separately, so all three have
+        // to cross the Tauri boundary.
+        let mut state = booted_app_state();
+        for room_id in ["!invite-one:matrix.org", "!invite-two:matrix.org"] {
+            state.invites.push(InvitePreview {
+                room_id: room_id.to_owned(),
+                display_name: "Invite".to_owned(),
+                avatar: None,
+                topic: None,
+                inviter_display_name: None,
+                inviter_user_id: None,
+                is_dm: false,
+            });
+        }
+
+        let value = serde_json::to_value(FrontendDesktopSnapshot::from(state))
+            .expect("snapshot should serialize");
+        let home = &value["sidebar"]["account_home"];
+        let unread = home["unread_count"].as_u64().expect("unread count");
+
+        assert_eq!(home["invite_count"], json!(2));
+        assert_eq!(
+            home["attention_count"],
+            json!(unread + 2),
+            "the badge total is unread messages plus pending invites"
+        );
+        assert_eq!(
+            home["unread_count"],
+            json!(unread),
+            "invites must not be folded into the unread message count"
+        );
+    }
+
+    #[test]
+    fn frontend_snapshot_sidebar_respects_muted_rooms_like_the_delta_path() {
+        // The full-snapshot and delta transports must agree. Composing the
+        // snapshot sidebar from rooms and spaces alone dropped mute filtering,
+        // so the same state produced a different Home badge depending on which
+        // transport delivered it.
+        let mut state = booted_app_state();
+        state.rooms.push(RoomSummary {
+            room_id: "!muted:matrix.org".to_owned(),
+            display_name: "Muted".to_owned(),
+            display_label: "Muted".to_owned(),
+            original_display_label: "Muted".to_owned(),
+            avatar: None,
+            is_dm: false,
+            dm_user_ids: Vec::new(),
+            tags: RoomTags::default(),
+            unread_count: 4,
+            notification_count: 4,
+            highlight_count: 2,
+            marked_unread: false,
+            recency_stamp: None,
+            conversation_activity: None,
+            latest_event: None,
+            parent_space_ids: vec![],
+            dm_space_ids: vec![],
+            is_encrypted: false,
+            joined_members: 0,
+        });
+        state.room_notification_settings.insert(
+            "!muted:matrix.org".to_owned(),
+            koushi_state::RoomNotificationSettings {
+                mode: koushi_state::RoomNotificationMode::Mute,
+                ..koushi_state::RoomNotificationSettings::default()
+            },
+        );
+
+        let value = serde_json::to_value(FrontendDesktopSnapshot::from(state))
+            .expect("snapshot should serialize");
+
+        assert_eq!(
+            value["sidebar"]["account_home"]["unread_count"],
+            json!(0),
+            "a muted room must not raise the Home unread count"
+        );
+        assert_eq!(
+            value["sidebar"]["account_home"]["highlight_count"],
+            json!(0),
+            "a muted room must not raise the Home highlight count"
+        );
+    }
+
+    #[test]
     fn frontend_snapshot_locale_profile_follows_rust_owned_locale_settings() {
         let mut state = booted_app_state();
         state.settings.values.locale = LocaleSettings {
@@ -2069,10 +2163,12 @@ mod tests {
         };
 
         // Serialize
-        let sidebar = koushi_state::compose_sidebar(
+        let sidebar = koushi_state::compose_sidebar_with_account_facts(
             state.navigation.active_space_id.as_deref(),
             &state.spaces,
             &state.rooms,
+            &state.room_notification_settings,
+            state.invites.len() as u64,
         );
         let value = serde_json::to_value(FrontendDesktopSnapshot {
             state_generation: None,

@@ -30,7 +30,7 @@ pub use locale_profile::{
 pub use reducer::reduce;
 pub use sidebar::{
     AccountHomeItem, RoomListItem, SidebarModel, SpaceRailItem, compose_sidebar,
-    compose_sidebar_with_room_notification_settings,
+    compose_sidebar_with_account_facts,
 };
 pub use state::{
     AccountManagementCapabilities, AccountManagementOperation, AccountManagementState,

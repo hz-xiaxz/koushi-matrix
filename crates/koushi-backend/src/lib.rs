@@ -8,7 +8,7 @@ use koushi_state::{
     AttachmentSort, AuthFailureKind, DelegatedAuthLinks, LoginAttemptId, LoginFlow, LoginRequest,
     RecoveryMethod, RecoveryRequest, RoomSummary, RoomTags, SearchResult, SearchScope, SessionInfo,
     SessionState, SidebarModel, SpaceSummary, ThreadPaneState, TrustOperationFailureKind,
-    compose_sidebar_with_room_notification_settings, reduce,
+    compose_sidebar_with_account_facts, reduce,
 };
 use serde::{Deserialize, Serialize};
 
@@ -146,11 +146,12 @@ impl FakeDesktopBackend {
     }
 
     pub fn snapshot(&self) -> DesktopSnapshot {
-        let sidebar = compose_sidebar_with_room_notification_settings(
+        let sidebar = compose_sidebar_with_account_facts(
             self.state.navigation.active_space_id.as_deref(),
             &self.state.spaces,
             &self.state.rooms,
             &self.state.room_notification_settings,
+            self.state.invites.len() as u64,
         );
         let timeline = self
             .state

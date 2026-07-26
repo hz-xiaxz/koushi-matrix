@@ -915,7 +915,8 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.ui.navigation.active_space_id,
       this.snapshot.state.domain.spaces,
       this.snapshot.state.domain.rooms,
-      this.snapshot.state.domain.room_notification_settings
+      this.snapshot.state.domain.room_notification_settings,
+      this.snapshot.state.domain.invites.length
     );
   }
 
@@ -4004,7 +4005,7 @@ function createInitialSnapshot(session: BrowserFakeApiOptions["session"]): Deskt
 function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): DesktopSnapshot {
   const active_space_id = "!space-alpha:example.invalid";
   const active_room_id = "!room-alpha:example.invalid";
-  const sidebar = composeBrowserFakeSidebar(active_space_id, spaces, rooms);
+  const sidebar = composeBrowserFakeSidebar(active_space_id, spaces, rooms, {}, invites.length);
     const snapshot: DesktopSnapshot = {
     state: {
       schema_version: 3,
@@ -4809,6 +4810,8 @@ function emptySidebar() {
       display_name: "Home",
       unread_count: 0,
       highlight_count: 0,
+      invite_count: 0,
+      attention_count: 0,
       is_active: true
     },
     space_rail: [],
@@ -5220,13 +5223,15 @@ function composeBrowserFakeSidebar(
   activeSpaceId: string | null,
   sourceSpaces: SpaceSummary[],
   sourceRooms: RoomSummary[],
-  roomNotificationSettings: Record<string, RoomNotificationSettings> = {}
+  roomNotificationSettings: Record<string, RoomNotificationSettings> = {},
+  pendingInviteCount = 0
 ) {
   const sidebar = composeSidebar(
     activeSpaceId,
     sourceSpaces,
     sourceRooms,
-    roomNotificationSettings
+    roomNotificationSettings,
+    pendingInviteCount
   );
   const projection = computeBrowserRoomListProjection(
     { kind: "people" },

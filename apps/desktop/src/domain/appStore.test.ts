@@ -827,6 +827,8 @@ function makeSnapshot(): DesktopSnapshot {
         display_name: "Home",
         unread_count: 0,
         highlight_count: 0,
+        invite_count: 0,
+        attention_count: 0,
         is_active: true
       },
       space_rail: [
