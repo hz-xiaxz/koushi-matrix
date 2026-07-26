@@ -182,7 +182,7 @@ describe("ContextualRightPanel", () => {
     expect(markup).toContain('aria-label="Send"');
   });
 
-  test("reset local data asks for confirmation before deleting local state", () => {
+  test("reset local data uses an in-app confirmation before deleting local state", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     const resetHandler = source
       .split("async function resetLocalData()")
@@ -191,10 +191,34 @@ describe("ContextualRightPanel", () => {
       .at(0);
 
     expect(resetHandler).toBeDefined();
-    expect(resetHandler).toContain('window.confirm(t("settings.resetLocalDataConfirm"))');
-    expect(resetHandler!.indexOf("window.confirm")).toBeLessThan(
-      resetHandler!.indexOf("api.resetLocalData()")
+    expect(resetHandler).not.toContain("window.confirm");
+    expect(source).toContain("resetLocalDataConfirmOpen");
+    expect(source.indexOf("resetLocalDataConfirmOpen")).toBeLessThan(
+      source.indexOf("api.resetLocalData()")
     );
+  });
+
+  test("reset local data confirmation dialog renders an explicit destructive confirmation", async () => {
+    vi.stubGlobal("window", { location: { search: "" } });
+    const { ResetLocalDataConfirmationDialog } = await import("./App");
+
+    const markup = renderToStaticMarkup(
+      <ResetLocalDataConfirmationDialog
+        isBusy={false}
+        onCancel={() => undefined}
+        onConfirm={() => undefined}
+      />
+    );
+
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain('aria-label="Reset local data"');
+    expect(markup).toContain(
+      "Reset local data for this session? This removes the local Matrix store, cached history, and saved credentials on this device. This cannot be undone."
+    );
+    expect(markup).toContain(">Cancel</button>");
+    expect(markup).toContain('class="dialog-button danger"');
+    expect(markup).toContain(">Reset local data</button>");
   });
 
   test("TimelineItemRow renders reaction pills with accessible labels", () => {
@@ -2432,7 +2456,7 @@ describe("Timeline item row rendering", () => {
     const failedMarkup = renderGate(failed);
     expect(failedMarkup).toContain("Finishing sign-in…");
     expect(failedMarkup).toContain('role="alert"');
-    expect(failedMarkup).toContain("Retry");
+    expect(failedMarkup).not.toContain("Retry");
   });
 
   test("rejected login transport refreshes authoritative gate state without rejecting", async () => {

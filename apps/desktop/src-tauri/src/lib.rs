@@ -484,16 +484,12 @@ fn window_event_should_persist(event: &tauri::WindowEvent) -> bool {
         tauri::WindowEvent::Resized(_)
             | tauri::WindowEvent::Moved(_)
             | tauri::WindowEvent::ScaleFactorChanged { .. }
-            | tauri::WindowEvent::CloseRequested { .. }
             | tauri::WindowEvent::Destroyed
     )
 }
 
 fn window_event_should_stop_background_tasks(event: &tauri::WindowEvent) -> bool {
-    matches!(
-        event,
-        tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
-    )
+    matches!(event, tauri::WindowEvent::Destroyed)
 }
 
 fn load_window_state_with_base(base_dir: &Path) -> Result<Option<PersistedWindowState>, String> {
@@ -614,11 +610,12 @@ fn restore_main_window_state<R: tauri::Runtime, M: Manager<R>>(manager: &M) -> R
 }
 
 fn ensure_main_window_visible<R: tauri::Runtime>(app: &mut tauri::App<R>) {
+    ensure_main_window_visible_for_handle(app.handle());
+}
+
+fn ensure_main_window_visible_for_handle<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     #[cfg(target_os = "macos")]
-    {
-        app.set_activation_policy(tauri::ActivationPolicy::Regular);
-        activate_macos_application(app.handle());
-    }
+    activate_macos_application(app);
 
     if let Some(window) = app.get_webview_window("main") {
         ensure_webview_window_visible(&window);
@@ -875,6 +872,7 @@ fn forwarded_webview_events_for_core_event(
     }
 
     if let CoreEvent::StateDelta(delta) = event {
+        let requires_snapshot_refresh = delta.changed.session.is_some();
         forwarded.push(ForwardedWebviewEvent {
             event_name: CORE_EVENT_NAME,
             payload: serde_json::json!({
@@ -883,6 +881,12 @@ fn forwarded_webview_events_for_core_event(
                 "changed": FrontendDesktopSnapshotDelta::from(delta.clone()).changed,
             }),
         });
+        if requires_snapshot_refresh {
+            forwarded.push(ForwardedWebviewEvent {
+                event_name: STATE_EVENT_NAME,
+                payload: serde_json::Value::String("stateChanged".to_owned()),
+            });
+        }
     }
 
     if let Some(payload) = serialize_core_event(event) {
@@ -1081,10 +1085,19 @@ pub fn run() {
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // The deep-link plugin consumes configured callback URLs and emits
             // them through `on_open_url`; keep this callback side-effect-free so
             // it never logs authorization callback query strings.
+            koushi_diagnostics::record(
+                DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "desktop.lifecycle",
+                    "reopen_requested",
+                )
+                .field(DiagnosticField::token("action", "show_main_window")),
+            );
+            ensure_main_window_visible_for_handle(&app);
         }));
     }
 
@@ -1189,6 +1202,21 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if window.label() == "main" {
+                #[cfg(target_os = "macos")]
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let _ = persist_current_window_state(window);
+                    api.prevent_close();
+                    let _ = window.hide();
+                    koushi_diagnostics::record(
+                        DiagnosticEvent::new(
+                            DiagnosticLevel::Info,
+                            "desktop.lifecycle",
+                            "close_requested",
+                        )
+                        .field(DiagnosticField::token("action", "hide")),
+                    );
+                    return;
+                }
                 if window_event_should_persist(event) {
                     let _ = persist_current_window_state(window);
                 }
@@ -1363,8 +1391,26 @@ pub fn run() {
             commands::timeline::send_reply,
             commands::timeline::send_thread_reply,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run matrix desktop app");
+        .build(tauri::generate_context!())
+        .expect("failed to build matrix desktop app")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                koushi_diagnostics::record(
+                    DiagnosticEvent::new(
+                        DiagnosticLevel::Info,
+                        "desktop.lifecycle",
+                        "reopen_requested",
+                    )
+                    .field(DiagnosticField::token("action", "show_main_window")),
+                );
+                ensure_main_window_visible_for_handle(app);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (app, event);
+            }
+        });
 }
 
 #[cfg(test)]
@@ -1689,6 +1735,49 @@ mod tests {
             forwarded[0].payload["changed"]["state"]["ui"]["navigation"]["active_space_id"],
             json!("!space:example.invalid")
         );
+    }
+
+    #[test]
+    fn session_state_delta_forwarding_also_requests_snapshot_refresh() {
+        use koushi_core::{CoreEvent, build_state_delta};
+        use koushi_state::{AppState, ProvisionalPhase, SessionInfo, SessionState};
+        use serde_json::json;
+
+        let timeline_items_count = AtomicUsize::new(17);
+        let mut previous = AppState::default();
+        previous.session = SessionState::Provisional {
+            info: SessionInfo {
+                homeserver: "https://example.test".to_owned(),
+                user_id: "@u:example.test".to_owned(),
+                device_id: "DEV".to_owned(),
+            },
+            phase: ProvisionalPhase::CheckingTrust,
+        };
+        let mut next = previous.clone();
+        next.session = SessionState::Provisional {
+            info: SessionInfo {
+                homeserver: "https://example.test".to_owned(),
+                user_id: "@u:example.test".to_owned(),
+                device_id: "DEV".to_owned(),
+            },
+            phase: ProvisionalPhase::DiscoveringMethods,
+        };
+        let delta = build_state_delta(1, &previous, &next).expect("session delta");
+
+        let forwarded = forwarded_webview_events_for_core_event(
+            &CoreEvent::StateDelta(delta),
+            &timeline_items_count,
+        );
+
+        assert_eq!(forwarded.len(), 2);
+        assert_eq!(forwarded[0].event_name, CORE_EVENT_NAME);
+        assert_eq!(forwarded[0].payload["kind"], json!("StateDelta"));
+        assert_eq!(
+            forwarded[0].payload["changed"]["state"]["domain"]["session"]["phase"]["kind"],
+            json!("discoveringMethods")
+        );
+        assert_eq!(forwarded[1].event_name, STATE_EVENT_NAME);
+        assert_eq!(forwarded[1].payload, json!("stateChanged"));
     }
 
     #[test]
@@ -2035,6 +2124,61 @@ mod tests {
         assert!(!window_event_should_stop_background_tasks(
             &tauri::WindowEvent::Resized(tauri::PhysicalSize::new(1280, 820))
         ));
+    }
+
+    #[test]
+    fn macos_close_requested_hides_without_stopping_background_tasks() {
+        let source = include_str!("lib.rs");
+        let stop_helper = source
+            .split("fn window_event_should_stop_background_tasks")
+            .nth(1)
+            .and_then(|rest| rest.split("fn load_window_state_with_base").next())
+            .expect("window event stop helper should exist");
+        assert!(
+            !stop_helper.contains("CloseRequested"),
+            "red close on macOS must hide the window without stopping account/runtime background tasks"
+        );
+
+        let close_handler = source
+            .split("tauri::WindowEvent::CloseRequested")
+            .nth(1)
+            .and_then(|rest| rest.split("if window_event_should_persist").next())
+            .expect("CloseRequested handler should be explicit before persistence handling");
+        assert!(close_handler.contains("prevent_close()"));
+        assert!(close_handler.contains(".hide()"));
+    }
+
+    #[test]
+    fn single_instance_reopen_shows_existing_main_window() {
+        let source = include_str!("lib.rs");
+        let callback = source
+            .split("tauri_plugin_single_instance::init(")
+            .nth(1)
+            .and_then(|rest| rest.split(".plugin(tauri_plugin_deep_link::init())").next())
+            .expect("single instance plugin callback should be wired before other plugins");
+
+        assert!(
+            callback.contains("ensure_main_window_visible_for_handle"),
+            "reopening Koushi or launching a second instance should show and focus the resident main window"
+        );
+        assert!(callback.contains("desktop.lifecycle"));
+        assert!(callback.contains("reopen_requested"));
+    }
+
+    #[test]
+    fn macos_run_event_reopen_shows_existing_main_window() {
+        let source = include_str!("lib.rs");
+        let run_block = source
+            .split("pub fn run()")
+            .nth(1)
+            .and_then(|rest| rest.split("#[cfg(test)]").next())
+            .expect("run function body should exist");
+
+        assert!(run_block.contains(".build(tauri::generate_context!())"));
+        assert!(run_block.contains("tauri::RunEvent::Reopen"));
+        assert!(run_block.contains("ensure_main_window_visible_for_handle"));
+        assert!(run_block.contains("desktop.lifecycle"));
+        assert!(run_block.contains("reopen_requested"));
     }
 
     #[test]

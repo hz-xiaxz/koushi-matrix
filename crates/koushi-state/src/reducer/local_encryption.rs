@@ -51,9 +51,9 @@ pub(crate) fn handle_reset_local_data_requested(
     state: &mut AppState,
     request_id: u64,
 ) -> Vec<AppEffect> {
-    if !matches!(
+    if matches!(
         state.local_encryption,
-        LocalEncryptionState::MissingCredential | LocalEncryptionState::ResetRequired
+        LocalEncryptionState::Resetting { .. }
     ) {
         return Vec::new();
     }

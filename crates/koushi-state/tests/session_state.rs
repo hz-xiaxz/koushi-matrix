@@ -653,6 +653,36 @@ fn only_authoritative_verified_promotes_and_trust_loss_locks_and_clears() {
 }
 
 #[test]
+fn awaiting_verification_ignores_non_verified_trust_updates() {
+    let info = session_info();
+    for trust in [
+        CurrentDeviceTrustState::Unknown,
+        CurrentDeviceTrustState::Unverified,
+    ] {
+        let mut state = AppState {
+            session: SessionState::AwaitingVerification {
+                info: info.clone(),
+                gate: recovery_gate(),
+            },
+            ..AppState::default()
+        };
+        let before = state.clone();
+
+        let effects = reduce(
+            &mut state,
+            AppAction::AuthoritativeDeviceTrustChanged {
+                generation: 2,
+                transition_id: 7,
+                trust,
+            },
+        );
+
+        assert!(effects.is_empty());
+        assert_eq!(state, before);
+    }
+}
+
+#[test]
 fn authoritative_verified_promotion_requests_sync_after_actor_ack() {
     let mut gated = AppState {
         session: SessionState::Verifying {
@@ -1887,7 +1917,7 @@ fn e2ee_recovery_submission_emits_recover_effect_without_exposing_secret() {
 }
 
 #[test]
-fn e2ee_recovery_success_requests_authoritative_trust_recheck() {
+fn e2ee_recovery_success_promotes_session_and_starts_sync() {
     let info = session_info();
     let mut state = AppState {
         session: SessionState::Verifying {
@@ -1902,18 +1932,13 @@ fn e2ee_recovery_success_requests_authoritative_trust_recheck() {
 
     let effects = reduce(&mut state, AppAction::E2eeRecoverySucceeded);
 
-    assert_eq!(
-        state.session,
-        SessionState::Provisional {
-            info,
-            phase: ProvisionalPhase::RecheckingTrust { failure: None },
-        }
-    );
-    assert_eq!(state.sync, SyncState::Stopped);
+    assert_eq!(state.session, SessionState::Ready(info.clone()));
+    assert_eq!(state.sync, SyncState::Starting);
     assert_eq!(
         effects,
         vec![
-            AppEffect::CheckCurrentDeviceTrust,
+            AppEffect::PersistSession(info),
+            AppEffect::StartSync,
             AppEffect::EmitUiEvent(UiEvent::SessionChanged),
         ]
     );
@@ -2121,6 +2146,36 @@ fn enabled_e2ee_recovery_state_requests_authoritative_trust_recheck() {
             AppEffect::EmitUiEvent(UiEvent::SessionChanged),
         ]
     );
+}
+
+#[test]
+fn active_recovery_ignores_recovery_state_observer_updates() {
+    let info = session_info();
+    for recovery_state in [E2eeRecoveryState::Enabled, E2eeRecoveryState::Disabled] {
+        let mut state = AppState {
+            session: SessionState::Verifying {
+                info: info.clone(),
+                gate: recovery_gate(),
+                method: VerificationMethod::RecoveryKey,
+                flow_id: 3,
+                sas_emojis: Vec::new(),
+            },
+            sync: SyncState::Stopped,
+            ..AppState::default()
+        };
+        let before = state.clone();
+
+        let effects = reduce(
+            &mut state,
+            AppAction::E2eeRecoveryStateChanged {
+                state: recovery_state,
+                methods: vec![RecoveryMethod::RecoveryKey],
+            },
+        );
+
+        assert!(effects.is_empty());
+        assert_eq!(state, before);
+    }
 }
 
 #[test]
