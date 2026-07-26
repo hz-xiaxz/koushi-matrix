@@ -10,7 +10,7 @@ use koushi_state::{
     JapaneseCatalogProfile, LocalEncryptionHealth, LoginRequest, MentionIntent,
     NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState, PresenceKind,
     RecoveryRequest, RoomListFilter, RoomModerationAction, RoomSettingChange, RoomTagKind,
-    SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, SubmissionId,
+    SearchRoomFilter, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, SubmissionId,
     TimelineScrollAnchor, VerificationCancelReason, VerificationTarget,
 };
 use serde::{Deserialize, Serialize};
@@ -2875,6 +2875,7 @@ pub enum SearchCommand {
         request_id: RequestId,
         query: String,
         scope: SearchScope,
+        room_filter: SearchRoomFilter,
     },
     Attachments {
         request_id: RequestId,
@@ -2916,17 +2917,28 @@ pub enum SearchScope {
     Dms,
 }
 
+fn search_room_filter_debug(filter: &SearchRoomFilter) -> (&'static str, usize) {
+    match filter {
+        SearchRoomFilter::AllRooms => ("all_rooms", 0),
+        SearchRoomFilter::OnlyRooms(room_ids) => ("only_rooms", room_ids.len()),
+    }
+}
+
 // Search queries can quote message content; redact like bodies.
 impl fmt::Debug for SearchCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Query {
-                request_id, scope, ..
+                request_id,
+                scope,
+                room_filter,
+                ..
             } => formatter
                 .debug_struct("Query")
                 .field("request_id", request_id)
                 .field("query", &"SearchQuery(..)")
                 .field("scope", scope)
+                .field("room_filter", &search_room_filter_debug(room_filter))
                 .finish(),
             Self::Attachments {
                 request_id,

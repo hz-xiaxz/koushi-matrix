@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use koushi_state::{
     AttachmentFilter, AttachmentKind, AttachmentResult, AttachmentScope, AttachmentSort,
-    SearchResult, normalize_cjk_search_text,
+    SearchResult, SearchRoomFilter, normalize_cjk_search_text,
 };
 use serde::{Deserialize, Serialize};
 
@@ -194,11 +194,10 @@ impl SearchDocumentStore {
     /// are findable even when the SDK ngram index — an accelerator, not the
     /// authority — does not surface them as candidates (issue #162). Results
     /// are ordered most-recent-first (then by event id) and capped at `limit`.
-    /// `room_filter == None` scans all rooms; `Some(room_id)` restricts scope.
     pub fn scan_candidates(
         &self,
         query: &str,
-        room_filter: Option<&str>,
+        room_filter: &SearchRoomFilter,
         limit: usize,
     ) -> Vec<SearchResult> {
         self.scan_candidates_with_stats(query, room_filter, limit)
@@ -208,7 +207,7 @@ impl SearchDocumentStore {
     fn scan_candidates_with_stats(
         &self,
         query: &str,
-        room_filter: Option<&str>,
+        room_filter: &SearchRoomFilter,
         limit: usize,
     ) -> SearchScanOutcome {
         let mut stats = SearchScanStats::default();
@@ -222,7 +221,7 @@ impl SearchDocumentStore {
         let mut results: Vec<SearchResult> = Vec::new();
         for event in self.documents.values() {
             stats.documents_visited += 1;
-            if room_filter.is_some_and(|room_id| event.room_id != room_id) {
+            if !room_filter.contains(&event.room_id) {
                 continue;
             }
             stats.documents_in_scope += 1;
@@ -257,14 +256,13 @@ impl SearchDocumentStore {
     /// unioned with a direct store scan (the authority) — issue #162.
     ///
     /// Results are ordered newest-first, deduped by `(room_id, event_id)`, and
-    /// capped at `limit`. `room_filter == None` searches all rooms; `Some`
-    /// restricts scope. This is the single matching path shared by the core
+    /// capped at `limit`. This is the single matching path shared by the core
     /// `SearchActor` and the fake backend so both agree that any message the
     /// store holds is findable, regardless of SDK index coverage.
     pub fn search_with_candidates(
         &self,
         query: &str,
-        room_filter: Option<&str>,
+        room_filter: &SearchRoomFilter,
         sdk_candidates: &[SearchCandidate],
         limit: usize,
     ) -> Vec<SearchResult> {
@@ -275,7 +273,7 @@ impl SearchDocumentStore {
     pub fn search_with_candidates_with_stats(
         &self,
         query: &str,
-        room_filter: Option<&str>,
+        room_filter: &SearchRoomFilter,
         sdk_candidates: &[SearchCandidate],
         limit: usize,
     ) -> SearchWithCandidatesOutcome {
@@ -291,7 +289,7 @@ impl SearchDocumentStore {
         let mut results: Vec<SearchResult> = Vec::new();
 
         for candidate in sdk_candidates {
-            if room_filter.is_some_and(|room_id| candidate.room_id != room_id) {
+            if !room_filter.contains(&candidate.room_id) {
                 continue;
             }
             stats.sdk_candidates_in_scope += 1;

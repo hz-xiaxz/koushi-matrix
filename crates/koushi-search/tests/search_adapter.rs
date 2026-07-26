@@ -1,6 +1,6 @@
 use koushi_search::{
-    SearchCandidate, SearchDocumentStore, SearchEdit, SearchMaintenanceQueue, SearchableEvent,
-    SensitiveString, cjk_search_query_variants,
+    SearchCandidate, SearchDocumentStore, SearchEdit, SearchMaintenanceQueue, SearchRoomFilter,
+    SearchableEvent, SensitiveString, cjk_search_query_variants,
 };
 use koushi_state::{SearchMatchField, SearchMatchKind, TextRange};
 
@@ -461,24 +461,36 @@ fn document_store_scan_finds_body_candidate_without_index() {
         attachment: None,
     });
 
-    let hits = store.scan_candidates("検査", None, 50);
+    let hits = store.scan_candidates("検査", &SearchRoomFilter::AllRooms, 50);
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].event_id, "$scan-1");
     assert_eq!(hits[0].match_field, SearchMatchField::MessageBody);
     assert_eq!(hits[0].match_kind, SearchMatchKind::Exact);
 
     // Absent query text yields no candidates.
-    assert!(store.scan_candidates("不一致語", None, 50).is_empty());
+    assert!(
+        store
+            .scan_candidates("不一致語", &SearchRoomFilter::AllRooms, 50)
+            .is_empty()
+    );
 
     // Room filter restricts scope.
     assert!(
         store
-            .scan_candidates("検査", Some("!other:example.invalid"), 50)
+            .scan_candidates(
+                "検査",
+                &SearchRoomFilter::OnlyRooms(vec!["!other:example.invalid".to_owned()]),
+                50,
+            )
             .is_empty()
     );
     assert_eq!(
         store
-            .scan_candidates("検査", Some("!room-a:example.invalid"), 50)
+            .scan_candidates(
+                "検査",
+                &SearchRoomFilter::OnlyRooms(vec!["!room-a:example.invalid".to_owned()]),
+                50,
+            )
             .len(),
         1
     );
@@ -500,13 +512,13 @@ fn document_store_scan_orders_recent_first_and_caps() {
         });
     }
 
-    let hits = store.scan_candidates("検査", None, 50);
+    let hits = store.scan_candidates("検査", &SearchRoomFilter::AllRooms, 50);
     assert_eq!(
         hits.iter().map(|h| h.event_id.as_str()).collect::<Vec<_>>(),
         vec!["$new", "$mid", "$old"]
     );
 
-    let capped = store.scan_candidates("検査", None, 2);
+    let capped = store.scan_candidates("検査", &SearchRoomFilter::AllRooms, 2);
     assert_eq!(capped.len(), 2);
     assert_eq!(capped[0].event_id, "$new");
 }
@@ -528,14 +540,14 @@ fn search_with_candidates_unions_store_scan_with_index_candidates() {
     });
 
     // No SDK candidate at all → still found via the store scan (the reported bug).
-    let store_only = store.search_with_candidates("検査", None, &[], 50);
+    let store_only = store.search_with_candidates("検査", &SearchRoomFilter::AllRooms, &[], 50);
     assert_eq!(store_only.len(), 1);
     assert_eq!(store_only[0].event_id, "$store-only");
 
     // Supplying the same event as an SDK candidate does not duplicate it.
     let deduped = store.search_with_candidates(
         "検査",
-        None,
+        &SearchRoomFilter::AllRooms,
         &[SearchCandidate {
             room_id: "!room-a:example.invalid".into(),
             event_id: "$store-only".into(),
@@ -549,7 +561,7 @@ fn search_with_candidates_unions_store_scan_with_index_candidates() {
     // A non-matching SDK candidate is never fabricated into a result.
     let no_fabrication = store.search_with_candidates(
         "検査",
-        None,
+        &SearchRoomFilter::AllRooms,
         &[SearchCandidate {
             room_id: "!room-a:example.invalid".into(),
             event_id: "$does-not-exist".into(),
@@ -563,8 +575,54 @@ fn search_with_candidates_unions_store_scan_with_index_candidates() {
     // Room filter restricts scope.
     assert!(
         store
-            .search_with_candidates("検査", Some("!other:example.invalid"), &[], 50)
+            .search_with_candidates(
+                "検査",
+                &SearchRoomFilter::OnlyRooms(vec!["!other:example.invalid".to_owned()]),
+                &[],
+                50,
+            )
             .is_empty()
+    );
+}
+
+#[test]
+fn search_with_candidates_filters_explicit_room_sets() {
+    let mut store = SearchDocumentStore::default();
+    for (event_id, room_id, body) in [
+        ("$space-a", "!space-child-a:example.invalid", "GPT scoped"),
+        ("$space-b", "!space-child-b:example.invalid", "GPT scoped"),
+        ("$outside", "!outside:example.invalid", "GPT scoped"),
+    ] {
+        store.upsert_message(SearchableEvent {
+            room_id: room_id.into(),
+            event_id: event_id.into(),
+            sender: "@user-a:example.invalid".into(),
+            timestamp_ms: 1_700_000_000_000,
+            body: Some(SensitiveString::new(body)),
+            attachment_filename: None,
+            attachment: None,
+        });
+    }
+
+    let hits = store.search_with_candidates(
+        "GPT",
+        &SearchRoomFilter::OnlyRooms(vec![
+            "!space-child-a:example.invalid".to_owned(),
+            "!space-child-b:example.invalid".to_owned(),
+        ]),
+        &[SearchCandidate {
+            room_id: "!outside:example.invalid".into(),
+            event_id: "$outside".into(),
+            score_millis: 1_000,
+        }],
+        50,
+    );
+
+    assert_eq!(
+        hits.iter()
+            .map(|result| result.event_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["$space-a", "$space-b"]
     );
 }
 
@@ -585,7 +643,7 @@ fn search_with_candidates_orders_results_newest_first_before_score() {
 
     let hits = store.search_with_candidates(
         "検査",
-        None,
+        &SearchRoomFilter::AllRooms,
         &[SearchCandidate {
             room_id: "!room-a:example.invalid".into(),
             event_id: "$old-high-score".into(),
@@ -621,8 +679,12 @@ fn search_with_candidates_stats_report_store_scan_work() {
         });
     }
 
-    let outcome =
-        store.search_with_candidates_with_stats("検査", Some("!room-a:example.invalid"), &[], 50);
+    let outcome = store.search_with_candidates_with_stats(
+        "検査",
+        &SearchRoomFilter::OnlyRooms(vec!["!room-a:example.invalid".to_owned()]),
+        &[],
+        50,
+    );
 
     assert_eq!(outcome.results.len(), 1);
     assert_eq!(outcome.results[0].event_id, "$match-a");

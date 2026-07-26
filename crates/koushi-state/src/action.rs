@@ -226,6 +226,7 @@ pub enum AppAction {
         emojis: Vec<SasEmoji>,
     },
     VerificationGateAttemptFailed {
+        flow_id: u64,
         kind: crate::state::VerificationGateFailureKind,
     },
     VerificationSessionRejected {

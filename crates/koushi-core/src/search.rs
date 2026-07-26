@@ -51,8 +51,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixClientSession;
 use koushi_search::{
-    AttachmentDocument, SearchCandidate, SearchDocumentStore, SearchEdit, SearchableEvent,
-    SensitiveString, cjk_search_query_variants,
+    AttachmentDocument, SearchCandidate, SearchDocumentStore, SearchEdit, SearchRoomFilter,
+    SearchableEvent, SensitiveString, cjk_search_query_variants,
 };
 use koushi_state::{
     AppAction, AttachmentFilter, AttachmentScope, AttachmentSort, SearchCrawlerSettings,
@@ -64,15 +64,13 @@ use crate::account_work::AccountWorkScheduler;
 use crate::command::{SearchCommand, SearchScope};
 use crate::event::{CoreEvent, SearchEvent, SearchResultItem};
 use crate::executor;
-use crate::failure::{CoreFailure, SearchFailureKind};
+use crate::failure::SearchFailureKind;
 use crate::ids::RequestId;
 use crate::search_crawler::{HistoryCrawlCheckpoint, HistoryCrawlPageResult};
 
 /// Maximum number of candidates requested from the SDK ngram index.
 /// Verification filters this down; the final result set may be smaller.
 const SEARCH_CANDIDATE_LIMIT: usize = 50;
-const SEARCH_UNAVAILABLE_MESSAGE: &str = "search unavailable";
-
 /// Search index mutation queue capacity (canon, overview.md: 512).
 pub const SEARCH_INDEX_MUTATION_QUEUE: usize = 512;
 
@@ -101,6 +99,13 @@ fn search_scope_trace_label(scope: &SearchScope) -> &'static str {
         SearchScope::CurrentRoom { .. } => "current_room",
         SearchScope::CurrentSpace { .. } => "current_space",
         SearchScope::Dms => "dms",
+    }
+}
+
+fn search_room_filter_debug(filter: &SearchRoomFilter) -> (&'static str, usize) {
+    match filter {
+        SearchRoomFilter::AllRooms => ("all_rooms", 0),
+        SearchRoomFilter::OnlyRooms(room_ids) => ("only_rooms", room_ids.len()),
     }
 }
 
@@ -268,6 +273,7 @@ pub(crate) enum SearchActorMessage {
         request_id: RequestId,
         query: String,
         scope: SearchScope,
+        room_filter: SearchRoomFilter,
         enqueued_at: Instant,
     },
     /// A `SearchCommand::Attachments` from the command boundary.
@@ -322,17 +328,31 @@ fn coalesce_contiguous_pending_queries(
     (message, dropped_queries)
 }
 
+struct SearchSdkQueryResult {
+    generation: u64,
+    request_id: RequestId,
+    query: String,
+    scope: SearchScope,
+    room_filter: SearchRoomFilter,
+    candidates: Result<Vec<SearchCandidate>, SearchFailureKind>,
+    sdk_total_ms: u128,
+}
+
 // Redact query text in Debug (queries may contain message content).
 impl std::fmt::Debug for SearchActorMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Query {
-                request_id, scope, ..
+                request_id,
+                scope,
+                room_filter,
+                ..
             } => f
                 .debug_struct("SearchActorMessage::Query")
                 .field("request_id", request_id)
                 .field("query", &"SearchQuery(..)")
                 .field("scope", scope)
+                .field("room_filter", &search_room_filter_debug(room_filter))
                 .finish(),
             Self::Attachments {
                 request_id,
@@ -393,10 +413,12 @@ impl SearchActorHandle {
                 request_id,
                 query,
                 scope,
+                room_filter,
             } => SearchActorMessage::Query {
                 request_id,
                 query,
                 scope,
+                room_filter,
                 enqueued_at: Instant::now(),
             },
             SearchCommand::Attachments {
@@ -505,6 +527,10 @@ pub(crate) struct SearchActor {
     /// Read-ahead actor messages drained from `msg_rx` while coalescing a burst
     /// of pending search queries. Non-query messages stay in order here.
     deferred_messages: VecDeque<SearchActorMessage>,
+    /// Current search generation. Every submitted query increments this and any
+    /// SDK supplement finishing with an older generation is dropped in actor.
+    active_query_generation: u64,
+    active_sdk_search: Option<executor::JoinHandle<SearchSdkQueryResult>>,
     account_work: AccountWorkScheduler,
     /// Element-style checkpoint queue for history crawling. The actor starts
     /// exactly one bounded `/messages` page at a time; unfinished rooms are
@@ -556,6 +582,8 @@ impl SearchActor {
             event_tx,
             msg_rx,
             deferred_messages: VecDeque::new(),
+            active_query_generation: 0,
+            active_sdk_search: None,
             account_work,
             crawl_queue: VecDeque::new(),
             queued_crawl_rooms: HashSet::new(),
@@ -585,6 +613,12 @@ impl SearchActor {
 
             tokio::select! {
                 biased;
+                msg = self.msg_rx.recv() => {
+                    let Some(msg) = msg else { break };
+                    if !self.handle_actor_message(msg).await {
+                        break;
+                    }
+                }
                 crawl_result = async {
                     self.active_crawl_page.as_mut().unwrap().await
                 }, if self.active_crawl_page.is_some() => {
@@ -602,10 +636,12 @@ impl SearchActor {
                     self.crawl_delay_elapsed = true;
                     self.start_next_history_crawl_page();
                 }
-                msg = self.msg_rx.recv() => {
-                    let Some(msg) = msg else { break };
-                    if !self.handle_actor_message(msg).await {
-                        break;
+                sdk_result = async {
+                    self.active_sdk_search.as_mut().unwrap().await
+                }, if self.active_sdk_search.is_some() => {
+                    self.active_sdk_search = None;
+                    if let Ok(result) = sdk_result {
+                        self.handle_sdk_query_result(result).await;
                     }
                 }
                 index_msg = index_rx.recv() => {
@@ -622,6 +658,9 @@ impl SearchActor {
     async fn handle_actor_message(&mut self, msg: SearchActorMessage) -> bool {
         match msg {
             SearchActorMessage::Shutdown => {
+                if let Some(task) = self.active_sdk_search.take() {
+                    task.abort();
+                }
                 self.stop_all_history_crawls().await;
                 false
             }
@@ -629,6 +668,7 @@ impl SearchActor {
                 request_id,
                 query,
                 scope,
+                room_filter,
                 enqueued_at,
             } => {
                 self.drain_available_actor_messages();
@@ -637,6 +677,7 @@ impl SearchActor {
                         request_id,
                         query,
                         scope,
+                        room_filter,
                         enqueued_at,
                     },
                     &mut self.deferred_messages,
@@ -645,6 +686,7 @@ impl SearchActor {
                     request_id,
                     query,
                     scope,
+                    room_filter,
                     enqueued_at,
                 } = latest_query
                 {
@@ -666,7 +708,7 @@ impl SearchActor {
                                 )),
                         );
                     }
-                    self.handle_query(request_id, &query, scope, enqueued_at)
+                    self.handle_query(request_id, &query, scope, room_filter, enqueued_at)
                         .await;
                 }
                 true
@@ -723,12 +765,25 @@ impl SearchActor {
     }
 
     async fn handle_query(
-        &self,
+        &mut self,
         request_id: RequestId,
         query: &str,
         scope: SearchScope,
+        room_filter: SearchRoomFilter,
         enqueued_at: Instant,
     ) {
+        self.active_query_generation = self.active_query_generation.wrapping_add(1);
+        let generation = self.active_query_generation;
+        if let Some(task) = self.active_sdk_search.take() {
+            task.abort();
+            record_stale_sdk_drop(
+                request_id,
+                generation.saturating_sub(1),
+                generation,
+                "aborted",
+            );
+        }
+
         let query = query.trim();
         if query.trim().is_empty() {
             self.emit_search_succeeded(request_id, query, &scope, Vec::new())
@@ -753,80 +808,95 @@ impl SearchActor {
             variants.iter().any(|variant| variant != query),
         );
 
-        let sdk_started = Instant::now();
-        let mut candidates_by_key: HashMap<(String, String), koushi_sdk::MatrixSearchCandidate> =
-            HashMap::new();
-        for (variant_index, query_variant) in variants.iter().enumerate() {
-            let variant_started = Instant::now();
-            let candidates = koushi_sdk::search_message_candidates(
-                &self.session,
-                query_variant,
-                SEARCH_CANDIDATE_LIMIT,
-            )
+        let projected_results =
+            self.project_search_results(request_id, query, &room_filter, &[], 0);
+        record_search_finish(
+            request_id,
+            "local_finish",
+            &projected_results,
+            query_started.elapsed().as_millis(),
+        );
+        let compact_results = compact_search_results(&projected_results);
+        self.emit_search_succeeded(request_id, query, &scope, projected_results)
             .await;
+        self.emit(CoreEvent::Search(SearchEvent::Results {
+            request_id,
+            results: compact_results,
+        }));
 
-            let candidates = match candidates {
-                Ok(c) => c,
-                Err(error) => {
-                    let kind = classify_matrix_search_error(&error);
-                    self.emit_search_failed(
-                        request_id,
-                        query,
-                        &scope,
-                        search_failure_message(kind),
-                    )
-                    .await;
-                    self.emit_failure(request_id, CoreFailure::SearchFailed { kind });
-                    return;
-                }
-            };
-            let elapsed_ms = variant_started.elapsed().as_millis();
-            record(
-                DiagnosticEvent::new(DiagnosticLevel::Debug, "core.search", "sdk_variant")
-                    .field(DiagnosticField::request_id(
-                        "request_id",
-                        request_id.connection_id.0,
-                        request_id.sequence,
-                    ))
-                    .field(DiagnosticField::count("variant", variant_index as u64))
-                    .field(DiagnosticField::boolean(
-                        "raw_variant",
-                        query_variant == query,
-                    ))
-                    .field(DiagnosticField::count(
-                        "candidates",
-                        candidates.len() as u64,
-                    ))
-                    .field(DiagnosticField::milliseconds("duration", elapsed_ms)),
-            );
-
-            for candidate in candidates {
-                let key = (candidate.room_id.clone(), candidate.event_id.clone());
-                candidates_by_key
-                    .entry(key)
-                    .and_modify(|current| {
-                        if candidate.score_millis > current.score_millis {
-                            *current = candidate.clone();
-                        }
-                    })
-                    .or_insert(candidate);
-            }
+        if matches!(&room_filter, SearchRoomFilter::OnlyRooms(room_ids) if room_ids.is_empty()) {
+            return;
         }
-        let sdk_total_ms = sdk_started.elapsed().as_millis();
 
-        let sdk_candidates = candidates_by_key
-            .into_values()
-            .map(|candidate| SearchCandidate {
-                room_id: candidate.room_id,
-                event_id: candidate.event_id,
-                score_millis: candidate.score_millis,
-            })
-            .collect::<Vec<_>>();
+        let session = self.session.clone();
+        let query = query.to_owned();
+        let sdk_scope = matrix_sdk_search_scope(&scope, &room_filter);
+        self.active_sdk_search = Some(executor::spawn(run_sdk_query(
+            session,
+            generation,
+            request_id,
+            query,
+            scope,
+            room_filter,
+            sdk_scope,
+            variants,
+        )));
+    }
 
-        let room_filter = match &scope {
-            SearchScope::CurrentRoom { room_id } => Some(room_id.as_str()),
-            SearchScope::AllRooms | SearchScope::CurrentSpace { .. } | SearchScope::Dms => None,
+    async fn handle_sdk_query_result(&mut self, result: SearchSdkQueryResult) {
+        if result.generation != self.active_query_generation {
+            record_stale_sdk_drop(
+                result.request_id,
+                result.generation,
+                self.active_query_generation,
+                "completed",
+            );
+            return;
+        }
+
+        let sdk_candidates = match result.candidates {
+            Ok(candidates) => candidates,
+            Err(kind) => {
+                record_search_sdk_failure(result.request_id, kind, result.sdk_total_ms);
+                return;
+            }
         };
+        let projection_started = Instant::now();
+        let projected_results = self.project_search_results(
+            result.request_id,
+            &result.query,
+            &result.room_filter,
+            &sdk_candidates,
+            result.sdk_total_ms,
+        );
+        record_search_finish(
+            result.request_id,
+            "finish",
+            &projected_results,
+            projection_started.elapsed().as_millis() + result.sdk_total_ms,
+        );
+        let compact_results = compact_search_results(&projected_results);
+        self.emit_search_succeeded(
+            result.request_id,
+            &result.query,
+            &result.scope,
+            projected_results,
+        )
+        .await;
+        self.emit(CoreEvent::Search(SearchEvent::Results {
+            request_id: result.request_id,
+            results: compact_results,
+        }));
+    }
+
+    fn project_search_results(
+        &self,
+        request_id: RequestId,
+        query: &str,
+        room_filter: &SearchRoomFilter,
+        sdk_candidates: &[SearchCandidate],
+        sdk_total_ms: u128,
+    ) -> Vec<koushi_state::SearchResult> {
         let sdk_room_count = {
             sdk_candidates
                 .iter()
@@ -835,16 +905,15 @@ impl SearchActor {
                 .len()
         };
 
-        // #162: the SDK ngram index is an accelerator, not the authority. Union
-        // the index candidates with a direct scan of the document store so any
-        // message koushi has indexed (crawled history, live, CJK, short
-        // queries) is found even when the sync-fed ngram index does not surface
-        // it. Verification against canonical text still drops false positives.
+        // #162/#341: the SDK ngram index is an accelerator, not the authority.
+        // The direct document-store scan runs first and with the same
+        // Rust-resolved scope filter, so indexed local results are visible even
+        // while an SDK supplement is still pending.
         let projection_started = Instant::now();
         let projection = self.document_store.search_with_candidates_with_stats(
             query,
             room_filter,
-            &sdk_candidates,
+            sdk_candidates,
             SEARCH_CANDIDATE_LIMIT,
         );
         let projection_elapsed_ms = projection_started.elapsed().as_millis();
@@ -857,45 +926,7 @@ impl SearchActor {
             projection_elapsed_ms,
             &projection.stats,
         ));
-        let projected_results = projection.results;
-        record(
-            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.search", "finish")
-                .field(DiagnosticField::request_id(
-                    "request_id",
-                    request_id.connection_id.0,
-                    request_id.sequence,
-                ))
-                .field(DiagnosticField::count(
-                    "results",
-                    projected_results.len() as u64,
-                ))
-                .field(DiagnosticField::count(
-                    "result_rooms",
-                    projected_results
-                        .iter()
-                        .map(|result| result.room_id.as_str())
-                        .collect::<HashSet<_>>()
-                        .len() as u64,
-                ))
-                .field(DiagnosticField::milliseconds(
-                    "duration",
-                    query_started.elapsed().as_millis(),
-                )),
-        );
-        let compact_results = projected_results
-            .iter()
-            .map(|result| SearchResultItem {
-                room_id: result.room_id.clone(),
-                event_id: result.event_id.clone(),
-                snippet: result.snippet.clone(),
-            })
-            .collect();
-        self.emit_search_succeeded(request_id, query, &scope, projected_results)
-            .await;
-        self.emit(CoreEvent::Search(SearchEvent::Results {
-            request_id,
-            results: compact_results,
-        }));
+        projection.results
     }
 
     async fn handle_attachments(
@@ -937,24 +968,6 @@ impl SearchActor {
                 query: query.to_owned(),
                 scope: state_search_scope(scope),
                 results,
-            }])
-            .await;
-    }
-
-    async fn emit_search_failed(
-        &self,
-        request_id: RequestId,
-        query: &str,
-        scope: &SearchScope,
-        message: &str,
-    ) {
-        let _ = self
-            .action_tx
-            .send(vec![AppAction::SearchFailed {
-                request_id: request_id.sequence,
-                query: query.to_owned(),
-                scope: state_search_scope(scope),
-                message: message.to_owned(),
             }])
             .await;
     }
@@ -1355,12 +1368,198 @@ impl SearchActor {
     fn emit(&self, event: CoreEvent) {
         let _ = self.event_tx.send(event);
     }
+}
 
-    fn emit_failure(&self, request_id: RequestId, failure: CoreFailure) {
-        self.emit(CoreEvent::OperationFailed {
-            request_id,
-            failure,
-        });
+fn compact_search_results(results: &[koushi_state::SearchResult]) -> Vec<SearchResultItem> {
+    results
+        .iter()
+        .map(|result| SearchResultItem {
+            room_id: result.room_id.clone(),
+            event_id: result.event_id.clone(),
+            snippet: result.snippet.clone(),
+        })
+        .collect()
+}
+
+fn record_search_finish(
+    request_id: RequestId,
+    stage: &'static str,
+    projected_results: &[koushi_state::SearchResult],
+    duration_ms: u128,
+) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "core.search", stage)
+            .field(DiagnosticField::request_id(
+                "request_id",
+                request_id.connection_id.0,
+                request_id.sequence,
+            ))
+            .field(DiagnosticField::count(
+                "results",
+                projected_results.len() as u64,
+            ))
+            .field(DiagnosticField::count(
+                "result_rooms",
+                projected_results
+                    .iter()
+                    .map(|result| result.room_id.as_str())
+                    .collect::<HashSet<_>>()
+                    .len() as u64,
+            ))
+            .field(DiagnosticField::milliseconds("duration", duration_ms)),
+    );
+}
+
+fn record_stale_sdk_drop(
+    request_id: RequestId,
+    generation: u64,
+    active_generation: u64,
+    reason: &'static str,
+) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "core.search", "stale_sdk_drop")
+            .field(DiagnosticField::request_id(
+                "request_id",
+                request_id.connection_id.0,
+                request_id.sequence,
+            ))
+            .field(DiagnosticField::count("generation", generation))
+            .field(DiagnosticField::count(
+                "active_generation",
+                active_generation,
+            ))
+            .field(DiagnosticField::token("reason", reason)),
+    );
+}
+
+fn record_search_sdk_failure(request_id: RequestId, kind: SearchFailureKind, duration_ms: u128) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "core.search", "sdk_failed")
+            .field(DiagnosticField::request_id(
+                "request_id",
+                request_id.connection_id.0,
+                request_id.sequence,
+            ))
+            .field(DiagnosticField::token(
+                "kind",
+                search_failure_trace_label(kind),
+            ))
+            .field(DiagnosticField::milliseconds("duration", duration_ms)),
+    );
+}
+
+fn search_failure_trace_label(kind: SearchFailureKind) -> &'static str {
+    match kind {
+        SearchFailureKind::IndexUnavailable => "index_unavailable",
+        SearchFailureKind::Query => "query",
+        SearchFailureKind::Internal => "internal",
+    }
+}
+
+fn matrix_sdk_search_scope(
+    scope: &SearchScope,
+    room_filter: &SearchRoomFilter,
+) -> koushi_sdk::MatrixSearchScope {
+    match scope {
+        SearchScope::CurrentRoom { room_id } => koushi_sdk::MatrixSearchScope::CurrentRoom {
+            room_id: room_id.clone(),
+        },
+        SearchScope::Dms => koushi_sdk::MatrixSearchScope::Dms,
+        SearchScope::CurrentSpace { .. } => match room_filter {
+            SearchRoomFilter::OnlyRooms(room_ids) => koushi_sdk::MatrixSearchScope::RoomSet {
+                room_ids: room_ids.clone(),
+            },
+            SearchRoomFilter::AllRooms => koushi_sdk::MatrixSearchScope::AllRooms,
+        },
+        SearchScope::AllRooms => koushi_sdk::MatrixSearchScope::AllRooms,
+    }
+}
+
+async fn run_sdk_query(
+    session: Arc<MatrixClientSession>,
+    generation: u64,
+    request_id: RequestId,
+    query: String,
+    scope: SearchScope,
+    room_filter: SearchRoomFilter,
+    sdk_scope: koushi_sdk::MatrixSearchScope,
+    variants: Vec<String>,
+) -> SearchSdkQueryResult {
+    let sdk_started = Instant::now();
+    let mut candidates_by_key: HashMap<(String, String), koushi_sdk::MatrixSearchCandidate> =
+        HashMap::new();
+    for (variant_index, query_variant) in variants.iter().enumerate() {
+        let variant_started = Instant::now();
+        let candidates = koushi_sdk::search_message_candidates_scoped(
+            &session,
+            query_variant,
+            sdk_scope.clone(),
+            SEARCH_CANDIDATE_LIMIT,
+        )
+        .await;
+
+        let candidates = match candidates {
+            Ok(candidates) => candidates,
+            Err(error) => {
+                return SearchSdkQueryResult {
+                    generation,
+                    request_id,
+                    query,
+                    scope,
+                    room_filter,
+                    candidates: Err(classify_matrix_search_error(&error)),
+                    sdk_total_ms: sdk_started.elapsed().as_millis(),
+                };
+            }
+        };
+        let elapsed_ms = variant_started.elapsed().as_millis();
+        record(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.search", "sdk_variant")
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                ))
+                .field(DiagnosticField::count("variant", variant_index as u64))
+                .field(DiagnosticField::boolean(
+                    "raw_variant",
+                    query_variant == &query,
+                ))
+                .field(DiagnosticField::count(
+                    "candidates",
+                    candidates.len() as u64,
+                ))
+                .field(DiagnosticField::milliseconds("duration", elapsed_ms)),
+        );
+
+        for candidate in candidates {
+            let key = (candidate.room_id.clone(), candidate.event_id.clone());
+            candidates_by_key
+                .entry(key)
+                .and_modify(|current| {
+                    if candidate.score_millis > current.score_millis {
+                        *current = candidate.clone();
+                    }
+                })
+                .or_insert(candidate);
+        }
+    }
+
+    SearchSdkQueryResult {
+        generation,
+        request_id,
+        query,
+        scope,
+        room_filter,
+        candidates: Ok(candidates_by_key
+            .into_values()
+            .map(|candidate| SearchCandidate {
+                room_id: candidate.room_id,
+                event_id: candidate.event_id,
+                score_millis: candidate.score_millis,
+            })
+            .collect()),
+        sdk_total_ms: sdk_started.elapsed().as_millis(),
     }
 }
 
@@ -1369,14 +1568,6 @@ fn classify_matrix_search_error(error: &koushi_sdk::MatrixSearchError) -> Search
         koushi_sdk::MatrixSearchError::IndexUnavailable => SearchFailureKind::IndexUnavailable,
         koushi_sdk::MatrixSearchError::Query => SearchFailureKind::Query,
         koushi_sdk::MatrixSearchError::Internal => SearchFailureKind::Internal,
-    }
-}
-
-fn search_failure_message(kind: SearchFailureKind) -> &'static str {
-    match kind {
-        SearchFailureKind::IndexUnavailable => SEARCH_UNAVAILABLE_MESSAGE,
-        SearchFailureKind::Query => "search query failed",
-        SearchFailureKind::Internal => "search internal failure",
     }
 }
 
@@ -1785,11 +1976,98 @@ mod tests {
         );
         assert!(
             query_handler.contains("classify_matrix_search_error(&error)"),
-            "query failures must classify the SDK search error before emitting CoreFailure"
+            "query failures must classify the SDK search error before recording supplement failure"
         );
         assert!(
             !query_handler.contains("kind: SearchFailureKind::IndexUnavailable"),
             "query failures must not hardcode every SDK error as IndexUnavailable"
+        );
+    }
+
+    #[test]
+    fn search_actor_handles_new_queries_before_crawl_and_sdk_completions() {
+        let source = include_str!("search.rs");
+        let run_loop = source
+            .split("async fn run")
+            .nth(1)
+            .expect("run loop should exist")
+            .split("async fn handle_actor_message")
+            .next()
+            .expect("actor message handler should follow run loop");
+        let actor_message_position = run_loop
+            .find("msg = self.msg_rx.recv()")
+            .expect("run loop should receive actor messages");
+        let crawl_completion_position = run_loop
+            .find("crawl_result = async")
+            .expect("run loop should receive crawl completions");
+        let sdk_completion_position = run_loop
+            .find("sdk_result = async")
+            .expect("run loop should receive SDK supplement completions");
+        assert!(run_loop.contains("biased;"));
+        assert!(
+            actor_message_position < crawl_completion_position,
+            "actor messages, including newer queries, must be polled before crawl completions"
+        );
+        assert!(
+            actor_message_position < sdk_completion_position,
+            "actor messages, including newer queries, must be polled before SDK supplement completion"
+        );
+
+        let query_handler = source
+            .split("async fn handle_query")
+            .nth(1)
+            .expect("query handler should exist")
+            .split("async fn handle_sdk_query_result")
+            .next()
+            .expect("SDK result handler should follow query handler");
+        assert!(query_handler.contains("self.active_sdk_search.take()"));
+        assert!(query_handler.contains("task.abort()"));
+        assert!(query_handler.contains("record_stale_sdk_drop"));
+
+        let sdk_result_handler = source
+            .split("async fn handle_sdk_query_result")
+            .nth(1)
+            .expect("SDK result handler should exist")
+            .split("fn project_search_results")
+            .next()
+            .expect("projector should follow SDK result handler");
+        assert!(sdk_result_handler.contains("result.generation != self.active_query_generation"));
+        assert!(sdk_result_handler.contains("record_stale_sdk_drop"));
+    }
+
+    #[test]
+    fn matrix_sdk_search_scope_respects_actor_resolved_room_filter() {
+        assert_eq!(
+            matrix_sdk_search_scope(
+                &SearchScope::CurrentRoom {
+                    room_id: "!room:example.invalid".to_owned(),
+                },
+                &SearchRoomFilter::AllRooms,
+            ),
+            koushi_sdk::MatrixSearchScope::CurrentRoom {
+                room_id: "!room:example.invalid".to_owned(),
+            }
+        );
+        assert_eq!(
+            matrix_sdk_search_scope(&SearchScope::Dms, &SearchRoomFilter::AllRooms),
+            koushi_sdk::MatrixSearchScope::Dms
+        );
+        assert_eq!(
+            matrix_sdk_search_scope(
+                &SearchScope::CurrentSpace {
+                    space_id: "!space:example.invalid".to_owned(),
+                },
+                &SearchRoomFilter::OnlyRooms(vec![
+                    "!room-a:example.invalid".to_owned(),
+                    "!room-b:example.invalid".to_owned(),
+                ]),
+            ),
+            koushi_sdk::MatrixSearchScope::RoomSet {
+                room_ids: vec![
+                    "!room-a:example.invalid".to_owned(),
+                    "!room-b:example.invalid".to_owned(),
+                ],
+            }
         );
     }
 
@@ -1806,6 +2084,7 @@ mod tests {
             },
             query: "super-secret-search-query".to_owned(),
             scope: SearchScope::AllRooms,
+            room_filter: SearchRoomFilter::AllRooms,
         };
         let debug = format!("{cmd:?}");
         assert!(
@@ -1926,6 +2205,7 @@ mod tests {
                 },
                 query: format!("q{sequence}"),
                 scope: SearchScope::AllRooms,
+                room_filter: SearchRoomFilter::AllRooms,
                 enqueued_at: Instant::now(),
             }
         }

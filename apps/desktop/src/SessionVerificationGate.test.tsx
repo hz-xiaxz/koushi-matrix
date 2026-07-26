@@ -103,12 +103,22 @@ describe("SessionVerificationGate interactions", () => {
     render(<SessionVerificationGate snapshot={snapshot} onSnapshot={() => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery, retryCurrentDeviceTrustDiscovery: async () => snapshot }} />);
 
     const sas = screen.getByRole("button", { name: "Verify with another device" });
+    const recovery = screen.getByRole("button", { name: "Verify with recovery key" });
+    expect(
+      recovery.compareDocumentPosition(sas) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
     fireEvent.click(sas);
+    expect(startOwnUserSas).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Try device verification?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Use recovery key" }));
+    expect(screen.queryByRole("dialog", { name: "Try device verification?" })).toBeNull();
+    expect(startOwnUserSas).not.toHaveBeenCalled();
     fireEvent.click(sas);
+    fireEvent.click(screen.getByRole("button", { name: "Try device verification anyway" }));
     expect(startOwnUserSas).toHaveBeenCalledTimes(1);
 
     fireEvent.change(screen.getByLabelText("Recovery secret"), { target: { value: "fixture-secret" } });
-    fireEvent.click(screen.getByRole("button", { name: "Recover" }));
+    fireEvent.click(screen.getByRole("button", { name: "Verify with recovery key" }));
     expect(submitRecovery).toHaveBeenCalledTimes(1);
     releaseSas(snapshot);
   });
@@ -120,10 +130,26 @@ describe("SessionVerificationGate interactions", () => {
     render(<SessionVerificationGate snapshot={snapshot} onSnapshot={() => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery: async () => snapshot, retryCurrentDeviceTrustDiscovery: async () => snapshot }} />);
     const button = screen.getByRole("button", { name: "Verify with another device" });
     fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Try device verification anyway" }));
     await vi.waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     expect(screen.getByRole("alert").textContent).toContain("Verification command failed");
     fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Try device verification anyway" }));
     await vi.waitFor(() => expect(startOwnUserSas).toHaveBeenCalledTimes(2));
+  });
+
+  test("does not offer recovery-key fallback when only SAS is available", async () => {
+    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" } };
+    const startOwnUserSas = vi.fn(async () => snapshot);
+    render(<SessionVerificationGate snapshot={snapshot} onSnapshot={() => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery: async () => snapshot, retryCurrentDeviceTrustDiscovery: async () => snapshot }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Verify with another device" }));
+
+    expect(screen.getByRole("dialog", { name: "Try device verification?" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Use recovery key" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try device verification anyway" }));
+    expect(startOwnUserSas).toHaveBeenCalledTimes(1);
   });
 
   test("provides a primary-button-only verification window drag region", async () => {

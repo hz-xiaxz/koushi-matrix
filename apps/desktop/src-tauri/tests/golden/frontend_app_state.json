@@ -456,6 +456,7 @@
         "request_id": 9,
         "results": [
           {
+            "context_label": "Fixture Space · Fixture Room",
             "event_id": "$search:example.invalid",
             "highlights": [
               {

@@ -11,8 +11,7 @@ use koushi_state::{
     RoomListProjection, RoomManagementState, RoomNotificationSettings, RoomPreferencesState,
     RoomSummary, SearchCrawlerState, SearchState, SessionState, SettingsState, SidebarModel,
     SoftLogoutReauthState, SpaceSummary, SyncMode, SyncState, ThreadAttentionState,
-    ThreadPaneState, ThreadsListState, TimelinePaneState,
-    compose_sidebar_with_account_facts,
+    ThreadPaneState, ThreadsListState, TimelinePaneState, compose_sidebar_with_account_facts,
 };
 use serde::{Deserialize, Serialize};
 

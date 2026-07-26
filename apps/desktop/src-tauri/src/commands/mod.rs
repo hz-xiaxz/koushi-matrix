@@ -757,6 +757,10 @@ fn snapshot_has_started_search(snapshot: &koushi_state::AppState, request_id: Re
             request_id: state_request_id,
             ..
         }
+        | koushi_state::SearchState::TooShort {
+            request_id: state_request_id,
+            ..
+        }
         | koushi_state::SearchState::Failed {
             request_id: state_request_id,
             ..
@@ -2416,6 +2420,7 @@ pub(crate) fn build_submit_search_command(
         request_id,
         query,
         scope,
+        room_filter: koushi_state::SearchRoomFilter::AllRooms,
     })
 }
 
@@ -5012,6 +5017,7 @@ mod tests {
                 request_id,
                 query: route_query,
                 scope,
+                ..
             }) => {
                 assert_eq!(request_id, fake_request_id(15));
                 assert_eq!(route_query, query);

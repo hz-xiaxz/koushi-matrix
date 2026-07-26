@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const nonReady = [
   "provisional",
@@ -8,6 +8,12 @@ const nonReady = [
   "rejecting",
   "locked"
 ] as const;
+
+async function startDeviceVerificationAnyway(page: Page) {
+  await page.getByRole("button", { name: "Verify with another device" }).click();
+  await expect(page.getByRole("dialog", { name: "Try device verification?" })).toBeVisible();
+  await page.getByRole("button", { name: "Try device verification anyway" }).click();
+}
 
 test("verification states replace the complete desktop shell", async ({ page }) => {
   await page.goto("/appHarness.html");
@@ -77,9 +83,9 @@ test("ready sync lifecycle stays in the normal shell", async ({ page }) => {
 
 test("gate controls follow the Core admission matrix", async ({ page }) => {
   await page.goto("/appHarness.html");
-  const controls = ["Verify with another device", "Recover", "Create secure backup", "They match", "They do not match", "Cancel", "Retry", "I saved the recovery key"];
+  const controls = ["Verify with another device", "Verify with recovery key", "Create secure backup", "They match", "They do not match", "Cancel", "Retry", "I saved the recovery key"];
   const cases = [
-    { session: { kind: "awaitingVerification", gate: { methods: ["existingDeviceSas", "recoveryKey", "bootstrap"], account_kind: "existingIdentity", failureKind: null } }, present: ["Verify with another device", "Recover", "Create secure backup", "Retry"] },
+    { session: { kind: "awaitingVerification", gate: { methods: ["existingDeviceSas", "recoveryKey", "bootstrap"], account_kind: "existingIdentity", failureKind: null } }, present: ["Verify with another device", "Verify with recovery key", "Create secure backup", "Retry"] },
     { session: { kind: "verifying", method: "existingDeviceSas", flow_id: 5, sas_emojis: Array.from({ length: 7 }, (_, i) => ({ symbol: `e${i}`, description: `d${i}` })), gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity", failureKind: null } }, present: ["They match", "They do not match", "Cancel"] },
     { session: { kind: "verifying", method: "recoveryKey", flow_id: 6, gate: { methods: ["recoveryKey"], account_kind: "existingIdentity", failureKind: null } }, present: [] },
     { session: { kind: "awaitingBootstrapConfirmation", flow_id: 7, destination_written: true, gate: { methods: ["bootstrap"], account_kind: "newIdentity", failureKind: null } }, present: ["I saved the recovery key"] },
@@ -109,7 +115,7 @@ test("recovery and bootstrap actions preserve secrets outside observable state",
   });
   const secret = "SYNTHETIC_RECOVERY_SECRET_8842";
   await page.getByLabel("Recovery secret").fill(secret);
-  await page.getByRole("button", { name: "Recover", exact: true }).click();
+  await page.getByRole("button", { name: "Verify with recovery key", exact: true }).click();
   await expect(page.getByLabel("Recovery secret")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("submit_recovery")[0]?.args)).toEqual({ secret: "[REDACTED]" });
   await expect(page.locator("body")).not.toContainText(secret);
@@ -182,7 +188,7 @@ test("SAS actions stay flow-correlated through retry and cancellation", async ({
     window.__harness.pushStateChanged();
     window.__harness.clearInvocations();
   });
-  await page.getByRole("button", { name: "Verify with another device" }).click();
+  await startDeviceVerificationAnyway(page);
   await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("start_own_user_sas")[0]?.args)).toEqual({});
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
@@ -247,7 +253,7 @@ test("completed verification failures disappear when a new attempt starts", asyn
   });
 
   await expect(page.getByText("Timeout")).toBeVisible();
-  await page.getByRole("button", { name: "Verify with another device" }).click();
+  await startDeviceVerificationAnyway(page);
   await expect(page.getByText("Timeout")).toHaveCount(0);
   await expect.poll(() => page.evaluate(
     () => window.__harness.currentSnapshot().state.domain.session.gate?.failureKind
@@ -277,7 +283,7 @@ test("completed verification failures disappear when a new attempt starts", asyn
     window.__harness.pushStateChanged();
   });
   await page.getByLabel("Recovery secret").fill("synthetic-recovery-key");
-  await page.getByRole("button", { name: "Recover" }).click();
+  await page.getByRole("button", { name: "Verify with recovery key" }).click();
   await expect(page.getByText("Timeout")).toHaveCount(0);
   await expect.poll(() => page.evaluate(
     () => window.__harness.currentSnapshot().state.domain.session.gate?.failureKind
@@ -341,14 +347,14 @@ test("start retries allocate distinct opaque flows and stale terminals are ignor
     window.__harness.setSnapshot({ ...snapshot, state: { ...snapshot.state, domain: { ...snapshot.state.domain, session: { kind: "awaitingVerification", homeserver: "https://example.invalid", user_id: "@gate:example.invalid", device_id: "DEVICE", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity", failureKind: null } } } } });
     window.__harness.pushStateChanged();
   });
-  await page.getByRole("button", { name: "Verify with another device" }).click();
+  await startDeviceVerificationAnyway(page);
   const first = await expect.poll(() => page.evaluate(() => window.__harness.currentSnapshot().state.domain.session.flow_id)).toBeTruthy().then(() => page.evaluate(() => window.__harness.currentSnapshot().state.domain.session.flow_id!));
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
     window.__harness.setSnapshot({ ...snapshot, state: { ...snapshot.state, domain: { ...snapshot.state.domain, session: { ...snapshot.state.domain.session, kind: "awaitingVerification", flow_id: undefined } } } });
     window.__harness.pushStateChanged();
   });
-  await page.getByRole("button", { name: "Verify with another device" }).click();
+  await startDeviceVerificationAnyway(page);
   const second = await expect.poll(() => page.evaluate(() => window.__harness.currentSnapshot().state.domain.session.flow_id)).not.toBe(first).then(() => page.evaluate(() => window.__harness.currentSnapshot().state.domain.session.flow_id!));
   expect(second).not.toBe(first);
   const beforeStale = await page.evaluate(() => JSON.stringify(window.__harness.currentSnapshot().state.domain.session));

@@ -1289,13 +1289,8 @@ fn sidebar_aggregate_badges_ignore_muted_rooms_but_room_items_keep_counts() {
         },
     )]);
 
-    let sidebar = compose_sidebar_with_account_facts(
-        None,
-        &spaces(),
-        &rooms(),
-        &notification_settings,
-        0,
-    );
+    let sidebar =
+        compose_sidebar_with_account_facts(None, &spaces(), &rooms(), &notification_settings, 0);
 
     assert_eq!(
         sidebar
@@ -1319,7 +1314,8 @@ fn home_attention_counts_invites_separately_from_unread_messages() {
     // #330: the Home rail badge is unread messages plus pending invites, but the
     // two must stay separately readable — the accessible label names them
     // individually, and `unread_count` keeps meaning only messages.
-    let without_invites = compose_sidebar_with_account_facts(None, &spaces(), &rooms(), &HashMap::new(), 0);
+    let without_invites =
+        compose_sidebar_with_account_facts(None, &spaces(), &rooms(), &HashMap::new(), 0);
     assert_eq!(without_invites.account_home.unread_count, 10);
     assert_eq!(without_invites.account_home.invite_count, 0);
     assert_eq!(
@@ -1327,7 +1323,8 @@ fn home_attention_counts_invites_separately_from_unread_messages() {
         "with no invites the total is the unread message count"
     );
 
-    let with_invites = compose_sidebar_with_account_facts(None, &spaces(), &rooms(), &HashMap::new(), 2);
+    let with_invites =
+        compose_sidebar_with_account_facts(None, &spaces(), &rooms(), &HashMap::new(), 2);
     assert_eq!(
         with_invites.account_home.unread_count, 10,
         "invites must not be folded into the unread message count"

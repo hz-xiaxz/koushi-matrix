@@ -1326,8 +1326,9 @@ button:disabled {
 }
 
 .room-list-chip.is-selected .room-list-chip-total {
-  color: var(--brand);
-  background: var(--brand-contrast);
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  outline: 1px solid var(--line);
 }
 
 .room-list-chip.is-selected .room-list-chip-unread {

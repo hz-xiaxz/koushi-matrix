@@ -58,6 +58,7 @@ fn result(
     SearchResult {
         room_id: event.room_id.clone(),
         event_id: event.event_id.clone(),
+        context_label: None,
         sender: event.sender.clone(),
         timestamp_ms: event.timestamp_ms,
         score_millis: candidate.score_millis,

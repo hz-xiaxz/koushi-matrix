@@ -29,6 +29,7 @@ async fn search_query_projects_search_state_before_routing() {
             request_id,
             query: "Alpha".to_owned(),
             scope: SearchScope::AllRooms,
+            room_filter: koushi_state::SearchRoomFilter::AllRooms,
         }))
         .await
         .expect("submit");

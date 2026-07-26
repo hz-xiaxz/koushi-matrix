@@ -93,6 +93,7 @@ fn secret_bearing_commands_redact_debug() {
         request_id: fake_request_id(),
         query: QUERY.to_owned(),
         scope: SearchScope::AllRooms,
+        room_filter: koushi_state::SearchRoomFilter::AllRooms,
     });
     let thread_draft = CoreCommand::App(AppCommand::SetThreadComposerDraft {
         request_id: fake_request_id(),

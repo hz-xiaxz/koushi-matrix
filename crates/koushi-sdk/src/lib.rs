@@ -159,6 +159,10 @@ fn sas_delivery_event(stage: &'static str, flow_id: u64) -> DiagnosticEvent {
         .field(DiagnosticField::count("flow_id", flow_id))
 }
 
+fn sas_delivery_waiting_event(flow_id: u64, waiting_for: &'static str) -> DiagnosticEvent {
+    sas_delivery_event("waiting", flow_id).field(DiagnosticField::token("waiting_for", waiting_for))
+}
+
 fn sas_recipients_resolved_event(
     flow_id: u64,
     diagnostics: OwnUserSasRecipientDiagnostics,
@@ -1510,6 +1514,7 @@ pub async fn request_own_user_sas_verification(
             ));
         }
     };
+    record_sas_delivery_event(sas_delivery_waiting_event(flow_id, "recipient_devices"));
     let devices = match encryption.get_user_devices(&user_id).await {
         Ok(devices) => devices,
         Err(_) => {
@@ -1550,6 +1555,7 @@ pub async fn request_own_user_sas_verification(
             "verification device unavailable".to_owned(),
         ));
     }
+    record_sas_delivery_event(sas_delivery_waiting_event(flow_id, "to_device_delivery"));
     let inner = match identity
         .request_verification_with_methods(vec![
             matrix_sdk::ruma::events::key::verification::VerificationMethod::SasV1,
@@ -2300,6 +2306,16 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert_eq!(
             koushi_diagnostics::format_event(&event),
             "stage=recipients_resolved flow_id=41 other_device_count=3 recipient_count=1"
+        );
+    }
+
+    #[test]
+    fn sas_delivery_waiting_event_identifies_private_safe_wait_state() {
+        let event = super::sas_delivery_waiting_event(43, "to_device_delivery");
+
+        assert_eq!(
+            koushi_diagnostics::format_event(&event),
+            "stage=waiting flow_id=43 waiting_for=to_device_delivery"
         );
     }
 
@@ -4055,6 +4071,14 @@ pub struct MatrixSearchCandidate {
     pub room_id: String,
     pub event_id: String,
     pub score_millis: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MatrixSearchScope {
+    AllRooms,
+    CurrentRoom { room_id: String },
+    Dms,
+    RoomSet { room_ids: Vec<String> },
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -6255,14 +6279,59 @@ pub async fn search_message_candidates(
     query: &str,
     limit: usize,
 ) -> Result<Vec<MatrixSearchCandidate>, MatrixSearchError> {
+    search_message_candidates_scoped(session, query, MatrixSearchScope::AllRooms, limit).await
+}
+
+pub async fn search_message_candidates_scoped(
+    session: &MatrixClientSession,
+    query: &str,
+    scope: MatrixSearchScope,
+    limit: usize,
+) -> Result<Vec<MatrixSearchCandidate>, MatrixSearchError> {
     if query.trim().is_empty() || limit == 0 {
         return Ok(Vec::new());
     }
 
-    let mut iterator = session
-        .client()
-        .search_messages(query.to_owned(), limit)
-        .build();
+    match scope {
+        MatrixSearchScope::CurrentRoom { room_id } => {
+            let room_id =
+                matrix_sdk::ruma::RoomId::parse(&room_id).map_err(|_| MatrixSearchError::Query)?;
+            let Some(room) = session.client().get_room(&room_id) else {
+                return Ok(Vec::new());
+            };
+            let mut iterator = room.search_messages(query.to_owned(), limit);
+            let Some(candidates) = iterator
+                .next()
+                .await
+                .map_err(|error| matrix_search_error_from_index(&error))?
+            else {
+                return Ok(Vec::new());
+            };
+
+            return Ok(candidates
+                .into_iter()
+                .take(limit)
+                .enumerate()
+                .map(|(index, event_id)| MatrixSearchCandidate {
+                    room_id: room_id.to_string(),
+                    event_id: event_id.to_string(),
+                    score_millis: 1_000_u32.saturating_sub(index as u32),
+                })
+                .collect());
+        }
+        MatrixSearchScope::AllRooms
+        | MatrixSearchScope::Dms
+        | MatrixSearchScope::RoomSet { .. } => {}
+    }
+
+    let mut builder = session.client().search_messages(query.to_owned(), limit);
+    if matches!(scope, MatrixSearchScope::Dms) {
+        builder = builder
+            .only_dm_rooms()
+            .await
+            .map_err(|_| MatrixSearchError::Internal)?;
+    }
+    let mut iterator = builder.build();
     let Some(candidates) = iterator
         .next()
         .await
@@ -6271,7 +6340,7 @@ pub async fn search_message_candidates(
         return Ok(Vec::new());
     };
 
-    Ok(candidates
+    let mut candidates = candidates
         .into_iter()
         .take(limit)
         .enumerate()
@@ -6280,7 +6349,11 @@ pub async fn search_message_candidates(
             event_id: event_id.to_string(),
             score_millis: 1_000_u32.saturating_sub(index as u32),
         })
-        .collect())
+        .collect::<Vec<_>>();
+    if let MatrixSearchScope::RoomSet { room_ids } = scope {
+        candidates.retain(|candidate| room_ids.iter().any(|room_id| room_id == &candidate.room_id));
+    }
+    Ok(candidates)
 }
 
 fn matrix_search_error_from_sdk(error: SearchError) -> MatrixSearchError {

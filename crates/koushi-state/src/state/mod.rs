@@ -181,7 +181,8 @@ pub use thread::{
 
 // ── Re-exports: search ──────────────────────────────────────────────────────
 pub use search::{
-    SearchMatchField, SearchMatchKind, SearchResult, SearchScope, SearchState, TextRange,
+    SearchMatchField, SearchMatchKind, SearchResult, SearchRoomFilter, SearchScope, SearchState,
+    TextRange, search_query_too_short,
 };
 
 // ── Re-exports: files_view ──────────────────────────────────────────────────

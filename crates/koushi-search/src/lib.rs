@@ -8,6 +8,7 @@ pub use document::{
     SearchWithCandidatesOutcome, SearchWithCandidatesStats, SearchableEvent,
     cjk_search_query_variants,
 };
+pub use koushi_state::SearchRoomFilter;
 pub use maintenance::{SearchEventRef, SearchMaintenanceQueue};
 pub use sensitive::SensitiveString;
 pub use verify::{SearchVerificationError, verify_candidate};

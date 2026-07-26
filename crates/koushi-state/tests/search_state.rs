@@ -1,6 +1,7 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, RoomSummary, RoomTags, SearchMatchField, SearchMatchKind,
-    SearchResult, SearchScope, SearchState, SessionInfo, SessionState, TextRange, UiEvent, reduce,
+    SearchResult, SearchRoomFilter, SearchScope, SearchState, SessionInfo, SessionState,
+    SpaceSummary, TextRange, UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -26,6 +27,7 @@ fn result(event_id: &str) -> SearchResult {
     SearchResult {
         room_id: "room-a".to_owned(),
         event_id: event_id.to_owned(),
+        context_label: None,
         sender: "@user-a:example.invalid".to_owned(),
         timestamp_ms: 1_700_000_000_000,
         score_millis: 900,
@@ -67,6 +69,7 @@ fn attachment_filename_result(event_id: &str) -> SearchResult {
     SearchResult {
         room_id: "room-a".to_owned(),
         event_id: event_id.to_owned(),
+        context_label: None,
         sender: "@user-a:example.invalid".to_owned(),
         timestamp_ms: 1_700_000_000_000,
         score_millis: 875,
@@ -162,9 +165,212 @@ fn submitting_search_emits_search_effect() {
                 request_id: 7,
                 query: "アンケート".to_owned(),
                 scope: scope(),
+                room_filter: SearchRoomFilter::AllRooms,
             },
             AppEffect::EmitUiEvent(UiEvent::SearchChanged),
         ]
+    );
+}
+
+#[test]
+fn submitting_short_ascii_search_stays_too_short_without_sdk_effect() {
+    let mut state = ready_state();
+
+    let effects = reduce(
+        &mut state,
+        AppAction::SearchSubmitted {
+            request_id: 7,
+            query: "GP".to_owned(),
+            scope: scope(),
+        },
+    );
+
+    assert_eq!(
+        state.search,
+        SearchState::TooShort {
+            request_id: 7,
+            query: "GP".to_owned(),
+            scope: scope(),
+            min_chars: 3,
+        }
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::SearchChanged)]
+    );
+}
+
+#[test]
+fn submitting_short_cjk_search_uses_cjk_threshold_without_sdk_effect() {
+    let mut state = ready_state();
+
+    let short_effects = reduce(
+        &mut state,
+        AppAction::SearchSubmitted {
+            request_id: 8,
+            query: "通".to_owned(),
+            scope: scope(),
+        },
+    );
+
+    assert_eq!(
+        state.search,
+        SearchState::TooShort {
+            request_id: 8,
+            query: "通".to_owned(),
+            scope: scope(),
+            min_chars: 2,
+        }
+    );
+    assert_eq!(
+        short_effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::SearchChanged)]
+    );
+
+    let searchable_effects = reduce(
+        &mut state,
+        AppAction::SearchSubmitted {
+            request_id: 9,
+            query: "通院".to_owned(),
+            scope: scope(),
+        },
+    );
+
+    assert_eq!(
+        state.search,
+        SearchState::Searching {
+            request_id: 9,
+            query: "通院".to_owned(),
+            scope: scope(),
+        }
+    );
+    assert_eq!(
+        searchable_effects,
+        vec![
+            AppEffect::SearchMessages {
+                request_id: 9,
+                query: "通院".to_owned(),
+                scope: scope(),
+                room_filter: SearchRoomFilter::AllRooms,
+            },
+            AppEffect::EmitUiEvent(UiEvent::SearchChanged),
+        ]
+    );
+}
+
+#[test]
+fn submitting_scoped_search_carries_rust_resolved_room_filter() {
+    let mut state = ready_state();
+    let mut space_child = room_summary("space-child");
+    space_child.parent_space_ids = vec!["space-a".to_owned()];
+    let mut dm_child = room_summary("dm-child");
+    dm_child.is_dm = true;
+    dm_child.dm_space_ids = vec!["space-a".to_owned()];
+    let outside = room_summary("outside");
+    state.rooms = vec![space_child, dm_child, outside];
+
+    let space_scope = SearchScope::CurrentSpace {
+        space_id: "space-a".to_owned(),
+    };
+    let effects = reduce(
+        &mut state,
+        AppAction::SearchSubmitted {
+            request_id: 11,
+            query: "GPT".to_owned(),
+            scope: space_scope.clone(),
+        },
+    );
+
+    assert_eq!(
+        effects,
+        vec![
+            AppEffect::SearchMessages {
+                request_id: 11,
+                query: "GPT".to_owned(),
+                scope: space_scope,
+                room_filter: SearchRoomFilter::OnlyRooms(vec![
+                    "space-child".to_owned(),
+                    "dm-child".to_owned(),
+                ]),
+            },
+            AppEffect::EmitUiEvent(UiEvent::SearchChanged),
+        ]
+    );
+
+    let effects = reduce(
+        &mut state,
+        AppAction::SearchSubmitted {
+            request_id: 12,
+            query: "GPT".to_owned(),
+            scope: SearchScope::Dms,
+        },
+    );
+
+    assert_eq!(
+        effects,
+        vec![
+            AppEffect::SearchMessages {
+                request_id: 12,
+                query: "GPT".to_owned(),
+                scope: SearchScope::Dms,
+                room_filter: SearchRoomFilter::OnlyRooms(vec!["dm-child".to_owned()]),
+            },
+            AppEffect::EmitUiEvent(UiEvent::SearchChanged),
+        ]
+    );
+}
+
+#[test]
+fn search_results_carry_rust_owned_space_context_label() {
+    let mut state = ready_state();
+    let mut room = room_summary("room-a");
+    room.display_name = "Ops".to_owned();
+    room.display_label = "Ops".to_owned();
+    room.parent_space_ids = vec!["space-fallback".to_owned(), "space-active".to_owned()];
+    state.rooms = vec![room];
+    state.spaces = vec![
+        SpaceSummary {
+            space_id: "space-fallback".to_owned(),
+            display_name: "Fallback Space".to_owned(),
+            avatar: None,
+            child_room_ids: vec!["room-a".to_owned()],
+        },
+        SpaceSummary {
+            space_id: "space-active".to_owned(),
+            display_name: "Active Space".to_owned(),
+            avatar: None,
+            child_room_ids: vec!["room-a".to_owned()],
+        },
+    ];
+    state.navigation.active_space_id = Some("space-active".to_owned());
+    let search_scope = SearchScope::CurrentSpace {
+        space_id: "space-fallback".to_owned(),
+    };
+
+    reduce(
+        &mut state,
+        AppAction::SearchSubmitted {
+            request_id: 13,
+            query: "GPT".to_owned(),
+            scope: search_scope.clone(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SearchSucceeded {
+            request_id: 13,
+            query: "GPT".to_owned(),
+            scope: search_scope,
+            results: vec![result("$event")],
+        },
+    );
+
+    let SearchState::Results { results, .. } = &state.search else {
+        panic!("expected search results");
+    };
+    assert_eq!(
+        results[0].context_label,
+        Some("Fallback Space · Ops".to_owned())
     );
 }
 
@@ -378,6 +584,52 @@ fn matching_search_result_updates_results() {
             query: "アンケート".to_owned(),
             scope: scope(),
             results: vec![result("$event")],
+        }
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::SearchChanged)]
+    );
+}
+
+#[test]
+fn matching_search_result_can_refresh_existing_results_for_sdk_supplement() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SearchSubmitted {
+            request_id: 9,
+            query: "GPT".to_owned(),
+            scope: scope(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SearchSucceeded {
+            request_id: 9,
+            query: "GPT".to_owned(),
+            scope: scope(),
+            results: vec![result("$local")],
+        },
+    );
+
+    let effects = reduce(
+        &mut state,
+        AppAction::SearchSucceeded {
+            request_id: 9,
+            query: "GPT".to_owned(),
+            scope: scope(),
+            results: vec![result("$sdk"), result("$local")],
+        },
+    );
+
+    assert_eq!(
+        state.search,
+        SearchState::Results {
+            request_id: 9,
+            query: "GPT".to_owned(),
+            scope: scope(),
+            results: vec![result("$sdk"), result("$local")],
         }
     );
     assert_eq!(
