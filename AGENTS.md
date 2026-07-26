@@ -2046,11 +2046,25 @@ the implementation plan is
   after a pre-connectivity SyncService failure and emit only
   `legacy_fallback_checkpoint=ok`, `legacy_fallback_gap_repaired=ok`,
   `legacy_fallback_settled=ok`, and `legacy_fallback_lifecycle=ok`.
-- As of 2026-07-16, the fresh-account Conduit core lane on `origin/main` can
-  stop after verification-method discovery reports `completion_received`,
-  before `LoggedIn`. Treat that baseline login timeout separately from a
-  timeline catch-up failure; do not weaken the timeline assertions or print
-  private identifiers to diagnose it.
+- The login timeout recorded here as a Conduit baseline was a harness bug, fixed
+  2026-07-26 (#334). It was never Conduit-specific: Tuwunel 1.7.1 failed
+  identically. Primary A is always a freshly registered user, so it parks in the
+  verification gate, and `AccountEvent::LoggedIn` is held in the actor's
+  pending-ready events until the trust transition promotes the session. Gate
+  completion was an allowlist of scenarios, so every scenario missing from it —
+  `media`, `login_sync`, `timeline`, `reply`, and most of the focused tier —
+  could only ever time out at `login A`. The shared login route now completes the
+  gate unconditionally; scenarios that must not bootstrap own their login and
+  return from `run_async` before that route.
+- If a focused core scenario times out at `login A: timed out waiting for
+  LoggedIn event` again, check whether a new login route skipped
+  `complete_new_identity_gate_for_qa` before reintroducing a scenario condition.
+  Do not weaken timeline assertions or print private identifiers to diagnose it.
+- `cargo test --workspace` does not compile the QA binaries: both bin targets set
+  `required-features = ["qa-bin"]`. The `Core homeserver QA (conduit)` CI job is
+  the only thing that compiles them and the only thing that runs the core against
+  a real homeserver. It runs `login_sync` and `media` against Conduit, in
+  parallel with the Rust job and with its own dependency cache.
 
 - Installing Conduit or Tuwunel from source with `cargo install --git` must set
   `RUMA_UNSTABLE_EXHAUSTIVE_TYPES=1`. Without it, Ruma marks many public API
