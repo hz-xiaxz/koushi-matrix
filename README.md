@@ -70,6 +70,38 @@ cd apps/desktop
 npm run tauri build
 ```
 
+### Build a macOS DMG
+
+On macOS, use the checked-in DMG wrapper script through the desktop package:
+
+```bash
+npm --prefix apps/desktop run build:dmg
+```
+
+The wrapper runs the release preflight check, then builds the native DMG with:
+
+```bash
+npm --prefix apps/desktop run tauri -- build --bundles dmg
+```
+
+Useful variants:
+
+```bash
+# Print the underlying Tauri command without building.
+npm --prefix apps/desktop run build:dmg -- --print-command
+
+# Skip the local release preflight when iterating on a throwaway local build.
+npm --prefix apps/desktop run build:dmg -- --skip-preflight
+
+# Run the macOS signing preflight before building.
+npm --prefix apps/desktop run build:dmg:signed
+```
+
+The script prints the generated `.dmg` artifact path when the build completes.
+Installed-app data is stored under
+`~/Library/Application Support/koushi-desktop`; credentials use the macOS
+Keychain service `koushi-desktop`.
+
 ## Open The Desktop Shell
 
 React/Tauri app in browser fallback mode:
