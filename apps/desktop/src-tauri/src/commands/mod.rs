@@ -433,11 +433,14 @@ fn snapshot_has_authenticated_session(snapshot: &koushi_state::AppState) -> bool
 
 fn snapshot_has_login_transport_terminal(snapshot: &koushi_state::AppState) -> bool {
     matches!(
-        snapshot.session,
-        koushi_state::SessionState::Provisional { .. }
-            | koushi_state::SessionState::AwaitingVerification { .. }
+        &snapshot.session,
+        koushi_state::SessionState::Provisional {
+            phase: koushi_state::ProvisionalPhase::RecheckingTrust { failure: Some(_) },
+            ..
+        } | koushi_state::SessionState::AwaitingVerification { .. }
             | koushi_state::SessionState::Verifying { .. }
             | koushi_state::SessionState::AwaitingBootstrapConfirmation { .. }
+            | koushi_state::SessionState::Rejecting { .. }
     ) || snapshot_has_authenticated_session(snapshot)
 }
 
@@ -7300,6 +7303,21 @@ mod tests {
             },
         };
         assert!(snapshot_has_login_transport_terminal(&state));
+    }
+
+    #[test]
+    fn login_transport_does_not_complete_while_discovering_verification_methods() {
+        let mut state = koushi_state::AppState::default();
+        state.session = koushi_state::SessionState::Provisional {
+            info: koushi_state::SessionInfo {
+                homeserver: "https://example.invalid".into(),
+                user_id: "@u:example.invalid".into(),
+                device_id: "D".into(),
+            },
+            phase: koushi_state::ProvisionalPhase::DiscoveringMethods,
+        };
+
+        assert!(!snapshot_has_login_transport_terminal(&state));
     }
 
     #[test]

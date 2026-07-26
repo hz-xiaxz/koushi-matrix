@@ -823,7 +823,40 @@ function startSessionVerificationWindowDrag(): void {
   void getCurrentWindow().startDragging().catch(() => undefined);
 }
 
-export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onStartWindowDrag = startSessionVerificationWindowDrag, operations = { startOwnUserSas: () => api.startOwnUserSas(), submitRecovery: (secret) => api.submitRecovery(secret), retryCurrentDeviceTrustDiscovery: () => api.retryCurrentDeviceTrustDiscovery() } }: { snapshot: DesktopSnapshot; onSnapshot: (snapshot: DesktopSnapshot) => void; onSignOut: () => void; onStartWindowDrag?: () => void; operations?: { startOwnUserSas: () => Promise<DesktopSnapshot>; submitRecovery: (secret: string) => Promise<DesktopSnapshot>; retryCurrentDeviceTrustDiscovery: () => Promise<DesktopSnapshot> } }) {
+function provisionalPhaseKind(
+  phase: import("./domain/types").ProvisionalPhase | undefined
+): "checkingTrust" | "discoveringMethods" | "recheckingTrust" | null {
+  if (phase === "checkingTrust" || phase === "discoveringMethods") {
+    return phase;
+  }
+  if (!phase || typeof phase !== "object") {
+    return null;
+  }
+  if ("kind" in phase) {
+    return phase.kind;
+  }
+  if ("recheckingTrust" in phase) {
+    return "recheckingTrust";
+  }
+  return null;
+}
+
+function provisionalPhaseFailure(
+  phase: import("./domain/types").ProvisionalPhase | undefined
+): import("./domain/types").VerificationGateFailureKind | null {
+  if (!phase || typeof phase !== "object") {
+    return null;
+  }
+  if ("kind" in phase && phase.kind === "recheckingTrust") {
+    return phase.failureKind ?? null;
+  }
+  if ("recheckingTrust" in phase) {
+    return phase.recheckingTrust.failureKind ?? null;
+  }
+  return null;
+}
+
+export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onStartWindowDrag = startSessionVerificationWindowDrag, operations = { startOwnUserSas: () => api.startOwnUserSas(), submitRecovery: (secret) => api.submitRecovery(secret) } }: { snapshot: DesktopSnapshot; onSnapshot: (snapshot: DesktopSnapshot) => void; onSignOut: () => void; onStartWindowDrag?: () => void; operations?: { startOwnUserSas: () => Promise<DesktopSnapshot>; submitRecovery: (secret: string) => Promise<DesktopSnapshot> } }) {
   const session = snapshot.state.domain.session;
   const recoveryRef = useRef<HTMLInputElement>(null);
   const passphraseRef = useRef<HTMLInputElement>(null);
@@ -833,12 +866,12 @@ export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onSta
   const awaiting = session.kind === "awaitingVerification";
   const canUseRecoverySecret = methods.includes("recoveryKey") || methods.includes("securityPhrase");
   const sasVerifying = session.kind === "verifying" && session.method === "existingDeviceSas";
-  const checking = session.kind === "provisional" && session.phase === "checkingTrust";
-  const discovering = session.kind === "provisional" && session.phase === "discoveringMethods";
-  const rechecking = session.kind === "provisional" && typeof session.phase === "object" && "recheckingTrust" in session.phase;
-  const preparationFailure = session.kind === "provisional" && typeof session.phase === "object" && "recheckingTrust" in session.phase
-    ? session.phase.recheckingTrust.failureKind
-    : null;
+  const phaseKind = session.kind === "provisional" ? provisionalPhaseKind(session.phase) : null;
+  const checking = phaseKind === "checkingTrust";
+  const discovering = phaseKind === "discoveringMethods";
+  const rechecking = phaseKind === "recheckingTrust";
+  const preparationFailure =
+    session.kind === "provisional" ? provisionalPhaseFailure(session.phase) : null;
   const activelyVerifying = session.kind === "verifying";
   const [gateOperation, setGateOperation] = useState<"recovery" | "sas" | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
@@ -894,7 +927,6 @@ export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onSta
     {sasVerifying && session.sas_emojis?.length === 7 && flowId !== undefined && <><button onClick={() => void run("sas", () => api.confirmSasVerification(flowId))}>{t("gate.match")}</button><button onClick={() => void run("sas", () => api.mismatchSasVerification(flowId))}>{t("gate.mismatch")}</button></>}
     {awaiting && methods.includes("bootstrap") && <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const destination = destinationRef.current?.value.trim() ?? ""; const passphrase = passphraseRef.current?.value || null; if (destinationRef.current) destinationRef.current.value = ""; if (passphraseRef.current) passphraseRef.current.value = ""; if (destination) void run("recovery", () => api.startSessionBootstrap(passphrase, destination)); }}><ImeTextField ref={destinationRef} aria-label={t("gate.destination")} syncKey="session-bootstrap-destination"/><SecureImeTextField ref={passphraseRef} aria-label={t("gate.passphrase")} autoComplete="new-password"/><button type="submit">{t("gate.bootstrap")}</button></ImeSafeForm>}
     {session.kind === "awaitingBootstrapConfirmation" && flowId !== undefined && <button onClick={() => void run("recovery", () => api.confirmSessionBootstrapSaved(flowId))}>{t("gate.saved")}</button>}
-    {(awaiting || discovering || rechecking) && <button disabled={gateOperation === "recovery"} onClick={() => void run("recovery", operations.retryCurrentDeviceTrustDiscovery)}>{t("gate.retry")}</button>}
     {sasVerifying && flowId !== undefined && <button onClick={() => void run("sas", () => api.cancelVerification(flowId))}>{t("action.cancel")}</button>}
     <button onClick={onSignOut}>{t("gate.signOut")}</button>
   </main>;
@@ -1219,6 +1251,7 @@ export function App() {
     "user" | "notRecognized" | null
   >(null);
   const [newDmDialogOpen, setNewDmDialogOpen] = useState(false);
+  const [resetLocalDataConfirmOpen, setResetLocalDataConfirmOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [runtimeDiagnosticSnapshot, setRuntimeDiagnosticSnapshot] =
     useState<DiagnosticLogSnapshot>({ entries: [], droppedEntries: 0 });
@@ -2471,9 +2504,7 @@ export function App() {
   }
 
   async function resetLocalData() {
-    if (!window.confirm(t("settings.resetLocalDataConfirm"))) {
-      return;
-    }
+    setResetLocalDataConfirmOpen(false);
     setSnapshot(await api.resetLocalData());
   }
 
@@ -4912,7 +4943,7 @@ export function App() {
             void probeLocalEncryptionHealth();
           }}
           onResetLocalData={() => {
-            void resetLocalData();
+            setResetLocalDataConfirmOpen(true);
           }}
           onLogout={() => {
             void logout();
@@ -5182,6 +5213,15 @@ export function App() {
           onSubmit={submitReportDialog}
         />
       ) : null}
+      {resetLocalDataConfirmOpen ? (
+        <ResetLocalDataConfirmationDialog
+          isBusy={snapshot.state.domain.local_encryption.kind === "resetting"}
+          onCancel={() => setResetLocalDataConfirmOpen(false)}
+          onConfirm={() => {
+            void resetLocalData();
+          }}
+        />
+      ) : null}
       {diagnosticsOpen ? (
         <DiagnosticDialog
           report={diagnosticReport({
@@ -5203,6 +5243,44 @@ export function App() {
       ) : null}
       </div>
     </TimelineStoreContext.Provider>
+  );
+}
+
+export function ResetLocalDataConfirmationDialog({
+  isBusy,
+  onCancel,
+  onConfirm
+}: {
+  isBusy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="dialog-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("settings.resetLocalData")}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !isBusy) {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+    >
+      <div className="dialog-box">
+        <div className="dialog-title">{t("settings.resetLocalData")}</div>
+        <p>{t("settings.resetLocalDataConfirm")}</p>
+        <div className="dialog-actions">
+          <button type="button" className="dialog-button" disabled={isBusy} onClick={onCancel}>
+            {t("action.cancel")}
+          </button>
+          <button type="button" className="dialog-button danger" disabled={isBusy} onClick={onConfirm}>
+            {t("settings.resetLocalData")}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

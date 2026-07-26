@@ -158,6 +158,35 @@ fn local_data_reset_is_guarded_and_request_correlated() {
 }
 
 #[test]
+fn local_data_reset_can_start_from_any_non_resetting_health_state() {
+    for initial in [
+        LocalEncryptionState::Unknown,
+        LocalEncryptionState::Healthy,
+        LocalEncryptionState::LockedOrInaccessible,
+        LocalEncryptionState::Unavailable,
+    ] {
+        let mut state = AppState {
+            local_encryption: initial,
+            ..AppState::default()
+        };
+
+        let effects = reduce(
+            &mut state,
+            AppAction::ResetLocalDataRequested { request_id: 88 },
+        );
+
+        assert_eq!(
+            state.local_encryption,
+            LocalEncryptionState::Resetting { request_id: 88 }
+        );
+        assert_eq!(
+            effects,
+            vec![AppEffect::EmitUiEvent(UiEvent::LocalEncryptionChanged)]
+        );
+    }
+}
+
+#[test]
 fn local_encryption_probe_does_not_clobber_resetting_state() {
     let mut state = AppState {
         local_encryption: LocalEncryptionState::Resetting { request_id: 77 },

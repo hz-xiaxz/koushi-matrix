@@ -7138,11 +7138,17 @@ test("Security settings render local encryption health and dispatch probe comman
       return next;
     });
   });
-  page.once("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("Reset local data");
-    await dialog.accept();
-  });
   await page.getByRole("button", { name: "Reset local data" }).click();
+  const resetDialog = page.getByRole("dialog", { name: "Reset local data" });
+  await expect(resetDialog).toBeVisible();
+  await expect(resetDialog.getByText("This cannot be undone.")).toBeVisible();
+  await expect.poll(() => invocationCount(page, "reset_local_data")).toBe(0);
+  await resetDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(resetDialog).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Reset local data" }).click();
+  const confirmResetDialog = page.getByRole("dialog", { name: "Reset local data" });
+  await confirmResetDialog.getByRole("button", { name: "Reset local data" }).click();
   await expect.poll(() => invocationCount(page, "reset_local_data")).toBe(1);
   await expect(page.getByText("Not checked")).toBeVisible();
 });

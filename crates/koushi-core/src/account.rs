@@ -292,7 +292,7 @@ async fn run_read_persistence_worker(
 }
 
 fn record_verification_admission_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record_and_stderr(event);
+    koushi_diagnostics::record(event);
 }
 
 fn verification_admission_event(
@@ -314,7 +314,7 @@ fn current_device_trust_token(trust: koushi_state::CurrentDeviceTrustState) -> &
 }
 
 fn record_verification_method_discovery_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record_and_stderr(event);
+    koushi_diagnostics::record(event);
 }
 
 fn verification_method_discovery_event(
@@ -905,11 +905,11 @@ fn recovery_verification_event(stage: &'static str, flow_id: u64) -> DiagnosticE
 }
 
 fn record_sas_verification_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record_and_stderr(event);
+    koushi_diagnostics::record(event);
 }
 
 fn record_recovery_verification_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record_and_stderr(event);
+    koushi_diagnostics::record(event);
 }
 
 fn verification_request_state_token(
@@ -1829,16 +1829,34 @@ impl AccountActor {
                         self.session.is_some(),
                     ) && owned_matches
                     {
-                        if let Some(owned) = self.verification_method_discovery_task.take() {
-                            let _ = owned.task.await;
-                        }
+                        let _ = self.verification_method_discovery_task.take();
                         match result {
                             VerificationMethodDiscoveryResult::Discovered(gate) => {
                                 self.verification_method_discovery_failed = false;
+                                record_verification_method_discovery_event(
+                                    verification_method_discovery_event(
+                                        "success_projecting",
+                                        generation,
+                                        serial,
+                                    )
+                                    .field(
+                                        DiagnosticField::count(
+                                            "method_count",
+                                            gate.methods.len() as u64,
+                                        ),
+                                    ),
+                                );
                                 self.send_actions(vec![AppAction::VerificationMethodsDiscovered(
                                     gate,
                                 )])
                                 .await;
+                                record_verification_method_discovery_event(
+                                    verification_method_discovery_event(
+                                        "success_projected",
+                                        generation,
+                                        serial,
+                                    ),
+                                );
                             }
                             VerificationMethodDiscoveryResult::Failed(kind) => {
                                 self.verification_method_discovery_failed = true;
@@ -7042,11 +7060,14 @@ impl AccountActor {
                     recovery_verification_event("settled", flow_id)
                         .field(DiagnosticField::token("terminal", "success")),
                 );
-                // SDK success remains gated; the subsequent authoritative
-                // trust observation is the only promotion authority.
+                if !self
+                    .promote_recovered_session_runtime(generation, flow_id, request_id)
+                    .await
+                {
+                    return;
+                }
                 self.send_actions(vec![AppAction::E2eeRecoverySucceeded])
                     .await;
-                self.request_authoritative_trust_recheck().await;
                 self.send_actions(vec![AppAction::RestoreKeyBackupRequested {
                     request_id: request_id.sequence,
                     version: None,
@@ -7110,6 +7131,57 @@ impl AccountActor {
                 self.emit_failure(request_id, CoreFailure::RecoveryFailed { kind });
             }
         }
+    }
+
+    async fn promote_recovered_session_runtime(
+        &mut self,
+        generation: u64,
+        flow_id: u64,
+        request_id: RequestId,
+    ) -> bool {
+        let (Some(session), Some(key_id)) = (self.session.clone(), self.session_key_id.clone())
+        else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return false;
+        };
+        record_recovery_verification_event(
+            recovery_verification_event("promoting", flow_id)
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )),
+        );
+        if self.persist_session(&session, &key_id).await.is_err() {
+            self.send_actions(vec![AppAction::SessionPersistenceFailed {
+                message: "session persistence failed".to_owned(),
+            }])
+            .await;
+            return false;
+        }
+        self.provisional_persistable = None;
+        self.stop_provisional_runtime().await;
+        self.start_incoming_verification_observer(session.clone())
+            .await;
+        self.spawn_sync_actor(session.clone()).await;
+        self.spawn_account_hydration(session.clone());
+        self.start_recovery_observer(session.clone());
+        self.start_session_change_observer(session);
+        self.session_promoted = true;
+        for event in std::mem::take(&mut self.pending_ready_events) {
+            self.emit(event);
+        }
+        record_recovery_verification_event(
+            recovery_verification_event("promoted", flow_id)
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )),
+        );
+        true
     }
 
     async fn stop_recovery_task(&mut self) -> Option<u64> {
@@ -10091,7 +10163,7 @@ mod tests {
     }
 
     #[test]
-    fn verification_admission_diagnostic_records_and_writes_stderr() {
+    fn verification_admission_diagnostic_records_without_stderr() {
         let output = std::process::Command::new(
             std::env::current_exe().expect("current test executable should be available"),
         )
@@ -10106,9 +10178,10 @@ mod tests {
         assert!(output.status.success(), "child failed: {output:?}");
 
         let stderr = String::from_utf8(output.stderr).expect("child stderr should be utf8");
-        assert!(stderr.contains(
-            "[koushi] core.verification_admission stage=trust_read_finished generation=7 transition_id=0 trust=verified elapsed_ms=42"
-        ));
+        assert!(
+            stderr.is_empty(),
+            "private diagnostics stay in the buffer only"
+        );
         assert!(!stderr.contains('@'));
         assert!(!stderr.contains("access_token"));
 
@@ -10150,7 +10223,7 @@ mod tests {
     }
 
     #[test]
-    fn verification_method_discovery_diagnostic_records_and_writes_stderr() {
+    fn verification_method_discovery_diagnostic_records_without_stderr() {
         let output = std::process::Command::new(
             std::env::current_exe().expect("current test executable should be available"),
         )
@@ -10165,9 +10238,10 @@ mod tests {
         assert!(output.status.success(), "child failed: {output:?}");
 
         let stderr = String::from_utf8(output.stderr).expect("child stderr should be utf8");
-        assert!(stderr.contains(
-            "[koushi] core.verification_method_discovery stage=finished generation=7 serial=11 outcome=failed elapsed_ms=42"
-        ));
+        assert!(
+            stderr.is_empty(),
+            "private diagnostics stay in the buffer only"
+        );
 
         let stdout = String::from_utf8(output.stdout).expect("child stdout should be utf8");
         let snapshot: serde_json::Value = serde_json::from_str(
@@ -10466,7 +10540,7 @@ mod tests {
     }
 
     #[test]
-    fn sas_verification_diagnostic_records_and_writes_stderr() {
+    fn sas_verification_diagnostic_records_without_stderr() {
         let output = std::process::Command::new(
             std::env::current_exe().expect("current test executable should be available"),
         )
@@ -10481,9 +10555,10 @@ mod tests {
         assert!(output.status.success(), "child failed: {output:?}");
 
         let stderr = String::from_utf8(output.stderr).expect("child stderr should be utf8");
-        assert!(stderr.contains(
-            "[koushi] core.sas_verification stage=request_state_changed flow_id=41 state=cancelled cancel_kind=timeout cancelled_by_us=false"
-        ));
+        assert!(
+            stderr.is_empty(),
+            "private diagnostics stay in the buffer only"
+        );
 
         let stdout = String::from_utf8(output.stdout).expect("child stdout should be utf8");
         let snapshot: serde_json::Value = serde_json::from_str(
@@ -11469,18 +11544,23 @@ mod tests {
                 result: Ok(()),
             })
             .await;
-        let _ = inspect_session_runtime(&handle).await;
-        let _ = inspect_session_runtime(&handle).await;
+        while !matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::E2eeRecoverySucceeded])
+        ) {}
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (true, true, true, false)
+        );
         handle
             .send(AccountMessage::CurrentDeviceTrustChanged {
                 generation: 2,
-                trust: koushi_state::CurrentDeviceTrustState::Verified,
+                trust: koushi_state::CurrentDeviceTrustState::Unknown,
             })
             .await;
-        acknowledge_next_verified_projection(&handle, &mut action_rx).await;
         assert_eq!(
             inspect_session_runtime(&handle).await,
-            (true, true, true, true)
+            (true, true, true, false)
         );
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
@@ -12788,6 +12868,29 @@ mod tests {
         assert!(
             !production_source.contains("action_tx.try_send(actions)"),
             "AccountActor reducer actions must not be dropped through try_send"
+        );
+    }
+
+    #[test]
+    fn verification_method_discovery_completion_projects_without_awaiting_sender_task() {
+        let source = include_str!("account.rs");
+        let production_source = source
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .expect("production source should precede tests");
+        let completion_arm = production_source
+            .split("AccountMessage::VerificationMethodsDiscovered")
+            .nth(1)
+            .and_then(|rest| rest.split("AccountMessage::RecoveryFinished").next())
+            .expect("verification method discovery completion arm should exist");
+
+        assert!(
+            !completion_arm.contains("owned.task.await"),
+            "the completion arm is handling a message sent by the discovery task; awaiting that task before projection can leave the gate stuck in DiscoveringMethods"
+        );
+        assert!(
+            completion_arm.contains("success_projected"),
+            "successful discovery projection must be diagnosable after completion_received"
         );
     }
 

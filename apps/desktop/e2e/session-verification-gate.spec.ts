@@ -85,11 +85,11 @@ test("gate controls follow the Core admission matrix", async ({ page }) => {
   await page.goto("/appHarness.html");
   const controls = ["Verify with another device", "Verify with recovery key", "Create secure backup", "They match", "They do not match", "Cancel", "Retry", "I saved the recovery key"];
   const cases = [
-    { session: { kind: "awaitingVerification", gate: { methods: ["existingDeviceSas", "recoveryKey", "bootstrap"], account_kind: "existingIdentity", failureKind: null } }, present: ["Verify with another device", "Verify with recovery key", "Create secure backup", "Retry"] },
+    { session: { kind: "awaitingVerification", gate: { methods: ["existingDeviceSas", "recoveryKey", "bootstrap"], account_kind: "existingIdentity", failureKind: null } }, present: ["Verify with another device", "Verify with recovery key", "Create secure backup"] },
     { session: { kind: "verifying", method: "existingDeviceSas", flow_id: 5, sas_emojis: Array.from({ length: 7 }, (_, i) => ({ symbol: `e${i}`, description: `d${i}` })), gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity", failureKind: null } }, present: ["They match", "They do not match", "Cancel"] },
     { session: { kind: "verifying", method: "recoveryKey", flow_id: 6, gate: { methods: ["recoveryKey"], account_kind: "existingIdentity", failureKind: null } }, present: [] },
     { session: { kind: "awaitingBootstrapConfirmation", flow_id: 7, destination_written: true, gate: { methods: ["bootstrap"], account_kind: "newIdentity", failureKind: null } }, present: ["I saved the recovery key"] },
-    { session: { kind: "provisional", phase: { recheckingTrust: {} } }, present: ["Retry"] },
+    { session: { kind: "provisional", phase: { recheckingTrust: {} } }, present: [] },
     { session: { kind: "locked" }, present: [] }
   ];
   for (const entry of cases) {
@@ -180,7 +180,7 @@ test("Ready to Locked replaces the shell with the gate", async ({ page }) => {
   expect(await page.evaluate(() => window.__harness.invocationsOf("play_native_attention_sound").length)).toBe(attentionCount);
 });
 
-test("SAS actions stay flow-correlated through retry and cancellation", async ({ page }) => {
+test("SAS actions stay flow-correlated through mismatch and cancellation", async ({ page }) => {
   await page.goto("/appHarness.html");
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
@@ -210,9 +210,8 @@ test("SAS actions stay flow-correlated through retry and cancellation", async ({
   });
   await page.getByRole("button", { name: "They do not match" }).click();
   await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("mismatch_sas_verification")[0]?.args)).toEqual({ flowId: 81 });
-  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
-  await page.getByRole("button", { name: "Retry" }).click();
-  await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("retry_current_device_trust_discovery").length)).toBe(1);
+  await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Verify with another device" })).toBeVisible();
 
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
