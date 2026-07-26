@@ -585,6 +585,56 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   It prints only `notification_candidate=ok`, `badge_state=ok`,
   `suppress_focus=ok`, and `clear_badge=ok`.
 
+## Home-Scoped Navigation Notes
+
+- A sidebar entry's location has to explain its scope. Account-global views
+  (Activity, Explore, Invites) render only under Home; a space sidebar is the
+  room list for that space, and its space-scoped actions are the header icons.
+  Do not reintroduce an account-global entry into a space sidebar.
+- A room's thread list opens from the room header, and that button is
+  unconditional. It used to appear only when a thread had unread attention, so
+  removing the sidebar entry without ungating it would have made a quiet room's
+  threads unreachable. The header counts still come from
+  `AppState.thread_attention`, gated on the tracked thread belonging to the open
+  room — that gate is the point, not a bug: the old sidebar badge showed a
+  room-scoped count no matter which room was open.
+- Account-wide and space-scoped thread aggregation does not exist. Issue #332
+  owns it. `ThreadsListState` is keyed by `room_id`, so there is nothing above
+  one room to filter.
+- The Home rail badge renders Rust-owned `AccountHomeItem.attention_count`
+  (`unread_count + invite_count`). Keep the three fields separate: the badge
+  needs one number, and the accessible label names unread messages and invites
+  individually through the catalog. Do not sum them in React, and do not let
+  `unread_count` absorb invites. Space rail badges stay unread-only —
+  `InvitePreview` carries no reliable parent-space scope.
+- Both Tauri sidebar paths must pass the same account facts.
+  `From<AppState> for FrontendDesktopSnapshot` composed from rooms and spaces
+  alone, so the full snapshot dropped mute filtering that
+  `koushi_core::state_delta` applies and the same state produced different Home
+  badges per transport. `compose_sidebar_with_account_facts` takes notification
+  settings and the invite count; the three-argument `compose_sidebar` wrapper is
+  for callers that genuinely hold neither.
+- Explore has two sections — join by address, and search a public directory —
+  and both submit through the single `resolveDirectorySubmission` classifier so
+  the same string cannot be read two ways. A full address pasted into the search
+  field routes to preview, because a directory text search cannot find a room
+  addressed by id. Neither path joins directly; both land in the Rust-owned
+  preview dialog.
+- A bare `@user:server` classifies as `user`. Only matrix.to user links did
+  before, so a pasted MXID became a directory search and returned "no public
+  rooms found" — which reads as if the person did not exist.
+- Give an input and its submit button different accessible names. Explore's
+  search input and Search button both answered to "Search public rooms", and
+  WebDriver could only tell them apart by tag name; the Linux lane selectors
+  depended on that. Inputs take their field label, buttons take their visible
+  text.
+- Playwright specs that reach Explore or Invites must select Home first — the
+  app harness boots with a space selected. `basic-operations.spec.ts` has a
+  `selectAccountHome` helper for this.
+- Focused checks are `cargo test -p koushi-state --test navigation_state`,
+  `cargo test -p koushi-desktop --lib`, and
+  `npx playwright test e2e/home-scoped-navigation.spec.ts`.
+
 ## Public Directory Phase A Notes
 
 - Public directory semantics are Rust-owned. `AppState.directory.query` and

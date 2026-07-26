@@ -16,6 +16,7 @@ export type DirectorySubmission =
   | { kind: "user"; userId: string };
 
 const ROOM_SIGILS = ["#", "!"];
+const USER_SIGIL = "@";
 
 /**
  * Classify free-text Explore input.
@@ -46,6 +47,12 @@ export function resolveDirectorySubmission(rawInput: string): DirectorySubmissio
     // Typed directly, so there is no link to carry routing hints.
     return { kind: "join", roomIdOrAlias: trimmed, viaServers: [] };
   }
+  if (namesOneUser(trimmed)) {
+    // A pasted MXID names a person, not a room. Treating it as a search term
+    // returned "no public rooms found", which reads as if the person could not
+    // be found at all (#330).
+    return { kind: "user", userId: trimmed };
+  }
   return { kind: "search", term: trimmed };
 }
 
@@ -53,7 +60,18 @@ function namesOneRoom(input: string): boolean {
   if (!ROOM_SIGILS.includes(input.slice(0, 1))) {
     return false;
   }
+  return hasLocalpartAndServer(input);
+}
+
+function namesOneUser(input: string): boolean {
+  if (input.slice(0, 1) !== USER_SIGIL) {
+    return false;
+  }
+  return hasLocalpartAndServer(input);
+}
+
+/** `<sigil>localpart:server` — without both parts this is just text. */
+function hasLocalpartAndServer(input: string): boolean {
   const separator = input.indexOf(":");
-  // `#localpart:server` — without both parts this is just text to search for.
   return separator > 1 && separator < input.length - 1;
 }

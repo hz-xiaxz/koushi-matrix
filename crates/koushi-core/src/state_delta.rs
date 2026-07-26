@@ -12,7 +12,7 @@ use koushi_state::{
     RoomSummary, SearchCrawlerState, SearchState, SessionState, SettingsState, SidebarModel,
     SoftLogoutReauthState, SpaceSummary, SyncMode, SyncState, ThreadAttentionState,
     ThreadPaneState, ThreadsListState, TimelinePaneState,
-    compose_sidebar_with_room_notification_settings,
+    compose_sidebar_with_account_facts,
 };
 use serde::{Deserialize, Serialize};
 
@@ -135,17 +135,19 @@ pub fn build_state_delta(
         || previous.rooms != next.rooms
         || previous.room_notification_settings != next.room_notification_settings
     {
-        let previous_sidebar = compose_sidebar_with_room_notification_settings(
+        let previous_sidebar = compose_sidebar_with_account_facts(
             previous.navigation.active_space_id.as_deref(),
             &previous.spaces,
             &previous.rooms,
             &previous.room_notification_settings,
+            previous.invites.len() as u64,
         );
-        let next_sidebar = compose_sidebar_with_room_notification_settings(
+        let next_sidebar = compose_sidebar_with_account_facts(
             next.navigation.active_space_id.as_deref(),
             &next.spaces,
             &next.rooms,
             &next.room_notification_settings,
+            next.invites.len() as u64,
         );
         if previous_sidebar != next_sidebar {
             changed.sidebar = Some(next_sidebar);

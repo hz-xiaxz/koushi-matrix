@@ -204,12 +204,19 @@ export function composeSidebar(
   activeSpaceId: string | null,
   spaces: SpaceSummary[],
   rooms: RoomSummary[],
-  roomNotificationSettings: Record<string, RoomNotificationSettings> = {}
+  roomNotificationSettings: Record<string, RoomNotificationSettings> = {},
+  // Mirrors the Rust `compose_sidebar` wrapper: a caller with only rooms and
+  // spaces reports no pending invites rather than guessing (#330).
+  pendingInviteCount = 0
 ): DesktopSnapshot["sidebar"] {
   const roomById = new Map(rooms.map((room) => [room.room_id, room]));
   const roomIsMuted = (roomId: string) =>
     roomNotificationSettings[roomId]?.mode.kind === "mute";
   const aggregateRooms = rooms.filter((room) => !roomIsMuted(room.room_id));
+  const homeUnreadCount = aggregateRooms.reduce(
+    (sum, room) => sum + roomActivityUnreadCount(room),
+    0
+  );
   const aggregateRoomItems = (items: RoomListItem[]) =>
     items.filter((room) => !roomIsMuted(room.room_id));
   const activeSpace = activeSpaceId
@@ -240,11 +247,13 @@ export function composeSidebar(
     active_space_id: activeSpaceId,
     account_home: {
       display_name: "Home",
-      unread_count: aggregateRooms.reduce((sum, room) => sum + roomActivityUnreadCount(room), 0),
+      unread_count: homeUnreadCount,
       highlight_count: aggregateRooms.reduce(
         (sum, room) => sum + (room.highlight_count ?? 0),
         0
       ),
+      invite_count: pendingInviteCount,
+      attention_count: homeUnreadCount + pendingInviteCount,
       is_active: activeSpaceId === null
     },
     space_rail: spaces.map((space) => ({

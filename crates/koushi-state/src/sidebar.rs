@@ -25,8 +25,19 @@ pub struct SidebarModel {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AccountHomeItem {
     pub display_name: String,
+    /// Unread messages only. Invites are counted separately so the accessible
+    /// rail label can name them individually (#330).
     pub unread_count: u64,
     pub highlight_count: u64,
+    /// Invites pending for the account. Invites are not room-scoped attention,
+    /// so room notification settings do not silence them.
+    #[serde(default)]
+    pub invite_count: u64,
+    /// What the Home rail badge shows: `unread_count + invite_count`. Owned here
+    /// rather than summed in the webview, because rail badges render a value
+    /// this projection produced.
+    #[serde(default)]
+    pub attention_count: u64,
     pub is_active: bool,
 }
 
@@ -50,19 +61,25 @@ pub struct RoomListItem {
     pub highlight_count: u64,
 }
 
+/// Compose the sidebar from room/space facts alone.
+///
+/// Reports no pending invites, because a caller with only rooms and spaces does
+/// not know about them. Callers that own `AppState` use
+/// [`compose_sidebar_with_account_facts`].
 pub fn compose_sidebar(
     active_space_id: Option<&str>,
     spaces: &[SpaceSummary],
     rooms: &[RoomSummary],
 ) -> SidebarModel {
-    compose_sidebar_with_room_notification_settings(active_space_id, spaces, rooms, &HashMap::new())
+    compose_sidebar_with_account_facts(active_space_id, spaces, rooms, &HashMap::new(), 0)
 }
 
-pub fn compose_sidebar_with_room_notification_settings(
+pub fn compose_sidebar_with_account_facts(
     active_space_id: Option<&str>,
     spaces: &[SpaceSummary],
     rooms: &[RoomSummary],
     room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+    pending_invite_count: u64,
 ) -> SidebarModel {
     let rooms_by_id: HashMap<&str, &RoomSummary> = rooms
         .iter()
@@ -81,18 +98,21 @@ pub fn compose_sidebar_with_room_notification_settings(
         })
         .collect();
 
+    let home_unread_count: u64 = rooms
+        .iter()
+        .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
+        .map(room_activity_unread_count)
+        .sum();
     let account_home = AccountHomeItem {
         display_name: "Home".to_owned(),
-        unread_count: rooms
-            .iter()
-            .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
-            .map(room_activity_unread_count)
-            .sum(),
+        unread_count: home_unread_count,
         highlight_count: rooms
             .iter()
             .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
             .map(|room| room.highlight_count)
             .sum(),
+        invite_count: pending_invite_count,
+        attention_count: home_unread_count + pending_invite_count,
         is_active: active_space_id.is_none(),
     };
 

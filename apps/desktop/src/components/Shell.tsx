@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { t } from "../i18n/messages";
 import type {
+  AccountHomeItem,
   DesktopSnapshot,
   DisplayPlatform,
   RoomListItem,
@@ -70,6 +71,24 @@ function sortedSidebarRooms(
       sensitivity: "base"
     });
     return nameOrder || left.room_id.localeCompare(right.room_id);
+  });
+}
+
+/**
+ * Accessible name for the Home rail button.
+ *
+ * The badge shows one Rust-owned total, so the label is where unread messages
+ * and invites stay individually readable (#330). A quiet Home keeps the plain
+ * name rather than announcing two zeroes.
+ */
+function accountHomeLabel(home: AccountHomeItem): string {
+  if (home.attention_count === 0) {
+    return home.display_name;
+  }
+  return t("workspace.homeAttention", {
+    name: home.display_name,
+    unread: String(home.unread_count),
+    invites: String(home.invite_count)
   });
 }
 
@@ -308,9 +327,9 @@ export function WorkspaceRail({
                 className={`workspace-button workspace-system-button workspace-home-button ${
                   snapshot.sidebar.account_home.is_active ? "is-active" : ""
                 }`}
-                data-count={snapshot.sidebar.account_home.unread_count || undefined}
+                data-count={snapshot.sidebar.account_home.attention_count || undefined}
                 type="button"
-                aria-label={snapshot.sidebar.account_home.display_name}
+                aria-label={accountHomeLabel(snapshot.sidebar.account_home)}
                 onClick={() => onSelectSpace(null)}
                 {...tooltipProps}
               >
@@ -420,7 +439,6 @@ export function Sidebar({
   onOpenExplore,
   onOpenInvites,
   onOpenSpaceInfo,
-  onOpenThreads,
   onJoinRoom,
   onSelectRoom
 }: {
@@ -435,7 +453,6 @@ export function Sidebar({
   onOpenExplore: () => void;
   onOpenInvites: () => void;
   onOpenSpaceInfo: () => void;
-  onOpenThreads: () => void;
   onJoinRoom?: (roomId: string) => void;
   onSelectRoom: (roomId: string) => void;
 }) {
@@ -446,10 +463,6 @@ export function Sidebar({
     snapshot.state.domain.rooms,
     snapshot.state.domain.invites
   );
-  const threadAttention =
-    snapshot.state.domain.thread_attention.kind === "tracking"
-      ? snapshot.state.domain.thread_attention
-      : null;
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(
     readCollapsedSections
   );
@@ -523,36 +536,33 @@ export function Sidebar({
         </button>
       </div>
       <div className="sidebar-scroll">
+        {/* #330: Activity, Explore, and Invites are account-global, so they live
+            under Home only. A space sidebar is the room list for that space; its
+            space-scoped actions are the header icons above. Room threads are
+            reached from the room header, where "this room" is already implied. */}
         {accountHomeActive ? (
-          <NavButton
-            active={activeView === "activity"}
-            icon={<Clock3 size={ICON_SIZE.control} />}
-            label={t("workspace.activity")}
-            onClick={onOpenActivity}
-          />
-        ) : (
-          <NavButton
-            count={threadAttention?.notification_count ?? 0}
-            icon={<MessageCircle size={ICON_SIZE.control} />}
-            label={t("workspace.threads")}
-            liveCount={threadAttention?.live_event_marker_count ?? 0}
-            mentionCount={threadAttention?.highlight_count ?? 0}
-            onClick={onOpenThreads}
-          />
-        )}
-        <NavButton
-          active={activeView === "explore"}
-          icon={<Compass size={ICON_SIZE.control} />}
-          label={t("workspace.explore")}
-          onClick={onOpenExplore}
-        />
-        <NavButton
-          active={activeView === "invites"}
-          count={snapshot.state.domain.invites.length}
-          icon={<Bell size={ICON_SIZE.control} />}
-          label={t("workspace.invites")}
-          onClick={onOpenInvites}
-        />
+          <>
+            <NavButton
+              active={activeView === "activity"}
+              icon={<Clock3 size={ICON_SIZE.control} />}
+              label={t("workspace.activity")}
+              onClick={onOpenActivity}
+            />
+            <NavButton
+              active={activeView === "explore"}
+              icon={<Compass size={ICON_SIZE.control} />}
+              label={t("workspace.explore")}
+              onClick={onOpenExplore}
+            />
+            <NavButton
+              active={activeView === "invites"}
+              count={snapshot.state.domain.invites.length}
+              icon={<Bell size={ICON_SIZE.control} />}
+              label={t("workspace.invites")}
+              onClick={onOpenInvites}
+            />
+          </>
+        ) : null}
         <RoomListControls
           dmTotal={snapshot.sidebar.global_dms.length}
           dmUnread={snapshot.sidebar.dm_unread_count}

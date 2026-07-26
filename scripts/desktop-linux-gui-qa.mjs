@@ -1240,10 +1240,10 @@ async function runLocalExploreScenario() {
     await exploreButton.waitForDisplayed({ timeout: timeoutMs });
     await exploreButton.click();
 
-    const searchInput = await session.browser.$('input[aria-label="Search public rooms"]');
+    const searchInput = await session.browser.$('input[aria-label="Search term"]');
     await searchInput.waitForDisplayed({ timeout: timeoutMs });
     await searchInput.setValue(session.directoryRoomName);
-    const searchButton = await session.browser.$('button[aria-label="Search public rooms"]');
+    const searchButton = await session.browser.$('button[aria-label="Search"]');
     await searchButton.click();
 
     await waitForDocumentText(

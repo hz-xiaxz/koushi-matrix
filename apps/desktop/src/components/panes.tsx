@@ -317,24 +317,37 @@ export function ActivityPane({
 }
 
 export function ExplorePane({
+  addressDraft,
+  addressNotice,
   isBusy,
   queryDraft,
   serverDraft,
   snapshot,
+  onAddressChange,
   onJoinRoom,
   onQueryChange,
   onServerChange,
-  onSearch
+  onSearch,
+  onSubmitAddress
 }: {
+  /** Matrix address or link to preview; separate from the directory search term. */
+  addressDraft: string;
+  /**
+   * Why the last address submission produced nothing. Rust owns preview/join
+   * state; this only explains input that never became a target.
+   */
+  addressNotice: "user" | "notRecognized" | null;
   isBusy: boolean;
   queryDraft: string;
   /** Homeserver whose public directory to query; blank means the user's own. */
   serverDraft: string;
   snapshot: DesktopSnapshot;
+  onAddressChange: (value: string) => void;
   onJoinRoom: (room: DirectoryRoomSummary) => void;
   onQueryChange: (value: string) => void;
   onServerChange: (value: string) => void;
   onSearch: () => void;
+  onSubmitAddress: () => void;
 }) {
   const queryState = snapshot.state.domain.directory.query;
   const joinState = snapshot.state.domain.directory.join;
@@ -346,6 +359,11 @@ export function ExplorePane({
     onSearch();
   }
 
+  function submitAddress(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSubmitAddress();
+  }
+
   return (
     <main className="main-pane explore-pane" aria-labelledby="explore-title">
       <header className="channel-header">
@@ -354,43 +372,80 @@ export function ExplorePane({
           <h1 id="explore-title">{t("workspace.explore")}</h1>
         </div>
       </header>
-      <ImeSafeForm className="directory-search" onSubmit={submitSearch}>
-        <label className="directory-search-field">
-          <span>{t("directory.searchPublicRooms")}</span>
-          <ImeTextField
-            type="search"
-            value={queryDraft}
-            syncKey="directory-search"
-            aria-label={t("directory.searchPublicRooms")}
-            placeholder={t("directory.searchPlaceholder")}
-            onChange={(event) => onQueryChange(event.currentTarget.value)}
-          />
-        </label>
-        <label className="directory-search-field directory-search-server">
-          <span>{t("directory.searchServer")}</span>
-          <ImeTextField
-            type="text"
-            value={serverDraft}
-            syncKey="directory-search-server"
-            aria-label={t("directory.searchServer")}
-            placeholder={t("directory.searchServerPlaceholder")}
-            onChange={(event) => onServerChange(event.currentTarget.value)}
-          />
-        </label>
-        <button
-          className="dialog-button is-primary"
-          type="submit"
-          aria-label={t("directory.searchPublicRooms")}
-          disabled={searchDisabled}
-        >
-          <Search size={ICON_SIZE.small} />
-          <span>
-            {queryState.kind === "querying"
-              ? t("directory.searching")
-              : t("directory.search")}
-          </span>
-        </button>
-      </ImeSafeForm>
+      <section className="directory-section" aria-label={t("directory.joinSectionTitle")}>
+        <h2>{t("directory.joinSectionTitle")}</h2>
+        <ImeSafeForm className="directory-search directory-address-form" onSubmit={submitAddress}>
+          <label className="directory-search-field">
+            <span>{t("directory.addressLabel")}</span>
+            <ImeTextField
+              type="text"
+              value={addressDraft}
+              syncKey="directory-address"
+              aria-label={t("directory.addressLabel")}
+              placeholder={t("directory.addressPlaceholder")}
+              onChange={(event) => onAddressChange(event.currentTarget.value)}
+            />
+          </label>
+          <button
+            className="dialog-button is-primary"
+            type="submit"
+            aria-label={t("directory.preview")}
+            disabled={isBusy}
+          >
+            <Compass size={ICON_SIZE.small} />
+            <span>{t("directory.preview")}</span>
+          </button>
+        </ImeSafeForm>
+        <p className="directory-field-helper">{t("directory.addressHelper")}</p>
+        {addressNotice ? (
+          <div className="directory-status" role="status">
+            {addressNotice === "user"
+              ? t("directory.addressIsUser")
+              : t("directory.addressNotRecognized")}
+          </div>
+        ) : null}
+      </section>
+      <section className="directory-section" aria-label={t("directory.searchSectionTitle")}>
+        <h2>{t("directory.searchSectionTitle")}</h2>
+        <ImeSafeForm className="directory-search" onSubmit={submitSearch}>
+          <label className="directory-search-field">
+            <span>{t("directory.searchTermLabel")}</span>
+            <ImeTextField
+              type="search"
+              value={queryDraft}
+              syncKey="directory-search"
+              aria-label={t("directory.searchTermLabel")}
+              placeholder={t("directory.searchPlaceholder")}
+              onChange={(event) => onQueryChange(event.currentTarget.value)}
+            />
+          </label>
+          <label className="directory-search-field directory-search-server">
+            <span>{t("directory.searchServer")}</span>
+            <ImeTextField
+              type="text"
+              value={serverDraft}
+              syncKey="directory-search-server"
+              aria-label={t("directory.searchServer")}
+              placeholder={t("directory.searchServerPlaceholder")}
+              onChange={(event) => onServerChange(event.currentTarget.value)}
+            />
+          </label>
+          <button
+            className="dialog-button is-primary"
+            type="submit"
+            aria-label={t("directory.search")}
+            disabled={searchDisabled}
+          >
+            <Search size={ICON_SIZE.small} />
+            <span>
+              {queryState.kind === "querying"
+                ? t("directory.searching")
+                : t("directory.search")}
+            </span>
+          </button>
+        </ImeSafeForm>
+        <p className="directory-field-helper">{t("directory.searchServerHelper")}</p>
+      </section>
       {queryState.kind === "failed" ? (
         <div className="directory-status" role="status">
           {t("directory.searchFailed", {
@@ -432,11 +487,9 @@ export function ExplorePane({
                     <span className="directory-result-name" dir="auto">
                       {displayName}
                     </span>
-                    {isSpace ? (
-                      <span className="directory-result-type">
-                        {t("directory.spaceBadge")}
-                      </span>
-                    ) : null}
+                    <span className="directory-result-type">
+                      {isSpace ? t("directory.spaceBadge") : t("directory.roomBadge")}
+                    </span>
                   </h2>
                   <p dir="auto">
                     {room.topic?.trim() || alias || t("directory.noAlias")}
@@ -748,10 +801,6 @@ export function TimelinePane({
   const threadsHeaderNotificationCount = timelineThreadAttention?.notificationCount ?? 0;
   const threadsHeaderHighlightCount = timelineThreadAttention?.highlightCount ?? 0;
   const threadsHeaderLiveCount = timelineThreadAttention?.liveEventMarkerCount ?? 0;
-  const showThreadsHeader =
-    threadsHeaderNotificationCount > 0 ||
-    threadsHeaderHighlightCount > 0 ||
-    threadsHeaderLiveCount > 0;
   // #161: when the main pane is anchored (jump-to-date landed on an event), it
   // renders the focused (event-centered) timeline instead of the live room
   // timeline; the right panel is not opened.
@@ -878,20 +927,20 @@ export function TimelinePane({
           >
             <ImageIcon size={ICON_SIZE.panel} />
           </button>
-          {showThreadsHeader ? (
-            <button
-              className="icon-button"
-              type="button"
-              data-count={threadsHeaderNotificationCount || undefined}
-              data-live-count={threadsHeaderLiveCount || undefined}
-              data-mention-count={threadsHeaderHighlightCount || undefined}
-              aria-label={t("workspace.threads")}
-              title={t("workspace.threads")}
-              onClick={onOpenThreadsStable}
-            >
-              <MessageCircle size={ICON_SIZE.panel} />
-            </button>
-          ) : null}
+          {/* #330: the only entry point to this room's threads, so it is always
+              offered. The counts render as badges when non-zero. */}
+          <button
+            className="icon-button"
+            type="button"
+            data-count={threadsHeaderNotificationCount || undefined}
+            data-live-count={threadsHeaderLiveCount || undefined}
+            data-mention-count={threadsHeaderHighlightCount || undefined}
+            aria-label={t("workspace.threads")}
+            title={t("workspace.threads")}
+            onClick={onOpenThreadsStable}
+          >
+            <MessageCircle size={ICON_SIZE.panel} />
+          </button>
           <button
             className="icon-button"
             type="button"

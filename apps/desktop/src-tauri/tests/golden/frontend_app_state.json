@@ -1,8 +1,10 @@
 {
   "sidebar": {
     "account_home": {
+      "attention_count": 3,
       "display_name": "Home",
       "highlight_count": 1,
+      "invite_count": 1,
       "is_active": false,
       "unread_count": 2
     },

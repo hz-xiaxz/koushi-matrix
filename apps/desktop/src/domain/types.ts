@@ -1732,8 +1732,13 @@ export interface SidebarModel {
 
 export interface AccountHomeItem {
   display_name: string;
+  /** Unread messages only; invites are counted separately (#330). */
   unread_count: number;
   highlight_count: number;
+  /** Invites pending for the account, not silenced by room notification settings. */
+  invite_count: number;
+  /** What the Home rail badge renders: unread_count + invite_count, summed in Rust. */
+  attention_count: number;
   is_active: boolean;
 }
 

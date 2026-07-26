@@ -158,7 +158,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -192,7 +191,6 @@ describe("Sidebar", () => {
           onOpenExplore={() => undefined}
           onOpenInvites={() => undefined}
           onOpenSpaceInfo={() => undefined}
-          onOpenThreads={() => undefined}
           onSelectRoom={() => undefined}
         />
       );
@@ -234,7 +232,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -261,7 +258,6 @@ describe("Sidebar", () => {
           onOpenExplore={() => undefined}
           onOpenInvites={() => undefined}
           onOpenSpaceInfo={() => undefined}
-          onOpenThreads={() => undefined}
           onSelectRoom={() => undefined}
         />
       );
@@ -348,7 +344,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -380,13 +375,14 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
 
     expect(screen.queryByRole("button", { name: "Home" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Threads" })).toBeTruthy();
+    // #330: a space sidebar is the room list for that space. Threads is
+    // room-scoped and is reached from the room header instead.
+    expect(screen.queryByRole("button", { name: "Threads" })).toBeNull();
     expect(screen.getByRole("region", { name: "Rooms" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Direct Messages" })).toBeNull();
   });
@@ -415,7 +411,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -448,7 +443,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -483,7 +477,7 @@ describe("WorkspaceRail", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Home" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Home/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Activity" })).toBeNull();
   });
 
