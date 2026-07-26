@@ -1200,6 +1200,7 @@ export function App() {
     "user" | "notRecognized" | null
   >(null);
   const [newDmDialogOpen, setNewDmDialogOpen] = useState(false);
+  const [resetLocalDataConfirmOpen, setResetLocalDataConfirmOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [runtimeDiagnosticSnapshot, setRuntimeDiagnosticSnapshot] =
     useState<DiagnosticLogSnapshot>({ entries: [], droppedEntries: 0 });
@@ -2452,9 +2453,7 @@ export function App() {
   }
 
   async function resetLocalData() {
-    if (!window.confirm(t("settings.resetLocalDataConfirm"))) {
-      return;
-    }
+    setResetLocalDataConfirmOpen(false);
     setSnapshot(await api.resetLocalData());
   }
 
@@ -4888,7 +4887,7 @@ export function App() {
             void probeLocalEncryptionHealth();
           }}
           onResetLocalData={() => {
-            void resetLocalData();
+            setResetLocalDataConfirmOpen(true);
           }}
           onLogout={() => {
             void logout();
@@ -5158,6 +5157,15 @@ export function App() {
           onSubmit={submitReportDialog}
         />
       ) : null}
+      {resetLocalDataConfirmOpen ? (
+        <ResetLocalDataConfirmationDialog
+          isBusy={snapshot.state.domain.local_encryption.kind === "resetting"}
+          onCancel={() => setResetLocalDataConfirmOpen(false)}
+          onConfirm={() => {
+            void resetLocalData();
+          }}
+        />
+      ) : null}
       {diagnosticsOpen ? (
         <DiagnosticDialog
           report={diagnosticReport({
@@ -5179,6 +5187,44 @@ export function App() {
       ) : null}
       </div>
     </TimelineStoreContext.Provider>
+  );
+}
+
+export function ResetLocalDataConfirmationDialog({
+  isBusy,
+  onCancel,
+  onConfirm
+}: {
+  isBusy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="dialog-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("settings.resetLocalData")}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !isBusy) {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+    >
+      <div className="dialog-box">
+        <div className="dialog-title">{t("settings.resetLocalData")}</div>
+        <p>{t("settings.resetLocalDataConfirm")}</p>
+        <div className="dialog-actions">
+          <button type="button" className="dialog-button" disabled={isBusy} onClick={onCancel}>
+            {t("action.cancel")}
+          </button>
+          <button type="button" className="dialog-button danger" disabled={isBusy} onClick={onConfirm}>
+            {t("settings.resetLocalData")}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
