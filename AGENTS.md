@@ -1157,9 +1157,68 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   discarded. Behavioral coverage proves success, omission, malformed/error, and
   timeout, plus that `M_UNKNOWN_TOKEN` causes zero refresh calls, no
   authoritative session-change/token mutation, and fail-closed `LegacySync`
-  selection. Conduit currently exercises automatic LegacySync fallback;
-  Tuwunel/Synapse exercise SyncService. Do not replace this with
-  server-family/version fingerprinting.
+  selection. Do not replace this with server-family/version fingerprinting.
+  The claim that Tuwunel/Synapse exercise SyncService was wrong; see the
+  measured state below.
+- **Measured 2026-07-26: no local server selects SyncService.** All three
+  advertise `org.matrix.simplified_msc3575` in `/_matrix/client/versions`, and
+  Koushi still picks LegacySync on every one of them:
+
+  | server | advertises | Koushi selects |
+  | --- | --- | --- |
+  | conduit 0.10.12 | yes | LegacySync |
+  | tuwunel 1.7.1 | yes | LegacySync |
+  | Synapse v1.151.0 (local lane) | **no** | LegacySync |
+
+  So the SyncService path is effectively unexercised by the local lanes, and
+  `--scenario=all` on conduit (181 green tokens) is a LegacySync baseline, not
+  proof that sliding sync works.
+- The direct cause is a field-name drift, not a server gap. MSC4186 renamed the
+  invited-rooms list filter `is_invite` to `is_invited`; ruma 0.24 still models
+  it as `is_invite` with no serde rename, so the probe sends a field the current
+  MSC does not define. Both Conduit and Tuwunel answer HTTP 200 but **omit the
+  list from the response**, and the probe reads that omission as
+  `KnownIncomplete` and falls back. Measured, same account, same request except
+  the filter:
+
+  | request | conduit | tuwunel |
+  | --- | --- | --- |
+  | `is_invite` (what Koushi sends) | `lists` absent | `lists` absent |
+  | `is_invited` (MSC4186) | `lists` present | `lists` present |
+  | no filters | `lists` present | `lists` present |
+
+  Response latency is ~5ms in all cases, so the two-second deadline is not
+  involved.
+- **The probe is a broken test that returns the right answer. Do not "fix" the
+  field name alone.** Removing the filter flips conduit to SyncService, and the
+  `invites_dm` stage then fails: `have 0 invites`,
+  `observer_diag_base_invite_update_seen=false`,
+  `observer_diag_invite_projection=0`. Conduit's sliding sync does not deliver
+  invites at all, so the fallback's *outcome* is correct even though its
+  *mechanism* is accidental. Sending `is_invited` would make conduit echo the
+  list and pass the probe while still losing invites, so an echo-based probe
+  cannot detect this. If ruma ever renames the field, conduit silently selects
+  SyncService and invites disappear — that is the landmine this note exists for.
+- **Legacy sync cannot be dropped**, and Element X parity is not an argument for
+  dropping it. Element X reads only the `/versions` flag and has no fallback, so
+  it would run on Conduit with broken invites. Element Web POSTs the sliding-sync
+  endpoint and treats 404 as unsupported, which is also blind to this. Koushi's
+  second stage is the only one of the three that asks whether the advertised
+  support actually behaves.
+- The local Synapse lane **cannot** be used to evaluate sliding sync: its config
+  sets only `experimental_features: msc3266_enabled`, so MSC4186 is off and stage
+  one fails regardless of the filter name. matrix.org does advertise the flag, but
+  what Koushi selects there is unmeasured. Decision 2026-07-26: matrix.org stays
+  on LegacySync for now.
+- To make progress, enable MSC4186 in the local Synapse config and add a lane
+  that asserts `sync_backend_a=SyncService`. Conduit cannot serve that role
+  because its invite delivery is broken. Until such a lane exists, treat any
+  SyncService-specific machinery as unverified.
+- The probe's own decision is invisible in QA output: `trace_sync!` records
+  `probe_done` with the `reason` token at `DiagnosticLevel::Debug`, which never
+  reaches stderr, so diagnosing the fallback required replicating the request
+  outside the app. Raising that to a stderr-visible level would have turned a
+  day of investigation into one log line.
 - The local core QA `invites_dm` scenario proves incoming room/space invite
   receipt and accept, invite decline, and DM start/invite projection through
   token-only stdout (`invite_recv=ok`, `invite_accept=ok`,
