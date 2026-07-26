@@ -158,7 +158,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -192,7 +191,6 @@ describe("Sidebar", () => {
           onOpenExplore={() => undefined}
           onOpenInvites={() => undefined}
           onOpenSpaceInfo={() => undefined}
-          onOpenThreads={() => undefined}
           onSelectRoom={() => undefined}
         />
       );
@@ -234,7 +232,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -261,7 +258,6 @@ describe("Sidebar", () => {
           onOpenExplore={() => undefined}
           onOpenInvites={() => undefined}
           onOpenSpaceInfo={() => undefined}
-          onOpenThreads={() => undefined}
           onSelectRoom={() => undefined}
         />
       );
@@ -348,7 +344,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -380,7 +375,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -415,7 +409,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );
@@ -448,7 +441,6 @@ describe("Sidebar", () => {
         onOpenExplore={() => undefined}
         onOpenInvites={() => undefined}
         onOpenSpaceInfo={() => undefined}
-        onOpenThreads={() => undefined}
         onSelectRoom={() => undefined}
       />
     );

@@ -748,10 +748,6 @@ export function TimelinePane({
   const threadsHeaderNotificationCount = timelineThreadAttention?.notificationCount ?? 0;
   const threadsHeaderHighlightCount = timelineThreadAttention?.highlightCount ?? 0;
   const threadsHeaderLiveCount = timelineThreadAttention?.liveEventMarkerCount ?? 0;
-  const showThreadsHeader =
-    threadsHeaderNotificationCount > 0 ||
-    threadsHeaderHighlightCount > 0 ||
-    threadsHeaderLiveCount > 0;
   // #161: when the main pane is anchored (jump-to-date landed on an event), it
   // renders the focused (event-centered) timeline instead of the live room
   // timeline; the right panel is not opened.
@@ -878,20 +874,20 @@ export function TimelinePane({
           >
             <ImageIcon size={ICON_SIZE.panel} />
           </button>
-          {showThreadsHeader ? (
-            <button
-              className="icon-button"
-              type="button"
-              data-count={threadsHeaderNotificationCount || undefined}
-              data-live-count={threadsHeaderLiveCount || undefined}
-              data-mention-count={threadsHeaderHighlightCount || undefined}
-              aria-label={t("workspace.threads")}
-              title={t("workspace.threads")}
-              onClick={onOpenThreadsStable}
-            >
-              <MessageCircle size={ICON_SIZE.panel} />
-            </button>
-          ) : null}
+          {/* #330: the only entry point to this room's threads, so it is always
+              offered. The counts render as badges when non-zero. */}
+          <button
+            className="icon-button"
+            type="button"
+            data-count={threadsHeaderNotificationCount || undefined}
+            data-live-count={threadsHeaderLiveCount || undefined}
+            data-mention-count={threadsHeaderHighlightCount || undefined}
+            aria-label={t("workspace.threads")}
+            title={t("workspace.threads")}
+            onClick={onOpenThreadsStable}
+          >
+            <MessageCircle size={ICON_SIZE.panel} />
+          </button>
           <button
             className="icon-button"
             type="button"

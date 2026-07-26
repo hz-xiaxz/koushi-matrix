@@ -858,6 +858,7 @@ export type MessageId =
   | "workspace.activity"
   | "workspace.createSpace"
   | "workspace.explore"
+  | "workspace.homeAttention"
   | "workspace.filters"
   | "workspace.home"
   | "workspace.invites"
@@ -1905,6 +1906,7 @@ const en: Catalog = {
   "workspace.activity": "Activity",
   "workspace.createSpace": "Create space",
   "workspace.explore": "Explore",
+  "workspace.homeAttention": "{name}, {unread} unread messages, {invites} invites",
   "workspace.filters": "Filters",
   "workspace.home": "Home",
   "workspace.invites": "Invites",
@@ -2837,6 +2839,7 @@ const ja: Catalog = {
   "workspace.activity": "アクティビティ",
   "workspace.createSpace": "スペースを作成",
   "workspace.explore": "探索",
+  "workspace.homeAttention": "{name}、未読メッセージ {unread} 件、招待 {invites} 件",
   "workspace.filters": "フィルター",
   "workspace.home": "ホーム",
   "workspace.invites": "招待",

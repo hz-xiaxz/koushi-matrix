@@ -4583,12 +4583,6 @@ export function App() {
           onOpenSpaceInfo={() => {
             void setRightPanelModeClosingFocusedContext("spaceInfo");
           }}
-          onOpenThreads={() => {
-            const roomId = snapshot.state.ui.navigation.active_room_id;
-            if (roomId) {
-              void openThreadsListPanel(roomId);
-            }
-          }}
           onJoinRoom={(roomId) => {
             void joinRoom(roomId);
           }}
