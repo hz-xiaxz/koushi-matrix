@@ -3852,6 +3852,7 @@ impl AppActor {
                         request_id,
                         query,
                         scope,
+                        ..
                     } => {
                         let effects = self
                             .reduce_app_action(AppAction::SearchSubmitted {
@@ -4024,6 +4025,7 @@ impl AppActor {
                     request_id: effect_request_id,
                     query,
                     scope,
+                    room_filter,
                 } => {
                     if effect_request_id != request_id.sequence {
                         continue;
@@ -4035,6 +4037,7 @@ impl AppActor {
                                 request_id,
                                 query,
                                 scope: map_state_search_scope_to_core(scope),
+                                room_filter,
                             },
                         ))
                         .await;

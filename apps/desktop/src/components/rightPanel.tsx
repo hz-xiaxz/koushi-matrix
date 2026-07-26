@@ -70,6 +70,7 @@ export function ContextualRightPanel({
   timelineTransport = null,
   searchIndexingPending = false,
   searchPending = false,
+  searchTooShortMinChars = null,
   searchQuery,
   searchResults,
   savedSessions,
@@ -170,6 +171,7 @@ export function ContextualRightPanel({
   timelineTransport?: TimelineTransport | null;
   searchIndexingPending?: boolean;
   searchPending?: boolean;
+  searchTooShortMinChars?: number | null;
   searchQuery: string;
   searchResults: SearchResult[];
   savedSessions: SavedSessionInfo[];
@@ -630,6 +632,7 @@ export function ContextualRightPanel({
           <SearchResults
             indexingPending={searchIndexingPending}
             pending={searchPending}
+            tooShortMinChars={searchTooShortMinChars}
             query={searchQuery}
             results={searchResults}
             rooms={snapshot.state.domain.rooms}

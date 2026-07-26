@@ -88,4 +88,88 @@ describe("App search lifecycle", () => {
     expect(await screen.findByText('Searching for "Beta"')).toBeTruthy();
     expect(screen.queryByText(/result[s]? for "Alpha"/)).toBeNull();
   });
+
+  test("shows a stable too-short state before running searchable terms", async () => {
+    const api = createBrowserFakeApi();
+    const submitSearch = vi.spyOn(api, "submitSearch");
+
+    await renderAppWithApi(api);
+
+    const searchInput = await screen.findByRole("textbox", { name: "Search" });
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "GP" } });
+    });
+
+    await waitFor(() => {
+      expect(submitSearch).toHaveBeenCalledWith("GP", "allRooms");
+    });
+    expect(await screen.findAllByText("Search term is too short")).toHaveLength(2);
+    expect(screen.queryByText('Searching for "GP"')).toBeNull();
+
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "GPT" } });
+    });
+    await waitFor(() => {
+      expect(submitSearch).toHaveBeenCalledWith("GPT", "allRooms");
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Search term is too short")).toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "通" } });
+    });
+    await waitFor(() => {
+      expect(submitSearch).toHaveBeenCalledWith("通", "allRooms");
+    });
+    expect(await screen.findAllByText("Search term is too short")).toHaveLength(2);
+
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "通院" } });
+    });
+    await waitFor(() => {
+      expect(submitSearch).toHaveBeenCalledWith("通院", "allRooms");
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Search term is too short")).toBeNull();
+    });
+  });
+
+  test("reruns the current search when the scope selector changes", async () => {
+    const api = createBrowserFakeApi();
+    const submitSearch = vi.spyOn(api, "submitSearch");
+
+    await renderAppWithApi(api);
+
+    const searchInput = await screen.findByRole("textbox", { name: "Search" });
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "GPT" } });
+    });
+    await waitFor(() => {
+      expect(submitSearch).toHaveBeenCalledWith("GPT", "allRooms");
+    });
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Search scope" }), {
+        target: { value: "dms" }
+      });
+    });
+
+    await waitFor(() => {
+      expect(submitSearch).toHaveBeenCalledWith("GPT", "dms");
+    });
+  });
+
+  test("renders Rust-owned search result context labels", async () => {
+    const api = createBrowserFakeApi();
+
+    await renderAppWithApi(api);
+
+    const searchInput = await screen.findByRole("textbox", { name: "Search" });
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "matrix-sdk-search" } });
+    });
+
+    expect(await screen.findByText("Synthetic Lab · matrix-sdk-search")).toBeTruthy();
+  });
 });

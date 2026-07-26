@@ -103,8 +103,8 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::GateSasPresented { flow_id, emojis } => {
             e2ee::handle_gate_sas_presented(state, flow_id, emojis)
         }
-        AppAction::VerificationGateAttemptFailed { kind } => {
-            session::handle_verification_gate_attempt_failed(state, kind)
+        AppAction::VerificationGateAttemptFailed { flow_id, kind } => {
+            session::handle_verification_gate_attempt_failed(state, flow_id, kind)
         }
         AppAction::VerificationSessionRejected { reason } => {
             session::handle_verification_session_rejected(state, reason)

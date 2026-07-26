@@ -1188,6 +1188,61 @@ fn recovery_cancel_and_retry_never_escape_the_gate() {
 }
 
 #[test]
+fn stale_gate_failure_from_previous_sas_does_not_interrupt_recovery_key_flow() {
+    let info = session_info();
+    let gate = VerificationGateState {
+        methods: vec![
+            VerificationMethodCapability::ExistingDeviceSas,
+            VerificationMethodCapability::RecoveryKey,
+        ],
+        account_kind: VerificationAccountKind::ExistingIdentity,
+        failure: None,
+    };
+    let mut state = AppState {
+        session: SessionState::AwaitingVerification {
+            info: info.clone(),
+            gate,
+        },
+        ..AppState::default()
+    };
+
+    reduce(
+        &mut state,
+        AppAction::VerificationMethodSubmitted {
+            method: VerificationMethod::ExistingDeviceSas,
+            flow_id: 30,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::VerificationFailed {
+            request_id: 30,
+            kind: TrustOperationFailureKind::Timeout,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::VerificationMethodSubmitted {
+            method: VerificationMethod::RecoveryKey,
+            flow_id: 31,
+        },
+    );
+    let recovery_verifying = state.clone();
+
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::VerificationGateAttemptFailed {
+                flow_id: 30,
+                kind: VerificationGateFailureKind::Cancelled,
+            },
+        )
+        .is_empty()
+    );
+    assert_eq!(state, recovery_verifying);
+}
+
+#[test]
 fn normal_room_commands_are_rejected_in_every_verification_gate_state() {
     let info = session_info();
     let states = [

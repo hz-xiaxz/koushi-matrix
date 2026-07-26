@@ -16738,6 +16738,7 @@ async fn poll_search_until_found(
             scope: SearchScope::CurrentRoom {
                 room_id: room_id.to_owned(),
             },
+            room_filter: koushi_state::SearchRoomFilter::AllRooms,
         }))
         .await
         .map_err(|e| format!("{label}: submit search query: {e}"))?;
@@ -16778,6 +16779,7 @@ async fn poll_search_until_absent(
             scope: SearchScope::CurrentRoom {
                 room_id: room_id.to_owned(),
             },
+            room_filter: koushi_state::SearchRoomFilter::AllRooms,
         }))
         .await
         .map_err(|e| format!("{label}: submit search query: {e}"))?;

@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -208,6 +210,19 @@ describe("Sidebar", () => {
     renderSidebar();
     expect(screen.getByRole("region", { name: "Direct Messages" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Rooms" })).toBeNull();
+  });
+
+  it("keeps category totals visually neutral compared with unread badges", () => {
+    const css = readFileSync(join(process.cwd(), "src/styles.css"), "utf8");
+    const selectedTotalRule = /\.room-list-chip\.is-selected \.room-list-chip-total\s*\{(?<body>[^}]+)\}/s.exec(
+      css
+    )?.groups?.body;
+
+    expect(selectedTotalRule).toBeTruthy();
+    expect(selectedTotalRule).toContain("background: var(--surface-raised)");
+    expect(selectedTotalRule).not.toContain("background: var(--brand-contrast)");
+    expect(selectedTotalRule).not.toContain("color: var(--unread)");
+    expect(selectedTotalRule).not.toContain("color: var(--mention)");
   });
 
   it("does not render unresolved child room ids as not joined rooms", async () => {

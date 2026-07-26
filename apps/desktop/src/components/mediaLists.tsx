@@ -401,6 +401,7 @@ function PinnedEventsList({
 function SearchResults({
   indexingPending = false,
   pending = false,
+  tooShortMinChars = null,
   query,
   results,
   rooms,
@@ -408,6 +409,7 @@ function SearchResults({
 }: {
   indexingPending?: boolean;
   pending?: boolean;
+  tooShortMinChars?: number | null;
   query: string;
   results: SearchResult[];
   rooms: DesktopSnapshot["state"]["domain"]["rooms"];
@@ -421,12 +423,14 @@ function SearchResults({
     <section className="search-results" aria-busy={pending || undefined}>
       <div className="search-results-header">
         <span dir="auto">
-          {pending
-            ? t("search.searchingFor", { query })
-            : t(results.length === 1 ? "search.resultCountOne" : "search.resultCountMany", {
-                count: results.length,
-                query
-              })}
+            {pending
+              ? t("search.searchingFor", { query })
+              : tooShortMinChars !== null
+                ? t("search.tooShort")
+              : t(results.length === 1 ? "search.resultCountOne" : "search.resultCountMany", {
+                  count: results.length,
+                  query
+                })}
         </span>
       </div>
       <div className="result-list">
@@ -442,7 +446,7 @@ function SearchResults({
               >
                 <span dir="auto">{highlight(result.snippet, result.highlights)}</span>
                 <span className="result-meta">
-                  <span dir="auto">{room?.display_label ?? result.room_id}</span> ·{" "}
+                  <span dir="auto">{result.context_label ?? room?.display_label ?? result.room_id}</span> ·{" "}
                   <time dateTime={new Date(result.timestamp_ms).toISOString()}>
                     {formatScheduledSendTime(result.timestamp_ms)}
                   </time>{" "}
@@ -456,6 +460,8 @@ function SearchResults({
             {t(
               pending
                 ? "search.searching"
+                : tooShortMinChars !== null
+                  ? "search.tooShort"
                 : indexingPending
                   ? "search.indexingPending"
                   : "search.noExactMatches"

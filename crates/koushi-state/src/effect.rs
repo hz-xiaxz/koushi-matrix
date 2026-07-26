@@ -2,8 +2,8 @@ use crate::{
     action::{LoginRequest, RecoveryRequest},
     state::{
         AttachmentFilter, AttachmentScope, AttachmentSort, LoginAttemptId, RoomPreferencesState,
-        SearchCrawlerSettings, SearchScope, SessionInfo, SettingsValues, VerificationCancelReason,
-        VerificationMethod, VerificationTarget,
+        SearchCrawlerSettings, SearchRoomFilter, SearchScope, SessionInfo, SettingsValues,
+        VerificationCancelReason, VerificationMethod, VerificationTarget,
     },
 };
 
@@ -86,6 +86,7 @@ pub enum AppEffect {
         request_id: u64,
         query: String,
         scope: SearchScope,
+        room_filter: SearchRoomFilter,
     },
     SearchAttachments {
         request_id: u64,

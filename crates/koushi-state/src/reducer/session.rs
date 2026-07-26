@@ -279,11 +279,21 @@ pub(crate) fn handle_verification_method_submitted(
 
 pub(crate) fn handle_verification_gate_attempt_failed(
     state: &mut AppState,
+    flow_id: u64,
     kind: VerificationGateFailureKind,
 ) -> Vec<AppEffect> {
-    let SessionState::Verifying { info, gate, .. } = &state.session else {
+    let SessionState::Verifying {
+        info,
+        gate,
+        flow_id: active_flow_id,
+        ..
+    } = &state.session
+    else {
         return Vec::new();
     };
+    if *active_flow_id != flow_id {
+        return Vec::new();
+    }
     let mut gate = gate.clone();
     gate.failure = Some(kind);
     state.session = SessionState::AwaitingVerification {

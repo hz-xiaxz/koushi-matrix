@@ -1609,6 +1609,13 @@ export type FocusedContextState =
 export type SearchState =
   | { kind: "closed" }
   | { kind: "editing"; query: string; scope: SearchScopeKind }
+  | {
+      kind: "tooShort";
+      request_id: number;
+      query: string;
+      scope: SearchScopeKind;
+      min_chars: number;
+    }
   | { kind: "searching"; request_id: number; query: string; scope: SearchScopeKind }
   | {
       kind: "results";
@@ -1628,6 +1635,7 @@ export type SearchState =
 export interface SearchResult {
   room_id: string;
   event_id: string;
+  context_label?: string | null;
   sender: string;
   timestamp_ms: number;
   score_millis: number;

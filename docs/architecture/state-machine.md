@@ -119,6 +119,10 @@ stateDiagram-v2
   `AwaitingVerification` for user feedback, and an accepted
   `VerificationMethodSubmitted` clears it while preserving the gate's methods
   and account kind before entering the new `Verifying` flow.
+- Gate terminal events are fenced by the active `flow_id`. A stale SAS
+  `cancelled`, `failed`, or `timeout` completion from an older flow is ignored
+  and must not move a newer recovery-key or device-verification attempt back to
+  `AwaitingVerification`.
 - Restricted crypto sync is AccountActor-internal and cannot publish normal
   projections or active saved-session state. Initial authoritative Verified
   skips that lane; later Verified cancels and joins it before the Ready
@@ -2354,6 +2358,14 @@ stateDiagram-v2
   submission/failure correlation. Incoming SDK-originated verification requests
   use a reserved Rust-owned flow-id namespace, so React never synthesizes or
   owns verification discovery state.
+- `AccountActor` records private-safe wait-state diagnostics for each
+  device-verification `flow_id`. The `core.sas_verification` stream may expose
+  only closed tokens and counts such as `waiting_for=recipient_devices`,
+  `to_device_delivery`, `remote_accept`, `sas_start`, `mac`,
+  `cross_signing_settlement`, or `normal_sync_resume`; terminal diagnostics
+  include the last known `waiting_for` token when available. Recovery-key flows
+  use a distinct private-safe `core.recovery_verification` diagnostic source
+  with `flow_type=recovery_key`.
 - Incoming SDK-originated verification observations are idempotent by the full
   `VerificationTarget` (peer and device) plus SDK flow id. `AccountActor`
   ignores only an exact target-and-flow replay; a different target or flow,
@@ -2953,7 +2965,9 @@ stateDiagram-v2
 stateDiagram-v2
     [*] --> Closed
     Closed --> Editing: SearchEdited
+    Editing --> TooShort: SearchSubmitted below minimum length
     Editing --> Searching: SearchSubmitted
+    TooShort --> Editing: SearchEdited
     Searching --> Results: SearchSucceeded
     Searching --> Failed: SearchFailed
     Results --> Editing: SearchEdited
@@ -2961,18 +2975,34 @@ stateDiagram-v2
     Searching --> Editing: SearchEdited
 ```
 
-- Search has editing, searching, results, and failed states.
+- Search has editing, too-short, searching, results, and failed states.
+- The reducer owns the minimum query length policy. Non-empty ASCII queries
+  shorter than three characters and CJK queries shorter than two characters
+  enter `TooShort`, emit `SearchChanged`, and do not emit a backend search
+  effect.
 - Search responses carry the submitted `request_id`, `query`, and `scope`.
 - Responses whose `request_id`, `query`, or `scope` does not match the active
-  searching state are ignored. This prevents results from a previous transient
-  command connection from settling the current search if connection-local
-  sequence numbers collide.
+  searching/results state are ignored. This prevents results from a previous
+  transient command connection from settling the current search if
+  connection-local sequence numbers collide, while allowing a matching SDK
+  supplement to replace the local-first result snapshot.
 - If the user edits the query while a search is in flight, the in-flight response
-  is ignored because the state is no longer `Searching`.
-- Submitting a search emits both the backend search request and `SearchChanged`
-  so the UI can display the loading state immediately.
+  is ignored because the state is no longer the matching `Searching`/`Results`
+  state.
+- Submitting a valid search emits both the backend search request and
+  `SearchChanged` so the UI can display the loading state immediately. The
+  reducer resolves `SearchScope` into the authoritative room filter before the
+  backend effect is emitted; React must not derive space, DM, or current-room
+  membership for product search behavior.
 - Snippet text and highlight ranges are DTO fields produced by a future search
   adapter, not by the reducer.
+- Search result context labels are Rust-owned projections. They may include a
+  space label plus room label for disambiguation, but the frontend only renders
+  the DTO and must not recompute cross-space context.
+- The search actor returns local index results first and may later supplement
+  them with SDK search results for the same request/query/scope. New search
+  messages preempt older SDK supplement work: the actor aborts or drops stale SDK
+  completions and must not make a newer query wait for an older remote search.
 
 The ngram index is a candidate generator, not the source of display truth. Before
 returning a result, the search adapter must run a second-pass verification over

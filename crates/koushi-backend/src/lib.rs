@@ -6,9 +6,9 @@ use koushi_search::{SearchDocumentStore, SearchEdit, SearchableEvent};
 use koushi_state::{
     AppAction, AppEffect, AppState, AttachmentFilter, AttachmentResult, AttachmentScope,
     AttachmentSort, AuthFailureKind, DelegatedAuthLinks, LoginAttemptId, LoginFlow, LoginRequest,
-    RecoveryMethod, RecoveryRequest, RoomSummary, RoomTags, SearchResult, SearchScope, SessionInfo,
-    SessionState, SidebarModel, SpaceSummary, ThreadPaneState, TrustOperationFailureKind,
-    compose_sidebar_with_account_facts, reduce,
+    RecoveryMethod, RecoveryRequest, RoomSummary, RoomTags, SearchResult, SearchRoomFilter,
+    SearchScope, SessionInfo, SessionState, SidebarModel, SpaceSummary, ThreadPaneState,
+    TrustOperationFailureKind, compose_sidebar_with_account_facts, reduce,
 };
 use serde::{Deserialize, Serialize};
 
@@ -237,7 +237,7 @@ impl FakeDesktopBackend {
             query: query.clone(),
             scope: scope.clone(),
         });
-        let _effects = reduce(
+        let effects = reduce(
             &mut self.state,
             AppAction::SearchSubmitted {
                 request_id,
@@ -245,8 +245,15 @@ impl FakeDesktopBackend {
                 scope: scope.clone(),
             },
         );
+        let room_filter = effects
+            .iter()
+            .find_map(|effect| match effect {
+                AppEffect::SearchMessages { room_filter, .. } => Some(room_filter.clone()),
+                _ => None,
+            })
+            .unwrap_or(SearchRoomFilter::AllRooms);
 
-        let results = self.search_candidates(&query, &scope, &candidates);
+        let results = self.search_candidates(&query, &room_filter, &candidates);
         self.dispatch(AppAction::SearchSucceeded {
             request_id,
             query,
@@ -390,11 +397,12 @@ impl FakeDesktopBackend {
                 request_id,
                 query,
                 scope,
+                room_filter,
             } => vec![AppAction::SearchSucceeded {
                 request_id: *request_id,
                 query: query.clone(),
                 scope: scope.clone(),
-                results: self.search(query, scope),
+                results: self.search(query, room_filter),
             }],
             AppEffect::SearchAttachments {
                 request_id,
@@ -654,8 +662,8 @@ impl FakeDesktopBackend {
         }
     }
 
-    fn search(&self, query: &str, scope: &SearchScope) -> Vec<SearchResult> {
-        self.search_candidates(query, scope, &self.search_candidates)
+    fn search(&self, query: &str, room_filter: &SearchRoomFilter) -> Vec<SearchResult> {
+        self.search_candidates(query, room_filter, &self.search_candidates)
     }
 
     fn search_attachments(
@@ -670,7 +678,7 @@ impl FakeDesktopBackend {
     fn search_candidates(
         &self,
         query: &str,
-        scope: &SearchScope,
+        room_filter: &SearchRoomFilter,
         candidates: &[SearchCandidate],
     ) -> Vec<SearchResult> {
         // #162: the SDK ngram index is only an accelerator. Union the supplied
@@ -678,42 +686,8 @@ impl FakeDesktopBackend {
         // indexed message is findable, then apply the product scope. This keeps
         // the fake backend faithful to the fixed core `SearchActor`.
         const CANDIDATE_LIMIT: usize = 50;
-        // For a single-room scope, push the room filter into the scan so scoping
-        // happens before the cap (matching the core path); otherwise other
-        // rooms' matches could fill the cap and drop the target room's results.
-        let room_filter = match scope {
-            SearchScope::CurrentRoom { room_id } => Some(room_id.as_str()),
-            _ => None,
-        };
-        let mut results = self.search_store.search_with_candidates(
-            query,
-            room_filter,
-            candidates,
-            CANDIDATE_LIMIT,
-        );
-        results.retain(|result| self.room_is_in_scope(&result.room_id, scope));
-        results
-    }
-
-    fn room_is_in_scope(&self, room_id: &str, scope: &SearchScope) -> bool {
-        match scope {
-            SearchScope::CurrentRoom {
-                room_id: current_room_id,
-            } => room_id == current_room_id,
-            SearchScope::CurrentSpace { space_id } => fixture_spaces()
-                .iter()
-                .find(|space| &space.space_id == space_id)
-                .is_some_and(|space| {
-                    space
-                        .child_room_ids
-                        .iter()
-                        .any(|child_id| child_id == room_id)
-                }),
-            SearchScope::Dms => fixture_rooms()
-                .iter()
-                .any(|room| room.room_id == room_id && room.is_dm),
-            SearchScope::AllRooms => true,
-        }
+        self.search_store
+            .search_with_candidates(query, room_filter, candidates, CANDIDATE_LIMIT)
     }
 
     fn thread_snapshot(&self) -> Option<ThreadSnapshot> {

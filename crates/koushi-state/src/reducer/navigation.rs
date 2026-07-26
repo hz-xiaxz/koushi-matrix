@@ -160,6 +160,7 @@ fn close_current_room_search_for_room_change(
 ) {
     let should_close = match &state.search {
         SearchState::Editing { scope, .. }
+        | SearchState::TooShort { scope, .. }
         | SearchState::Searching { scope, .. }
         | SearchState::Results { scope, .. }
         | SearchState::Failed { scope, .. } => match scope {

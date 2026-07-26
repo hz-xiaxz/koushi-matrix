@@ -426,6 +426,7 @@ export type MessageId =
   | "search.resultCountOne"
   | "search.searching"
   | "search.searchingFor"
+  | "search.tooShort"
   | "search.scopeAll"
   | "search.scopeDm"
   | "search.scopeRoom"
@@ -651,6 +652,11 @@ export type MessageId =
   | "gate.rejecting"
   | "gate.locked"
   | "gate.otherDevice"
+  | "gate.verifyRecoveryKey"
+  | "gate.deviceVerificationDialogTitle"
+  | "gate.deviceVerificationDialogCopy"
+  | "gate.useRecoveryKey"
+  | "gate.tryDeviceVerificationAnyway"
   | "gate.match"
   | "gate.mismatch"
   | "gate.recoverySecret"
@@ -1473,6 +1479,7 @@ const en: Catalog = {
   "search.resultCountOne": "1 result for \"{query}\"",
   "search.searching": "Searching...",
   "search.searchingFor": "Searching for \"{query}\"",
+  "search.tooShort": "Search term is too short",
   "search.scopeAll": "All",
   "search.scopeDm": "DM",
   "search.scopeRoom": "Room",
@@ -1710,6 +1717,11 @@ const en: Catalog = {
   "gate.rejecting": "Rejecting unverified session…",
   "gate.locked": "This session must be verified again.",
   "gate.otherDevice": "Verify with another device",
+  "gate.verifyRecoveryKey": "Verify with recovery key",
+  "gate.deviceVerificationDialogTitle": "Try device verification?",
+  "gate.deviceVerificationDialogCopy": "Device-to-device verification can be unreliable if the other device is offline, slow to sync, or missing keys. We recommend verifying with your recovery key when possible.",
+  "gate.useRecoveryKey": "Use recovery key",
+  "gate.tryDeviceVerificationAnyway": "Try device verification anyway",
   "gate.match": "They match",
   "gate.mismatch": "They do not match",
   "gate.recoverySecret": "Recovery secret",
@@ -2418,6 +2430,7 @@ const ja: Catalog = {
   "search.resultCountOne": "\"{query}\" の結果 1 件",
   "search.searching": "検索中...",
   "search.searchingFor": "\"{query}\" を検索中",
+  "search.tooShort": "検索語が短すぎます",
   "search.scopeAll": "すべて",
   "search.scopeDm": "ダイレクト",
   "search.scopeRoom": "ルーム",
@@ -2655,6 +2668,11 @@ const ja: Catalog = {
   "gate.rejecting": "未検証セッションを拒否中…",
   "gate.locked": "このセッションは再検証が必要です。",
   "gate.otherDevice": "別のデバイスで検証",
+  "gate.verifyRecoveryKey": "リカバリーキーで検証",
+  "gate.deviceVerificationDialogTitle": "デバイス検証を試しますか？",
+  "gate.deviceVerificationDialogCopy": "デバイス間検証は、相手のデバイスがオフライン、同期が遅い、または鍵が不足している場合に不安定になることがあります。可能な場合はリカバリーキーでの検証をおすすめします。",
+  "gate.useRecoveryKey": "リカバリーキーを使う",
+  "gate.tryDeviceVerificationAnyway": "それでもデバイス検証を試す",
   "gate.match": "一致しています",
   "gate.mismatch": "一致していません",
   "gate.recoverySecret": "リカバリーシークレット",

@@ -2308,11 +2308,24 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
-    const results = search(query, scope, this.snapshot);
+    const trimmed = query.trim();
+    const minChars = searchMinChars(trimmed);
+    if (trimmed.length > 0 && [...trimmed].length < minChars) {
+      this.snapshot.state.domain.search = {
+        kind: "tooShort",
+        request_id: Date.now(),
+        query: trimmed,
+        scope,
+        min_chars: minChars
+      };
+      return this.getSnapshot();
+    }
+
+    const results = search(trimmed, scope, this.snapshot);
     this.snapshot.state.domain.search = {
       kind: "results",
       request_id: Date.now(),
-      query,
+      query: trimmed,
       scope,
       results
     };
@@ -4872,7 +4885,7 @@ function search(
 
   return timelineMessages
     .filter((message) => roomIsInScope(message.room_id, scope, snapshot))
-    .map((message) => searchMessage(message, query))
+    .map((message) => searchMessage(message, query, scope, snapshot))
     .filter((result): result is SearchResult => Boolean(result))
     .sort(
       (left, right) =>
@@ -4882,12 +4895,36 @@ function search(
     );
 }
 
-function searchMessage(message: TimelineMessage, query: string): SearchResult | null {
+function searchMinChars(query: string): number {
+  return [...query].some((character) => isCjkSearchCharacter(character)) ? 2 : 3;
+}
+
+function isCjkSearchCharacter(character: string): boolean {
+  const codePoint = character.codePointAt(0);
+  if (codePoint === undefined) {
+    return false;
+  }
+  return (
+    (codePoint >= 0x3040 && codePoint <= 0x30ff) ||
+    (codePoint >= 0x3400 && codePoint <= 0x9fff) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7af)
+  );
+}
+
+function searchMessage(
+  message: TimelineMessage,
+  query: string,
+  scope: SearchScopeKind,
+  snapshot: DesktopSnapshot
+): SearchResult | null {
+  const contextLabel = searchResultContextLabel(message.room_id, scope, snapshot);
   const bodyRange = textRangeUtf16(message.body, query);
   if (bodyRange) {
     return {
       room_id: message.room_id,
       event_id: message.event_id,
+      context_label: contextLabel,
       sender: message.sender,
       timestamp_ms: message.timestamp_ms,
       score_millis: candidateScore(message.event_id),
@@ -4904,6 +4941,7 @@ function searchMessage(message: TimelineMessage, query: string): SearchResult | 
       return {
         room_id: message.room_id,
         event_id: message.event_id,
+        context_label: contextLabel,
         sender: message.sender,
         timestamp_ms: message.timestamp_ms,
         score_millis: candidateScore(message.event_id),
@@ -4916,6 +4954,59 @@ function searchMessage(message: TimelineMessage, query: string): SearchResult | 
   }
 
   return null;
+}
+
+function searchResultContextLabel(
+  roomId: string,
+  scope: SearchScopeKind,
+  snapshot: DesktopSnapshot
+): string | null {
+  const room = snapshot.state.domain.rooms.find((candidate) => candidate.room_id === roomId);
+  if (!room) {
+    return null;
+  }
+  const roomLabel = room.display_label.trim() || room.display_name.trim() || room.room_id;
+  const spaceLabel = searchResultSpaceLabel(room, scope, snapshot);
+  return spaceLabel ? `${spaceLabel} · ${roomLabel}` : roomLabel;
+}
+
+function searchResultSpaceLabel(
+  room: RoomSummary,
+  scope: SearchScopeKind,
+  snapshot: DesktopSnapshot
+): string | null {
+  const spacesById = new Map(snapshot.state.domain.spaces.map((space) => [space.space_id, space]));
+  if (scope === "currentSpace") {
+    const activeSpaceId = snapshot.state.ui.navigation.active_space_id;
+    if (activeSpaceId && roomBelongsToSpace(room, activeSpaceId)) {
+      const activeLabel = spaceDisplayLabel(spacesById.get(activeSpaceId));
+      if (activeLabel) {
+        return activeLabel;
+      }
+    }
+  }
+
+  const activeSpaceId = snapshot.state.ui.navigation.active_space_id;
+  if (activeSpaceId && roomBelongsToSpace(room, activeSpaceId)) {
+    const activeLabel = spaceDisplayLabel(spacesById.get(activeSpaceId));
+    if (activeLabel) {
+      return activeLabel;
+    }
+  }
+
+  return snapshot.state.domain.spaces
+    .filter((space) => roomBelongsToSpace(room, space.space_id))
+    .map((space) => spaceDisplayLabel(space))
+    .find((label): label is string => Boolean(label)) ?? null;
+}
+
+function roomBelongsToSpace(room: RoomSummary, spaceId: string): boolean {
+  return room.parent_space_ids.includes(spaceId) || room.dm_space_ids.includes(spaceId);
+}
+
+function spaceDisplayLabel(space: SpaceSummary | undefined): string | null {
+  const label = space?.display_name.trim();
+  return label ? label : null;
 }
 
 function candidateScore(eventId: string): number {

@@ -702,6 +702,12 @@ pub enum FrontendSearchState {
         query: String,
         scope: SearchScopeKind,
     },
+    TooShort {
+        request_id: u64,
+        query: String,
+        scope: SearchScopeKind,
+        min_chars: u8,
+    },
     Searching {
         request_id: u64,
         query: String,
@@ -728,6 +734,17 @@ impl From<SearchState> for FrontendSearchState {
             SearchState::Editing { query, scope } => Self::Editing {
                 query,
                 scope: scope.into(),
+            },
+            SearchState::TooShort {
+                request_id,
+                query,
+                scope,
+                min_chars,
+            } => Self::TooShort {
+                request_id,
+                query,
+                scope: scope.into(),
+                min_chars,
             },
             SearchState::Searching {
                 request_id,
@@ -814,6 +831,8 @@ impl From<SearchScope> for SearchScopeKind {
 pub struct FrontendSearchResult {
     pub room_id: String,
     pub event_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_label: Option<String>,
     pub sender: String,
     pub timestamp_ms: u64,
     pub score_millis: u32,
@@ -828,6 +847,7 @@ impl From<SearchResult> for FrontendSearchResult {
         Self {
             room_id: result.room_id,
             event_id: result.event_id,
+            context_label: result.context_label,
             sender: result.sender,
             timestamp_ms: result.timestamp_ms,
             score_millis: result.score_millis,
@@ -2081,6 +2101,7 @@ mod tests {
             results: vec![SearchResult {
                 room_id: "!room:example.invalid".to_owned(),
                 event_id: "$search:example.invalid".to_owned(),
+                context_label: Some("Fixture Space · Fixture Room".to_owned()),
                 sender: "@fixture:example.invalid".to_owned(),
                 timestamp_ms: 600_000,
                 score_millis: 950,
