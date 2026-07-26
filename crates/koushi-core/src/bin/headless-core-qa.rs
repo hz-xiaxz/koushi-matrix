@@ -5734,17 +5734,6 @@ async fn cleanup_after_full_flow(
     Ok("restore_cleanup=ok".to_owned())
 }
 
-fn should_bootstrap_new_identity_before_logged_in(scenario: QaScenario) -> bool {
-    matches!(
-        scenario,
-        QaScenario::All
-            | QaScenario::InvitesDm
-            | QaScenario::E2eeTrust
-            | QaScenario::GateRestore
-            | QaScenario::GateNegative
-    )
-}
-
 fn should_run_normal_secondary_participant(scenario: QaScenario) -> bool {
     scenario.should_run_stage(QaStage::InvitesDm)
         || scenario.should_run_stage(QaStage::Directory)
@@ -5817,15 +5806,21 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
         .await
         .map_err(|e| format!("submit login A: {e}"))?;
 
-    let bootstrap_recovery_secret_a = if should_bootstrap_new_identity_before_logged_in(scenario) {
-        let secret =
-            complete_new_identity_gate_for_qa(&mut conn_a, &config.password_a, "gate-bootstrap-a")
-                .await?;
-        println!("gate_new_identity_bootstrap=ok");
-        secret
-    } else {
-        None
-    };
+    // The runner registers a fresh synthetic user per leg, so primary A always
+    // arrives as a new identity and parks in the verification gate. `LoggedIn`
+    // is held in the actor's pending-ready events until the session is promoted,
+    // so the gate has to be completed here or the wait below can only time out.
+    //
+    // This used to be an allowlist of scenarios, which silently broke every
+    // scenario missing from it — `media`, `login_sync`, `timeline`, `reply`, and
+    // the rest all timed out at login. Scenarios that must not bootstrap have
+    // their own login route and return from `run_async` above this point, so
+    // completing the gate unconditionally here cannot reach them. The helper
+    // returns `Ok(None)` when the session is already `Ready`.
+    let bootstrap_recovery_secret_a =
+        complete_new_identity_gate_for_qa(&mut conn_a, &config.password_a, "gate-bootstrap-a")
+            .await?;
+    println!("gate_new_identity_bootstrap=ok");
 
     let mut account_key_a = wait_for_logged_in(&mut conn_a, login_a_id, "login A").await?;
     wait_for_ready_snapshot(&mut conn_a, "session A Ready").await?;
@@ -18657,11 +18652,52 @@ mod tests {
     }
 
     #[test]
-    fn invites_dm_primary_login_requires_new_identity_bootstrap() {
+    fn shared_primary_login_always_completes_the_new_identity_gate() {
+        // Primary A is always a freshly registered user, so it always parks in
+        // the verification gate and `LoggedIn` stays pending until promotion.
+        // An allowlist of scenarios here silently broke every scenario missing
+        // from it; the gate completion must be unconditional.
+        let source = include_str!("headless-core-qa.rs");
+        let shared_login = source
+            .split("--- Login A (storeless exchange + store bootstrap inside the actor) ---")
+            .nth(1)
+            .expect("shared primary login route")
+            .split("wait_for_logged_in(&mut conn_a, login_a_id")
+            .next()
+            .expect("shared primary login waits for LoggedIn");
         assert!(
-            should_bootstrap_new_identity_before_logged_in(QaScenario::InvitesDm),
-            "focused InvitesDm must bootstrap primary A before LoggedIn"
+            shared_login.contains("complete_new_identity_gate_for_qa(&mut conn_a"),
+            "the shared login route must complete the gate before waiting for LoggedIn"
         );
+        assert!(
+            !shared_login.contains("should_bootstrap_new_identity_before_logged_in"),
+            "gate completion must not be gated on the scenario"
+        );
+    }
+
+    #[test]
+    fn scenarios_that_must_not_bootstrap_return_before_the_shared_login() {
+        // This is what makes the unconditional gate completion safe: a scenario
+        // that owns its own login never reaches the shared route.
+        let source = include_str!("headless-core-qa.rs");
+        let before_shared_login = source
+            .split("async fn run_async")
+            .nth(1)
+            .expect("run_async body")
+            .split("--- Login A (storeless exchange + store bootstrap inside the actor) ---")
+            .next()
+            .expect("shared primary login follows the early returns");
+        for marker in [
+            "QaScenario::GateNoProof",
+            "QaScenario::TimelineReconnect",
+            "QaScenario::CacheRestore",
+            "should_run_focused_send_queue_route(scenario)",
+        ] {
+            assert!(
+                before_shared_login.contains(marker),
+                "{marker} must return before the shared primary login"
+            );
+        }
     }
 
     #[test]
@@ -18819,33 +18855,9 @@ mod tests {
     #[test]
     fn all_flow_retains_the_primary_recovery_secret_for_its_send_queue_stage() {
         assert!(QaScenario::All.should_run_stage(QaStage::SendQueue));
-        assert!(
-            should_bootstrap_new_identity_before_logged_in(QaScenario::All),
-            "All must retain the primary recovery secret required by its SendQueue stage"
-        );
-        assert!(should_bootstrap_new_identity_before_logged_in(
-            QaScenario::E2eeTrust
-        ));
-        assert!(should_bootstrap_new_identity_before_logged_in(
-            QaScenario::GateRestore
-        ));
-        assert!(should_bootstrap_new_identity_before_logged_in(
-            QaScenario::GateNegative
-        ));
-
-        assert!(!should_bootstrap_new_identity_before_logged_in(
-            QaScenario::GateNoProof
-        ));
-        assert!(!should_bootstrap_new_identity_before_logged_in(
-            QaScenario::LoginSync
-        ));
-        assert!(!should_bootstrap_new_identity_before_logged_in(
-            QaScenario::TimelineReconnect
-        ));
-        assert!(!should_bootstrap_new_identity_before_logged_in(
-            QaScenario::SendQueue
-        ));
-
+        // The primary recovery secret is now produced unconditionally by the
+        // shared login route, so All keeps it without a scenario allowlist —
+        // `shared_primary_login_always_completes_the_new_identity_gate` pins that.
         let source = include_str!("headless-core-qa.rs");
         let all_send_queue_route = source
             .split("if scenario.should_run_stage(QaStage::SendQueue)")
