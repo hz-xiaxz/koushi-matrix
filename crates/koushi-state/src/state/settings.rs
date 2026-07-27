@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::composer_shortcuts::ComposerFormattingOptions;
+
 use super::search_crawler::SearchCrawlerSettings;
 
 pub(crate) fn default_true() -> bool {
@@ -101,6 +103,8 @@ pub struct SettingsValues {
     pub typography: TypographySettings,
     pub keyboard: KeyboardSettings,
     #[serde(default)]
+    pub composer: ComposerSettings,
+    #[serde(default)]
     pub notifications: NotificationSettings,
     #[serde(default)]
     pub display: DisplaySettings,
@@ -129,6 +133,9 @@ impl SettingsValues {
         }
         if let Some(keyboard) = patch.keyboard {
             self.keyboard = keyboard;
+        }
+        if let Some(composer) = patch.composer {
+            self.composer = composer;
         }
         if let Some(notifications) = patch.notifications {
             self.notifications = notifications;
@@ -161,6 +168,7 @@ impl Default for SettingsValues {
             appearance: AppearanceSettings::default(),
             typography: TypographySettings::default(),
             keyboard: KeyboardSettings::default(),
+            composer: ComposerSettings::default(),
             notifications: NotificationSettings::default(),
             display: DisplaySettings::default(),
             media: MediaSettings::default(),
@@ -263,6 +271,26 @@ impl Default for KeyboardSettings {
 pub enum ComposerSendShortcut {
     Enter,
     ModEnter,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ComposerSettings {
+    #[serde(default = "default_true")]
+    pub math_mode: bool,
+}
+
+impl ComposerSettings {
+    pub fn formatting_options(&self) -> ComposerFormattingOptions {
+        ComposerFormattingOptions {
+            math_mode: self.math_mode,
+        }
+    }
+}
+
+impl Default for ComposerSettings {
+    fn default() -> Self {
+        Self { math_mode: true }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -473,6 +501,7 @@ pub struct SettingsPatch {
     pub appearance: Option<AppearanceSettings>,
     pub typography: Option<TypographySettings>,
     pub keyboard: Option<KeyboardSettings>,
+    pub composer: Option<ComposerSettings>,
     pub notifications: Option<NotificationSettings>,
     pub display: Option<DisplaySettings>,
     pub media: Option<MediaSettings>,

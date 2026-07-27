@@ -83,6 +83,9 @@ export type MessageId =
   | "composer.italic"
   | "composer.link"
   | "composer.list"
+  | "composer.mathMode"
+  | "composer.mathModeOff"
+  | "composer.mathModeOn"
   | "composer.mention"
   | "composer.mentionRoomNotification"
   | "composer.mentionRoomNotificationDescription"
@@ -1128,6 +1131,9 @@ const en: Catalog = {
   "composer.italic": "Italic",
   "composer.link": "Link",
   "composer.list": "List",
+    "composer.mathMode": "数式",
+  "composer.mathModeOff": "Math formatting off",
+  "composer.mathModeOn": "Math formatting on",
   "composer.mention": "Mention",
   "composer.mentionRoomNotification": "Room Notification",
   "composer.mentionRoomNotificationDescription": "Notify the whole room",
@@ -2077,6 +2083,9 @@ const ja: Catalog = {
   "composer.italic": "斜体",
   "composer.link": "リンク",
   "composer.list": "リスト",
+  "composer.mathMode": "Math",
+  "composer.mathModeOff": "数式モード: OFF",
+  "composer.mathModeOn": "数式モード: ON",
   "composer.mention": "メンション",
   "composer.mentionRoomNotification": "ルーム通知",
   "composer.mentionRoomNotificationDescription": "ルーム全体に通知",

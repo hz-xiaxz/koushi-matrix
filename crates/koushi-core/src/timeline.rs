@@ -74,14 +74,15 @@ use koushi_sdk::{
 };
 use koushi_search::{AttachmentDocument, SensitiveString};
 use koushi_state::{
-    ActivityRow, AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState, ComposerSendIntent,
-    FormattedMessageDraft, LiveEventReceipts, LiveReadReceipt, MediaTransferProgress,
-    MentionIntent, OperationFailureKind, ReplyQuote, ReplyQuoteState, SlashCommandIntent,
+    ActivityRow, AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState,
+    ComposerFormattingOptions, ComposerSendIntent, FormattedMessageDraft, LiveEventReceipts,
+    LiveReadReceipt, MediaTransferProgress, MentionIntent, OperationFailureKind, ReplyQuote,
+    ReplyQuoteState, SlashCommandIntent,
     ThreadRootProjectionActivity as ThreadRootProjectionActivityState,
     TimelineContinuityInspection, TimelineGapRepairFailureKind, TimelineMediaDownloadState,
     TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
     TimelineMediaGalleryThumbnail, TimelineMediaKind as GalleryTimelineMediaKind,
-    resolve_composer_send_intent,
+    resolve_composer_send_intent, resolve_composer_send_intent_with_options,
 };
 use matrix_sdk::attachment::{
     AttachmentConfig, AttachmentInfo, BaseFileInfo, BaseImageInfo, Thumbnail,
@@ -285,9 +286,18 @@ impl TimelineSendTerminalIngress {
 /// Messages routed to the `TimelineManagerActor`.
 pub(crate) enum TimelineMessage {
     Command(TimelineCommand),
+    CommandWithComposerFormatting {
+        command: TimelineCommand,
+        formatting_options: ComposerFormattingOptions,
+    },
     LeasedCommand {
         command: TimelineCommand,
         composer_permit: ForwardedComposerDraftPermit,
+    },
+    LeasedCommandWithComposerFormatting {
+        command: TimelineCommand,
+        composer_permit: ForwardedComposerDraftPermit,
+        formatting_options: ComposerFormattingOptions,
     },
     AcknowledgeProjection {
         projection_request_id: RequestId,
@@ -532,11 +542,13 @@ enum TimelineSendEnqueuePayload {
     Text {
         body: String,
         mentions: MentionIntent,
+        formatting_options: ComposerFormattingOptions,
     },
     Reply {
         in_reply_to_event_id: String,
         body: String,
         mentions: MentionIntent,
+        formatting_options: ComposerFormattingOptions,
     },
     Media {
         request_id: RequestId,
@@ -1179,13 +1191,18 @@ async fn enqueue_text_send(
     context: MatrixTimelineSendEnqueueContext,
     body: String,
     mentions: MentionIntent,
+    formatting_options: ComposerFormattingOptions,
 ) -> Result<SendEnqueueSuccess, TimelineFailureKind> {
     let room_id = matrix_sdk::ruma::RoomId::parse(context.key.room_id())
         .map_err(|_| TimelineFailureKind::Sdk)?;
     if context.session.client().get_room(&room_id).is_none() {
         return Err(TimelineFailureKind::Sdk);
     }
-    let content = build_room_message_content_from_composer_body(&body, mentions)?;
+    let content = build_room_message_content_from_composer_body_with_options(
+        &body,
+        mentions,
+        formatting_options,
+    )?;
     let content = matrix_sdk::ruma::events::AnyMessageLikeEventContent::RoomMessage(content);
     context
         .timeline
@@ -1200,6 +1217,7 @@ async fn enqueue_reply_send(
     in_reply_to_event_id: String,
     body: String,
     mentions: MentionIntent,
+    formatting_options: ComposerFormattingOptions,
 ) -> Result<SendEnqueueSuccess, TimelineFailureKind> {
     let room_id = matrix_sdk::ruma::RoomId::parse(context.key.room_id())
         .map_err(|_| TimelineFailureKind::Sdk)?;
@@ -1208,7 +1226,11 @@ async fn enqueue_reply_send(
     if context.session.client().get_room(&room_id).is_none() {
         return Err(TimelineFailureKind::Sdk);
     }
-    let content = build_room_message_content_without_relation_from_composer_body(&body, mentions)?;
+    let content = build_room_message_content_without_relation_from_composer_body_with_options(
+        &body,
+        mentions,
+        formatting_options,
+    )?;
     let reply = Reply {
         event_id: reply_event_id,
         enforce_thread: reply_enforce_thread_for_key(&context.key),
@@ -1284,14 +1306,26 @@ async fn enqueue_timeline_send(
 ) -> Result<SendEnqueueSuccess, TimelineFailureKind> {
     match context {
         TimelineSendEnqueueContext::Matrix(context) => match payload {
-            TimelineSendEnqueuePayload::Text { body, mentions } => {
-                enqueue_text_send(context, body, mentions).await
-            }
+            TimelineSendEnqueuePayload::Text {
+                body,
+                mentions,
+                formatting_options,
+            } => enqueue_text_send(context, body, mentions, formatting_options).await,
             TimelineSendEnqueuePayload::Reply {
                 in_reply_to_event_id,
                 body,
                 mentions,
-            } => enqueue_reply_send(context, in_reply_to_event_id, body, mentions).await,
+                formatting_options,
+            } => {
+                enqueue_reply_send(
+                    context,
+                    in_reply_to_event_id,
+                    body,
+                    mentions,
+                    formatting_options,
+                )
+                .await
+            }
             TimelineSendEnqueuePayload::Media {
                 request_id,
                 client_transaction_id,
@@ -2503,6 +2537,7 @@ pub struct TimelineManagerActor {
     data_dir: Option<std::path::PathBuf>,
     /// URL preview policy broadcast from AppState.
     link_preview_policy: LinkPreviewContext,
+    composer_formatting_options: ComposerFormattingOptions,
     account_work: AccountWorkScheduler,
     /// Room-root hydration is shared across replacement actors so SyncStarted
     /// cannot restart a failed/pending bounded lookup.
@@ -2628,6 +2663,7 @@ impl TimelineManagerActor {
             ignored_user_ids: std::collections::BTreeSet::new(),
             data_dir,
             link_preview_policy: LinkPreviewContext::default(),
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work,
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
@@ -2705,6 +2741,7 @@ impl TimelineManagerActor {
             ignored_user_ids: std::collections::BTreeSet::new(),
             data_dir,
             link_preview_policy,
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work,
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
@@ -3069,12 +3106,31 @@ impl TimelineManagerActor {
                 TimelineMessage::Command(command) => {
                     self.handle_command(command).await;
                 }
+                TimelineMessage::CommandWithComposerFormatting {
+                    command,
+                    formatting_options,
+                } => {
+                    self.handle_command_with_formatting_options(command, formatting_options)
+                        .await;
+                }
                 TimelineMessage::LeasedCommand {
                     command,
                     composer_permit,
                 } => {
                     self.handle_command_with_permit(command, Some(composer_permit))
                         .await;
+                }
+                TimelineMessage::LeasedCommandWithComposerFormatting {
+                    command,
+                    composer_permit,
+                    formatting_options,
+                } => {
+                    self.handle_command_with_formatting_context(
+                        command,
+                        Some(composer_permit),
+                        formatting_options,
+                    )
+                    .await;
                 }
                 TimelineMessage::AcknowledgeProjection {
                     projection_request_id,
@@ -3990,6 +4046,28 @@ impl TimelineManagerActor {
         self.handle_command_with_permit(command, None).await;
     }
 
+    async fn handle_command_with_formatting_options(
+        &mut self,
+        command: TimelineCommand,
+        formatting_options: ComposerFormattingOptions,
+    ) {
+        self.handle_command_with_formatting_context(command, None, formatting_options)
+            .await;
+    }
+
+    async fn handle_command_with_formatting_context(
+        &mut self,
+        command: TimelineCommand,
+        composer_permit: Option<ForwardedComposerDraftPermit>,
+        formatting_options: ComposerFormattingOptions,
+    ) {
+        let previous_options = self.composer_formatting_options;
+        self.composer_formatting_options = formatting_options;
+        self.handle_command_with_permit(command, composer_permit)
+            .await;
+        self.composer_formatting_options = previous_options;
+    }
+
     async fn handle_command_with_permit(
         &mut self,
         command: TimelineCommand,
@@ -4135,7 +4213,11 @@ impl TimelineManagerActor {
                     transaction_id.clone(),
                     body.clone(),
                     SendComposerProjection::for_send_text(&key),
-                    TimelineSendEnqueuePayload::Text { body, mentions },
+                    TimelineSendEnqueuePayload::Text {
+                        body,
+                        mentions,
+                        formatting_options: self.composer_formatting_options,
+                    },
                 )
                 .await;
             }
@@ -4166,7 +4248,11 @@ impl TimelineManagerActor {
                     body.clone(),
                     draft_revision,
                     SendComposerProjection::for_send_text(&key),
-                    TimelineSendEnqueuePayload::Text { body, mentions },
+                    TimelineSendEnqueuePayload::Text {
+                        body,
+                        mentions,
+                        formatting_options: self.composer_formatting_options,
+                    },
                     composer_permit.take(),
                 )
                 .await;
@@ -4193,6 +4279,7 @@ impl TimelineManagerActor {
                         in_reply_to_event_id,
                         body,
                         mentions,
+                        formatting_options: self.composer_formatting_options,
                     },
                 )
                 .await;
@@ -4229,6 +4316,7 @@ impl TimelineManagerActor {
                         in_reply_to_event_id,
                         body,
                         mentions,
+                        formatting_options: self.composer_formatting_options,
                     },
                     composer_permit.take(),
                 )
@@ -6045,22 +6133,43 @@ pub(crate) fn build_room_message_content_from_composer_body(
     body: &str,
     mentions: MentionIntent,
 ) -> Result<RoomMessageEventContent, TimelineFailureKind> {
-    build_room_message_content_without_relation_from_composer_body(body, mentions)
-        .map(|content| content.with_relation(None))
+    build_room_message_content_from_composer_body_with_options(
+        body,
+        mentions,
+        ComposerFormattingOptions::default(),
+    )
 }
 
-fn build_room_message_content_without_relation_from_composer_body(
+pub(crate) fn build_room_message_content_from_composer_body_with_options(
     body: &str,
     mentions: MentionIntent,
+    formatting_options: ComposerFormattingOptions,
+) -> Result<RoomMessageEventContent, TimelineFailureKind> {
+    build_room_message_content_without_relation_from_composer_body_with_options(
+        body,
+        mentions,
+        formatting_options,
+    )
+    .map(|content| content.with_relation(None))
+}
+
+fn build_room_message_content_without_relation_from_composer_body_with_options(
+    body: &str,
+    mentions: MentionIntent,
+    formatting_options: ComposerFormattingOptions,
 ) -> Result<RoomMessageEventContentWithoutRelation, TimelineFailureKind> {
-    match resolve_composer_send_intent(body, mentions) {
+    match resolve_composer_send_intent_with_options(body, mentions, formatting_options) {
         ComposerSendIntent::Message { draft } => {
             Ok(without_relation_content_from_formatted_draft(draft, false))
         }
         ComposerSendIntent::SlashCommand {
             command: SlashCommandIntent::Me { body },
         } => Ok(without_relation_content_from_formatted_draft(
-            koushi_state::build_formatted_message_draft(body, MentionIntent::default()),
+            koushi_state::build_formatted_message_draft_with_options(
+                body,
+                MentionIntent::default(),
+                formatting_options,
+            ),
             true,
         )),
         ComposerSendIntent::SlashCommand { .. } | ComposerSendIntent::LocalFailure { .. } => {
@@ -28631,6 +28740,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: thread_root_projection_service.clone(),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
@@ -30079,6 +30189,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
@@ -30807,6 +30918,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
@@ -33402,6 +33514,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
@@ -33800,6 +33913,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
@@ -33878,6 +33992,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
@@ -34513,6 +34628,46 @@ mod tests {
                         .map(|formatted| formatted.body.as_str()),
                     Some("keep <span data-mx-spoiler>secret</span> hidden")
                 );
+            }
+            other => panic!("expected text content, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn composer_core_builds_math_markdown_as_matrix_math_html() {
+        let content = build_room_message_content_from_composer_body(
+            "Energy $E=mc^2$",
+            MentionIntent::default(),
+        )
+        .expect("content");
+
+        match &content.msgtype {
+            MessageType::Text(text) => {
+                assert_eq!(text.body, "Energy $E=mc^2$");
+                assert_eq!(
+                    text.formatted
+                        .as_ref()
+                        .map(|formatted| formatted.body.as_str()),
+                    Some("Energy <span data-mx-maths=\"E=mc^2\">E=mc^2</span>")
+                );
+            }
+            other => panic!("expected text content, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn composer_core_respects_math_mode_off_for_sent_content() {
+        let content = build_room_message_content_from_composer_body_with_options(
+            "Energy $E=mc^2$",
+            MentionIntent::default(),
+            koushi_state::ComposerFormattingOptions { math_mode: false },
+        )
+        .expect("content");
+
+        match &content.msgtype {
+            MessageType::Text(text) => {
+                assert_eq!(text.body, "Energy $E=mc^2$");
+                assert!(text.formatted.is_none());
             }
             other => panic!("expected text content, got {other:?}"),
         }
@@ -35260,6 +35415,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
@@ -35455,6 +35611,7 @@ mod tests {
             ignored_user_ids: Default::default(),
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
+            composer_formatting_options: ComposerFormattingOptions::default(),
             account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),

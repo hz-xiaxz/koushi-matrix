@@ -3098,6 +3098,18 @@ button:disabled {
   line-height: 1.42;
 }
 
+.message-math {
+  display: inline-block;
+  max-inline-size: 100%;
+  overflow-x: auto;
+  vertical-align: -0.12em;
+}
+
+.message-math.is-block {
+  display: block;
+  margin-block: 6px;
+}
+
 .message-body.message-formatted-body a {
   color: var(--brand);
   text-decoration: underline;
@@ -4164,6 +4176,31 @@ mark {
   border-bottom: 1px solid var(--line);
   color: var(--text-faint);
   background: var(--surface-hover);
+}
+
+.composer-math-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-inline-size: 74px;
+  block-size: 28px;
+  margin-inline-start: auto;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.composer-math-toggle:hover,
+.composer-math-toggle:focus-visible,
+.composer-math-toggle.is-active {
+  color: var(--brand-contrast);
+  border-color: var(--brand);
+  background: var(--brand);
 }
 
 .composer-mention-pills {

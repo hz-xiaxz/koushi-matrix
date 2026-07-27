@@ -708,6 +708,7 @@ export function TimelinePane({
   onRetryStagedUploadPreparation = () => undefined,
   onUseOriginalStagedUpload = () => undefined,
   onComposerDraftChange,
+  onComposerMathModeChange,
   onMentionIntentChange,
   onEditMessage,
   onOpenContextMenu,
@@ -753,6 +754,7 @@ export function TimelinePane({
   onRetryStagedUploadPreparation?: (stagedId: string) => void | Promise<void>;
   onUseOriginalStagedUpload?: (stagedId: string) => void | Promise<void>;
   onComposerDraftChange: (value: string) => void;
+  onComposerMathModeChange: (enabled: boolean) => void | Promise<void>;
   onMentionIntentChange: (intent: MentionIntent) => void;
   onEditMessage: (message: { body: string | null; room_id: string; event_id: string }) => void;
   onOpenContextMenu: OpenContextMenu;
@@ -846,6 +848,7 @@ export function TimelinePane({
   const onRetryStagedUploadPreparationStable = useStableEvent(onRetryStagedUploadPreparation);
   const onUseOriginalStagedUploadStable = useStableEvent(onUseOriginalStagedUpload);
   const onComposerDraftChangeStable = useStableEvent(onComposerDraftChange);
+  const onComposerMathModeChangeStable = useStableEvent(onComposerMathModeChange);
   const onMentionIntentChangeStable = useStableEvent(onMentionIntentChange);
   const onEditMessageStable = useStableEvent(onEditMessage);
   const onOpenContextMenuStable = useStableEvent(onOpenContextMenu);
@@ -1061,6 +1064,7 @@ export function TimelinePane({
         composerMode={composerModeForComposer}
         hasStagedUploads={stagedUploads.length > 0}
         isSending={Boolean(snapshot.state.ui.timeline.composer.pending_transaction_id)}
+        mathModeEnabled={snapshot.state.domain.settings.values.composer?.math_mode ?? true}
         mentionCandidates={mentionCandidates}
         mentionIntent={mentionIntent}
         resolveComposerKeyAction={resolveComposerKeyActionStable}
@@ -1069,6 +1073,7 @@ export function TimelinePane({
         value={composerDraft}
         onCancelReply={onCancelReplyStable}
         onAttachFiles={onAttachFilesStable}
+        onMathModeChange={onComposerMathModeChangeStable}
         onMentionIntentChange={onMentionIntentChangeStable}
         onScheduleSend={onScheduleSendStable}
         onSend={onSendTextStable}

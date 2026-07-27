@@ -157,6 +157,45 @@ describe("Composer", () => {
     expect(onValueChange).toHaveBeenLastCalledWith("**world**");
   });
 
+  it("renders the math mode toggle from props and requests Rust-owned settings updates", () => {
+    const onMathModeChange = vi.fn();
+    const { rerender } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        mathModeEnabled
+        roomName="Direct room"
+        value=""
+        onCancelReply={() => undefined}
+        onMathModeChange={onMathModeChange}
+        onSend={() => undefined}
+        onValueChange={() => undefined}
+      />
+    );
+
+    const toggle = screen.getByRole("button", { name: /math formatting on/i });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(onMathModeChange).toHaveBeenCalledWith(false);
+
+    rerender(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        mathModeEnabled={false}
+        roomName="Direct room"
+        value=""
+        onCancelReply={() => undefined}
+        onMathModeChange={onMathModeChange}
+        onSend={() => undefined}
+        onValueChange={() => undefined}
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: /math formatting off/i }).getAttribute("aria-pressed")
+    ).toBe("false");
+  });
+
   it("gives the thread textarea the same live conversion ownership", () => {
     const props = {
       canEdit: true,

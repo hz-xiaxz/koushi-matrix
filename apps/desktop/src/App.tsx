@@ -4805,6 +4805,9 @@ export function App() {
             onComposerDraftChange={(value) => {
               void updateComposerDraft(value);
             }}
+            onComposerMathModeChange={(enabled) => {
+              void updateSettings({ composer: { math_mode: enabled } });
+            }}
             onMentionIntentChange={setComposerMentions}
             onOpenThread={openThread}
             onOpenMatrixTarget={(target) => {

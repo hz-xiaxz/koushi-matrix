@@ -1,6 +1,6 @@
 use koushi_state::{
-    AppAction, AppEffect, AppState, AppearanceSettings, ComposerSendShortcut, DisplaySettings,
-    EmojiPreference, FontPreference, ImageUploadCompressionMode, KeyboardSettings, LocaleSettings,
+    AppAction, AppEffect, AppState, AppearanceSettings, ComposerSendShortcut, ComposerSettings,
+    DisplaySettings, EmojiPreference, FontPreference, KeyboardSettings, LocaleSettings,
     MediaSettings, NotificationSettings, RoomListSort, RoomSummary, SettingsPatch,
     SettingsPersistenceState, SettingsValues, TextDirectionPreference, ThemePreference,
     ThreadListOrder, TimelineSettings, TimelineThreadRootOrder, UiEvent, reduce,
@@ -87,6 +87,7 @@ fn settings_loaded_replaces_values_without_requiring_a_session() {
         keyboard: KeyboardSettings {
             composer_send_shortcut: ComposerSendShortcut::ModEnter,
         },
+        composer: ComposerSettings::default(),
         notifications: NotificationSettings {
             desktop_notifications: false,
             sound: false,
@@ -230,6 +231,26 @@ fn settings_values_deserialize_legacy_without_timeline_as_default_true() {
             thread_root_order: TimelineThreadRootOrder::RootEvent,
         }
     );
+}
+
+#[test]
+fn settings_values_deserialize_legacy_without_composer_as_default_math_on() {
+    let values = serde_json::from_str::<SettingsValues>(
+        r#"{
+  "locale": { "language_tag": null, "text_direction": "auto" },
+  "appearance": { "theme": "system" },
+  "typography": { "font": "system", "emoji": "system" },
+  "keyboard": { "composer_send_shortcut": "enter" },
+  "notifications": { "desktop_notifications": true, "sound": true, "badges": true },
+  "display": { "code_block_wrap": true, "hide_redacted": true },
+  "media": {},
+  "timeline": { "auto_load_older_messages": true, "thread_root_order": { "kind": "rootEvent" } }
+}
+"#,
+    )
+    .expect("legacy settings without composer should deserialize");
+
+    assert_eq!(values.composer, ComposerSettings { math_mode: true });
 }
 
 #[test]
@@ -417,6 +438,39 @@ fn hide_redacted_patch_is_rust_owned_and_persisted() {
         vec![
             AppEffect::PersistSettings {
                 request_id: 79,
+                values: state.settings.values.clone(),
+            },
+            AppEffect::EmitUiEvent(UiEvent::SettingsChanged),
+        ]
+    );
+}
+
+#[test]
+fn composer_math_mode_patch_is_rust_owned_and_persisted() {
+    let mut state = AppState::default();
+    let composer_settings = ComposerSettings { math_mode: false };
+
+    let effects = reduce(
+        &mut state,
+        AppAction::SettingsUpdateRequested {
+            request_id: 82,
+            patch: SettingsPatch {
+                composer: Some(composer_settings.clone()),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+
+    assert_eq!(state.settings.values.composer, composer_settings);
+    assert_eq!(
+        state.settings.persistence,
+        SettingsPersistenceState::Saving { request_id: 82 }
+    );
+    assert_eq!(
+        effects,
+        vec![
+            AppEffect::PersistSettings {
+                request_id: 82,
                 values: state.settings.values.clone(),
             },
             AppEffect::EmitUiEvent(UiEvent::SettingsChanged),

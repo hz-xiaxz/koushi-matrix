@@ -3826,6 +3826,7 @@ impl AppActor {
                 if self.should_suppress_timeline_command_for_privacy(&timeline_command) {
                     return false;
                 }
+                let formatting_options = self.state.settings.values.composer.formatting_options();
                 // Route to AccountActor (which forwards to TimelineManagerActor).
                 let message = if let Some(permit) = composer_permit.take() {
                     let request_id = timeline_command
@@ -3835,13 +3836,17 @@ impl AppActor {
                     let identity =
                         composer_acceptance_identity_for_timeline_command(&timeline_command)
                             .expect("leased timeline command must have an acceptance identity");
-                    crate::account::AccountMessage::LeasedTimelineCommand {
+                    crate::account::AccountMessage::LeasedTimelineCommandWithComposerFormatting {
                         command: timeline_command,
                         composer_permit: self
                             .forward_composer_draft_permit(request_id, identity, permit),
+                        formatting_options,
                     }
                 } else {
-                    crate::account::AccountMessage::TimelineCommand(timeline_command)
+                    crate::account::AccountMessage::TimelineCommandWithComposerFormatting {
+                        command: timeline_command,
+                        formatting_options,
+                    }
                 };
                 let _ = self.account_actor.send(message).await;
                 false
