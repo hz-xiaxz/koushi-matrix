@@ -111,6 +111,9 @@ pub(crate) fn trace_activity_room(stage: &str, room: &RoomSummary, emitted: bool
     if !room_has_unread_metrics(room) {
         return;
     }
+    if !emitted && reason == "plain_unread_only" {
+        return;
+    }
     record_room_metrics(stage, room, Some(emitted), Some(reason));
 }
 
@@ -250,5 +253,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn activity_plain_unread_non_candidates_are_suppressed() {
+        let room = private_room();
+        let before = koushi_diagnostics::snapshot().records.len();
+
+        trace_activity_room("activity_recent_event", &room, false, "plain_unread_only");
+        trace_activity_room("activity_placeholder", &room, false, "plain_unread_only");
+
+        let after = koushi_diagnostics::snapshot().records.len();
+        assert_eq!(
+            after, before,
+            "plain-unread-only activity non-candidates are high-volume noise"
+        );
     }
 }
