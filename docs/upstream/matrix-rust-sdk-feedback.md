@@ -1,8 +1,46 @@
 # Matrix Rust SDK Feedback Packet
 
-Date: 2026-07-20
+Date: 2026-07-27
 
 This note separates SDK-upstreamable material from desktop-product decisions. Element Desktop/Web compatibility work in this repository is UX-only and is intentionally out of scope for the SDK feedback.
+
+## Fork Maintenance Snapshot
+
+As of 2026-07-27, the checked-in SDK gitlink follows the maintained
+`shinaoka/matrix-rust-sdk-work` fork on a branch rebased onto that fork's
+`origin/main` commit `35672e96a`. The fork is expected to be managed and
+maintained for a while; local SDK patches should therefore stay as small topic
+commits with clear upstream intent instead of being squashed into an opaque
+vendor snapshot.
+
+The current Koushi-required SDK topic stack is:
+
+- `feat(event-cache): publish committed response fence`
+- `fix(event-cache): classify committed room membership`
+- `test(event-cache): exercise joined update failure fence`
+- `fix(event-cache): refresh authoritative room live tail`
+- `fix(event-cache): retain targeted persisted gap work`
+- `fix(event-cache): reconcile live tail from older anchor`
+- `test(event-cache): require stable live-tail anchors`
+- `fix(timeline): publish gap barrier in visible suffix`
+- `fix(crypto): ignore replayed SAS starts`
+- `fix(room-list): expand own-member state key`
+- `fix(crypto): harden async delivery ownership`
+- `Handle stale order tracker readers`
+
+These are retained because Koushi currently depends on their public or
+behavioral contracts for verification delivery, restricted verification sync,
+legacy room/timeline catch-up, and room-list request compatibility. The first
+upstreaming unit should be the smallest self-contained crypto verification
+patches; event-cache/live-tail work can remain fork-maintained until the
+desktop production evidence is easier to summarize.
+
+Matrix Rust SDK PR #6753 (`sliding_sync: eagerly send verification responses
+after a sync response`) was still open when this snapshot was taken and is not
+part of the pinned SDK revision. Koushi therefore keeps its own wait-state
+diagnostics around `to_device_delivery`, `sas_start`, `mac`, and
+`normal_sync_resume` so a verification stall can still be assigned to a product
+or SDK boundary without logging private Matrix payloads.
 
 ## Upstreamable Patch Material
 
