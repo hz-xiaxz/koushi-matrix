@@ -9331,6 +9331,148 @@ enum MediaDownloadOutcome {
     Failed(TimelineFailureKind),
 }
 
+fn media_download_selection_token(selection: &MediaDownloadSelection) -> &'static str {
+    match selection {
+        MediaDownloadSelection::File => "file",
+        MediaDownloadSelection::Thumbnail { .. } => "thumbnail",
+    }
+}
+
+fn media_download_failure_token(kind: TimelineFailureKind) -> &'static str {
+    match kind {
+        TimelineFailureKind::InvalidDirection => "invalid_direction",
+        TimelineFailureKind::InvalidReactionTarget => "invalid_reaction_target",
+        TimelineFailureKind::InvalidReactionState => "invalid_reaction_state",
+        TimelineFailureKind::InvalidSendTarget => "invalid_send_target",
+        TimelineFailureKind::InvalidSendState => "invalid_send_state",
+        TimelineFailureKind::ComposerRevisionExhausted => "composer_revision_exhausted",
+        TimelineFailureKind::UnsupportedSlashCommand => "unsupported_slash_command",
+        TimelineFailureKind::NotSubscribed => "not_subscribed",
+        TimelineFailureKind::Forbidden => "forbidden",
+        TimelineFailureKind::Network => "network",
+        TimelineFailureKind::Timeout => "timeout",
+        TimelineFailureKind::Sdk => "sdk",
+        TimelineFailureKind::QueueOverflow => "queue_overflow",
+    }
+}
+
+fn media_source_token(source: &MediaSource) -> &'static str {
+    match source {
+        MediaSource::Plain(_) => "plain",
+        MediaSource::Encrypted(_) => "encrypted",
+    }
+}
+
+fn media_format_token(format: &MediaFormat) -> &'static str {
+    match format {
+        MediaFormat::File => "file",
+        MediaFormat::Thumbnail(_) => "thumbnail",
+    }
+}
+
+fn sdk_media_error_token(error: &matrix_sdk::Error) -> &'static str {
+    match error {
+        matrix_sdk::Error::Http(_) => "http",
+        matrix_sdk::Error::AuthenticationRequired => "authentication_required",
+        matrix_sdk::Error::InsufficientData => "insufficient_data",
+        matrix_sdk::Error::SerdeJson(_) => "serde_json",
+        matrix_sdk::Error::Io(_) => "io",
+        matrix_sdk::Error::CrossProcessLockError(_) => "cross_process_lock",
+        matrix_sdk::Error::StateStore(_) => "state_store",
+        matrix_sdk::Error::EventCacheStore(_) => "event_cache_store",
+        matrix_sdk::Error::MediaStore(_) => "media_store",
+        matrix_sdk::Error::Identifier(_) => "identifier",
+        matrix_sdk::Error::Url(_) => "url",
+        matrix_sdk::Error::UserTagName(_) => "user_tag_name",
+        matrix_sdk::Error::SlidingSync(_) => "sliding_sync",
+        matrix_sdk::Error::WrongRoomState(_) => "wrong_room_state",
+        matrix_sdk::Error::MultipleSessionCallbacks => "multiple_session_callbacks",
+        matrix_sdk::Error::OAuth(_) => "oauth",
+        matrix_sdk::Error::ConcurrentRequestFailed => "concurrent_request_failed",
+        matrix_sdk::Error::UnknownError(_) => "unknown",
+        matrix_sdk::Error::EventCache(_) => "event_cache",
+        matrix_sdk::Error::SendQueueWedgeError(_) => "send_queue_wedge",
+        matrix_sdk::Error::BackupNotEnabled => "backup_not_enabled",
+        matrix_sdk::Error::CantIgnoreLoggedInUser => "cant_ignore_logged_in_user",
+        matrix_sdk::Error::Media(_) => "media",
+        matrix_sdk::Error::ReplyError(_) => "reply",
+        matrix_sdk::Error::PowerLevels(_) => "power_levels",
+        matrix_sdk::Error::Timeout => "timeout",
+        _ => "other",
+    }
+}
+
+fn trace_media_download_request(
+    stage: &'static str,
+    request_id: RequestId,
+    selection: &MediaDownloadSelection,
+    entry: Option<&PrivateMediaEntry>,
+    outcome: Option<&'static str>,
+) {
+    let mut event = DiagnosticEvent::new(DiagnosticLevel::Info, "core.media_download", stage)
+        .field(DiagnosticField::request_id(
+            "request_id",
+            request_id.connection_id.0,
+            request_id.sequence,
+        ))
+        .field(DiagnosticField::token(
+            "selection",
+            media_download_selection_token(selection),
+        ));
+    if let Some(entry) = entry {
+        event = event
+            .field(DiagnosticField::token(
+                "source",
+                media_source_token(&entry.source),
+            ))
+            .field(DiagnosticField::boolean(
+                "source_encrypted",
+                matches!(entry.source, MediaSource::Encrypted(_)),
+            ))
+            .field(DiagnosticField::boolean(
+                "thumbnail_source_present",
+                entry.thumbnail_source.is_some(),
+            ))
+            .field(DiagnosticField::count("declared_size", entry.size));
+    }
+    if let Some(outcome) = outcome {
+        event = event.field(DiagnosticField::token("outcome", outcome));
+    }
+    koushi_diagnostics::record(event);
+}
+
+fn trace_media_download_worker(
+    stage: &'static str,
+    request: &MediaRequestParameters,
+    byte_count: Option<u64>,
+    failure: Option<&'static str>,
+    sdk_error: Option<&'static str>,
+) {
+    let mut event = DiagnosticEvent::new(DiagnosticLevel::Info, "core.media_download", stage)
+        .field(DiagnosticField::token(
+            "source",
+            media_source_token(&request.source),
+        ))
+        .field(DiagnosticField::boolean(
+            "source_encrypted",
+            matches!(request.source, MediaSource::Encrypted(_)),
+        ))
+        .field(DiagnosticField::token(
+            "format",
+            media_format_token(&request.format),
+        ));
+    if let Some(byte_count) = byte_count {
+        event = event.field(DiagnosticField::count("byte_count", byte_count));
+    }
+    if let Some(failure) = failure {
+        event = event.field(DiagnosticField::token("failure", failure));
+    }
+    if let Some(sdk_error) = sdk_error {
+        event = event.field(DiagnosticField::token("sdk_error", sdk_error));
+    }
+    koushi_diagnostics::record(event);
+}
+
 struct ReactionTargetState {
     item_id: TimelineEventItemId,
     can_react: bool,
@@ -17647,19 +17789,47 @@ impl TimelineActor {
         event_id: String,
         selection: MediaDownloadSelection,
     ) {
+        trace_media_download_request(
+            "request_received",
+            request_id,
+            &selection,
+            self.media_sources.get(&event_id),
+            None,
+        );
         if self.media_downloads_in_progress.contains(&event_id) {
+            trace_media_download_request(
+                "request_rejected",
+                request_id,
+                &selection,
+                self.media_sources.get(&event_id),
+                Some("already_in_progress"),
+            );
             self.emit_media_download_current_state(request_id, &event_id)
                 .await;
             return;
         }
 
         let Some(entry) = self.media_sources.get(&event_id).cloned() else {
+            trace_media_download_request(
+                "request_rejected",
+                request_id,
+                &selection,
+                None,
+                Some("missing_media_source"),
+            );
             self.emit_download_failed(request_id, &event_id, TimelineFailureKind::Sdk)
                 .await;
             return;
         };
 
-        let Some(request) = media_request_for_download(&entry, selection) else {
+        let Some(request) = media_request_for_download(&entry, &selection) else {
+            trace_media_download_request(
+                "request_rejected",
+                request_id,
+                &selection,
+                Some(&entry),
+                Some("unsupported_request"),
+            );
             self.emit_download_failed(request_id, &event_id, TimelineFailureKind::Sdk)
                 .await;
             return;
@@ -17703,6 +17873,7 @@ impl TimelineActor {
         entry: PrivateMediaEntry,
         request: MediaRequestParameters,
     ) -> MediaDownloadOutcome {
+        trace_media_download_worker("sdk_fetch_started", &request, None, None, None);
         let bytes = match executor::timeout(
             MEDIA_DOWNLOAD_TIMEOUT,
             session.client().media().get_media_content(&request, true),
@@ -17711,13 +17882,37 @@ impl TimelineActor {
         {
             Ok(Ok(bytes)) => bytes,
             Ok(Err(error)) => {
-                return MediaDownloadOutcome::Failed(classify_media_download_error(&error));
+                let kind = classify_media_download_error(&error);
+                trace_media_download_worker(
+                    "sdk_fetch_failed",
+                    &request,
+                    None,
+                    Some(media_download_failure_token(kind)),
+                    Some(sdk_media_error_token(&error)),
+                );
+                return MediaDownloadOutcome::Failed(kind);
             }
-            Err(_) => return MediaDownloadOutcome::Failed(TimelineFailureKind::Timeout),
+            Err(_) => {
+                trace_media_download_worker(
+                    "sdk_fetch_failed",
+                    &request,
+                    None,
+                    Some(media_download_failure_token(TimelineFailureKind::Timeout)),
+                    Some("timeout"),
+                );
+                return MediaDownloadOutcome::Failed(TimelineFailureKind::Timeout);
+            }
         };
 
         let byte_count = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         let Some(data_dir) = data_dir else {
+            trace_media_download_worker(
+                "file_write_failed",
+                &request,
+                Some(byte_count),
+                Some("missing_data_dir"),
+                None,
+            );
             return MediaDownloadOutcome::Failed(TimelineFailureKind::Sdk);
         };
 
@@ -17727,14 +17922,29 @@ impl TimelineActor {
         let file_name = format!("{}.bin", sanitize_matrix_id_for_path(&event_id));
         let dir = data_dir.join("media_downloads").join(dir_name);
         if tokio::fs::create_dir_all(&dir).await.is_err() {
+            trace_media_download_worker(
+                "file_write_failed",
+                &request,
+                Some(byte_count),
+                Some("create_dir"),
+                None,
+            );
             return MediaDownloadOutcome::Failed(TimelineFailureKind::Sdk);
         }
         let path = dir.join(file_name);
         if tokio::fs::write(&path, &bytes).await.is_err() {
+            trace_media_download_worker(
+                "file_write_failed",
+                &request,
+                Some(byte_count),
+                Some("write_file"),
+                None,
+            );
             return MediaDownloadOutcome::Failed(TimelineFailureKind::Sdk);
         }
 
         let source_url = path.to_string_lossy().into_owned();
+        trace_media_download_worker("completed", &request, Some(byte_count), None, None);
         MediaDownloadOutcome::Ready(MediaDownloadReady {
             download_state: TimelineMediaDownloadState::Ready {
                 source_url: source_url.clone(),
@@ -17812,6 +18022,13 @@ impl TimelineActor {
         event_id: &str,
         kind: TimelineFailureKind,
     ) {
+        trace_media_download_request(
+            "failed_projected",
+            request_id,
+            &MediaDownloadSelection::File,
+            self.media_sources.get(event_id),
+            Some(media_download_failure_token(kind)),
+        );
         self.emit(CoreEvent::Timeline(TimelineEvent::MediaDownloadFailed {
             request_id,
             key: self.key.clone(),
@@ -23597,7 +23814,7 @@ fn thumbnail_for_upload(request: &UploadMediaRequest) -> Option<Thumbnail> {
 
 fn media_request_for_download(
     entry: &PrivateMediaEntry,
-    selection: MediaDownloadSelection,
+    selection: &MediaDownloadSelection,
 ) -> Option<MediaRequestParameters> {
     match selection {
         MediaDownloadSelection::File => Some(MediaRequestParameters {
@@ -23614,8 +23831,8 @@ fn media_request_for_download(
             Some(MediaRequestParameters {
                 source: entry.source.clone(),
                 format: MediaFormat::Thumbnail(MediaThumbnailSettings::new(
-                    uint_from_u64(width)?,
-                    uint_from_u64(height)?,
+                    uint_from_u64(*width)?,
+                    uint_from_u64(*height)?,
                 )),
             })
         }
@@ -37768,6 +37985,43 @@ mod tests {
             worker.contains("TimelineFailureKind::Timeout"),
             "download timeout must settle the pending state with a timeout failure"
         );
+    }
+
+    #[test]
+    fn media_downloads_diagnose_stage_and_failure_boundaries() {
+        let source = include_str!("timeline.rs");
+        let production = source
+            .rsplit_once("\n#[cfg(test)]\nmod tests")
+            .map(|(production, _)| production)
+            .unwrap_or(source);
+        assert!(
+            production.contains("\"core.media_download\""),
+            "media download diagnostics need a dedicated source"
+        );
+        for stage in [
+            "\"request_received\"",
+            "\"request_rejected\"",
+            "\"sdk_fetch_started\"",
+            "\"sdk_fetch_failed\"",
+            "\"file_write_failed\"",
+            "\"completed\"",
+        ] {
+            assert!(
+                production.contains(stage),
+                "media download diagnostics must include {stage}"
+            );
+        }
+        for field in [
+            "\"selection\"",
+            "\"source_encrypted\"",
+            "\"thumbnail_source_present\"",
+            "\"failure\"",
+        ] {
+            assert!(
+                production.contains(field),
+                "media download diagnostics must include privacy-safe field {field}"
+            );
+        }
     }
 
     #[test]
