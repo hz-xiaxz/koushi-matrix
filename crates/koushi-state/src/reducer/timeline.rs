@@ -541,6 +541,16 @@ pub(crate) fn handle_media_download_updated(
     if state.timeline.room_id.as_deref() != Some(room_id.as_str()) {
         return Vec::new();
     }
+    let preserve_ready = matches!(
+        state.timeline.media_downloads.get(&event_id),
+        Some(crate::state::TimelineMediaDownloadState::Ready { .. })
+    ) && matches!(
+        download_state,
+        crate::state::TimelineMediaDownloadState::Failed { .. }
+    );
+    if preserve_ready {
+        return vec![AppEffect::EmitUiEvent(UiEvent::TimelineChanged { room_id })];
+    }
     state
         .timeline
         .media_downloads

@@ -2657,14 +2657,38 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
     #[test]
     fn matrix_client_store_config_uses_the_required_key_for_sqlite_builder() {
         let source = include_str!("lib.rs");
+        let impl_marker = concat!("impl ", "MatrixClientStoreConfig");
+        let debug_impl_marker = concat!("impl fmt::Debug for ", "MatrixClientStoreConfig");
+        let apply_marker = concat!(
+            "fn ",
+            "apply_to_builder(&self, builder: matrix_sdk::ClientBuilder)"
+        );
+        let config_impl = source
+            .split(impl_marker)
+            .nth(1)
+            .expect("MatrixClientStoreConfig impl");
         let impl_body = source
-            .split("fn apply_to_builder(&self, builder: matrix_sdk::ClientBuilder)")
+            .split(impl_marker)
+            .nth(1)
+            .expect("MatrixClientStoreConfig impl")
+            .split(debug_impl_marker)
+            .next()
+            .expect("MatrixClientStoreConfig impl body")
+            .split(apply_marker)
             .nth(1)
             .expect("apply_to_builder body");
 
         assert!(
+            config_impl.contains(apply_marker),
+            "MatrixClientStoreConfig must keep apply_to_builder"
+        );
+        assert!(
             impl_body.contains(".key(Some(self.key.expose_key()))"),
             "apply_to_builder must pass the required MatrixClientStoreKey into sqlite_store"
+        );
+        assert!(
+            impl_body.contains(".pool_max_size(DESKTOP_SQLITE_STORE_POOL_MAX_SIZE)"),
+            "apply_to_builder must cap SDK SQLite pools so packaged macOS apps do not exhaust the default 256 file descriptor soft limit"
         );
 
         let config = crate::MatrixClientStoreConfig::new(
@@ -2674,6 +2698,8 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert!(config.encrypted_at_rest_configured());
     }
 }
+
+const DESKTOP_SQLITE_STORE_POOL_MAX_SIZE: usize = 4;
 
 #[derive(Clone)]
 pub struct MatrixClientStoreConfig {
@@ -2722,8 +2748,9 @@ impl MatrixClientStoreConfig {
     }
 
     fn apply_to_builder(&self, builder: matrix_sdk::ClientBuilder) -> matrix_sdk::ClientBuilder {
-        let sqlite_config =
-            matrix_sdk::SqliteStoreConfig::new(&self.path).key(Some(self.key.expose_key()));
+        let sqlite_config = matrix_sdk::SqliteStoreConfig::new(&self.path)
+            .pool_max_size(DESKTOP_SQLITE_STORE_POOL_MAX_SIZE)
+            .key(Some(self.key.expose_key()));
         let builder = builder
             .sqlite_store_with_config_and_cache_path(sqlite_config, self.cache_path.as_deref());
         match &self.search_index_store {
