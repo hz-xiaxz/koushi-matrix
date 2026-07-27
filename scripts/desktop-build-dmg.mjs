@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopDir = join(repoRoot, "apps", "desktop");
-const dmgDir = join(desktopDir, "src-tauri", "target", "release", "bundle", "dmg");
+const dmgDir = join(repoRoot, "target", "release", "bundle", "dmg");
 const args = new Set(process.argv.slice(2));
 
 if (args.has("--help")) {
