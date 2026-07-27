@@ -2667,6 +2667,122 @@ mod tests {
     }
 
     #[test]
+    fn room_list_update_refreshes_native_attention_badge_without_initial_sync_sound_candidate() {
+        let mut state = ready_state();
+        let mut unread_room = test_room("!room:example.invalid", None);
+        unread_room.unread_count = 3;
+        unread_room.notification_count = 3;
+        unread_room.highlight_count = 1;
+
+        let effects = reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![unread_room],
+            },
+        );
+
+        assert!(effects.contains(&AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged)));
+        assert_eq!(state.native_attention.summary.unread_count, 3);
+        assert_eq!(state.native_attention.summary.badge_count, 3);
+        assert_eq!(state.native_attention.summary.highlight_count, 1);
+        assert_eq!(state.native_attention.summary.candidate, None);
+        assert_eq!(
+            state.native_attention.dispatch,
+            crate::state::NativeAttentionDispatchState::Suppressed {
+                reason: crate::state::NativeAttentionSuppressionReason::InitialSync,
+            }
+        );
+    }
+
+    #[test]
+    fn room_list_update_creates_native_attention_candidate_for_live_unread_in_other_room() {
+        let mut state = ready_state();
+        state.navigation.active_room_id = Some("!active:example.invalid".to_owned());
+
+        let active_room = test_room("!active:example.invalid", None);
+        let quiet_room = test_room("!other:example.invalid", None);
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![active_room, quiet_room],
+            },
+        );
+
+        let active_room = test_room("!active:example.invalid", None);
+        let mut other_room = test_room("!other:example.invalid", None);
+        other_room.unread_count = 1;
+        other_room.notification_count = 1;
+        other_room.latest_event = Some(latest_event("$new:example.invalid", 43));
+        other_room.recency_stamp = Some(43);
+
+        let effects = reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![active_room, other_room],
+            },
+        );
+
+        assert!(effects.contains(&AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged)));
+        assert_eq!(state.native_attention.summary.unread_count, 1);
+        assert_eq!(state.native_attention.summary.badge_count, 1);
+        assert_eq!(
+            state.native_attention.summary.candidate,
+            Some(crate::state::NativeAttentionCandidate {
+                room_display_name: "!other:example.invalid".to_owned(),
+                kind: crate::state::RoomAttentionKind::Message,
+                unread_count: 1,
+                highlight_count: 0,
+            })
+        );
+        assert_eq!(
+            state.native_attention.dispatch,
+            crate::state::NativeAttentionDispatchState::Idle
+        );
+    }
+
+    #[test]
+    fn room_list_update_suppresses_native_attention_candidate_for_live_unread_in_active_room() {
+        let mut state = ready_state();
+        state.navigation.active_room_id = Some("!active:example.invalid".to_owned());
+
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![test_room("!active:example.invalid", None)],
+            },
+        );
+
+        let mut active_room = test_room("!active:example.invalid", None);
+        active_room.unread_count = 2;
+        active_room.notification_count = 2;
+        active_room.latest_event = Some(latest_event("$active-new:example.invalid", 44));
+        active_room.recency_stamp = Some(44);
+
+        let effects = reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![active_room],
+            },
+        );
+
+        assert!(effects.contains(&AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged)));
+        assert_eq!(state.native_attention.summary.unread_count, 2);
+        assert_eq!(state.native_attention.summary.badge_count, 2);
+        assert_eq!(state.native_attention.summary.candidate, None);
+        assert_eq!(
+            state.native_attention.dispatch,
+            crate::state::NativeAttentionDispatchState::Suppressed {
+                reason: crate::state::NativeAttentionSuppressionReason::WindowFocused,
+            }
+        );
+    }
+
+    #[test]
     fn live_signals_clear_with_session_views() {
         let mut state = ready_state();
         state.live_signals.rooms.insert(

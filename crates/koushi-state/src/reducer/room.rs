@@ -1,11 +1,11 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::{
     effect::{AppEffect, UiEvent},
     state::{
         AppError, AppState, OperationFailureKind, PinOp, PinOperationState, PinnedEvent,
-        RoomListFilter, RoomSummary, RoomTagInfo, RoomTagKind, SpaceSummary, ThreadAttentionState,
-        ThreadPaneState, ThreadsListState, TimelinePaneState,
+        RoomListFilter, RoomNotificationMode, RoomSummary, RoomTagInfo, RoomTagKind, SpaceSummary,
+        ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     },
 };
 
@@ -42,6 +42,7 @@ pub(crate) fn handle_room_list_updated(
         &state.profile,
         own_user_id.as_deref(),
     );
+    let has_attention_increase = room_list_has_attention_increase(&state.rooms, &rooms);
     let retained_room_ids = rooms
         .iter()
         .map(|room| room.room_id.clone())
@@ -62,6 +63,9 @@ pub(crate) fn handle_room_list_updated(
     refresh_timeline_media_gallery(state);
 
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
+    if recompute_native_attention_after_room_list_update(state, has_attention_increase) {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged));
+    }
 
     // Notify the search crawler of all current joined rooms on every
     // RoomListUpdate so it can idempotently start/resume any missing
@@ -175,6 +179,65 @@ pub(crate) fn handle_room_list_updated(
 
     recompute_room_list_projection(state);
     effects
+}
+
+fn recompute_native_attention_after_room_list_update(
+    state: &mut AppState,
+    has_attention_increase: bool,
+) -> bool {
+    let observation = if has_attention_increase {
+        crate::state::NativeAttentionObservationKind::Live
+    } else {
+        crate::state::NativeAttentionObservationKind::InitialSync
+    };
+    let room_notification_modes: HashMap<String, RoomNotificationMode> = state
+        .room_notification_settings
+        .iter()
+        .map(|(room_id, settings)| (room_id.clone(), settings.mode))
+        .collect();
+    let previous_candidate = state.native_attention.summary.candidate.as_ref();
+    let mut next = crate::state::native_attention_state_from_rooms(
+        crate::state::NativeAttentionProjectionInput {
+            rooms: &state.rooms,
+            active_room_id: state.navigation.active_room_id.as_deref(),
+            muted_room_ids: &[],
+            room_notification_modes: &room_notification_modes,
+            ignored_user_ids: &state.profile.ignored_user_ids,
+            // Koushi does not currently persist native window focus in core
+            // state. Use a conservative value so live events in the selected
+            // room do not generate sound/notification candidates; live events
+            // in other rooms are still candidates.
+            window_focused: true,
+            observation,
+            previous_candidate,
+            capabilities: state.native_attention.summary.capabilities,
+        },
+    );
+    if !state.settings.values.notifications.badges {
+        next.summary.badge_count = 0;
+    }
+    if state.native_attention == next {
+        return false;
+    }
+    state.native_attention = next;
+    true
+}
+
+fn room_list_has_attention_increase(previous_rooms: &[RoomSummary], rooms: &[RoomSummary]) -> bool {
+    let previous_by_id: HashMap<&str, &RoomSummary> = previous_rooms
+        .iter()
+        .map(|room| (room.room_id.as_str(), room))
+        .collect();
+    rooms.iter().any(|room| {
+        let Some(previous) = previous_by_id.get(room.room_id.as_str()) else {
+            return false;
+        };
+        room_attention_metric(room) > room_attention_metric(previous)
+    })
+}
+
+fn room_attention_metric(room: &RoomSummary) -> u64 {
+    crate::state::room_activity_unread_count(room).max(room.highlight_count)
 }
 
 fn suppress_stale_unread_after_local_read(state: &AppState, rooms: &mut [RoomSummary]) {
