@@ -1,4 +1,5 @@
 import type {
+  NativeAttentionCapability,
   NativeAttentionCapabilities,
   NativeAttentionState,
   NotificationSettings,
@@ -10,16 +11,7 @@ export const WINDOWS_ATTENTION_OVERLAY_ICON_PATH = "src-tauri/icons/icon.png";
 export const DESKTOP_ATTENTION_REQUEST_TYPE = 2;
 export const DESKTOP_ATTENTION_SOUND_COOLDOWN_MS = 3_000;
 
-export type DesktopAttentionDiagnosticToken =
-  | "attention_title_failed"
-  | "attention_badge_failed"
-  | "attention_overlay_acl_denied"
-  | "attention_overlay_failed"
-  | "attention_tray_failed"
-  | "attention_sound_failed"
-  | "attention_activation_failed"
-  | "attention_notification_failed"
-  | "attention_notification_clear_failed";
+export type DesktopAttentionDiagnosticToken = string;
 export type DesktopAttentionDiagnosticSink = (token: DesktopAttentionDiagnosticToken) => void;
 
 export interface DesktopAttentionSummary {
@@ -80,14 +72,36 @@ export async function applyDesktopAttentionToWindow(
   capabilities?: NativeAttentionCapabilities,
   diagnostic?: DesktopAttentionDiagnosticSink
 ): Promise<void> {
-  const operations = [runNativeOperation(() => windowLike.setTitle(title), "attention_title_failed", diagnostic)];
+  const normalizedBadgeCount = normalizeAttentionCount(badgeCount);
+  diagnostic?.(
+    [
+      `attention_window_apply badge_count=${normalizedBadgeCount}`,
+      `badge=${capabilityToken(capabilities?.badge)}`,
+      `overlay=${capabilityToken(capabilities?.overlay_icon)}`,
+      `tray=${capabilityToken(capabilities?.tray)}`
+    ].join(" ")
+  );
+
+  const operations = [
+    runNativeOperation(
+      () => windowLike.setTitle(title),
+      "attention_title_failed",
+      diagnostic,
+      undefined,
+      "attention_title_set"
+    )
+  ];
 
   if (capabilities?.badge === "available") {
     operations.push(runNativeOperation(
-      () => windowLike.setBadgeCount(badgeCount > 0 ? badgeCount : undefined),
+      () => windowLike.setBadgeCount(normalizedBadgeCount > 0 ? normalizedBadgeCount : undefined),
       "attention_badge_failed",
-      diagnostic
+      diagnostic,
+      undefined,
+      `attention_badge_set count=${normalizedBadgeCount}`
     ));
+  } else {
+    diagnostic?.(`attention_badge_skipped capability=${capabilityToken(capabilities?.badge)}`);
   }
 
   if (
@@ -97,8 +111,12 @@ export async function applyDesktopAttentionToWindow(
   ) {
     operations.push(
       runNativeOperation(() => windowLike.setOverlayIcon!(
-        badgeCount > 0 ? WINDOWS_ATTENTION_OVERLAY_ICON_PATH : undefined
-      ), "attention_overlay_failed", diagnostic, overlayFailureToken)
+        normalizedBadgeCount > 0 ? WINDOWS_ATTENTION_OVERLAY_ICON_PATH : undefined
+      ), "attention_overlay_failed", diagnostic, overlayFailureToken, `attention_overlay_set count=${normalizedBadgeCount}`)
+    );
+  } else {
+    diagnostic?.(
+      `attention_overlay_skipped badge=${capabilityToken(capabilities?.badge)} overlay=${capabilityToken(capabilities?.overlay_icon)} transport=${windowLike.setOverlayIcon ? "available" : "missing"}`
     );
   }
 
@@ -108,10 +126,16 @@ export async function applyDesktopAttentionToWindow(
     windowLike.setTrayBadgeCount
   ) {
     operations.push(runNativeOperation(
-      () => windowLike.setTrayBadgeCount!(badgeCount > 0 ? badgeCount : undefined),
+      () => windowLike.setTrayBadgeCount!(normalizedBadgeCount > 0 ? normalizedBadgeCount : undefined),
       "attention_tray_failed",
-      diagnostic
+      diagnostic,
+      undefined,
+      `attention_tray_set count=${normalizedBadgeCount}`
     ));
+  } else {
+    diagnostic?.(
+      `attention_tray_skipped badge=${capabilityToken(capabilities?.badge)} tray=${capabilityToken(capabilities?.tray)} transport=${windowLike.setTrayBadgeCount ? "available" : "missing"}`
+    );
   }
 
   await Promise.allSettled(operations);
@@ -121,10 +145,14 @@ async function runNativeOperation(
   operation: () => Promise<void>,
   failureToken: DesktopAttentionDiagnosticToken,
   diagnostic?: DesktopAttentionDiagnosticSink,
-  classifyFailure?: (error: unknown) => DesktopAttentionDiagnosticToken
+  classifyFailure?: (error: unknown) => DesktopAttentionDiagnosticToken,
+  successToken?: DesktopAttentionDiagnosticToken
 ): Promise<void> {
   try {
     await operation();
+    if (successToken) {
+      diagnostic?.(successToken);
+    }
   } catch (error) {
     diagnostic?.(classifyFailure?.(error) ?? failureToken);
   }
@@ -146,24 +174,48 @@ export async function dispatchDesktopAttentionTransientEffects(
   diagnostic?: DesktopAttentionDiagnosticSink
 ): Promise<void> {
   if (!candidate) {
+    diagnostic?.("attention_transient_skipped reason=no_candidate");
     return;
   }
 
   const operations: Promise<void>[] = [];
   const soundEnabled = policy?.sound ?? true;
+  diagnostic?.(
+    [
+      `attention_transient_candidate kind=${candidate.kind}`,
+      `unread=${normalizeAttentionCount(candidate.unreadCount)}`,
+      `highlight=${normalizeAttentionCount(candidate.highlightCount)}`,
+      `sound=${capabilityToken(capabilities?.sound)}`,
+      `activation=${capabilityToken(capabilities?.activation)}`,
+      `policy_sound=${soundEnabled ? "true" : "false"}`
+    ].join(" ")
+  );
 
   if (soundEnabled && capabilities?.sound === "available" && transport.playAttentionSound) {
-    operations.push(runNativeOperation(
-      async () => { await transport.playAttentionSound!(); }, "attention_sound_failed", diagnostic
-    ));
+    operations.push(
+      runNativeOperation(async () => {
+        const outcome = await transport.playAttentionSound!();
+        diagnostic?.(`attention_sound_outcome outcome=${outcome}`);
+      }, "attention_sound_failed", diagnostic)
+    );
+  } else {
+    diagnostic?.(
+      `attention_sound_skipped policy_sound=${soundEnabled ? "true" : "false"} capability=${capabilityToken(capabilities?.sound)} transport=${transport.playAttentionSound ? "available" : "missing"}`
+    );
   }
 
   if (capabilities?.activation === "available" && transport.requestUserAttention) {
     operations.push(runNativeOperation(
       () => transport.requestUserAttention!(DESKTOP_ATTENTION_REQUEST_TYPE),
       "attention_activation_failed",
-      diagnostic
+      diagnostic,
+      undefined,
+      "attention_activation_requested"
     ));
+  } else {
+    diagnostic?.(
+      `attention_activation_skipped capability=${capabilityToken(capabilities?.activation)} transport=${transport.requestUserAttention ? "available" : "missing"}`
+    );
   }
 
   await Promise.allSettled(operations);
@@ -196,6 +248,7 @@ export function createDesktopAttentionTransientDispatcher(
         soundInFlight = true;
         try {
           const outcome = await transport.playAttentionSound();
+          diagnostic?.(`attention_sound_outcome outcome=${outcome}`);
           if (outcome === "played") {
             lastSoundAt = now();
           } else if (outcome === "failed") {
@@ -206,6 +259,10 @@ export function createDesktopAttentionTransientDispatcher(
         } finally {
           soundInFlight = false;
         }
+      } else if (candidate) {
+        diagnostic?.(
+          `attention_sound_skipped policy_sound=${policy.sound ? "true" : "false"} capability=${capabilityToken(capabilities.sound)} transport=${transport.playAttentionSound ? "available" : "missing"} cooldown=${soundAllowed ? "false" : "true"} inflight=${soundInFlight ? "true" : "false"}`
+        );
       }
       await dispatchDesktopAttentionTransientEffects(
         { ...transport, playAttentionSound: undefined },
@@ -216,6 +273,14 @@ export function createDesktopAttentionTransientDispatcher(
       );
     }
   };
+}
+
+function capabilityToken(capability: NativeAttentionCapability | undefined): NativeAttentionCapability | "missing" {
+  return capability ?? "missing";
+}
+
+function normalizeAttentionCount(count: number): number {
+  return Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0;
 }
 
 export function createTauriDesktopAttentionTransientTransport(
