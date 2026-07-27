@@ -9,8 +9,6 @@ export type MessageId =
   | "action.createRoom"
   | "action.createSpace"
   | "action.done"
-  | "action.forward"
-  | "action.history"
   | "action.more"
   | "action.restartSync"
   | "action.recover"
@@ -1054,8 +1052,6 @@ const en: Catalog = {
   "action.createRoom": "Create room",
   "action.createSpace": "Create space",
   "action.done": "Done",
-  "action.forward": "Forward",
-  "action.history": "History",
   "action.more": "More",
   "action.restartSync": "Restart sync",
   "action.recover": "Recover",
@@ -2014,8 +2010,6 @@ const ja: Catalog = {
   "action.createRoom": "ルームを作成",
   "action.createSpace": "スペースを作成",
   "action.done": "完了",
-  "action.forward": "進む",
-  "action.history": "履歴",
   "action.more": "その他",
   "action.restartSync": "同期を再開",
   "action.recover": "復旧",

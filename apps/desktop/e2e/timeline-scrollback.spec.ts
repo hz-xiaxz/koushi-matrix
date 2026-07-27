@@ -1030,12 +1030,12 @@ test("known-dimension media keeps row height stable across download completion",
   await expect(media.locator(".message-media-hover-action").first()).toBeVisible();
   await expect
     .poll(() => media.evaluate((node) => getComputedStyle(node).display))
-    .toBe("inline-grid");
+    .toBe("grid");
   await expect
     .poll(() =>
       media.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").length)
     )
-    .toBe(3);
+    .toBe(1);
   const afterHeight = await frame.evaluate((node) => node.getBoundingClientRect().height);
   expect(Math.abs(afterHeight - beforeHeight)).toBeLessThanOrEqual(1);
 });

@@ -440,6 +440,45 @@ test("re-edit submits edit_message command with updated body", async ({ page }) 
   expect(args).toMatchObject({ body: "Second edit body" });
 });
 
+test("message edit Shift+Enter shows and saves a newline", async ({ page }) => {
+  await gotoReadyShell(page);
+  const eventId = "$edit-newline-item:example.invalid";
+  await seedTimelineItems(page, [
+    makeEventItem(eventId, { can_edit: true, body: "Line oneLine two" })
+  ]);
+  await page.evaluate(() => window.__harness.clearInvocations());
+
+  const article = page.locator(`[data-event-id="${eventId}"]`);
+  await article.getByRole("button", { name: t("timeline.editMessage") }).click();
+  const editTextarea = article.getByRole("textbox", { name: t("timeline.editBody") });
+  await expect(editTextarea).toBeVisible();
+  await editTextarea.evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.setSelectionRange("Line one".length, "Line one".length);
+  });
+  await editTextarea.press("Shift+Enter");
+
+  await expect(editTextarea).toHaveValue("Line one\nLine two");
+  await expect
+    .poll(() =>
+      editTextarea.evaluate((element) => {
+        const textarea = element as HTMLTextAreaElement;
+        return [textarea.selectionStart, textarea.selectionEnd];
+      })
+    )
+    .toEqual(["Line one\n".length, "Line one\n".length]);
+
+  await article.getByRole("button", { name: t("timeline.saveEdit") }).click();
+
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("edit_message").length))
+    .toBeGreaterThanOrEqual(1);
+  const args = await page.evaluate(
+    () => window.__harness.invocationsOf("edit_message")[0]?.args
+  );
+  expect(args).toMatchObject({ body: "Line one\nLine two" });
+});
+
 // ---------------------------------------------------------------------------
 // 8. Reply not shown for null-body items
 // ---------------------------------------------------------------------------

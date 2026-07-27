@@ -578,7 +578,7 @@ button:disabled {
 .titlebar {
   position: relative;
   display: grid;
-  grid-template-columns: 128px minmax(220px, 1fr) 88px minmax(132px, max-content);
+  grid-template-columns: minmax(220px, 1fr) 88px minmax(132px, max-content);
   align-items: center;
   gap: 12px;
   padding: 0 14px;
@@ -591,7 +591,6 @@ button:disabled {
   padding-inline-start: var(--macos-traffic-light-inline-space);
 }
 
-.history,
 .top-actions,
 .channel-actions {
   display: flex;
@@ -3609,6 +3608,7 @@ button:disabled {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
+  box-sizing: border-box;
   min-width: min(100%, 260px);
   max-width: min(100%, 420px);
   margin-top: 8px;
@@ -3736,23 +3736,32 @@ button:disabled {
 /* #163: image-first inline attachment. The image is the primary block; actions
    overlay on hover/focus and never occupy layout that covers the preview. */
 .message-media-image-ready {
-  display: inline-grid;
-  max-inline-size: min(100%, var(--media-image-max-inline));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  box-sizing: border-box;
+  min-inline-size: min(100%, 260px);
+  inline-size: 100%;
+  max-inline-size: var(--media-frame-inline-size, var(--media-image-max-inline));
   margin-top: 8px;
 }
 
 .message-media-figure {
   position: relative;
-  display: inline-grid;
+  display: grid;
   place-items: center;
   overflow: hidden;
-  max-inline-size: min(100%, var(--media-image-max-inline));
-  max-block-size: var(--media-image-max-block);
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  aspect-ratio: var(--media-frame-aspect-ratio, 16 / 9);
   border-radius: var(--r-md);
   background: var(--surface);
 }
 
 .message-media-open {
+  position: absolute;
+  inset: 0;
   display: inline-grid;
   place-items: center;
   inline-size: 100%;
@@ -3768,10 +3777,14 @@ button:disabled {
   display: block;
   inline-size: 100%;
   block-size: 100%;
+  max-inline-size: 100%;
+  max-block-size: 100%;
   object-fit: contain;
 }
 
 .message-media-image-placeholder {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   align-content: center;
@@ -7104,12 +7117,11 @@ kbd {
 
 @media (max-width: 760px) {
   .titlebar {
-    grid-template-columns: 44px minmax(0, 1fr) 72px;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     padding: 0 8px;
   }
 
-  .history,
   .scope-select,
   .top-actions {
     display: none;

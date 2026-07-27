@@ -1,8 +1,8 @@
 /**
  * Headless spec: top-bar control alignment (#320).
  *
- * #320 reports that the macOS traffic lights and the history buttons sit
- * higher than the search field. The native traffic lights are placed by
+ * #320 reports that the macOS traffic lights and top-bar controls sit higher
+ * than the search field. The native traffic lights are placed by
  * `tauri.conf.json` and cannot be measured here, but whether the DOM controls
  * agree with each other is a plain layout fact — so measure it rather than
  * reasoning about the CSS.
@@ -17,7 +17,6 @@ import { t } from "../src/i18n/messages";
 
 /** Every interactive control in the top bar, in visual order. */
 const TOP_BAR_CONTROLS = [
-  ".history .icon-button",
   ".top-search input",
   ".scope-select",
   ".top-actions .sync-status",
@@ -31,6 +30,7 @@ async function gotoReadyShell(page: Page): Promise<void> {
 
 test("every top-bar control shares one vertical center line", async ({ page }) => {
   await gotoReadyShell(page);
+  await expect(page.locator(".titlebar .history")).toHaveCount(0);
 
   const measured = await page.evaluate((selectors) => {
     const bar = document.querySelector<HTMLElement>(".titlebar");

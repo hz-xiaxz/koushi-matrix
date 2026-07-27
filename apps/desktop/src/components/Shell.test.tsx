@@ -559,6 +559,30 @@ describe("TopBar search placeholder", () => {
   });
 });
 
+describe("TopBar navigation controls", () => {
+  it("does not render unused history navigation controls", () => {
+    render(
+      <TopBar
+        activeSpaceName="Matrix"
+        isBusy={false}
+        searchInputRef={{ current: null }}
+        searchQuery=""
+        searchScope="allRooms"
+        sync="running"
+        onOpenKeyboardSettings={() => undefined}
+        onRestartSync={() => undefined}
+        onSearchQueryChange={() => undefined}
+        onSearchScopeChange={() => undefined}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Forward" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "History" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Search" })).toBeTruthy();
+  });
+});
+
 describe("TopBar window dragging", () => {
   it("starts window dragging from the titlebar background", () => {
     const onStartWindowDrag = vi.fn();
@@ -606,7 +630,7 @@ describe("TopBar window dragging", () => {
       />
     );
 
-    const button = document.querySelector<HTMLButtonElement>(".history .icon-button");
+    const button = document.querySelector<HTMLButtonElement>(".top-actions .icon-button");
     const search = document.querySelector<HTMLElement>(".top-search");
     expect(button).not.toBeNull();
     expect(search).not.toBeNull();
