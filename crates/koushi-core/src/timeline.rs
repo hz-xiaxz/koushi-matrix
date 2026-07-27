@@ -52,7 +52,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{
     Arc, Mutex,
@@ -9473,6 +9473,85 @@ fn trace_media_download_worker(
     koushi_diagnostics::record(event);
 }
 
+fn trace_media_download_file_write_failed(
+    request: &MediaRequestParameters,
+    byte_count: u64,
+    failure: &'static str,
+    error: Option<&std::io::Error>,
+    data_dir_present: bool,
+    target_dir: Option<&Path>,
+    target_path: Option<&Path>,
+) {
+    let mut event = DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "core.media_download",
+        "file_write_failed",
+    )
+    .field(DiagnosticField::token(
+        "source",
+        media_source_token(&request.source),
+    ))
+    .field(DiagnosticField::boolean(
+        "source_encrypted",
+        matches!(request.source, MediaSource::Encrypted(_)),
+    ))
+    .field(DiagnosticField::token(
+        "format",
+        media_format_token(&request.format),
+    ))
+    .field(DiagnosticField::count("byte_count", byte_count))
+    .field(DiagnosticField::token("failure", failure))
+    .field(DiagnosticField::boolean(
+        "data_dir_present",
+        data_dir_present,
+    ))
+    .field(DiagnosticField::boolean(
+        "target_dir_exists",
+        target_dir.is_some_and(Path::exists),
+    ))
+    .field(DiagnosticField::boolean(
+        "target_path_exists",
+        target_path.is_some_and(Path::exists),
+    ))
+    .field(DiagnosticField::boolean(
+        "target_path_is_file",
+        target_path.is_some_and(Path::is_file),
+    ))
+    .field(DiagnosticField::boolean(
+        "target_path_is_dir",
+        target_path.is_some_and(Path::is_dir),
+    ));
+    if let Some(error) = error {
+        event = event.field(DiagnosticField::token(
+            "io_error_kind",
+            io_error_kind_token(error.kind()),
+        ));
+        if let Some(raw_os_error) = error.raw_os_error()
+            && let Ok(raw_os_error) = u64::try_from(raw_os_error)
+        {
+            event = event.field(DiagnosticField::count("raw_os_error", raw_os_error));
+        }
+    }
+    koushi_diagnostics::record(event);
+}
+
+fn io_error_kind_token(kind: std::io::ErrorKind) -> &'static str {
+    match kind {
+        std::io::ErrorKind::NotFound => "not_found",
+        std::io::ErrorKind::PermissionDenied => "permission_denied",
+        std::io::ErrorKind::AlreadyExists => "already_exists",
+        std::io::ErrorKind::InvalidInput => "invalid_input",
+        std::io::ErrorKind::InvalidData => "invalid_data",
+        std::io::ErrorKind::TimedOut => "timed_out",
+        std::io::ErrorKind::WriteZero => "write_zero",
+        std::io::ErrorKind::Interrupted => "interrupted",
+        std::io::ErrorKind::UnexpectedEof => "unexpected_eof",
+        std::io::ErrorKind::OutOfMemory => "out_of_memory",
+        std::io::ErrorKind::Other => "other",
+        _ => "unknown",
+    }
+}
+
 struct ReactionTargetState {
     item_id: TimelineEventItemId,
     can_react: bool,
@@ -17873,6 +17952,46 @@ impl TimelineActor {
         entry: PrivateMediaEntry,
         request: MediaRequestParameters,
     ) -> MediaDownloadOutcome {
+        let Some(data_dir) = data_dir else {
+            trace_media_download_file_write_failed(
+                &request,
+                0,
+                "missing_data_dir",
+                None,
+                false,
+                None,
+                None,
+            );
+            return MediaDownloadOutcome::Failed(TimelineFailureKind::Sdk);
+        };
+
+        // Matrix IDs contain ':' which is not valid in Windows path components.
+        // Use hashed path components so the local path is portable and private.
+        let dir_name = sanitize_matrix_id_for_path(&room_id);
+        let file_name = format!("{}.bin", sanitize_matrix_id_for_path(&event_id));
+        let dir = data_dir.join("media_downloads").join(dir_name);
+        let path = dir.join(file_name);
+        if let Ok(metadata) = tokio::fs::metadata(&path).await {
+            if metadata.is_file() && metadata.len() > 0 {
+                let byte_count = metadata.len();
+                let source_url = path.to_string_lossy().into_owned();
+                trace_media_download_worker("cache_hit", &request, Some(byte_count), None, None);
+                return MediaDownloadOutcome::Ready(MediaDownloadReady {
+                    download_state: TimelineMediaDownloadState::Ready {
+                        source_url: source_url.clone(),
+                        width: entry.width,
+                        height: entry.height,
+                        mime_type: entry.mimetype.clone(),
+                    },
+                    source_url,
+                    byte_count,
+                    mimetype: entry.mimetype,
+                    width: entry.width,
+                    height: entry.height,
+                });
+            }
+        }
+
         trace_media_download_worker("sdk_fetch_started", &request, None, None, None);
         let bytes = match executor::timeout(
             MEDIA_DOWNLOAD_TIMEOUT,
@@ -17905,40 +18024,27 @@ impl TimelineActor {
         };
 
         let byte_count = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        let Some(data_dir) = data_dir else {
-            trace_media_download_worker(
-                "file_write_failed",
+        if let Err(error) = tokio::fs::create_dir_all(&dir).await {
+            trace_media_download_file_write_failed(
                 &request,
-                Some(byte_count),
-                Some("missing_data_dir"),
-                None,
-            );
-            return MediaDownloadOutcome::Failed(TimelineFailureKind::Sdk);
-        };
-
-        // Matrix IDs contain ':' which is not valid in Windows path components.
-        // Use hashed path components so the local path is portable and private.
-        let dir_name = sanitize_matrix_id_for_path(&room_id);
-        let file_name = format!("{}.bin", sanitize_matrix_id_for_path(&event_id));
-        let dir = data_dir.join("media_downloads").join(dir_name);
-        if tokio::fs::create_dir_all(&dir).await.is_err() {
-            trace_media_download_worker(
-                "file_write_failed",
-                &request,
-                Some(byte_count),
-                Some("create_dir"),
+                byte_count,
+                "create_dir",
+                Some(&error),
+                true,
+                Some(&dir),
                 None,
             );
             return MediaDownloadOutcome::Failed(TimelineFailureKind::Sdk);
         }
-        let path = dir.join(file_name);
-        if tokio::fs::write(&path, &bytes).await.is_err() {
-            trace_media_download_worker(
-                "file_write_failed",
+        if let Err(error) = tokio::fs::write(&path, &bytes).await {
+            trace_media_download_file_write_failed(
                 &request,
-                Some(byte_count),
-                Some("write_file"),
-                None,
+                byte_count,
+                "write_file",
+                Some(&error),
+                true,
+                Some(&dir),
+                Some(&path),
             );
             return MediaDownloadOutcome::Failed(TimelineFailureKind::Sdk);
         }
@@ -38001,6 +38107,7 @@ mod tests {
         for stage in [
             "\"request_received\"",
             "\"request_rejected\"",
+            "\"cache_hit\"",
             "\"sdk_fetch_started\"",
             "\"sdk_fetch_failed\"",
             "\"file_write_failed\"",
@@ -38016,6 +38123,12 @@ mod tests {
             "\"source_encrypted\"",
             "\"thumbnail_source_present\"",
             "\"failure\"",
+            "\"raw_os_error\"",
+            "\"data_dir_present\"",
+            "\"target_dir_exists\"",
+            "\"target_path_exists\"",
+            "\"target_path_is_file\"",
+            "\"target_path_is_dir\"",
         ] {
             assert!(
                 production.contains(field),

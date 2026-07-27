@@ -154,6 +154,7 @@ describe("desktop notification candidate", () => {
       setTitle: vi.fn().mockResolvedValue(undefined),
       setBadgeCount: vi.fn().mockResolvedValue(undefined)
     };
+    const diagnostic = vi.fn();
     const summary = desktopAttentionSummary(
       nativeAttentionState({
         unread_count: 5,
@@ -171,11 +172,16 @@ describe("desktop notification candidate", () => {
       windowMock,
       desktopAttentionWindowTitle("koushi-desktop", summary),
       summary.badgeCount,
-      { notifications: "available", badge: "available", overlay_icon: "unavailable", sound: "available", tray: "unavailable", activation: "unavailable" }
+      { notifications: "available", badge: "available", overlay_icon: "unavailable", sound: "available", tray: "unavailable", activation: "unavailable" },
+      diagnostic
     );
 
     expect(windowMock.setTitle).toHaveBeenCalledWith("koushi-desktop · 5 unread");
     expect(windowMock.setBadgeCount).toHaveBeenCalledWith(5);
+    expect(diagnostic).toHaveBeenCalledWith(
+      "attention_window_apply badge_count=5 badge=available overlay=unavailable tray=unavailable"
+    );
+    expect(diagnostic).toHaveBeenCalledWith("attention_badge_set count=5");
   });
 
   test("routes Windows overlay icon through the native attention capability DTO", async () => {
@@ -226,6 +232,7 @@ describe("desktop notification candidate", () => {
       playAttentionSound: vi.fn().mockResolvedValue("played" as const),
       requestUserAttention: vi.fn().mockResolvedValue(undefined)
     };
+    const diagnostic = vi.fn();
 
     await dispatchDesktopAttentionTransientEffects(
       windowMock,
@@ -242,11 +249,45 @@ describe("desktop notification candidate", () => {
         sound: "available",
         tray: "available",
         activation: "available"
-      }
+      },
+      undefined,
+      diagnostic
     );
 
     expect(windowMock.playAttentionSound).toHaveBeenCalledOnce();
     expect(windowMock.requestUserAttention).toHaveBeenCalledWith(2);
+    expect(diagnostic).toHaveBeenCalledWith(
+      "attention_transient_candidate kind=mention unread=2 highlight=1 sound=available activation=available policy_sound=true"
+    );
+    expect(diagnostic).toHaveBeenCalledWith("attention_sound_outcome outcome=played");
+    expect(diagnostic).toHaveBeenCalledWith("attention_activation_requested");
+  });
+
+  test("diagnoses transient attention skip reasons without private room data", async () => {
+    const transport = {
+      playAttentionSound: vi.fn().mockResolvedValue("played" as const),
+      requestUserAttention: vi.fn().mockResolvedValue(undefined)
+    };
+    const diagnostic = vi.fn();
+
+    await dispatchDesktopAttentionTransientEffects(
+      transport,
+      null,
+      {
+        notifications: "available",
+        badge: "available",
+        overlay_icon: "unavailable",
+        sound: "available",
+        tray: "available",
+        activation: "available"
+      },
+      { sound: true },
+      diagnostic
+    );
+
+    expect(transport.playAttentionSound).not.toHaveBeenCalled();
+    expect(transport.requestUserAttention).not.toHaveBeenCalled();
+    expect(diagnostic).toHaveBeenCalledWith("attention_transient_skipped reason=no_candidate");
   });
 
   test("keeps Rust-owned notification sound settings out of transient sound routing", async () => {
@@ -504,6 +545,7 @@ describe("desktop notification candidate", () => {
       await dispatcher.dispatch({ playAttentionSound }, { ...candidate, unreadCount: 2 }, capabilities, { sound: true }, diagnostic);
       expect(playAttentionSound).toHaveBeenCalledTimes(2);
       if (firstOutcome === "failed") expect(diagnostic).toHaveBeenCalledWith("attention_sound_failed");
+      expect(diagnostic).toHaveBeenCalledWith(`attention_sound_outcome outcome=${firstOutcome}`);
     }
   );
 

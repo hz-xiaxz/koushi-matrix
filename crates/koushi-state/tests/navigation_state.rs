@@ -434,6 +434,7 @@ fn room_list_update_replaces_state_and_emits_room_list_event() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
                     "room-a".to_owned(),
@@ -489,6 +490,7 @@ fn room_list_update_selects_first_room_when_no_room_is_active() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
                     "room-a".to_owned(),
@@ -736,6 +738,7 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec!["room-a".to_owned(), "room-b".to_owned()],
                 settings: search_crawler_settings_standard(),
@@ -844,6 +847,7 @@ fn room_list_update_moves_active_room_when_it_disappears_from_selected_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec!["room-b".to_owned()],
                 settings: search_crawler_settings_standard(),
@@ -909,6 +913,7 @@ fn room_list_update_keeps_active_dm_global_with_selected_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
                     "room-a".to_owned(),
@@ -1126,6 +1131,7 @@ fn room_list_update_keeps_empty_selected_space_empty() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
                     "room-a".to_owned(),
