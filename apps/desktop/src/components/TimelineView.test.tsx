@@ -395,6 +395,52 @@ describe("TimelineView", () => {
     );
   });
 
+  it("shows a Shift+Enter edit newline immediately and saves that body", async () => {
+    const editMessage = vi.fn(async () => undefined);
+    const editable = { ...message("$edit-newline", "helloworld"), can_edit: true };
+    const store = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [editable]
+      }
+    });
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({ editMessage })}
+          resolveComposerKeyAction={async () => "insertNewline"}
+          onReply={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
+    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLTextAreaElement;
+    textarea.setSelectionRange(5, 5);
+    fireEvent.keyDown(textarea, {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 13,
+      shiftKey: true
+    });
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("hello\nworld");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /save edit/i }));
+
+    expect(editMessage).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$edit-newline",
+      "hello\nworld"
+    );
+  });
+
   it("sends the edit value captured when deferred Enter was pressed", async () => {
     let resolveAction!: (action: "send") => void;
     const action = new Promise<"send">((resolve) => {

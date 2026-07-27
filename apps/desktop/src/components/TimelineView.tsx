@@ -5702,10 +5702,23 @@ export function TimelineItemRow({
   const actionMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const firstActionMenuItemRef = useRef<HTMLButtonElement>(null);
   const editImeTextControl = useCompositionOwnedTextarea(editDraft, eventId ?? "edit");
-  const { textareaRef: editTextareaRef, lifecycle: editImeComposition } = editImeTextControl;
+  const {
+    textareaRef: editTextareaRef,
+    lifecycle: editImeComposition,
+    recordLocalValue: recordEditLocalValue
+  } = editImeTextControl;
   const captureEditKeyIntent = useComposerKeyIntentSnapshot(editImeComposition);
   const editMacKillRingRef = useRef<string>("");
   const requestedLinkPreviewsRef = useRef<Set<string>>(new Set());
+
+  const updateEditDraft = useCallback((nextDraft: string) => {
+    recordEditLocalValue(nextDraft);
+    const textarea = editTextareaRef.current;
+    if (textarea && textarea.value !== nextDraft) {
+      textarea.value = nextDraft;
+    }
+    setEditDraft(nextDraft);
+  }, [editTextareaRef, recordEditLocalValue]);
 
   useEffect(() => {
     if (!autoLoadLinkPreviews) {
@@ -5809,14 +5822,15 @@ export function TimelineItemRow({
       if (!eventId) {
         return;
       }
-      const nextBody = editDraft.trim();
+      const visibleDraft = editTextareaRef.current?.value ?? editDraft;
+      const nextBody = visibleDraft.trim();
       if (!nextBody) {
         return;
       }
       onEdit(roomId, eventId, nextBody);
       closeEditForm();
     },
-    [closeEditForm, editDraft, eventId, onEdit, roomId]
+    [closeEditForm, editDraft, editTextareaRef, eventId, onEdit, roomId]
   );
 
   const onEditKeyDown = useCallback(
@@ -5843,7 +5857,7 @@ export function TimelineItemRow({
               editMacKillRingRef.current = effect.newKillRing;
             }
             if (effect.newValue !== undefined) {
-              setEditDraft(effect.newValue);
+              updateEditDraft(effect.newValue);
             }
             const pos = effect.newSelectionPos;
             requestAnimationFrame(() => ta.setSelectionRange(pos, pos));
@@ -5895,7 +5909,7 @@ export function TimelineItemRow({
               intent.selectionStart,
               intent.selectionEnd
             );
-            setEditDraft(nextDraft.value);
+            updateEditDraft(nextDraft.value);
             requestAnimationFrame(() => {
               textarea.selectionStart = nextDraft.cursor;
               textarea.selectionEnd = nextDraft.cursor;
@@ -5909,7 +5923,7 @@ export function TimelineItemRow({
         .catch(() => undefined)
         .finally(intent.releaseResolution);
     },
-    [captureEditKeyIntent, closeEditForm, editImeComposition, eventId, onEdit, resolveComposerKeyAction, roomId]
+    [captureEditKeyIntent, closeEditForm, editImeComposition, eventId, onEdit, resolveComposerKeyAction, roomId, updateEditDraft]
   );
 
   const submitReaction = useCallback(
@@ -6162,7 +6176,7 @@ export function TimelineItemRow({
         aria-label={t("timeline.editBody")}
         className="message-edit-body"
         value={editDraft}
-        onChange={(event) => setEditDraft(event.target.value)}
+        onChange={(event) => updateEditDraft(event.target.value)}
         onKeyDown={onEditKeyDown}
       />
       <div className="message-edit-actions">
@@ -7471,9 +7485,9 @@ function TimelineMediaAttachment({
   const Icon = media.kind === "Image" ? ImageIcon : FileText;
   const displayBox = timelineMediaDisplayBox(media.width, media.height);
   const mediaFrameStyle = {
-    inlineSize: `${displayBox.inlineSize}px`,
-    blockSize: `${displayBox.blockSize}px`
-  } satisfies CSSProperties;
+    "--media-frame-inline-size": `${displayBox.inlineSize}px`,
+    "--media-frame-aspect-ratio": `${displayBox.inlineSize} / ${displayBox.blockSize}`
+  } as CSSProperties;
   const readyImageDownload =
     downloadState?.kind === "ready" && media.kind === "Image" ? downloadState : null;
   const readyImagePreview =

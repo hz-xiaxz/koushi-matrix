@@ -178,17 +178,6 @@ export function TopBar({
         onStartWindowDrag();
       }}
     >
-      <div className="history">
-        <button className="icon-button" type="button" aria-label={t("action.back")}>
-          ‹
-        </button>
-        <button className="icon-button" type="button" aria-label={t("action.forward")}>
-          ›
-        </button>
-        <button className="icon-button" type="button" aria-label={t("action.history")}>
-          <Clock3 size={ICON_SIZE.control} />
-        </button>
-      </div>
       <label className="top-search">
         <Search size={ICON_SIZE.input} />
         <ImeTextField

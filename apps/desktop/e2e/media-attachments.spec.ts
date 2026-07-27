@@ -20,11 +20,17 @@
 
 import { expect, test } from "@playwright/test";
 import { t } from "../src/i18n/messages";
-import { roomTimelineKey } from "../src/domain/coreEvents";
+import { roomTimelineKey, threadTimelineKey } from "../src/domain/coreEvents";
 
 const HARNESS_ACCOUNT_KEY = "@harness-user:example.invalid";
 const HARNESS_ROOM_ID = "!harness-room:example.invalid";
+const HARNESS_THREAD_ROOT_ID = "$seed-event:example.invalid";
 const HARNESS_ROOM_KEY = roomTimelineKey(HARNESS_ACCOUNT_KEY, HARNESS_ROOM_ID);
+const HARNESS_THREAD_KEY = threadTimelineKey(
+  HARNESS_ACCOUNT_KEY,
+  HARNESS_ROOM_ID,
+  HARNESS_THREAD_ROOT_ID
+);
 
 async function gotoReadyShell(page: import("@playwright/test").Page): Promise<void> {
   await page.goto("/appHarness.html");
@@ -35,7 +41,8 @@ async function gotoReadyShell(page: import("@playwright/test").Page): Promise<vo
 async function seedTimelineItems(
   page: import("@playwright/test").Page,
   items: unknown[],
-  generation = 2
+  generation = 2,
+  key: unknown = HARNESS_ROOM_KEY
 ): Promise<void> {
   await expect
     .poll(
@@ -68,11 +75,16 @@ async function seedTimelineItems(
               document.querySelector(`[data-item-id="${CSS.escape(id)}"]`)
             );
           },
-          { key: HARNESS_ROOM_KEY, nextItems: items, nextGeneration: generation }
+          { key, nextItems: items, nextGeneration: generation }
         ),
       { timeout: 10_000, intervals: [25, 50, 100, 250] }
     )
     .toBe(true);
+}
+
+async function openThreadPane(page: import("@playwright/test").Page): Promise<void> {
+  await page.getByRole("button", { name: /2 replies/ }).click();
+  await expect(page.getByText(t("panel.thread"), { exact: true })).toBeVisible();
 }
 
 async function pushMediaDownloadState(
@@ -426,6 +438,67 @@ test("timeline media viewer keeps image inside the visible stage", async ({ page
   const imageCenterY = imageBox.y + imageBox.height / 2;
   expect(Math.abs(imageCenterX - stageCenterX)).toBeLessThanOrEqual(2);
   expect(Math.abs(imageCenterY - stageCenterY)).toBeLessThanOrEqual(2);
+});
+
+test("thread panel ready image preview fits inside the panel width", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 900, height: 720 });
+  await gotoReadyShell(page);
+  await openThreadPane(page);
+  const eventId = "$thread-media-ready-img:example.invalid";
+  await seedTimelineItems(
+    page,
+    [
+      {
+        ...makeImageItem(eventId),
+        in_reply_to_event_id: HARNESS_THREAD_ROOT_ID,
+        thread_root: HARNESS_THREAD_ROOT_ID
+      }
+    ],
+    3,
+    HARNESS_THREAD_KEY
+  );
+
+  const syntheticUrl = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+  await pushMediaDownloadState(page, eventId, {
+    kind: "ready",
+    source_url: syntheticUrl,
+    width: 2048,
+    height: 1188,
+    mime_type: "image/jpeg"
+  });
+
+  const pane = page.locator('aside[aria-label="Context panel"]');
+  const media = pane.locator(`[data-event-id="${eventId}"] .message-media`);
+  const figure = media.locator(".message-media-figure");
+  const image = media.locator("img.message-media-image");
+  await expect(media).toHaveAttribute("data-download-state", "ready");
+  await expect(image).toBeVisible();
+
+  const [paneBox, mediaBox, figureBox, imageBox] = await Promise.all([
+    pane.boundingBox(),
+    media.boundingBox(),
+    figure.boundingBox(),
+    image.boundingBox()
+  ]);
+  expect(paneBox).not.toBeNull();
+  expect(mediaBox).not.toBeNull();
+  expect(figureBox).not.toBeNull();
+  expect(imageBox).not.toBeNull();
+  if (!paneBox || !mediaBox || !figureBox || !imageBox) {
+    return;
+  }
+
+  const panelRight = paneBox.x + paneBox.width;
+  for (const box of [mediaBox, figureBox, imageBox]) {
+    expect(box.x).toBeGreaterThanOrEqual(paneBox.x - 0.5);
+    expect(box.x + box.width).toBeLessThanOrEqual(panelRight + 0.5);
+  }
+  expect(figureBox.width / figureBox.height).toBeCloseTo(800 / 600, 1);
+  await expect
+    .poll(() => figure.evaluate((element) => getComputedStyle(element).overflow))
+    .toBe("hidden");
 });
 
 // ---------------------------------------------------------------------------
