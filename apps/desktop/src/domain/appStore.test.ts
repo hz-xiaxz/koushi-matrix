@@ -612,6 +612,7 @@ function makeSnapshot(): DesktopSnapshot {
             appearance: { theme: "system" },
             typography: { font: "system", emoji: "system" },
             keyboard: { composer_send_shortcut: "enter" },
+            composer: { math_mode: true },
             notifications: {
               desktop_notifications: true,
               sound: true,

@@ -84,6 +84,7 @@ describe("TimelinePane render isolation", () => {
         onCancelScheduledSend: noop,
         onAttachFiles: noop,
         onClearUploadStaging: noop,
+        onComposerMathModeChange: noop,
         onUpdateStagedUploadCaption: noop,
         onSelectStagedUploadOutput: noop,
         onSendStagedAttachments: noop,
@@ -230,6 +231,7 @@ describe("TimelinePane render isolation", () => {
         onCancelScheduledSend: noop,
         onAttachFiles: noop,
         onClearUploadStaging: noop,
+        onComposerMathModeChange: noop,
         onUpdateStagedUploadCaption: noop,
         onSelectStagedUploadOutput: noop,
         onSendStagedAttachments: noop,
@@ -278,6 +280,7 @@ function makeSnapshot(): DesktopSnapshot {
             appearance: { theme: "system" },
             typography: { font: "system", emoji: "system" },
             keyboard: { composer_send_shortcut: "enter" },
+            composer: { math_mode: true },
             notifications: {
               desktop_notifications: true,
               sound: true,

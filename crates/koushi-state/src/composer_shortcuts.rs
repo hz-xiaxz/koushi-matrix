@@ -119,6 +119,22 @@ pub struct FormattedMessageDraft {
     pub mentions: MentionIntent,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ComposerFormattingOptions {
+    #[serde(default = "default_math_mode")]
+    pub math_mode: bool,
+}
+
+impl Default for ComposerFormattingOptions {
+    fn default() -> Self {
+        Self { math_mode: true }
+    }
+}
+
+fn default_math_mode() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SlashCommandIntent {
@@ -162,9 +178,17 @@ pub fn build_formatted_message_draft(
     body: impl Into<String>,
     mentions: MentionIntent,
 ) -> FormattedMessageDraft {
+    build_formatted_message_draft_with_options(body, mentions, ComposerFormattingOptions::default())
+}
+
+pub fn build_formatted_message_draft_with_options(
+    body: impl Into<String>,
+    mentions: MentionIntent,
+    options: ComposerFormattingOptions,
+) -> FormattedMessageDraft {
     let plain_body = body.into();
     FormattedMessageDraft {
-        formatted_body: format_markdown_subset(&plain_body),
+        formatted_body: format_markdown_subset(&plain_body, options),
         plain_body,
         mentions,
     }
@@ -199,9 +223,17 @@ pub fn parse_slash_command(body: &str) -> SlashCommandIntent {
 }
 
 pub fn resolve_composer_send_intent(body: &str, mentions: MentionIntent) -> ComposerSendIntent {
+    resolve_composer_send_intent_with_options(body, mentions, ComposerFormattingOptions::default())
+}
+
+pub fn resolve_composer_send_intent_with_options(
+    body: &str,
+    mentions: MentionIntent,
+    options: ComposerFormattingOptions,
+) -> ComposerSendIntent {
     match parse_slash_command(body) {
         SlashCommandIntent::PlainText { body } => ComposerSendIntent::Message {
-            draft: build_formatted_message_draft(body, mentions),
+            draft: build_formatted_message_draft_with_options(body, mentions, options),
         },
         command @ SlashCommandIntent::Me { .. }
         | command @ SlashCommandIntent::Join { .. }
@@ -242,8 +274,79 @@ fn resolve_enter_key(
     }
 }
 
-fn format_markdown_subset(body: &str) -> Option<String> {
+fn format_markdown_subset(body: &str, options: ComposerFormattingOptions) -> Option<String> {
     let mut html = String::with_capacity(body.len());
+    let mut changed = false;
+    let lines = body.split('\n').collect::<Vec<_>>();
+    let mut line_index = 0;
+
+    while line_index < lines.len() {
+        if line_index > 0 {
+            html.push('\n');
+        }
+
+        if options.math_mode
+            && let Some((block_body, closing_index)) = math_block_body(&lines, line_index)
+        {
+            push_math_html(&mut html, "div", &block_body);
+            changed = true;
+            line_index = closing_index + 1;
+            continue;
+        }
+
+        if unordered_list_item_body(lines[line_index]).is_some() {
+            html.push_str("<ul>");
+            while line_index < lines.len() {
+                let Some(item_body) = unordered_list_item_body(lines[line_index]) else {
+                    break;
+                };
+                html.push_str("<li>");
+                let _ = push_inline_markdown_subset(&mut html, item_body, options);
+                html.push_str("</li>");
+                changed = true;
+                line_index += 1;
+            }
+            html.push_str("</ul>");
+            continue;
+        }
+
+        changed = push_inline_markdown_subset(&mut html, lines[line_index], options) || changed;
+        line_index += 1;
+    }
+
+    changed.then_some(html)
+}
+
+fn unordered_list_item_body(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start_matches(' ');
+    trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+}
+
+fn math_block_body(lines: &[&str], start_index: usize) -> Option<(String, usize)> {
+    if lines.get(start_index)?.trim() != "$$" {
+        return None;
+    }
+    let closing_index = lines
+        .iter()
+        .enumerate()
+        .skip(start_index + 1)
+        .find_map(|(index, line)| (line.trim() == "$$").then_some(index))?;
+    if closing_index == start_index + 1 {
+        return None;
+    }
+    Some((
+        lines[start_index + 1..closing_index].join("\n"),
+        closing_index,
+    ))
+}
+
+fn push_inline_markdown_subset(
+    html: &mut String,
+    body: &str,
+    options: ComposerFormattingOptions,
+) -> bool {
     let mut changed = false;
     let mut index = 0;
 
@@ -253,9 +356,15 @@ fn format_markdown_subset(body: &str) -> Option<String> {
             && let Some(end) = after.find("||")
         {
             html.push_str("<span data-mx-spoiler>");
-            push_escaped_html(&mut html, &after[..end]);
+            push_escaped_html(html, &after[..end]);
             html.push_str("</span>");
             index += 2 + end + 2;
+            changed = true;
+            continue;
+        }
+        if let Some(after) = rest.strip_prefix("\\$") {
+            html.push('$');
+            index += rest.len() - after.len();
             changed = true;
             continue;
         }
@@ -263,7 +372,7 @@ fn format_markdown_subset(body: &str) -> Option<String> {
             && let Some(end) = after.find("**")
         {
             html.push_str("<strong>");
-            push_escaped_html(&mut html, &after[..end]);
+            push_escaped_html(html, &after[..end]);
             html.push_str("</strong>");
             index += 2 + end + 2;
             changed = true;
@@ -273,7 +382,7 @@ fn format_markdown_subset(body: &str) -> Option<String> {
             && let Some(end) = after.find('`')
         {
             html.push_str("<code>");
-            push_escaped_html(&mut html, &after[..end]);
+            push_escaped_html(html, &after[..end]);
             html.push_str("</code>");
             index += 1 + end + 1;
             changed = true;
@@ -283,22 +392,65 @@ fn format_markdown_subset(body: &str) -> Option<String> {
             && let Some(end) = after.find('*')
         {
             html.push_str("<em>");
-            push_escaped_html(&mut html, &after[..end]);
+            push_escaped_html(html, &after[..end]);
             html.push_str("</em>");
             index += 1 + end + 1;
             changed = true;
             continue;
+        }
+        if options.math_mode
+            && let Some(after) = rest.strip_prefix('$')
+            && let Some(end) = find_unescaped_math_close(after)
+            && end > 0
+        {
+            let latex = &after[..end];
+            if !latex.trim().is_empty() {
+                push_math_html(html, "span", latex);
+                index += 1 + end + 1;
+                changed = true;
+                continue;
+            }
         }
 
         let ch = rest
             .chars()
             .next()
             .expect("rest is non-empty while scanning markdown subset");
-        push_escaped_html_char(&mut html, ch);
+        push_escaped_html_char(html, ch);
         index += ch.len_utf8();
     }
 
-    changed.then_some(html)
+    changed
+}
+
+fn find_unescaped_math_close(value: &str) -> Option<usize> {
+    let mut escaped = false;
+    for (index, ch) in value.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '$' {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn push_math_html(output: &mut String, tag: &str, latex: &str) {
+    output.push('<');
+    output.push_str(tag);
+    output.push_str(" data-mx-maths=\"");
+    push_escaped_html(output, latex);
+    output.push_str("\">");
+    push_escaped_html(output, latex);
+    output.push_str("</");
+    output.push_str(tag);
+    output.push('>');
 }
 
 fn push_escaped_html(output: &mut String, value: &str) {

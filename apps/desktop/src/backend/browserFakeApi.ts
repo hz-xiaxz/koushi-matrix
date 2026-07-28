@@ -4243,6 +4243,7 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
       appearance: { theme: "system" },
       typography: { font: "system", emoji: "system" },
       keyboard: { composer_send_shortcut: "enter" },
+      composer: { math_mode: true },
       notifications: {
         desktop_notifications: true,
         sound: true,
@@ -4777,6 +4778,7 @@ function applySettingsPatch(
     appearance: patch.appearance ?? values.appearance,
     typography: patch.typography ?? values.typography,
     keyboard: patch.keyboard ?? values.keyboard,
+    composer: patch.composer ?? values.composer ?? { math_mode: true },
     notifications: patch.notifications ?? values.notifications,
     display: patch.display ?? values.display,
     media: patch.media ?? values.media,

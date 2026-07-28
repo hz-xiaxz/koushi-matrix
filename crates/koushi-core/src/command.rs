@@ -999,6 +999,9 @@ fn settings_patch_field_names(patch: &SettingsPatch) -> Vec<&'static str> {
     if patch.keyboard.is_some() {
         fields.push("keyboard");
     }
+    if patch.composer.is_some() {
+        fields.push("composer");
+    }
     if patch.notifications.is_some() {
         fields.push("notifications");
     }

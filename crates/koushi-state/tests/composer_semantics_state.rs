@@ -1,8 +1,9 @@
 use koushi_state::{
-    ComposerKey, ComposerKeyFacts, ComposerKeyModifiers, ComposerResolvedAction,
-    ComposerResolverContext, ComposerSelection, ComposerSendIntent, ComposerSendShortcut,
-    ComposerSurface, FormattedMessageDraft, MentionIntent, MentionTarget, SlashCommandIntent,
-    build_formatted_message_draft, resolve_composer_key_action, resolve_composer_send_intent,
+    ComposerFormattingOptions, ComposerKey, ComposerKeyFacts, ComposerKeyModifiers,
+    ComposerResolvedAction, ComposerResolverContext, ComposerSelection, ComposerSendIntent,
+    ComposerSendShortcut, ComposerSurface, FormattedMessageDraft, MentionIntent, MentionTarget,
+    SlashCommandIntent, build_formatted_message_draft, build_formatted_message_draft_with_options,
+    resolve_composer_key_action, resolve_composer_send_intent,
 };
 
 fn key_facts(
@@ -99,6 +100,63 @@ fn composer_spoiler_markdown_is_rust_owned_formatted_body() {
         draft.formatted_body.as_deref(),
         Some("keep <span data-mx-spoiler>secret</span> hidden")
     );
+}
+
+#[test]
+fn composer_markdown_unordered_lists_are_rust_owned_formatted_body() {
+    let draft = build_formatted_message_draft("- first\n- **second**", MentionIntent::default());
+
+    assert_eq!(draft.plain_body, "- first\n- **second**");
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<ul><li>first</li><li><strong>second</strong></li></ul>")
+    );
+}
+
+#[test]
+fn composer_math_markdown_uses_matrix_math_html_by_default() {
+    let draft = build_formatted_message_draft(
+        "Energy $E=mc^2$\n$$\n\\int_0^1 x dx\n$$",
+        MentionIntent::default(),
+    );
+
+    assert_eq!(draft.plain_body, "Energy $E=mc^2$\n$$\n\\int_0^1 x dx\n$$");
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some(
+            "Energy <span data-mx-maths=\"E=mc^2\">E=mc^2</span>\n<div data-mx-maths=\"\\int_0^1 x dx\">\\int_0^1 x dx</div>"
+        )
+    );
+}
+
+#[test]
+fn composer_math_mode_off_leaves_dollar_delimiters_literal() {
+    let draft = build_formatted_message_draft_with_options(
+        "Energy $E=mc^2$",
+        MentionIntent::default(),
+        ComposerFormattingOptions { math_mode: false },
+    );
+
+    assert_eq!(draft.plain_body, "Energy $E=mc^2$");
+    assert_eq!(draft.formatted_body, None);
+}
+
+#[test]
+fn composer_math_requires_a_closing_delimiter_on_the_same_line() {
+    let draft = build_formatted_message_draft(
+        "The price is $5\nand the formula is still unclosed",
+        MentionIntent::default(),
+    );
+
+    assert_eq!(draft.formatted_body, None);
+}
+
+#[test]
+fn composer_escaped_dollar_is_literal_even_when_math_mode_is_on() {
+    let draft = build_formatted_message_draft(r"literal \$x$ only", MentionIntent::default());
+
+    assert_eq!(draft.plain_body, r"literal \$x$ only");
+    assert_eq!(draft.formatted_body.as_deref(), Some("literal $x$ only"));
 }
 
 #[test]

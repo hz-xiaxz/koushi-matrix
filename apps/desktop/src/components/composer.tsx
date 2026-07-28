@@ -20,6 +20,7 @@ import {
   List,
   Paperclip,
   Send,
+  Sigma,
   Smile,
   X
 } from "lucide-react";
@@ -74,6 +75,7 @@ export const Composer = memo(function Composer({
   composerMode,
   hasStagedUploads = false,
   isSending,
+  mathModeEnabled = true,
   mentionCandidates = [],
   mentionIntent = EMPTY_MENTION_INTENT,
   resolveComposerKeyAction = ignoreComposerKeyAction,
@@ -85,6 +87,7 @@ export const Composer = memo(function Composer({
   onCancelReply,
   onAttachFiles = async () => undefined,
   onMentionIntentChange = () => undefined,
+  onMathModeChange = () => undefined,
   onScheduleSend,
   onSend,
   onValueChange
@@ -94,6 +97,7 @@ export const Composer = memo(function Composer({
   composerMode: ComposerModeProp;
   hasStagedUploads?: boolean;
   isSending: boolean;
+  mathModeEnabled?: boolean;
   mentionCandidates?: MentionCandidate[];
   mentionIntent?: MentionIntent;
   resolveComposerKeyAction?: ResolveComposerKeyAction;
@@ -104,6 +108,7 @@ export const Composer = memo(function Composer({
   value: string;
   onCancelReply: () => void;
   onAttachFiles?: (files: File[]) => void | Promise<void>;
+  onMathModeChange?: (enabled: boolean) => void | Promise<void>;
   onMentionIntentChange?: (intent: MentionIntent) => void;
   onScheduleSend?: (sendAtMs: number, body: string) => void | Promise<void>;
   onSend: (body: string) => void | Promise<void>;
@@ -519,6 +524,20 @@ export const Composer = memo(function Composer({
           onClick={() => applyInlineMarkdown("`", "`", "code")}
         >
           <Code2 size={ICON_SIZE.input} />
+        </button>
+        <button
+          className={`composer-math-toggle${mathModeEnabled ? " is-active" : ""}`}
+          type="button"
+          aria-label={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
+          aria-pressed={mathModeEnabled}
+          title={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
+          onMouseDown={keepComposerFocus}
+          onClick={() => {
+            void onMathModeChange(!mathModeEnabled);
+          }}
+        >
+          <Sigma size={ICON_SIZE.input} aria-hidden="true" />
+          <span>{t("composer.mathMode")}</span>
         </button>
       </div>
       {mentionIntent.targets.length ? (

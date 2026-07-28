@@ -470,8 +470,8 @@ describe("ContextualRightPanel", () => {
           in_reply_to_event_id: null,
           formatted: {
             html:
-              '<strong>Bold body</strong><blockquote>Quoted body</blockquote><ul><li>List item</li></ul><a href="https://example.invalid/path">safe link</a><pre><code class="language-rust">fn main() {}</code></pre>',
-            plain_text: "Bold bodyQuoted bodyList itemsafe linkfn main() {}",
+              '<strong>Bold body</strong><blockquote>Quoted body</blockquote><ul><li>List item</li></ul><span data-mx-maths="E=mc^2">E=mc^2</span><a href="https://example.invalid/path">safe link</a><pre><code class="language-rust">fn main() {}</code></pre>',
+            plain_text: "Bold bodyQuoted bodyList itemE=mc^2safe linkfn main() {}",
             code_blocks: [{ language: "rust", body: "fn main() {}" }]
           },
           thread_root: null,
@@ -497,6 +497,8 @@ describe("ContextualRightPanel", () => {
     expect(markup).toContain("<strong>Bold body</strong>");
     expect(markup).toContain("<blockquote>Quoted body</blockquote>");
     expect(markup).toContain("<li>List item</li>");
+    expect(markup).toContain('class="message-math');
+    expect(markup).toContain('class="katex');
     expect(markup).toContain('href="https://example.invalid/path"');
     expect(markup).toContain('class="message-code-block"');
     expect(markup).toContain('data-code-block-wrap="true"');

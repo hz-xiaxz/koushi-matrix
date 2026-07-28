@@ -65,6 +65,7 @@ import {
   type Dispatch,
   type SetStateAction
 } from "react";
+import katex from "katex";
 
 import { getActiveLocale, t } from "../i18n/messages";
 import {
@@ -1418,6 +1419,7 @@ const FORMATTED_TAGS = new Set([
   "br",
   "code",
   "del",
+  "div",
   "em",
   "h1",
   "h2",
@@ -1724,6 +1726,45 @@ function renderSpoiler(
   );
 }
 
+function renderMathFormula(
+  key: string,
+  latex: string | undefined,
+  children: ReactNode,
+  displayMode: boolean
+): ReactNode {
+  const source = latex?.trim() ?? "";
+  const Tag = displayMode ? "div" : "span";
+  if (!source) {
+    return (
+      <Tag key={key} className={`message-math${displayMode ? " is-block" : ""}`}>
+        {children}
+      </Tag>
+    );
+  }
+  try {
+    const html = katex.renderToString(source, {
+      displayMode,
+      strict: false,
+      throwOnError: false,
+      trust: false
+    });
+    return (
+      <Tag
+        key={key}
+        className={`message-math${displayMode ? " is-block" : ""}`}
+        data-mx-maths={source}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  } catch {
+    return (
+      <Tag key={key} className={`message-math${displayMode ? " is-block" : ""}`}>
+        {children}
+      </Tag>
+    );
+  }
+}
+
 type FormattedTagRenderer = (
   node: Extract<FormattedNode, { kind: "element" }>,
   key: string,
@@ -1826,6 +1867,21 @@ const formattedTagRenderers: Record<string, FormattedTagRenderer> = {
     _onCopyText: TimelineRowActionHandlers["onCopyText"]
   ) {
     return <del key={key}>{children}</del>;
+  },
+  div(
+    node: Extract<FormattedNode, { kind: "element" }>,
+    key: string,
+    children: ReactNode,
+    _formatted: NonNullable<TimelineItem["formatted"]>,
+    _codeBlockWrap: boolean,
+    _codeBlockIndexRef: { current: number },
+    _onCopyText: TimelineRowActionHandlers["onCopyText"]
+  ) {
+    const math = node.attrs["data-mx-maths"];
+    if (math !== undefined) {
+      return renderMathFormula(key, math, children, true);
+    }
+    return <div key={key}>{children}</div>;
   },
   em(
     _node: Extract<FormattedNode, { kind: "element" }>,
@@ -2005,7 +2061,11 @@ const formattedTagRenderers: Record<string, FormattedTagRenderer> = {
   ) {
     const className = node.attrs.class?.trim();
     const spoiler = node.attrs["data-mx-spoiler"];
+    const math = node.attrs["data-mx-maths"];
     const color = node.attrs["data-mx-color"];
+    if (math !== undefined) {
+      return renderMathFormula(key, math, children, false);
+    }
     if (spoiler !== undefined) {
       return renderSpoiler(`formatted:${key}`, children, spoiler, spoilerState);
     }
