@@ -27,6 +27,7 @@ fn unread_reason_token(value: &str) -> &'static str {
         "fully_read_latest" => "fully_read_latest",
         "cleared_latest" => "cleared_latest",
         "cleared_local" => "cleared_local",
+        "latest_event_read" => "latest_event_read",
         "room_metrics" => "room_metrics",
         _ => "other",
     }
@@ -111,6 +112,9 @@ pub(crate) fn trace_activity_room(stage: &str, room: &RoomSummary, emitted: bool
     if !room_has_unread_metrics(room) {
         return;
     }
+    if !emitted && reason == "plain_unread_only" {
+        return;
+    }
     record_room_metrics(stage, room, Some(emitted), Some(reason));
 }
 
@@ -156,6 +160,8 @@ mod tests {
             conversation_activity: None,
             latest_event: Some(RoomLatestEventSummary {
                 event_id: "$private-event:example.invalid".to_owned(),
+                relation_type: None,
+                relation_event_id: None,
                 sender_id: Some("@private-sender:example.invalid".to_owned()),
                 sender_label: Some("Private Sender".to_owned()),
                 sender_avatar: None,
@@ -199,6 +205,7 @@ mod tests {
             "fully_read_latest",
             "cleared_latest",
             "cleared_local",
+            "latest_event_read",
             "room_metrics",
         ] {
             trace_activity_room("activity_recent_event", &room, true, reason);
@@ -250,5 +257,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn activity_plain_unread_non_candidates_are_suppressed() {
+        let room = private_room();
+        let before = koushi_diagnostics::snapshot().records.len();
+
+        trace_activity_room("activity_recent_event", &room, false, "plain_unread_only");
+        trace_activity_room("activity_placeholder", &room, false, "plain_unread_only");
+
+        let after = koushi_diagnostics::snapshot().records.len();
+        assert_eq!(
+            after, before,
+            "plain-unread-only activity non-candidates are high-volume noise"
+        );
     }
 }

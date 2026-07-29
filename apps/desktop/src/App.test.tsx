@@ -1874,10 +1874,43 @@ describe("desktop integration source guards", () => {
     expect(selectRoomSource).toContain('source: "room.transition"');
     expect(selectRoomSource).toContain("target_known=");
     expect(selectRoomSource).toContain("same_active=");
+    expect(selectRoomSource).toContain("stage=before_composer_drain");
+    expect(selectRoomSource).toContain("stage=after_composer_drain");
+    expect(selectRoomSource).toContain("outcome=blocked");
+    expect(selectRoomSource).toContain("outcome=continue");
+    expect(selectRoomSource).toContain("stage=before_primary_view_update");
+    expect(selectRoomSource).toContain("stage=after_primary_view_update");
+    expect(selectRoomSource).toContain("stage=before_api_select");
+    expect(selectRoomSource).toContain("stage=after_api_select");
+    expect(selectRoomSource).toContain("stage=after_snapshot_apply");
+    expect(selectRoomSource).toContain("elapsed_ms_since_start=");
     expect(selectRoomSource).toContain("timeline_matches=");
     expect(startOffset).toBeGreaterThanOrEqual(0);
     expect(apiOffset).toBeGreaterThan(startOffset);
     expect(doneOffset).toBeGreaterThan(apiOffset);
+  });
+
+  test("home selection appends private-data-free transition diagnostics", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const fnStart = source.indexOf("const openHomeSelection = useCallback");
+    const fnEnd = source.indexOf("async function selectSpace", fnStart);
+    expect(fnStart).toBeGreaterThanOrEqual(0);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    const openHomeSelectionSource = source.slice(fnStart, fnEnd);
+
+    expect(openHomeSelectionSource).toContain('source: "home.transition"');
+    expect(openHomeSelectionSource).toContain("stage=submit");
+    expect(openHomeSelectionSource).toContain("selection=");
+    expect(openHomeSelectionSource).toContain("current_active_room_present=");
+    expect(openHomeSelectionSource).toContain("current_timeline_present=");
+    expect(openHomeSelectionSource).toContain("stage=after_composer_drain");
+    expect(openHomeSelectionSource).toContain("outcome=blocked");
+    expect(openHomeSelectionSource).toContain("outcome=continue");
+    expect(openHomeSelectionSource).toContain("stage=after_select_space");
+    expect(openHomeSelectionSource).toContain("active_room_present=");
+    expect(openHomeSelectionSource).toContain("timeline_present=");
+    expect(openHomeSelectionSource).toContain("stage=after_view_apply");
+    expect(openHomeSelectionSource).toContain("elapsed_ms_since_start=");
   });
 
   test("space selection keeps transition diagnostics on structured Rust lanes", () => {
