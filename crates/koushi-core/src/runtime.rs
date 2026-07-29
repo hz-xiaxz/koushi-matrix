@@ -7397,7 +7397,7 @@ mod tests {
         let gate = koushi_state::VerificationGateState {
             methods: vec![],
             account_kind: koushi_state::VerificationAccountKind::ExistingIdentity,
-            failure: Some(koushi_state::VerificationGateFailureKind::Server),
+            failure: Some(koushi_state::VerificationGateFailureKind::Sdk),
         };
 
         assert!(is_verification_gate_command(
