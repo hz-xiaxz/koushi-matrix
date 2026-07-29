@@ -560,6 +560,8 @@ export type MessageId =
   | "settings.passphraseChangeFailed"
   | "settings.resetLocalData"
   | "settings.resetLocalDataConfirm"
+  | "gate.resetForNewDevice"
+  | "gate.resetForNewDeviceConfirm"
   | "settings.session"
   | "settings.sessionSecretLabel"
   | "settings.sessionSecret"
@@ -1733,6 +1735,8 @@ const en: Catalog = {
   "gate.bootstrap": "Create secure backup",
   "gate.saved": "I saved the recovery key",
   "gate.retry": "Retry",
+  "gate.resetForNewDevice": "Reset local data and sign in as a new device",
+  "gate.resetForNewDeviceConfirm": "Reset this session's local data and sign in again with a new device ID? This removes the local encrypted store, cached history, and saved credentials on this Mac. It does not remove messages from the homeserver. This cannot be undone.",
   "gate.signOut": "Sign out",
   "gate.failureCancelled": "Verification was cancelled.",
   "gate.failureForbidden": "Verification was not permitted.",
@@ -2579,6 +2583,8 @@ const ja: Catalog = {
   "settings.passphraseChangeFailed": "変更失敗: {reason}",
   "settings.resetLocalData": "ローカルデータをリセット",
   "settings.resetLocalDataConfirm": "このセッションのローカルデータをリセットしますか？このデバイス上の Matrix ストア、キャッシュ済み履歴、保存済み資格情報が削除されます。この操作は元に戻せません。",
+  "gate.resetForNewDevice": "ローカルデータを削除して新しいデバイスとしてログイン",
+  "gate.resetForNewDeviceConfirm": "このセッションのローカルデータを削除し、新しいデバイス ID でログインし直しますか？この Mac 上の暗号化ストア、キャッシュ済み履歴、保存済み資格情報が削除されます。ホームサーバー上のメッセージは削除されません。この操作は元に戻せません。",
   "settings.session": "セッション",
   "settings.sessionSecretLabel": "セッションシークレット",
   "settings.sessionSecret": "OS資格情報ストア",

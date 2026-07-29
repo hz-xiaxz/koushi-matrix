@@ -4693,6 +4693,7 @@ fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -
                 | AccountCommand::SubmitRecovery { .. }
                 | AccountCommand::StartSessionBootstrap { .. }
                 | AccountCommand::ConfirmSessionBootstrapSaved { .. }
+                | AccountCommand::ResetLocalData { .. }
                 | AccountCommand::StartOwnUserSas { .. }
                 | AccountCommand::AcceptVerification { .. }
                 | AccountCommand::ConfirmSasVerification { .. }
@@ -7377,6 +7378,55 @@ mod tests {
                 flow_id: 77,
                 sas_emojis: vec![]
             }
+        ));
+    }
+
+    #[test]
+    fn local_data_reset_is_admitted_through_the_verification_gate() {
+        let command = CoreCommand::Account(AccountCommand::ResetLocalData {
+            request_id: RequestId {
+                connection_id: RuntimeConnectionId(1),
+                sequence: 78,
+            },
+        });
+        let info = SessionInfo {
+            homeserver: "https://example.invalid".into(),
+            user_id: "@me:example.invalid".into(),
+            device_id: "DEVICE".into(),
+        };
+        let gate = koushi_state::VerificationGateState {
+            methods: vec![],
+            account_kind: koushi_state::VerificationAccountKind::ExistingIdentity,
+            failure: Some(koushi_state::VerificationGateFailureKind::Server),
+        };
+
+        assert!(is_verification_gate_command(
+            &command,
+            &SessionState::Provisional {
+                info: info.clone(),
+                phase: koushi_state::ProvisionalPhase::DiscoveringMethods,
+            }
+        ));
+        assert!(is_verification_gate_command(
+            &command,
+            &SessionState::AwaitingVerification {
+                info: info.clone(),
+                gate: gate.clone(),
+            }
+        ));
+        assert!(is_verification_gate_command(
+            &command,
+            &SessionState::Verifying {
+                info,
+                gate,
+                method: koushi_state::VerificationMethod::RecoveryKey,
+                flow_id: 78,
+                sas_emojis: vec![],
+            }
+        ));
+        assert!(!is_verification_gate_command(
+            &command,
+            &SessionState::SignedOut
         ));
     }
 
