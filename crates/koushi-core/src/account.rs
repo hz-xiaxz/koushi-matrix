@@ -88,7 +88,7 @@ use crate::sync::{SyncActorHandle, SyncMessage};
 use crate::timeline::{
     NavigationProjectionIngress, NavigationProjectionIntent, ReadPersistenceIngress,
     ReadPersistenceRequest, TimelineManagerHandle, TimelineMessage,
-    build_room_message_content_from_composer_body,
+    TimelineProjectionAcknowledgement, build_room_message_content_from_composer_body,
 };
 
 /// "Credential store healthy, but no stored session for that account"
@@ -354,9 +354,18 @@ pub enum AccountMessage {
     SyncCommand(SyncCommand),
     RoomCommand(RoomCommand),
     TimelineCommand(TimelineCommand),
+    TimelineCommandWithComposerFormatting {
+        command: TimelineCommand,
+        formatting_options: koushi_state::ComposerFormattingOptions,
+    },
     LeasedTimelineCommand {
         command: TimelineCommand,
         composer_permit: ForwardedComposerDraftPermit,
+    },
+    LeasedTimelineCommandWithComposerFormatting {
+        command: TimelineCommand,
+        composer_permit: ForwardedComposerDraftPermit,
+        formatting_options: koushi_state::ComposerFormattingOptions,
     },
     ResolveActivity {
         generation: u64,
@@ -367,7 +376,7 @@ pub enum AccountMessage {
         projection_request_id: RequestId,
         key: TimelineKey,
         generation: TimelineGeneration,
-        response: oneshot::Sender<bool>,
+        response: oneshot::Sender<TimelineProjectionAcknowledgement>,
     },
     AcknowledgeTimelineBatchRendered {
         key: TimelineKey,
@@ -1516,12 +1525,34 @@ impl AccountActor {
                 AccountMessage::TimelineCommand(timeline_command) => {
                     self.route_timeline_command(timeline_command).await;
                 }
+                AccountMessage::TimelineCommandWithComposerFormatting {
+                    command,
+                    formatting_options,
+                } => {
+                    self.route_timeline_command_with_formatting_options(
+                        command,
+                        formatting_options,
+                    )
+                    .await;
+                }
                 AccountMessage::LeasedTimelineCommand {
                     command,
                     composer_permit,
                 } => {
                     self.route_leased_timeline_command(command, composer_permit)
                         .await;
+                }
+                AccountMessage::LeasedTimelineCommandWithComposerFormatting {
+                    command,
+                    composer_permit,
+                    formatting_options,
+                } => {
+                    self.route_leased_timeline_command_with_formatting_options(
+                        command,
+                        composer_permit,
+                        formatting_options,
+                    )
+                    .await;
                 }
                 AccountMessage::ResolveActivity {
                     generation,
@@ -2162,6 +2193,19 @@ impl AccountActor {
         self.route_timeline_command_with_permit(command, None).await;
     }
 
+    async fn route_timeline_command_with_formatting_options(
+        &mut self,
+        command: TimelineCommand,
+        formatting_options: koushi_state::ComposerFormattingOptions,
+    ) {
+        self.route_timeline_command_with_permit_and_formatting_options(
+            command,
+            None,
+            Some(formatting_options),
+        )
+        .await;
+    }
+
     async fn route_leased_timeline_command(
         &mut self,
         command: TimelineCommand,
@@ -2171,10 +2215,38 @@ impl AccountActor {
             .await;
     }
 
+    async fn route_leased_timeline_command_with_formatting_options(
+        &mut self,
+        command: TimelineCommand,
+        composer_permit: ForwardedComposerDraftPermit,
+        formatting_options: koushi_state::ComposerFormattingOptions,
+    ) {
+        self.route_timeline_command_with_permit_and_formatting_options(
+            command,
+            Some(composer_permit),
+            Some(formatting_options),
+        )
+        .await;
+    }
+
     async fn route_timeline_command_with_permit(
         &mut self,
         command: TimelineCommand,
         composer_permit: Option<ForwardedComposerDraftPermit>,
+    ) {
+        self.route_timeline_command_with_permit_and_formatting_options(
+            command,
+            composer_permit,
+            None,
+        )
+        .await;
+    }
+
+    async fn route_timeline_command_with_permit_and_formatting_options(
+        &mut self,
+        command: TimelineCommand,
+        composer_permit: Option<ForwardedComposerDraftPermit>,
+        formatting_options: Option<koushi_state::ComposerFormattingOptions>,
     ) {
         if !composer_timeline_command_targets_active_session(self.session_key_id.as_ref(), &command)
             && let Some((request_id, _)) = command.composer_account_fence()
@@ -2192,12 +2264,23 @@ impl AccountActor {
             self.link_preview_policy.encrypted_global_enabled = *encrypted_global_enabled;
             self.link_preview_policy.room_overrides = room_overrides.clone();
         }
-        let message = match composer_permit {
-            Some(composer_permit) => TimelineMessage::LeasedCommand {
+        let message = match (composer_permit, formatting_options) {
+            (Some(composer_permit), Some(formatting_options)) => {
+                TimelineMessage::LeasedCommandWithComposerFormatting {
+                    command,
+                    composer_permit,
+                    formatting_options,
+                }
+            }
+            (Some(composer_permit), None) => TimelineMessage::LeasedCommand {
                 command,
                 composer_permit,
             },
-            None => TimelineMessage::Command(command),
+            (None, Some(formatting_options)) => TimelineMessage::CommandWithComposerFormatting {
+                command,
+                formatting_options,
+            },
+            (None, None) => TimelineMessage::Command(command),
         };
         let _ = self.timeline_manager.send(message).await;
     }

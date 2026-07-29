@@ -122,6 +122,7 @@ export interface SettingsValues {
   appearance: AppearanceSettings;
   typography: TypographySettings;
   keyboard: KeyboardSettings;
+  composer: ComposerSettings;
   notifications: NotificationSettings;
   display: DisplaySettings;
   media: MediaSettings;
@@ -136,6 +137,7 @@ export interface SettingsPatch {
   appearance?: AppearanceSettings;
   typography?: TypographySettings;
   keyboard?: KeyboardSettings;
+  composer?: ComposerSettings;
   notifications?: NotificationSettings;
   display?: DisplaySettings;
   media?: MediaSettings;
@@ -212,6 +214,10 @@ export interface KeyboardSettings {
 }
 
 export type ComposerSendShortcut = "enter" | "modEnter";
+
+export interface ComposerSettings {
+  math_mode: boolean;
+}
 
 export interface NotificationSettings {
   desktop_notifications: boolean;

@@ -216,7 +216,9 @@ describe("timeline store — diff application", () => {
       kind: "applied",
       requestId,
       key,
-      generation: 4
+      generation: 4,
+      itemCount: 1,
+      targetPresent: true
     });
     expect(getItems(applied.store, key).map(itemId)).toEqual(["$target"]);
 
@@ -255,6 +257,30 @@ describe("timeline store — diff application", () => {
     });
     expect(replacement.projection.kind).toBe("applied");
     expect(getKeyState(replacement.store, key)?.actorGeneration).toBe(5);
+  });
+
+  test("reports an accepted focused projection whose target is missing", () => {
+    const key = focusedTimelineKey(ACCOUNT_KEY, "!room:example.invalid", "$target");
+    const requestId = { connection_id: 7, sequence: 12 };
+
+    const applied = applyTimelineEventWithProjectionResult(createTimelineStore(), {
+      InitialItems: {
+        request_id: requestId,
+        key,
+        actor_generation: 4,
+        generation: 4,
+        items: [makeMsg("$context", "context")]
+      }
+    });
+
+    expect(applied.projection).toEqual({
+      kind: "applied",
+      requestId,
+      key,
+      generation: 4,
+      itemCount: 1,
+      targetPresent: false
+    });
   });
 
   test("ignores InitialItems without an acknowledgement-bearing request identity", () => {
@@ -1543,6 +1569,43 @@ describe("timeline store — generation handling", () => {
       expect(rows.find((row) => row.row_id === "thread-root:$old-root")?.kind).toBe(expectedKind);
       expect(rows.some((row) => row.row_id === "$reply")).toBe(false);
     }
+  });
+
+  test("display projection derives a thread summary from a visible reply when SDK summary lacks latest event details", () => {
+    const root = {
+      ...makeMsg("$root", "root"),
+      timestamp_ms: 1_800_000_000_000,
+      thread_summary: {
+        reply_count: 1,
+        latest_event_id: null,
+        latest_sender: null,
+        latest_sender_label: null,
+        latest_body_preview: null,
+        latest_timestamp_ms: null
+      }
+    };
+    const reply = {
+      ...makeMsg("$reply", "visible reply"),
+      sender: "@reply:example.invalid",
+      sender_label: "Reply Alias",
+      timestamp_ms: 1_800_000_010_000,
+      thread_root: "$root"
+    };
+
+    const rows = projectTimelineDisplayRows([root, reply], KEY, LATEST_REPLY);
+    const projectedRoot = rows.find((row) => row.row_id === "thread-root:$root");
+
+    expect(projectedRoot?.activity_event_id).toBe("$reply");
+    expect(projectedRoot?.display_timestamp_ms).toBe(reply.timestamp_ms);
+    expect(projectedRoot?.item.thread_summary).toEqual({
+      reply_count: 1,
+      latest_event_id: "$reply",
+      latest_sender: "@reply:example.invalid",
+      latest_sender_label: "Reply Alias",
+      latest_body_preview: "visible reply",
+      latest_timestamp_ms: reply.timestamp_ms
+    });
+    expect(rows.some((row) => row.row_id === "$reply")).toBe(false);
   });
 });
 

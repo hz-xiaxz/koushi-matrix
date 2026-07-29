@@ -107,7 +107,7 @@ const DEVICE_B: &str = "Koushi Core QA B";
 /// Maximum time to wait for a single event.
 const EVENT_TIMEOUT: Duration = Duration::from_secs(30);
 const GATE_RESTORE_READY_BUDGET: Duration = Duration::from_secs(10);
-const LOGIN_EVENT_TIMEOUT: Duration = Duration::from_secs(90);
+const LOGIN_EVENT_TIMEOUT: Duration = Duration::from_secs(180);
 const ROOM_LIST_EVENT_TIMEOUT: Duration = Duration::from_secs(90);
 const TIMELINE_INITIAL_EVENT_TIMEOUT: Duration = Duration::from_secs(90);
 const E2EE_EVENT_TIMEOUT: Duration = Duration::from_secs(90);
@@ -11610,6 +11610,8 @@ async fn subscribe_and_ack_active_timeline_projection_for_qa(
                         projection_request_id,
                         key: key.clone(),
                         generation,
+                        item_count: items.len() as u64,
+                        target_present: true,
                     },
                 ))
                 .await
@@ -20594,7 +20596,7 @@ mod tests {
             .expect("wait_for_logged_in body");
 
         assert!(
-            source.contains("const LOGIN_EVENT_TIMEOUT: Duration = Duration::from_secs(90);"),
+            source.contains("const LOGIN_EVENT_TIMEOUT: Duration = Duration::from_secs(180);"),
             "login waits need their own timeout because local homeservers can finish /login slowly under full QA load"
         );
         assert!(

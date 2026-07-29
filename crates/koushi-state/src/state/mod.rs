@@ -62,8 +62,8 @@ pub use session::{
 
 // ── Re-exports: settings ────────────────────────────────────────────────────
 pub use settings::{
-    AppearanceSettings, ComposerSendShortcut, DisplaySettings, EmojiPreference, FontPreference,
-    ImageUploadCompressionMode, ImageUploadCompressionPolicy, KeyboardSettings,
+    AppearanceSettings, ComposerSendShortcut, ComposerSettings, DisplaySettings, EmojiPreference,
+    FontPreference, ImageUploadCompressionMode, ImageUploadCompressionPolicy, KeyboardSettings,
     LinkPreviewSettingsState, LocaleSettings, MediaSettings, NotificationSettings,
     RoomNotificationMode, RoomNotificationModeOperation, RoomNotificationSettings, RoomPreference,
     RoomPreferencesState, RoomUrlPreviews, SettingsPatch, SettingsPersistenceState, SettingsState,

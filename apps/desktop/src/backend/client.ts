@@ -565,8 +565,12 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("load_message_source", { roomId, eventId });
   }
 
-  async requestRoomKey(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("request_room_key", { roomId, eventId });
+  async requestRoomKey(
+    roomId: string,
+    eventId: string,
+    timelineKey?: TimelineKey
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("request_room_key", { roomId, eventId, timelineKey });
   }
 
   async forwardMessage(
@@ -800,12 +804,16 @@ class TauriDesktopApi implements DesktopApi {
   async acknowledgeTimelineProjection(
     projectionRequestId: RequestId,
     key: TimelineKey,
-    generation: number
+    generation: number,
+    itemCount: number,
+    targetPresent: boolean
   ): Promise<void> {
     return invoke<void>("acknowledge_timeline_projection", {
       projectionRequestId,
       key,
-      generation
+      generation,
+      itemCount,
+      targetPresent
     });
   }
 

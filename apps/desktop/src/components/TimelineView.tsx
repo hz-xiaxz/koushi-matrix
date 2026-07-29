@@ -65,6 +65,7 @@ import {
   type Dispatch,
   type SetStateAction
 } from "react";
+import katex from "katex";
 
 import { getActiveLocale, t } from "../i18n/messages";
 import {
@@ -135,6 +136,8 @@ import {
   getMediaUploadProgress,
   getKeyState,
   getPaginationState,
+  timelineProjectionEvidence,
+  timelineStoreKeyId,
   type TimelineStoreState
 } from "../domain/timelineStore";
 import {
@@ -198,7 +201,9 @@ export interface TimelineTransport {
   acknowledgeProjection?(
     projectionRequestId: RequestId,
     timelineKey: TimelineKey,
-    generation: number
+    generation: number,
+    itemCount: number,
+    targetPresent: boolean
   ): Promise<void>;
   /** Confirm that one repair-produced Room batch committed through layout. */
   acknowledgeRenderedBatch?(
@@ -247,7 +252,7 @@ export interface TimelineTransport {
   /** Request a Rust-owned safe source DTO for an event-backed item. */
   loadMessageSource(roomId: string, eventId: string): Promise<void>;
   /** Request missing room keys for an undecryptable event and retry decryption. */
-  requestRoomKey(roomId: string, eventId: string): Promise<void>;
+  requestRoomKey(roomId: string, eventId: string, timelineKey?: TimelineKey): Promise<void>;
   /** Forward an event-backed message through Rust-owned source projection. */
   forwardMessage(
     roomId: string,
@@ -581,6 +586,10 @@ function canonicalTimelineContainsActivityEventId(
   return items.some(
     (item) => "Event" in item.id && item.id.Event.event_id === eventId
   );
+}
+
+function timelineItemEventId(item: TimelineItem): string | null {
+  return "Event" in item.id ? item.id.Event.event_id : null;
 }
 
 function timelineEventIdentityAttribute(identity: TimelineEventIdentity): string {
@@ -1418,6 +1427,7 @@ const FORMATTED_TAGS = new Set([
   "br",
   "code",
   "del",
+  "div",
   "em",
   "h1",
   "h2",
@@ -1724,6 +1734,45 @@ function renderSpoiler(
   );
 }
 
+function renderMathFormula(
+  key: string,
+  latex: string | undefined,
+  children: ReactNode,
+  displayMode: boolean
+): ReactNode {
+  const source = latex?.trim() ?? "";
+  const Tag = displayMode ? "div" : "span";
+  if (!source) {
+    return (
+      <Tag key={key} className={`message-math${displayMode ? " is-block" : ""}`}>
+        {children}
+      </Tag>
+    );
+  }
+  try {
+    const html = katex.renderToString(source, {
+      displayMode,
+      strict: false,
+      throwOnError: false,
+      trust: false
+    });
+    return (
+      <Tag
+        key={key}
+        className={`message-math${displayMode ? " is-block" : ""}`}
+        data-mx-maths={source}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  } catch {
+    return (
+      <Tag key={key} className={`message-math${displayMode ? " is-block" : ""}`}>
+        {children}
+      </Tag>
+    );
+  }
+}
+
 type FormattedTagRenderer = (
   node: Extract<FormattedNode, { kind: "element" }>,
   key: string,
@@ -1826,6 +1875,21 @@ const formattedTagRenderers: Record<string, FormattedTagRenderer> = {
     _onCopyText: TimelineRowActionHandlers["onCopyText"]
   ) {
     return <del key={key}>{children}</del>;
+  },
+  div(
+    node: Extract<FormattedNode, { kind: "element" }>,
+    key: string,
+    children: ReactNode,
+    _formatted: NonNullable<TimelineItem["formatted"]>,
+    _codeBlockWrap: boolean,
+    _codeBlockIndexRef: { current: number },
+    _onCopyText: TimelineRowActionHandlers["onCopyText"]
+  ) {
+    const math = node.attrs["data-mx-maths"];
+    if (math !== undefined) {
+      return renderMathFormula(key, math, children, true);
+    }
+    return <div key={key}>{children}</div>;
   },
   em(
     _node: Extract<FormattedNode, { kind: "element" }>,
@@ -2005,7 +2069,11 @@ const formattedTagRenderers: Record<string, FormattedTagRenderer> = {
   ) {
     const className = node.attrs.class?.trim();
     const spoiler = node.attrs["data-mx-spoiler"];
+    const math = node.attrs["data-mx-maths"];
     const color = node.attrs["data-mx-color"];
+    if (math !== undefined) {
+      return renderMathFormula(key, math, children, false);
+    }
     if (spoiler !== undefined) {
       return renderSpoiler(`formatted:${key}`, children, spoiler, spoilerState);
     }
@@ -2511,6 +2579,7 @@ export const TimelineView = memo(function TimelineView({
   const readSignalEventRef = useRef<string | null>(null);
   const lastViewportObservationRef = useRef<string | null>(null);
   const downloadedEventIdsRef = useRef<Set<string>>(new Set());
+  const autoRequestedRoomKeyIdsRef = useRef<Set<string>>(new Set());
   const requestedImagePreviewEventIdsRef = useRef<Set<string>>(new Set());
   const relevantAvatarMxcsRef = useRef<Set<string>>(new Set());
   const requestedAvatarMxcsRef = useRef<Set<string>>(new Set());
@@ -2545,6 +2614,7 @@ export const TimelineView = memo(function TimelineView({
   const readSignalThreadRootEventId =
     "Thread" in timelineKey.kind ? timelineKey.kind.Thread.root_event_id : null;
   const items = getItems(store, timelineKey);
+  const timelineStoreKey = useMemo(() => timelineStoreKeyId(timelineKey), [timelineKeyHash]);
   // The selector returns an array. Memoize it by the separately-owned map so
   // ordinary scroll/measurement renders keep the existing display-row
   // identity; otherwise an empty projection source would churn Task 4's
@@ -2565,6 +2635,35 @@ export const TimelineView = memo(function TimelineView({
     },
     [onDiagnosticLogEntry]
   );
+  useEffect(() => {
+    if (!("Thread" in timelineKey.kind)) {
+      return;
+    }
+    for (const item of items) {
+      if (!item.unable_to_decrypt?.can_request_keys) {
+        continue;
+      }
+      const eventId = timelineItemEventId(item);
+      if (eventId === null) {
+        continue;
+      }
+      const requestKey = `${timelineStoreKey}\u0000${eventId}`;
+      if (autoRequestedRoomKeyIdsRef.current.has(requestKey)) {
+        continue;
+      }
+      autoRequestedRoomKeyIdsRef.current.add(requestKey);
+      emitDiagnosticLog(
+        "e2ee.room_key",
+        "operation=request_keys stage=request source=auto timeline=thread"
+      );
+      void transport.requestRoomKey(roomId, eventId, timelineKey).catch(() => {
+        emitDiagnosticLog(
+          "e2ee.room_key",
+          "operation=request_keys stage=failed source=auto kind=transport timeline=thread"
+        );
+      });
+    }
+  }, [emitDiagnosticLog, items, roomId, timelineKey, timelineStoreKey, transport]);
   useLayoutEffect(() => {
     if (!("Thread" in timelineKey.kind) || !timelineKeyState) {
       return;
@@ -3972,7 +4071,7 @@ export const TimelineView = memo(function TimelineView({
         source: "e2ee.room_key",
         message: "operation=request_keys stage=request"
       });
-      void transport.requestRoomKey(targetRoomId, eventId).catch(() => {
+      void transport.requestRoomKey(targetRoomId, eventId, timelineKey).catch(() => {
         onDiagnosticLogEntry?.({
           timestampMs: Date.now(),
           source: "e2ee.room_key",
@@ -3980,7 +4079,7 @@ export const TimelineView = memo(function TimelineView({
         });
       });
     },
-    [onDiagnosticLogEntry, transport]
+    [onDiagnosticLogEntry, timelineKey, transport]
   );
   const onForwardMessage = useCallback(
     (targetRoomId: string, sourceEventId: string, destinationRoomId: string) => {
@@ -4545,9 +4644,16 @@ export const TimelineView = memo(function TimelineView({
         projectionSignature !== lastProjectionAcknowledgementSignatureRef.current &&
         projectionSignature !== projectionAcknowledgementInFlightRef.current
       ) {
+        const evidence = timelineProjectionEvidence(timelineKeyRef.current, items);
         projectionAcknowledgementInFlightRef.current = projectionSignature;
         void transport
-          .acknowledgeProjection!(projectionRequestId, timelineKeyRef.current, generation)
+          .acknowledgeProjection!(
+            projectionRequestId,
+            timelineKeyRef.current,
+            generation,
+            evidence.itemCount,
+            evidence.targetPresent
+          )
           .then(() => {
             if (projectionAcknowledgementInFlightRef.current === projectionSignature) {
               projectionAcknowledgementInFlightRef.current = null;
@@ -4625,6 +4731,7 @@ export const TimelineView = memo(function TimelineView({
   }, [
     continuity,
     generation,
+    items,
     projectionSettlementRevision,
     roomTimelineRoomId,
     timelineKeyHash,

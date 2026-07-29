@@ -152,7 +152,9 @@ export interface DesktopApi {
   acknowledgeTimelineProjection(
     projectionRequestId: import("../domain/coreEvents").RequestId,
     key: import("../domain/coreEvents").TimelineKey,
-    generation: number
+    generation: number,
+    itemCount: number,
+    targetPresent: boolean
   ): Promise<void>;
   acknowledgeTimelineBatchRendered(
     key: import("../domain/coreEvents").TimelineKey,
@@ -249,7 +251,11 @@ export interface DesktopApi {
   editMessage(roomId: string, eventId: string, body: string): Promise<DesktopSnapshot>;
   redactMessage(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   loadMessageSource(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  requestRoomKey(roomId: string, eventId: string): Promise<DesktopSnapshot>;
+  requestRoomKey(
+    roomId: string,
+    eventId: string,
+    timelineKey?: import("../domain/coreEvents").TimelineKey
+  ): Promise<DesktopSnapshot>;
   forwardMessage(
     roomId: string,
     sourceEventId: string,
@@ -2005,7 +2011,11 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
-  async requestRoomKey(_roomId: string, _eventId: string): Promise<DesktopSnapshot> {
+  async requestRoomKey(
+    _roomId: string,
+    _eventId: string,
+    _timelineKey?: import("../domain/coreEvents").TimelineKey
+  ): Promise<DesktopSnapshot> {
     return this.getSnapshot();
   }
 
@@ -4243,6 +4253,7 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
       appearance: { theme: "system" },
       typography: { font: "system", emoji: "system" },
       keyboard: { composer_send_shortcut: "enter" },
+      composer: { math_mode: true },
       notifications: {
         desktop_notifications: true,
         sound: true,
@@ -4777,6 +4788,7 @@ function applySettingsPatch(
     appearance: patch.appearance ?? values.appearance,
     typography: patch.typography ?? values.typography,
     keyboard: patch.keyboard ?? values.keyboard,
+    composer: patch.composer ?? values.composer ?? { math_mode: true },
     notifications: patch.notifications ?? values.notifications,
     display: patch.display ?? values.display,
     media: patch.media ?? values.media,

@@ -493,6 +493,9 @@
           "appearance": {
             "theme": "system"
           },
+          "composer": {
+            "math_mode": true
+          },
           "display": {
             "code_block_wrap": true,
             "encrypted_url_previews_enabled": true,

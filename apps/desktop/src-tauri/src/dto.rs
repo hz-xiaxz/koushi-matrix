@@ -1083,6 +1083,10 @@ mod tests {
             json!("enter")
         );
         assert_eq!(
+            value["state"]["domain"]["settings"]["values"]["composer"],
+            json!({ "math_mode": true })
+        );
+        assert_eq!(
             value["state"]["domain"]["settings"]["values"]["notifications"],
             json!({
                 "desktop_notifications": true,
