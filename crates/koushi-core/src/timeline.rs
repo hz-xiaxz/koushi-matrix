@@ -7595,7 +7595,7 @@ fn record_timeline_item(
 
 fn trace_timeline_items(stage: &str, key: &TimelineKey, items: &[TimelineItem]) {
     let hidden = items.iter().filter(|item| item.is_hidden).count();
-    let mut events = Vec::with_capacity(items.len().saturating_add(1));
+    let mut events = Vec::with_capacity(1);
     events.push(
         DiagnosticEvent::new(
             DiagnosticLevel::Debug,
@@ -7610,15 +7610,6 @@ fn trace_timeline_items(stage: &str, key: &TimelineKey, items: &[TimelineItem]) 
         .field(DiagnosticField::count("count", items.len() as u64))
         .field(DiagnosticField::count("hidden", hidden as u64)),
     );
-    for (index, item) in items.iter().enumerate() {
-        events.push(timeline_item_diagnostic_event(
-            stage,
-            key,
-            "item",
-            Some(index),
-            item,
-        ));
-    }
     koushi_diagnostics::record_batch(events);
 }
 
@@ -35380,6 +35371,46 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn timeline_items_record_batch_only_by_default() {
+        let key = room_key();
+        let baseline = koushi_diagnostics::snapshot().records.len();
+        trace_timeline_items(
+            "replay_initial",
+            &key,
+            &[
+                timeline_item("$one:test", Some("first body"), "@a:test", false),
+                timeline_item("$two:test", Some("second body"), "@b:test", true),
+            ],
+        );
+
+        let records = koushi_diagnostics::snapshot().records;
+        let appended = records[baseline..]
+            .iter()
+            .filter(|record| {
+                record.event.source == "core.timeline_item"
+                    && record.event.stage == "replay_initial"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(appended.len(), 1);
+        let event = &appended[0].event;
+        assert!(event.fields.iter().any(|field| {
+            field.key == "kind" && field.value == DiagnosticValue::Token("batch")
+        }));
+        assert!(
+            event
+                .fields
+                .iter()
+                .any(|field| { field.key == "count" && field.value == DiagnosticValue::Count(2) })
+        );
+        assert!(
+            event
+                .fields
+                .iter()
+                .any(|field| { field.key == "hidden" && field.value == DiagnosticValue::Count(1) })
+        );
     }
 
     #[test]

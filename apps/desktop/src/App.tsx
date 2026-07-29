@@ -1036,6 +1036,8 @@ function composerDraftApiAccount(scope: ComposerDraftScope): {
 
 export function App() {
   const snapshot = useAppStore(selectSnapshot);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
   const initialAccount = readyComposerDraftAccountOwner(snapshot);
   const submissionAccountOwnerRef = useRef<string | null>(
     initialAccount ? composerDraftAccountOwnerKey(initialAccount) : null
@@ -2666,8 +2668,37 @@ export function App() {
   }
 
   const openHomeSelection = useCallback(async (selection = homeSelection) => {
-    if (!(await drainActiveComposerScopesForNavigation(true, true))) return;
+    const transitionStartedAt = Date.now();
+    const homeSelectionKind = selection.kind;
+    const currentSnapshot = snapshotRef.current;
+    appendDiagnosticLog({
+      timestampMs: transitionStartedAt,
+      source: "home.transition",
+      message: `stage=submit selection=${homeSelectionKind} current_active_room_present=${Boolean(currentSnapshot?.state.ui.navigation.active_room_id)} current_timeline_present=${Boolean(currentSnapshot?.state.ui.timeline.room_id)}`
+    });
+    const composerDrainStartedAt = Date.now();
+    if (!(await drainActiveComposerScopesForNavigation(true, true))) {
+      const composerDrainFinishedAt = Date.now();
+      appendDiagnosticLog({
+        timestampMs: composerDrainFinishedAt,
+        source: "home.transition",
+        message: `stage=after_composer_drain elapsed_ms=${composerDrainFinishedAt - composerDrainStartedAt} outcome=blocked`
+      });
+      return;
+    }
+    const composerDrainFinishedAt = Date.now();
+    appendDiagnosticLog({
+      timestampMs: composerDrainFinishedAt,
+      source: "home.transition",
+      message: `stage=after_composer_drain elapsed_ms=${composerDrainFinishedAt - composerDrainStartedAt} outcome=continue`
+    });
     const homeSnapshot = await api.selectSpace(null);
+    const selectSpaceFinishedAt = Date.now();
+    appendDiagnosticLog({
+      timestampMs: selectSpaceFinishedAt,
+      source: "home.transition",
+      message: `stage=after_select_space elapsed_ms_since_start=${selectSpaceFinishedAt - transitionStartedAt} active_room_present=${Boolean(homeSnapshot.state.ui.navigation.active_room_id)} timeline_present=${Boolean(homeSnapshot.state.ui.timeline.room_id)}`
+    });
     if (selection.kind === "dm") {
       const room = homeSnapshot.state.domain.rooms.find(
         (candidate) => candidate.room_id === selection.roomId && candidate.is_dm
@@ -2680,15 +2711,33 @@ export function App() {
     if (selection.kind === "explore") {
       setSnapshot(homeSnapshot);
       setPrimaryView("explore");
+      const viewAppliedAt = Date.now();
+      appendDiagnosticLog({
+        timestampMs: viewAppliedAt,
+        source: "home.transition",
+        message: `stage=after_view_apply elapsed_ms_since_start=${viewAppliedAt - transitionStartedAt} view=explore`
+      });
       return;
     }
     if (selection.kind === "invites") {
       setSnapshot(homeSnapshot);
       setPrimaryView("invites");
+      const viewAppliedAt = Date.now();
+      appendDiagnosticLog({
+        timestampMs: viewAppliedAt,
+        source: "home.transition",
+        message: `stage=after_view_apply elapsed_ms_since_start=${viewAppliedAt - transitionStartedAt} view=invites`
+      });
       return;
     }
     setSnapshot(await api.openActivity());
     setPrimaryView("activity");
+    const viewAppliedAt = Date.now();
+    appendDiagnosticLog({
+      timestampMs: viewAppliedAt,
+      source: "home.transition",
+      message: `stage=after_view_apply elapsed_ms_since_start=${viewAppliedAt - transitionStartedAt} view=activity`
+    });
   }, [homeSelection, setSnapshot]);
 
   async function selectSpace(spaceId: string | null) {
@@ -2708,10 +2757,11 @@ export function App() {
   }
 
   async function selectRoom(roomId: string) {
+    const transitionStartedAt = Date.now();
     const selectedRoom = snapshot?.state.domain.rooms.find((room) => room.room_id === roomId);
     const previousActiveRoomId = snapshot?.state.ui.navigation.active_room_id ?? null;
     appendDiagnosticLog({
-      timestampMs: Date.now(),
+      timestampMs: transitionStartedAt,
       source: "room.transition",
       message: `stage=select_start current_active=${Boolean(previousActiveRoomId)} target_known=${Boolean(selectedRoom)} same_active=${previousActiveRoomId === roomId}`
     });
@@ -2719,16 +2769,60 @@ export function App() {
       setHomeSelection({ kind: "dm", roomId });
     }
     if (previousActiveRoomId !== roomId) {
-      if (!(await drainActiveComposerScopesForNavigation(true, true))) return;
+      const composerDrainStartedAt = Date.now();
+      appendDiagnosticLog({
+        timestampMs: composerDrainStartedAt,
+        source: "room.transition",
+        message: `stage=before_composer_drain include_main=true include_thread=true current_timeline_present=${Boolean(snapshot?.state.ui.timeline.room_id)} thread_open=${snapshot?.state.ui.thread.kind === "open"} elapsed_ms_since_start=${composerDrainStartedAt - transitionStartedAt}`
+      });
+      if (!(await drainActiveComposerScopesForNavigation(true, true))) {
+        appendDiagnosticLog({
+          timestampMs: Date.now(),
+          source: "room.transition",
+          message: `stage=after_composer_drain elapsed_ms=${Date.now() - composerDrainStartedAt} outcome=blocked elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
+        });
+        return;
+      }
+      appendDiagnosticLog({
+        timestampMs: Date.now(),
+        source: "room.transition",
+        message: `stage=after_composer_drain elapsed_ms=${Date.now() - composerDrainStartedAt} outcome=continue elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
+      });
     }
+    const primaryViewUpdateStartedAt = Date.now();
+    appendDiagnosticLog({
+      timestampMs: primaryViewUpdateStartedAt,
+      source: "room.transition",
+      message: `stage=before_primary_view_update previous_view=${primaryView} next_view=timeline elapsed_ms_since_start=${primaryViewUpdateStartedAt - transitionStartedAt}`
+    });
     setPrimaryView("timeline");
+    appendDiagnosticLog({
+      timestampMs: Date.now(),
+      source: "room.transition",
+      message: `stage=after_primary_view_update elapsed_ms=${Date.now() - primaryViewUpdateStartedAt} elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
+    });
+    appendDiagnosticLog({
+      timestampMs: Date.now(),
+      source: "room.transition",
+      message: `stage=before_api_select elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
+    });
     const nextSnapshot = await api.selectRoom(roomId);
+    appendDiagnosticLog({
+      timestampMs: Date.now(),
+      source: "room.transition",
+      message: `stage=after_api_select elapsed_ms=${Date.now() - transitionStartedAt} committed_active=${nextSnapshot.state.ui.navigation.active_room_id === roomId} timeline_matches=${nextSnapshot.state.ui.timeline.room_id === nextSnapshot.state.ui.navigation.active_room_id}`
+    });
+    setSnapshot(nextSnapshot);
+    appendDiagnosticLog({
+      timestampMs: Date.now(),
+      source: "room.transition",
+      message: `stage=after_snapshot_apply elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
+    });
     appendDiagnosticLog({
       timestampMs: Date.now(),
       source: "room.transition",
       message: `stage=select_done active_changed=${nextSnapshot.state.ui.navigation.active_room_id !== previousActiveRoomId} timeline_matches=${nextSnapshot.state.ui.timeline.room_id === nextSnapshot.state.ui.navigation.active_room_id}`
     });
-    setSnapshot(nextSnapshot);
   }
 
   async function openDmUserInfo(roomId: string, userId: string) {
