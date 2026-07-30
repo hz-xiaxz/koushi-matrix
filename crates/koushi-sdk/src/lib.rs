@@ -4771,6 +4771,30 @@ pub struct MatrixRoomMemberSummary {
     pub user_trust: Option<MatrixUserTrustState>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MatrixJoinedMemberSnapshot {
+    pub members: Vec<MatrixRoomMemberSummary>,
+    pub complete: bool,
+}
+
+impl MatrixClientSession {
+    pub async fn joined_member_snapshot_no_sync(
+        &self,
+        room_id: &str,
+    ) -> Result<MatrixJoinedMemberSnapshot, MatrixRoomOperationError> {
+        let room = matrix_room(self, room_id)?;
+        matrix_joined_member_snapshot(&room, false).await
+    }
+
+    pub async fn refresh_joined_member_snapshot(
+        &self,
+        room_id: &str,
+    ) -> Result<MatrixJoinedMemberSnapshot, MatrixRoomOperationError> {
+        let room = matrix_room(self, room_id)?;
+        matrix_joined_member_snapshot(&room, true).await
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MatrixRoomMemberRole {
     Creator,
@@ -6389,6 +6413,127 @@ mod start_direct_message_tests {
     }
 }
 
+#[cfg(test)]
+mod joined_member_snapshot_tests {
+    use matrix_sdk::{
+        ruma::events::room::member::MembershipState, test_utils::mocks::MatrixMockServer,
+    };
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    use super::{MatrixClientSession, SessionInfo};
+
+    async fn session_for(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        let info = SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client
+                .user_id()
+                .expect("mock client has a user id")
+                .to_string(),
+            device_id: client
+                .device_id()
+                .expect("mock client has a device id")
+                .to_string(),
+        };
+        MatrixClientSession { client, info }
+    }
+
+    #[tokio::test]
+    async fn joined_member_snapshot_no_sync_is_fail_closed_and_does_not_request_members() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let room_id = matrix_sdk::ruma::room_id!("!mention-room:example.org");
+        let joined = matrix_sdk::ruma::user_id!("@joined:example.org");
+        let invited = matrix_sdk::ruma::user_id!("@invited:example.org");
+        let left = matrix_sdk::ruma::user_id!("@left:example.org");
+
+        server
+            .mock_sync()
+            .ok_and_run(&session.client(), |builder| {
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(room_id)
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(room_id)
+                                .member(joined)
+                                .display_name("Joined Member")
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(room_id)
+                                .member(invited)
+                                .membership(MembershipState::Invite)
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(room_id)
+                                .member(left)
+                                .membership(MembershipState::Leave)
+                                .into_raw_sync_state(),
+                        ),
+                );
+            })
+            .await;
+
+        // No /members mock is mounted. A network request would fail this call.
+        let snapshot = session
+            .joined_member_snapshot_no_sync(room_id.as_str())
+            .await
+            .expect("cached joined member snapshot");
+        assert!(!snapshot.complete);
+        assert_eq!(snapshot.members.len(), 1);
+        assert_eq!(snapshot.members[0].user_id, joined.as_str());
+        assert_eq!(
+            snapshot.members[0].display_name.as_deref(),
+            Some("Joined Member")
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_joined_member_snapshot_fetches_once_and_marks_the_snapshot_complete() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let room_id = matrix_sdk::ruma::room_id!("!mention-refresh:example.org");
+        let joined = matrix_sdk::ruma::user_id!("@refreshed:example.org");
+
+        server
+            .mock_sync()
+            .ok_and_run(&session.client(), |builder| {
+                builder.add_joined_room(JoinedRoomBuilder::new(room_id));
+            })
+            .await;
+        server
+            .mock_get_members()
+            .ok(vec![
+                EventFactory::new()
+                    .room(room_id)
+                    .member(joined)
+                    .display_name("Refreshed Member")
+                    .into_raw(),
+            ])
+            .mock_once()
+            .mount()
+            .await;
+
+        let refreshed = session
+            .refresh_joined_member_snapshot(room_id.as_str())
+            .await
+            .expect("member refresh");
+        assert!(refreshed.complete);
+        assert_eq!(refreshed.members.len(), 1);
+        assert_eq!(refreshed.members[0].user_id, joined.as_str());
+
+        let cached = session
+            .refresh_joined_member_snapshot(room_id.as_str())
+            .await
+            .expect("already complete refresh should use the cache");
+        assert!(cached.complete);
+        assert_eq!(cached.members, refreshed.members);
+    }
+}
+
 pub async fn join_room_by_id(
     session: &MatrixClientSession,
     room_id: &str,
@@ -7299,6 +7444,38 @@ fn matrix_room(
         .client()
         .get_room(&room_id)
         .ok_or(MatrixRoomOperationError::RoomUnavailable)
+}
+
+async fn matrix_joined_member_snapshot(
+    room: &matrix_sdk::Room,
+    refresh: bool,
+) -> Result<MatrixJoinedMemberSnapshot, MatrixRoomOperationError> {
+    let members = if refresh {
+        room.members(matrix_sdk::RoomMemberships::JOIN).await
+    } else {
+        room.members_no_sync(matrix_sdk::RoomMemberships::JOIN)
+            .await
+    }
+    .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    let mut summaries: Vec<MatrixRoomMemberSummary> = members
+        .into_iter()
+        .map(|member| {
+            let power_level = matrix_room_member_power_level(member.power_level());
+            MatrixRoomMemberSummary {
+                user_id: member.user_id().to_string(),
+                display_name: member.display_name().map(ToOwned::to_owned),
+                avatar_url: member.avatar_url().map(ToString::to_string),
+                power_level,
+                role: matrix_room_member_role(power_level),
+                user_trust: None,
+            }
+        })
+        .collect();
+    summaries.sort_by(|left, right| left.user_id.cmp(&right.user_id));
+    Ok(MatrixJoinedMemberSnapshot {
+        members: summaries,
+        complete: room.are_members_synced(),
+    })
 }
 
 fn matrix_public_room_from_chunk(
