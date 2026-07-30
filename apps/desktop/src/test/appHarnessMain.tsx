@@ -2863,6 +2863,14 @@ mockIPC(
 // getCurrentWindow() (used by the title effect) reads __TAURI_INTERNALS__.metadata.
 mockWindows("main");
 
+// Set once a spec pushes its own CoreEvent through the harness control. The
+// boot seed retry loop keys its exit on the SEED row being visible in the
+// DOM, so a spec that replaces the timeline before that loop has finished
+// would otherwise be overwritten by a late seed re-emit (flaky "row vanished
+// mid-assertion" failures). Checked at the top of each retry iteration —
+// same JS task, so check-then-emit cannot interleave with a spec push.
+let externalCoreEventPushSeen = false;
+
 const harnessControl: AppHarnessControl = {
   invocations: () => mock.recordedInvocations(),
   invocationsOf: (command) => mock.invocationsOf(command),
@@ -2877,7 +2885,12 @@ const harnessControl: AppHarnessControl = {
     setCurrentSnapshot(snapshot);
     mock.setCommandResponse("get_snapshot", () => currentSnapshot);
   },
-  pushCoreEvent: (event) => emit(CORE_EVENT_NAME, event),
+  pushCoreEvent: (event) => {
+    // Records that a test now owns the CoreEvent stream so the boot seed
+    // loop below stops re-emitting its generation-1 timeline over test data.
+    externalCoreEventPushSeen = true;
+    return emit(CORE_EVENT_NAME, event);
+  },
   pushStateChanged: () => {
     void emit(STATE_EVENT_NAME, "stateChanged");
   },
@@ -2947,10 +2960,18 @@ async function boot() {
     }
   };
   // Retry-emit until the App's listener is registered (listen() is async).
+  // Stop as soon as a spec has pushed its own CoreEvent: from that point the
+  // spec owns the timeline and a late seed re-emit would overwrite its rows.
   for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (externalCoreEventPushSeen) {
+      break;
+    }
     await emit(CORE_EVENT_NAME, payload);
     await new Promise((resolve) => setTimeout(resolve, 25));
-    if (document.querySelector(`[data-event-id="${SEED_EVENT_ID}"]`)) {
+    if (
+      externalCoreEventPushSeen ||
+      document.querySelector(`[data-event-id="${SEED_EVENT_ID}"]`)
+    ) {
       break;
     }
   }

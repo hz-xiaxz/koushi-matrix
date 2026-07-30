@@ -1392,6 +1392,18 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   raise the worker count to speed up a run: the whole suite finishes in about
   three minutes serialized, and the parallel-contention flakes come straight
   back.
+- The app harness boot loop re-emits its generation-1 seed `InitialItems`
+  every 25ms (up to 40 attempts) until the seed row is visible in the DOM.
+  Until 2026-07-30 that visibility check was its ONLY exit, so a spec that
+  replaced the timeline while the loop was still running (e.g.
+  `timeline-thread-latest-placement.spec.ts` pushing generation 101 right
+  after `gotoReadyApp`) had its rows overwritten by a late seed re-emit: a row
+  passes `toHaveCount(1)` and vanishes one assertion later, with the seed
+  thread summary visible in the failure snapshot. `appHarnessMain.tsx` now
+  sets `externalCoreEventPushSeen` inside `pushCoreEvent` and the boot loop
+  stops re-emitting once any spec push has happened. If timeline rows vanish
+  mid-assertion again with harness seed content in the snapshot, look for a
+  new path that bypasses `pushCoreEvent` instead of adding waits to specs.
 - The three entries below are kept as root-cause history. All of them passed in
   a full 208-test serialized run on 2026-07-25, including the a11y spec that was
   previously recorded as an outright pre-existing failure. Treat them as
