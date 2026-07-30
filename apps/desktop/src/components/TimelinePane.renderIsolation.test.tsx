@@ -406,6 +406,7 @@ function makeSnapshot(): DesktopSnapshot {
         join: { kind: "idle" },
       },
         room_management: { selected_room_id: null, settings: null, operation: { kind: "idle" } },
+        mention_candidates: { targets: [] },
         activity: { kind: "closed" },
         thread_attention: { kind: "closed" },
         search: { kind: "closed" },

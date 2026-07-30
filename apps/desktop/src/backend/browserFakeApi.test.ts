@@ -773,7 +773,8 @@ describe("BrowserFakeApi settings preview", () => {
         }
       },
       fully_read_event_id: null,
-      typing_user_ids: []
+      typing_user_ids: [],
+      typing_users: []
     };
 
     await api.sendReadReceipt("!room-alpha:example.invalid", eventId);

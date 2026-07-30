@@ -188,8 +188,9 @@ function readySnapshot(
         query: { kind: "closed" },
         preview: { kind: "closed" },
         join: { kind: "idle" },
-      },
+          },
           room_management: { selected_room_id: null, settings: null, operation: { kind: "idle" } },
+          mention_candidates: { targets: [] },
           activity: { kind: "closed" }, thread_attention: { kind: "closed" },
           search: { kind: "closed" }, search_crawler: { rooms: {}, last_active: null },
           live_signals: defaultLiveSignalsState(),
@@ -2944,7 +2945,12 @@ async function boot() {
         count: 1,
         reacted_by_me: false,
         my_reaction_event_id: null,
-        sender_preview: ["@other-user:example.invalid"]
+        sender_preview: [
+          {
+            user_id: "@other-user:example.invalid",
+            display_label: "Other User"
+          }
+        ]
       }
     ]
   };

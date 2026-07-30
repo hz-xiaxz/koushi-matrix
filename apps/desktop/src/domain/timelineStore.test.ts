@@ -138,7 +138,7 @@ function makeMsg(id: string, body: string): TimelineItem {
         count: 1,
         reacted_by_me: false,
         my_reaction_event_id: null,
-        sender_preview: ["@alice:example.invalid"]
+        sender_preview: [{ user_id: "@alice:example.invalid", display_label: "Alice" }]
       }
     ]
   };
@@ -591,7 +591,10 @@ describe("timeline store — diff application", () => {
           count: 2,
           reacted_by_me: true,
           my_reaction_event_id: "$reaction",
-          sender_preview: ["@sender:example.invalid", "@reply:example.invalid"]
+          sender_preview: [
+            { user_id: "@sender:example.invalid", display_label: "Sender" },
+            { user_id: "@reply:example.invalid", display_label: "Reply" }
+          ]
         }
       ]
     };
@@ -1192,7 +1195,10 @@ describe("timeline store — diff application", () => {
                     count: 3,
                     reacted_by_me: true,
                     my_reaction_event_id: "$reaction:test",
-                    sender_preview: ["@alice:example.invalid", "@bob:example.invalid"]
+                    sender_preview: [
+                      { user_id: "@alice:example.invalid", display_label: "Alice" },
+                      { user_id: "@bob:example.invalid", display_label: "Bob" }
+                    ]
                   }
                 ],
                 can_react: true,
@@ -1215,7 +1221,10 @@ describe("timeline store — diff application", () => {
       count: 3,
       reacted_by_me: true,
       my_reaction_event_id: "$reaction:test",
-      sender_preview: ["@alice:example.invalid", "@bob:example.invalid"]
+      sender_preview: [
+        { user_id: "@alice:example.invalid", display_label: "Alice" },
+        { user_id: "@bob:example.invalid", display_label: "Bob" }
+      ]
     });
   });
 

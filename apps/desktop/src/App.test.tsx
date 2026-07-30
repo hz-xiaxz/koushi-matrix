@@ -245,7 +245,7 @@ describe("ContextualRightPanel", () => {
               count: 2,
               reacted_by_me: true,
               my_reaction_event_id: "$reaction:example.invalid",
-              sender_preview: ["@alice:example.invalid"]
+              sender_preview: [{ user_id: "@alice:example.invalid", display_label: "Alice" }]
             }
           ]
         }}
@@ -713,7 +713,7 @@ describe("ContextualRightPanel", () => {
                 count: 2,
                 reacted_by_me: true,
                 my_reaction_event_id: null,
-                sender_preview: ["@alice:example.invalid"]
+                sender_preview: [{ user_id: "@alice:example.invalid", display_label: "Alice" }]
               }
             ]
           } as TimelineItem

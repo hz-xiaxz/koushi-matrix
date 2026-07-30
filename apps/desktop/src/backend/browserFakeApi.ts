@@ -1839,6 +1839,15 @@ class BrowserFakeApi implements DesktopApi {
     const roomSignals = ensureRoomLiveSignals(this.snapshot, roomId);
     const withoutSelf = roomSignals.typing_user_ids.filter((userId) => userId !== session.user_id);
     roomSignals.typing_user_ids = isTyping ? [...withoutSelf, session.user_id] : withoutSelf;
+    roomSignals.typing_users = roomSignals.typing_user_ids.map((userId) => ({
+      user_id: userId,
+      display_label:
+        this.snapshot.state.domain.profile.local_aliases[userId]?.trim() ||
+        this.snapshot.state.domain.profile.users[userId]?.display_label?.trim() ||
+        (userId === session.user_id
+          ? this.snapshot.state.domain.profile.own.display_name?.trim() || null
+          : null)
+    }));
   }
 
   async setPresence(presence: PresenceKind): Promise<DesktopSnapshot> {
@@ -3102,7 +3111,13 @@ class BrowserFakeApi implements DesktopApi {
           ? entry.pinned_events
           : [
               ...entry.pinned_events,
-              { event_id: eventId, sender: null, body_preview: null, redacted: false }
+              {
+                event_id: eventId,
+                sender: null,
+                sender_label: null,
+                body_preview: null,
+                redacted: false
+              }
             ],
         pin_operation: { kind: "idle" }
       }
@@ -4070,6 +4085,7 @@ function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): Desk
         room_interactions: {},
         directory: defaultDirectoryState(),
         room_management: defaultRoomManagementState(),
+        mention_candidates: { targets: [] },
         activity: { kind: "closed" },
         thread_attention: { kind: "closed" },
         search: { kind: "closed" },
@@ -4198,6 +4214,7 @@ function createSignedOutSnapshot(): DesktopSnapshot {
         room_interactions: {},
         directory: defaultDirectoryState(),
         room_management: defaultRoomManagementState(),
+        mention_candidates: { targets: [] },
         activity: { kind: "closed" },
         thread_attention: { kind: "closed" },
         search: { kind: "closed" },
@@ -4685,7 +4702,8 @@ function ensureRoomLiveSignals(
   snapshot.state.domain.live_signals.rooms[roomId] ??= {
     receipts_by_event: {},
     fully_read_event_id: null,
-    typing_user_ids: []
+    typing_user_ids: [],
+    typing_users: []
   };
   return snapshot.state.domain.live_signals.rooms[roomId];
 }
@@ -5526,6 +5544,7 @@ function attachmentResultFromMessage(message: TimelineMessage): AttachmentResult
     room_id: message.room_id,
     event_id: message.event_id,
     sender: message.sender,
+    sender_label: null,
     timestamp_ms: message.timestamp_ms,
     kind: "file",
     filename,

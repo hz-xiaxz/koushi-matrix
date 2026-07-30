@@ -94,6 +94,7 @@ import type {
   CoreEventPayload,
   MediaTransferProgress,
   PaginationState,
+  ReactionSender,
   RequestId,
   TimelineEvent,
   TimelineDiff,
@@ -6221,7 +6222,6 @@ export function TimelineItemRow({
   const receiptAriaLabel =
     receiptDetails.length > 0 ? `${receiptLabel}: ${receiptDetails.join("; ")}` : receiptLabel;
   const receiptTitle = receiptDetails.join("\n");
-  const reactionSenderLabelByUserId = reactionSenderLabelsByUserId(mentionProfileUsers);
   const spoilerState = { revealed: revealedSpoilers, reveal: revealSpoiler };
   const displayBody = localizedTimelineItemBody(item);
   const replyLabel = t("timeline.replyToMessage");
@@ -6534,8 +6534,7 @@ export function TimelineItemRow({
                   const reactionTooltip = formatReactionTooltip(
                     reaction.key,
                     reaction.count,
-                    reaction.sender_preview,
-                    reactionSenderLabelByUserId
+                    reaction.sender_preview
                   );
                   const pillKey = `${reaction.key}:${reaction.my_reaction_event_id ?? index}`;
                   if (!eventId) {
@@ -7340,27 +7339,17 @@ function receiptAvatarSource(receipt: LiveReadReceipt): string | null {
     : null;
 }
 
-function reactionSenderLabelsByUserId(
-  profileUsers: Record<string, UserProfile>
-): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(profileUsers).map(([userId, profile]) => [
-      userId,
-      profile.display_label?.trim() || profile.display_name?.trim() || profile.original_display_label.trim() || userId
-    ])
-  );
-}
-
 function formatReactionTooltip(
   reactionKey: string,
   totalCount: number,
-  senderPreview: readonly string[],
-  senderLabelsByUserId: Record<string, string>
+  senderPreview: readonly ReactionSender[]
 ): string | null {
   if (totalCount <= 0) {
     return null;
   }
-  const previewLabels = senderPreview.map((userId) => senderLabelsByUserId[userId] ?? userId);
+  const previewLabels = senderPreview.map(
+    (sender) => sender.display_label?.trim() || t("timeline.reactionSenderUnknown", { count: 1 })
+  );
   const overflowCount = Math.max(0, totalCount - previewLabels.length);
   const labels =
     overflowCount > 0

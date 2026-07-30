@@ -7,11 +7,12 @@ use koushi_state::{
     AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, DeviceSessionListState,
     DirectoryState, E2eeTrustState, FilesViewState, FocusedContextState, InvitePreview,
     InviteWorkflowState, LinkPreviewSettingsState, LiveSignalsState, LocalEncryptionState,
-    NativeAttentionState, NavigationState, ProfileState, QrLoginState, RoomInteractionState,
-    RoomListProjection, RoomManagementState, RoomNotificationSettings, RoomPreferencesState,
-    RoomSummary, SearchCrawlerState, SearchState, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceSummary, SyncMode, SyncState, ThreadAttentionState,
-    ThreadPaneState, ThreadsListState, TimelinePaneState, compose_sidebar_with_account_facts,
+    MentionCandidatesState, NativeAttentionState, NavigationState, ProfileState, QrLoginState,
+    RoomInteractionState, RoomListProjection, RoomManagementState, RoomNotificationSettings,
+    RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchState, SessionState,
+    SettingsState, SidebarModel, SoftLogoutReauthState, SpaceSummary, SyncMode, SyncState,
+    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
+    compose_sidebar_with_account_facts,
 };
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +47,7 @@ pub struct StateDeltaChangedSlices {
     pub room_interactions: Option<BTreeMap<String, RoomInteractionState>>,
     pub directory: Option<DirectoryState>,
     pub room_management: Option<RoomManagementState>,
+    pub mention_candidates: Option<MentionCandidatesState>,
     pub activity: Option<ActivityState>,
     pub timeline: Option<TimelinePaneState>,
     pub thread: Option<ThreadPaneState>,
@@ -112,6 +114,7 @@ pub fn build_state_delta(
     changed_slice!(room_interactions);
     changed_slice!(directory);
     changed_slice!(room_management);
+    changed_slice!(mention_candidates);
     changed_slice!(activity);
     changed_slice!(timeline);
     changed_slice!(thread);
@@ -217,7 +220,10 @@ fn audit_app_state_delta_slices(state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use koushi_state::SearchCrawlerRoomState;
+    use koushi_state::{
+        MentionCandidatesCompleteness, MentionCandidatesTarget, MentionSurface,
+        RoomMentionPermission, SearchCrawlerRoomState,
+    };
 
     #[test]
     fn state_delta_contains_only_changed_slices_and_sidebar_projection() {
@@ -239,6 +245,35 @@ mod tests {
     #[test]
     fn state_delta_omits_unchanged_state() {
         assert!(build_state_delta(1, &AppState::default(), &AppState::default()).is_none());
+    }
+
+    #[test]
+    fn state_delta_emits_only_the_changed_mention_candidates_slice() {
+        let previous = AppState::default();
+        let mut next = previous.clone();
+        next.mention_candidates
+            .targets
+            .push(MentionCandidatesTarget {
+                room_id: "!room:example.invalid".to_owned(),
+                generation: 1,
+                request_id: 2,
+                query: "ali".to_owned(),
+                surface: MentionSurface::Main,
+                completeness: MentionCandidatesCompleteness::Partial,
+                candidates: Vec::new(),
+                room_mention_allowed: RoomMentionPermission::Allowed,
+                failure_kind: None,
+            });
+
+        let delta = build_state_delta(2, &previous, &next).expect("mention candidates changed");
+
+        assert_eq!(
+            delta.changed.mention_candidates,
+            Some(next.mention_candidates)
+        );
+        let mut without_mentions = delta.changed;
+        without_mentions.mention_candidates = None;
+        assert!(without_mentions.is_empty());
     }
 
     #[test]
