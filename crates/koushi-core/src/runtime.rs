@@ -2817,6 +2817,9 @@ impl AppActor {
                     AccountCommand::RestoreSession { .. }
                         | AccountCommand::RestoreLastSession { .. }
                         | AccountCommand::ResetLocalData { .. }
+                        | AccountCommand::StartDeviceCleanup { .. }
+                        | AccountCommand::SubmitDeviceCleanupUia { .. }
+                        | AccountCommand::EraseDeviceCleanupLocalDataAnyway { .. }
                         | AccountCommand::SubmitRecovery { .. }
                         | AccountCommand::StartSessionBootstrap { .. }
                         | AccountCommand::ConfirmSessionBootstrapSaved { .. }
@@ -4835,6 +4838,23 @@ fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -
             } | SessionState::AwaitingVerification { .. }
         );
     }
+    if matches!(
+        command,
+        CoreCommand::Account(
+            AccountCommand::StartDeviceCleanup { .. }
+                | AccountCommand::SubmitDeviceCleanupUia { .. }
+                | AccountCommand::EraseDeviceCleanupLocalDataAnyway { .. }
+        )
+    ) {
+        return matches!(
+            session,
+            SessionState::AwaitingVerification { .. }
+                | SessionState::Provisional {
+                    phase: koushi_state::ProvisionalPhase::RecheckingTrust { .. },
+                    ..
+                }
+        );
+    }
     if !matches!(
         session,
         SessionState::Provisional { .. }
@@ -5058,6 +5078,24 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         AccountCommand::ResetLocalData { request_id } => Some(AppAction::ResetLocalDataRequested {
             request_id: request_id.sequence,
         }),
+        AccountCommand::StartDeviceCleanup { request_id } => {
+            Some(AppAction::DeviceCleanupStartRequested {
+                request_id: request_id.sequence,
+            })
+        }
+        AccountCommand::SubmitDeviceCleanupUia {
+            request_id: _,
+            flow_id,
+            ..
+        } => Some(AppAction::DeviceCleanupUiaSubmitted {
+            request_id: *flow_id,
+            flow_id: *flow_id,
+        }),
+        AccountCommand::EraseDeviceCleanupLocalDataAnyway { request_id } => {
+            Some(AppAction::DeviceCleanupEraseLocalAnywayRequested {
+                request_id: request_id.sequence,
+            })
+        }
         AccountCommand::SubmitIdentityResetAuth { flow_id, .. } => {
             Some(AppAction::ResetIdentityAuthSubmitted {
                 request_id: *flow_id,
@@ -7642,6 +7680,66 @@ mod tests {
     }
 
     #[test]
+    fn device_cleanup_commands_project_correlated_pending_state_before_routing() {
+        let start_request_id = RequestId {
+            connection_id: RuntimeConnectionId(1),
+            sequence: 21,
+        };
+        let submit_request_id = RequestId {
+            connection_id: RuntimeConnectionId(1),
+            sequence: 22,
+        };
+
+        assert_eq!(
+            account_command_projected_action(&AccountCommand::StartDeviceCleanup {
+                request_id: start_request_id,
+            }),
+            Some(AppAction::DeviceCleanupStartRequested { request_id: 21 })
+        );
+        assert_eq!(
+            account_command_projected_action(&AccountCommand::SubmitDeviceCleanupUia {
+                request_id: submit_request_id,
+                flow_id: 21,
+                password: koushi_state::AuthSecret::new("private-password"),
+            }),
+            Some(AppAction::DeviceCleanupUiaSubmitted {
+                request_id: 21,
+                flow_id: 21,
+            })
+        );
+        assert_eq!(
+            account_command_projected_action(&AccountCommand::EraseDeviceCleanupLocalDataAnyway {
+                request_id: submit_request_id,
+            },),
+            Some(AppAction::DeviceCleanupEraseLocalAnywayRequested { request_id: 22 })
+        );
+    }
+
+    #[test]
+    fn device_cleanup_commands_are_admitted_from_the_provisional_gate() {
+        let command = CoreCommand::Account(AccountCommand::StartDeviceCleanup {
+            request_id: RequestId {
+                connection_id: RuntimeConnectionId(1),
+                sequence: 23,
+            },
+        });
+        let session = SessionState::AwaitingVerification {
+            info: koushi_state::SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@user:example.invalid".to_owned(),
+                device_id: "DEVICE".to_owned(),
+            },
+            gate: koushi_state::VerificationGateState {
+                methods: vec![],
+                account_kind: koushi_state::VerificationAccountKind::ExistingIdentity,
+                failure: Some(koushi_state::VerificationGateFailureKind::Sdk),
+            },
+        };
+
+        assert!(is_verification_gate_command(&command, &session));
+    }
+
+    #[test]
     fn profile_commands_project_pending_state_without_display_name_or_avatar_bytes() {
         let display_request_id = RequestId {
             connection_id: RuntimeConnectionId(1),
@@ -7852,6 +7950,44 @@ mod tests {
         assert!(!is_verification_gate_command(
             &command,
             &SessionState::SignedOut
+        ));
+    }
+
+    #[test]
+    fn device_cleanup_is_not_admitted_while_verification_owns_the_gate() {
+        let command = CoreCommand::Account(AccountCommand::StartDeviceCleanup {
+            request_id: RequestId {
+                connection_id: RuntimeConnectionId(1),
+                sequence: 79,
+            },
+        });
+        let info = SessionInfo {
+            homeserver: "https://example.invalid".into(),
+            user_id: "@me:example.invalid".into(),
+            device_id: "DEVICE".into(),
+        };
+        let gate = koushi_state::VerificationGateState {
+            methods: vec![koushi_state::VerificationMethodCapability::RecoveryKey],
+            account_kind: koushi_state::VerificationAccountKind::ExistingIdentity,
+            failure: Some(koushi_state::VerificationGateFailureKind::Sdk),
+        };
+
+        assert!(is_verification_gate_command(
+            &command,
+            &SessionState::AwaitingVerification {
+                info: info.clone(),
+                gate: gate.clone(),
+            }
+        ));
+        assert!(!is_verification_gate_command(
+            &command,
+            &SessionState::Verifying {
+                info,
+                gate,
+                method: koushi_state::VerificationMethod::RecoveryKey,
+                flow_id: 79,
+                sas_emojis: vec![],
+            }
         ));
     }
 

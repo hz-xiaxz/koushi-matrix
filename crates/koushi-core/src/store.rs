@@ -585,9 +585,18 @@ impl StoreActor {
     /// than a logout that fails. Matrix session JSON / pointers stored via the
     /// credential backend are cleaned up by AccountActor through the same
     /// backend.
-    pub fn delete_account_credentials(&self, key_id: &SessionKeyId) {
-        let _ = self.credential_store.delete(key_id);
-        let _ = std::fs::remove_dir_all(self.account_root_dir(key_id));
+    pub fn delete_account_credentials(&self, key_id: &SessionKeyId) -> Result<(), ()> {
+        let credential_deleted = self.credential_store.delete(key_id).is_ok();
+        let directory_deleted = match std::fs::remove_dir_all(self.account_root_dir(key_id)) {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => false,
+        };
+        if credential_deleted && directory_deleted {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 
     /// Probe the stored local unlock secret without creating a new one.
@@ -1943,7 +1952,9 @@ mod tests {
         let actor = file_store_actor(&data_dir, &cred_dir);
 
         // Should not panic even when credentials don't exist.
-        actor.delete_account_credentials(&key_id);
+        actor
+            .delete_account_credentials(&key_id)
+            .expect("account credentials delete");
     }
 
     #[test]

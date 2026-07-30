@@ -45,6 +45,7 @@ use koushi_sdk::{MatrixClientSession, PendingOidcLogin, PersistableMatrixSession
 use koushi_state::{
     AccountManagementOperation, AppAction, AuthFailureKind, AvatarImage,
     AvatarThumbnailFailureKind, AvatarThumbnailState, ComposerDraftRevision, CrossSigningStatus,
+    DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupRemoteOutcome,
     DeviceSessionSummary, E2eeRecoveryState, IdentityResetAuthType, IdentityResetState,
     LoginAttemptId, LoginRequest, OperationFailureKind, OwnProfile, PresenceKind,
     RecoveryKeyDeliveryState, RecoveryMethod, RecoveryRequest, SasEmoji, ScheduledSendCapability,
@@ -108,6 +109,7 @@ const VERIFICATION_METHOD_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 const RECOVERY_TRUST_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(20);
 const RECOVERY_TRUST_SETTLEMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const IDENTITY_RESET_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
+const DEVICE_CLEANUP_REMOTE_TIMEOUT: Duration = Duration::from_secs(20);
 const INCOMING_VERIFICATION_OBSERVER_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 const OIDC_REDIRECT_URI: &str = "koushi-desktop://auth/callback";
 /// Redacted message used in reducer error projections (never raw SDK text).
@@ -524,6 +526,10 @@ pub enum AccountMessage {
         response: oneshot::Sender<(bool, bool, bool, bool)>,
     },
     #[cfg(test)]
+    InspectPendingDeviceCleanup {
+        response: oneshot::Sender<bool>,
+    },
+    #[cfg(test)]
     InspectSyncOwners {
         response: oneshot::Sender<(bool, bool, bool)>,
     },
@@ -562,6 +568,10 @@ pub enum AccountMessage {
     #[cfg(test)]
     ConfigureCloseStoreResults {
         results: Vec<bool>,
+    },
+    #[cfg(test)]
+    ConfigureDeviceCleanupResults {
+        results: Vec<Result<koushi_sdk::MatrixDeviceCleanupOutcome, DeviceCleanupFailureKind>>,
     },
     #[cfg(test)]
     ShutdownWithAck {
@@ -749,6 +759,24 @@ struct PendingUiaOperation {
     new_password: Option<koushi_state::AuthSecret>,
     erase_data: bool,
     uiaa_session: Option<String>,
+}
+
+struct PendingDeviceCleanup {
+    original_request_id: RequestId,
+    trust_generation: u64,
+    key_id: SessionKeyId,
+    stage: PendingDeviceCleanupStage,
+}
+
+#[derive(Clone)]
+enum PendingDeviceCleanupStage {
+    AwaitingUia {
+        session: Option<String>,
+    },
+    RemoteFailed,
+    Local {
+        remote_outcome: Option<DeviceCleanupRemoteOutcome>,
+    },
 }
 
 enum AccountManagementUiaError {
@@ -973,6 +1001,37 @@ fn local_data_reset_event(stage: &'static str, request_id: RequestId) -> Diagnos
 
 fn record_local_data_reset_event(event: DiagnosticEvent) {
     koushi_diagnostics::record_and_stderr(event);
+}
+
+fn device_cleanup_event(stage: &'static str, request_id: RequestId) -> DiagnosticEvent {
+    DiagnosticEvent::new(DiagnosticLevel::Info, "device_cleanup", stage).field(
+        DiagnosticField::request_id(
+            "request_id",
+            request_id.connection_id.0,
+            request_id.sequence,
+        ),
+    )
+}
+
+fn record_device_cleanup_event(event: DiagnosticEvent) {
+    koushi_diagnostics::record_and_stderr(event);
+}
+
+fn record_device_cleanup_offer(reason: &'static str) {
+    record_device_cleanup_event(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "device_cleanup", "offered")
+            .field(DiagnosticField::token("reason", reason)),
+    );
+}
+
+fn device_cleanup_failure_token(kind: DeviceCleanupFailureKind) -> &'static str {
+    match kind {
+        DeviceCleanupFailureKind::Network => "network",
+        DeviceCleanupFailureKind::Forbidden => "forbidden",
+        DeviceCleanupFailureKind::Timeout => "timeout",
+        DeviceCleanupFailureKind::Sdk => "sdk",
+        DeviceCleanupFailureKind::LocalData => "local_data",
+    }
 }
 
 fn verification_request_state_token(
@@ -1334,6 +1393,10 @@ pub struct AccountActor {
     recovery_download_override: std::sync::Mutex<Option<oneshot::Receiver<bool>>>,
     #[cfg(test)]
     close_store_results: std::collections::VecDeque<bool>,
+    #[cfg(test)]
+    device_cleanup_results: std::collections::VecDeque<
+        Result<koushi_sdk::MatrixDeviceCleanupOutcome, DeviceCleanupFailureKind>,
+    >,
     /// Store actor — owns the credential store backend and per-account paths.
     store: StoreActor,
     /// App-level action channel to drive the reducer.
@@ -1396,6 +1459,9 @@ pub struct AccountActor {
     /// supplies interactive auth. Secrets (password, UIA session) are held
     /// only inside this actor-private map, never in reducer state.
     pending_uia_operations: BTreeMap<u64, PendingUiaOperation>,
+    /// Opaque legacy UIAA continuation or local retry context. Raw SDK data
+    /// never enters reducer state or diagnostics.
+    pending_device_cleanup: Option<PendingDeviceCleanup>,
     /// Pending OAuth authorization-code flow, keyed by originating request id.
     /// Holds SDK client, PKCE verifier, and CSRF validation data inside Rust.
     pending_oidc_login: Option<(RequestId, PendingOidcFlow)>,
@@ -1516,6 +1582,8 @@ impl AccountActor {
             recovery_download_override: std::sync::Mutex::new(None),
             #[cfg(test)]
             close_store_results: std::collections::VecDeque::new(),
+            #[cfg(test)]
+            device_cleanup_results: std::collections::VecDeque::new(),
             store: store_actor,
             action_tx,
             event_tx,
@@ -1540,6 +1608,7 @@ impl AccountActor {
             identity_reset_timeout_task: None,
             device_session_ordinals: BTreeMap::new(),
             pending_uia_operations: BTreeMap::new(),
+            pending_device_cleanup: None,
             pending_oidc_login: None,
             #[cfg(test)]
             oidc_completion_override: None,
@@ -1961,6 +2030,12 @@ impl AccountActor {
                         match result {
                             VerificationMethodDiscoveryResult::Discovered(gate) => {
                                 self.verification_method_discovery_failed = false;
+                                if gate.account_kind
+                                    == koushi_state::VerificationAccountKind::ExistingIdentity
+                                    && gate.methods.is_empty()
+                                {
+                                    record_device_cleanup_offer("no_proof_method");
+                                }
                                 record_verification_method_discovery_event(
                                     verification_method_discovery_event(
                                         "success_projecting",
@@ -2001,6 +2076,7 @@ impl AccountActor {
                                         ),
                                     ),
                                 );
+                                record_device_cleanup_offer("recovery_failed");
                                 self.send_actions(vec![
                                     AppAction::VerificationMethodDiscoveryFailed {
                                         generation,
@@ -2074,6 +2150,10 @@ impl AccountActor {
                         self.sync_actor.is_some(),
                         self.trust_observer.is_some(),
                     ));
+                }
+                #[cfg(test)]
+                AccountMessage::InspectPendingDeviceCleanup { response } => {
+                    let _ = response.send(self.pending_device_cleanup.is_some());
                 }
                 #[cfg(test)]
                 AccountMessage::InspectSyncOwners { response } => {
@@ -2172,6 +2252,10 @@ impl AccountActor {
                 #[cfg(test)]
                 AccountMessage::ConfigureCloseStoreResults { results } => {
                     self.close_store_results = results.into();
+                }
+                #[cfg(test)]
+                AccountMessage::ConfigureDeviceCleanupResults { results } => {
+                    self.device_cleanup_results = results.into();
                 }
                 AccountMessage::InvalidateSearchCrawlerCache => {
                     if let Some(handle) = &self.search_actor {
@@ -3701,6 +3785,21 @@ impl AccountActor {
             AccountCommand::ResetLocalData { request_id } => {
                 self.handle_reset_local_data(request_id).await;
             }
+            AccountCommand::StartDeviceCleanup { request_id } => {
+                self.handle_start_device_cleanup(request_id).await;
+            }
+            AccountCommand::SubmitDeviceCleanupUia {
+                request_id,
+                flow_id,
+                password,
+            } => {
+                self.handle_submit_device_cleanup_uia(request_id, flow_id, password)
+                    .await;
+            }
+            AccountCommand::EraseDeviceCleanupLocalDataAnyway { request_id } => {
+                self.handle_erase_device_cleanup_local_data_anyway(request_id)
+                    .await;
+            }
             AccountCommand::Logout { request_id } => {
                 self.handle_logout(request_id).await;
             }
@@ -4862,6 +4961,7 @@ impl AccountActor {
             .is_some_and(|pending| pending.flow_id == flow_id)
         {
             self.stop_recovery_task().await;
+            record_device_cleanup_offer("recovery_failed");
             self.send_actions(vec![AppAction::VerificationGateAttemptFailed {
                 flow_id,
                 kind: koushi_state::VerificationGateFailureKind::Cancelled,
@@ -7359,6 +7459,7 @@ impl AccountActor {
                         )),
                 );
                 // Project failure: Recovering → NeedsRecovery.
+                record_device_cleanup_offer("recovery_failed");
                 self.send_actions(vec![AppAction::E2eeRecoveryFailed {
                     message: "recovery failed".to_owned(),
                 }])
@@ -7626,6 +7727,7 @@ impl AccountActor {
                 ))
                 .field(DiagnosticField::token("failure_kind", "timeout")),
         );
+        record_device_cleanup_offer("recovery_failed");
         self.send_actions(vec![AppAction::E2eeRecoveryFailed {
             message: "session verification timed out".to_owned(),
         }])
@@ -7862,6 +7964,7 @@ impl AccountActor {
         let session = Arc::new(session);
         self.device_session_ordinals.clear();
         self.pending_uia_operations.clear();
+        self.pending_device_cleanup = None;
         self.session = Some(session.clone());
         self.session_key_id = Some(key_id);
         self.provisional_persistable = Some(persistable);
@@ -8003,6 +8106,7 @@ impl AccountActor {
 
     async fn stop_provisional_runtime(&mut self) {
         self.trust_generation = self.trust_generation.wrapping_add(1);
+        self.pending_device_cleanup = None;
         self.cancel_pending_trust_promotion().await;
         if let Some(task) = self.trust_observer.take() {
             task.abort();
@@ -8544,25 +8648,28 @@ impl AccountActor {
     /// Remove all persisted material for one account: session JSON, saved
     /// session index entry, last-session pointer (only if it points at this
     /// account), unlock secret, and store/cache directories.
-    async fn clear_account_persistence(&self, key_id: &SessionKeyId) {
+    async fn clear_account_persistence(&self, key_id: &SessionKeyId) -> bool {
         let store = self.store.clone();
         let key_id = key_id.clone();
-        let _ = executor::spawn_blocking(move || {
+        executor::spawn_blocking(move || {
             let backend = store.credential_backend();
-            let _ = backend.delete_matrix_session(&key_id);
-            let _ = backend.forget_saved_session(&key_id);
+            let mut cleared = backend.delete_matrix_session(&key_id).is_ok();
+            cleared &= backend.forget_saved_session(&key_id).is_ok();
             match backend.load_last_session() {
                 Ok(Some(last)) if last == key_id => {
-                    let _ = backend.delete_last_session();
+                    cleared &= backend.delete_last_session().is_ok();
                 }
                 Ok(_) => {}
                 Err(_) => {
+                    cleared = false;
                     let _ = backend.delete_last_session();
                 }
             }
-            store.delete_account_credentials(&key_id);
+            cleared &= store.delete_account_credentials(&key_id).is_ok();
+            cleared
         })
-        .await;
+        .await
+        .unwrap_or(false)
     }
 
     /// Leave the saved session, unlock secret, and keyed store intact, but
@@ -8690,6 +8797,316 @@ impl AccountActor {
         self.emit(CoreEvent::LocalEncryption(
             LocalEncryptionEvent::HealthChanged { health },
         ));
+    }
+
+    async fn handle_start_device_cleanup(&mut self, request_id: RequestId) {
+        if let Some(mut pending) = self.pending_device_cleanup.take() {
+            if matches!(&pending.stage, PendingDeviceCleanupStage::Local { .. }) {
+                pending.original_request_id = request_id;
+                self.finish_device_cleanup_local(pending).await;
+                return;
+            }
+        }
+        self.run_device_cleanup_remote(request_id, None, None).await;
+    }
+
+    async fn handle_submit_device_cleanup_uia(
+        &mut self,
+        request_id: RequestId,
+        flow_id: u64,
+        password: koushi_state::AuthSecret,
+    ) {
+        let Some(pending) = self.pending_device_cleanup.take() else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        let uiaa_session = match &pending.stage {
+            PendingDeviceCleanupStage::AwaitingUia { session } => session.clone(),
+            PendingDeviceCleanupStage::RemoteFailed | PendingDeviceCleanupStage::Local { .. } => {
+                self.pending_device_cleanup = Some(pending);
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+        if pending.original_request_id.sequence != flow_id
+            || pending.trust_generation != self.trust_generation
+            || self.session_key_id.as_ref() != Some(&pending.key_id)
+        {
+            self.pending_device_cleanup = Some(pending);
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        }
+        self.run_device_cleanup_remote(
+            pending.original_request_id,
+            Some(&password),
+            uiaa_session.as_deref(),
+        )
+        .await;
+    }
+
+    async fn handle_erase_device_cleanup_local_data_anyway(&mut self, request_id: RequestId) {
+        let Some(failed) = self.pending_device_cleanup.take() else {
+            self.send_actions(vec![AppAction::DeviceCleanupLocalResetFailed {
+                request_id: request_id.sequence,
+                kind: DeviceCleanupFailureKind::LocalData,
+            }])
+            .await;
+            return;
+        };
+        if !matches!(&failed.stage, PendingDeviceCleanupStage::RemoteFailed)
+            || failed.trust_generation != self.trust_generation
+            || self.session_key_id.as_ref() != Some(&failed.key_id)
+        {
+            self.pending_device_cleanup = Some(failed);
+            self.send_actions(vec![AppAction::DeviceCleanupLocalResetFailed {
+                request_id: request_id.sequence,
+                kind: DeviceCleanupFailureKind::LocalData,
+            }])
+            .await;
+            return;
+        }
+        self.finish_device_cleanup_local(PendingDeviceCleanup {
+            original_request_id: request_id,
+            trust_generation: self.trust_generation,
+            key_id: failed.key_id,
+            stage: PendingDeviceCleanupStage::Local {
+                remote_outcome: None,
+            },
+        })
+        .await;
+    }
+
+    async fn run_device_cleanup_remote(
+        &mut self,
+        request_id: RequestId,
+        password: Option<&koushi_state::AuthSecret>,
+        uiaa_session: Option<&str>,
+    ) {
+        let missing_context_auth_mode = if password.is_some() {
+            DeviceCleanupAuthMode::Legacy
+        } else {
+            DeviceCleanupAuthMode::Unknown
+        };
+        let Some(session) = self.session.clone() else {
+            let mut actions = Vec::new();
+            if password.is_none() {
+                actions.push(AppAction::DeviceCleanupRemoteStarted {
+                    request_id: request_id.sequence,
+                    auth_mode: missing_context_auth_mode,
+                });
+            }
+            actions.push(AppAction::DeviceCleanupRemoteFailed {
+                request_id: request_id.sequence,
+                auth_mode: missing_context_auth_mode,
+                kind: DeviceCleanupFailureKind::Sdk,
+            });
+            self.send_actions(actions).await;
+            return;
+        };
+        let Some(key_id) = self.session_key_id.clone() else {
+            let mut actions = Vec::new();
+            if password.is_none() {
+                actions.push(AppAction::DeviceCleanupRemoteStarted {
+                    request_id: request_id.sequence,
+                    auth_mode: missing_context_auth_mode,
+                });
+            }
+            actions.push(AppAction::DeviceCleanupRemoteFailed {
+                request_id: request_id.sequence,
+                auth_mode: missing_context_auth_mode,
+                kind: DeviceCleanupFailureKind::Sdk,
+            });
+            self.send_actions(actions).await;
+            return;
+        };
+        let trust_generation = self.trust_generation;
+        let auth_mode = session.device_cleanup_auth_mode();
+        let is_uia_continuation = password.is_some();
+        if !is_uia_continuation {
+            self.send_actions(vec![AppAction::DeviceCleanupRemoteStarted {
+                request_id: request_id.sequence,
+                auth_mode,
+            }])
+            .await;
+        }
+        record_device_cleanup_event(
+            device_cleanup_event(
+                if is_uia_continuation {
+                    "uia_submitted"
+                } else {
+                    "remote_started"
+                },
+                request_id,
+            )
+            .field(DiagnosticField::token(
+                "auth_mode",
+                match auth_mode {
+                    DeviceCleanupAuthMode::Legacy => "legacy",
+                    DeviceCleanupAuthMode::OAuth => "oauth",
+                    DeviceCleanupAuthMode::Unknown => "unknown",
+                },
+            )),
+        );
+
+        #[cfg(test)]
+        let configured_result = self.device_cleanup_results.pop_front();
+        let result = executor::timeout(DEVICE_CLEANUP_REMOTE_TIMEOUT, async {
+            #[cfg(test)]
+            if let Some(result) = configured_result {
+                return result;
+            }
+            koushi_sdk::cleanup_current_device(&session, password, uiaa_session).await
+        })
+        .await
+        .unwrap_or(Err(DeviceCleanupFailureKind::Timeout));
+        if trust_generation != self.trust_generation
+            || self.session_key_id.as_ref() != Some(&key_id)
+        {
+            record_device_cleanup_event(
+                device_cleanup_event("stale_ignored", request_id)
+                    .field(DiagnosticField::token("stage", "remote_settlement")),
+            );
+            return;
+        }
+        match result {
+            Ok(koushi_sdk::MatrixDeviceCleanupOutcome::UiaaRequired { session }) => {
+                debug_assert_eq!(auth_mode, DeviceCleanupAuthMode::Legacy);
+                self.pending_device_cleanup = Some(PendingDeviceCleanup {
+                    original_request_id: request_id,
+                    trust_generation,
+                    key_id,
+                    stage: PendingDeviceCleanupStage::AwaitingUia { session },
+                });
+                self.send_actions(vec![AppAction::DeviceCleanupUiaRequired {
+                    request_id: request_id.sequence,
+                    flow_id: request_id.sequence,
+                }])
+                .await;
+                record_device_cleanup_event(device_cleanup_event("uia_required", request_id));
+            }
+            Ok(koushi_sdk::MatrixDeviceCleanupOutcome::Settled(outcome)) => {
+                self.send_actions(vec![AppAction::DeviceCleanupRemoteSettled {
+                    request_id: request_id.sequence,
+                    outcome,
+                }])
+                .await;
+                record_device_cleanup_event(
+                    device_cleanup_event("remote_settled", request_id).field(
+                        DiagnosticField::token(
+                            "outcome",
+                            match outcome {
+                                DeviceCleanupRemoteOutcome::Success => "success",
+                                DeviceCleanupRemoteOutcome::AlreadyAbsent => "already_absent",
+                            },
+                        ),
+                    ),
+                );
+                self.finish_device_cleanup_local(PendingDeviceCleanup {
+                    original_request_id: request_id,
+                    trust_generation,
+                    key_id,
+                    stage: PendingDeviceCleanupStage::Local {
+                        remote_outcome: Some(outcome),
+                    },
+                })
+                .await;
+            }
+            Err(kind) => {
+                self.pending_device_cleanup = Some(PendingDeviceCleanup {
+                    original_request_id: request_id,
+                    trust_generation,
+                    key_id,
+                    stage: PendingDeviceCleanupStage::RemoteFailed,
+                });
+                self.send_actions(vec![AppAction::DeviceCleanupRemoteFailed {
+                    request_id: request_id.sequence,
+                    auth_mode,
+                    kind,
+                }])
+                .await;
+                record_device_cleanup_event(
+                    device_cleanup_event("remote_failed", request_id).field(
+                        DiagnosticField::token("failure_kind", device_cleanup_failure_token(kind)),
+                    ),
+                );
+            }
+        }
+    }
+
+    async fn finish_device_cleanup_local(&mut self, mut pending: PendingDeviceCleanup) {
+        let request_id = pending.original_request_id;
+        if pending.trust_generation != self.trust_generation
+            || self.session_key_id.as_ref() != Some(&pending.key_id)
+        {
+            record_device_cleanup_event(
+                device_cleanup_event("stale_ignored", request_id)
+                    .field(DiagnosticField::token("stage", "local_reset")),
+            );
+            return;
+        }
+        let PendingDeviceCleanupStage::Local { remote_outcome } = &pending.stage else {
+            return;
+        };
+        let mut local_started = device_cleanup_event("local_reset_started", request_id).field(
+            DiagnosticField::boolean("remote_may_remain", remote_outcome.is_none()),
+        );
+        if let Some(outcome) = *remote_outcome {
+            local_started = local_started.field(DiagnosticField::token(
+                "outcome",
+                match outcome {
+                    DeviceCleanupRemoteOutcome::Success => "success",
+                    DeviceCleanupRemoteOutcome::AlreadyAbsent => "already_absent",
+                },
+            ));
+        }
+        record_device_cleanup_event(local_started);
+        self.stop_current_session_runtime().await;
+        pending.trust_generation = self.trust_generation;
+        let active_session = self.session.clone();
+        let stores_closed = match active_session.as_deref() {
+            Some(session) => self.close_pending_session_stores(session).await.is_ok(),
+            None => false,
+        };
+        if !stores_closed {
+            self.pending_device_cleanup = Some(pending);
+            self.send_device_cleanup_local_failure(request_id).await;
+            return;
+        }
+        self.read_persistence_session_generation = next_read_persistence_session_generation();
+        self.store.invalidate_read_state_outbox_saves(
+            &pending.key_id,
+            self.read_persistence_session_generation,
+        );
+        if !self.clear_account_persistence(&pending.key_id).await {
+            self.pending_device_cleanup = Some(pending);
+            self.send_device_cleanup_local_failure(request_id).await;
+            return;
+        }
+
+        self.pending_device_cleanup = None;
+        self.session_key_id.take();
+        self.provisional_persistable.take();
+        self.session_promoted = false;
+        drop(self.session.take());
+        self.send_actions(vec![AppAction::DeviceCleanupCompleted {
+            request_id: request_id.sequence,
+        }])
+        .await;
+        record_device_cleanup_event(device_cleanup_event("completed", request_id));
+    }
+
+    async fn send_device_cleanup_local_failure(&self, request_id: RequestId) {
+        self.send_actions(vec![AppAction::DeviceCleanupLocalResetFailed {
+            request_id: request_id.sequence,
+            kind: DeviceCleanupFailureKind::LocalData,
+        }])
+        .await;
+        record_device_cleanup_event(
+            device_cleanup_event("local_reset_failed", request_id).field(DiagnosticField::token(
+                "failure_kind",
+                device_cleanup_failure_token(DeviceCleanupFailureKind::LocalData),
+            )),
+        );
     }
 
     async fn handle_reset_local_data(&mut self, request_id: RequestId) {
@@ -12104,6 +12521,275 @@ mod tests {
         (handle, action_rx)
     }
 
+    async fn next_device_cleanup_actions(
+        action_rx: &mut mpsc::Receiver<Vec<AppAction>>,
+    ) -> Vec<AppAction> {
+        executor::timeout(Duration::from_secs(2), async {
+            loop {
+                let actions = action_rx
+                    .recv()
+                    .await
+                    .expect("device cleanup action channel");
+                if actions.iter().any(|action| {
+                    matches!(
+                        action,
+                        AppAction::DeviceCleanupRemoteStarted { .. }
+                            | AppAction::DeviceCleanupUiaRequired { .. }
+                            | AppAction::DeviceCleanupRemoteSettled { .. }
+                            | AppAction::DeviceCleanupRemoteFailed { .. }
+                            | AppAction::DeviceCleanupLocalResetFailed { .. }
+                            | AppAction::DeviceCleanupCompleted { .. }
+                    )
+                }) {
+                    return actions;
+                }
+            }
+        })
+        .await
+        .expect("device cleanup action timeout")
+    }
+
+    #[tokio::test]
+    async fn device_cleanup_remote_failure_preserves_the_provisional_session() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        handle
+            .send(AccountMessage::ConfigureDeviceCleanupResults {
+                results: vec![Err(DeviceCleanupFailureKind::Network)],
+            })
+            .await;
+        let request_id = RequestId {
+            connection_id: RuntimeConnectionId(1),
+            sequence: 301,
+        };
+
+        handle
+            .send(AccountMessage::Command(
+                AccountCommand::StartDeviceCleanup { request_id },
+            ))
+            .await;
+
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupRemoteStarted {
+                request_id: 301,
+                auth_mode: DeviceCleanupAuthMode::Legacy,
+            }]
+        ));
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupRemoteFailed {
+                request_id: 301,
+                auth_mode: DeviceCleanupAuthMode::Legacy,
+                kind: DeviceCleanupFailureKind::Network,
+            }]
+        ));
+        assert!(
+            inspect_session_runtime(&handle).await.0,
+            "remote failure must retain the provisional SDK session"
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn device_cleanup_uia_and_local_retry_do_not_repeat_remote_cleanup() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        handle
+            .send(AccountMessage::ConfigureDeviceCleanupResults {
+                results: vec![
+                    Ok(koushi_sdk::MatrixDeviceCleanupOutcome::UiaaRequired {
+                        session: Some("opaque-test-session".to_owned()),
+                    }),
+                    Ok(koushi_sdk::MatrixDeviceCleanupOutcome::Settled(
+                        DeviceCleanupRemoteOutcome::Success,
+                    )),
+                ],
+            })
+            .await;
+        handle
+            .send(AccountMessage::ConfigureCloseStoreResults {
+                results: vec![false, true],
+            })
+            .await;
+        let start_request_id = RequestId {
+            connection_id: RuntimeConnectionId(1),
+            sequence: 401,
+        };
+        handle
+            .send(AccountMessage::Command(
+                AccountCommand::StartDeviceCleanup {
+                    request_id: start_request_id,
+                },
+            ))
+            .await;
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupRemoteStarted {
+                request_id: 401,
+                ..
+            }]
+        ));
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupUiaRequired {
+                request_id: 401,
+                flow_id: 401,
+            }]
+        ));
+
+        handle
+            .send(AccountMessage::Command(
+                AccountCommand::SubmitDeviceCleanupUia {
+                    request_id: RequestId {
+                        connection_id: RuntimeConnectionId(1),
+                        sequence: 402,
+                    },
+                    flow_id: 401,
+                    password: koushi_state::AuthSecret::new("test-password"),
+                },
+            ))
+            .await;
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupRemoteSettled {
+                request_id: 401,
+                outcome: DeviceCleanupRemoteOutcome::Success,
+            }]
+        ));
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupLocalResetFailed {
+                request_id: 401,
+                kind: DeviceCleanupFailureKind::LocalData,
+            }]
+        ));
+
+        let retry_request_id = RequestId {
+            connection_id: RuntimeConnectionId(1),
+            sequence: 403,
+        };
+        handle
+            .send(AccountMessage::Command(
+                AccountCommand::StartDeviceCleanup {
+                    request_id: retry_request_id,
+                },
+            ))
+            .await;
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupCompleted { request_id: 403 }]
+        ));
+        assert!(
+            !inspect_session_runtime(&handle).await.0,
+            "successful local retry must drop the provisional SDK session"
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn device_cleanup_local_only_escape_runs_only_after_remote_failure() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        handle
+            .send(AccountMessage::ConfigureDeviceCleanupResults {
+                results: vec![Err(DeviceCleanupFailureKind::Forbidden)],
+            })
+            .await;
+        let start_request_id = RequestId {
+            connection_id: RuntimeConnectionId(1),
+            sequence: 501,
+        };
+        handle
+            .send(AccountMessage::Command(
+                AccountCommand::StartDeviceCleanup {
+                    request_id: start_request_id,
+                },
+            ))
+            .await;
+        let _ = next_device_cleanup_actions(&mut action_rx).await;
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupRemoteFailed {
+                request_id: 501,
+                kind: DeviceCleanupFailureKind::Forbidden,
+                ..
+            }]
+        ));
+
+        handle
+            .send(AccountMessage::Command(
+                AccountCommand::EraseDeviceCleanupLocalDataAnyway {
+                    request_id: RequestId {
+                        connection_id: RuntimeConnectionId(1),
+                        sequence: 502,
+                    },
+                },
+            ))
+            .await;
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupCompleted { request_id: 502 }]
+        ));
+        assert!(!inspect_session_runtime(&handle).await.0);
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn provisional_teardown_drops_actor_private_device_cleanup_continuation() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        handle
+            .send(AccountMessage::ConfigureDeviceCleanupResults {
+                results: vec![Ok(koushi_sdk::MatrixDeviceCleanupOutcome::UiaaRequired {
+                    session: Some("opaque-test-session".to_owned()),
+                })],
+            })
+            .await;
+        handle
+            .send(AccountMessage::Command(
+                AccountCommand::StartDeviceCleanup {
+                    request_id: RequestId {
+                        connection_id: RuntimeConnectionId(1),
+                        sequence: 601,
+                    },
+                },
+            ))
+            .await;
+        let _ = next_device_cleanup_actions(&mut action_rx).await;
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupUiaRequired {
+                request_id: 601,
+                flow_id: 601,
+            }]
+        ));
+        assert!(inspect_pending_device_cleanup(&handle).await);
+
+        handle
+            .send(AccountMessage::RejectProvisionalSession {
+                request_id: RequestId {
+                    connection_id: RuntimeConnectionId(1),
+                    sequence: 602,
+                },
+            })
+            .await;
+        executor::timeout(Duration::from_secs(2), async {
+            loop {
+                if matches!(
+                    action_rx.recv().await.as_deref(),
+                    Some([AppAction::LogoutFinished])
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("provisional rejection settles");
+
+        assert!(
+            !inspect_pending_device_cleanup(&handle).await,
+            "teardown must discard actor-private UIAA continuation state"
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
     #[tokio::test]
     async fn recovery_proof_success_waits_for_verified_trust_before_promotion() {
         let (handle, mut action_rx) = login_gated_actor().await;
@@ -12944,6 +13630,16 @@ mod tests {
         result.await.expect("runtime inspection")
     }
 
+    async fn inspect_pending_device_cleanup(handle: &AccountActorHandle) -> bool {
+        let (response, result) = oneshot::channel();
+        assert!(
+            handle
+                .send(AccountMessage::InspectPendingDeviceCleanup { response })
+                .await
+        );
+        result.await.expect("pending device cleanup inspection")
+    }
+
     async fn inspect_sync_owners(handle: &AccountActorHandle) -> (bool, bool, bool) {
         let (response, result) = oneshot::channel();
         assert!(
@@ -13147,10 +13843,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("address");
         std::thread::spawn(move || {
-            for _ in 0..256 {
-                let Ok((mut stream, _)) = listener.accept() else {
-                    return;
-                };
+            while let Ok((mut stream, _)) = listener.accept() {
                 let mut request = Vec::new();
                 let mut buffer = [0_u8; 4096];
                 loop {
@@ -13197,6 +13890,43 @@ mod tests {
             }
         });
         format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn quarantine_password_server_outlives_the_legacy_request_budget() {
+        let homeserver = spawn_quarantine_password_server();
+        let address = homeserver
+            .strip_prefix("http://")
+            .expect("fixture homeserver scheme")
+            .parse::<std::net::SocketAddr>()
+            .expect("fixture homeserver address");
+
+        for request_number in 0..300 {
+            use std::io::{Read, Write};
+
+            let mut stream = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(1))
+                .unwrap_or_else(|error| {
+                    panic!("fixture stopped at request {request_number}: {error}")
+                });
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .expect("fixture read timeout");
+            stream
+                .write_all(
+                    b"GET /_matrix/client/versions HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                )
+                .expect("fixture request");
+            let mut response = String::new();
+            stream
+                .read_to_string(&mut response)
+                .unwrap_or_else(|error| {
+                    panic!("fixture response {request_number} failed: {error}")
+                });
+            assert!(
+                response.contains(r#"{"versions":["v1.7"]}"#),
+                "fixture response {request_number}: {response}"
+            );
+        }
     }
 
     #[test]
@@ -14335,6 +15065,7 @@ mod tests {
             trust_observation_is_synthetic: false,
             recovery_download_override: std::sync::Mutex::new(None),
             close_store_results: std::collections::VecDeque::new(),
+            device_cleanup_results: std::collections::VecDeque::new(),
             store: store.clone(),
             action_tx,
             event_tx,
@@ -14361,6 +15092,7 @@ mod tests {
             identity_reset_timeout_task: None,
             device_session_ordinals: BTreeMap::new(),
             pending_uia_operations: BTreeMap::new(),
+            pending_device_cleanup: None,
             verification_request: None,
             sas_verification: None,
             own_user_verification: None,

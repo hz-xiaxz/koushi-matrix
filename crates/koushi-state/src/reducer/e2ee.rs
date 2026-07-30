@@ -1,12 +1,13 @@
 use crate::{
     effect::{AppEffect, UiEvent},
     state::{
-        AppState, AuthFailureKind, CrossSigningStatus, IdentityResetState, KeyBackupStatus,
-        ProvisionalPhase, QrLoginState, RoomKeyExportState, RoomKeyImportState, SasEmoji,
-        SecureBackupPassphraseChangeState, SecureBackupSetupState, SessionState, SyncState,
-        TrustOperationFailureKind, VerificationAccountKind, VerificationCancelReason,
-        VerificationFlowState, VerificationGateFailureKind, VerificationGateState,
-        VerificationMethod, VerificationMethodCapability, VerificationTarget,
+        AppState, AuthFailureKind, CrossSigningStatus, DeviceCleanupOfferReason,
+        DeviceCleanupState, IdentityResetState, KeyBackupStatus, ProvisionalPhase, QrLoginState,
+        RoomKeyExportState, RoomKeyImportState, SasEmoji, SecureBackupPassphraseChangeState,
+        SecureBackupSetupState, SessionState, SyncState, TrustOperationFailureKind,
+        VerificationAccountKind, VerificationCancelReason, VerificationFlowState,
+        VerificationGateFailureKind, VerificationGateState, VerificationMethod,
+        VerificationMethodCapability, VerificationTarget,
     },
 };
 
@@ -109,6 +110,7 @@ pub(crate) fn handle_e2ee_recovery_submitted(
     } else {
         return Vec::new();
     };
+    state.device_cleanup = DeviceCleanupState::Idle;
     state.session = SessionState::Verifying {
         info: info.clone(),
         gate: gate.clone(),
@@ -162,6 +164,9 @@ pub(crate) fn handle_e2ee_recovery_failed(state: &mut AppState, message: String)
     }
     let mut gate = gate.clone();
     gate.failure = Some(VerificationGateFailureKind::Sdk);
+    state.device_cleanup = DeviceCleanupState::Offered {
+        reason: DeviceCleanupOfferReason::RecoveryFailed,
+    };
     state.session = SessionState::AwaitingVerification {
         info: info.clone(),
         gate,

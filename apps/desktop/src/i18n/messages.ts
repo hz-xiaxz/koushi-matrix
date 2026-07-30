@@ -681,6 +681,25 @@ export type MessageId =
   | "gate.bootstrap"
   | "gate.saved"
   | "gate.retry"
+  | "gate.cleanupOffer"
+  | "gate.cleanupDialogTitle"
+  | "gate.cleanupDialogCopy"
+  | "gate.cleanupConfirm"
+  | "gate.cleanupResolving"
+  | "gate.cleanupRemoving"
+  | "gate.cleanupAccountPassword"
+  | "gate.cleanupContinue"
+  | "gate.cleanupRemoteFailed"
+  | "gate.cleanupRetryRemote"
+  | "gate.cleanupEraseAnywayOffer"
+  | "gate.cleanupEraseAnywayTitle"
+  | "gate.cleanupEraseAnywayCopy"
+  | "gate.cleanupEraseAnywayConfirm"
+  | "gate.cleanupResettingLocal"
+  | "gate.cleanupErasingLocal"
+  | "gate.cleanupLocalFailed"
+  | "gate.cleanupRetryLocal"
+  | "gate.cleanupCommandFailed"
   | "gate.signOut"
   | "gate.failureCancelled"
   | "gate.failureForbidden"
@@ -1762,6 +1781,25 @@ const en: Catalog = {
   "gate.bootstrap": "Create secure backup",
   "gate.saved": "I saved the recovery key",
   "gate.retry": "Retry",
+  "gate.cleanupOffer": "Cancel sign-in and remove this device…",
+  "gate.cleanupDialogTitle": "Cancel sign-in and remove this device",
+  "gate.cleanupDialogCopy": "Koushi will remove this device from your Matrix account first, then erase local messages, encryption keys, caches, and saved credentials on this computer. Messages on your homeserver are preserved. The next sign-in creates a new Device ID. This cannot be undone.",
+  "gate.cleanupConfirm": "Remove device and erase local data",
+  "gate.cleanupResolving": "Checking how this device must be removed…",
+  "gate.cleanupRemoving": "Removing this device from your Matrix account…",
+  "gate.cleanupAccountPassword": "Account password",
+  "gate.cleanupContinue": "Continue device removal",
+  "gate.cleanupRemoteFailed": "The device could not be removed from your Matrix account. Your credentials and local data are still preserved.",
+  "gate.cleanupRetryRemote": "Retry removing device",
+  "gate.cleanupEraseAnywayOffer": "Erase local data anyway…",
+  "gate.cleanupEraseAnywayTitle": "Erase local data anyway",
+  "gate.cleanupEraseAnywayCopy": "The device may remain active on your Matrix account. Erasing now removes local messages, encryption keys, and saved credentials from this computer and cannot be undone.",
+  "gate.cleanupEraseAnywayConfirm": "Erase local data anyway",
+  "gate.cleanupResettingLocal": "Device removed. Erasing local data…",
+  "gate.cleanupErasingLocal": "Erasing local data while the remote device may remain…",
+  "gate.cleanupLocalFailed": "The local data could not be erased. The cleanup can be retried safely.",
+  "gate.cleanupRetryLocal": "Retry erasing local data",
+  "gate.cleanupCommandFailed": "Device cleanup failed. Please try again.",
   "gate.resetForNewDevice": "Reset local data and sign in as a new device",
   "gate.resetForNewDeviceConfirm": "Reset this session's local data and sign in again with a new device ID? This removes the local encrypted store, cached history, and saved credentials on this computer. It does not remove messages from the homeserver. This cannot be undone.",
   "gate.signOut": "Sign out",
@@ -2733,6 +2771,25 @@ const ja: Catalog = {
   "gate.bootstrap": "安全なバックアップを作成",
   "gate.saved": "リカバリーキーを保存しました",
   "gate.retry": "再試行",
+  "gate.cleanupOffer": "サインインを中止してこのデバイスを削除…",
+  "gate.cleanupDialogTitle": "サインインを中止してこのデバイスを削除",
+  "gate.cleanupDialogCopy": "最初に Matrix アカウントからこのデバイスを削除し、その後このコンピューター上のローカルメッセージ、暗号化キー、キャッシュ、保存済み資格情報を消去します。ホームサーバー上のメッセージは保持されます。次回のサインインでは新しい Device ID が作成されます。この操作は元に戻せません。",
+  "gate.cleanupConfirm": "デバイスを削除してローカルデータを消去",
+  "gate.cleanupResolving": "このデバイスの削除方法を確認しています…",
+  "gate.cleanupRemoving": "Matrix アカウントからこのデバイスを削除しています…",
+  "gate.cleanupAccountPassword": "アカウントのパスワード",
+  "gate.cleanupContinue": "デバイスの削除を続行",
+  "gate.cleanupRemoteFailed": "Matrix アカウントからデバイスを削除できませんでした。資格情報とローカルデータは保持されています。",
+  "gate.cleanupRetryRemote": "デバイスの削除を再試行",
+  "gate.cleanupEraseAnywayOffer": "それでもローカルデータを消去…",
+  "gate.cleanupEraseAnywayTitle": "それでもローカルデータを消去",
+  "gate.cleanupEraseAnywayCopy": "このデバイスが Matrix アカウント上で有効なまま残る可能性があります。続行すると、このコンピューター上のローカルメッセージ、暗号化キー、保存済み資格情報が消去されます。この操作は元に戻せません。",
+  "gate.cleanupEraseAnywayConfirm": "それでもローカルデータを消去",
+  "gate.cleanupResettingLocal": "デバイスを削除しました。ローカルデータを消去しています…",
+  "gate.cleanupErasingLocal": "リモートデバイスが残る可能性がある状態でローカルデータを消去しています…",
+  "gate.cleanupLocalFailed": "ローカルデータを消去できませんでした。安全に再試行できます。",
+  "gate.cleanupRetryLocal": "ローカルデータの消去を再試行",
+  "gate.cleanupCommandFailed": "デバイスのクリーンアップに失敗しました。もう一度お試しください。",
   "gate.signOut": "サインアウト",
   "gate.failureCancelled": "検証がキャンセルされました。",
   "gate.failureForbidden": "検証は許可されませんでした。",

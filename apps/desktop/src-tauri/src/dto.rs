@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use koushi_core::StateDelta;
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, ActivityState, AppError, AppState,
-    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState,
+    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState, DeviceCleanupState,
     DeviceSessionListState, DirectoryState, DisplayPlatform, E2eeTrustState, FilesViewState,
     FocusedContextState, InvitePreview, InviteWorkflowState, LinkPreviewSettingsState,
     LiveSignalsState, LocalEncryptionState, LocaleDisplayProfile, MentionCandidatesState,
@@ -111,6 +111,8 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<FrontendSessionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_cleanup: Option<DeviceCleanupState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthDiscoveryState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_sessions: Option<DeviceSessionListState>,
@@ -180,6 +182,7 @@ pub struct FrontendDomainStateChangedSlices {
 impl FrontendDomainStateChangedSlices {
     fn is_empty(&self) -> bool {
         self.session.is_none()
+            && self.device_cleanup.is_none()
             && self.auth.is_none()
             && self.device_sessions.is_none()
             && self.account_management.is_none()
@@ -259,6 +262,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         let mut ui = FrontendUiStateChangedSlices::default();
 
         domain.session = changed.session.map(Into::into);
+        domain.device_cleanup = changed.device_cleanup;
         domain.auth = changed.auth;
         domain.device_sessions = changed.device_sessions;
         domain.account_management = changed.account_management;
@@ -352,6 +356,7 @@ pub struct FrontendAppState {
 #[derive(Clone, Debug, Serialize)]
 pub struct FrontendDomainState {
     pub session: FrontendSessionState,
+    pub device_cleanup: DeviceCleanupState,
     pub auth: AuthDiscoveryState,
     pub device_sessions: DeviceSessionListState,
     pub account_management: AccountManagementState,
@@ -419,6 +424,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         domain: FrontendDomainState {
             session: state.session.into(),
+            device_cleanup: state.device_cleanup,
             auth: state.auth,
             device_sessions: state.device_sessions,
             account_management: state.account_management,
@@ -939,6 +945,10 @@ mod tests {
         assert_eq!(value["state"]["domain"]["room_interactions"], json!({}));
         assert_eq!(
             value["state"]["domain"]["device_sessions"]["kind"],
+            json!("idle")
+        );
+        assert_eq!(
+            value["state"]["domain"]["device_cleanup"]["kind"],
             json!("idle")
         );
         assert_eq!(
@@ -1724,10 +1734,11 @@ mod tests {
             ActivityMarkReadState, ActivityRow, ActivityState, ActivityStream, ActivityTab,
             AttachmentFilter, AttachmentKind, AttachmentResult, AttachmentScope, AttachmentSort,
             AvatarImage, AvatarThumbnailState, BasicOperationState, CrossSigningStatus,
-            DirectoryJoinState, DirectoryPreviewJoinability, DirectoryPreviewMembership,
-            DirectoryPreviewState, DirectoryQuery, DirectoryQueryState, DirectoryRoomPreview,
-            DirectoryRoomSummary, DirectoryState, E2eeKeyManagementState, E2eeTrustState,
-            FilesViewState, FocusedContextState, IdentityResetState, InvitePreview,
+            DeviceCleanupFailureKind, DeviceCleanupLocalMode, DeviceCleanupRemoteOutcome,
+            DeviceCleanupState, DirectoryJoinState, DirectoryPreviewJoinability,
+            DirectoryPreviewMembership, DirectoryPreviewState, DirectoryQuery, DirectoryQueryState,
+            DirectoryRoomPreview, DirectoryRoomSummary, DirectoryState, E2eeKeyManagementState,
+            E2eeTrustState, FilesViewState, FocusedContextState, IdentityResetState, InvitePreview,
             KeyBackupStatus, LiveSignalsState, LocalEncryptionState, MediaTransferProgress,
             NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
             NativeAttentionDispatchState, NativeAttentionState, NativeAttentionSummary,
@@ -1762,6 +1773,13 @@ mod tests {
 
         let mut state = AppState {
             session: SessionState::Ready(session_info.clone()),
+            device_cleanup: DeviceCleanupState::LocalResetFailed {
+                request_id: 370,
+                mode: DeviceCleanupLocalMode::RemoteRemoved {
+                    outcome: DeviceCleanupRemoteOutcome::AlreadyAbsent,
+                },
+                failure: DeviceCleanupFailureKind::LocalData,
+            },
             sync: SyncState::Running,
             ..AppState::default()
         };

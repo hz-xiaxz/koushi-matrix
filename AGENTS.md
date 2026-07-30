@@ -1287,11 +1287,36 @@ before GA. Do not open feature issues for these without re-deciding scope here.
 - With SAS gone, a user holding no recovery material has no action left in the
   gate, so it renders explicit `gate.noRecoveryKey*` guidance instead of an
   empty panel. Nothing is deleted there: the session stays signed in.
-- **Still open in #370:** the explicit destructive
-  `Cancel sign-in and remove this device…` path — remote-first device deletion,
-  idempotent already-absent handling, retryable failure, and the OAuth/MAS vs
-  password-UIA split. Verification failure must never auto-delete the server
-  device or local data; that remains true today because no such path exists yet.
+- The explicit `Cancel sign-in and remove this device…` path is Rust-owned
+  `AppState.device_cleanup`. It is always remote-first: legacy sessions use
+  password UIAA, OAuth/MAS sessions revoke through OAuth logout, and
+  already-absent devices settle idempotently. A remote failure preserves the
+  provisional session and local credentials for retry; erasing local data while
+  the remote device may remain requires a separate confirmation.
+- Device-cleanup commands are valid only while cleanup owns a retryable
+  provisional/rechecking or awaiting-verification gate. Starting recovery or
+  verification clears the offer; `Verifying` never admits or renders cleanup.
+  React renders the Rust snapshot and submits typed commands; it must not infer
+  success, delete local state, retain UIAA secrets, or auto-start cleanup after
+  verification failure.
+- Private-data-free diagnostics use source `device_cleanup` with stages
+  `offered`, `remote_started`, `uia_required`, `uia_submitted`,
+  `remote_settled`, `remote_failed`, `local_reset_started`,
+  `local_reset_failed`, and `completed`. They never contain account, device, or
+  raw SDK identifiers.
+- Focused checks are `cargo test -p koushi-state --test session_state`,
+  `cargo test -p koushi-core --lib device_cleanup`, and
+  `npm --prefix apps/desktop exec -- playwright test
+  e2e/session-verification-gate.spec.ts -g "device cleanup" --workers=1`.
+  The local server proof is
+  `PATH=/tmp/koushi-desktop-local-qa-bin:$PATH npm --prefix apps/desktop run
+  qa:headless-local -- --server=conduit --scenario=device_cleanup --core
+  --core-backend=probed --timeout-ms=240000`.
+  This scenario uses a separate short-lived audit session to query the raw
+  homeserver device list, proves the removed Device ID is absent and the
+  replacement is present, then remotely deletes the auditor device.
+- Rich device naming and account-management presentation remain #369. Do not
+  expand this cleanup state machine into that surface.
 
 ## E2EE Trust Phase B GUI Notes
 

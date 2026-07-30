@@ -7,7 +7,7 @@ build gates. AGENTS.md remains the operational how-to (permissions, install
 caveats, recovery steps); durable rules discovered there are promoted to
 REPOSITORY_RULES.md or this document.
 
-Last amended: 2026-07-24.
+Last amended: 2026-07-30.
 
 ## Design Simplicity
 
@@ -241,6 +241,23 @@ Rules:
    unverified eligible peer devices do not require a normal-mode send prompt,
    while blocked devices and cryptographic integrity/key-mismatch failures
    remain hard failures.
+   Provisional-device cleanup is remote-first and Rust-owned. Legacy Matrix
+   sessions use current-device deletion plus server UIAA; OAuth/MAS sessions
+   use SDK token/session revocation and must never request a password UIAA
+   continuation. Remote failure preserves the credentials and keyed store
+   needed to retry. Local clearing begins only after remote success or an
+   authoritative already-absent result, except for a separately confirmed
+   local-only escape from the failed state. The `device_cleanup` diagnostic
+   source may record only request correlation, elapsed milliseconds, booleans,
+   and these enum fields: `stage`, `reason`, `auth_mode`, `outcome`, and
+   `failure_kind`. It must never record Device IDs, user IDs, homeservers,
+   tokens, UIAA sessions, passwords, recovery material, or raw SDK errors.
+   OAuth device naming and its `oauth_device_name` diagnostics belong to the
+   live-session issue #369 and must not gain a second owner here.
+   Treat ambiguous `M_UNKNOWN_TOKEN` and generic `M_NOT_FOUND` cleanup errors
+   as retryable; neither proves the target Device ID is absent. Recovery or
+   verification and destructive cleanup are mutually exclusive owners:
+   entering `Verifying` clears the cleanup offer and rejects cleanup commands.
 12. Credential-store health diagnostics are kind-only. Public state may report
    only `unknown`, `healthy`, `unavailable`, `locked_or_inaccessible`,
    `missing_credential`, or `reset_required`, with optional private-data-free

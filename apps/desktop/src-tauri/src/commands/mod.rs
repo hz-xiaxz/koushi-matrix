@@ -1364,6 +1364,30 @@ pub(crate) fn build_reset_local_data_command(request_id: koushi_core::RequestId)
     CoreCommand::Account(AccountCommand::ResetLocalData { request_id })
 }
 
+pub(crate) fn build_start_device_cleanup_command(
+    request_id: koushi_core::RequestId,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::StartDeviceCleanup { request_id })
+}
+
+pub(crate) fn build_submit_device_cleanup_uia_command(
+    request_id: koushi_core::RequestId,
+    flow_id: u64,
+    password: AuthSecret,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::SubmitDeviceCleanupUia {
+        request_id,
+        flow_id,
+        password,
+    })
+}
+
+pub(crate) fn build_erase_device_cleanup_local_data_anyway_command(
+    request_id: koushi_core::RequestId,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::EraseDeviceCleanupLocalDataAnyway { request_id })
+}
+
 pub(crate) fn build_open_activity_command(request_id: koushi_core::RequestId) -> CoreCommand {
     CoreCommand::App(AppCommand::OpenActivity { request_id })
 }
@@ -3644,15 +3668,16 @@ mod tests {
         build_confirm_sas_verification_command, build_create_room_command,
         build_create_space_command, build_decline_invite_command, build_discover_login_command,
         build_download_media_command, build_edit_message_command, build_enable_key_backup_command,
-        build_export_room_keys_command, build_forget_room_command, build_forward_message_command,
-        build_hide_link_preview_command, build_ignore_user_command, build_import_room_keys_command,
-        build_invite_user_command, build_join_directory_room_command, build_join_room_command,
-        build_leave_room_command, build_load_link_previews_command,
-        build_load_message_source_command, build_load_room_settings_command, build_logout_command,
-        build_mark_activity_read_command, build_moderate_room_member_command,
-        build_observe_timeline_viewport_command, build_open_activity_command,
-        build_open_files_view_command, build_open_timeline_at_timestamp_command,
-        build_paginate_activity_command, build_paginate_thread_timeline_backwards_command,
+        build_erase_device_cleanup_local_data_anyway_command, build_export_room_keys_command,
+        build_forget_room_command, build_forward_message_command, build_hide_link_preview_command,
+        build_ignore_user_command, build_import_room_keys_command, build_invite_user_command,
+        build_join_directory_room_command, build_join_room_command, build_leave_room_command,
+        build_load_link_previews_command, build_load_message_source_command,
+        build_load_room_settings_command, build_logout_command, build_mark_activity_read_command,
+        build_moderate_room_member_command, build_observe_timeline_viewport_command,
+        build_open_activity_command, build_open_files_view_command,
+        build_open_timeline_at_timestamp_command, build_paginate_activity_command,
+        build_paginate_thread_timeline_backwards_command,
         build_paginate_timeline_backwards_command, build_pin_event_command,
         build_probe_local_encryption_health_command, build_query_directory_command,
         build_redact_message_command, build_redact_reaction_command, build_remove_room_tag_command,
@@ -3668,7 +3693,8 @@ mod tests {
         build_set_local_user_alias_command, build_set_presence_command, build_set_room_tag_command,
         build_set_room_url_preview_override_command, build_set_space_child_command,
         build_set_thread_composer_draft_command, build_set_typing_command,
-        build_start_direct_message_command, build_submit_identity_reset_oauth_command,
+        build_start_device_cleanup_command, build_start_direct_message_command,
+        build_submit_device_cleanup_uia_command, build_submit_identity_reset_oauth_command,
         build_submit_identity_reset_password_command, build_submit_login_command,
         build_submit_recovery_command, build_submit_search_command,
         build_submit_soft_logout_reauth_command, build_subscribe_focused_timeline_command,
@@ -6727,6 +6753,39 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn device_cleanup_commands_route_to_the_provisional_account_state_machine() {
+        let request_id = fake_request_id(49);
+        assert!(matches!(
+            build_start_device_cleanup_command(request_id),
+            CoreCommand::Account(AccountCommand::StartDeviceCleanup {
+                request_id: actual
+            }) if actual == request_id
+        ));
+        match build_submit_device_cleanup_uia_command(
+            request_id,
+            41,
+            AuthSecret::new("private-password"),
+        ) {
+            CoreCommand::Account(AccountCommand::SubmitDeviceCleanupUia {
+                request_id: actual,
+                flow_id,
+                password,
+            }) => {
+                assert_eq!(actual, request_id);
+                assert_eq!(flow_id, 41);
+                assert_eq!(password.expose_secret(), "private-password");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+        assert!(matches!(
+            build_erase_device_cleanup_local_data_anyway_command(request_id),
+            CoreCommand::Account(AccountCommand::EraseDeviceCleanupLocalDataAnyway {
+                request_id: actual
+            }) if actual == request_id
+        ));
     }
 
     #[test]

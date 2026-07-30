@@ -163,6 +163,7 @@ function readySnapshot(
         schema_version: 3,
         domain: {
           session: { kind: "ready", homeserver: HOMESERVER, user_id: USER_ID, device_id: DEVICE_ID },
+          device_cleanup: { kind: "idle" },
           auth: { kind: "unknown" },
           settings: defaultSettingsState(),
           link_preview_settings: { room_overrides: {} },

@@ -98,6 +98,9 @@ export interface DesktopApi {
   switchAccount(session: SavedSessionInfo): Promise<DesktopSnapshot>;
   logout(): Promise<DesktopSnapshot>;
   submitRecovery(secret: string): Promise<DesktopSnapshot>;
+  startDeviceCleanup(): Promise<DesktopSnapshot>;
+  submitDeviceCleanupUia(flowId: number, password: string): Promise<DesktopSnapshot>;
+  eraseLocalDataAnyway(): Promise<DesktopSnapshot>;
   restartSync(): Promise<DesktopSnapshot>;
   updateSettings(patch: SettingsPatch): Promise<DesktopSnapshot>;
   rebuildSearchIndex(): Promise<DesktopSnapshot>;
@@ -738,6 +741,20 @@ class BrowserFakeApi implements DesktopApi {
     );
     void secret;
 
+    return this.getSnapshot();
+  }
+
+  async startDeviceCleanup(): Promise<DesktopSnapshot> {
+    return this.getSnapshot();
+  }
+
+  async submitDeviceCleanupUia(flowId: number, password: string): Promise<DesktopSnapshot> {
+    void flowId;
+    void password;
+    return this.getSnapshot();
+  }
+
+  async eraseLocalDataAnyway(): Promise<DesktopSnapshot> {
     return this.getSnapshot();
   }
 
@@ -4118,7 +4135,7 @@ function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): Desk
   const active_space_id = "!space-alpha:example.invalid";
   const active_room_id = "!room-alpha:example.invalid";
   const sidebar = composeBrowserFakeSidebar(active_space_id, spaces, rooms, {}, invites.length);
-    const snapshot: DesktopSnapshot = {
+  const snapshot: DesktopSnapshot = {
     state: {
       schema_version: 3,
       domain: {
@@ -4126,6 +4143,7 @@ function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): Desk
           ...session,
           kind: "ready"
         },
+        device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },
         device_sessions: { kind: "idle" },
         account_management: { kind: "idle" },
@@ -4255,6 +4273,7 @@ function createSignedOutSnapshot(): DesktopSnapshot {
       schema_version: 3,
       domain: {
         session: { kind: "signedOut" },
+        device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },
         device_sessions: { kind: "idle" },
         account_management: { kind: "idle" },

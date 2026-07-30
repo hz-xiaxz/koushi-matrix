@@ -8,7 +8,7 @@ fixture/demo backend contract mentioned below is historical (dev/demo only).
 The state-transition diagrams in this document are normative and must track the
 reducer; see [Maintenance Contract](#maintenance-contract).
 
-Date: 2026-07-20
+Date: 2026-07-30
 
 ## Contract
 
@@ -78,9 +78,8 @@ stateDiagram-v2
     SignedOut --> Authenticating: LoginSubmitted / CompleteOidcLogin
     Authenticating --> Provisional: AuthenticatedSessionInstalled
     Authenticating --> SignedOut: LoginFailed
-    Provisional --> AwaitingVerification: TrustUnverified / methods discovered
+    Provisional --> AwaitingVerification: TrustUnverified / method discovery settled
     Provisional --> Ready: AuthoritativeDeviceTrustChanged(Verified)
-    Provisional --> Rejecting: ExistingIdentityWithoutProof
     AwaitingVerification --> Verifying: VerificationMethodSubmitted / clear prior failure
     AwaitingVerification --> Rejecting: RejectSession / no proof
     Verifying --> AwaitingVerification: Cancelled / failed / timeout
@@ -92,6 +91,58 @@ stateDiagram-v2
     Locked --> LoggingOut: LogoutRequested
     LoggingOut --> SignedOut: LogoutFinished
 ```
+
+Provisional-device cleanup is a Rust-owned AppState state machine alongside the
+session gate, so it can represent method-discovery failures before a
+`VerificationGateState` exists. Confirmation
+dialog visibility is presentation-only; all Matrix ordering, retry, and
+terminal meaning below belongs to the reducer and `AccountActor`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Offered: Verification failure / no proof method
+    Offered --> ResolvingRemote: StartDeviceCleanup
+    ResolvingRemote --> RemovingRemote: auth mode resolved
+    RemovingRemote --> AwaitingUia: Legacy UIAA challenge
+    AwaitingUia --> RemovingRemote: matching SubmitDeviceCleanupUia
+    RemovingRemote --> RemoteFailed: remote failure
+    RemoteFailed --> ResolvingRemote: StartDeviceCleanup retry
+    RemovingRemote --> ResettingLocal: success / already absent
+    ResettingLocal --> LocalResetFailed: local clear failure
+    LocalResetFailed --> ResettingLocal: StartDeviceCleanup local-only retry
+    ResettingLocal --> SignedOut: local clear success
+    RemoteFailed --> ErasingLocalAnyway: EraseLocalDataAnyway
+    ErasingLocalAnyway --> LocalResetFailed: local clear failure
+    ErasingLocalAnyway --> SignedOut: local clear success
+    Offered --> Idle: promotion / rejection / logout / account replacement
+    RemoteFailed --> Idle: promotion / rejection / logout / account replacement
+    LocalResetFailed --> Idle: rejection / logout / account replacement
+```
+
+- `StartDeviceCleanup` is accepted only from `Offered`, `RemoteFailed`, or
+  `LocalResetFailed`. The last state retries only the local clearing stage
+  because remote removal has already settled.
+- Legacy cleanup resolves the current Device ID inside `AccountActor`, attempts
+  deletion without auth to receive a server UIAA challenge, and holds the
+  opaque UIAA session only inside the actor. Only a matching `flow_id` may
+  resume it. OAuth/MAS cleanup uses SDK OAuth logout/revocation and never enters
+  password UIAA.
+- Remote `success` and authoritative `already_absent` both permit
+  `ResettingLocal`. Any other remote outcome settles `RemoteFailed` without
+  stopping the runtime, dropping the SDK session, or clearing credentials.
+- `EraseLocalDataAnyway` is accepted only from `RemoteFailed` after a separate
+  GUI confirmation. It skips remote work and its completion explicitly means
+  that the remote device may remain.
+- Request IDs fence every pending/settled transition. Stale and duplicate
+  completions, stale UIAA flow IDs, and completions for a replaced provisional
+  session are ignored. An actor-side failure always sends the matching reducer
+  failure action; `OperationFailed` alone is not settlement.
+- Promotion, rejection, logout, account switch, and a new login attempt clear
+  cleanup state and actor-private continuations.
+- Starting any recovery or verification attempt also clears an `Offered`
+  cleanup state. `Verifying` never owns cleanup commands or cleanup UI, so
+  recovery and destructive cleanup cannot overlap.
 
 - A state-changing account command is admitted only if its projected action is
   accepted by the current reducer state. Rejection is never a silent return:

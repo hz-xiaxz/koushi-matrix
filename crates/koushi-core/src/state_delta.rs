@@ -4,14 +4,14 @@ use std::collections::{BTreeMap, HashMap};
 
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, ActivityState, AppError, AppState,
-    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, DeviceSessionListState,
-    DirectoryState, E2eeTrustState, FilesViewState, FocusedContextState, InvitePreview,
-    InviteWorkflowState, LinkPreviewSettingsState, LiveSignalsState, LocalEncryptionState,
-    MentionCandidatesState, NativeAttentionState, NavigationState, ProfileState, QrLoginState,
-    RoomInteractionState, RoomListProjection, RoomManagementState, RoomNotificationSettings,
-    RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchState, SessionState,
-    SettingsState, SidebarModel, SoftLogoutReauthState, SpaceSummary, SyncMode, SyncState,
-    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
+    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, DeviceCleanupState,
+    DeviceSessionListState, DirectoryState, E2eeTrustState, FilesViewState, FocusedContextState,
+    InvitePreview, InviteWorkflowState, LinkPreviewSettingsState, LiveSignalsState,
+    LocalEncryptionState, MentionCandidatesState, NativeAttentionState, NavigationState,
+    ProfileState, QrLoginState, RoomInteractionState, RoomListProjection, RoomManagementState,
+    RoomNotificationSettings, RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchState,
+    SessionState, SettingsState, SidebarModel, SoftLogoutReauthState, SpaceSummary, SyncMode,
+    SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     compose_sidebar_with_account_facts,
 };
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,7 @@ pub struct StateDelta {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StateDeltaChangedSlices {
     pub session: Option<SessionState>,
+    pub device_cleanup: Option<DeviceCleanupState>,
     pub auth: Option<AuthDiscoveryState>,
     pub device_sessions: Option<DeviceSessionListState>,
     pub account_management: Option<AccountManagementState>,
@@ -92,6 +93,7 @@ pub fn build_state_delta(
     }
 
     changed_slice!(session);
+    changed_slice!(device_cleanup);
     changed_slice!(auth);
     changed_slice!(device_sessions);
     changed_slice!(account_management);
@@ -214,6 +216,7 @@ fn audit_app_state_delta_slices(state: &AppState) {
         native_attention: _,
         cjk_text_policy: _,
         errors: _,
+        device_cleanup: _,
     } = state;
 }
 
@@ -221,8 +224,8 @@ fn audit_app_state_delta_slices(state: &AppState) {
 mod tests {
     use super::*;
     use koushi_state::{
-        MentionCandidatesCompleteness, MentionCandidatesTarget, MentionSurface,
-        RoomMentionPermission, SearchCrawlerRoomState,
+        DeviceCleanupOfferReason, MentionCandidatesCompleteness, MentionCandidatesTarget,
+        MentionSurface, RoomMentionPermission, SearchCrawlerRoomState,
     };
 
     #[test]
@@ -245,6 +248,22 @@ mod tests {
     #[test]
     fn state_delta_omits_unchanged_state() {
         assert!(build_state_delta(1, &AppState::default(), &AppState::default()).is_none());
+    }
+
+    #[test]
+    fn device_cleanup_state_is_an_incremental_slice() {
+        let previous = AppState::default();
+        let mut next = previous.clone();
+        next.device_cleanup = DeviceCleanupState::Offered {
+            reason: DeviceCleanupOfferReason::RecoveryFailed,
+        };
+
+        let delta = build_state_delta(7, &previous, &next).expect("cleanup state changed");
+
+        assert_eq!(delta.changed.device_cleanup, Some(next.device_cleanup));
+        let mut without_cleanup = delta.changed;
+        without_cleanup.device_cleanup = None;
+        assert!(without_cleanup.is_empty());
     }
 
     #[test]

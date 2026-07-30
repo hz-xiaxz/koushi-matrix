@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! Koushi core runtime.
 //!
 //! The only production runtime owner: actor lifecycle, command routing,

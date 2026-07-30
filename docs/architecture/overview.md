@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-07-20.
+Last amended: 2026-07-30.
 
 ## Product Scope
 
@@ -400,6 +400,24 @@ persisted; a process restart returns to `SignedOut`. Rejection performs
 best-effort server logout and deletes account-local keyed stores. A later
 non-Verified observation locks a Ready session, stops normal children, and
 clears session views before the main shell can remain usable.
+
+**Provisional-device cleanup invariant.** A failed or unavailable verification
+method never deletes a device or local data automatically. The verification
+gate may offer an explicit destructive cleanup, but its ordering and outcome
+are Rust-owned: `AccountActor` first resolves the active SDK session's
+authentication mode and authoritative current Device ID, then removes the
+legacy Matrix device through UIAA or revokes the OAuth/MAS session through the
+SDK OAuth logout path. Only remote success or an authoritative already-absent
+result permits account-local persistence clearing and `SignedOut`. A remote
+failure retains the session and keyed persistence for retry. A separately
+confirmed local-only escape is allowed only from that failed state and must say
+that the remote device may remain. Raw Device IDs, UIAA sessions, tokens,
+passwords, and SDK errors stay inside Rust. OAuth device naming and live
+account-management-link discovery have a separate owner in issue #369.
+Ambiguous legacy `M_UNKNOWN_TOKEN` and generic `M_NOT_FOUND` errors are not
+proof of target-device absence and therefore remain retryable. Starting a new
+verification/recovery attempt retires the cleanup offer; the two flows never
+own the provisional session concurrently.
 
 Actor deployment is flexible. The boundaries above define state ownership,
 command routing, event production, and shutdown responsibility; they do not

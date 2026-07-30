@@ -84,6 +84,22 @@ describe("TauriDesktopApi", () => {
     });
   });
 
+  test("passes explicit device cleanup stages to Rust without exposing remote policy", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    const api = createDesktopApi();
+    await api.startDeviceCleanup();
+    await api.submitDeviceCleanupUia(370, "synthetic-password");
+    await api.eraseLocalDataAnyway();
+
+    expect(invoke).toHaveBeenCalledWith("start_device_cleanup");
+    expect(invoke).toHaveBeenCalledWith("submit_device_cleanup_uia", {
+      flowId: 370,
+      password: "synthetic-password"
+    });
+    expect(invoke).toHaveBeenCalledWith("erase_local_data_anyway");
+  });
+
   test("passes settings patches to the Rust update_settings command", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 

@@ -99,6 +99,86 @@ pub struct VerificationGateState {
     pub failure: Option<VerificationGateFailureKind>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceCleanupAuthMode {
+    Legacy,
+    OAuth,
+    #[default]
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceCleanupOfferReason {
+    RecoveryFailed,
+    NoProofMethod,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceCleanupRemoteOutcome {
+    Success,
+    AlreadyAbsent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceCleanupFailureKind {
+    Network,
+    Forbidden,
+    Timeout,
+    Sdk,
+    LocalData,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DeviceCleanupLocalMode {
+    RemoteRemoved { outcome: DeviceCleanupRemoteOutcome },
+    RemoteMayRemain,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DeviceCleanupState {
+    #[default]
+    Idle,
+    Offered {
+        reason: DeviceCleanupOfferReason,
+    },
+    ResolvingRemote {
+        request_id: u64,
+    },
+    RemovingRemote {
+        request_id: u64,
+        auth_mode: DeviceCleanupAuthMode,
+    },
+    AwaitingUia {
+        request_id: u64,
+        flow_id: u64,
+    },
+    RemoteFailed {
+        request_id: u64,
+        auth_mode: DeviceCleanupAuthMode,
+        #[serde(rename = "failureKind")]
+        failure: DeviceCleanupFailureKind,
+    },
+    ResettingLocal {
+        request_id: u64,
+        mode: DeviceCleanupLocalMode,
+    },
+    LocalResetFailed {
+        request_id: u64,
+        mode: DeviceCleanupLocalMode,
+        #[serde(rename = "failureKind")]
+        failure: DeviceCleanupFailureKind,
+    },
+    ErasingLocalAnyway {
+        request_id: u64,
+    },
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum VerificationMethodCapability {

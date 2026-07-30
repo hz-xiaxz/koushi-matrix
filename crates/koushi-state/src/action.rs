@@ -9,7 +9,8 @@ use crate::state::{
     AccountManagementOperation, ActivityMarkReadTarget, ActivityRow, ActivityStream, ActivityTab,
     AttachmentFilter, AttachmentResult, AttachmentScope, AttachmentSort, AuthFailureKind,
     AvatarThumbnailState, BasicOperationRequest, CrossSigningStatus, CurrentDeviceTrustState,
-    DelegatedAuthLinks, DeviceSessionSummary, DirectoryQuery, DirectoryRoomPreview,
+    DelegatedAuthLinks, DeviceCleanupAuthMode, DeviceCleanupFailureKind,
+    DeviceCleanupRemoteOutcome, DeviceSessionSummary, DirectoryQuery, DirectoryRoomPreview,
     DirectoryRoomSummary, E2eeRecoveryState, FilesViewScope, IdentityResetAuthType,
     InviteDestinationResult, InviteScopeSelection, JapaneseCatalogProfile, LiveEventReceipts,
     LocalEncryptionHealth, LoginAttemptId, LoginFlow, MentionCandidate,
@@ -255,6 +256,40 @@ pub enum AppAction {
     VerificationGateAttemptFailed {
         flow_id: u64,
         kind: crate::state::VerificationGateFailureKind,
+    },
+    DeviceCleanupStartRequested {
+        request_id: u64,
+    },
+    DeviceCleanupRemoteStarted {
+        request_id: u64,
+        auth_mode: DeviceCleanupAuthMode,
+    },
+    DeviceCleanupUiaRequired {
+        request_id: u64,
+        flow_id: u64,
+    },
+    DeviceCleanupUiaSubmitted {
+        request_id: u64,
+        flow_id: u64,
+    },
+    DeviceCleanupRemoteSettled {
+        request_id: u64,
+        outcome: DeviceCleanupRemoteOutcome,
+    },
+    DeviceCleanupRemoteFailed {
+        request_id: u64,
+        auth_mode: DeviceCleanupAuthMode,
+        kind: DeviceCleanupFailureKind,
+    },
+    DeviceCleanupEraseLocalAnywayRequested {
+        request_id: u64,
+    },
+    DeviceCleanupLocalResetFailed {
+        request_id: u64,
+        kind: DeviceCleanupFailureKind,
+    },
+    DeviceCleanupCompleted {
+        request_id: u64,
     },
     VerificationSessionRejected {
         reason: crate::state::VerificationGateRejectReason,

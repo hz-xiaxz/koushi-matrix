@@ -115,6 +115,9 @@ impl CoreCommand {
                 | AccountCommand::ChangeSecureBackupPassphrase { request_id, .. }
                 | AccountCommand::ProbeLocalEncryptionHealth { request_id }
                 | AccountCommand::ResetLocalData { request_id }
+                | AccountCommand::StartDeviceCleanup { request_id }
+                | AccountCommand::SubmitDeviceCleanupUia { request_id, .. }
+                | AccountCommand::EraseDeviceCleanupLocalDataAnyway { request_id }
                 | AccountCommand::SubmitRecovery { request_id, .. }
                 | AccountCommand::StartSessionBootstrap { request_id, .. }
                 | AccountCommand::ConfirmSessionBootstrapSaved { request_id, .. }
@@ -1181,6 +1184,17 @@ pub enum AccountCommand {
     ResetLocalData {
         request_id: RequestId,
     },
+    StartDeviceCleanup {
+        request_id: RequestId,
+    },
+    SubmitDeviceCleanupUia {
+        request_id: RequestId,
+        flow_id: u64,
+        password: koushi_state::AuthSecret,
+    },
+    EraseDeviceCleanupLocalDataAnyway {
+        request_id: RequestId,
+    },
     SubmitRecovery {
         request_id: RequestId,
         request: RecoveryRequest,
@@ -1498,6 +1512,24 @@ impl fmt::Debug for AccountCommand {
                 .finish(),
             Self::ResetLocalData { request_id } => formatter
                 .debug_struct("ResetLocalData")
+                .field("request_id", request_id)
+                .finish(),
+            Self::StartDeviceCleanup { request_id } => formatter
+                .debug_struct("StartDeviceCleanup")
+                .field("request_id", request_id)
+                .finish(),
+            Self::SubmitDeviceCleanupUia {
+                request_id,
+                flow_id,
+                ..
+            } => formatter
+                .debug_struct("SubmitDeviceCleanupUia")
+                .field("request_id", request_id)
+                .field("flow_id", flow_id)
+                .field("password", &"AuthSecret(..)")
+                .finish(),
+            Self::EraseDeviceCleanupLocalDataAnyway { request_id } => formatter
+                .debug_struct("EraseDeviceCleanupLocalDataAnyway")
                 .field("request_id", request_id)
                 .finish(),
             Self::SubmitRecovery {
@@ -3889,5 +3921,27 @@ mod tests {
         assert!(avatar_debug.contains("image/png"), "{avatar_debug}");
         assert!(avatar_debug.contains("bytes_len"), "{avatar_debug}");
         assert!(!avatar_debug.contains("9, 8, 7, 6"), "{avatar_debug}");
+    }
+
+    #[test]
+    fn device_cleanup_commands_are_provisional_safe_and_redact_passwords() {
+        let start = AccountCommand::StartDeviceCleanup {
+            request_id: fake_rid(41),
+        };
+        let submit = AccountCommand::SubmitDeviceCleanupUia {
+            request_id: fake_rid(42),
+            flow_id: 41,
+            password: koushi_state::AuthSecret::new("private-cleanup-password"),
+        };
+        let erase = AccountCommand::EraseDeviceCleanupLocalDataAnyway {
+            request_id: fake_rid(43),
+        };
+
+        assert!(!start.requires_ready_session());
+        assert!(!submit.requires_ready_session());
+        assert!(!erase.requires_ready_session());
+        let debug = format!("{submit:?}");
+        assert!(debug.contains("AuthSecret(..)"), "{debug}");
+        assert!(!debug.contains("private-cleanup-password"), "{debug}");
     }
 }

@@ -54,6 +54,7 @@ export interface AppState {
 
 export interface AppDomainState {
   session: SessionState;
+  device_cleanup: DeviceCleanupState;
   auth: AuthDiscoveryState;
   device_sessions: DeviceSessionListState;
   account_management: AccountManagementState;
@@ -445,6 +446,33 @@ export type VerificationMethod = VerificationMethodCapability;
 export type VerificationAccountKind = "existingIdentity" | "newIdentity" | "unknown";
 export type VerificationGateFailureKind = "network" | "cancelled" | "mismatch" | "forbidden" | "timeout" | "sdk" | "noProofMethod";
 export interface VerificationGateState { methods: VerificationMethodCapability[]; account_kind: VerificationAccountKind; failureKind?: VerificationGateFailureKind | null }
+export type DeviceCleanupAuthMode = "legacy" | "oAuth" | "unknown";
+export type DeviceCleanupOfferReason = "recoveryFailed" | "noProofMethod";
+export type DeviceCleanupRemoteOutcome = "success" | "alreadyAbsent";
+export type DeviceCleanupFailureKind = "network" | "forbidden" | "timeout" | "sdk" | "localData";
+export type DeviceCleanupLocalMode =
+  | { kind: "remoteRemoved"; outcome: DeviceCleanupRemoteOutcome }
+  | { kind: "remoteMayRemain" };
+export type DeviceCleanupState =
+  | { kind: "idle" }
+  | { kind: "offered"; reason: DeviceCleanupOfferReason }
+  | { kind: "resolvingRemote"; request_id: number }
+  | { kind: "removingRemote"; request_id: number; auth_mode: DeviceCleanupAuthMode }
+  | { kind: "awaitingUia"; request_id: number; flow_id: number }
+  | {
+      kind: "remoteFailed";
+      request_id: number;
+      auth_mode: DeviceCleanupAuthMode;
+      failureKind: DeviceCleanupFailureKind;
+    }
+  | { kind: "resettingLocal"; request_id: number; mode: DeviceCleanupLocalMode }
+  | {
+      kind: "localResetFailed";
+      request_id: number;
+      mode: DeviceCleanupLocalMode;
+      failureKind: DeviceCleanupFailureKind;
+    }
+  | { kind: "erasingLocalAnyway"; request_id: number };
 export type ProvisionalPhase =
   | "checkingTrust"
   | "discoveringMethods"

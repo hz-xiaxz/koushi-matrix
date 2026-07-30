@@ -143,6 +143,214 @@ test("recovery and bootstrap actions preserve secrets outside observable state",
   expect(observable).not.toContain(destination);
 });
 
+test("device cleanup is explicit, remote-first, and keeps UIA secrets out of observable state", async ({ page }) => {
+  await page.goto("/appHarness.html");
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          session: {
+            kind: "awaitingVerification",
+            homeserver: "https://example.invalid",
+            user_id: "@gate:example.invalid",
+            device_id: "DEVICE",
+            gate: {
+              methods: ["recoveryKey"],
+              account_kind: "existingIdentity",
+              failureKind: "sdk"
+            }
+          },
+          device_cleanup: { kind: "offered", reason: "recoveryFailed" }
+        }
+      }
+    });
+    window.__harness.setCommandResponse("start_device_cleanup", () => {
+      const current = window.__harness.currentSnapshot();
+      return {
+        ...current,
+        state: {
+          ...current.state,
+          domain: {
+            ...current.state.domain,
+            device_cleanup: { kind: "resolvingRemote", request_id: 370 }
+          }
+        }
+      };
+    });
+    window.__harness.pushStateChanged();
+    window.__harness.clearInvocations();
+  });
+
+  await expect(page.getByRole("button", {
+    name: "Cancel sign-in and remove this device…"
+  })).toBeVisible();
+  expect(await page.evaluate(() => window.__harness.invocationsOf("start_device_cleanup").length))
+    .toBe(0);
+  await page.getByRole("button", { name: "Cancel sign-in and remove this device…" }).click();
+  const confirmation = page.getByRole("dialog", {
+    name: "Cancel sign-in and remove this device"
+  });
+  await expect(confirmation).toContainText("remove this device from your Matrix account first");
+  await expect(confirmation).toContainText("Messages on your homeserver are preserved");
+  await expect(confirmation).toContainText("next sign-in creates a new Device ID");
+  await confirmation.getByRole("button", {
+    name: "Remove device and erase local data"
+  }).click();
+  await expect.poll(
+    () => page.evaluate(() => window.__harness.invocationsOf("start_device_cleanup").length)
+  ).toBe(1);
+  await expect(page.getByText("Checking how this device must be removed…")).toBeVisible();
+
+  await page.evaluate(() => {
+    const current = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...current,
+      state: {
+        ...current.state,
+        domain: {
+          ...current.state.domain,
+          device_cleanup: { kind: "awaitingUia", request_id: 371, flow_id: 41 }
+        }
+      }
+    });
+    window.__harness.setCommandResponse("submit_device_cleanup_uia", () => {
+      const next = window.__harness.currentSnapshot();
+      return {
+        ...next,
+        state: {
+          ...next.state,
+          domain: {
+            ...next.state.domain,
+            device_cleanup: {
+              kind: "resettingLocal",
+              request_id: 371,
+              mode: { kind: "remoteRemoved", outcome: "success" }
+            }
+          }
+        }
+      };
+    });
+    window.__harness.pushStateChanged();
+    window.__harness.clearInvocations();
+  });
+  const secret = "SYNTHETIC_CLEANUP_PASSWORD_370";
+  await page.getByLabel("Account password").fill(secret);
+  await page.getByRole("button", { name: "Continue device removal" }).click();
+  await expect(page.getByLabel("Account password")).toHaveCount(0);
+  await expect.poll(
+    () => page.evaluate(() => window.__harness.invocationsOf("submit_device_cleanup_uia")[0]?.args)
+  ).toEqual({ flowId: 41, password: "[REDACTED]" });
+  await expect(page.locator("body")).not.toContainText(secret);
+  expect(await page.evaluate(
+    (sentinel) => JSON.stringify(window.__harness.currentSnapshot()).includes(sentinel),
+    secret
+  )).toBe(false);
+});
+
+test("remote cleanup failure preserves data and separately confirms local-only erasure", async ({ page }) => {
+  await page.goto("/appHarness.html");
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          session: {
+            kind: "awaitingVerification",
+            homeserver: "https://example.invalid",
+            user_id: "@gate:example.invalid",
+            device_id: "DEVICE",
+            gate: {
+              methods: [],
+              account_kind: "existingIdentity",
+              failureKind: "noProofMethod"
+            }
+          },
+          device_cleanup: {
+            kind: "remoteFailed",
+            request_id: 372,
+            auth_mode: "oAuth",
+            failureKind: "forbidden"
+          }
+        }
+      }
+    });
+    window.__harness.setCommandResponse(
+      "erase_local_data_anyway",
+      () => window.__harness.currentSnapshot()
+    );
+    window.__harness.pushStateChanged();
+    window.__harness.clearInvocations();
+  });
+
+  await expect(page.getByRole("alert").filter({
+    hasText: "Your credentials and local data are still preserved"
+  })).toBeVisible();
+  await expect(page.getByLabel("Account password")).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry removing device" }).click();
+  await expect.poll(
+    () => page.evaluate(() => window.__harness.invocationsOf("start_device_cleanup").length)
+  ).toBe(1);
+  await page.getByRole("button", { name: "Erase local data anyway…" }).click();
+  const confirmation = page.getByRole("dialog", { name: "Erase local data anyway" });
+  await expect(confirmation).toContainText("device may remain active on your Matrix account");
+  expect(await page.evaluate(
+    () => window.__harness.invocationsOf("erase_local_data_anyway").length
+  )).toBe(0);
+  await confirmation.getByRole("button", { name: "Erase local data anyway" }).click();
+  await expect.poll(
+    () => page.evaluate(() => window.__harness.invocationsOf("erase_local_data_anyway").length)
+  ).toBe(1);
+});
+
+test("already-absent remote cleanup proceeds only with the Rust-owned local reset", async ({ page }) => {
+  await page.goto("/appHarness.html");
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          session: {
+            kind: "awaitingVerification",
+            homeserver: "https://example.invalid",
+            user_id: "@gate:example.invalid",
+            device_id: "DEVICE",
+            gate: {
+              methods: ["recoveryKey"],
+              account_kind: "existingIdentity",
+              failureKind: "sdk"
+            }
+          },
+          device_cleanup: {
+            kind: "resettingLocal",
+            request_id: 376,
+            mode: { kind: "remoteRemoved", outcome: "alreadyAbsent" }
+          }
+        }
+      }
+    });
+    window.__harness.pushStateChanged();
+    window.__harness.clearInvocations();
+  });
+
+  await expect(page.getByText("Device removed. Erasing local data…")).toBeVisible();
+  await expect(page.getByLabel("Account password")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retry removing device" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Erase local data anyway…" })).toHaveCount(0);
+  expect(await page.evaluate(
+    () => window.__harness.invocationsOf("start_device_cleanup").length
+  )).toBe(0);
+});
+
 test("Ready to Locked replaces the shell with the gate", async ({ page }) => {
   await page.goto("/appHarness.html");
   await expect(page.getByRole("main", { name: "Conversation timeline" })).toBeVisible();
