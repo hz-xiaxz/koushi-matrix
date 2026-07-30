@@ -401,6 +401,7 @@ fn open_thread_projects_only_its_staging_and_close_clears_it() {
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: koushi_state::ThreadOpenIntent::ExistingThread,
         },
     );
     reduce(

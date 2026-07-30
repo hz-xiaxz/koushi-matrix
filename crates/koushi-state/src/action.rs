@@ -1057,6 +1057,7 @@ pub enum AppAction {
     OpenThread {
         room_id: String,
         root_event_id: String,
+        intent: crate::ThreadOpenIntent,
     },
     ThreadSubscribed {
         room_id: String,
@@ -1066,6 +1067,12 @@ pub enum AppAction {
         room_id: String,
         root_event_id: String,
         message: String,
+    },
+    /// Core observed a matching event-backed thread reply. Vector mutation
+    /// shape alone must not dispatch this action.
+    ThreadActivityObserved {
+        room_id: String,
+        root_event_id: String,
     },
     ThreadAttentionUpdated {
         room_id: String,

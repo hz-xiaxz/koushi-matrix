@@ -6,16 +6,25 @@ use super::errors::OperationFailureKind;
 use super::settings::ThreadListOrder;
 use super::timeline::{ComposerState, StagedUploadItem};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadOpenIntent {
+    ExistingThread,
+    NewThreadDraft,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ThreadPaneState {
     Closed,
     Opening {
         room_id: String,
         root_event_id: String,
+        intent: ThreadOpenIntent,
     },
     Open {
         room_id: String,
         root_event_id: String,
+        intent: ThreadOpenIntent,
         is_subscribed: bool,
         composer: ComposerState,
         staged_uploads: Vec<StagedUploadItem>,
