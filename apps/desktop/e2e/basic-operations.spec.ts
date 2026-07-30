@@ -5752,7 +5752,8 @@ test("thread summary chip opens a thread timeline from keyed CoreEvents", async 
     )
     .toEqual({
       roomId: "!harness-room:example.invalid",
-      rootEventId: "$seed-event:example.invalid"
+      rootEventId: "$seed-event:example.invalid",
+      intent: "existingThread"
     });
 
   const threadEventId = "$thread-reply:example.invalid";
@@ -8358,7 +8359,8 @@ test("timeline header Threads button opens the threads list and row opens a thre
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("open_thread")[0]?.args))
     .toEqual({
       roomId: "!harness-room:example.invalid",
-      rootEventId: "$thread-root:example.invalid"
+      rootEventId: "$thread-root:example.invalid",
+      intent: "existingThread"
     });
 });
 

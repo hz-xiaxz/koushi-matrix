@@ -306,7 +306,8 @@ test("latest-reply placement keeps an old root whole without room backfill", asy
   await expect.poll(() => invocationCount(page, "open_thread")).toBe(1);
   await expect.poll(() => latestInvocationArgs(page, "open_thread")).toEqual({
     roomId: ROOM_ID,
-    rootEventId: ROOT_EVENT_ID
+    rootEventId: ROOT_EVENT_ID,
+    intent: "existingThread"
   });
   expect(await invocationCount(page, "paginate_timeline_backwards")).toBe(0);
 });
@@ -355,6 +356,7 @@ test("a replay-known root uses summary activity when the Room stream has no repl
   await knownRoot.getByRole("button", { name: /^Open thread,/ }).click({ force: true });
   await expect.poll(() => latestInvocationArgs(page, "open_thread")).toEqual({
     roomId: ROOM_ID,
-    rootEventId: ROOT_EVENT_ID
+    rootEventId: ROOT_EVENT_ID,
+    intent: "existingThread"
   });
 });
