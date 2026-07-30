@@ -37,7 +37,8 @@ use koushi_state::{
     MentionIntent, MentionSurface, PresenceKind, RecoveryRequest, RoomListFilter,
     RoomModerationAction, RoomNotificationMode, RoomSettingChange, RoomTagKind, SessionInfo,
     SessionState, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
-    SubmissionId, TimelineScrollAnchor, VerificationCancelReason, build_formatted_message_draft,
+    SubmissionId, ThreadOpenIntent, TimelineScrollAnchor, VerificationCancelReason,
+    build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(any(debug_assertions, test))]
@@ -1446,6 +1447,20 @@ pub(crate) fn build_open_files_view_command(
 
 pub(crate) fn build_close_files_view_command(request_id: koushi_core::RequestId) -> CoreCommand {
     CoreCommand::App(AppCommand::CloseFilesView { request_id })
+}
+
+pub(crate) fn build_open_thread_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+    root_event_id: String,
+    intent: ThreadOpenIntent,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::OpenThread {
+        request_id,
+        room_id,
+        root_event_id,
+        intent,
+    })
 }
 
 pub(crate) fn build_open_threads_list_command(
@@ -3655,7 +3670,7 @@ mod tests {
     };
     use koushi_state::{
         AppState, AuthSecret, IdentityResetAuthRequest, LoginRequest, MentionIntent, MentionTarget,
-        SessionInfo, SessionState, VerificationCancelReason,
+        SessionInfo, SessionState, ThreadOpenIntent, VerificationCancelReason,
     };
 
     use super::QaControlCommand;
@@ -3677,7 +3692,7 @@ mod tests {
         build_load_link_previews_command, build_load_message_source_command,
         build_load_room_settings_command, build_logout_command, build_mark_activity_read_command,
         build_moderate_room_member_command, build_observe_timeline_viewport_command,
-        build_open_activity_command, build_open_files_view_command,
+        build_open_activity_command, build_open_files_view_command, build_open_thread_command,
         build_open_timeline_at_timestamp_command, build_paginate_activity_command,
         build_paginate_thread_timeline_backwards_command,
         build_paginate_timeline_backwards_command, build_pin_event_command,
@@ -6052,6 +6067,21 @@ mod tests {
         match build_close_files_view_command(fake_request_id(66)) {
             CoreCommand::App(AppCommand::CloseFilesView { request_id }) => {
                 assert_eq!(request_id, fake_request_id(66));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        match build_open_thread_command(
+            fake_request_id(67),
+            "!room:example.org".to_owned(),
+            "$root:example.org".to_owned(),
+            ThreadOpenIntent::NewThreadDraft,
+        ) {
+            CoreCommand::App(AppCommand::OpenThread {
+                request_id, intent, ..
+            }) => {
+                assert_eq!(request_id, fake_request_id(67));
+                assert_eq!(intent, ThreadOpenIntent::NewThreadDraft);
             }
             other => panic!("unexpected command: {other:?}"),
         }

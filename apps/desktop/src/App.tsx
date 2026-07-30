@@ -171,6 +171,7 @@ import type {
   SavedSessionInfo,
   SearchScopeKind,
   SettingsPatch,
+  ThreadOpenIntent,
   TimelineScrollAnchor
 } from "./domain/types";
 import { stageAttachmentFiles } from "./domain/attachmentIngestion";
@@ -4008,7 +4009,11 @@ export function App() {
     setSnapshot(await api.updateRoomMemberRole(roomId, targetUserId, powerLevel));
   }
 
-  async function openThread(roomId: string, rootEventId: string) {
+  async function openThread(
+    roomId: string,
+    rootEventId: string,
+    intent: ThreadOpenIntent
+  ) {
     const thread = snapshot?.state.ui.thread;
     if (
       thread?.kind === "open" &&
@@ -4017,7 +4022,7 @@ export function App() {
       if (!(await drainActiveComposerScopesForNavigation(false, true))) return;
     }
     await closeFocusedContextIfHiddenBy("thread");
-    setSnapshot(await api.openThread(roomId, rootEventId));
+    setSnapshot(await api.openThread(roomId, rootEventId, intent));
     setRightPanelMode("thread");
   }
 
@@ -4579,7 +4584,7 @@ export function App() {
         setPrimaryView("timeline");
         if (!(await drainActiveComposerScopesForNavigation(true, true))) return;
         await selectRoom(roomId);
-        await openThread(roomId, threadRootEventId);
+        await openThread(roomId, threadRootEventId, "existingThread");
       })();
       return;
     }
@@ -4628,7 +4633,11 @@ export function App() {
           void setComposerReplyTarget(target.message.room_id, target.message.event_id);
           return;
         case "openThread":
-          void openThread(target.message.room_id, target.message.event_id);
+          void openThread(
+            target.message.room_id,
+            target.message.event_id,
+            target.message.reply_count > 0 ? "existingThread" : "newThreadDraft"
+          );
           return;
         case "editMessage":
           void editMessage(target.message);
@@ -5221,8 +5230,8 @@ export function App() {
           onClosePanel={() => {
             void closeFocusedContextPanel();
           }}
-          onOpenThread={(roomId, rootEventId) => {
-            void openThread(roomId, rootEventId);
+          onOpenThread={(roomId, rootEventId, intent) => {
+            void openThread(roomId, rootEventId, intent);
           }}
           onOpenFiles={(scope) => {
             void openFilesView(scope);

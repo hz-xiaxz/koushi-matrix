@@ -1654,14 +1654,25 @@ export interface CjkCollationProfile {
   case_first: string | null;
 }
 
-export interface ThreadPaneState {
-  kind: "closed" | "opening" | "open";
-  room_id?: string;
-  root_event_id?: string;
-  is_subscribed?: boolean;
-  composer?: ComposerState;
-  staged_uploads?: StagedUploadItem[];
-}
+export type ThreadOpenIntent = "existingThread" | "newThreadDraft";
+
+export type ThreadPaneState =
+  | { kind: "closed" }
+  | {
+      kind: "opening";
+      room_id: string;
+      root_event_id: string;
+      intent: ThreadOpenIntent;
+    }
+  | {
+      kind: "open";
+      room_id: string;
+      root_event_id: string;
+      intent: ThreadOpenIntent;
+      is_subscribed: boolean;
+      composer: ComposerState;
+      staged_uploads: StagedUploadItem[];
+    };
 
 export type ThreadAttentionState =
   | { kind: "closed" }

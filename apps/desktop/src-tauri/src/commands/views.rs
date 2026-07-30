@@ -76,6 +76,7 @@ pub async fn paginate_threads_list(
 pub async fn open_thread(
     room_id: String,
     root_event_id: String,
+    intent: ThreadOpenIntent,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
@@ -85,11 +86,7 @@ pub async fn open_thread(
     let request_id = next_request_id(state.inner()).await;
     submit_core_command(
         state.inner(),
-        CoreCommand::App(AppCommand::OpenThread {
-            request_id,
-            room_id,
-            root_event_id,
-        }),
+        build_open_thread_command(request_id, room_id, root_event_id, intent),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;

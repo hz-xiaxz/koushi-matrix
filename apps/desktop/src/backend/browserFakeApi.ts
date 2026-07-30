@@ -68,6 +68,7 @@ import type {
   StagedUploadOutputSelection,
   StageUploadBytesRequestItem,
   TimelineMessage,
+  ThreadOpenIntent,
   ThreadsListItem,
   UploadStagingRequestItem,
   AttachmentFilter,
@@ -290,7 +291,11 @@ export interface DesktopApi {
     draft: string,
     revision: ComposerDraftRevision
   ): Promise<DesktopSnapshot>;
-  openThread(roomId: string, rootEventId: string): Promise<DesktopSnapshot>;
+  openThread(
+    roomId: string,
+    rootEventId: string,
+    intent: ThreadOpenIntent
+  ): Promise<DesktopSnapshot>;
   closeThread(): Promise<DesktopSnapshot>;
   openThreadsList(roomId: string): Promise<DesktopSnapshot>;
   closeThreadsList(): Promise<DesktopSnapshot>;
@@ -2125,7 +2130,11 @@ class BrowserFakeApi implements DesktopApi {
     return this.removeRoomFromFakeSnapshot(roomId);
   }
 
-  async openThread(roomId: string, rootEventId: string): Promise<DesktopSnapshot> {
+  async openThread(
+    roomId: string,
+    rootEventId: string,
+    intent: ThreadOpenIntent
+  ): Promise<DesktopSnapshot> {
     if (!this.canUseSyncedViews()) {
       return this.getSnapshot();
     }
@@ -2134,7 +2143,9 @@ class BrowserFakeApi implements DesktopApi {
       kind: "open",
       room_id: roomId,
       root_event_id: rootEventId,
+      intent,
       is_subscribed: true,
+      staged_uploads: [],
       composer: {
         accepted_submission_ids: [],
         pending_transaction_id: null,
@@ -4002,7 +4013,9 @@ function browserStagedUploadsForTarget(
   }
   return target.kind === "main"
     ? snapshot.state.ui.timeline.staged_uploads
-    : snapshot.state.ui.thread.staged_uploads ?? [];
+    : snapshot.state.ui.thread.kind === "open"
+      ? snapshot.state.ui.thread.staged_uploads
+      : [];
 }
 
 function setBrowserStagedUploadsForTarget(
@@ -4015,7 +4028,7 @@ function setBrowserStagedUploadsForTarget(
   }
   if (target.kind === "main") {
     snapshot.state.ui.timeline.staged_uploads = items;
-  } else {
+  } else if (snapshot.state.ui.thread.kind === "open") {
     snapshot.state.ui.thread.staged_uploads = items;
   }
 }

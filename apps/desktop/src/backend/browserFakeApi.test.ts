@@ -296,7 +296,7 @@ describe("BrowserFakeApi settings preview", () => {
     });
 
     const rootId = nextMain.timeline[0]!.event_id;
-    await api.openThread(roomId, rootId);
+    await api.openThread(roomId, rootId, "existingThread");
     const { lease: threadLease } = await beginComposerLease(
       api,
       account,
@@ -413,7 +413,7 @@ describe("BrowserFakeApi settings preview", () => {
     await api.selectRoom(roomId);
     const before = await api.getSnapshot();
     const rootId = before.timeline[0]!.event_id;
-    await api.openThread(roomId, rootId);
+    await api.openThread(roomId, rootId, "existingThread");
     const account = await readyAccount(api);
     const mainTarget = { kind: "main" as const, room_id: roomId };
     const threadTarget = {
@@ -558,7 +558,7 @@ describe("BrowserFakeApi settings preview", () => {
     await api.selectRoom(roomId);
     const account = await readyAccount(api);
     const rootId = (await api.getSnapshot()).timeline[0]!.event_id;
-    await api.openThread(roomId, rootId);
+    await api.openThread(roomId, rootId, "existingThread");
     const { generation, lease } = await beginComposerLease(
       api,
       account,

@@ -11,7 +11,7 @@ use koushi_state::{
     AppAction, ComposerDraftRevision, ComposerDraftStore, ComposerMode, ComposerTarget,
     CurrentDeviceTrustState, MentionIntent, PreparedUploadFormat, PreparedUploadVariant,
     SessionInfo, SessionState, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
-    StagedUploadPreparation, SubmissionId, ThreadPaneState,
+    StagedUploadPreparation, SubmissionId, ThreadOpenIntent, ThreadPaneState,
 };
 
 mod support;
@@ -196,6 +196,7 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
             AppAction::OpenThread {
                 room_id: room_id.clone(),
                 root_event_id: root_event_id.clone(),
+                intent: ThreadOpenIntent::ExistingThread,
             },
             AppAction::ThreadSubscribed {
                 room_id: room_id.clone(),
@@ -592,6 +593,7 @@ async fn app_command_sets_open_thread_composer_draft() {
             AppAction::OpenThread {
                 room_id: "!room:example.test".to_owned(),
                 root_event_id: "$root:example.test".to_owned(),
+                intent: ThreadOpenIntent::ExistingThread,
             },
             AppAction::ThreadSubscribed {
                 room_id: "!room:example.test".to_owned(),
@@ -707,6 +709,7 @@ async fn composer_draft_command_rejects_a_stale_account_owner() {
             AppAction::OpenThread {
                 room_id: "!room:example.test".to_owned(),
                 root_event_id: "$root:example.test".to_owned(),
+                intent: ThreadOpenIntent::ExistingThread,
             },
             AppAction::ThreadSubscribed {
                 room_id: "!room:example.test".to_owned(),

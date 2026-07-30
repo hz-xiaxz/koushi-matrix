@@ -444,6 +444,7 @@ pub enum AppCommand {
         request_id: RequestId,
         room_id: String,
         root_event_id: String,
+        intent: koushi_state::ThreadOpenIntent,
     },
     CloseThread {
         request_id: RequestId,
@@ -732,14 +733,13 @@ impl fmt::Debug for AppCommand {
                 .field("send_at_ms", send_at_ms)
                 .finish(),
             Self::OpenThread {
-                request_id,
-                room_id,
-                ..
+                request_id, intent, ..
             } => formatter
                 .debug_struct("OpenThread")
                 .field("request_id", request_id)
-                .field("room_id", room_id)
+                .field("room_id", &"RoomId(..)")
                 .field("root_event_id", &"EventId(..)")
+                .field("intent", intent)
                 .finish(),
             Self::CloseThread { request_id } => formatter
                 .debug_struct("CloseThread")
@@ -3069,7 +3069,7 @@ mod tests {
         ImageUploadCompressionMode, MentionIntent, MentionTarget, NativeAttentionCandidate,
         NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,
         NativeAttentionState, NativeAttentionSummary, NativeAttentionSuppressionReason,
-        RoomAttentionKind,
+        RoomAttentionKind, ThreadOpenIntent,
     };
 
     use super::*;
@@ -3079,6 +3079,31 @@ mod tests {
             connection_id: crate::ids::RuntimeConnectionId(999),
             sequence: seq,
         }
+    }
+
+    #[test]
+    fn open_thread_command_retains_typed_intent_and_redacts_identifiers() {
+        let request_id = fake_rid(75);
+        let command = AppCommand::OpenThread {
+            request_id,
+            room_id: "!private-room:example.invalid".to_owned(),
+            root_event_id: "$private-root:example.invalid".to_owned(),
+            intent: ThreadOpenIntent::NewThreadDraft,
+        };
+
+        assert_eq!(CoreCommand::App(command).request_id(), request_id);
+        let debug = format!(
+            "{:?}",
+            AppCommand::OpenThread {
+                request_id,
+                room_id: "!private-room:example.invalid".to_owned(),
+                root_event_id: "$private-root:example.invalid".to_owned(),
+                intent: ThreadOpenIntent::NewThreadDraft,
+            }
+        );
+        assert!(debug.contains("NewThreadDraft"), "{debug}");
+        assert!(!debug.contains("!private-room:example.invalid"), "{debug}");
+        assert!(!debug.contains("$private-root:example.invalid"), "{debug}");
     }
 
     fn test_session_key() -> koushi_key::SessionKeyId {

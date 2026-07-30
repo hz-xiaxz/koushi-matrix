@@ -735,6 +735,7 @@
           "mode": "Plain",
           "pending_transaction_id": null
         },
+        "intent": "newThreadDraft",
         "is_subscribed": true,
         "kind": "open",
         "room_id": "!room:example.invalid",

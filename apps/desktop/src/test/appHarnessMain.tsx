@@ -2069,6 +2069,7 @@ mock.setCommandResponse(
             kind: "open",
             room_id: roomId,
             root_event_id: rootEventId,
+            intent: "existingThread",
             is_subscribed: true,
             staged_uploads: [],
           composer: {

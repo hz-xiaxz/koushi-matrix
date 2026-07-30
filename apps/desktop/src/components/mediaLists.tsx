@@ -26,7 +26,10 @@ import type {
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
 import { mediaSourceUrl } from "../domain/mediaUrl";
-import { renderTimelineMessageText } from "./TimelineView";
+import {
+  renderTimelineMessageText,
+  type TimelineRowActionHandlers
+} from "./TimelineView";
 import { ImeSafeForm } from "./ImeTextControl";
 import {
   ICON_SIZE,
@@ -490,7 +493,7 @@ function MessageArticle({
   query: string;
   onOpenContextMenu?: OpenContextMenu;
   onEditMessage: (message: { body: string | null; room_id: string; event_id: string }) => void;
-  onOpenThread: (roomId: string, rootEventId: string) => void;
+  onOpenThread: TimelineRowActionHandlers["onOpenThread"];
   onRedactMessage: (roomId: string, eventId: string) => void;
   profileUsers: Record<string, UserProfile>;
   isIgnored: boolean;
@@ -569,7 +572,9 @@ function MessageArticle({
           <button
             className="reply-link"
             type="button"
-            onClick={() => onOpenThread(message.room_id, message.event_id)}
+            onClick={() =>
+              onOpenThread(message.room_id, message.event_id, "existingThread")
+            }
           >
             {t("timeline.viewReplies", { count: message.reply_count })}
           </button>

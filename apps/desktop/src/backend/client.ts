@@ -40,7 +40,8 @@ import type {
   AttachmentSort,
   CreateRoomRequest,
   FilesViewScope,
-  SubmissionResponse
+  SubmissionResponse,
+  ThreadOpenIntent
 } from "../domain/types";
 import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
 import type { RequestId, TimelineKey } from "../domain/coreEvents";
@@ -741,8 +742,12 @@ class TauriDesktopApi implements DesktopApi {
     });
   }
 
-  async openThread(roomId: string, rootEventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_thread", { roomId, rootEventId });
+  async openThread(
+    roomId: string,
+    rootEventId: string,
+    intent: ThreadOpenIntent
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("open_thread", { roomId, rootEventId, intent });
   }
 
   async closeThread(): Promise<DesktopSnapshot> {

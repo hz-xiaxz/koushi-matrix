@@ -325,7 +325,22 @@ function snapshotForPanelMode(
           continuity: { kind: "unknown" }
         },
         thread: hasThread
-          ? { kind: "open", room_id: "!room:example", root_event_id: "$event" }
+          ? {
+              kind: "open",
+              room_id: "!room:example",
+              root_event_id: "$event",
+              intent: "existingThread",
+              is_subscribed: true,
+              composer: {
+                accepted_submission_ids: [],
+                pending_transaction_id: null,
+                draft_revision: COMPOSER_DRAFT_REVISION_ZERO,
+                last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO,
+                draft: "",
+                mode: "Plain"
+              },
+              staged_uploads: []
+            }
           : { kind: "closed" },
         focused_context: { kind: "closed" },
         files_view: { kind: "closed" },

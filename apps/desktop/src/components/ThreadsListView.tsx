@@ -2,13 +2,21 @@ import { MessageCircle } from "lucide-react";
 
 import { t } from "../i18n/messages";
 import { peopleFacingLabel } from "../app/uiShared";
-import type { ThreadsListItem, ThreadsListState } from "../domain/types";
+import type {
+  ThreadOpenIntent,
+  ThreadsListItem,
+  ThreadsListState
+} from "../domain/types";
 
 export interface ThreadsListViewProps {
   threadsList: ThreadsListState;
   roomId: string | null;
   onClose: () => void;
-  onOpenThread: (roomId: string, rootEventId: string) => void;
+  onOpenThread: (
+    roomId: string,
+    rootEventId: string,
+    intent: ThreadOpenIntent
+  ) => void;
   onPaginate: (roomId: string) => void;
 }
 
@@ -39,7 +47,7 @@ export function ThreadsListView({
                 item={item}
                 onClick={() => {
                   if (roomId) {
-                    onOpenThread(roomId, item.root_event_id);
+                    onOpenThread(roomId, item.root_event_id, "existingThread");
                   }
                 }}
               />

@@ -41,7 +41,10 @@ export function peopleFacingLabel(
 export type ContextMenuTarget =
   | {
       kind: "message";
-      message: Pick<TimelineMessage, "sender" | "room_id" | "event_id" | "body">;
+      message: Pick<
+        TimelineMessage,
+        "sender" | "room_id" | "event_id" | "body" | "reply_count"
+      >;
     }
   | { kind: "room"; roomId: string; dmUserId?: string | null }
   | { kind: "space"; spaceId: string }
