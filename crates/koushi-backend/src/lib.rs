@@ -439,7 +439,10 @@ impl FakeDesktopBackend {
             // notifications (there are no background crawls in tests).
             | AppEffect::NotifySearchCrawlerRoomsAvailable { .. }
             | AppEffect::InvalidateSearchCrawlerCache
-            | AppEffect::RebuildSearchIndex => Vec::new(),
+            | AppEffect::RebuildSearchIndex
+            // Production Core records this private-safe diagnostic. The
+            // historical fixture backend has no diagnostic transport.
+            | AppEffect::RecordNativeAttentionRecomputed { .. } => Vec::new(),
             AppEffect::RequestVerification { request_id, .. }
             | AppEffect::AcceptVerification { request_id }
             | AppEffect::ConfirmSasVerification { request_id } => {
