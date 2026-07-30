@@ -2135,10 +2135,47 @@ the implementation plan is
   could only ever time out at `login A`. The shared login route now completes the
   gate unconditionally; scenarios that must not bootstrap own their login and
   return from `run_async` before that route.
-- If a focused core scenario times out at `login A: timed out waiting for
-  LoggedIn event` again, check whether a new login route skipped
-  `complete_new_identity_gate_for_qa` before reintroducing a scenario condition.
-  Do not weaken timeline assertions or print private identifiers to diagnose it.
+- **#334 did not end this failure mode.** The same `login A: timed out waiting
+  for LoggedIn event` recurred on `main` in 2026-07-30 CI (#375): three red runs
+  on `codex/verification-restore-diagnostics`, one on
+  `codex/issue-368-dm-get-or-create`, while `codex/issue-366-thread-root-default`
+  passed the identical job — intermittent, not a Conduit baseline, and green
+  locally on the same commits. #334 fixed one cause (the scenario allowlist);
+  it is not the whole story.
+- The login-wait timeout now names the session phase
+  (`timed out waiting for LoggedIn event; phase=…`), and that token found the
+  real cause in ONE run: **`phase=rechecking_trust`**. The session leaves the
+  bootstrap gate, enters `Provisional { RecheckingTrust }`, and never promotes,
+  so `LoggedIn` stays held in the actor's pending-ready events. Read this token
+  first instead of re-running; before it existed the message was identical for
+  every hypothesis and diagnosing it took a full CI round trip.
+- **`AppEffect::CheckCurrentDeviceTrust` is dropped by the production runtime.**
+  It is handled only by the fixture backend (`koushi-backend/src/lib.rs`); in
+  `koushi-core/src/runtime.rs` it sits in the ignored-effect catch-all arm of
+  both effect lanes. So when the reducer enters `RecheckingTrust` and asks for a
+  trust recheck, nothing performs it — promotion happens only if an ambient SDK
+  trust observer independently fires `CurrentDeviceTrustChanged`. That is the
+  intermittency, and it is a **product** gap, not a QA-harness one: a real
+  session can strand in `RecheckingTrust` after bootstrap.
+- Routing that effect to the actor is NOT a safe one-line fix. A candidate that
+  added `AccountMessage::CheckCurrentDeviceTrust` calling
+  `request_authoritative_trust_recheck()` made the conduit `media` lane green
+  3/3 but broke
+  `runtime::tests::authoritative_trust_runs_through_app_actor_ack_and_restarts_real_children`
+  ("session transition timed out during initial promotion"): re-emitting the SDK
+  subscriber's current value can feed `Unknown` into promotion at the wrong
+  moment. The recheck has to settle on a real trust value and respect
+  `trust_generation`. Do not ship a promotion change with that test red.
+- `complete_new_identity_gate_for_qa` also used to submit
+  `ConfirmSessionBootstrapSaved` and return without observing its outcome, so a
+  failed confirmation would have been indistinguishable from the stall above —
+  after the helper had already printed `gate_new_identity_bootstrap=ok`. It now
+  settles that confirmation and surfaces its correlated failure as its own
+  error. This was a real gap but NOT the observed cause.
+- `Core homeserver QA (conduit)` is **not a required check**, so a red run does
+  not block auto-merge — three of the runs above merged red. Do not read a green
+  PR as evidence this job passed; check it explicitly. Making it required is
+  deliberately deferred until the flake is proven gone (#375).
 - `cargo test --workspace` does not compile the QA binaries: both bin targets set
   `required-features = ["qa-bin"]`. The `Core homeserver QA (conduit)` CI job is
   the only thing that compiles them and the only thing that runs the core against
