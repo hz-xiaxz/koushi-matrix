@@ -2712,6 +2712,38 @@ fn device_cleanup_is_offered_without_automatically_discarding_failed_verificatio
 }
 
 #[test]
+fn device_cleanup_is_offered_when_recovery_task_fails() {
+    let mut state = AppState {
+        session: SessionState::Verifying {
+            info: session_info(),
+            gate: recovery_gate(),
+            method: VerificationMethod::RecoveryKey,
+            flow_id: 42,
+            sas_emojis: vec![],
+        },
+        ..AppState::default()
+    };
+
+    reduce(
+        &mut state,
+        AppAction::E2eeRecoveryFailed {
+            message: "recovery failed".to_owned(),
+        },
+    );
+
+    assert!(matches!(
+        state.session,
+        SessionState::AwaitingVerification { .. }
+    ));
+    assert_eq!(
+        state.device_cleanup,
+        DeviceCleanupState::Offered {
+            reason: DeviceCleanupOfferReason::RecoveryFailed,
+        }
+    );
+}
+
+#[test]
 fn device_cleanup_is_offered_when_authoritative_trust_preparation_fails() {
     let mut state = AppState {
         session: SessionState::Provisional {

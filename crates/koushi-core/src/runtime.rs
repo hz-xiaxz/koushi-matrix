@@ -4856,6 +4856,9 @@ fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -
                 | AccountCommand::StartSessionBootstrap { .. }
                 | AccountCommand::ConfirmSessionBootstrapSaved { .. }
                 | AccountCommand::ResetLocalData { .. }
+                | AccountCommand::StartDeviceCleanup { .. }
+                | AccountCommand::SubmitDeviceCleanupUia { .. }
+                | AccountCommand::EraseDeviceCleanupLocalDataAnyway { .. }
                 | AccountCommand::StartOwnUserSas { .. }
                 | AccountCommand::AcceptVerification { .. }
                 | AccountCommand::ConfirmSasVerification { .. }
@@ -7696,6 +7699,30 @@ mod tests {
             },),
             Some(AppAction::DeviceCleanupEraseLocalAnywayRequested { request_id: 22 })
         );
+    }
+
+    #[test]
+    fn device_cleanup_commands_are_admitted_from_the_provisional_gate() {
+        let command = CoreCommand::Account(AccountCommand::StartDeviceCleanup {
+            request_id: RequestId {
+                connection_id: RuntimeConnectionId(1),
+                sequence: 23,
+            },
+        });
+        let session = SessionState::AwaitingVerification {
+            info: koushi_state::SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@user:example.invalid".to_owned(),
+                device_id: "DEVICE".to_owned(),
+            },
+            gate: koushi_state::VerificationGateState {
+                methods: vec![],
+                account_kind: koushi_state::VerificationAccountKind::ExistingIdentity,
+                failure: Some(koushi_state::VerificationGateFailureKind::Sdk),
+            },
+        };
+
+        assert!(is_verification_gate_command(&command, &session));
     }
 
     #[test]

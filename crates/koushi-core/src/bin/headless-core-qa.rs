@@ -66,11 +66,11 @@ use koushi_state::{
     ActivityMarkReadTarget, ActivityRowKind, ActivityState, AppAction, AppState, AuthSecret,
     ComposerKey, ComposerKeyEvent, ComposerKeyModifiers, ComposerResolvedAction,
     ComposerResolverContext, ComposerSelection, ComposerSendShortcut, ComposerSurface,
-    ComposerTarget, DirectoryQuery, DirectoryRoomSummary, DisplaySettings,
-    IdentityResetAuthRequest, IdentityResetAuthType, IdentityResetState,
-    ImageUploadCompressionMode, KeyBackupStatus, LocalEncryptionHealth, LocalEncryptionState,
-    MentionCandidatesCompleteness, MentionCandidatesTarget, MentionIntent, MentionSurface,
-    MentionTarget, NativeAttentionCapabilities, NativeAttentionCapability,
+    ComposerTarget, DeviceCleanupLocalMode, DeviceCleanupState, DirectoryQuery,
+    DirectoryRoomSummary, DisplaySettings, IdentityResetAuthRequest, IdentityResetAuthType,
+    IdentityResetState, ImageUploadCompressionMode, KeyBackupStatus, LocalEncryptionHealth,
+    LocalEncryptionState, MentionCandidatesCompleteness, MentionCandidatesTarget, MentionIntent,
+    MentionSurface, MentionTarget, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionDispatchState, NativeAttentionObservationKind, NativeAttentionProjectionInput,
     NativeAttentionState, NativeAttentionSuppressionReason, OperationFailureKind, PresenceKind,
     RecoveryRequest, ReplyQuoteState, RoomAttentionKind, RoomListFilter,
@@ -238,6 +238,7 @@ enum QaScenario {
     CredentialHealth,
     NativeAttention,
     E2eeTrust,
+    DeviceCleanup,
     GateRestore,
     GateNegative,
     GateNoProof,
@@ -273,6 +274,7 @@ enum QaStage {
     CredentialHealth,
     NativeAttention,
     E2eeTrust,
+    DeviceCleanup,
     GateRestore,
     GateNegative,
     GateNoProof,
@@ -393,6 +395,7 @@ impl QaScenario {
             "credential_health" => Ok(Self::CredentialHealth),
             "native_attention" => Ok(Self::NativeAttention),
             "e2ee_trust" => Ok(Self::E2eeTrust),
+            "device_cleanup" => Ok(Self::DeviceCleanup),
             "gate_restore" => Ok(Self::GateRestore),
             "gate_negative" => Ok(Self::GateNegative),
             "gate_no_proof" => Ok(Self::GateNoProof),
@@ -420,7 +423,7 @@ impl QaScenario {
             "link_preview" => Ok(Self::LinkPreview),
             "cache_restore" => Ok(Self::CacheRestore),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, credential_health, native_attention, e2ee_trust, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_legacy_fallback, timeline_legacy_persisted_gap, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, credential_health, native_attention, e2ee_trust, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_legacy_fallback, timeline_legacy_persisted_gap, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
             )),
         }
     }
@@ -433,6 +436,7 @@ impl QaScenario {
                     | QaStage::TimelineLegacyFallback
                     | QaStage::TimelineLegacyPersistedGap
                     | QaStage::TimelineStress
+                    | QaStage::DeviceCleanup
             ),
             Self::Safety => matches!(stage, QaStage::Safety),
             Self::LoginSync => matches!(stage, QaStage::Safety | QaStage::LoginSync),
@@ -450,6 +454,10 @@ impl QaScenario {
                     QaStage::Safety | QaStage::LoginSync | QaStage::E2eeTrust
                 )
             }
+            Self::DeviceCleanup => matches!(
+                stage,
+                QaStage::Safety | QaStage::LoginSync | QaStage::DeviceCleanup
+            ),
             Self::GateRestore => matches!(
                 stage,
                 QaStage::Safety | QaStage::LoginSync | QaStage::GateRestore
@@ -634,6 +642,10 @@ fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "e2ee_unverified_peer_send_nonblocking=ok",
             "e2ee_blocked_device_withheld=ok",
             "e2ee_trust=ok",
+        ],
+        QaStage::DeviceCleanup => &[
+            "device_cleanup_remote_first=ok",
+            "device_cleanup_relogin_new_device=ok",
         ],
         QaStage::GateRestore => &[
             "gate_restore_bootstrapped=ok",
@@ -882,6 +894,9 @@ fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
         QaScenario::E2eeTrust => {
             vec![QaStage::Safety, QaStage::LoginSync, QaStage::E2eeTrust]
         }
+        QaScenario::DeviceCleanup => {
+            vec![QaStage::Safety, QaStage::LoginSync, QaStage::DeviceCleanup]
+        }
         QaScenario::GateRestore => vec![QaStage::Safety, QaStage::LoginSync, QaStage::GateRestore],
         QaScenario::GateNegative => {
             vec![QaStage::Safety, QaStage::LoginSync, QaStage::GateNegative]
@@ -1082,6 +1097,7 @@ fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static str> {
         | QaScenario::TimelineLegacyFallback
         | QaScenario::TimelineLegacyPersistedGap
         | QaScenario::CacheRestore
+        | QaScenario::DeviceCleanup
         | QaScenario::GateRestore
         | QaScenario::GateNegative
         | QaScenario::GateNoProof => stages_for_scenario(scenario)
@@ -1528,6 +1544,166 @@ async fn run_gate_negative_stage(
     drop(conn_a6);
     runtime_a6.shutdown().await;
     Ok(())
+}
+
+async fn run_provisional_device_cleanup_qa(config: &QaConfig) -> Result<(), String> {
+    let runtime = CoreRuntime::start_with_data_dir(qa_data_dir("gate-device-cleanup"));
+    let mut conn = runtime.attach();
+    let result = async {
+        let removed_session =
+            login_until_device_cleanup_offered(&mut conn, config, "device cleanup first login")
+                .await?;
+        drive_remote_first_device_cleanup(
+            &mut conn,
+            &config.password_a,
+            "device cleanup first device",
+        )
+        .await?;
+        println!("device_cleanup_remote_first=ok");
+
+        let replacement_session =
+            login_until_device_cleanup_offered(&mut conn, config, "device cleanup replacement")
+                .await?;
+        if replacement_session.device_id == removed_session.device_id {
+            return Err(
+                "device cleanup replacement login reused the removed server device".to_owned(),
+            );
+        }
+        println!("device_cleanup_relogin_new_device=ok");
+
+        drive_remote_first_device_cleanup(
+            &mut conn,
+            &config.password_a,
+            "device cleanup replacement device",
+        )
+        .await?;
+        Ok(())
+    }
+    .await;
+
+    drop(conn);
+    runtime.shutdown().await;
+    result
+}
+
+async fn login_until_device_cleanup_offered(
+    conn: &mut CoreConnection,
+    config: &QaConfig,
+    label: &str,
+) -> Result<SessionInfo, String> {
+    let login_id = conn.next_request_id();
+    conn.command(CoreCommand::Account(AccountCommand::LoginPassword {
+        request_id: login_id,
+        request: koushi_state::LoginRequest {
+            homeserver: config.homeserver.clone(),
+            username: config.user_a.clone(),
+            password: AuthSecret::new(config.password_a.clone()),
+            device_display_name: Some("Koushi Device Cleanup QA".to_owned()),
+        },
+    }))
+    .await
+    .map_err(|error| format!("{label}: login submit failed: {error}"))?;
+    wait_for_recovery_gate(conn, label).await?;
+    let session = authenticated_session_info(conn, label)?;
+
+    let invalid_recovery = conn.next_request_id();
+    conn.command(CoreCommand::Account(AccountCommand::SubmitRecovery {
+        request_id: invalid_recovery,
+        request: RecoveryRequest {
+            secret: AuthSecret::new(QA_WRONG_RECOVERY_SECRET.to_owned()),
+        },
+    }))
+    .await
+    .map_err(|error| format!("{label}: invalid recovery submit failed: {error}"))?;
+    wait_for_device_cleanup_offered(conn, label).await?;
+    Ok(session)
+}
+
+async fn wait_for_device_cleanup_offered(
+    conn: &mut CoreConnection,
+    label: &str,
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
+    loop {
+        if matches!(
+            conn.snapshot().device_cleanup,
+            DeviceCleanupState::Offered { .. }
+        ) {
+            return Ok(());
+        }
+        tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for device cleanup offer"))?
+            .map_err(|_| format!("{label}: event stream closed"))?;
+    }
+}
+
+async fn drive_remote_first_device_cleanup(
+    conn: &mut CoreConnection,
+    password: &str,
+    label: &str,
+) -> Result<(), String> {
+    let start_request_id = conn.next_request_id();
+    conn.command(CoreCommand::Account(AccountCommand::StartDeviceCleanup {
+        request_id: start_request_id,
+    }))
+    .await
+    .map_err(|error| format!("{label}: cleanup submit failed: {error}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
+    let mut submitted_uia_flow = None;
+    let mut retried_local_reset = false;
+    loop {
+        let snapshot = conn.snapshot();
+        if matches!(snapshot.session, SessionState::SignedOut) {
+            return Ok(());
+        }
+        match snapshot.device_cleanup {
+            DeviceCleanupState::AwaitingUia { flow_id, .. }
+                if submitted_uia_flow != Some(flow_id) =>
+            {
+                submitted_uia_flow = Some(flow_id);
+                let request_id = conn.next_request_id();
+                conn.command(CoreCommand::Account(
+                    AccountCommand::SubmitDeviceCleanupUia {
+                        request_id,
+                        flow_id,
+                        password: AuthSecret::new(password.to_owned()),
+                    },
+                ))
+                .await
+                .map_err(|error| format!("{label}: cleanup UIAA submit failed: {error}"))?;
+            }
+            DeviceCleanupState::RemoteFailed {
+                failure, auth_mode, ..
+            } => {
+                return Err(format!(
+                    "{label}: remote cleanup failed; mode={auth_mode:?} failure={failure:?}"
+                ));
+            }
+            DeviceCleanupState::LocalResetFailed {
+                mode: DeviceCleanupLocalMode::RemoteRemoved { .. },
+                ..
+            } if !retried_local_reset => {
+                retried_local_reset = true;
+                let request_id = conn.next_request_id();
+                conn.command(CoreCommand::Account(AccountCommand::StartDeviceCleanup {
+                    request_id,
+                }))
+                .await
+                .map_err(|error| format!("{label}: local cleanup retry failed: {error}"))?;
+            }
+            DeviceCleanupState::LocalResetFailed { .. } => {
+                return Err(format!("{label}: local cleanup failed after retry"));
+            }
+            _ => {}
+        }
+
+        tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for cleanup completion"))?
+            .map_err(|_| format!("{label}: event stream closed"))?;
+    }
 }
 
 async fn cleanup_after_login_sync(
@@ -6504,6 +6680,13 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
 
     if scenario.should_run_stage(QaStage::NativeAttention) {
         run_native_attention_stage(&mut conn_a).await?;
+    }
+
+    if scenario == QaScenario::DeviceCleanup {
+        run_provisional_device_cleanup_qa(&config).await?;
+        drop(conn_a);
+        runtime_a.shutdown().await;
+        return Ok(scenario_report(&config.server_kind, scenario));
     }
 
     if scenario == QaScenario::E2eeTrust {
@@ -21037,6 +21220,27 @@ mod tests {
         );
         assert!(
             !stage.contains("publish primary cross-signing facts before gated second-device login")
+        );
+    }
+
+    #[test]
+    fn device_cleanup_scenario_has_a_dedicated_remote_first_proof() {
+        let source = include_str!("headless-core-qa.rs");
+        let route = source
+            .split("if scenario == QaScenario::DeviceCleanup")
+            .nth(1)
+            .expect("device cleanup scenario route should exist")
+            .split("if scenario == QaScenario::E2eeTrust")
+            .next()
+            .expect("E2EE trust route should follow device cleanup");
+
+        assert!(route.contains("run_provisional_device_cleanup_qa(&config).await?"));
+        assert!(
+            tokens_for_stage(QaStage::DeviceCleanup).contains(&"device_cleanup_remote_first=ok")
+        );
+        assert!(
+            tokens_for_stage(QaStage::DeviceCleanup)
+                .contains(&"device_cleanup_relogin_new_device=ok")
         );
     }
 

@@ -38,6 +38,7 @@ const checks = [
   "scenario safety",
   "scenario login_sync",
   "scenario e2ee_trust",
+  "scenario device_cleanup",
   "scenario gate_restore",
   "scenario gate_negative",
   "scenario gate_no_proof",
@@ -632,7 +633,7 @@ function defaultCoreBackendForScenario(value, cargoProfile) {
     return "probed";
   }
   const scenarios = selectedScenarios(value);
-  if (scenarios.some((scenario) => ["all", "e2ee_trust", "gate_restore", "gate_negative", "gate_no_proof", "timeline_stress", "timeline_legacy_fallback", "timeline_legacy_persisted_gap"].includes(scenario))) {
+  if (scenarios.some((scenario) => ["all", "e2ee_trust", "device_cleanup", "gate_restore", "gate_negative", "gate_no_proof", "timeline_stress", "timeline_legacy_fallback", "timeline_legacy_persisted_gap"].includes(scenario))) {
     return "probed";
   }
   return "both";
@@ -690,7 +691,7 @@ function safeTimestamp() {
 
 function printUsage() {
   console.log(
-    "Usage: desktop-headless-local-qa.mjs --run [--server=conduit|tuwunel|synapse|matrixorg|both|all] [--scenario=all|timeline_reconnect|timeline_legacy_fallback|timeline_legacy_persisted_gap|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--core-backend=probed|legacy|both] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
+    "Usage: desktop-headless-local-qa.mjs --run [--server=conduit|tuwunel|synapse|matrixorg|both|all] [--scenario=all|device_cleanup|timeline_reconnect|timeline_legacy_fallback|timeline_legacy_persisted_gap|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--core-backend=probed|legacy|both] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
   );
   console.log("Starts a disposable local homeserver and runs non-GUI Matrix SDK QA.");
   console.log("  --server=synapse/matrixorg  Runs local Synapse in Docker.");
