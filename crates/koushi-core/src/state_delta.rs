@@ -193,6 +193,7 @@ fn audit_app_state_delta_slices(state: &AppState) {
         media_gallery: _,
         directory: _,
         room_management: _,
+        mention_candidates: _,
         activity: _,
         timeline: _,
         thread: _,

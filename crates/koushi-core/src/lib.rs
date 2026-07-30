@@ -23,6 +23,7 @@ pub mod link_preview;
 mod live_catchup;
 mod live_tail_freshness;
 pub mod media_preparation;
+pub(crate) mod mention_candidates;
 pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 pub mod room;

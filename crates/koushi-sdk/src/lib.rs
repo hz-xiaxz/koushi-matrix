@@ -4775,6 +4775,7 @@ pub struct MatrixRoomMemberSummary {
 pub struct MatrixJoinedMemberSnapshot {
     pub members: Vec<MatrixRoomMemberSummary>,
     pub complete: bool,
+    pub room_mention_allowed: Option<bool>,
 }
 
 impl MatrixClientSession {
@@ -7457,6 +7458,10 @@ async fn matrix_joined_member_snapshot(
             .await
     }
     .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    let room_mention_allowed = members
+        .iter()
+        .find(|member| member.user_id() == room.own_user_id())
+        .map(|member| member.can_trigger_room_notification());
     let mut summaries: Vec<MatrixRoomMemberSummary> = members
         .into_iter()
         .map(|member| {
@@ -7475,6 +7480,7 @@ async fn matrix_joined_member_snapshot(
     Ok(MatrixJoinedMemberSnapshot {
         members: summaries,
         complete: room.are_members_synced(),
+        room_mention_allowed,
     })
 }
 
