@@ -13,6 +13,19 @@ use super::room::{
 };
 use super::settings::RoomNotificationMode;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeAttentionContext {
+    pub window_focused: bool,
+}
+
+impl Default for NativeAttentionContext {
+    fn default() -> Self {
+        Self {
+            window_focused: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NativeAttentionState {
     pub summary: NativeAttentionSummary,

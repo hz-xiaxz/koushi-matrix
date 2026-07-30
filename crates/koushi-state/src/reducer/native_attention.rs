@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use crate::{
     effect::{AppEffect, UiEvent},
-    state::AppState,
+    state::{AppState, NativeAttentionObservationKind, RoomNotificationMode},
 };
 
 use super::is_session_ready;
@@ -74,6 +76,68 @@ pub(crate) fn handle_native_attention_updated(
     }
 
     state.native_attention = attention;
+    vec![AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged)]
+}
+
+fn projected_native_attention_from_rooms(
+    state: &AppState,
+    observation: NativeAttentionObservationKind,
+) -> crate::state::NativeAttentionState {
+    let room_notification_modes: HashMap<String, RoomNotificationMode> = state
+        .room_notification_settings
+        .iter()
+        .map(|(room_id, settings)| (room_id.clone(), settings.mode))
+        .collect();
+    let previous_candidate = state.native_attention.summary.candidate.as_ref();
+    let mut next = crate::state::native_attention_state_from_rooms(
+        crate::state::NativeAttentionProjectionInput {
+            rooms: &state.rooms,
+            active_room_id: state.navigation.active_room_id.as_deref(),
+            muted_room_ids: &[],
+            room_notification_modes: &room_notification_modes,
+            ignored_user_ids: &state.profile.ignored_user_ids,
+            window_focused: state.native_attention_context.window_focused,
+            observation,
+            previous_candidate,
+            capabilities: state.native_attention.summary.capabilities,
+        },
+    );
+    if !state.settings.values.notifications.badges {
+        next.summary.badge_count = 0;
+    }
+    next
+}
+
+pub(crate) fn recompute_native_attention_from_rooms(
+    state: &mut AppState,
+    observation: NativeAttentionObservationKind,
+) -> bool {
+    let next = projected_native_attention_from_rooms(state, observation);
+    if state.native_attention == next {
+        return false;
+    }
+    state.native_attention = next;
+    true
+}
+
+pub(crate) fn handle_native_window_focus_changed(
+    state: &mut AppState,
+    focused: bool,
+) -> Vec<AppEffect> {
+    if state.native_attention_context.window_focused == focused {
+        return Vec::new();
+    }
+    state.native_attention_context.window_focused = focused;
+
+    let mut next =
+        projected_native_attention_from_rooms(state, NativeAttentionObservationKind::InitialSync);
+    next.summary.candidate = None;
+    next.dispatch = crate::state::NativeAttentionDispatchState::Idle;
+    if state.native_attention == next {
+        return Vec::new();
+    }
+
+    state.native_attention = next;
     vec![AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged)]
 }
 

@@ -848,6 +848,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::NativeAttentionUpdated { attention } => {
             native_attention::handle_native_attention_updated(state, attention)
         }
+        AppAction::NativeWindowFocusChanged { focused } => {
+            native_attention::handle_native_window_focus_changed(state, focused)
+        }
         AppAction::NativeAttentionDispatchStarted { dispatch_id } => {
             native_attention::handle_dispatch_started(state, dispatch_id)
         }
@@ -2959,10 +2962,7 @@ mod tests {
             &mut state,
             AppAction::RoomListUpdated {
                 spaces: Vec::new(),
-                rooms: vec![
-                    test_room("!active:example.invalid", None),
-                    other_room,
-                ],
+                rooms: vec![test_room("!active:example.invalid", None), other_room],
             },
         );
         assert!(state.native_attention.summary.candidate.is_some());
@@ -2979,13 +2979,11 @@ mod tests {
         );
 
         assert_eq!(
-            state.native_attention.summary.unread_count,
-            unread_count,
+            state.native_attention.summary.unread_count, unread_count,
             "focus changes must preserve unread totals"
         );
         assert_eq!(
-            state.native_attention.summary.badge_count,
-            badge_count,
+            state.native_attention.summary.badge_count, badge_count,
             "focus changes must preserve badge totals"
         );
         assert_eq!(state.native_attention.summary.candidate, None);

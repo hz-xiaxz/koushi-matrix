@@ -767,6 +767,9 @@ pub enum AppAction {
     NativeAttentionUpdated {
         attention: NativeAttentionState,
     },
+    NativeWindowFocusChanged {
+        focused: bool,
+    },
     NativeAttentionDispatchStarted {
         dispatch_id: NativeAttentionDispatchId,
     },
