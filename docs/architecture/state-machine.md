@@ -871,7 +871,13 @@ stateDiagram-v2
 ```
 
 - The thread pane is either closed, opening a root event, or open with a focused
-  thread timeline.
+  thread timeline. Every opening/open pane retains a Rust-owned
+  `ThreadOpenIntent`: `ExistingThread` or `NewThreadDraft`.
+- The open-thread entry point chooses `ExistingThread` for a room timeline row
+  whose Rust-projected `thread_summary.reply_count` is positive and for every
+  Threads-list entry. A room-timeline “Reply in thread” action whose root has no
+  known reply summary chooses `NewThreadDraft`. React carries that typed intent;
+  it does not revise it from timeline emptiness.
 - Thread subscription success or failure must match the current opening room and
   root event; stale thread signals are ignored.
 - Opening a thread is not complete when `ThreadPaneState` changes to `Opening`.
@@ -885,6 +891,19 @@ stateDiagram-v2
   thread items are not stored in `AppState`; they flow as `TimelineEvent`
   batches/diffs keyed by the thread `TimelineKey`. Legacy top-level frontend
   placeholders such as `snapshot.thread` are not authoritative in production.
+- A new-thread draft still subscribes its thread timeline so live remote
+  activity and send routing work. Its opening presentation is immediately
+  composer-capable and its automatic backward-history eligibility is false.
+  Initial-empty, pagination-terminal, replay, reset, layout, and gap-repair
+  settlement signals cannot bypass that semantic guard. A matching accepted
+  local thread submission or matching event-backed thread activity promotes
+  the pane monotonically to `ExistingThread`; wrong-room/root and stale activity
+  are ignored.
+- Existing threads retain ordinary automatic backfill eligibility. When their
+  local projection is empty, the centralized backfill policy may admit one
+  bounded request subject to its normal in-flight/transition fences and the
+  automatic-history setting. No independent empty-thread effect may issue a
+  second request.
 - The open thread pane owns its own Rust `ComposerState`. The thread composer
   sends by routing `TimelineCommand::SendReply` to
   `TimelineKind::Thread { room_id, root_event_id }`, with
@@ -904,6 +923,23 @@ stateDiagram-v2
   open room/root event pair, and is cleared when the thread closes or navigation
   selects another room. React may render the DTO but must not scan timeline rows
   or thread chips to invent pane-level notification counts.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Closed
+    Closed --> OpeningExisting: OpenThread(ExistingThread) [Ready, active room]
+    Closed --> OpeningDraft: OpenThread(NewThreadDraft) [Ready, active room]
+    OpeningExisting --> OpenExisting: ThreadSubscribed [matching room/root]
+    OpeningDraft --> OpenDraft: ThreadSubscribed [matching room/root]
+    OpeningDraft --> OpeningExisting: ThreadSubmissionAccepted or ThreadActivityObserved [matching room/root]
+    OpenDraft --> OpenExisting: ThreadSubmissionAccepted or ThreadActivityObserved [matching room/root]
+    OpeningExisting --> Closed: ThreadSubscriptionFailed [matching room/root]
+    OpeningDraft --> Closed: ThreadSubscriptionFailed [matching room/root]
+    OpeningExisting --> Closed: CloseThread/SelectRoom/session clear
+    OpeningDraft --> Closed: CloseThread/SelectRoom/session clear
+    OpenExisting --> Closed: CloseThread/SelectRoom/session clear
+    OpenDraft --> Closed: CloseThread/SelectRoom/session clear
+```
 
 ```mermaid
 stateDiagram-v2
