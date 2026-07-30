@@ -8,7 +8,7 @@ fixture/demo backend contract mentioned below is historical (dev/demo only).
 The state-transition diagrams in this document are normative and must track the
 reducer; see [Maintenance Contract](#maintenance-contract).
 
-Date: 2026-07-30
+Date: 2026-07-31
 
 ## Contract
 
@@ -2886,17 +2886,33 @@ stateDiagram-v2
     Candidate --> Dispatching: NativeAttentionDispatchRequested
     Dispatching --> Delivered: NativeAttentionDelivered [matching request_id]
     Dispatching --> Failed: NativeAttentionFailed [matching request_id]
-    Delivered --> Idle: AttentionCleared/RoomMarkedRead/WindowFocused
-    Suppressed --> Idle: AttentionCleared/RoomMarkedRead/WindowFocused
-    Failed --> Idle: AttentionCleared/RoomMarkedRead/WindowFocused
-    Candidate --> Idle: AttentionCleared/RoomMarkedRead/WindowFocused
-    Dispatching --> Idle: AttentionCleared/RoomMarkedRead/WindowFocused
+    Delivered --> Idle: AttentionCleared/RoomMarkedRead/NativeWindowFocusChanged
+    Suppressed --> Idle: AttentionCleared/RoomMarkedRead/NativeWindowFocusChanged
+    Failed --> Idle: AttentionCleared/RoomMarkedRead/NativeWindowFocusChanged
+    Candidate --> Idle: AttentionCleared/RoomMarkedRead/NativeWindowFocusChanged
+    Dispatching --> Idle: AttentionCleared/RoomMarkedRead/NativeWindowFocusChanged
 ```
 
 - Accepted inputs are Rust-owned room/timeline activity observations,
   notification settings changes, room muted/low-priority state changes, window
   focus changes, mark-read/read-receipt actions, platform capability updates,
   and dispatch completion/failure events from the Tauri adapter.
+- The main Tauri window maps native `Focused(bool)` events to the typed
+  `ObserveNativeWindowFocus` core command and
+  `NativeWindowFocusChanged` reducer action. Tauri assigns a strictly
+  increasing observation generation before asynchronous submission, and the
+  reducer rejects any generation that is not newer than the last accepted
+  value, so spawned submissions cannot regress focus state when they complete
+  out of order. Generation exhaustion stops further observations instead of
+  wrapping. The resulting
+  `NativeAttentionContext.window_focused` fact is process-local Rust state,
+  defaults conservatively to focused until first observation, and is skipped by
+  AppState/WebView serialization. React does not observe or infer native focus.
+- A focus transition recomputes persistent unread and badge totals but never
+  creates or replays a transient candidate. A later live room-list update uses
+  the stored focus fact: activity in the active room is suppressed only while
+  the native window is focused; the same activity may produce a candidate while
+  unfocused.
 - Notification policy enters this machine through Rust-owned
   `SettingsValues.notifications`, persisted by the settings store with legacy
   JSON backfill to the default policy. React settings panels may dispatch typed
@@ -2928,6 +2944,11 @@ stateDiagram-v2
   eligibility, tray visibility, and activation behavior are reducer/core
   semantics. Platform adapters only map candidates to macOS, Windows, Linux, or
   no-op capabilities.
+- Every real room-list recomputation emits a private-data-free Core diagnostic
+  with source `native.attention` and stage `recomputed`. Its allowlisted fields
+  are observation, unread/badge counts, candidate and suppression tokens,
+  window focus, and active-room-match booleans. Room/event/user IDs, labels,
+  message bodies, and raw errors are never retained by that diagnostic effect.
 - Persistent adapter effects such as window title, badge count, Windows overlay,
   tray count, and zero-badge notification clearing follow the Rust-owned
   snapshot state. Transient sound and activation effects are scoped to a

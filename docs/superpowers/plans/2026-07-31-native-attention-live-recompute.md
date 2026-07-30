@@ -4,7 +4,7 @@
 
 **Goal:** Complete issue #353 by making active-room notification suppression depend on the real native-window focus state and by recording the Rust-owned recomputation decision without private data.
 
-**Architecture:** Tauri converts main-window `Focused(bool)` events into a typed `AppCommand`. The AppActor reduces that command into process-local `NativeAttentionContext`, which is skipped by AppState serialization. The existing room-list reducer remains the single owner of badge/candidate policy and consumes the stored focus fact. Core observes the completed room-list reduction and records a fixed-field diagnostic.
+**Architecture:** Tauri converts main-window `Focused(bool)` events into a typed `AppCommand` with a callback-ordered observation generation. The AppActor reduces that command into process-local `NativeAttentionContext`, which is skipped by AppState serialization and rejects stale asynchronous delivery. The existing room-list reducer remains the single owner of badge/candidate policy and consumes the stored focus fact. Core observes the completed room-list reduction and records a fixed-field diagnostic.
 
 **Tech Stack:** Rust, koushi-state reducer, koushi-core actor/diagnostics, Tauri 2 window events, Cargo tests, Node repository guards.
 
@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `crates/koushi-state/src/reducer/mod.rs`
 
-- [ ] Add a reducer test named `unfocused_active_room_live_unread_creates_native_attention_candidate`.
+- [x] Add a reducer test named `unfocused_active_room_live_unread_creates_native_attention_candidate`.
 
   Construct a ready state with the active room selected, apply the initial
   `RoomListUpdated`, apply `NativeWindowFocusChanged { focused: false }`, then
@@ -31,14 +31,14 @@
   );
   ```
 
-- [ ] Add `focus_change_does_not_replay_existing_native_attention_candidate`.
+- [x] Add `focus_change_does_not_replay_existing_native_attention_candidate`.
 
   Seed a live candidate from another room, reduce both focus transitions, and
   assert that the transition clears/suppresses transient delivery rather than
   producing another deliverable candidate. Badge and unread totals must remain
   unchanged.
 
-- [ ] Run the focused RED gate and record the non-zero exit:
+- [x] Run the focused RED gate and record the non-zero exit:
 
   ```bash
   cargo test -p koushi-state --lib native_attention > /tmp/issue-353-state-red.log 2>&1
@@ -49,7 +49,7 @@
   process-local context do not exist yet, or the unfocused test fails because
   the reducer still hard-codes `window_focused: true`.
 
-- [ ] Commit the RED tests:
+- [x] Commit the RED tests:
 
   ```bash
   git add crates/koushi-state/src/reducer/mod.rs
@@ -67,18 +67,20 @@
 - Modify: `crates/koushi-state/src/reducer/room.rs`
 - Modify: `crates/koushi-state/src/reducer/mod.rs`
 
-- [ ] Add a conservative process-local focus context:
+- [x] Add a conservative process-local focus context:
 
   ```rust
   #[derive(Clone, Copy, Debug, Eq, PartialEq)]
   pub struct NativeAttentionContext {
       pub window_focused: bool,
+      pub window_focus_observation_generation: u64,
   }
 
   impl Default for NativeAttentionContext {
       fn default() -> Self {
           Self {
               window_focused: true,
+              window_focus_observation_generation: 0,
           }
       }
   }
@@ -95,18 +97,19 @@
   Initialize it in `AppState::default`. Do not add it to Tauri or TypeScript
   DTOs.
 
-- [ ] Add the reducer input:
+- [x] Add the reducer input:
 
   ```rust
   NativeWindowFocusChanged {
       focused: bool,
+      observation_generation: u64,
   },
   ```
 
   Route it from `reduce` to
   `native_attention::handle_native_window_focus_changed`.
 
-- [ ] Move the existing room-derived attention projection into a
+- [x] Move the existing room-derived attention projection into a
   `pub(crate)` helper in `reducer/native_attention.rs`. It must accept the
   observation kind and use:
 
@@ -117,26 +120,29 @@
   Preserve badge preference masking and the current room notification/ignored
   user inputs.
 
-- [ ] Implement focus handling so a focus transition is reducer state, not a
+- [x] Implement focus handling so a focus transition is reducer state, not a
   transient Matrix observation:
 
   ```rust
   pub(crate) fn handle_native_window_focus_changed(
       state: &mut AppState,
       focused: bool,
+      observation_generation: u64,
   ) -> Vec<AppEffect>
   ```
 
-  If the value is unchanged, return no effects. Otherwise update the context,
-  recompute the current persistent totals, clear the transient candidate, and
-  leave dispatch non-deliverable. Emit `NativeAttentionChanged` only when the
-  serialized `NativeAttentionState` changes.
+  Reject a generation that is not newer than the last accepted observation.
+  If the accepted value is unchanged, return no effects. Otherwise update the
+  context, recompute the current persistent totals, clear the transient
+  candidate, and leave dispatch non-deliverable. Emit
+  `NativeAttentionChanged` only when the serialized `NativeAttentionState`
+  changes.
 
-- [ ] Keep the focused-active-room test green and add an assertion that the
+- [x] Keep the focused-active-room test green and add an assertion that the
   default context is focused. Verify serialization omits
   `native_attention_context`.
 
-- [ ] Run:
+- [x] Run:
 
   ```bash
   cargo test -p koushi-state --lib native_attention > /tmp/issue-353-state-green.log 2>&1
@@ -147,7 +153,7 @@
 
   Expected: both exits are `0`.
 
-- [ ] Commit:
+- [x] Commit:
 
   ```bash
   git add crates/koushi-state
@@ -162,20 +168,21 @@
 - Modify: `apps/desktop/src-tauri/src/commands/native_attention.rs`
 - Modify: `apps/desktop/src-tauri/src/lib.rs`
 
-- [ ] Add RED command tests in `crates/koushi-core/src/command.rs` proving the
+- [x] Add RED command tests in `crates/koushi-core/src/command.rs` proving the
   new command preserves its request ID and has private-data-free `Debug`:
 
   ```rust
   AppCommand::ObserveNativeWindowFocus {
       request_id,
       focused: false,
+      observation_generation: 7,
   }
   ```
 
   The debug form must contain the command name and boolean, with no Matrix
   identifier fields.
 
-- [ ] Add a Tauri unit test for a pure helper:
+- [x] Add a Tauri unit test for a pure helper:
 
   ```rust
   fn observed_native_window_focus(event: &tauri::WindowEvent) -> Option<bool>
@@ -184,7 +191,7 @@
   It returns `Some(true/false)` only for `WindowEvent::Focused`, and `None` for
   resize, move, close, and destroy events.
 
-- [ ] Run the RED gates:
+- [x] Run the RED gates:
 
   ```bash
   cargo test -p koushi-core --lib observe_native_window_focus > /tmp/issue-353-core-command-red.log 2>&1
@@ -193,36 +200,48 @@
   echo "EXIT=$?"
   ```
 
-- [ ] Add `ObserveNativeWindowFocus { request_id, focused }` to `AppCommand`,
-  its `request_id()` match, and its manual redacted `Debug`.
+- [x] Add
+  `ObserveNativeWindowFocus { request_id, focused, observation_generation }`
+  to `AppCommand`, its `request_id()` match, and its manual redacted `Debug`.
 
-- [ ] In AppActor command handling, reduce it to:
+- [x] In AppActor command handling, reduce it to:
 
   ```rust
-  AppAction::NativeWindowFocusChanged { focused }
+  AppAction::NativeWindowFocusChanged {
+      focused,
+      observation_generation,
+  }
   ```
 
   Then handle its effects through the existing request-correlated effect path.
   This command must be accepted before session readiness so the conservative
   default is replaced as soon as the main window reports focus.
 
-- [ ] Add
-  `build_observe_native_window_focus_command(request_id, focused)` in the Tauri
-  native-attention command module. In the main-window event callback, clone the
-  app handle, obtain the next request ID from `CoreRuntimeState`, and
+- [x] Add `build_observe_native_window_focus_command` in the Tauri
+  native-attention command module. In the main-window event callback,
+  synchronously allocate a strictly increasing observation generation, clone
+  the app handle, obtain the next request ID from `CoreRuntimeState`, and
   best-effort submit that typed command on Tauri's async runtime. Do not invoke
   sound, notification, permission, or badge APIs from the focus callback.
 
-- [ ] Run:
+- [x] Add
+  `native_window_focus_generation_rejects_stale_async_delivery` and
+  `native_window_focus_generation_is_monotonic_and_exhaustion_safe`. The
+  reducer must ignore an older delivery, and the Tauri counter must stop rather
+  than wrap at `u64::MAX`.
+
+- [x] Run:
 
   ```bash
   cargo test -p koushi-core --lib observe_native_window_focus > /tmp/issue-353-core-command-green.log 2>&1
   echo "EXIT=$?"
   cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib observed_native_window_focus > /tmp/issue-353-tauri-focus-green.log 2>&1
   echo "EXIT=$?"
+  cargo test -p koushi-state --lib native_window_focus_generation_rejects_stale_async_delivery
+  cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib native_window_focus
   ```
 
-- [ ] Commit:
+- [x] Commit:
 
   ```bash
   git add crates/koushi-core/src/command.rs crates/koushi-core/src/runtime.rs apps/desktop/src-tauri/src/commands/native_attention.rs apps/desktop/src-tauri/src/lib.rs
@@ -238,7 +257,7 @@
 - Modify: `crates/koushi-state/src/reducer/room.rs`
 - Modify: `crates/koushi-core/src/runtime.rs`
 
-- [ ] Add a RED runtime test that reduces an initial room snapshot and a live
+- [x] Add a RED runtime test that reduces an initial room snapshot and a live
   unread increase, inspects the diagnostic sink, and requires one event with:
 
   ```text
@@ -256,31 +275,31 @@
   Assert the serialized diagnostic contains none of the fixture's room ID,
   event ID, user ID, room label, or message body.
 
-- [ ] Run RED:
+- [x] Run RED:
 
   ```bash
   cargo test -p koushi-core --lib native_attention_recomputed_diagnostic > /tmp/issue-353-diagnostic-red.log 2>&1
   echo "EXIT=$?"
   ```
 
-- [ ] Add a projection result alongside the existing
+- [x] Add a projection result alongside the existing
   `native_attention_state_from_rooms` wrapper. It returns the projected state
   plus `active_room_match: bool`, calculated from the selected candidate's
   internal room ID before that ID is discarded. It must not expose or retain
   the room ID.
 
-- [ ] Add an internal `AppEffect::RecordNativeAttentionRecomputed` carrying
+- [x] Add an internal `AppEffect::RecordNativeAttentionRecomputed` carrying
   only the observation enum, counts, candidate kind, suppression reason,
   window-focus boolean, and active-room-match boolean. Emit it on every real
   `RoomListUpdated` recomputation, even when the WebView-visible attention
   projection did not change.
 
-- [ ] Handle that effect in the AppActor by recording `source=native.attention`
+- [x] Handle that effect in the AppActor by recording `source=native.attention`
   and `stage=recomputed`. Map enums to fixed tokens; never log IDs or display
   content. This keeps the diagnostic coupled to the exact reducer decision
   instead of reconstructing policy from the post-reduction state.
 
-- [ ] Run GREEN:
+- [x] Run GREEN:
 
   ```bash
   cargo test -p koushi-core --lib native_attention_recomputed_diagnostic > /tmp/issue-353-diagnostic-green.log 2>&1
@@ -289,7 +308,7 @@
   echo "EXIT=$?"
   ```
 
-- [ ] Commit:
+- [x] Commit:
 
   ```bash
   git add crates/koushi-state/src/effect.rs crates/koushi-state/src/state/native_attention.rs crates/koushi-state/src/reducer/native_attention.rs crates/koushi-state/src/reducer/room.rs crates/koushi-core/src/runtime.rs
@@ -301,7 +320,7 @@
 **Files:**
 - Modify: `crates/koushi-state/src/state/native_attention.rs`
 
-- [ ] Add table-driven projection tests proving:
+- [x] Add table-driven projection tests proving:
 
   1. `InitialSync`, `Backfill`, and `SelfEvent` observations keep persistent
      unread/badge totals but produce no transient candidate;
@@ -314,7 +333,7 @@
   emit timeline actions only, while server room-list unread metrics remain the
   sole input to this policy; do not add guessed provenance to React or Tauri.
 
-- [ ] Run:
+- [x] Run:
 
   ```bash
   cargo test -p koushi-state --lib native_attention_observation > /tmp/issue-353-observation.log 2>&1
@@ -323,7 +342,7 @@
 
   Expected: `EXIT=0`.
 
-- [ ] Commit:
+- [x] Commit:
 
   ```bash
   git add crates/koushi-state/src/state/native_attention.rs
@@ -336,18 +355,20 @@
 - Modify: `docs/architecture/state-machine.md`
 - Modify: `docs/superpowers/plans/2026-07-31-native-attention-live-recompute.md`
 
-- [ ] Update the state-machine document to show main-window focus as a native
+- [x] Update the state-machine document to show main-window focus as a native
   typed input to the AppActor and to state that focus context is process-local,
   Rust-owned, and excluded from the WebView DTO.
 
-- [ ] Mark every completed plan checkbox and run formatting:
+- [x] Mark every completed plan checkbox and run formatting:
 
   ```bash
   cargo fmt --all -- --check
-  npm --prefix apps/desktop run format:check
   ```
 
-- [ ] Run focused and contract gates, reading each command's exit:
+  The desktop package has no `format:check` script. Its actual `lint`,
+  `typecheck`, and focused test gates below were run instead.
+
+- [x] Run focused and contract gates, reading each command's exit:
 
   ```bash
   cargo test -p koushi-state --lib native_attention
@@ -361,13 +382,13 @@
   node scripts/check-sdk-submodule.mjs
   ```
 
-- [ ] Run the issue's integrated local Conduit proof once:
+- [x] Run the issue's integrated local Conduit proof once:
 
   ```bash
   PATH=/tmp/koushi-desktop-local-qa-bin:$PATH npm --prefix apps/desktop run qa:headless-local -- --server=conduit --scenario=native_attention --core --core-backend=both --timeout-ms=240000
   ```
 
-- [ ] Review the exact finished scope:
+- [x] Review the exact finished scope:
 
   ```bash
   git diff origin/main...HEAD
@@ -377,7 +398,7 @@
   Verify repository-rule consistency, state ownership, private-data-free
   diagnostics, no WebView DTO drift, and no unrelated files.
 
-- [ ] Commit canon/plan completion:
+- [x] Commit canon/plan completion:
 
   ```bash
   git add docs/architecture/state-machine.md docs/superpowers/plans/2026-07-31-native-attention-live-recompute.md

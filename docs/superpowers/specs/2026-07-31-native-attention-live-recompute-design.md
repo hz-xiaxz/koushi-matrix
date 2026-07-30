@@ -1,8 +1,8 @@
 # Native Attention Live Recompute Completion Design
 
-**Issue:** #353  
-**Date:** 2026-07-31  
-**Status:** Approved under the user's goal-wide automatic approval
+**Issue:** #353
+**Date:** 2026-07-31
+**Status:** Implemented and verified
 
 ## Problem
 
@@ -58,16 +58,19 @@ cross-layer machinery.
 
 ### Rust-owned focus context
 
-Add a small `NativeAttentionContext` to `AppState` with
-`window_focused: bool`. It is process-local reducer input, not product content,
-and is excluded from serialized WebView state. Its conservative default is
-focused, matching current behavior until the native window reports its real
-state.
+Add a small `NativeAttentionContext` to `AppState` with `window_focused: bool`
+and `window_focus_observation_generation: u64`. It is process-local reducer
+input, not product content, and is excluded from serialized WebView state. Its
+conservative default is focused with generation zero, matching current behavior
+until the native window reports its real state.
 
 Tauri's main-window `Focused(bool)` event dispatches a typed
-`ObserveNativeWindowFocus` core command. The AppActor projects the command to a
-`NativeWindowFocusChanged` action. No React listener or React-local focus state
-is introduced.
+`ObserveNativeWindowFocus` core command. Tauri assigns a strictly increasing
+generation before spawning asynchronous delivery. The AppActor projects the
+command to a `NativeWindowFocusChanged` action, and the reducer ignores a
+generation that is not newer than the last accepted observation. This prevents
+two spawned focus submissions from applying in the opposite order. No React
+listener or React-local focus state is introduced.
 
 On focus change, the reducer:
 
@@ -121,6 +124,9 @@ Window focus observation is best-effort:
 
 - a missing runtime or closed command channel does not crash the native event
   loop;
+- a saturated asynchronous runtime cannot reorder focus state because the
+  generation is allocated synchronously at the native callback boundary;
+- generation exhaustion skips further focus observations without wrapping;
 - the focus event carries no private Matrix data;
 - focus observation never prompts for notification permission and never calls
   a platform notification API directly.
@@ -136,11 +142,13 @@ Build the checks before implementation and keep them headless:
    a candidate and badge.
 2. Reducer test: the same update while focused suppresses only the candidate.
 3. Reducer test: changing focus does not replay an existing candidate.
-4. Runtime test: the typed focus command reaches the reducer and the
+4. Reducer/Tauri tests: stale asynchronous delivery is rejected by a monotonic
+   observation generation, including exhaustion without wraparound.
+5. Runtime test: the typed focus command reaches the reducer and the
    recomputation diagnostic contains only allowlisted fields.
-5. Tauri unit/structure test: main-window `Focused(bool)` routes the typed
+6. Tauri unit/structure test: main-window `Focused(bool)` routes the typed
    command.
-6. Existing native-attention reducer, DTO, frontend adapter, typecheck, lint,
+7. Existing native-attention reducer, DTO, frontend adapter, typecheck, lint,
    browser-headless, workspace, and local Conduit gates remain green.
 
 No manual Dock or GUI inspection is acceptance evidence.
