@@ -9,8 +9,8 @@ use koushi_core::event::{AccountEvent, CoreEvent};
 use koushi_core::ids::{AccountKey, TimelineKey};
 use koushi_key::SessionKeyId;
 use koushi_state::{
-    AuthSecret, IdentityResetAuthRequest, LoginRequest, MentionIntent, PresenceKind,
-    RecoveryRequest, RoomTagKind, TimelineScrollAnchor, TimelineScrollAnchorEdge,
+    AuthSecret, DisplayPlatform, IdentityResetAuthRequest, LoginRequest, MentionIntent,
+    PresenceKind, RecoveryRequest, RoomTagKind, TimelineScrollAnchor, TimelineScrollAnchorEdge,
     VerificationCancelReason, VerificationTarget,
 };
 
@@ -200,6 +200,7 @@ fn auth_discovery_and_oidc_commands_redact_debug_and_do_not_require_ready_sessio
         CoreCommand::Account(AccountCommand::CompleteOidcLogin {
             request_id,
             callback_url: callback_url.clone(),
+            platform: DisplayPlatform::Linux,
         }),
     ];
 
