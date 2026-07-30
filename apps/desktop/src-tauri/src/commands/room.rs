@@ -570,18 +570,27 @@ pub async fn start_direct_message(
         .command(build_start_direct_message_command(request_id, user_id))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    // Get-or-create resolves the exact conversation; keep that identity,
+    // wait for it to reach the Rust room-list projection, and open it before
+    // returning so "Send message" lands in the DM instead of staying on the
+    // previous room (#368).
+    let room_id =
+        wait_for_direct_message_started(&mut event_conn, request_id, ROOM_OPERATION_EVENT_TIMEOUT)
+            .await?;
+    wait_for_room_in_state(&mut event_conn, &room_id, ROOM_OPERATION_EVENT_TIMEOUT).await?;
+    let select_request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_select_room_command(
+            select_request_id,
+            room_id.clone(),
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    wait_for_selected_room(
         &mut event_conn,
-        request_id,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::DirectMessageStarted { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "direct message start did not complete",
-        "direct message start failed",
+        select_request_id,
+        &room_id,
+        SELECT_ROOM_EVENT_TIMEOUT,
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
