@@ -1463,15 +1463,7 @@ pub async fn cleanup_current_device(
     uiaa_session: Option<&str>,
 ) -> Result<MatrixDeviceCleanupOutcome, DeviceCleanupFailureKind> {
     if session.device_cleanup_auth_mode() == DeviceCleanupAuthMode::OAuth {
-        return match session.client().oauth().logout().await {
-            Ok(()) => Ok(MatrixDeviceCleanupOutcome::Settled(
-                DeviceCleanupRemoteOutcome::Success,
-            )),
-            Err(matrix_sdk::authentication::oauth::OAuthError::NotAuthenticated) => Ok(
-                MatrixDeviceCleanupOutcome::Settled(DeviceCleanupRemoteOutcome::AlreadyAbsent),
-            ),
-            Err(_) => Err(DeviceCleanupFailureKind::Sdk),
-        };
+        return cleanup_oauth_session(session.client().oauth()).await;
     }
 
     let raw_device_id = session.info.device_id.as_str();
@@ -1500,6 +1492,20 @@ pub async fn cleanup_current_device(
     }
 }
 
+async fn cleanup_oauth_session(
+    oauth: matrix_sdk::authentication::oauth::OAuth,
+) -> Result<MatrixDeviceCleanupOutcome, DeviceCleanupFailureKind> {
+    match oauth.logout().await {
+        Ok(()) => Ok(MatrixDeviceCleanupOutcome::Settled(
+            DeviceCleanupRemoteOutcome::Success,
+        )),
+        Err(matrix_sdk::authentication::oauth::OAuthError::NotAuthenticated) => Ok(
+            MatrixDeviceCleanupOutcome::Settled(DeviceCleanupRemoteOutcome::AlreadyAbsent),
+        ),
+        Err(_) => Err(DeviceCleanupFailureKind::Sdk),
+    }
+}
+
 fn classify_device_cleanup_http_fact(
     kind: Option<&matrix_sdk::ruma::api::error::ErrorKind>,
     network_failure: bool,
@@ -1507,10 +1513,9 @@ fn classify_device_cleanup_http_fact(
     use matrix_sdk::ruma::api::error::ErrorKind;
 
     match kind {
-        Some(ErrorKind::UnknownToken(_)) | Some(ErrorKind::NotFound) => {
-            Ok(DeviceCleanupRemoteOutcome::AlreadyAbsent)
+        Some(ErrorKind::Forbidden) | Some(ErrorKind::UnknownToken(_)) => {
+            Err(DeviceCleanupFailureKind::Forbidden)
         }
-        Some(ErrorKind::Forbidden) => Err(DeviceCleanupFailureKind::Forbidden),
         _ if network_failure => Err(DeviceCleanupFailureKind::Network),
         _ => Err(DeviceCleanupFailureKind::Sdk),
     }
@@ -1573,7 +1578,7 @@ mod device_cleanup_tests {
     use super::{
         DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupRemoteOutcome,
         MatrixClientSession, MatrixDeviceCleanupOutcome, SessionInfo,
-        classify_device_cleanup_http_fact, cleanup_current_device,
+        classify_device_cleanup_http_fact, cleanup_current_device, cleanup_oauth_session,
     };
 
     async fn session_for(server: &MatrixMockServer) -> MatrixClientSession {
@@ -1631,10 +1636,77 @@ mod device_cleanup_tests {
                 device_id: client.device_id().expect("OAuth device").to_string(),
             },
         );
-
         assert_eq!(
             session.device_cleanup_auth_mode(),
             DeviceCleanupAuthMode::OAuth
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_device_cleanup_revokes_tokens_without_matrix_uiaa() {
+        let server = MatrixMockServer::new().await;
+        let oauth_server = server.oauth();
+        oauth_server
+            .mock_server_metadata()
+            .ok_https()
+            .expect(1..)
+            .named("server_metadata")
+            .mount()
+            .await;
+        oauth_server
+            .mock_revocation()
+            .ok()
+            .expect(1)
+            .named("revocation")
+            .mount()
+            .await;
+        let client = server.client_builder().unlogged().build().await;
+        client
+            .oauth()
+            .restore_session(
+                matrix_sdk::test_utils::client::oauth::mock_session(
+                    matrix_sdk::test_utils::client::mock_session_tokens_with_refresh(),
+                ),
+                matrix_sdk_base::store::RoomLoadSettings::default(),
+            )
+            .await
+            .expect("synthetic OAuth session");
+        let session = MatrixClientSession::from_client_for_testing(
+            client.clone(),
+            SessionInfo {
+                homeserver: client.homeserver().to_string(),
+                user_id: client.user_id().expect("OAuth user").to_string(),
+                device_id: client.device_id().expect("OAuth device").to_string(),
+            },
+        );
+        client
+            .oauth()
+            .server_metadata()
+            .await
+            .expect("OAuth server metadata");
+        assert_eq!(
+            session.device_cleanup_auth_mode(),
+            DeviceCleanupAuthMode::OAuth
+        );
+
+        assert_eq!(
+            cleanup_oauth_session(client.oauth().insecure_rewrite_https_to_http()).await,
+            Ok(MatrixDeviceCleanupOutcome::Settled(
+                DeviceCleanupRemoteOutcome::Success
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_device_cleanup_maps_an_absent_session_without_uiaa() {
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().unlogged().build().await;
+
+        assert_eq!(
+            cleanup_oauth_session(client.oauth()).await,
+            Ok(MatrixDeviceCleanupOutcome::Settled(
+                DeviceCleanupRemoteOutcome::AlreadyAbsent
+            ))
         );
     }
 
@@ -1668,7 +1740,7 @@ mod device_cleanup_tests {
     }
 
     #[tokio::test]
-    async fn legacy_device_cleanup_treats_unknown_token_as_already_absent() {
+    async fn legacy_device_cleanup_keeps_unknown_token_retryable() {
         let server = MatrixMockServer::new().await;
         let session = session_for(&server).await;
         Mock::given(method("POST"))
@@ -1684,9 +1756,7 @@ mod device_cleanup_tests {
 
         assert_eq!(
             cleanup_current_device(&session, None, None).await,
-            Ok(MatrixDeviceCleanupOutcome::Settled(
-                DeviceCleanupRemoteOutcome::AlreadyAbsent
-            ))
+            Err(DeviceCleanupFailureKind::Forbidden)
         );
     }
 
@@ -1702,17 +1772,17 @@ mod device_cleanup_tests {
     }
 
     #[test]
-    fn device_cleanup_http_classification_is_private_and_idempotent() {
+    fn device_cleanup_http_classification_requires_authoritative_absence() {
         assert_eq!(
             classify_device_cleanup_http_fact(
                 Some(&ErrorKind::UnknownToken(UnknownTokenErrorData::new())),
                 false,
             ),
-            Ok(DeviceCleanupRemoteOutcome::AlreadyAbsent)
+            Err(DeviceCleanupFailureKind::Forbidden)
         );
         assert_eq!(
             classify_device_cleanup_http_fact(Some(&ErrorKind::NotFound), false),
-            Ok(DeviceCleanupRemoteOutcome::AlreadyAbsent)
+            Err(DeviceCleanupFailureKind::Sdk)
         );
         assert_eq!(
             classify_device_cleanup_http_fact(Some(&ErrorKind::Forbidden), false),

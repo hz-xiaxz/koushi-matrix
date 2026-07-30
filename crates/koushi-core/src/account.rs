@@ -526,6 +526,10 @@ pub enum AccountMessage {
         response: oneshot::Sender<(bool, bool, bool, bool)>,
     },
     #[cfg(test)]
+    InspectPendingDeviceCleanup {
+        response: oneshot::Sender<bool>,
+    },
+    #[cfg(test)]
     InspectSyncOwners {
         response: oneshot::Sender<(bool, bool, bool)>,
     },
@@ -2026,6 +2030,12 @@ impl AccountActor {
                         match result {
                             VerificationMethodDiscoveryResult::Discovered(gate) => {
                                 self.verification_method_discovery_failed = false;
+                                if gate.account_kind
+                                    == koushi_state::VerificationAccountKind::ExistingIdentity
+                                    && gate.methods.is_empty()
+                                {
+                                    record_device_cleanup_offer("no_proof_method");
+                                }
                                 record_verification_method_discovery_event(
                                     verification_method_discovery_event(
                                         "success_projecting",
@@ -2066,7 +2076,7 @@ impl AccountActor {
                                         ),
                                     ),
                                 );
-                                record_device_cleanup_offer("no_proof_method");
+                                record_device_cleanup_offer("recovery_failed");
                                 self.send_actions(vec![
                                     AppAction::VerificationMethodDiscoveryFailed {
                                         generation,
@@ -2140,6 +2150,10 @@ impl AccountActor {
                         self.sync_actor.is_some(),
                         self.trust_observer.is_some(),
                     ));
+                }
+                #[cfg(test)]
+                AccountMessage::InspectPendingDeviceCleanup { response } => {
+                    let _ = response.send(self.pending_device_cleanup.is_some());
                 }
                 #[cfg(test)]
                 AccountMessage::InspectSyncOwners { response } => {
@@ -8092,6 +8106,7 @@ impl AccountActor {
 
     async fn stop_provisional_runtime(&mut self) {
         self.trust_generation = self.trust_generation.wrapping_add(1);
+        self.pending_device_cleanup = None;
         self.cancel_pending_trust_promotion().await;
         if let Some(task) = self.trust_observer.take() {
             task.abort();
@@ -12718,6 +12733,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn provisional_teardown_drops_actor_private_device_cleanup_continuation() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        handle
+            .send(AccountMessage::ConfigureDeviceCleanupResults {
+                results: vec![Ok(koushi_sdk::MatrixDeviceCleanupOutcome::UiaaRequired {
+                    session: Some("opaque-test-session".to_owned()),
+                })],
+            })
+            .await;
+        handle
+            .send(AccountMessage::Command(
+                AccountCommand::StartDeviceCleanup {
+                    request_id: RequestId {
+                        connection_id: RuntimeConnectionId(1),
+                        sequence: 601,
+                    },
+                },
+            ))
+            .await;
+        let _ = next_device_cleanup_actions(&mut action_rx).await;
+        assert!(matches!(
+            next_device_cleanup_actions(&mut action_rx).await.as_slice(),
+            [AppAction::DeviceCleanupUiaRequired {
+                request_id: 601,
+                flow_id: 601,
+            }]
+        ));
+        assert!(inspect_pending_device_cleanup(&handle).await);
+
+        handle
+            .send(AccountMessage::RejectProvisionalSession {
+                request_id: RequestId {
+                    connection_id: RuntimeConnectionId(1),
+                    sequence: 602,
+                },
+            })
+            .await;
+        executor::timeout(Duration::from_secs(2), async {
+            loop {
+                if matches!(
+                    action_rx.recv().await.as_deref(),
+                    Some([AppAction::LogoutFinished])
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("provisional rejection settles");
+
+        assert!(
+            !inspect_pending_device_cleanup(&handle).await,
+            "teardown must discard actor-private UIAA continuation state"
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
     async fn recovery_proof_success_waits_for_verified_trust_before_promotion() {
         let (handle, mut action_rx) = login_gated_actor().await;
         let flow_id = 81;
@@ -13555,6 +13628,16 @@ mod tests {
                 .await
         );
         result.await.expect("runtime inspection")
+    }
+
+    async fn inspect_pending_device_cleanup(handle: &AccountActorHandle) -> bool {
+        let (response, result) = oneshot::channel();
+        assert!(
+            handle
+                .send(AccountMessage::InspectPendingDeviceCleanup { response })
+                .await
+        );
+        result.await.expect("pending device cleanup inspection")
     }
 
     async fn inspect_sync_owners(handle: &AccountActorHandle) -> (bool, bool, bool) {

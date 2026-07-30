@@ -78,9 +78,8 @@ stateDiagram-v2
     SignedOut --> Authenticating: LoginSubmitted / CompleteOidcLogin
     Authenticating --> Provisional: AuthenticatedSessionInstalled
     Authenticating --> SignedOut: LoginFailed
-    Provisional --> AwaitingVerification: TrustUnverified / methods discovered
+    Provisional --> AwaitingVerification: TrustUnverified / method discovery settled
     Provisional --> Ready: AuthoritativeDeviceTrustChanged(Verified)
-    Provisional --> Rejecting: ExistingIdentityWithoutProof
     AwaitingVerification --> Verifying: VerificationMethodSubmitted / clear prior failure
     AwaitingVerification --> Rejecting: RejectSession / no proof
     Verifying --> AwaitingVerification: Cancelled / failed / timeout
@@ -141,6 +140,9 @@ stateDiagram-v2
   failure action; `OperationFailed` alone is not settlement.
 - Promotion, rejection, logout, account switch, and a new login attempt clear
   cleanup state and actor-private continuations.
+- Starting any recovery or verification attempt also clears an `Offered`
+  cleanup state. `Verifying` never owns cleanup commands or cleanup UI, so
+  recovery and destructive cleanup cannot overlap.
 
 - A state-changing account command is admitted only if its projected action is
   accepted by the current reducer state. Rejection is never a silent return:

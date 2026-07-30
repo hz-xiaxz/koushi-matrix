@@ -1293,10 +1293,12 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   already-absent devices settle idempotently. A remote failure preserves the
   provisional session and local credentials for retry; erasing local data while
   the remote device may remain requires a separate confirmation.
-- Device-cleanup commands are valid while the session is provisional or awaiting
-  verification. React renders the Rust snapshot and submits typed commands; it
-  must not infer success, delete local state, retain UIAA secrets, or auto-start
-  cleanup after verification failure.
+- Device-cleanup commands are valid only while cleanup owns a retryable
+  provisional/rechecking or awaiting-verification gate. Starting recovery or
+  verification clears the offer; `Verifying` never admits or renders cleanup.
+  React renders the Rust snapshot and submits typed commands; it must not infer
+  success, delete local state, retain UIAA secrets, or auto-start cleanup after
+  verification failure.
 - Private-data-free diagnostics use source `device_cleanup` with stages
   `offered`, `remote_started`, `uia_required`, `uia_submitted`,
   `remote_settled`, `remote_failed`, `local_reset_started`,
@@ -1310,6 +1312,9 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   `PATH=/tmp/koushi-desktop-local-qa-bin:$PATH npm --prefix apps/desktop run
   qa:headless-local -- --server=conduit --scenario=device_cleanup --core
   --core-backend=probed --timeout-ms=240000`.
+  This scenario uses a separate short-lived audit session to query the raw
+  homeserver device list, proves the removed Device ID is absent and the
+  replacement is present, then remotely deletes the auditor device.
 - Rich device naming and account-management presentation remain #369. Do not
   expand this cleanup state machine into that surface.
 

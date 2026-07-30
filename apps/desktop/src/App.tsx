@@ -938,6 +938,7 @@ export function SessionVerificationGate({
   const checking = phaseKind === "checkingTrust";
   const discovering = phaseKind === "discoveringMethods";
   const rechecking = phaseKind === "recheckingTrust";
+  const cleanupSurfaceOwned = awaiting || rechecking;
   const preparationFailure =
     session.kind === "provisional" ? provisionalPhaseFailure(session.phase) : null;
   const activelyVerifying = session.kind === "verifying";
@@ -1030,8 +1031,8 @@ export function SessionVerificationGate({
     {awaiting && methods.includes("bootstrap") && <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const destination = destinationRef.current?.value.trim() ?? ""; const passphrase = passphraseRef.current?.value || null; if (destinationRef.current) destinationRef.current.value = ""; if (passphraseRef.current) passphraseRef.current.value = ""; if (destination) void run("recovery", () => api.startSessionBootstrap(passphrase, destination)); }}><ImeTextField ref={destinationRef} aria-label={t("gate.destination")} syncKey="session-bootstrap-destination"/><SecureImeTextField ref={passphraseRef} aria-label={t("gate.passphrase")} autoComplete="new-password"/><button type="submit">{t("gate.bootstrap")}</button></ImeSafeForm>}
     {session.kind === "awaitingBootstrapConfirmation" && flowId !== undefined && <button onClick={() => void run("recovery", () => api.confirmSessionBootstrapSaved(flowId))}>{t("gate.saved")}</button>}
     {sasVerifying && flowId !== undefined && <button onClick={() => void run("sas", () => api.cancelVerification(flowId))}>{t("action.cancel")}</button>}
-    {deviceCleanup.kind === "offered" && <button className="dialog-button danger" type="button" disabled={gateOperation !== null} onClick={() => setConfirmDeviceCleanup(true)}>{t("gate.cleanupOffer")}</button>}
-    {confirmDeviceCleanup && <ResetLocalDataConfirmationDialog
+    {cleanupSurfaceOwned && deviceCleanup.kind === "offered" && <button className="dialog-button danger" type="button" disabled={gateOperation !== null} onClick={() => setConfirmDeviceCleanup(true)}>{t("gate.cleanupOffer")}</button>}
+    {cleanupSurfaceOwned && confirmDeviceCleanup && <ResetLocalDataConfirmationDialog
       isBusy={gateOperation !== null}
       title={t("gate.cleanupDialogTitle")}
       copy={t("gate.cleanupDialogCopy")}
@@ -1039,9 +1040,9 @@ export function SessionVerificationGate({
       onCancel={() => setConfirmDeviceCleanup(false)}
       onConfirm={startDeviceCleanup}
     />}
-    {deviceCleanup.kind === "resolvingRemote" && <p>{t("gate.cleanupResolving")}</p>}
-    {deviceCleanup.kind === "removingRemote" && <p>{t("gate.cleanupRemoving")}</p>}
-    {deviceCleanup.kind === "awaitingUia" && <ImeSafeForm onSubmit={(event) => {
+    {cleanupSurfaceOwned && deviceCleanup.kind === "resolvingRemote" && <p>{t("gate.cleanupResolving")}</p>}
+    {cleanupSurfaceOwned && deviceCleanup.kind === "removingRemote" && <p>{t("gate.cleanupRemoving")}</p>}
+    {cleanupSurfaceOwned && deviceCleanup.kind === "awaitingUia" && <ImeSafeForm onSubmit={(event) => {
       event.preventDefault();
       const password = cleanupPasswordRef.current?.value ?? "";
       if (cleanupPasswordRef.current) cleanupPasswordRef.current.value = "";
@@ -1055,12 +1056,12 @@ export function SessionVerificationGate({
       <SecureImeTextField ref={cleanupPasswordRef} aria-label={t("gate.cleanupAccountPassword")} autoComplete="current-password"/>
       <button className="dialog-button is-primary" disabled={gateOperation === "cleanup"} type="submit">{t("gate.cleanupContinue")}</button>
     </ImeSafeForm>}
-    {deviceCleanup.kind === "remoteFailed" && <>
+    {cleanupSurfaceOwned && deviceCleanup.kind === "remoteFailed" && <>
       <p role="alert">{t("gate.cleanupRemoteFailed")}</p>
       <button className="dialog-button" type="button" disabled={gateOperation !== null} onClick={startDeviceCleanup}>{t("gate.cleanupRetryRemote")}</button>
       <button className="dialog-button danger" type="button" disabled={gateOperation !== null} onClick={() => setConfirmEraseLocalAnyway(true)}>{t("gate.cleanupEraseAnywayOffer")}</button>
     </>}
-    {confirmEraseLocalAnyway && <ResetLocalDataConfirmationDialog
+    {cleanupSurfaceOwned && confirmEraseLocalAnyway && <ResetLocalDataConfirmationDialog
       isBusy={gateOperation !== null}
       title={t("gate.cleanupEraseAnywayTitle")}
       copy={t("gate.cleanupEraseAnywayCopy")}
@@ -1068,9 +1069,9 @@ export function SessionVerificationGate({
       onCancel={() => setConfirmEraseLocalAnyway(false)}
       onConfirm={eraseLocalDataAnyway}
     />}
-    {deviceCleanup.kind === "resettingLocal" && <p>{t("gate.cleanupResettingLocal")}</p>}
-    {deviceCleanup.kind === "erasingLocalAnyway" && <p>{t("gate.cleanupErasingLocal")}</p>}
-    {deviceCleanup.kind === "localResetFailed" && <>
+    {cleanupSurfaceOwned && deviceCleanup.kind === "resettingLocal" && <p>{t("gate.cleanupResettingLocal")}</p>}
+    {cleanupSurfaceOwned && deviceCleanup.kind === "erasingLocalAnyway" && <p>{t("gate.cleanupErasingLocal")}</p>}
+    {cleanupSurfaceOwned && deviceCleanup.kind === "localResetFailed" && <>
       <p role="alert">{t("gate.cleanupLocalFailed")}</p>
       <button className="dialog-button" type="button" disabled={gateOperation !== null} onClick={startDeviceCleanup}>{t("gate.cleanupRetryLocal")}</button>
     </>}

@@ -4838,6 +4838,23 @@ fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -
             } | SessionState::AwaitingVerification { .. }
         );
     }
+    if matches!(
+        command,
+        CoreCommand::Account(
+            AccountCommand::StartDeviceCleanup { .. }
+                | AccountCommand::SubmitDeviceCleanupUia { .. }
+                | AccountCommand::EraseDeviceCleanupLocalDataAnyway { .. }
+        )
+    ) {
+        return matches!(
+            session,
+            SessionState::AwaitingVerification { .. }
+                | SessionState::Provisional {
+                    phase: koushi_state::ProvisionalPhase::RecheckingTrust { .. },
+                    ..
+                }
+        );
+    }
     if !matches!(
         session,
         SessionState::Provisional { .. }
@@ -4856,9 +4873,6 @@ fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -
                 | AccountCommand::StartSessionBootstrap { .. }
                 | AccountCommand::ConfirmSessionBootstrapSaved { .. }
                 | AccountCommand::ResetLocalData { .. }
-                | AccountCommand::StartDeviceCleanup { .. }
-                | AccountCommand::SubmitDeviceCleanupUia { .. }
-                | AccountCommand::EraseDeviceCleanupLocalDataAnyway { .. }
                 | AccountCommand::StartOwnUserSas { .. }
                 | AccountCommand::AcceptVerification { .. }
                 | AccountCommand::ConfirmSasVerification { .. }
@@ -7936,6 +7950,44 @@ mod tests {
         assert!(!is_verification_gate_command(
             &command,
             &SessionState::SignedOut
+        ));
+    }
+
+    #[test]
+    fn device_cleanup_is_not_admitted_while_verification_owns_the_gate() {
+        let command = CoreCommand::Account(AccountCommand::StartDeviceCleanup {
+            request_id: RequestId {
+                connection_id: RuntimeConnectionId(1),
+                sequence: 79,
+            },
+        });
+        let info = SessionInfo {
+            homeserver: "https://example.invalid".into(),
+            user_id: "@me:example.invalid".into(),
+            device_id: "DEVICE".into(),
+        };
+        let gate = koushi_state::VerificationGateState {
+            methods: vec![koushi_state::VerificationMethodCapability::RecoveryKey],
+            account_kind: koushi_state::VerificationAccountKind::ExistingIdentity,
+            failure: Some(koushi_state::VerificationGateFailureKind::Sdk),
+        };
+
+        assert!(is_verification_gate_command(
+            &command,
+            &SessionState::AwaitingVerification {
+                info: info.clone(),
+                gate: gate.clone(),
+            }
+        ));
+        assert!(!is_verification_gate_command(
+            &command,
+            &SessionState::Verifying {
+                info,
+                gate,
+                method: koushi_state::VerificationMethod::RecoveryKey,
+                flow_id: 79,
+                sas_emojis: vec![],
+            }
         ));
     }
 

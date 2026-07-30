@@ -414,6 +414,10 @@ confirmed local-only escape is allowed only from that failed state and must say
 that the remote device may remain. Raw Device IDs, UIAA sessions, tokens,
 passwords, and SDK errors stay inside Rust. OAuth device naming and live
 account-management-link discovery have a separate owner in issue #369.
+Ambiguous legacy `M_UNKNOWN_TOKEN` and generic `M_NOT_FOUND` errors are not
+proof of target-device absence and therefore remain retryable. Starting a new
+verification/recovery attempt retires the cleanup offer; the two flows never
+own the provisional session concurrently.
 
 Actor deployment is flexible. The boundaries above define state ownership,
 command routing, event production, and shutdown responsibility; they do not

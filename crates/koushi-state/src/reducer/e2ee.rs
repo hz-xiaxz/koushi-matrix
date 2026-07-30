@@ -110,6 +110,7 @@ pub(crate) fn handle_e2ee_recovery_submitted(
     } else {
         return Vec::new();
     };
+    state.device_cleanup = DeviceCleanupState::Idle;
     state.session = SessionState::Verifying {
         info: info.clone(),
         gate: gate.clone(),

@@ -254,6 +254,10 @@ Rules:
    tokens, UIAA sessions, passwords, recovery material, or raw SDK errors.
    OAuth device naming and its `oauth_device_name` diagnostics belong to the
    live-session issue #369 and must not gain a second owner here.
+   Treat ambiguous `M_UNKNOWN_TOKEN` and generic `M_NOT_FOUND` cleanup errors
+   as retryable; neither proves the target Device ID is absent. Recovery or
+   verification and destructive cleanup are mutually exclusive owners:
+   entering `Verifying` clears the cleanup offer and rejects cleanup commands.
 12. Credential-store health diagnostics are kind-only. Public state may report
    only `unknown`, `healthy`, `unavailable`, `locked_or_inaccessible`,
    `missing_credential`, or `reset_required`, with optional private-data-free

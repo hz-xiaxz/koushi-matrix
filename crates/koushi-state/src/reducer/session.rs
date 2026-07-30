@@ -326,6 +326,16 @@ pub(crate) fn handle_device_cleanup_start_requested(
     state: &mut AppState,
     request_id: u64,
 ) -> Vec<AppEffect> {
+    if !matches!(
+        state.session,
+        SessionState::AwaitingVerification { .. }
+            | SessionState::Provisional {
+                phase: ProvisionalPhase::RecheckingTrust { .. },
+                ..
+            }
+    ) {
+        return Vec::new();
+    }
     state.device_cleanup = match state.device_cleanup {
         DeviceCleanupState::Offered { .. } | DeviceCleanupState::RemoteFailed { .. } => {
             DeviceCleanupState::ResolvingRemote { request_id }

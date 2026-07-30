@@ -195,6 +195,8 @@ test("device cleanup is explicit, remote-first, and keeps UIA secrets out of obs
     name: "Cancel sign-in and remove this device"
   });
   await expect(confirmation).toContainText("remove this device from your Matrix account first");
+  await expect(confirmation).toContainText("Messages on your homeserver are preserved");
+  await expect(confirmation).toContainText("next sign-in creates a new Device ID");
   await confirmation.getByRole("button", {
     name: "Remove device and erase local data"
   }).click();
@@ -291,6 +293,10 @@ test("remote cleanup failure preserves data and separately confirms local-only e
     hasText: "Your credentials and local data are still preserved"
   })).toBeVisible();
   await expect(page.getByLabel("Account password")).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry removing device" }).click();
+  await expect.poll(
+    () => page.evaluate(() => window.__harness.invocationsOf("start_device_cleanup").length)
+  ).toBe(1);
   await page.getByRole("button", { name: "Erase local data anyway…" }).click();
   const confirmation = page.getByRole("dialog", { name: "Erase local data anyway" });
   await expect(confirmation).toContainText("device may remain active on your Matrix account");
@@ -301,6 +307,48 @@ test("remote cleanup failure preserves data and separately confirms local-only e
   await expect.poll(
     () => page.evaluate(() => window.__harness.invocationsOf("erase_local_data_anyway").length)
   ).toBe(1);
+});
+
+test("already-absent remote cleanup proceeds only with the Rust-owned local reset", async ({ page }) => {
+  await page.goto("/appHarness.html");
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          session: {
+            kind: "awaitingVerification",
+            homeserver: "https://example.invalid",
+            user_id: "@gate:example.invalid",
+            device_id: "DEVICE",
+            gate: {
+              methods: ["recoveryKey"],
+              account_kind: "existingIdentity",
+              failureKind: "sdk"
+            }
+          },
+          device_cleanup: {
+            kind: "resettingLocal",
+            request_id: 376,
+            mode: { kind: "remoteRemoved", outcome: "alreadyAbsent" }
+          }
+        }
+      }
+    });
+    window.__harness.pushStateChanged();
+    window.__harness.clearInvocations();
+  });
+
+  await expect(page.getByText("Device removed. Erasing local data…")).toBeVisible();
+  await expect(page.getByLabel("Account password")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retry removing device" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Erase local data anyway…" })).toHaveCount(0);
+  expect(await page.evaluate(
+    () => window.__harness.invocationsOf("start_device_cleanup").length
+  )).toBe(0);
 });
 
 test("Ready to Locked replaces the shell with the gate", async ({ page }) => {

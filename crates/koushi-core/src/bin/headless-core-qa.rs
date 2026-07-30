@@ -1559,7 +1559,6 @@ async fn run_provisional_device_cleanup_qa(config: &QaConfig) -> Result<(), Stri
             "device cleanup first device",
         )
         .await?;
-        println!("device_cleanup_remote_first=ok");
 
         let replacement_session =
             login_until_device_cleanup_offered(&mut conn, config, "device cleanup replacement")
@@ -1569,6 +1568,13 @@ async fn run_provisional_device_cleanup_qa(config: &QaConfig) -> Result<(), Stri
                 "device cleanup replacement login reused the removed server device".to_owned(),
             );
         }
+        audit_removed_device_absent_from_server(
+            config,
+            &removed_session.device_id,
+            &replacement_session.device_id,
+        )
+        .await?;
+        println!("device_cleanup_remote_first=ok");
         println!("device_cleanup_relogin_new_device=ok");
 
         drive_remote_first_device_cleanup(
@@ -1584,6 +1590,76 @@ async fn run_provisional_device_cleanup_qa(config: &QaConfig) -> Result<(), Stri
     drop(conn);
     runtime.shutdown().await;
     result
+}
+
+async fn audit_removed_device_absent_from_server(
+    config: &QaConfig,
+    removed_device_id: &str,
+    replacement_device_id: &str,
+) -> Result<(), String> {
+    let auditor = koushi_sdk::login_with_password(&koushi_state::LoginRequest {
+        homeserver: config.homeserver.clone(),
+        username: config.user_a.clone(),
+        password: AuthSecret::new(config.password_a.clone()),
+        device_display_name: Some("Koushi Device Cleanup Auditor".to_owned()),
+    })
+    .await
+    .map_err(|_| "device cleanup audit login failed".to_owned())?;
+    let devices = auditor
+        .client()
+        .devices()
+        .await
+        .map_err(|_| "device cleanup audit device-list request failed".to_owned());
+    let cleanup = cleanup_qa_auditor_device(&auditor, &config.password_a).await;
+    let _ = koushi_sdk::close_session_stores(&auditor).await;
+    drop(auditor);
+
+    let devices = devices?;
+    cleanup?;
+    if devices
+        .devices
+        .iter()
+        .any(|device| device.device_id.as_str() == removed_device_id)
+    {
+        return Err("device cleanup audit found the removed device on the homeserver".to_owned());
+    }
+    if !devices
+        .devices
+        .iter()
+        .any(|device| device.device_id.as_str() == replacement_device_id)
+    {
+        return Err(
+            "device cleanup audit did not find the replacement device on the homeserver".to_owned(),
+        );
+    }
+    Ok(())
+}
+
+async fn cleanup_qa_auditor_device(
+    auditor: &koushi_sdk::MatrixClientSession,
+    password: &str,
+) -> Result<(), String> {
+    let initial = koushi_sdk::cleanup_current_device(auditor, None, None)
+        .await
+        .map_err(|_| "device cleanup audit device removal failed".to_owned())?;
+    match initial {
+        koushi_sdk::MatrixDeviceCleanupOutcome::Settled(_) => Ok(()),
+        koushi_sdk::MatrixDeviceCleanupOutcome::UiaaRequired { session } => {
+            match koushi_sdk::cleanup_current_device(
+                auditor,
+                Some(&AuthSecret::new(password.to_owned())),
+                session.as_deref(),
+            )
+            .await
+            .map_err(|_| "device cleanup audit authenticated removal failed".to_owned())?
+            {
+                koushi_sdk::MatrixDeviceCleanupOutcome::Settled(_) => Ok(()),
+                koushi_sdk::MatrixDeviceCleanupOutcome::UiaaRequired { .. } => {
+                    Err("device cleanup audit repeated its authentication challenge".to_owned())
+                }
+            }
+        }
+    }
 }
 
 async fn login_until_device_cleanup_offered(
@@ -21233,8 +21309,19 @@ mod tests {
             .split("if scenario == QaScenario::E2eeTrust")
             .next()
             .expect("E2EE trust route should follow device cleanup");
+        let proof = source
+            .split("async fn run_provisional_device_cleanup_qa")
+            .nth(1)
+            .expect("device cleanup proof should exist")
+            .split("async fn login_until_device_cleanup_offered")
+            .next()
+            .expect("device cleanup login helper should follow proof");
 
         assert!(route.contains("run_provisional_device_cleanup_qa(&config).await?"));
+        assert!(
+            proof.contains("audit_removed_device_absent_from_server"),
+            "the remote-first token requires an independent server device-list audit"
+        );
         assert!(
             tokens_for_stage(QaStage::DeviceCleanup).contains(&"device_cleanup_remote_first=ok")
         );

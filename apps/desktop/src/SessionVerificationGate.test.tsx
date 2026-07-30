@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { SessionVerificationGate } from "./App";
 import { createBrowserFakeApi } from "./backend/browserFakeApi";
-import type { ProvisionalPhase } from "./domain/types";
+import type { DesktopSnapshot, ProvisionalPhase } from "./domain/types";
 
 const provisionalPhaseCases: Array<[ProvisionalPhase, string]> = [
   ["checkingTrust", "Checking device trust…"],
@@ -23,6 +23,20 @@ describe("SessionVerificationGate interactions", () => {
    */
   function enableDeviceVerificationForTest(): void {
     vi.stubEnv("VITE_KOUSHI_ENABLE_DEVICE_VERIFICATION", "1");
+  }
+
+  function setCleanupSurfaceSession(snapshot: DesktopSnapshot): void {
+    snapshot.state.domain.session = {
+      kind: "awaitingVerification",
+      user_id: "@u:example.invalid",
+      homeserver: "https://example.invalid",
+      device_id: "D",
+      gate: {
+        methods: ["recoveryKey"],
+        account_kind: "existingIdentity",
+        failureKind: "sdk"
+      }
+    };
   }
 
   afterEach(() => {
@@ -283,7 +297,9 @@ describe("SessionVerificationGate interactions", () => {
     });
     expect(dialog).toBeTruthy();
     expect(within(dialog).getByText(/remove this device from your Matrix account first/i)).toBeTruthy();
-    expect(within(dialog).getByText(/local messages and encryption keys/i)).toBeTruthy();
+    expect(within(dialog).getByText(/local messages.*encryption keys/i)).toBeTruthy();
+    expect(within(dialog).getByText(/messages on your homeserver are preserved/i)).toBeTruthy();
+    expect(within(dialog).getByText(/next sign-in creates a new Device ID/i)).toBeTruthy();
     fireEvent.click(
       within(dialog).getByRole("button", {
         name: "Remove device and erase local data",
@@ -296,6 +312,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("submits legacy UIA password through the IME-safe cleanup form", async () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    setCleanupSurfaceSession(snapshot);
     snapshot.state.domain.device_cleanup = {
       kind: "awaitingUia",
       request_id: 371,
@@ -327,6 +344,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("offers retry and separately confirms local erasure after remote cleanup fails", async () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    setCleanupSurfaceSession(snapshot);
     snapshot.state.domain.device_cleanup = {
       kind: "remoteFailed",
       request_id: 372,
@@ -349,9 +367,9 @@ describe("SessionVerificationGate interactions", () => {
       />
     );
 
-    expect(screen.getByRole("alert").textContent).toContain(
-      "Your credentials and local data are still preserved"
-    );
+    expect(
+      screen.getByText(/Your credentials and local data are still preserved/)
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry removing device" }));
     await vi.waitFor(() => expect(startDeviceCleanup).toHaveBeenCalledTimes(1));
 
@@ -369,6 +387,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("never asks for a password on the OAuth cleanup failure path", async () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    setCleanupSurfaceSession(snapshot);
     snapshot.state.domain.device_cleanup = {
       kind: "remoteFailed",
       request_id: 373,
@@ -389,6 +408,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("shows progress without duplicate cleanup actions while remote removal is pending", async () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    setCleanupSurfaceSession(snapshot);
     snapshot.state.domain.device_cleanup = {
       kind: "removingRemote",
       request_id: 374,
@@ -405,6 +425,42 @@ describe("SessionVerificationGate interactions", () => {
     expect(screen.getByText("Removing this device from your Matrix account…")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Retry removing device" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Erase local data anyway…" })).toBeNull();
+  });
+
+  test("does not offer destructive cleanup while a recovery retry is verifying", async () => {
+    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    snapshot.state.domain.session = {
+      kind: "verifying",
+      user_id: "@u:example.invalid",
+      homeserver: "https://example.invalid",
+      device_id: "D",
+      gate: {
+        methods: ["recoveryKey"],
+        account_kind: "existingIdentity",
+        failureKind: "sdk"
+      },
+      method: "recoveryKey",
+      flow_id: 375,
+      sas_emojis: []
+    };
+    snapshot.state.domain.device_cleanup = {
+      kind: "offered",
+      reason: "recoveryFailed"
+    };
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+      />
+    );
+
+    expect(
+      screen.queryByRole("button", {
+        name: "Cancel sign-in and remove this device…"
+      })
+    ).toBeNull();
   });
 
   test("provides a primary-button-only verification window drag region", async () => {

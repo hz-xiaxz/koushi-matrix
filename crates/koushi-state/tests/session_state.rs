@@ -1938,6 +1938,33 @@ fn e2ee_recovery_submission_emits_recover_effect_without_exposing_secret() {
 }
 
 #[test]
+fn e2ee_recovery_retry_retires_the_cleanup_offer() {
+    let mut state = AppState {
+        session: SessionState::AwaitingVerification {
+            info: session_info(),
+            gate: recovery_gate(),
+        },
+        device_cleanup: DeviceCleanupState::Offered {
+            reason: DeviceCleanupOfferReason::RecoveryFailed,
+        },
+        ..AppState::default()
+    };
+
+    reduce(
+        &mut state,
+        AppAction::E2eeRecoverySubmitted {
+            flow_id: 78,
+            request: RecoveryRequest {
+                secret: AuthSecret::new("synthetic-recovery-secret"),
+            },
+        },
+    );
+
+    assert!(matches!(state.session, SessionState::Verifying { .. }));
+    assert_eq!(state.device_cleanup, DeviceCleanupState::Idle);
+}
+
+#[test]
 fn e2ee_recovery_success_promotes_session_and_starts_sync() {
     let info = session_info();
     let mut state = AppState {

@@ -131,7 +131,8 @@ TypeScript, Vitest, Playwright, local Conduit/Tuwunel QA.
    - a 401 UIAA response becomes `UiaaRequired` without exposing the UIAA
      session in `Debug`;
    - password continuation is used only for legacy cleanup;
-   - `M_UNKNOWN_TOKEN`/not-found becomes `AlreadyAbsent`;
+   - `M_UNKNOWN_TOKEN`/generic not-found remains retryable because it does not
+     prove the target Device ID is absent;
    - network/server failures become coarse private-safe failure kinds;
    - OAuth cleanup calls SDK OAuth logout/revocation and cannot return UIAA.
 2. Run:
@@ -149,8 +150,9 @@ TypeScript, Vitest, Playwright, local Conduit/Tuwunel QA.
 5. Implement `MatrixClientSession::auth_mode()` and a remote cleanup wrapper.
 6. Reuse the existing `delete_devices` and OAuth logout primitives; do not call
    password UIAA from OAuth.
-7. Classify authoritative absent-token/device responses without retaining raw
-   errors.
+7. Classify only authoritative absent/revoked-session responses as
+   `AlreadyAbsent`; keep ambiguous token/not-found responses retryable without
+   retaining raw errors.
 8. Run:
 
    ```bash

@@ -107,7 +107,9 @@ cleanup. Opening or closing the confirmation dialog is ephemeral presentation
 state and remains React-owned.
 
 The cleanup slice is reset when the provisional session is promoted, rejected,
-logged out, switched, or replaced by another login attempt.
+logged out, switched, replaced by another login attempt, or handed back to an
+active verification/recovery attempt. Verification and destructive cleanup
+never own the provisional session concurrently.
 
 ## Commands and Guards
 
@@ -157,10 +159,12 @@ Only a legacy challenge may project `AwaitingUia`. The UI submits the password
 through the dedicated continuation command. OAuth sessions never enter this
 state.
 
-`M_UNKNOWN_TOKEN` and authoritative not-found responses settle as
-`AlreadyAbsent`; they mean there is no usable remote device/session left for
-these credentials. Other server, network, timeout, and SDK failures become
-coarse retryable failure kinds.
+`M_UNKNOWN_TOKEN` and generic `M_NOT_FOUND` do not prove that the target Device
+ID is absent: an expired credential or unrelated endpoint failure may leave the
+device registered. They therefore remain retryable failures and preserve local
+credentials. `AlreadyAbsent` is reserved for an authentication-mode response
+that authoritatively establishes revocation/absence; a successful idempotent
+legacy bulk-delete response remains `Success`.
 
 ### OAuth/MAS
 
