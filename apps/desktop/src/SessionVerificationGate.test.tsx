@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { SessionVerificationGate } from "./App";
 import { createBrowserFakeApi } from "./backend/browserFakeApi";
@@ -120,6 +120,56 @@ describe("SessionVerificationGate interactions", () => {
     expect(screen.queryByRole("button", { name: "Use recovery key" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try device verification anyway" }));
     expect(startOwnUserSas).toHaveBeenCalledTimes(1);
+  });
+
+  test("can clear an unrepairable verification session and return as a new device", async () => {
+    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    snapshot.state.domain.session = {
+      kind: "awaitingVerification",
+      user_id: "@u:example.invalid",
+      homeserver: "https://example.invalid",
+      device_id: "POISONED",
+      gate: {
+        methods: ["recoveryKey"],
+        account_kind: "existingIdentity",
+        failureKind: "sdk",
+      },
+    };
+    const resetSnapshot = await createBrowserFakeApi({ session: "signedOut" }).getSnapshot();
+    const resetLocalData = vi.fn(async () => resetSnapshot);
+    const onSnapshot = vi.fn();
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={onSnapshot}
+        onSignOut={() => undefined}
+        operations={{
+          startOwnUserSas: async () => snapshot,
+          submitRecovery: async () => snapshot,
+          resetLocalData,
+        }}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Reset local data and sign in as a new device",
+      })
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Reset local data and sign in as a new device",
+    });
+    expect(dialog).toBeTruthy();
+    expect(screen.getByText(/new device ID/)).toBeTruthy();
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: "Reset local data and sign in as a new device",
+      })
+    );
+
+    await vi.waitFor(() => expect(resetLocalData).toHaveBeenCalledTimes(1));
+    expect(onSnapshot).toHaveBeenCalledWith(resetSnapshot);
   });
 
   test("provides a primary-button-only verification window drag region", async () => {

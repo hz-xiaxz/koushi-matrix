@@ -29,7 +29,9 @@ fn default_thread_list_order() -> ThreadListOrder {
 }
 
 fn default_timeline_thread_root_order() -> TimelineThreadRootOrder {
-    TimelineThreadRootOrder::RootEvent
+    // Product default since #366: threaded conversations surface at their
+    // latest reply. A persisted "rootEvent" value keeps the user's choice.
+    TimelineThreadRootOrder::LatestReply
 }
 
 fn default_room_list_sort() -> RoomListSort {
