@@ -49,6 +49,14 @@ fn map_sdk_verification_state(
     }
 }
 
+fn current_device_trust_state_token(state: CurrentDeviceTrustState) -> &'static str {
+    match state {
+        CurrentDeviceTrustState::Unknown => "unknown",
+        CurrentDeviceTrustState::Verified => "verified",
+        CurrentDeviceTrustState::Unverified => "unverified",
+    }
+}
+
 fn map_verification_method_facts(facts: VerificationMethodFacts) -> VerificationGateState {
     let (account_kind, methods) = match facts.identity {
         IdentityFact::Unknown => (VerificationAccountKind::Unknown, Vec::new()),
@@ -204,6 +212,180 @@ fn sas_recipients_resolved_event(
 
 fn record_sas_delivery_event(event: DiagnosticEvent) {
     koushi_diagnostics::record_and_stderr(event);
+}
+
+fn recovery_verification_event(stage: &'static str) -> DiagnosticEvent {
+    DiagnosticEvent::new(DiagnosticLevel::Info, "sdk.recovery_verification", stage)
+        .field(DiagnosticField::token("flow_type", "recovery_key"))
+}
+
+fn record_recovery_verification_event(event: DiagnosticEvent) {
+    koushi_diagnostics::record_and_stderr(event);
+}
+
+fn has_stale_authoritative_device_signature(
+    inspection: &matrix_sdk::encryption::recovery::RecoveryDeviceSignatureInspection,
+) -> bool {
+    inspection.authoritative_self_signing_signature_present
+        && inspection.authoritative_self_signing_signature_parseable
+        && !inspection.authoritative_self_signing_signature_valid
+        && inspection.cached_self_signing_key_matches_authoritative
+        && inspection.cached_signed_content_matches_authoritative
+}
+
+fn secret_storage_error_kind(
+    error: &matrix_sdk::encryption::secret_storage::SecretStorageError,
+) -> &'static str {
+    use matrix_sdk::encryption::{
+        identities::ManualVerifyError,
+        secret_storage::{ImportError, SecretStorageError},
+    };
+
+    match error {
+        SecretStorageError::Sdk(_) => "sdk",
+        SecretStorageError::Json(_) => "json",
+        SecretStorageError::SecretStorageKey(_) => "secret_storage_key",
+        SecretStorageError::MissingKeyInfo { .. } => "missing_key_info",
+        SecretStorageError::ImportError { error, .. } => match error {
+            ImportError::Sdk(_) => "import_sdk",
+            ImportError::Json(_) => "import_json",
+            ImportError::Key(_) => "import_key",
+            ImportError::MismatchedPublicKeys => "import_mismatched_public_keys",
+            ImportError::Decryption(_) => "import_decryption",
+        },
+        SecretStorageError::Storage(_) => "storage",
+        SecretStorageError::Verification(error) => match error {
+            ManualVerifyError::Http(_) => "verification_http",
+            ManualVerifyError::Signature(_) => "verification_signature",
+            ManualVerifyError::SignatureUploadFailures { .. } => "signature_upload_failures",
+        },
+        SecretStorageError::Decryption(_) => "decryption",
+        SecretStorageError::InconsistentBackupDecryptionKey => "inconsistent_backup_decryption_key",
+        SecretStorageError::MissingOrInvalidBackupDecryptionKey => {
+            "missing_or_invalid_backup_decryption_key"
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SignatureUploadFailureDiagnostics {
+    signed_target_count: usize,
+    signed_key_count: usize,
+    failure_user_count: usize,
+    failure_key_count: usize,
+    invalid_signature_count: usize,
+    other_failure_count: usize,
+    unknown_failure_count: usize,
+}
+
+fn secret_storage_signature_upload_failure_diagnostics(
+    error: &matrix_sdk::encryption::secret_storage::SecretStorageError,
+) -> Option<SignatureUploadFailureDiagnostics> {
+    match error {
+        matrix_sdk::encryption::secret_storage::SecretStorageError::Verification(
+            matrix_sdk::encryption::identities::ManualVerifyError::SignatureUploadFailures {
+                signed_target_count,
+                signed_key_count,
+                failure_user_count,
+                failure_key_count,
+                invalid_signature_count,
+                other_failure_count,
+                unknown_failure_count,
+            },
+        ) => Some(SignatureUploadFailureDiagnostics {
+            signed_target_count: *signed_target_count,
+            signed_key_count: *signed_key_count,
+            failure_user_count: *failure_user_count,
+            failure_key_count: *failure_key_count,
+            invalid_signature_count: *invalid_signature_count,
+            other_failure_count: *other_failure_count,
+            unknown_failure_count: *unknown_failure_count,
+        }),
+        _ => None,
+    }
+}
+
+fn recovery_error_kind(error: &matrix_sdk::encryption::recovery::RecoveryError) -> &'static str {
+    match error {
+        matrix_sdk::encryption::recovery::RecoveryError::BackupExistsOnServer => {
+            "backup_exists_on_server"
+        }
+        matrix_sdk::encryption::recovery::RecoveryError::Sdk(_) => "sdk",
+        matrix_sdk::encryption::recovery::RecoveryError::SecretStorage(error) => {
+            secret_storage_error_kind(error)
+        }
+    }
+}
+
+fn recovery_signature_upload_failure_diagnostics(
+    error: &matrix_sdk::encryption::recovery::RecoveryError,
+) -> Option<SignatureUploadFailureDiagnostics> {
+    match error {
+        matrix_sdk::encryption::recovery::RecoveryError::SecretStorage(error) => {
+            secret_storage_signature_upload_failure_diagnostics(error)
+        }
+        _ => None,
+    }
+}
+
+fn with_signature_upload_failure_diagnostics(
+    event: DiagnosticEvent,
+    diagnostics: SignatureUploadFailureDiagnostics,
+) -> DiagnosticEvent {
+    event
+        .field(DiagnosticField::count(
+            "signed_target_count",
+            diagnostics.signed_target_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "signed_key_count",
+            diagnostics.signed_key_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "failure_user_count",
+            diagnostics.failure_user_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "failure_key_count",
+            diagnostics.failure_key_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "invalid_signature_count",
+            diagnostics.invalid_signature_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "other_failure_count",
+            diagnostics.other_failure_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "unknown_failure_count",
+            diagnostics.unknown_failure_count as u64,
+        ))
+}
+
+async fn record_recovery_cross_signing_status(
+    encryption: &matrix_sdk::encryption::Encryption,
+    stage: &'static str,
+) {
+    match encryption.cross_signing_status().await {
+        Some(status) => record_recovery_verification_event(
+            recovery_verification_event(stage)
+                .field(DiagnosticField::token("outcome", "found"))
+                .field(DiagnosticField::boolean("has_master", status.has_master))
+                .field(DiagnosticField::boolean(
+                    "has_self_signing",
+                    status.has_self_signing,
+                ))
+                .field(DiagnosticField::boolean(
+                    "has_user_signing",
+                    status.has_user_signing,
+                ))
+                .field(DiagnosticField::boolean("complete", status.is_complete())),
+        ),
+        None => record_recovery_verification_event(
+            recovery_verification_event(stage).field(DiagnosticField::token("outcome", "missing")),
+        ),
+    }
 }
 use matrix_sdk::{
     authentication::{
@@ -5299,13 +5481,224 @@ pub async fn recover_e2ee(
     session: &MatrixClientSession,
     request: &RecoveryRequest,
 ) -> Result<(), E2eeRecoveryError> {
-    session
-        .client()
-        .encryption()
+    let client = session.client();
+    let encryption = client.encryption();
+    let own_user_id = client
+        .user_id()
+        .ok_or_else(|| E2eeRecoveryError::Sdk("missing own user id".to_owned()))?
+        .to_owned();
+    record_recovery_cross_signing_status(&encryption, "cross_signing_before_recovery").await;
+    record_recovery_verification_event(recovery_verification_event(
+        "recover_and_fix_backup_started",
+    ));
+    encryption
         .recovery()
-        .recover(request.secret.expose_secret())
+        .recover_and_fix_backup(request.secret.expose_secret())
         .await
-        .map_err(|error| E2eeRecoveryError::Sdk(error.to_string()))
+        .map_err(|error| {
+            let mut event = recovery_verification_event("recover_and_fix_backup_finished")
+                .field(DiagnosticField::token("outcome", "failed"))
+                .field(DiagnosticField::token(
+                    "error_kind",
+                    recovery_error_kind(&error),
+                ));
+            if let Some(diagnostics) = recovery_signature_upload_failure_diagnostics(&error) {
+                event = with_signature_upload_failure_diagnostics(event, diagnostics);
+            }
+            record_recovery_verification_event(event);
+            E2eeRecoveryError::Sdk(error.to_string())
+        })?;
+    record_recovery_verification_event(
+        recovery_verification_event("recover_and_fix_backup_finished")
+            .field(DiagnosticField::token("outcome", "success")),
+    );
+    record_recovery_cross_signing_status(&encryption, "cross_signing_after_recovery").await;
+
+    record_recovery_verification_event(recovery_verification_event(
+        "authoritative_signature_inspection_started",
+    ));
+    let signature_inspection = encryption
+        .recovery()
+        .inspect_current_device_signature_state()
+        .await
+        .map_err(|error| {
+            record_recovery_verification_event(
+                recovery_verification_event("authoritative_signature_inspection_finished")
+                    .field(DiagnosticField::token("outcome", "failed")),
+            );
+            E2eeRecoveryError::Sdk(error.to_string())
+        })?;
+    record_recovery_verification_event(
+        recovery_verification_event("authoritative_signature_inspection_finished")
+            .field(DiagnosticField::token("outcome", "success"))
+            .field(DiagnosticField::count(
+                "query_failure_count",
+                signature_inspection.query_failure_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "server_device_count",
+                signature_inspection.server_device_count as u64,
+            ))
+            .field(DiagnosticField::boolean(
+                "authoritative_device_present",
+                signature_inspection.authoritative_device_present,
+            ))
+            .field(DiagnosticField::boolean(
+                "authoritative_device_deserialized",
+                signature_inspection.authoritative_device_deserialized,
+            ))
+            .field(DiagnosticField::count(
+                "authoritative_signature_count",
+                signature_inspection.authoritative_signature_count as u64,
+            ))
+            .field(DiagnosticField::boolean(
+                "self_signing_key_present",
+                signature_inspection.self_signing_key_present,
+            ))
+            .field(DiagnosticField::boolean(
+                "self_signing_key_deserialized",
+                signature_inspection.self_signing_key_deserialized,
+            ))
+            .field(DiagnosticField::boolean(
+                "authoritative_self_signing_signature_valid",
+                signature_inspection.authoritative_self_signing_signature_valid,
+            ))
+            .field(DiagnosticField::boolean(
+                "authoritative_self_signing_signature_present",
+                signature_inspection.authoritative_self_signing_signature_present,
+            ))
+            .field(DiagnosticField::boolean(
+                "authoritative_self_signing_signature_parseable",
+                signature_inspection.authoritative_self_signing_signature_parseable,
+            ))
+            .field(DiagnosticField::boolean(
+                "cached_self_signing_key_present",
+                signature_inspection.cached_self_signing_key_present,
+            ))
+            .field(DiagnosticField::boolean(
+                "cached_self_signing_key_matches_authoritative",
+                signature_inspection.cached_self_signing_key_matches_authoritative,
+            ))
+            .field(DiagnosticField::boolean(
+                "cached_device_present",
+                signature_inspection.cached_device_present,
+            ))
+            .field(DiagnosticField::boolean(
+                "cached_keys_match_authoritative",
+                signature_inspection.cached_keys_match_authoritative,
+            ))
+            .field(DiagnosticField::boolean(
+                "cached_signed_content_matches_authoritative",
+                signature_inspection.cached_signed_content_matches_authoritative,
+            ))
+            .field(DiagnosticField::count(
+                "cached_signature_count",
+                signature_inspection.cached_signature_count as u64,
+            ))
+            .field(DiagnosticField::boolean(
+                "cached_cross_signed_by_owner",
+                signature_inspection.cached_cross_signed_by_owner,
+            )),
+    );
+
+    let identity = encryption
+        .get_user_identity(&own_user_id)
+        .await
+        .map_err(|error| {
+            record_recovery_verification_event(
+                recovery_verification_event("post_recovery_identity_inspected")
+                    .field(DiagnosticField::token("outcome", "failed")),
+            );
+            E2eeRecoveryError::Sdk(error.to_string())
+        })?;
+    let projected_trust = map_sdk_verification_state(encryption.verification_state().get());
+    record_recovery_verification_event(
+        recovery_verification_event("post_recovery_identity_inspected")
+            .field(DiagnosticField::token("outcome", "success"))
+            .field(DiagnosticField::boolean(
+                "identity_found",
+                identity.is_some(),
+            ))
+            .field(DiagnosticField::boolean(
+                "identity_verified",
+                identity
+                    .as_ref()
+                    .is_some_and(|identity| identity.is_verified()),
+            ))
+            .field(DiagnosticField::boolean(
+                "identity_previously_verified",
+                identity
+                    .as_ref()
+                    .is_some_and(|identity| identity.was_previously_verified()),
+            ))
+            .field(DiagnosticField::token(
+                "projected_trust",
+                current_device_trust_state_token(projected_trust),
+            )),
+    );
+    record_recovery_cross_signing_status(&encryption, "cross_signing_after_recovery_inspection")
+        .await;
+
+    let own_device = encryption.get_own_device().await.map_err(|error| {
+        record_recovery_verification_event(
+            recovery_verification_event("post_recovery_own_device_inspected")
+                .field(DiagnosticField::token("outcome", "failed")),
+        );
+        E2eeRecoveryError::Sdk(error.to_string())
+    })?;
+    let Some(own_device) = own_device else {
+        record_recovery_verification_event(
+            recovery_verification_event("post_recovery_own_device_inspected")
+                .field(DiagnosticField::token("outcome", "missing")),
+        );
+        return Err(E2eeRecoveryError::Sdk(
+            "own device is missing after recovery".to_owned(),
+        ));
+    };
+
+    let cross_signed_by_owner = own_device.is_cross_signed_by_owner();
+    record_recovery_verification_event(
+        recovery_verification_event("post_recovery_own_device_inspected")
+            .field(DiagnosticField::token("outcome", "found"))
+            .field(DiagnosticField::boolean(
+                "verified",
+                own_device.is_verified(),
+            ))
+            .field(DiagnosticField::boolean(
+                "verified_with_cross_signing",
+                own_device.is_verified_with_cross_signing(),
+            ))
+            .field(DiagnosticField::boolean(
+                "cross_signed_by_owner",
+                cross_signed_by_owner,
+            )),
+    );
+    if !cross_signed_by_owner {
+        if has_stale_authoritative_device_signature(&signature_inspection) {
+            record_recovery_verification_event(
+                recovery_verification_event("server_signature_conflict_detected")
+                    .field(DiagnosticField::token("outcome", "confirmed"))
+                    .field(DiagnosticField::token(
+                        "cause",
+                        "stale_authoritative_device_signature",
+                    ))
+                    .field(DiagnosticField::token(
+                        "remediation",
+                        "new_device_id_required",
+                    )),
+            );
+            return Err(E2eeRecoveryError::Sdk(
+                "the homeserver retained an invalid cross-signing signature for this device; \
+                 sign in as a new device to recover"
+                    .to_owned(),
+            ));
+        }
+        return Err(E2eeRecoveryError::Sdk(
+            "own device is not cross-signed after recovery".to_owned(),
+        ));
+    }
+
+    Ok(())
 }
 
 pub async fn logout(session: &MatrixClientSession) -> Result<(), PasswordLoginError> {
@@ -8187,7 +8580,8 @@ mod tests {
         MatrixRoomSettingsSnapshot, MatrixRoomTagInfo, MatrixRoomTags, MatrixSearchIndexKey,
         MatrixSearchIndexStoreConfig, SYNC_INVITE_PROBE_TIMEOUT, SdkUnreadTrace, SessionInfo,
         create_public_directory_room, create_room_request, get_room_settings_snapshot,
-        join_room_target, matrix_conversation_activity_source, matrix_public_room_from_chunk,
+        has_stale_authoritative_device_signature, join_room_target,
+        matrix_conversation_activity_source, matrix_public_room_from_chunk,
         matrix_room_list_room_from_counts, matrix_room_member_role, matrix_room_preview_from_sdk,
         moderate_room_member, newest_conversation_activity, normalized_local_user_aliases,
         query_public_room_directory, resolve_join_target, room_settings_snapshot_with_change,
@@ -8743,6 +9137,155 @@ mod tests {
 
         assert!(defaults_body.contains("with_encryption_settings"));
         assert!(defaults_body.contains("BackupDownloadStrategy::AfterDecryptionFailure"));
+    }
+
+    #[test]
+    fn recovery_key_path_uses_sdk_signature_publication_only() {
+        let source = include_str!("lib.rs");
+        let recovery_body = source
+            .split("pub async fn recover_e2ee")
+            .nth(1)
+            .expect("recover_e2ee should exist")
+            .split("pub async fn logout")
+            .next()
+            .expect("logout should follow recover_e2ee");
+
+        assert!(
+            !recovery_body.contains("prepare_current_device_registration"),
+            "recovery must never republish identity keys for an existing device ID"
+        );
+        assert!(
+            !recovery_body.contains("force_upload_device_keys"),
+            "recovery must not replace device identity keys out of band"
+        );
+        assert!(recovery_body.contains("recover_and_fix_backup"));
+        assert!(!recovery_body.contains(".recover(request.secret.expose_secret())"));
+        assert!(
+            !recovery_body.contains("republish_current_device_keys_after_recovery"),
+            "SDK recovery already publishes the cross-signature through /keys/signatures/upload"
+        );
+        assert!(
+            !recovery_body.contains("post_recovery_device_republish"),
+            "recovery must not mutate device keys after SDK signature publication"
+        );
+        assert!(
+            recovery_body.contains("get_own_device"),
+            "recovery key proof must inspect current device signing state"
+        );
+        assert!(
+            recovery_body.contains("post_recovery_own_device_inspected"),
+            "recovery must diagnose the SDK-refreshed own-device projection"
+        );
+        assert!(
+            recovery_body.contains("inspect_current_device_signature_state"),
+            "recovery must compare authoritative device signatures with the local projection"
+        );
+        assert!(
+            recovery_body.contains("is_cross_signed_by_owner"),
+            "recovery must require the SDK-refreshed owner cross-signature"
+        );
+        assert!(
+            recovery_body.contains("record_recovery_verification_event"),
+            "recovery key proof must emit stderr diagnostics before UI diagnostics are available"
+        );
+    }
+
+    #[test]
+    fn recovery_detects_a_stale_authoritative_device_signature() {
+        use matrix_sdk::encryption::recovery::RecoveryDeviceSignatureInspection;
+
+        let stale = RecoveryDeviceSignatureInspection {
+            authoritative_self_signing_signature_present: true,
+            authoritative_self_signing_signature_parseable: true,
+            authoritative_self_signing_signature_valid: false,
+            cached_self_signing_key_matches_authoritative: true,
+            cached_signed_content_matches_authoritative: true,
+            ..Default::default()
+        };
+        assert!(has_stale_authoritative_device_signature(&stale));
+
+        let repaired = RecoveryDeviceSignatureInspection {
+            authoritative_self_signing_signature_valid: true,
+            ..stale
+        };
+        assert!(!has_stale_authoritative_device_signature(&repaired));
+    }
+
+    #[test]
+    fn recovery_sdk_records_standard_signature_round_trip_diagnostics() {
+        let devices_source = include_str!(
+            "../../../vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/identities/devices.rs"
+        );
+        let secret_store_source = include_str!(
+            "../../../vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/secret_storage/secret_store.rs"
+        );
+
+        assert!(
+            devices_source.contains("verify_with_diagnostics"),
+            "the exact signed device target must be retained across the standard upload"
+        );
+        assert!(
+            secret_store_source.contains("standard_signature_round_trip_finished"),
+            "the standard recovery path must compare its upload target with the refreshed device"
+        );
+        assert!(
+            secret_store_source.contains("preupload_self_signing_signature_valid"),
+            "diagnostics must distinguish invalid local signing from server-side mutation"
+        );
+        assert!(
+            secret_store_source.contains("signed_content_matches_refreshed"),
+            "diagnostics must compare the canonical signed content before and after upload"
+        );
+        assert!(
+            secret_store_source.contains("self_signing_key_id_matches_refreshed"),
+            "diagnostics must distinguish a stale self-signing key generation"
+        );
+        assert!(
+            secret_store_source.contains("preupload_signature_matches_refreshed"),
+            "diagnostics must distinguish server-side signature replacement"
+        );
+        assert!(
+            secret_store_source.contains("preupload_signature_valid_with_refreshed_key"),
+            "diagnostics must cross-check the upload with the authoritative key generation"
+        );
+        assert!(
+            !secret_store_source.contains("preupload_signature_value"),
+            "diagnostics must never expose raw signatures"
+        );
+    }
+
+    #[test]
+    fn recovery_diagnostics_classify_signature_upload_failures_inside_secret_storage() {
+        let error = matrix_sdk::encryption::recovery::RecoveryError::SecretStorage(
+            matrix_sdk::encryption::secret_storage::SecretStorageError::Verification(
+                matrix_sdk::encryption::identities::ManualVerifyError::SignatureUploadFailures {
+                    signed_target_count: 1,
+                    signed_key_count: 1,
+                    failure_user_count: 1,
+                    failure_key_count: 2,
+                    invalid_signature_count: 1,
+                    other_failure_count: 1,
+                    unknown_failure_count: 0,
+                },
+            ),
+        );
+
+        assert_eq!(
+            super::recovery_error_kind(&error),
+            "signature_upload_failures"
+        );
+        assert_eq!(
+            super::recovery_signature_upload_failure_diagnostics(&error),
+            Some(super::SignatureUploadFailureDiagnostics {
+                signed_target_count: 1,
+                signed_key_count: 1,
+                failure_user_count: 1,
+                failure_key_count: 2,
+                invalid_signature_count: 1,
+                other_failure_count: 1,
+                unknown_failure_count: 0,
+            })
+        );
     }
 
     #[test]

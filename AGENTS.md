@@ -214,6 +214,14 @@ or visual GUI inspection. Build the verification (体制) BEFORE the fix and let
 same check turn green as the proof of the fix: 体制 → 修正, strictly, never the
 reverse.
 
+- Human-in-the-loop debugging is a bottleneck. Always look for ways to minimize
+  the number of human reproduction and feedback round trips. Rich diagnostics
+  are one important means: before asking the human to retry, add enough
+  sanitized information to distinguish the leading hypotheses in one run,
+  including the relevant stage, outcome, elapsed time, error classification,
+  and useful counts or booleans. Prefer one deliberately rich diagnostic pass
+  over adding one field after each retry. Never log secrets, credentials,
+  recovery material, keys, tokens, or unnecessary raw identifiers.
 - For any bug / regression / perf / behavior change, FIRST add or extend a
   headless check that REPRODUCES the problem (RED): a `headless-core-qa`
   scenario against local Conduit/Tuwunel, a Rust/TypeScript unit test, or a

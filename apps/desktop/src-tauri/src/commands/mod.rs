@@ -35,9 +35,9 @@ use koushi_state::{
     ComposerSurface, DirectoryQuery, FilesViewScope, FocusedContextState, IdentityResetAuthRequest,
     ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, PresenceKind,
     RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
-    RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem,
-    StagedUploadKind, SubmissionId, TimelineScrollAnchor, VerificationCancelReason,
-    build_formatted_message_draft,
+    RoomTagKind, SessionInfo, SessionState, SettingsPatch, StagedUploadCompressionChoice,
+    StagedUploadItem, StagedUploadKind, SubmissionId, TimelineScrollAnchor,
+    VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(any(debug_assertions, test))]
@@ -342,6 +342,7 @@ const FOCUSED_CONTEXT_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::
 const SEARCH_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const ROOM_OPERATION_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const UPLOAD_STAGING_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const LOCAL_DATA_RESET_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 async fn submit_login_and_wait_for_authenticated(
     app: AppHandle,
@@ -957,6 +958,53 @@ async fn wait_for_upload_staging_snapshot(
             }
             Ok(_) => {}
             Err(_) if predicate(&event_conn.snapshot()) => return Ok(()),
+            Err(_) => continue,
+        }
+    }
+}
+
+fn snapshot_has_completed_local_data_reset(snapshot: &koushi_state::AppState) -> bool {
+    matches!(snapshot.session, SessionState::SignedOut)
+        && !matches!(
+            snapshot.local_encryption,
+            koushi_state::LocalEncryptionState::Resetting { .. }
+        )
+}
+
+async fn wait_for_local_data_reset(
+    event_conn: &mut impl SelectEventSource,
+    request_id: RequestId,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        if snapshot_has_completed_local_data_reset(&event_conn.snapshot()) {
+            return Ok(());
+        }
+
+        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
+            .await
+            .map_err(|_| "local data reset did not complete".to_owned())?;
+        match event {
+            Ok(CoreEvent::StateChanged(snapshot))
+                if snapshot_has_completed_local_data_reset(&snapshot) =>
+            {
+                return Ok(());
+            }
+            Ok(CoreEvent::OperationFailed {
+                request_id: failed_request_id,
+                failure,
+            }) if failed_request_id == request_id => {
+                return Err(invoke_error_from_core_failure(
+                    "local data reset failed",
+                    failure,
+                ));
+            }
+            Ok(_) => {}
+            Err(_) if snapshot_has_completed_local_data_reset(&event_conn.snapshot()) => {
+                return Ok(());
+            }
             Err(_) => continue,
         }
     }
@@ -6495,6 +6543,7 @@ mod tests {
     #[test]
     fn reset_local_data_tauri_command_contract_is_present() {
         let commands_source = commands_source();
+        let reset_command_source = include_str!("local_encryption.rs");
         let lib_source = include_str!("../lib.rs");
         let command_name = "pub async fn reset_local_data";
         let builder_name = "build_reset_local_data_command";
@@ -6517,6 +6566,31 @@ mod tests {
             lib_source.contains(registration_name),
             "Tauri command should be registered in generate_handler"
         );
+        assert!(
+            reset_command_source.contains("wait_for_local_data_reset"),
+            "Tauri reset must not return the pre-reset snapshot before the correlated signed-out projection"
+        );
+    }
+
+    #[tokio::test]
+    async fn reset_local_data_waits_for_the_correlated_signed_out_projection() {
+        let request_id = fake_request_id(48);
+        let mut signed_out = AppState::default();
+        signed_out.session = SessionState::SignedOut;
+        let mut before_reset = AppState::default();
+        before_reset.session = SessionState::Restoring;
+        let mut source = ScriptedSelectSource {
+            snapshot: before_reset,
+            events: VecDeque::from([Ok(CoreEvent::StateChanged(signed_out))]),
+        };
+
+        super::wait_for_local_data_reset(
+            &mut source,
+            request_id,
+            std::time::Duration::from_millis(10),
+        )
+        .await
+        .expect("reset should settle only after signed-out is projected");
     }
 
     #[test]
