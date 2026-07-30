@@ -889,9 +889,36 @@ function provisionalPhaseFailure(
   return null;
 }
 
-export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onStartWindowDrag = startSessionVerificationWindowDrag, operations = { startOwnUserSas: () => api.startOwnUserSas(), submitRecovery: (secret) => api.submitRecovery(secret), resetLocalData: () => api.resetLocalData() } }: { snapshot: DesktopSnapshot; onSnapshot: (snapshot: DesktopSnapshot) => void; onSignOut: () => void; onStartWindowDrag?: () => void; operations?: { startOwnUserSas: () => Promise<DesktopSnapshot>; submitRecovery: (secret: string) => Promise<DesktopSnapshot>; resetLocalData?: () => Promise<DesktopSnapshot> } }) {
+export function SessionVerificationGate({
+  snapshot,
+  onSnapshot,
+  onSignOut,
+  onStartWindowDrag = startSessionVerificationWindowDrag,
+  operations = {
+    startOwnUserSas: () => api.startOwnUserSas(),
+    submitRecovery: (secret) => api.submitRecovery(secret),
+    startDeviceCleanup: () => api.startDeviceCleanup(),
+    submitDeviceCleanupUia: (flowId, password) =>
+      api.submitDeviceCleanupUia(flowId, password),
+    eraseLocalDataAnyway: () => api.eraseLocalDataAnyway()
+  }
+}: {
+  snapshot: DesktopSnapshot;
+  onSnapshot: (snapshot: DesktopSnapshot) => void;
+  onSignOut: () => void;
+  onStartWindowDrag?: () => void;
+  operations?: {
+    startOwnUserSas: () => Promise<DesktopSnapshot>;
+    submitRecovery: (secret: string) => Promise<DesktopSnapshot>;
+    startDeviceCleanup?: () => Promise<DesktopSnapshot>;
+    submitDeviceCleanupUia?: (flowId: number, password: string) => Promise<DesktopSnapshot>;
+    eraseLocalDataAnyway?: () => Promise<DesktopSnapshot>;
+  };
+}) {
   const session = snapshot.state.domain.session;
+  const deviceCleanup = snapshot.state.domain.device_cleanup;
   const recoveryRef = useRef<HTMLInputElement>(null);
+  const cleanupPasswordRef = useRef<HTMLInputElement>(null);
   const passphraseRef = useRef<HTMLInputElement>(null);
   const destinationRef = useRef<HTMLInputElement>(null);
   const flowId = session.flow_id;
@@ -914,17 +941,32 @@ export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onSta
   const preparationFailure =
     session.kind === "provisional" ? provisionalPhaseFailure(session.phase) : null;
   const activelyVerifying = session.kind === "verifying";
-  const [gateOperation, setGateOperation] = useState<"recovery" | "sas" | null>(null);
+  const [gateOperation, setGateOperation] = useState<"recovery" | "sas" | "cleanup" | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [confirmDeviceVerification, setConfirmDeviceVerification] = useState(false);
-  const [confirmLocalReset, setConfirmLocalReset] = useState(false);
-  const gateOperationRef = useRef<"recovery" | "sas" | null>(null);
-  const run = async (kind: "recovery" | "sas", operation: () => Promise<DesktopSnapshot>) => {
+  const [confirmDeviceCleanup, setConfirmDeviceCleanup] = useState(false);
+  const [confirmEraseLocalAnyway, setConfirmEraseLocalAnyway] = useState(false);
+  const gateOperationRef = useRef<"recovery" | "sas" | "cleanup" | null>(null);
+  const run = async (
+    kind: "recovery" | "sas" | "cleanup",
+    operation: () => Promise<DesktopSnapshot>
+  ) => {
     if (gateOperationRef.current === kind) return;
     gateOperationRef.current = kind;
     setOperationError(null);
     setGateOperation(kind);
-    try { onSnapshot(await operation()); } catch { setOperationError("Verification command failed. Please try again."); } finally { gateOperationRef.current = null; setGateOperation(null); }
+    try {
+      onSnapshot(await operation());
+    } catch {
+      setOperationError(
+        kind === "cleanup"
+          ? t("gate.cleanupCommandFailed")
+          : "Verification command failed. Please try again."
+      );
+    } finally {
+      gateOperationRef.current = null;
+      setGateOperation(null);
+    }
   };
   const useRecoveryKey = () => {
     setConfirmDeviceVerification(false);
@@ -934,20 +976,16 @@ export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onSta
     setConfirmDeviceVerification(false);
     void run("sas", operations.startOwnUserSas);
   };
-  const verificationFailed = Boolean(
-    session.gate?.failureKind || preparationFailure || operationError
-  );
-  const resetLocalDataForNewDevice = async () => {
-    setConfirmLocalReset(false);
-    setOperationError(null);
-    setGateOperation("recovery");
-    try {
-      onSnapshot(await (operations.resetLocalData ?? api.resetLocalData)());
-    } catch {
-      setOperationError("Resetting local data failed. Please try again.");
-    } finally {
-      setGateOperation(null);
-    }
+  const startDeviceCleanup = () => {
+    setConfirmDeviceCleanup(false);
+    void run("cleanup", operations.startDeviceCleanup ?? (() => api.startDeviceCleanup()));
+  };
+  const eraseLocalDataAnyway = () => {
+    setConfirmEraseLocalAnyway(false);
+    void run(
+      "cleanup",
+      operations.eraseLocalDataAnyway ?? (() => api.eraseLocalDataAnyway())
+    );
   };
   const heading = checking ? t("gate.checking") : rechecking ? t("gate.finishing") : activelyVerifying ? t("gate.verifying") : t("gate.title");
   return <main className="session-verification-gate" aria-label={heading}>
@@ -992,15 +1030,50 @@ export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onSta
     {awaiting && methods.includes("bootstrap") && <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const destination = destinationRef.current?.value.trim() ?? ""; const passphrase = passphraseRef.current?.value || null; if (destinationRef.current) destinationRef.current.value = ""; if (passphraseRef.current) passphraseRef.current.value = ""; if (destination) void run("recovery", () => api.startSessionBootstrap(passphrase, destination)); }}><ImeTextField ref={destinationRef} aria-label={t("gate.destination")} syncKey="session-bootstrap-destination"/><SecureImeTextField ref={passphraseRef} aria-label={t("gate.passphrase")} autoComplete="new-password"/><button type="submit">{t("gate.bootstrap")}</button></ImeSafeForm>}
     {session.kind === "awaitingBootstrapConfirmation" && flowId !== undefined && <button onClick={() => void run("recovery", () => api.confirmSessionBootstrapSaved(flowId))}>{t("gate.saved")}</button>}
     {sasVerifying && flowId !== undefined && <button onClick={() => void run("sas", () => api.cancelVerification(flowId))}>{t("action.cancel")}</button>}
-    {verificationFailed && <button className="dialog-button danger" type="button" disabled={gateOperation !== null} onClick={() => setConfirmLocalReset(true)}>{t("gate.resetForNewDevice")}</button>}
-    {confirmLocalReset && <ResetLocalDataConfirmationDialog
+    {deviceCleanup.kind === "offered" && <button className="dialog-button danger" type="button" disabled={gateOperation !== null} onClick={() => setConfirmDeviceCleanup(true)}>{t("gate.cleanupOffer")}</button>}
+    {confirmDeviceCleanup && <ResetLocalDataConfirmationDialog
       isBusy={gateOperation !== null}
-      title={t("gate.resetForNewDevice")}
-      copy={t("gate.resetForNewDeviceConfirm")}
-      confirmLabel={t("gate.resetForNewDevice")}
-      onCancel={() => setConfirmLocalReset(false)}
-      onConfirm={() => void resetLocalDataForNewDevice()}
+      title={t("gate.cleanupDialogTitle")}
+      copy={t("gate.cleanupDialogCopy")}
+      confirmLabel={t("gate.cleanupConfirm")}
+      onCancel={() => setConfirmDeviceCleanup(false)}
+      onConfirm={startDeviceCleanup}
     />}
+    {deviceCleanup.kind === "resolvingRemote" && <p>{t("gate.cleanupResolving")}</p>}
+    {deviceCleanup.kind === "removingRemote" && <p>{t("gate.cleanupRemoving")}</p>}
+    {deviceCleanup.kind === "awaitingUia" && <ImeSafeForm onSubmit={(event) => {
+      event.preventDefault();
+      const password = cleanupPasswordRef.current?.value ?? "";
+      if (cleanupPasswordRef.current) cleanupPasswordRef.current.value = "";
+      if (password) {
+        void run(
+          "cleanup",
+          () => (operations.submitDeviceCleanupUia ?? ((flowId, secret) => api.submitDeviceCleanupUia(flowId, secret)))(deviceCleanup.flow_id, password)
+        );
+      }
+    }}>
+      <SecureImeTextField ref={cleanupPasswordRef} aria-label={t("gate.cleanupAccountPassword")} autoComplete="current-password"/>
+      <button className="dialog-button is-primary" disabled={gateOperation === "cleanup"} type="submit">{t("gate.cleanupContinue")}</button>
+    </ImeSafeForm>}
+    {deviceCleanup.kind === "remoteFailed" && <>
+      <p role="alert">{t("gate.cleanupRemoteFailed")}</p>
+      <button className="dialog-button" type="button" disabled={gateOperation !== null} onClick={startDeviceCleanup}>{t("gate.cleanupRetryRemote")}</button>
+      <button className="dialog-button danger" type="button" disabled={gateOperation !== null} onClick={() => setConfirmEraseLocalAnyway(true)}>{t("gate.cleanupEraseAnywayOffer")}</button>
+    </>}
+    {confirmEraseLocalAnyway && <ResetLocalDataConfirmationDialog
+      isBusy={gateOperation !== null}
+      title={t("gate.cleanupEraseAnywayTitle")}
+      copy={t("gate.cleanupEraseAnywayCopy")}
+      confirmLabel={t("gate.cleanupEraseAnywayConfirm")}
+      onCancel={() => setConfirmEraseLocalAnyway(false)}
+      onConfirm={eraseLocalDataAnyway}
+    />}
+    {deviceCleanup.kind === "resettingLocal" && <p>{t("gate.cleanupResettingLocal")}</p>}
+    {deviceCleanup.kind === "erasingLocalAnyway" && <p>{t("gate.cleanupErasingLocal")}</p>}
+    {deviceCleanup.kind === "localResetFailed" && <>
+      <p role="alert">{t("gate.cleanupLocalFailed")}</p>
+      <button className="dialog-button" type="button" disabled={gateOperation !== null} onClick={startDeviceCleanup}>{t("gate.cleanupRetryLocal")}</button>
+    </>}
     <button onClick={onSignOut}>{t("gate.signOut")}</button>
   </main>;
 }
