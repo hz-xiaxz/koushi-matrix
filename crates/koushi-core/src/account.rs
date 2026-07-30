@@ -35,7 +35,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use futures_util::StreamExt;
@@ -110,6 +110,7 @@ const RECOVERY_TRUST_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(20);
 const RECOVERY_TRUST_SETTLEMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const IDENTITY_RESET_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 const DEVICE_CLEANUP_REMOTE_TIMEOUT: Duration = Duration::from_secs(20);
+const CURRENT_SESSION_STATUS_TIMEOUT: Duration = Duration::from_secs(15);
 const INCOMING_VERIFICATION_OBSERVER_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 const OIDC_REDIRECT_URI: &str = "koushi-desktop://auth/callback";
 /// Redacted message used in reducer error projections (never raw SDK text).
@@ -497,6 +498,21 @@ pub enum AccountMessage {
         trust: koushi_state::CurrentDeviceTrustState,
     },
     CheckCurrentDeviceTrust,
+    RefreshCurrentSessionStatus {
+        request_id: u64,
+        trigger: koushi_state::SessionStatusRefreshTrigger,
+        sync_state: koushi_state::CurrentSessionSyncState,
+    },
+    CurrentSessionStatusRefreshFinished {
+        request_id: u64,
+        generation: u64,
+        sync_state: koushi_state::CurrentSessionSyncState,
+        started_at: Instant,
+        result: Result<
+            koushi_sdk::MatrixCurrentSessionInspection,
+            koushi_state::CurrentSessionStatusFailureKind,
+        >,
+    },
     CurrentDeviceTrustRecheckFinished {
         generation: u64,
         result: Result<
@@ -1388,6 +1404,79 @@ fn trust_lifecycle_decision(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn current_session_status_completion_action(
+    active_request_id: Option<u64>,
+    active_generation: u64,
+    session_promoted: bool,
+    session_info: Option<&SessionInfo>,
+    request_id: u64,
+    generation: u64,
+    sync_state: koushi_state::CurrentSessionSyncState,
+    result: Result<
+        koushi_sdk::MatrixCurrentSessionInspection,
+        koushi_state::CurrentSessionStatusFailureKind,
+    >,
+    checked_at_ms: u64,
+) -> Option<AppAction> {
+    if active_request_id != Some(request_id) || active_generation != generation || !session_promoted
+    {
+        return None;
+    }
+    Some(match result {
+        Ok(inspection) => {
+            let info = session_info?;
+            AppAction::CurrentSessionStatusRefreshed {
+                request_id,
+                details: koushi_state::CurrentSessionStatusDetails::new(
+                    inspection.device_display_name,
+                    info.device_id.clone(),
+                    info.authentication_method,
+                    sync_state,
+                    inspection.is_cross_signed_by_owner,
+                    inspection.own_identity_verification,
+                    inspection.key_backup,
+                    checked_at_ms,
+                ),
+            }
+        }
+        Err(kind) => AppAction::CurrentSessionStatusRefreshFailed {
+            request_id,
+            kind,
+            checked_at_ms,
+        },
+    })
+}
+
+fn current_session_status_settled_event(action: &AppAction, elapsed: Duration) -> DiagnosticEvent {
+    let event =
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "session_status", "refresh_settled").field(
+            DiagnosticField::milliseconds("elapsed_ms", elapsed.as_millis()),
+        );
+    match action {
+        AppAction::CurrentSessionStatusRefreshed { details, .. } => event
+            .field(DiagnosticField::token("result", "ready"))
+            .field(DiagnosticField::token(
+                "verdict",
+                match details.verification {
+                    koushi_state::CurrentSessionVerification::Verified => "verified",
+                    koushi_state::CurrentSessionVerification::Unverified => "unverified",
+                },
+            )),
+        AppAction::CurrentSessionStatusRefreshFailed { kind, .. } => {
+            event.field(DiagnosticField::token(
+                "result",
+                match kind {
+                    koushi_state::CurrentSessionStatusFailureKind::Sdk => "sdk",
+                    koushi_state::CurrentSessionStatusFailureKind::TimedOut => "timed_out",
+                    koushi_state::CurrentSessionStatusFailureKind::Unavailable => "unavailable",
+                },
+            ))
+        }
+        _ => event.field(DiagnosticField::token("result", "invalid")),
+    }
+}
+
 /// The account actor's internal state.
 pub struct AccountActor {
     /// Active store-backed session, if any.
@@ -1400,6 +1489,8 @@ pub struct AccountActor {
     trust_generation: u64,
     trust_observer: Option<crate::executor::JoinHandle<()>>,
     trust_recheck_task: Option<crate::executor::JoinHandle<()>>,
+    current_session_status_task: Option<crate::executor::JoinHandle<()>>,
+    current_session_status_request: Option<u64>,
     verification_method_discovery_task: Option<OwnedVerificationMethodDiscoveryTask>,
     verification_method_discovery_serial: u64,
     verification_method_discovery_failed: bool,
@@ -1589,6 +1680,8 @@ impl AccountActor {
             trust_generation: 0,
             trust_observer: None,
             trust_recheck_task: None,
+            current_session_status_task: None,
+            current_session_status_request: None,
             verification_method_discovery_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,
@@ -1933,6 +2026,25 @@ impl AccountActor {
                 }
                 AccountMessage::CheckCurrentDeviceTrust => {
                     self.request_authoritative_trust_recheck();
+                }
+                AccountMessage::RefreshCurrentSessionStatus {
+                    request_id,
+                    trigger,
+                    sync_state,
+                } => {
+                    self.start_current_session_status_refresh(request_id, trigger, sync_state);
+                }
+                AccountMessage::CurrentSessionStatusRefreshFinished {
+                    request_id,
+                    generation,
+                    sync_state,
+                    started_at,
+                    result,
+                } => {
+                    self.finish_current_session_status_refresh(
+                        request_id, generation, sync_state, started_at, result,
+                    )
+                    .await;
                 }
                 AccountMessage::CurrentDeviceTrustRecheckFinished { generation, result } => {
                     if generation != self.trust_generation {
@@ -3143,6 +3255,7 @@ impl AccountActor {
         self.stop_recovery_task().await;
         self.stop_recovery_trust_settlement_task().await;
         self.stop_provisional_runtime().await;
+        self.cancel_current_session_status_refresh().await;
         self.stop_recovery_observer().await;
         self.stop_incoming_verification_observer().await;
         self.stop_session_change_observer().await;
@@ -3737,6 +3850,10 @@ impl AccountActor {
             }
             AccountCommand::QueryDevices { request_id } => {
                 self.handle_query_devices(request_id).await;
+            }
+            AccountCommand::RefreshCurrentSessionStatus { .. } => {
+                // The AppActor routes the reducer-owned refresh effect with
+                // the authoritative sync projection.
             }
             AccountCommand::LoadAccountManagementCapabilities { request_id } => {
                 self.handle_load_account_management_capabilities(request_id)
@@ -7821,6 +7938,119 @@ impl AccountActor {
         }));
     }
 
+    fn start_current_session_status_refresh(
+        &mut self,
+        request_id: u64,
+        trigger: koushi_state::SessionStatusRefreshTrigger,
+        sync_state: koushi_state::CurrentSessionSyncState,
+    ) {
+        if self.current_session_status_request == Some(request_id) {
+            return;
+        }
+        if let Some(task) = self.current_session_status_task.take() {
+            task.abort();
+        }
+        self.current_session_status_request = Some(request_id);
+        let generation = self.trust_generation;
+        let started_at = Instant::now();
+        record(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "session_status", "refresh_started")
+                .field(DiagnosticField::token(
+                    "trigger",
+                    match trigger {
+                        koushi_state::SessionStatusRefreshTrigger::Open => "open",
+                        koushi_state::SessionStatusRefreshTrigger::Manual => "manual",
+                    },
+                )),
+        );
+        let Some(session) = self.session.clone().filter(|_| self.session_promoted) else {
+            let tx = self.self_tx.clone();
+            self.current_session_status_task = Some(executor::spawn(async move {
+                let _ = tx
+                    .send(AccountMessage::CurrentSessionStatusRefreshFinished {
+                        request_id,
+                        generation,
+                        sync_state,
+                        started_at,
+                        result: Err(koushi_state::CurrentSessionStatusFailureKind::Unavailable),
+                    })
+                    .await;
+            }));
+            return;
+        };
+        let tx = self.self_tx.clone();
+        self.current_session_status_task = Some(executor::spawn(async move {
+            let result = match executor::timeout(
+                CURRENT_SESSION_STATUS_TIMEOUT,
+                session.inspect_current_session(),
+            )
+            .await
+            {
+                Ok(Ok(inspection)) => Ok(inspection),
+                Ok(Err(
+                    koushi_sdk::MatrixCurrentSessionInspectionError::Unavailable
+                    | koushi_sdk::MatrixCurrentSessionInspectionError::CurrentDeviceMissing,
+                )) => Err(koushi_state::CurrentSessionStatusFailureKind::Unavailable),
+                Ok(Err(
+                    koushi_sdk::MatrixCurrentSessionInspectionError::DeviceRequest
+                    | koushi_sdk::MatrixCurrentSessionInspectionError::IdentityRequest,
+                )) => Err(koushi_state::CurrentSessionStatusFailureKind::Sdk),
+                Err(_) => Err(koushi_state::CurrentSessionStatusFailureKind::TimedOut),
+            };
+            let _ = tx
+                .send(AccountMessage::CurrentSessionStatusRefreshFinished {
+                    request_id,
+                    generation,
+                    sync_state,
+                    started_at,
+                    result,
+                })
+                .await;
+        }));
+    }
+
+    async fn finish_current_session_status_refresh(
+        &mut self,
+        request_id: u64,
+        generation: u64,
+        sync_state: koushi_state::CurrentSessionSyncState,
+        started_at: Instant,
+        result: Result<
+            koushi_sdk::MatrixCurrentSessionInspection,
+            koushi_state::CurrentSessionStatusFailureKind,
+        >,
+    ) {
+        let checked_at_ms = current_epoch_ms();
+        let Some(action) = current_session_status_completion_action(
+            self.current_session_status_request,
+            self.trust_generation,
+            self.session_promoted,
+            self.session.as_ref().map(|session| &session.info),
+            request_id,
+            generation,
+            sync_state,
+            result,
+            checked_at_ms,
+        ) else {
+            return;
+        };
+        self.current_session_status_request = None;
+        self.current_session_status_task = None;
+        record(current_session_status_settled_event(
+            &action,
+            started_at.elapsed(),
+        ));
+        self.send_actions(vec![action]).await;
+    }
+
+    async fn cancel_current_session_status_refresh(&mut self) {
+        self.current_session_status_request = None;
+        if let Some(task) = self.current_session_status_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
     async fn perform_logout(
         &mut self,
         request_id: RequestId,
@@ -9423,6 +9653,13 @@ fn session_info_from_key_id(key_id: &SessionKeyId) -> SessionInfo {
     }
 }
 
+fn current_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or_default()
+}
+
 async fn run_session_change_observation(
     mut changes: tokio::sync::broadcast::Receiver<matrix_sdk::SessionChange>,
     tx: mpsc::Sender<AccountMessage>,
@@ -10083,6 +10320,156 @@ mod tests {
 
     use super::*;
     use crate::store::CredentialStoreBackend;
+
+    fn session_status_info() -> SessionInfo {
+        SessionInfo {
+            homeserver: "https://private.example.test".to_owned(),
+            user_id: "@private:example.test".to_owned(),
+            device_id: "PRIVATE-DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::OAuth,
+        }
+    }
+
+    fn verified_session_inspection() -> koushi_sdk::MatrixCurrentSessionInspection {
+        koushi_sdk::MatrixCurrentSessionInspection {
+            device_display_name: Some("Private Device Name".to_owned()),
+            is_cross_signed_by_owner: true,
+            own_identity_verification: koushi_state::OwnIdentityVerification::Verified,
+            key_backup: koushi_state::CurrentSessionBackupState::Ready,
+        }
+    }
+
+    #[test]
+    fn session_status_completion_requires_request_and_session_generation_fences() {
+        let info = session_status_info();
+        for (active_request, active_generation, promoted) in
+            [(Some(8), 4, true), (Some(7), 5, true), (Some(7), 4, false)]
+        {
+            assert!(
+                current_session_status_completion_action(
+                    active_request,
+                    active_generation,
+                    promoted,
+                    Some(&info),
+                    7,
+                    4,
+                    koushi_state::CurrentSessionSyncState::Running,
+                    Ok(verified_session_inspection()),
+                    123,
+                )
+                .is_none(),
+                "stale request, stale generation, and cleared sessions must all be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn session_status_sdk_failure_projects_coarse_failed_action() {
+        let info = session_status_info();
+        assert_eq!(
+            current_session_status_completion_action(
+                Some(7),
+                4,
+                true,
+                Some(&info),
+                7,
+                4,
+                koushi_state::CurrentSessionSyncState::Error,
+                Err(koushi_state::CurrentSessionStatusFailureKind::Sdk),
+                123,
+            ),
+            Some(AppAction::CurrentSessionStatusRefreshFailed {
+                request_id: 7,
+                kind: koushi_state::CurrentSessionStatusFailureKind::Sdk,
+                checked_at_ms: 123,
+            })
+        );
+    }
+
+    #[test]
+    fn session_status_success_uses_durable_auth_sync_and_sdk_trust_facts() {
+        let info = session_status_info();
+        let Some(AppAction::CurrentSessionStatusRefreshed {
+            request_id,
+            details,
+        }) = current_session_status_completion_action(
+            Some(7),
+            4,
+            true,
+            Some(&info),
+            7,
+            4,
+            koushi_state::CurrentSessionSyncState::Running,
+            Ok(verified_session_inspection()),
+            123,
+        )
+        else {
+            panic!("current completion should project ready details");
+        };
+        assert_eq!(request_id, 7);
+        assert_eq!(details.device_id, "PRIVATE-DEVICE");
+        assert_eq!(
+            details.authentication_method,
+            koushi_state::SessionAuthenticationMethod::OAuth
+        );
+        assert_eq!(
+            details.sync_state,
+            koushi_state::CurrentSessionSyncState::Running
+        );
+        assert_eq!(
+            details.verification,
+            koushi_state::CurrentSessionVerification::Verified
+        );
+    }
+
+    #[test]
+    fn session_status_diagnostics_expose_only_coarse_result_and_elapsed_time() {
+        let info = session_status_info();
+        let action = current_session_status_completion_action(
+            Some(7),
+            4,
+            true,
+            Some(&info),
+            7,
+            4,
+            koushi_state::CurrentSessionSyncState::Running,
+            Ok(verified_session_inspection()),
+            123,
+        )
+        .expect("current completion");
+        let formatted = koushi_diagnostics::format_event(&current_session_status_settled_event(
+            &action,
+            Duration::from_millis(9),
+        ));
+        assert_eq!(
+            formatted,
+            "stage=refresh_settled elapsed_ms=9 result=ready verdict=verified"
+        );
+        for private in [
+            "private.example.test",
+            "@private:example.test",
+            "PRIVATE-DEVICE",
+            "Private Device Name",
+        ] {
+            assert!(!formatted.contains(private));
+        }
+    }
+
+    #[test]
+    fn session_status_refresh_task_is_cancelled_with_the_session_runtime() {
+        let source = include_str!("account.rs");
+        let shutdown = source
+            .split("async fn stop_current_session_runtime")
+            .nth(1)
+            .expect("session runtime shutdown helper")
+            .split("async fn stop_threads_list_actor")
+            .next()
+            .expect("next helper bounds shutdown");
+        assert!(
+            shutdown.contains("cancel_current_session_status_refresh().await"),
+            "logout, switch, and shutdown must abort the actor-owned refresh task"
+        );
+    }
 
     #[test]
     fn composer_timeline_command_rechecks_full_session_owner_before_account_routing() {
@@ -15096,6 +15483,8 @@ mod tests {
             trust_generation: 0,
             trust_observer: None,
             trust_recheck_task: None,
+            current_session_status_task: None,
+            current_session_status_request: None,
             verification_method_discovery_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,

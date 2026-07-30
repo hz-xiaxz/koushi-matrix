@@ -2807,6 +2807,13 @@ impl AppActor {
                         Vec::new()
                     };
                 let projected_state_changed = !effects.is_empty();
+                if matches!(
+                    &account_command,
+                    AccountCommand::RefreshCurrentSessionStatus { .. }
+                ) {
+                    self.handle_app_effects(command_request_id, effects).await;
+                    return projected_state_changed;
+                }
                 self.handle_ui_event_effects_with_display_label_users(
                     &effects,
                     &display_label_user_ids,
@@ -4332,8 +4339,20 @@ impl AppActor {
                         .send(AccountMessage::CheckCurrentDeviceTrust)
                         .await;
                 }
+                AppEffect::RefreshCurrentSessionStatus {
+                    request_id,
+                    trigger,
+                } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::RefreshCurrentSessionStatus {
+                            request_id,
+                            trigger,
+                            sync_state: current_session_sync_state(&self.state.sync),
+                        })
+                        .await;
+                }
                 AppEffect::RestoreSession
-                | AppEffect::RefreshCurrentSessionStatus { .. }
                 | AppEffect::DiscoverLogin { .. }
                 | AppEffect::Login { .. }
                 | AppEffect::DiscoverVerificationMethods
@@ -4457,8 +4476,20 @@ impl AppActor {
                         .send(AccountMessage::CheckCurrentDeviceTrust)
                         .await;
                 }
+                AppEffect::RefreshCurrentSessionStatus {
+                    request_id,
+                    trigger,
+                } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::RefreshCurrentSessionStatus {
+                            request_id: *request_id,
+                            trigger: *trigger,
+                            sync_state: current_session_sync_state(&self.state.sync),
+                        })
+                        .await;
+                }
                 AppEffect::RestoreSession
-                | AppEffect::RefreshCurrentSessionStatus { .. }
                 | AppEffect::DiscoverLogin { .. }
                 | AppEffect::Login { .. }
                 | AppEffect::DiscoverVerificationMethods
@@ -5108,6 +5139,13 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
                 request_id: request_id.sequence,
             })
         }
+        AccountCommand::RefreshCurrentSessionStatus {
+            request_id,
+            trigger,
+        } => Some(AppAction::CurrentSessionStatusRefreshRequested {
+            request_id: request_id.sequence,
+            trigger: *trigger,
+        }),
         AccountCommand::LoadAccountManagementCapabilities { .. } => {
             Some(AppAction::AccountManagementCapabilitiesLoadRequested)
         }
@@ -5220,6 +5258,19 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         | AccountCommand::CancelVerification { .. }
         | AccountCommand::RetryCurrentDeviceTrustDiscovery { .. }
         | AccountCommand::SwitchAccount { .. } => None,
+    }
+}
+
+fn current_session_sync_state(
+    sync: &koushi_state::SyncState,
+) -> koushi_state::CurrentSessionSyncState {
+    match sync {
+        koushi_state::SyncState::Stopped => koushi_state::CurrentSessionSyncState::Stopped,
+        koushi_state::SyncState::Starting => koushi_state::CurrentSessionSyncState::Starting,
+        koushi_state::SyncState::Running => koushi_state::CurrentSessionSyncState::Running,
+        koushi_state::SyncState::Failed { .. } | koushi_state::SyncState::Reconnecting { .. } => {
+            koushi_state::CurrentSessionSyncState::Error
+        }
     }
 }
 
@@ -6974,6 +7025,61 @@ mod tests {
             assert!(
                 recheck_arm.contains("AccountMessage::CheckCurrentDeviceTrust"),
                 "trust recheck effects must reach the AccountActor instead of being discarded"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_routes_current_session_status_in_both_effect_lanes() {
+        let source = include_str!("runtime.rs");
+        let command_effects = source
+            .split("async fn handle_app_effects")
+            .nth(1)
+            .expect("handle_app_effects should exist")
+            .split("async fn handle_post_projection_effects")
+            .next()
+            .expect("handle_app_effects should precede post projection effects");
+        let actor_projection_effects = source
+            .split("async fn handle_post_projection_effects")
+            .nth(1)
+            .expect("handle_post_projection_effects should exist")
+            .split("async fn handle_ui_event_effects")
+            .next()
+            .expect("post projection effects should precede ui event effects");
+
+        for helper in [command_effects, actor_projection_effects] {
+            let refresh_arm = helper
+                .split("AppEffect::RefreshCurrentSessionStatus")
+                .nth(1)
+                .expect("session-status refresh effect should be matched explicitly")
+                .split("AppEffect::")
+                .next()
+                .expect("another effect arm should bound the session-status route");
+            assert!(
+                refresh_arm.contains("AccountMessage::RefreshCurrentSessionStatus"),
+                "session-status refresh effects must reach AccountActor instead of being discarded"
+            );
+        }
+    }
+
+    #[test]
+    fn current_session_status_account_command_projects_open_and_manual_refreshes() {
+        for trigger in [
+            koushi_state::SessionStatusRefreshTrigger::Open,
+            koushi_state::SessionStatusRefreshTrigger::Manual,
+        ] {
+            assert_eq!(
+                account_command_projected_action(&AccountCommand::RefreshCurrentSessionStatus {
+                    request_id: RequestId {
+                        connection_id: RuntimeConnectionId(2),
+                        sequence: 17,
+                    },
+                    trigger,
+                }),
+                Some(AppAction::CurrentSessionStatusRefreshRequested {
+                    request_id: 17,
+                    trigger,
+                })
             );
         }
     }
