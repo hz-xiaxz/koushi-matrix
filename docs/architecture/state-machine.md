@@ -93,7 +93,9 @@ stateDiagram-v2
     LoggingOut --> SignedOut: LogoutFinished
 ```
 
-Provisional-device cleanup is a nested Rust-owned state machine. Confirmation
+Provisional-device cleanup is a Rust-owned AppState state machine alongside the
+session gate, so it can represent method-discovery failures before a
+`VerificationGateState` exists. Confirmation
 dialog visibility is presentation-only; all Matrix ordering, retry, and
 terminal meaning below belongs to the reducer and `AccountActor`.
 
@@ -101,11 +103,12 @@ terminal meaning below belongs to the reducer and `AccountActor`.
 stateDiagram-v2
     [*] --> Idle
     Idle --> Offered: Verification failure / no proof method
-    Offered --> RemovingRemote: StartDeviceCleanup
+    Offered --> ResolvingRemote: StartDeviceCleanup
+    ResolvingRemote --> RemovingRemote: auth mode resolved
     RemovingRemote --> AwaitingUia: Legacy UIAA challenge
     AwaitingUia --> RemovingRemote: matching SubmitDeviceCleanupUia
     RemovingRemote --> RemoteFailed: remote failure
-    RemoteFailed --> RemovingRemote: StartDeviceCleanup retry
+    RemoteFailed --> ResolvingRemote: StartDeviceCleanup retry
     RemovingRemote --> ResettingLocal: success / already absent
     ResettingLocal --> LocalResetFailed: local clear failure
     LocalResetFailed --> ResettingLocal: StartDeviceCleanup local-only retry

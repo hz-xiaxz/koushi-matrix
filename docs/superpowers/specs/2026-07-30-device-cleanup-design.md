@@ -61,7 +61,7 @@ not automatically clear local credentials. The user gets retry and an explicit
 
 ### A. Dedicated Rust-owned cleanup state machine (selected)
 
-Add a cleanup sub-state to the provisional verification gate, typed cleanup
+Add an AppState cleanup slice alongside the provisional verification gate, typed cleanup
 commands, AccountActor-owned UIAA continuation, SDK authentication-mode
 classification, and reducer-correlated settlement.
 
@@ -82,11 +82,13 @@ rerender or WebView restart. Rejected.
 
 ## State Contract
 
-`VerificationGateState` gains a `device_cleanup` field:
+`AppState` gains a `device_cleanup` field so failures that happen before
+`VerificationGateState` discovery are also representable:
 
 ```text
 Idle
 Offered { reason }
+ResolvingRemote { request_id }
 RemovingRemote { request_id, auth_mode }
 AwaitingUia { request_id, flow_id }
 RemoteFailed { request_id, auth_mode, failure_kind }
@@ -104,7 +106,7 @@ the established no-proof-method gate. Merely being unverified never starts
 cleanup. Opening or closing the confirmation dialog is ephemeral presentation
 state and remains React-owned.
 
-The cleanup state is reset when the provisional session is promoted, rejected,
+The cleanup slice is reset when the provisional session is promoted, rejected,
 logged out, switched, or replaced by another login attempt.
 
 ## Commands and Guards

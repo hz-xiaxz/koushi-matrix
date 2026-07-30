@@ -8,7 +8,7 @@
 **Goal:** Replace the verification gate's local-only reset shortcut with an
 explicit, Rust-owned, remote-first provisional-device cleanup flow.
 
-**Architecture:** A `DeviceCleanupState` nested in the Rust verification gate
+**Architecture:** A `DeviceCleanupState` AppState slice alongside the Rust verification gate
 owns offer, remote removal, UIAA, retry, local reset, and local-only escape
 semantics. `AccountActor` keeps raw Device IDs, UIAA sessions, and SDK handles;
 `koushi-sdk` maps legacy device deletion and OAuth token revocation into coarse
@@ -90,14 +90,14 @@ TypeScript, Vitest, Playwright, local Conduit/Tuwunel QA.
 
 **GREEN steps:**
 
-4. Add private-safe enums:
+4. Add a private-safe `AppState.device_cleanup` slice and enums:
    - `DeviceCleanupState`
    - `DeviceCleanupAuthMode`
    - `DeviceCleanupOfferReason`
    - `DeviceCleanupRemoteOutcome`
    - `DeviceCleanupFailureKind`
-5. Nest cleanup state in `VerificationGateState` with serde defaults needed for
-   old fixtures.
+5. Give the cleanup slice serde defaults needed for old fixtures and method
+   discovery failures that occur before a gate exists.
 6. Add request/settlement actions and reducer handlers.
 7. Keep confirmation visibility out of Rust state.
 8. Run:
