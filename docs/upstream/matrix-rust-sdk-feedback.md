@@ -1,6 +1,6 @@
 # Matrix Rust SDK Feedback Packet
 
-Date: 2026-07-27
+Date: 2026-07-30
 
 This note separates SDK-upstreamable material from desktop-product decisions. Element Desktop/Web compatibility work in this repository is UX-only and is intentionally out of scope for the SDK feedback.
 
@@ -26,6 +26,7 @@ The current Koushi-required SDK topic stack is:
 - `fix(crypto): ignore replayed SAS starts`
 - `fix(room-list): expand own-member state key`
 - `fix(crypto): harden async delivery ownership`
+- `fix: avoid identity query Olm lock deadlock`
 - `Handle stale order tracker readers`
 
 These are retained because Koushi currently depends on their public or
@@ -108,6 +109,19 @@ or SDK boundary without logging private Matrix payloads.
   integration requests assert the exact expansion. Upstreaming intent: submit
   the helper and request-shape regressions independently of Koushi's backend
   capability preflight.
+
+- Non-blocking own-user identity query (2026-07-30, issue #375):
+  `Encryption::request_user_identity` clones the current `OlmMachine` and
+  releases the client's read guard before awaiting `/keys/query`. Previously
+  the response path reacquired the same Tokio `RwLock`; if Olm regeneration
+  queued a writer while the request was in flight, the original read guard
+  blocked the writer and writer preference blocked the nested read forever.
+  The regression delays the key query, queues regeneration, and requires both
+  operations to settle. Why: Koushi's authoritative current-device trust
+  recheck exposed this as an intermittent login stall in
+  `Provisional { RecheckingTrust }`. Upstreaming intent: submit the minimal
+  lock-scope change and deterministic concurrency regression independently;
+  it changes no identity or trust policy.
 
 - Deferred unknown-device verification request (2026-07-20, issue #285
   hardening): a valid to-device `m.key.verification.request` is retained when
@@ -242,6 +256,8 @@ Current SDK-only patch area:
 - `cargo test --manifest-path vendor/matrix-rust-sdk/crates/matrix-sdk/Cargo.toml search_index --features experimental-search,sqlite,e2e-encryption`
 - `cargo test --manifest-path vendor/matrix-rust-sdk/crates/matrix-sdk-crypto/Cargo.toml test_replayed_sas_start_keeps_adopted_responder_sas`
 - `cargo test --manifest-path vendor/matrix-rust-sdk/crates/matrix-sdk-crypto/Cargo.toml test_simultaneous_sas_starts_keep_lexicographically_smaller_start`
+- `cargo test -p matrix-sdk --lib test_request_user_identity_does_not_deadlock_with_olm_regeneration`
+- `cargo test -p matrix-sdk --lib`
 - `cargo test --manifest-path vendor/matrix-rust-sdk/crates/matrix-sdk-ui/Cargo.toml room_list_service`
 - `git -C vendor/matrix-rust-sdk diff --check`
 

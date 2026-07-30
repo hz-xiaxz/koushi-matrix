@@ -124,3 +124,43 @@ Expected: exit 0 without a `phase=rechecking_trust` login timeout.
 - [x] **Step 3: Self-review and publish**
 
 Inspect `git diff origin/main...HEAD` and `git status --short`, commit only #375 files, push `codex/issue-375-trust-recheck`, open a standalone PR referencing `Fixes #375`, and explicitly inspect the non-required Core homeserver QA result before merge.
+
+### Task 5: Remove the SDK lock cycle exposed by CI
+
+**Files:**
+- Modify: `vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/mod.rs`
+- Modify: `vendor/matrix-rust-sdk` gitlink
+- Modify: `docs/upstream/matrix-rust-sdk-feedback.md`
+
+- [x] **Step 1: Reproduce the queued-writer deadlock**
+
+Delay the own-user `/keys/query`, queue `BaseClient::regenerate_olm`, and require
+both the identity request and writer to settle. On the original SDK revision the
+test times out after the HTTP response because `request_user_identity` retains
+an Olm read guard while the response path tries to reacquire that read behind
+the queued writer.
+
+- [x] **Step 2: Release the read guard before network I/O**
+
+Clone the current `OlmMachine` inside a narrow guard scope, then perform the
+query after the guard is dropped. Preserve the request's machine handle and
+leave identity/trust semantics unchanged.
+
+- [x] **Step 3: Verify and publish the SDK topic commit**
+
+Run:
+
+```bash
+cargo test -p matrix-sdk --lib test_request_user_identity_does_not_deadlock_with_olm_regeneration
+cargo test -p matrix-sdk --lib
+cargo fmt -p matrix-sdk -- --check
+```
+
+Record the patch and upstreaming intent in the SDK feedback ledger, push the
+minimal SDK topic commit, and update the parent gitlink.
+
+- [x] **Step 4: Re-run parent and homeserver gates**
+
+Re-run the SDK wrapper/core library tests and the Conduit `media` scenario
+against the updated gitlink. Push the parent commit and require the complete PR
+CI, including the advisory Core homeserver QA job, to finish green before merge.
