@@ -121,6 +121,6 @@ PATH=/tmp/koushi-desktop-local-qa-bin:$PATH npm --prefix apps/desktop run qa:hea
 
 Expected: exit 0 without a `phase=rechecking_trust` login timeout.
 
-- [ ] **Step 3: Self-review and publish**
+- [x] **Step 3: Self-review and publish**
 
 Inspect `git diff origin/main...HEAD` and `git status --short`, commit only #375 files, push `codex/issue-375-trust-recheck`, open a standalone PR referencing `Fixes #375`, and explicitly inspect the non-required Core homeserver QA result before merge.
