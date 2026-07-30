@@ -7154,6 +7154,50 @@ async fn complete_new_identity_gate_for_qa(
         .map_err(|_| "remove disposable bootstrap recovery key".to_owned())?;
     std::fs::remove_dir(&bootstrap_dir)
         .map_err(|_| "remove disposable bootstrap delivery directory".to_owned())?;
+
+    // Observe the confirmation's own outcome instead of firing and forgetting
+    // it (#375). A failed confirmation leaves the session unpromoted, so
+    // `LoggedIn` is never released from the actor's pending-ready events and
+    // the run used to surface only `login A: timed out waiting for LoggedIn
+    // event` — after this helper had already printed its own success token.
+    //
+    // Leaving `AwaitingBootstrapConfirmation` is progress, so the loop returns
+    // as soon as the session moves on; it deliberately does NOT wait for
+    // `Ready`, because the caller owns that wait. Consuming `LoggedIn` here is
+    // harmless: the caller resolves the account key from the authoritative
+    // snapshot when the session is `Ready`.
+    let settle_deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
+    loop {
+        match &conn.snapshot().session {
+            SessionState::AwaitingBootstrapConfirmation {
+                flow_id: active, ..
+            } if *active == flow_id => {}
+            SessionState::Rejecting { .. } => {
+                return Err("new identity bootstrap confirmation rejected".to_owned());
+            }
+            _ => break,
+        }
+        let event = match tokio::time::timeout_at(settle_deadline, conn.recv_event()).await {
+            Ok(event) => event,
+            Err(_) => {
+                return Err(format!(
+                    "timed out settling bootstrap confirmation; phase={}",
+                    gate_session_phase(&conn.snapshot().session)
+                ));
+            }
+        };
+        match event {
+            Ok(CoreEvent::OperationFailed {
+                request_id: failed,
+                failure,
+            }) if failed == confirm_id => {
+                return Err(format!("bootstrap confirmation failed: {failure:?}"));
+            }
+            Ok(_) => {}
+            Err(_) => continue,
+        }
+    }
+
     Ok(Some(recovery_secret))
 }
 
@@ -9742,8 +9786,16 @@ async fn wait_for_logged_in<S: QaSnapshotEventSource + ?Sized>(
                 ));
             }
             Err(_) => {
-                return ready_account_key(conn)
-                    .ok_or_else(|| format!("{label}: timed out waiting for LoggedIn event"));
+                // Name the session phase so one failed capture distinguishes
+                // "promotion never happened" from "promotion in flight" or
+                // "event correlated to another request". Without it the
+                // message was identical for every hypothesis (#375).
+                return ready_account_key(conn).ok_or_else(|| {
+                    format!(
+                        "{label}: timed out waiting for LoggedIn event; phase={}",
+                        gate_session_phase(&conn.snapshot().session)
+                    )
+                });
             }
         };
 
@@ -18717,6 +18769,63 @@ mod tests {
     }
 
     #[test]
+    fn new_identity_gate_settles_its_bootstrap_confirmation_before_returning() {
+        // #375: the helper used to submit ConfirmSessionBootstrapSaved and
+        // return immediately, so a failed confirmation left the session
+        // unpromoted and the run reported only `login A: timed out waiting for
+        // LoggedIn event` — after this helper had printed its success token.
+        let source = include_str!("headless-core-qa.rs");
+        let helper = source
+            .split("async fn complete_new_identity_gate_for_qa")
+            .nth(1)
+            .expect("new identity gate helper")
+            .split("async fn wait_for_existing_identity_gate")
+            .next()
+            .expect("helper ends before the existing-identity gate");
+
+        let confirm_submit = helper
+            .find("ConfirmSessionBootstrapSaved")
+            .expect("helper submits the saved confirmation");
+        let observes_failure = helper
+            .find("failed == confirm_id")
+            .expect("helper observes the confirmation's correlated failure");
+        let returns = helper
+            .rfind("Ok(Some(recovery_secret))")
+            .expect("helper returns the disposable recovery secret");
+        assert!(
+            confirm_submit < observes_failure && observes_failure < returns,
+            "the confirmation outcome must be observed between submit and return"
+        );
+        assert!(
+            helper.contains("timed out settling bootstrap confirmation; phase="),
+            "a stuck confirmation must name the session phase, not fall through \
+             to a login-wait timeout"
+        );
+    }
+
+    #[test]
+    fn login_wait_timeout_names_the_session_phase() {
+        // The message is the only artifact a failed CI run leaves behind, so it
+        // has to distinguish "never promoted" from "promotion in flight" (#375).
+        let source = include_str!("headless-core-qa.rs");
+        let waiter = source
+            .split("async fn wait_for_logged_in")
+            .nth(1)
+            .expect("login waiter")
+            .split("async fn ")
+            .next()
+            .expect("waiter body");
+        assert!(
+            waiter.contains("timed out waiting for LoggedIn event; phase="),
+            "the login-wait timeout must report the session phase"
+        );
+        assert!(
+            waiter.contains("gate_session_phase(&conn.snapshot().session)"),
+            "the phase must come from the authoritative snapshot"
+        );
+    }
+
+    #[test]
     fn scenarios_that_must_not_bootstrap_return_before_the_shared_login() {
         // This is what makes the unconditional gate completion safe: a scenario
         // that owns its own login never reaches the shared route.
@@ -19706,9 +19815,11 @@ mod tests {
         .await
         .expect_err("a non-Ready snapshot must retain the login timeout");
 
+        // The phase token is part of the contract now (#375): it is what makes
+        // one failed CI capture diagnosable.
         assert_eq!(
             error,
-            "login remains pending: timed out waiting for LoggedIn event"
+            "login remains pending: timed out waiting for LoggedIn event; phase=signed_out"
         );
         assert_eq!(
             tokio::time::Instant::now().duration_since(started_at),
