@@ -2604,7 +2604,7 @@ test("notification attention snapshot drives room, space, thread, and click rout
   await expect(attentionRoom).toHaveClass(/is-active/);
 });
 
-test("workspace rail space and account buttons show reusable tooltips on hover and focus", async ({
+test("Home rail tooltip is absent while Space rail tooltip remains on hover and focus", async ({
   page
 }) => {
   await gotoReadyShell(page);
@@ -2627,11 +2627,11 @@ test("workspace rail space and account buttons show reusable tooltips on hover a
   await expect(spaceButton).not.toHaveAttribute("aria-describedby", /.+/);
 
   await accountButton.hover();
-  const accountTooltip = page.getByRole("tooltip", { name: "Home" });
-  await expect(accountTooltip).toBeVisible();
-
-  await page.getByRole("main", { name: "Conversation timeline" }).hover();
-  await expect(accountTooltip).toBeHidden();
+  await expect(page.getByRole("tooltip", { name: "Home" })).toHaveCount(0);
+  await accountButton.focus();
+  await expect(page.getByRole("tooltip", { name: "Home" })).toHaveCount(0);
+  await expect(accountButton).not.toHaveAttribute("title", /.+/);
+  await expect(accountButton).not.toHaveAttribute("aria-describedby", /.+/);
 
   await spaceButton.focus();
   await expect(spaceTooltip).toBeVisible();
@@ -2640,7 +2640,16 @@ test("workspace rail space and account buttons show reusable tooltips on hover a
   await expect(spaceButton).not.toHaveAttribute("aria-describedby", /.+/);
 });
 
-test("mention autocomplete inserts a pill and sends typed mention intent", async ({
+test("timeline action tooltip remains available", async ({ page }) => {
+  await gotoReadyShell(page);
+  const replyButton = page.getByRole("button", { name: "Reply to message" }).first();
+
+  await replyButton.hover();
+
+  await expect(page.getByRole("tooltip", { name: "Reply to message" })).toBeVisible();
+});
+
+test("room mention candidates stay Rust-owned and send typed mention intent", async ({
   page
 }) => {
   await gotoReadyShell(page);
@@ -2656,12 +2665,12 @@ test("mention autocomplete inserts a pill and sends typed mention intent", async
             ...snapshot.state.domain.profile,
             users: {
               ...snapshot.state.domain.profile.users,
-              "@alice:example.invalid": {
-                user_id: "@alice:example.invalid",
-                display_name: "Alice",
-                display_label: "Alice",
-                original_display_label: "Alice",
-                mention_search_terms: ["Alice", "@alice:example.invalid"],
+              "@account-global-only:example.invalid": {
+                user_id: "@account-global-only:example.invalid",
+                display_name: "Account Global Only",
+                display_label: "Account Global Only",
+                original_display_label: "Account Global Only",
+                mention_search_terms: ["account", "global"],
                 avatar: null
               }
             }
@@ -2672,46 +2681,12 @@ test("mention autocomplete inserts a pill and sends typed mention intent", async
     window.__harness.pushStateChanged();
     window.__harness.clearInvocations();
   });
-  await pushTimelineDiffs(
-    page,
-    [
-      {
-        Set: {
-          index: 0,
-          item: {
-            id: { Event: { event_id: "$seed-event:example.invalid" } },
-            sender: "@harness-user:example.invalid",
-            body: "Timeline mentions @Alice from Rust profile data",
-            timestamp_ms: 1_800_000_000_000,
-            in_reply_to_event_id: null,
-            thread_root: null,
-            thread_summary: null,
-            can_react: true,
-            is_redacted: false,
-            is_hidden: false,
-            can_redact: true,
-            is_edited: false,
-            can_edit: true,
-            reactions: []
-          }
-        }
-      }
-    ],
-    1
-  );
-  const timelineMention = page.locator(".message-body .message-mention-pill", {
-    hasText: "@Alice"
-  });
-  await expect(timelineMention).toBeVisible();
-  await expect(timelineMention).toHaveAttribute(
-    "data-mention-user-id",
-    "@alice:example.invalid"
-  );
-
   const composer = page.getByRole("textbox", { name: "Message composer" });
   await composer.fill("@a");
   await expect(page.getByRole("listbox", { name: "Mention suggestions" })).toBeVisible();
-  await page.getByRole("option", { name: "Alice" }).click();
+  await expect(page.getByRole("option", { name: "Alice @alice:example.invalid" })).toBeVisible();
+  await expect(page.getByRole("option", { name: /Account Global Only/ })).toHaveCount(0);
+  await page.getByRole("option", { name: "Alice @alice:example.invalid" }).click();
   await expect(
     page.getByLabel("Selected mentions").getByText("@Alice", { exact: true })
   ).toBeVisible();
@@ -2736,7 +2711,126 @@ test("mention autocomplete inserts a pill and sends typed mention intent", async
           }
         ]
       }
+  });
+});
+
+test("room mention candidates keep main and thread composer targets independent", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  const mainComposer = page.getByRole("textbox", { name: "Message composer" });
+  await mainComposer.fill("@a");
+  await expect(
+    page.getByRole("option", { name: "Alice @alice:example.invalid" })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: /2 replies/ }).click();
+  const threadComposer = page.getByRole("textbox", { name: "Thread composer" });
+  await threadComposer.fill("@b");
+
+  const mainSuggestions = page
+    .getByRole("region", { name: "Message composer" })
+    .getByRole("listbox", { name: "Mention suggestions" });
+  const threadSuggestions = page
+    .getByRole("region", { name: "Thread composer" })
+    .getByRole("listbox", { name: "Mention suggestions" });
+  await expect(
+    threadSuggestions.getByRole("option", { name: "Bob @bob:example.invalid" })
+  ).toBeVisible();
+  await expect(
+    threadSuggestions.getByRole("option", { name: "Alice @alice:example.invalid" })
+  ).toHaveCount(0);
+  await expect(
+    mainSuggestions.getByRole("option", { name: "Alice @alice:example.invalid" })
+  ).toBeVisible();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const invocations = window.__harness.invocationsOf("query_mention_candidates");
+        return invocations[invocations.length - 1]?.args;
+      })
+    )
+    .toEqual({
+      roomId: HARNESS_ROOM_ID,
+      surface: "thread",
+      query: "b"
     });
+});
+
+test("room people labels never promote raw Matrix ids in timeline metadata", async ({ page }) => {
+  await gotoReadyShell(page);
+  await pushTimelineDiffs(
+    page,
+    [
+      {
+        Set: {
+          index: 0,
+          item: {
+            id: { Event: { event_id: "$people-labels:example.invalid" } },
+            sender: "@raw-sender:example.invalid",
+            sender_label: "Sender Alias",
+            sender_avatar: null,
+            body: "People label probe",
+            timestamp_ms: 1_800_000_000_000,
+            in_reply_to_event_id: "$quoted:example.invalid",
+            reply_quote: {
+              event_id: "$quoted:example.invalid",
+              sender: "@raw-quoted:example.invalid",
+              sender_label: null,
+              body_preview: "Quoted body",
+              state: "ready"
+            },
+            thread_root: null,
+            thread_summary: {
+              reply_count: 1,
+              latest_event_id: "$latest:example.invalid",
+              latest_sender: "@raw-latest:example.invalid",
+              latest_sender_label: "Latest Alias",
+              latest_body_preview: "Latest reply",
+              latest_timestamp_ms: 1_800_000_000_100
+            },
+            can_react: true,
+            is_redacted: false,
+            is_hidden: false,
+            can_redact: false,
+            is_edited: false,
+            can_edit: false,
+            reactions: [
+              {
+                key: "✅",
+                count: 2,
+                reacted_by_me: false,
+                my_reaction_event_id: null,
+                sender_preview: [
+                  {
+                    user_id: "@raw-reactor:example.invalid",
+                    display_label: "Known Reactor"
+                  },
+                  {
+                    user_id: "@missing-reactor:example.invalid",
+                    display_label: null
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    1
+  );
+
+  const row = page.locator(
+    'article[data-content-event-id="$people-labels:example.invalid"]'
+  );
+  await expect(row.getByText("Sender Alias", { exact: true })).toBeVisible();
+  await expect(row.getByText("Unknown user", { exact: true })).toBeVisible();
+  await expect(row.getByText(/Latest Alias: Latest reply/)).toBeVisible();
+  await expect(
+    row.getByText("Known Reactor and Unknown user reacted with ✅", { exact: true })
+  ).toBeAttached();
+  await expect(row).not.toContainText("@raw-");
+  await expect(row).not.toContainText("@missing-reactor:example.invalid");
 });
 
 test("markdown toolbar and slash composer input dispatch Rust-owned send bodies", async ({

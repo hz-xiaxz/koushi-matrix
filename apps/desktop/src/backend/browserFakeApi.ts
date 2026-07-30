@@ -58,6 +58,7 @@ import type {
   LiveEventReceiptSummary,
   LiveReadReceipt,
   MentionIntent,
+  MentionSurface,
   OidcAuthorization,
   SpaceSummary,
   SubmissionResponse,
@@ -318,6 +319,11 @@ export interface DesktopApi {
   dismissDirectoryPreview(): Promise<DesktopSnapshot>;
   joinRoom(roomId: string): Promise<DesktopSnapshot>;
   loadRoomSettings(roomId: string): Promise<DesktopSnapshot>;
+  queryMentionCandidates(
+    roomId: string,
+    surface: MentionSurface,
+    query: string
+  ): Promise<void>;
   repairRoomTimeline(roomId: string): Promise<DesktopSnapshot>;
   updateRoomSetting(roomId: string, change: RoomSettingChange): Promise<DesktopSnapshot>;
   moderateRoomMember(
@@ -2543,6 +2549,63 @@ class BrowserFakeApi implements DesktopApi {
       operation: { kind: "idle" }
     };
     return this.getSnapshot();
+  }
+
+  async queryMentionCandidates(
+    roomId: string,
+    surface: MentionSurface,
+    query: string
+  ): Promise<void> {
+    const normalizedRoomId = roomId.trim();
+    if (!this.canUseSyncedViews() || !normalizedRoomId) {
+      return;
+    }
+    const previous = this.snapshot.state.domain.mention_candidates.targets.find(
+      (target) => target.room_id === normalizedRoomId && target.surface === surface
+    );
+    const settings =
+      this.snapshot.state.domain.room_management.selected_room_id === normalizedRoomId &&
+      this.snapshot.state.domain.room_management.settings?.room_id === normalizedRoomId
+        ? this.snapshot.state.domain.room_management.settings
+        : null;
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const candidates = (settings?.members ?? [])
+      .filter((member) =>
+        [member.display_label, member.original_display_label, member.user_id].some((value) =>
+          value.toLocaleLowerCase().includes(normalizedQuery)
+        )
+      )
+      .map((member) => ({
+        user_id: member.user_id,
+        display_label: member.display_label || null,
+        original_display_label: member.original_display_label || null,
+        avatar: member.avatar_url
+          ? {
+              mxc_uri: member.avatar_url,
+              thumbnail: { kind: "notRequested" as const }
+            }
+          : null,
+        membership: "joined" as const
+      }));
+    const target = {
+      room_id: normalizedRoomId,
+      generation: (previous?.generation ?? 0) + 1,
+      request_id: this.nextRequestId(),
+      query,
+      surface,
+      completeness: settings ? ("complete" as const) : ("partial" as const),
+      candidates,
+      room_mention_allowed: "unknown" as const,
+      failure_kind: null
+    };
+    this.snapshot.state.domain.mention_candidates.targets =
+      this.snapshot.state.domain.mention_candidates.targets
+        .filter(
+          (candidateTarget) =>
+            candidateTarget.room_id !== normalizedRoomId ||
+            candidateTarget.surface !== surface
+        )
+        .concat(target);
   }
 
   async reshareRoomKey(_roomId: string): Promise<DesktopSnapshot> {

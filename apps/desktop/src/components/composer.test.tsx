@@ -16,7 +16,6 @@ describe("Composer", () => {
     {
       key: "@alice:example.invalid",
       label: "Alice",
-      searchText: "alice @alice:example.invalid",
       target: {
         kind: "user",
         user_id: "@alice:example.invalid",
@@ -26,7 +25,6 @@ describe("Composer", () => {
     {
       key: "@bob:example.invalid",
       label: "Bob",
-      searchText: "bob @bob:example.invalid",
       target: {
         kind: "user",
         user_id: "@bob:example.invalid",
@@ -36,7 +34,6 @@ describe("Composer", () => {
     {
       key: "roomMention",
       label: "@room",
-      searchText: "room @room notify the whole room",
       target: {
         kind: "roomMention",
         display_label: "room"
@@ -537,7 +534,7 @@ describe("Composer", () => {
       <Composer
         composerMode={{ kind: "plain" }}
         isSending={false}
-        mentionCandidates={mentionCandidates}
+        mentionCandidates={[mentionCandidates[2]!]}
         roomName="Room"
         value="@a"
         resolveComposerKeyAction={() => action}
@@ -798,6 +795,52 @@ describe("Composer", () => {
     });
   });
 
+  it("requests Rust-owned mention results and renders their canonical order without local filtering", () => {
+    const onMentionQueryChange = vi.fn();
+    const orderedCandidates = [
+      mentionCandidates[1]!,
+      mentionCandidates[0]!
+    ];
+    const { container } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        mentionCandidates={orderedCandidates}
+        roomName="Direct room"
+        value="@alice"
+        onCancelReply={() => undefined}
+        onMentionQueryChange={onMentionQueryChange}
+        onSend={() => undefined}
+        onValueChange={() => undefined}
+      />
+    );
+
+    expect(onMentionQueryChange).toHaveBeenCalledWith("alice");
+    expect(
+      screen.getAllByRole("option").map((option) => option.getAttribute("data-mention-key"))
+    ).toEqual(orderedCandidates.map((candidate) => candidate.key));
+    expect(container.querySelector(".composer-autocomplete-loading")).toBeNull();
+  });
+
+  it("keeps known partial mention candidates visible with a loading state", () => {
+    render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        mentionCandidates={[mentionCandidates[0]!]}
+        mentionCandidatesLoading
+        roomName="Direct room"
+        value="@"
+        onCancelReply={() => undefined}
+        onSend={() => undefined}
+        onValueChange={() => undefined}
+      />
+    );
+
+    expect(screen.getByRole("option")).toBeTruthy();
+    expect(screen.getByText("Loading people…")).toBeTruthy();
+  });
+
   it("closes mention suggestions on Escape until the query changes", async () => {
     const resolveComposerKeyAction = vi.fn(async () => "closeAutocomplete" as const);
     const { container } = render(
@@ -832,7 +875,7 @@ describe("Composer", () => {
       <Composer
         composerMode={{ kind: "plain" }}
         isSending={false}
-        mentionCandidates={mentionCandidates}
+        mentionCandidates={[mentionCandidates[2]!]}
         roomName="Direct room"
         value="@room"
         onCancelReply={() => undefined}

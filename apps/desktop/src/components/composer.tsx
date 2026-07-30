@@ -56,6 +56,7 @@ import {
   mentionDraftToken,
   mentionTargetKey,
   mentionPillLabel,
+  peopleFacingLabel,
   initials,
   defaultScheduleDateTimeValue,
   scheduledSendTimestampFromInput,
@@ -77,6 +78,7 @@ export const Composer = memo(function Composer({
   isSending,
   mathModeEnabled = true,
   mentionCandidates = [],
+  mentionCandidatesLoading = false,
   mentionIntent = EMPTY_MENTION_INTENT,
   resolveComposerKeyAction = ignoreComposerKeyAction,
   draftKey = "default",
@@ -88,6 +90,7 @@ export const Composer = memo(function Composer({
   onAttachFiles = async () => undefined,
   onMentionIntentChange = () => undefined,
   onMathModeChange = () => undefined,
+  onMentionQueryChange = () => undefined,
   onScheduleSend,
   onSend,
   onValueChange
@@ -99,6 +102,7 @@ export const Composer = memo(function Composer({
   isSending: boolean;
   mathModeEnabled?: boolean;
   mentionCandidates?: MentionCandidate[];
+  mentionCandidatesLoading?: boolean;
   mentionIntent?: MentionIntent;
   resolveComposerKeyAction?: ResolveComposerKeyAction;
   draftKey?: string;
@@ -110,6 +114,7 @@ export const Composer = memo(function Composer({
   onAttachFiles?: (files: File[]) => void | Promise<void>;
   onMathModeChange?: (enabled: boolean) => void | Promise<void>;
   onMentionIntentChange?: (intent: MentionIntent) => void;
+  onMentionQueryChange?: (query: string | null) => void;
   onScheduleSend?: (sendAtMs: number, body: string) => void | Promise<void>;
   onSend: (body: string) => void | Promise<void>;
   onValueChange: (value: string) => void;
@@ -117,6 +122,8 @@ export const Composer = memo(function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const macKillRingRef = useRef<string>("");
+  const onMentionQueryChangeRef = useRef(onMentionQueryChange);
+  onMentionQueryChangeRef.current = onMentionQueryChange;
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [scheduleValue, setScheduleValue] = useState(() => defaultScheduleDateTimeValue());
@@ -134,10 +141,11 @@ export const Composer = memo(function Composer({
   const activeMentionSuggestions =
     activeMention === null || activeMentionKey === dismissedMentionKey
       ? []
-      : mentionCandidates
-          .filter((candidate) => candidate.searchText.includes(activeMention.query.toLowerCase()))
-          .slice(0, 8);
-  const autocompleteOpen = activeMentionSuggestions.length > 0;
+      : mentionCandidates;
+  const autocompleteOpen =
+    activeMention !== null &&
+    activeMentionKey !== dismissedMentionKey &&
+    (activeMentionSuggestions.length > 0 || mentionCandidatesLoading);
   const mentionSuggestionSections = mentionSections(activeMentionSuggestions);
   const activeMentionOption = autocompleteOpen
     ? activeMentionSuggestions[Math.min(activeMentionIndex, activeMentionSuggestions.length - 1)]
@@ -156,6 +164,10 @@ export const Composer = memo(function Composer({
 
   useEffect(() => {
     setActiveMentionIndex(0);
+  }, [activeMentionKey]);
+
+  useEffect(() => {
+    onMentionQueryChangeRef.current(activeMention?.query ?? null);
   }, [activeMentionKey]);
 
   useEffect(() => {
@@ -262,11 +274,16 @@ export const Composer = memo(function Composer({
     if (!activeMention) {
       return;
     }
-    const token = `${mentionDraftToken(candidate.target)} `;
+    const displayLabel = peopleFacingLabel(candidate.label);
+    const target =
+      candidate.target.kind === "user"
+        ? { ...candidate.target, display_label: displayLabel }
+        : candidate.target;
+    const token = `${mentionDraftToken(target)} `;
     updateLocalValue(
       `${localValue.slice(0, activeMention.start)}${token}${localValue.slice(activeMention.end)}`
     );
-    onMentionIntentChange(appendMentionTarget(mentionIntent, candidate.target));
+    onMentionIntentChange(appendMentionTarget(mentionIntent, target));
     const cursor = activeMention.start + token.length;
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
@@ -572,6 +589,11 @@ export const Composer = memo(function Composer({
               ))}
             </div>
           ))}
+          {mentionCandidatesLoading ? (
+            <div className="composer-autocomplete-loading" role="status">
+              {t("composer.mentionLoading")}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <ImeOwnedTextArea
@@ -736,6 +758,7 @@ function MentionOption({
   onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const meta = mentionOptionMeta(candidate);
+  const displayLabel = peopleFacingLabel(candidate.label);
   return (
     <button
       id={id}
@@ -745,6 +768,7 @@ function MentionOption({
       role="option"
       aria-label={mentionOptionAriaLabel(candidate)}
       aria-selected={active ? "true" : "false"}
+      data-mention-key={candidate.key}
       onMouseDown={onMouseDown}
       onClick={() => onAccept(candidate)}
     >
@@ -754,11 +778,11 @@ function MentionOption({
           candidate.target.kind === "roomMention" ? "is-room-mention" : "is-user"
         }`}
         colorSeed={mentionTargetKey(candidate.target)}
-        fallback={candidate.target.kind === "roomMention" ? "@" : initials(candidate.label)}
+        fallback={candidate.target.kind === "roomMention" ? "@" : initials(displayLabel)}
       />
       <span className="mention-option-main">
         <span className="mention-option-label" dir="auto">
-          {candidate.label}
+          {displayLabel}
         </span>
         <span className="mention-option-meta" dir="auto" aria-hidden="true">
           {meta}
@@ -781,7 +805,8 @@ function mentionOptionMeta(candidate: MentionCandidate): string {
 
 function mentionOptionAriaLabel(candidate: MentionCandidate): string {
   const meta = mentionOptionMeta(candidate);
-  return meta ? `${candidate.label} ${meta}` : candidate.label;
+  const label = peopleFacingLabel(candidate.label);
+  return meta ? `${label} ${meta}` : label;
 }
 
 function ThreadComposer({
@@ -791,12 +816,14 @@ function ThreadComposer({
   hasStagedUploads = false,
   isSending,
   mentionCandidates = [],
+  mentionCandidatesLoading = false,
   mentionIntent = EMPTY_MENTION_INTENT,
   roomName = t("panel.thread"),
   resolveComposerKeyAction,
   onAttachFiles,
   onDraftChange,
   onMentionIntentChange,
+  onMentionQueryChange,
   onScheduleSend,
   onSend
 }: {
@@ -806,12 +833,14 @@ function ThreadComposer({
   hasStagedUploads?: boolean;
   isSending: boolean;
   mentionCandidates?: MentionCandidate[];
+  mentionCandidatesLoading?: boolean;
   mentionIntent?: MentionIntent;
   roomName?: string;
   resolveComposerKeyAction: ResolveComposerKeyAction;
   onAttachFiles?: (files: File[]) => void | Promise<void>;
   onDraftChange: (draft: string) => void;
   onMentionIntentChange?: (intent: MentionIntent) => void;
+  onMentionQueryChange?: (query: string | null) => void;
   onScheduleSend?: (sendAtMs: number, body: string) => void | Promise<void>;
   onSend: (value: string) => void | Promise<void>;
 }) {
@@ -823,6 +852,7 @@ function ThreadComposer({
       hasStagedUploads={hasStagedUploads}
       isSending={isSending}
       mentionCandidates={mentionCandidates}
+      mentionCandidatesLoading={mentionCandidatesLoading}
       mentionIntent={mentionIntent}
       resolveComposerKeyAction={resolveComposerKeyAction}
       draftKey={draftKey}
@@ -833,6 +863,7 @@ function ThreadComposer({
       onAttachFiles={onAttachFiles}
       onCancelReply={() => undefined}
       onMentionIntentChange={onMentionIntentChange}
+      onMentionQueryChange={onMentionQueryChange}
       onScheduleSend={onScheduleSend}
       onSend={onSend}
       onValueChange={onDraftChange}

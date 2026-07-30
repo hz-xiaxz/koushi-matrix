@@ -33,11 +33,11 @@ use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
     ComposerDraftRevision, ComposerKeyEvent, ComposerResolvedAction, ComposerResolverContext,
     ComposerSurface, DirectoryQuery, FilesViewScope, FocusedContextState, IdentityResetAuthRequest,
-    ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, PresenceKind,
-    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
-    RoomTagKind, SessionInfo, SessionState, SettingsPatch, StagedUploadCompressionChoice,
-    StagedUploadItem, StagedUploadKind, SubmissionId, TimelineScrollAnchor,
-    VerificationCancelReason, build_formatted_message_draft,
+    ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface,
+    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode,
+    RoomSettingChange, RoomTagKind, SessionInfo, SessionState, SettingsPatch,
+    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, SubmissionId,
+    TimelineScrollAnchor, VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(any(debug_assertions, test))]

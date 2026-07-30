@@ -68,6 +68,7 @@ import {
 import katex from "katex";
 
 import { getActiveLocale, t } from "../i18n/messages";
+import { peopleFacingLabel } from "../app/uiShared";
 import {
   FloatingLayer,
   floatingPlacementStyle,
@@ -5566,9 +5567,9 @@ export const TimelineView = memo(function TimelineView({
           />
         ) : null}
       </div>
-      {roomSignals && roomSignals.typing_user_ids.length > 0 ? (
+      {roomSignals && roomSignals.typing_users.length > 0 ? (
         <div className="typing-indicator" dir="auto">
-          {formatTypingUsers(roomSignals.typing_user_ids, profileUsers)}
+          {formatTypingUsers(roomSignals.typing_users)}
         </div>
       ) : null}
       {messageSource ? (
@@ -6190,21 +6191,23 @@ export function TimelineItemRow({
     onImageLoad: onAvatarImageLoad
   } = useRecoverableImageSource(avatarUrl);
   const showAvatarImage = Boolean(displayAvatarUrl);
-  const senderDisplayLabel = item.sender_label?.trim() || item.sender || "";
+  const senderDisplayLabel = peopleFacingLabel(item.sender_label);
   const senderOriginalLabel =
     profile?.original_display_label.trim() || profile?.display_name?.trim() || "";
   const senderAliasTarget =
     item.sender && canSetSenderAlias
       ? {
           userId: item.sender,
-          displayLabel: senderDisplayLabel || item.sender,
+          displayLabel: senderDisplayLabel,
           originalDisplayLabel: senderOriginalLabel
         }
       : null;
   const threadSummaryText = item.thread_summary
     ? formatThreadSummary(
         item.thread_summary.reply_count,
-        item.thread_summary.latest_sender_label?.trim() || item.thread_summary.latest_sender,
+        item.thread_summary.latest_sender
+          ? peopleFacingLabel(item.thread_summary.latest_sender_label)
+          : null,
         item.thread_summary.latest_body_preview,
         item.thread_summary.latest_timestamp_ms
       )
@@ -6263,9 +6266,7 @@ export function TimelineItemRow({
     !isRedacted && item.reply_quote ? (
       <div className="reply-quote" data-reply-state={item.reply_quote.state}>
         <div className="reply-quote-sender" dir="auto">
-          {item.reply_quote.sender_label?.trim() ||
-            item.reply_quote.sender ||
-            t("timeline.replyQuoteUnknownSender")}
+          {peopleFacingLabel(item.reply_quote.sender_label)}
         </div>
         <div className="reply-quote-body" dir="auto">
           {replyQuoteBody(item.reply_quote)}
@@ -7286,26 +7287,14 @@ function messageSourceJson(source: TimelineMessageSource): unknown {
   };
 }
 
-function formatTypingUsers(
-  userIds: string[],
-  profileUsers: Record<string, UserProfile> = {}
-): string {
-  const [firstUser] = userIds;
-  if (userIds.length === 1 && firstUser) {
+function formatTypingUsers(users: LiveSignalsState["rooms"][string]["typing_users"]): string {
+  const [firstUser] = users;
+  if (users.length === 1 && firstUser) {
     return t("timeline.typingOne", {
-      user: profileDisplayLabel(profileUsers[firstUser], firstUser)
+      user: peopleFacingLabel(firstUser.display_label)
     });
   }
-  return t("timeline.typingMany", { count: userIds.length });
-}
-
-function profileDisplayLabel(profile: UserProfile | undefined, userId: string): string {
-  return (
-    profile?.display_label?.trim() ||
-    profile?.display_name?.trim() ||
-    profile?.original_display_label.trim() ||
-    userId
-  );
+  return t("timeline.typingMany", { count: users.length });
 }
 
 function formatReceiptDetails(receipts: LiveReadReceipt[], overflowCount: number): string[] {
@@ -7321,7 +7310,7 @@ function formatReceiptDetails(receipts: LiveReadReceipt[], overflowCount: number
 }
 
 export function receiptDisplayName(receipt: LiveReadReceipt): string {
-  return receipt.display_name?.trim() || receipt.original_display_label.trim();
+  return peopleFacingLabel(receipt.display_name, receipt.original_display_label);
 }
 
 function receiptInitials(receipt: LiveReadReceipt): string {
@@ -7347,8 +7336,8 @@ function formatReactionTooltip(
   if (totalCount <= 0) {
     return null;
   }
-  const previewLabels = senderPreview.map(
-    (sender) => sender.display_label?.trim() || t("timeline.reactionSenderUnknown", { count: 1 })
+  const previewLabels = senderPreview.map((sender) =>
+    peopleFacingLabel(sender.display_label)
   );
   const overflowCount = Math.max(0, totalCount - previewLabels.length);
   const labels =

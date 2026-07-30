@@ -710,6 +710,7 @@ export function TimelinePane({
   onComposerDraftChange,
   onComposerMathModeChange,
   onMentionIntentChange,
+  onMentionQueryChange = () => undefined,
   onEditMessage,
   onOpenContextMenu,
   onOpenThread,
@@ -756,6 +757,7 @@ export function TimelinePane({
   onComposerDraftChange: (value: string) => void;
   onComposerMathModeChange: (enabled: boolean) => void | Promise<void>;
   onMentionIntentChange: (intent: MentionIntent) => void;
+  onMentionQueryChange?: (roomId: string, query: string | null) => void;
   onEditMessage: (message: { body: string | null; room_id: string; event_id: string }) => void;
   onOpenContextMenu: OpenContextMenu;
   onOpenThread: (roomId: string, rootEventId: string) => void;
@@ -835,7 +837,15 @@ export function TimelinePane({
   const mediaGallery = snapshot.state.ui.timeline.media_gallery ?? [];
   const mediaDownloads = snapshot.state.ui.timeline.media_downloads ?? {};
   const forwardDestinations = useAppStore(selectForwardDestinations);
-  const mentionCandidates = useAppStore(selectMentionCandidates);
+  const mentionCandidates = useAppStore((state) =>
+    selectMentionCandidates(state, timelineRoomId, "main")
+  );
+  const mentionCandidateTarget = snapshot.state.domain.mention_candidates.targets.find(
+    (target) => target.room_id === timelineRoomId && target.surface === "main"
+  );
+  const mentionCandidatesLoading =
+    mentionCandidateTarget?.completeness === "loading" ||
+    mentionCandidateTarget?.completeness === "partial";
   const resolveComposerKeyActionStable = useStableEvent(resolveComposerKeyAction);
   const onCancelReplyStable = useStableEvent(onCancelReply);
   const onCancelScheduledSendStable = useStableEvent(onCancelScheduledSend);
@@ -850,6 +860,11 @@ export function TimelinePane({
   const onComposerDraftChangeStable = useStableEvent(onComposerDraftChange);
   const onComposerMathModeChangeStable = useStableEvent(onComposerMathModeChange);
   const onMentionIntentChangeStable = useStableEvent(onMentionIntentChange);
+  const onMentionQueryChangeStable = useStableEvent((query: string | null) => {
+    if (timelineRoomId) {
+      onMentionQueryChange(timelineRoomId, query);
+    }
+  });
   const onEditMessageStable = useStableEvent(onEditMessage);
   const onOpenContextMenuStable = useStableEvent(onOpenContextMenu);
   const onOpenThreadStable = useStableEvent(onOpenThread);
@@ -1066,6 +1081,7 @@ export function TimelinePane({
         isSending={Boolean(snapshot.state.ui.timeline.composer.pending_transaction_id)}
         mathModeEnabled={snapshot.state.domain.settings.values.composer?.math_mode ?? true}
         mentionCandidates={mentionCandidates}
+        mentionCandidatesLoading={mentionCandidatesLoading}
         mentionIntent={mentionIntent}
         resolveComposerKeyAction={resolveComposerKeyActionStable}
         draftKey={composerDraftKey ?? timelineRoomId ?? "no-room"}
@@ -1075,6 +1091,7 @@ export function TimelinePane({
         onAttachFiles={onAttachFilesStable}
         onMathModeChange={onComposerMathModeChangeStable}
         onMentionIntentChange={onMentionIntentChangeStable}
+        onMentionQueryChange={onMentionQueryChangeStable}
         onScheduleSend={onScheduleSendStable}
         onSend={onSendTextStable}
         onValueChange={onComposerDraftChangeStable}

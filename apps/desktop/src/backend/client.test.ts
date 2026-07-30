@@ -371,6 +371,7 @@ describe("TauriDesktopApi", () => {
 
     const api = createDesktopApi();
     await api.loadRoomSettings("!room:example.invalid");
+    await api.queryMentionCandidates("!room:example.invalid", "thread", "ali");
     await api.repairRoomTimeline("!room:example.invalid");
     await api.updateRoomSetting("!room:example.invalid", {
       topic: "Private topic"
@@ -385,6 +386,11 @@ describe("TauriDesktopApi", () => {
 
     expect(invoke).toHaveBeenCalledWith("load_room_settings", {
       roomId: "!room:example.invalid"
+    });
+    expect(invoke).toHaveBeenCalledWith("query_mention_candidates", {
+      roomId: "!room:example.invalid",
+      surface: "thread",
+      query: "ali"
     });
     expect(invoke).toHaveBeenCalledWith("repair_room_timeline", {
       roomId: "!room:example.invalid"

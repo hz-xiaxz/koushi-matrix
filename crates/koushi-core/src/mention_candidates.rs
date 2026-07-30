@@ -119,7 +119,7 @@ fn match_rank<'a>(normalized_query: &str, terms: impl Iterator<Item = &'a str>) 
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
+    use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
     use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
@@ -418,6 +418,76 @@ mod tests {
                 .is_err(),
             "complete cache must not start a refresh"
         );
+
+        assert!(handle.send(RoomMessage::Shutdown).await);
+        handle.join().await;
+    }
+
+    #[tokio::test]
+    async fn room_actor_applies_local_aliases_to_candidate_matching_and_labels() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let room_id = matrix_sdk::ruma::room_id!("!aliased-mentions:example.org");
+        let joined = matrix_sdk::ruma::user_id!("@joined:example.org");
+        server
+            .mock_sync()
+            .ok_and_run(&session.client(), |builder| {
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(room_id).add_state_event(
+                        EventFactory::new()
+                            .room(room_id)
+                            .member(joined)
+                            .display_name("Room Name")
+                            .into_raw_sync_state(),
+                    ),
+                );
+            })
+            .await;
+
+        let (action_tx, mut action_rx) = mpsc::channel(8);
+        let (event_tx, _) = broadcast::channel(8);
+        let handle = RoomActor::spawn(action_tx, event_tx);
+        assert!(
+            handle
+                .send(RoomMessage::SessionEstablished {
+                    session: session.clone(),
+                })
+                .await
+        );
+        assert!(
+            handle
+                .send(RoomMessage::LocalUserAliasesUpdated {
+                    aliases: BTreeMap::from([(joined.to_string(), "Personal Alias".to_owned(),)]),
+                })
+                .await
+        );
+        assert!(
+            handle
+                .send(RoomMessage::Command(RoomCommand::QueryMentionCandidates {
+                    request_id: RequestId {
+                        connection_id: RuntimeConnectionId(7),
+                        sequence: 45,
+                    },
+                    account_key: AccountKey(session.info.user_id.clone()),
+                    room_id: room_id.to_string(),
+                    surface: koushi_state::MentionSurface::Main,
+                    query: "personal".to_owned(),
+                }))
+                .await
+        );
+
+        let _demanded = action_rx.recv().await.expect("demand action");
+        let projected = action_rx.recv().await.expect("projection action");
+        assert!(matches!(
+            projected.as_slice(),
+            [koushi_state::AppAction::MentionCandidatesProjected {
+                candidates,
+                ..
+            }] if candidates.len() == 1
+                && candidates[0].user_id == joined.as_str()
+                && candidates[0].display_label.as_deref() == Some("Personal Alias")
+                && candidates[0].original_display_label.as_deref() == Some("Room Name")
+        ));
 
         assert!(handle.send(RoomMessage::Shutdown).await);
         handle.join().await;

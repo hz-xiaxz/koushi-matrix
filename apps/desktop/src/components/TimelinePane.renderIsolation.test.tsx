@@ -197,7 +197,9 @@ describe("TimelinePane render isolation", () => {
 
     rerender(renderPane(projectedUsersChanged));
 
-    expect(renderCounts.composer).toBe(2);
+    // Mention candidates are room-scoped Rust projections, so account-wide
+    // profile-cache churn must not invalidate the composer.
+    expect(renderCounts.composer).toBe(1);
     expect(renderCounts.timelineView).toBe(3);
   });
 

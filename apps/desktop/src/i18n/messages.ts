@@ -87,6 +87,7 @@ export type MessageId =
   | "composer.mathModeOff"
   | "composer.mathModeOn"
   | "composer.mention"
+  | "composer.mentionLoading"
   | "composer.mentionRoomNotification"
   | "composer.mentionRoomNotificationDescription"
   | "composer.mentionSuggestions"
@@ -317,6 +318,7 @@ export type MessageId =
   | "people.you"
   | "people.sendMessage"
   | "people.setAlias"
+  | "people.unknownUser"
   | "room.members"
   | "room.ban"
   | "room.banMember"
@@ -1147,6 +1149,7 @@ const en: Catalog = {
   "composer.mathModeOff": "Math formatting off",
   "composer.mathModeOn": "Math formatting on",
   "composer.mention": "Mention",
+  "composer.mentionLoading": "Loading people…",
   "composer.mentionRoomNotification": "Room Notification",
   "composer.mentionRoomNotificationDescription": "Notify the whole room",
   "composer.mentionSuggestions": "Mention suggestions",
@@ -1384,6 +1387,7 @@ const en: Catalog = {
   "people.you": "You",
   "people.sendMessage": "Send message",
   "people.setAlias": "Set alias",
+  "people.unknownUser": "Unknown user",
   "room.avatarUrl": "Room avatar URL",
   "room.ban": "Ban",
   "room.banMember": "Ban {name}",
@@ -2114,6 +2118,7 @@ const ja: Catalog = {
   "composer.mathModeOff": "数式モード: OFF",
   "composer.mathModeOn": "数式モード: ON",
   "composer.mention": "メンション",
+  "composer.mentionLoading": "メンバーを読み込み中…",
   "composer.mentionRoomNotification": "ルーム通知",
   "composer.mentionRoomNotificationDescription": "ルーム全体に通知",
   "composer.mentionSuggestions": "メンション候補",
@@ -2351,6 +2356,7 @@ const ja: Catalog = {
   "people.you": "あなた",
   "people.sendMessage": "メッセージを送信",
   "people.setAlias": "エイリアスを設定",
+  "people.unknownUser": "不明なユーザー",
   "room.avatarUrl": "ルームアバターURL",
   "room.ban": "BAN",
   "room.banMember": "{name}をBAN",

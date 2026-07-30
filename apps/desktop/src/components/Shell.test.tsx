@@ -477,6 +477,46 @@ describe("Sidebar", () => {
 });
 
 describe("WorkspaceRail", () => {
+  it("keeps Home accessible without a visual tooltip while preserving Space tooltips", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.getSnapshot();
+    const firstSpace = snapshot.sidebar.space_rail[0];
+    if (!firstSpace) {
+      throw new Error("expected fake snapshot to include a space");
+    }
+    snapshot.sidebar.account_home.unread_count = 3;
+    snapshot.sidebar.account_home.invite_count = 1;
+    snapshot.sidebar.account_home.attention_count = 4;
+
+    render(
+      <WorkspaceRail
+        snapshot={snapshot}
+        onCreateSpace={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenUserSettings={() => undefined}
+        onReorderSpaces={() => undefined}
+        onSelectSpace={() => undefined}
+      />
+    );
+
+    const home = screen.getByRole("button", {
+      name: "Home, 3 unread messages, 1 invites"
+    });
+    fireEvent.mouseEnter(home);
+    fireEvent.focus(home);
+    expect(
+      Array.from(document.querySelectorAll(".tooltip-bubble")).some(
+        (tooltip) => tooltip.textContent === "Home"
+      )
+    ).toBe(false);
+    expect(home.getAttribute("title")).toBeNull();
+    expect(home.getAttribute("aria-describedby")).toBeNull();
+
+    const space = screen.getByRole("button", { name: firstSpace.display_name });
+    fireEvent.focus(space);
+    expect(screen.getByRole("tooltip", { name: firstSpace.display_name })).toBeTruthy();
+  });
+
   it("uses Home as the only top-level system entry and does not render Activity bell", async () => {
     const api = createBrowserFakeApi();
     const snapshot = await api.selectSpace(null);

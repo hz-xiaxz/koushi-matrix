@@ -38,6 +38,7 @@ import {
   datetimeLocalValueFromTimestamp,
   scheduledSendTimestampFromInput,
   initials,
+  peopleFacingLabel,
   type OpenContextMenu
 } from "../app/uiShared";
 
@@ -374,7 +375,7 @@ function PinnedEventsList({
             <div className="pinned-event-main">
               {event.sender ? (
                 <span className="pinned-event-sender" dir="auto">
-                  {event.sender}
+                  {peopleFacingLabel(event.sender_label)}
                 </span>
               ) : null}
               <span className="pinned-event-body" dir="auto">
@@ -495,6 +496,12 @@ function MessageArticle({
   isIgnored: boolean;
 }) {
   const canManage = currentUserId === message.sender;
+  const profile = profileUsers[message.sender];
+  const senderDisplayLabel = peopleFacingLabel(
+    profile?.display_label,
+    profile?.display_name,
+    profile?.original_display_label
+  );
 
   return (
     <article
@@ -522,11 +529,11 @@ function MessageArticle({
       }
     >
       <div className="avatar" aria-hidden="true">
-        {initials(message.sender)}
+        {initials(senderDisplayLabel)}
       </div>
       <div className="message-main">
         <div className="message-heading">
-          <span className="sender" dir="auto">{message.sender}</span>
+          <span className="sender" dir="auto">{senderDisplayLabel}</span>
           <span className="time">{formatTime(message.timestamp_ms)}</span>
           {canManage ? (
             <span className="message-actions">

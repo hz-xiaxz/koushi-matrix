@@ -19,6 +19,7 @@ import type {
   ComposerDraftAcceptanceResponse,
   DirectoryQuery,
   MentionIntent,
+  MentionSurface,
   OidcAuthorization,
   PresenceKind,
   InviteScopeSelection,
@@ -627,6 +628,14 @@ class TauriDesktopApi implements DesktopApi {
 
   async loadRoomSettings(roomId: string): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("load_room_settings", { roomId });
+  }
+
+  async queryMentionCandidates(
+    roomId: string,
+    surface: MentionSurface,
+    query: string
+  ): Promise<void> {
+    return invoke<void>("query_mention_candidates", { roomId, surface, query });
   }
 
   async repairRoomTimeline(roomId: string): Promise<DesktopSnapshot> {

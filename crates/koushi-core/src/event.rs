@@ -2560,7 +2560,12 @@ mod tests {
                     "count": 2,
                     "reacted_by_me": true,
                     "my_reaction_event_id": "$reaction:test",
-                    "sender_preview": ["@alice:example.invalid"]
+                    "sender_preview": [
+                        {
+                            "user_id": "@alice:example.invalid",
+                            "display_label": "Alice"
+                        }
+                    ]
                 }
             ])
         );

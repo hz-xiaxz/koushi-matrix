@@ -6,7 +6,8 @@ import type { MentionCandidate, TimelineForwardDestination } from "./projectionT
 import type {
   AppState,
   DesktopSnapshot,
-  UserProfile
+  MentionCandidatesTarget,
+  MentionSurface
 } from "./types";
 
 interface AppStoreState {
@@ -19,13 +20,12 @@ const EMPTY_MENTION_CANDIDATES: MentionCandidate[] = [];
 const ROOM_MENTION_CANDIDATE: MentionCandidate = {
   key: "roomMention",
   label: "@room",
-  searchText: "room @room notify the whole room",
   target: { kind: "roomMention", display_label: "room" }
 };
 
 let cachedForwardRooms: DesktopSnapshot["state"]["domain"]["rooms"] | null = null;
 let cachedForwardDestinations: TimelineForwardDestination[] = EMPTY_FORWARD_DESTINATIONS;
-let cachedMentionUsers: DesktopSnapshot["state"]["domain"]["profile"]["users"] | null = null;
+let cachedMentionTarget: MentionCandidatesTarget | null = null;
 let cachedMentionCandidates: MentionCandidate[] = EMPTY_MENTION_CANDIDATES;
 
 export const useAppStore = create<AppStoreState>()(
@@ -209,48 +209,38 @@ export function selectForwardDestinations(
 }
 
 export function selectMentionCandidates(
-  state: Pick<AppStoreState, "snapshot">
+  state: Pick<AppStoreState, "snapshot">,
+  roomId: string | null,
+  surface: MentionSurface
 ): MentionCandidate[] {
-  const users = state.snapshot?.state.domain.profile.users ?? null;
-  if (users === null) {
-    cachedMentionUsers = null;
+  const target =
+    state.snapshot?.state.domain.mention_candidates.targets.find(
+      (candidateTarget) =>
+        candidateTarget.room_id === roomId && candidateTarget.surface === surface
+    ) ?? null;
+  if (target === null) {
+    cachedMentionTarget = null;
     cachedMentionCandidates = EMPTY_MENTION_CANDIDATES;
     return cachedMentionCandidates;
   }
-  if (users === cachedMentionUsers) {
+  if (target === cachedMentionTarget) {
     return cachedMentionCandidates;
   }
-  cachedMentionUsers = users;
+  cachedMentionTarget = target;
   cachedMentionCandidates = [
-    ...Object.values(users)
-      .map((profile) => mentionCandidateFromProfile(profile))
-      .sort(
-        (a, b) =>
-          a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) ||
-          a.key.localeCompare(b.key)
-      ),
-    ROOM_MENTION_CANDIDATE
+    ...target.candidates.map((candidate) => ({
+      key: candidate.user_id,
+      label: candidate.display_label?.trim() ?? "",
+      avatar: candidate.avatar,
+      target: {
+        kind: "user" as const,
+        user_id: candidate.user_id,
+        display_label: candidate.display_label?.trim() ?? ""
+      }
+    })),
+    ...(target.room_mention_allowed === "allowed" ? [ROOM_MENTION_CANDIDATE] : [])
   ];
   return cachedMentionCandidates;
-}
-
-function mentionCandidateFromProfile(profile: UserProfile): MentionCandidate {
-  const label = profile.display_label.trim() || profile.user_id;
-  return {
-    key: profile.user_id,
-    label,
-    searchText: (
-      profile.mention_search_terms.length
-        ? profile.mention_search_terms.join(" ")
-        : `${label} ${profile.user_id}`
-    ).toLowerCase(),
-    avatar: profile.avatar,
-    target: {
-      kind: "user",
-      user_id: profile.user_id,
-      display_label: label
-    }
-  };
 }
 
 function reconcileJsonValue<T>(previous: T, next: T): T {

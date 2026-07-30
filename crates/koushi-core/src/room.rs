@@ -53,7 +53,7 @@
 //! classified into `RoomFailureKind`.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, RwLock},
 };
 
@@ -131,6 +131,9 @@ pub enum RoomMessage {
     /// Observer relay: parent-only space links discovered in a room-list
     /// snapshot. RoomActor owns dedupe, server writes, and retry policy.
     MissingSpaceChildLinks { links: Vec<MissingSpaceChildLink> },
+    /// Account-data aliases are identity presentation inputs, never mention
+    /// eligibility inputs. Reproject only already-demanded joined members.
+    LocalUserAliasesUpdated { aliases: BTreeMap<String, String> },
     MentionMembersRefreshed {
         room_id: String,
         session_generation: u64,
@@ -183,6 +186,7 @@ pub struct RoomActor {
     mention_refresh_generations: HashMap<String, u64>,
     mention_refresh_sequence: u64,
     mention_session_generation: u64,
+    mention_local_aliases: BTreeMap<String, String>,
     action_tx: mpsc::Sender<Vec<AppAction>>,
     event_tx: broadcast::Sender<CoreEvent>,
     self_tx: mpsc::Sender<RoomMessage>,
@@ -212,6 +216,7 @@ impl RoomActor {
             mention_refresh_generations: HashMap::new(),
             mention_refresh_sequence: 0,
             mention_session_generation: 0,
+            mention_local_aliases: BTreeMap::new(),
             action_tx,
             event_tx,
             self_tx: tx.clone(),
@@ -283,6 +288,9 @@ impl RoomActor {
                 }
                 RoomMessage::MissingSpaceChildLinks { links } => {
                     self.handle_missing_space_child_links(links).await;
+                }
+                RoomMessage::LocalUserAliasesUpdated { aliases } => {
+                    self.handle_mention_local_aliases_updated(aliases).await;
                 }
                 RoomMessage::MentionMembersRefreshed {
                     room_id,
@@ -2272,6 +2280,17 @@ impl RoomActor {
         }
     }
 
+    async fn handle_mention_local_aliases_updated(&mut self, aliases: BTreeMap<String, String>) {
+        self.mention_local_aliases = aliases;
+        let demanded_targets = self.mention_demands.keys().cloned().collect::<Vec<_>>();
+        for (room_id, surface) in demanded_targets {
+            if let Some(snapshot) = self.mention_member_snapshots.get(&room_id).cloned() {
+                self.publish_mention_projection(&room_id, surface, &snapshot)
+                    .await;
+            }
+        }
+    }
+
     async fn publish_mention_projection(
         &self,
         room_id: &str,
@@ -2299,7 +2318,7 @@ impl RoomActor {
                     user_id: member.user_id.clone(),
                     room_display_name: member.display_name.clone(),
                     profile_display_name: None,
-                    local_alias: None,
+                    local_alias: self.mention_local_aliases.get(&member.user_id).cloned(),
                     avatar_mxc_uri: member.avatar_url.clone(),
                 })
                 .collect(),
@@ -2380,6 +2399,7 @@ impl RoomActor {
         self.mention_demands.clear();
         self.mention_member_snapshots.clear();
         self.mention_refresh_generations.clear();
+        self.mention_local_aliases.clear();
         self.mention_refresh_sequence = 0;
         self.mention_session_generation = self.mention_session_generation.wrapping_add(1);
     }

@@ -1,6 +1,7 @@
 import { MessageCircle } from "lucide-react";
 
 import { t } from "../i18n/messages";
+import { peopleFacingLabel } from "../app/uiShared";
 import type { ThreadsListItem, ThreadsListState } from "../domain/types";
 
 export interface ThreadsListViewProps {
@@ -80,11 +81,11 @@ function ThreadsListRow({
             {item.root_body_preview ?? t("activity.noPreview")}
           </span>
           <span className="threads-list-row-meta">
-            {item.root_sender_label ?? item.root_sender}
+            {peopleFacingLabel(item.root_sender_label)}
             {item.latest_body_preview ? (
               <>
                 {" · "}
-                {item.latest_sender_label ?? item.latest_sender ?? " "}: {item.latest_body_preview}
+                {peopleFacingLabel(item.latest_sender_label)}: {item.latest_body_preview}
               </>
             ) : null}
             {" · "}
