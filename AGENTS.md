@@ -214,6 +214,14 @@ or visual GUI inspection. Build the verification (体制) BEFORE the fix and let
 same check turn green as the proof of the fix: 体制 → 修正, strictly, never the
 reverse.
 
+- Human-in-the-loop debugging is a bottleneck. Always look for ways to minimize
+  the number of human reproduction and feedback round trips. Rich diagnostics
+  are one important means: before asking the human to retry, add enough
+  sanitized information to distinguish the leading hypotheses in one run,
+  including the relevant stage, outcome, elapsed time, error classification,
+  and useful counts or booleans. Prefer one deliberately rich diagnostic pass
+  over adding one field after each retry. Never log secrets, credentials,
+  recovery material, keys, tokens, or unnecessary raw identifiers.
 - For any bug / regression / perf / behavior change, FIRST add or extend a
   headless check that REPRODUCES the problem (RED): a `headless-core-qa`
   scenario against local Conduit/Tuwunel, a Rust/TypeScript unit test, or a
@@ -1392,6 +1400,18 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   raise the worker count to speed up a run: the whole suite finishes in about
   three minutes serialized, and the parallel-contention flakes come straight
   back.
+- The app harness boot loop re-emits its generation-1 seed `InitialItems`
+  every 25ms (up to 40 attempts) until the seed row is visible in the DOM.
+  Until 2026-07-30 that visibility check was its ONLY exit, so a spec that
+  replaced the timeline while the loop was still running (e.g.
+  `timeline-thread-latest-placement.spec.ts` pushing generation 101 right
+  after `gotoReadyApp`) had its rows overwritten by a late seed re-emit: a row
+  passes `toHaveCount(1)` and vanishes one assertion later, with the seed
+  thread summary visible in the failure snapshot. `appHarnessMain.tsx` now
+  sets `externalCoreEventPushSeen` inside `pushCoreEvent` and the boot loop
+  stops re-emitting once any spec push has happened. If timeline rows vanish
+  mid-assertion again with harness seed content in the snapshot, look for a
+  new path that bypasses `pushCoreEvent` instead of adding waits to specs.
 - The three entries below are kept as root-cause history. All of them passed in
   a full 208-test serialized run on 2026-07-25, including the a11y spec that was
   previously recorded as an outright pre-existing failure. Treat them as

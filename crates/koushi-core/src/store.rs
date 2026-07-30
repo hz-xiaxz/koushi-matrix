@@ -177,7 +177,7 @@ impl StoreActor {
         &self,
         key_id: &SessionKeyId,
     ) -> Result<AccountStoreConfig, CoreFailure> {
-        let secret = self.load_or_create_unlock_secret(key_id)?;
+        let secret = self.load_or_create_unlock_secret_for(key_id, "account_store")?;
         let sdk_store_key = secret.derive_sdk_store_key();
         let store_key = MatrixClientStoreKey::new(*sdk_store_key.as_bytes());
 
@@ -203,7 +203,7 @@ impl StoreActor {
         &self,
         key_id: &SessionKeyId,
     ) -> Result<AccountSearchIndexConfig, CoreFailure> {
-        let secret = self.load_or_create_unlock_secret(key_id)?;
+        let secret = self.load_or_create_unlock_secret_for(key_id, "search_index")?;
         let search_key = secret.derive_search_index_key();
         let search_dir = self.account_search_index_dir(key_id);
         let config = MatrixSearchIndexStoreConfig::new(
@@ -619,17 +619,41 @@ impl StoreActor {
         &self,
         key_id: &SessionKeyId,
     ) -> Result<LocalUnlockSecret, CoreFailure> {
+        self.load_or_create_unlock_secret_with_diagnostic(key_id, None)
+    }
+
+    fn load_or_create_unlock_secret_for(
+        &self,
+        key_id: &SessionKeyId,
+        purpose: &'static str,
+    ) -> Result<LocalUnlockSecret, CoreFailure> {
+        self.load_or_create_unlock_secret_with_diagnostic(key_id, Some(purpose))
+    }
+
+    fn load_or_create_unlock_secret_with_diagnostic(
+        &self,
+        key_id: &SessionKeyId,
+        purpose: Option<&'static str>,
+    ) -> Result<LocalUnlockSecret, CoreFailure> {
         match self.credential_store.load(key_id) {
-            Ok(secret) => Ok(secret),
+            Ok(secret) => {
+                record_local_unlock_secret(purpose, "loaded");
+                Ok(secret)
+            }
             Err(err) if koushi_key::is_missing_credential_error(&err) => {
                 // First use: generate and persist a new unlock secret.
                 let secret = LocalUnlockSecret::generate();
-                self.credential_store
-                    .save(key_id, &secret)
-                    .map_err(|_| CoreFailure::LocalEncryptionUnavailable)?;
+                if self.credential_store.save(key_id, &secret).is_err() {
+                    record_local_unlock_secret(purpose, "save_failed");
+                    return Err(CoreFailure::LocalEncryptionUnavailable);
+                }
+                record_local_unlock_secret(purpose, "created");
                 Ok(secret)
             }
-            Err(_) => Err(CoreFailure::LocalEncryptionUnavailable),
+            Err(_) => {
+                record_local_unlock_secret(purpose, "load_failed");
+                Err(CoreFailure::LocalEncryptionUnavailable)
+            }
         }
     }
 
@@ -1710,6 +1734,17 @@ fn record_file_credential_store_active() {
     );
 }
 
+fn record_local_unlock_secret(purpose: Option<&'static str>, outcome: &'static str) {
+    let Some(purpose) = purpose else {
+        return;
+    };
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "core.store", "local_unlock_secret")
+            .field(DiagnosticField::token("purpose", purpose))
+            .field(DiagnosticField::token("outcome", outcome)),
+    );
+}
+
 /// QA/debug structural guard: true only when the env-resolved credential
 /// store backend is the file-dir backend (i.e.
 /// `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` is set in a debug/test/qa-bin
@@ -1848,6 +1883,54 @@ mod tests {
         assert_eq!(
             config.store_config.cache_path(),
             config2.store_config.cache_path()
+        );
+    }
+
+    #[test]
+    fn account_store_and_search_config_trace_unlock_secret_source() {
+        let data_dir = tempdir().expect("tempdir");
+        let cred_dir = tempdir().expect("tempdir");
+        let key_id = make_key_id();
+        let actor = file_store_actor(&data_dir, &cred_dir);
+        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+
+        actor
+            .account_store_config(&key_id)
+            .expect("first store config creates the unlock secret");
+        actor
+            .account_search_index_config(&key_id)
+            .expect("search config reuses the unlock secret");
+        actor
+            .account_store_config(&key_id)
+            .expect("second store config reuses the unlock secret");
+
+        let records = koushi_diagnostics::snapshot().records;
+        let unlock_events = records
+            .iter()
+            .skip(diagnostic_start)
+            .filter(|record| {
+                record.event.source == "core.store" && record.event.stage == "local_unlock_secret"
+            })
+            .map(|record| koushi_diagnostics::format_event(&record.event))
+            .collect::<Vec<_>>();
+        assert!(
+            unlock_events
+                .iter()
+                .any(|line| line.contains("purpose=account_store")
+                    && line.contains("outcome=created")),
+            "first account store config must say it created the account-local unlock secret"
+        );
+        assert!(
+            unlock_events.iter().any(
+                |line| line.contains("purpose=search_index") && line.contains("outcome=loaded")
+            ),
+            "search index config must say it loaded the existing account-local unlock secret"
+        );
+        assert!(
+            !unlock_events
+                .iter()
+                .any(|line| line.contains("@alice") || line.contains("DEVICE1")),
+            "unlock diagnostics must not leak account identifiers"
         );
     }
 

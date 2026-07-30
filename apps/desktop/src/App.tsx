@@ -856,7 +856,7 @@ function provisionalPhaseFailure(
   return null;
 }
 
-export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onStartWindowDrag = startSessionVerificationWindowDrag, operations = { startOwnUserSas: () => api.startOwnUserSas(), submitRecovery: (secret) => api.submitRecovery(secret) } }: { snapshot: DesktopSnapshot; onSnapshot: (snapshot: DesktopSnapshot) => void; onSignOut: () => void; onStartWindowDrag?: () => void; operations?: { startOwnUserSas: () => Promise<DesktopSnapshot>; submitRecovery: (secret: string) => Promise<DesktopSnapshot> } }) {
+export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onStartWindowDrag = startSessionVerificationWindowDrag, operations = { startOwnUserSas: () => api.startOwnUserSas(), submitRecovery: (secret) => api.submitRecovery(secret), resetLocalData: () => api.resetLocalData() } }: { snapshot: DesktopSnapshot; onSnapshot: (snapshot: DesktopSnapshot) => void; onSignOut: () => void; onStartWindowDrag?: () => void; operations?: { startOwnUserSas: () => Promise<DesktopSnapshot>; submitRecovery: (secret: string) => Promise<DesktopSnapshot>; resetLocalData?: () => Promise<DesktopSnapshot> } }) {
   const session = snapshot.state.domain.session;
   const recoveryRef = useRef<HTMLInputElement>(null);
   const passphraseRef = useRef<HTMLInputElement>(null);
@@ -876,6 +876,7 @@ export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onSta
   const [gateOperation, setGateOperation] = useState<"recovery" | "sas" | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [confirmDeviceVerification, setConfirmDeviceVerification] = useState(false);
+  const [confirmLocalReset, setConfirmLocalReset] = useState(false);
   const gateOperationRef = useRef<"recovery" | "sas" | null>(null);
   const run = async (kind: "recovery" | "sas", operation: () => Promise<DesktopSnapshot>) => {
     if (gateOperationRef.current === kind) return;
@@ -891,6 +892,21 @@ export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onSta
   const tryDeviceVerification = () => {
     setConfirmDeviceVerification(false);
     void run("sas", operations.startOwnUserSas);
+  };
+  const verificationFailed = Boolean(
+    session.gate?.failureKind || preparationFailure || operationError
+  );
+  const resetLocalDataForNewDevice = async () => {
+    setConfirmLocalReset(false);
+    setOperationError(null);
+    setGateOperation("recovery");
+    try {
+      onSnapshot(await (operations.resetLocalData ?? api.resetLocalData)());
+    } catch {
+      setOperationError("Resetting local data failed. Please try again.");
+    } finally {
+      setGateOperation(null);
+    }
   };
   const heading = checking ? t("gate.checking") : rechecking ? t("gate.finishing") : activelyVerifying ? t("gate.verifying") : t("gate.title");
   return <main className="session-verification-gate" aria-label={heading}>
@@ -928,6 +944,15 @@ export function SessionVerificationGate({ snapshot, onSnapshot, onSignOut, onSta
     {awaiting && methods.includes("bootstrap") && <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const destination = destinationRef.current?.value.trim() ?? ""; const passphrase = passphraseRef.current?.value || null; if (destinationRef.current) destinationRef.current.value = ""; if (passphraseRef.current) passphraseRef.current.value = ""; if (destination) void run("recovery", () => api.startSessionBootstrap(passphrase, destination)); }}><ImeTextField ref={destinationRef} aria-label={t("gate.destination")} syncKey="session-bootstrap-destination"/><SecureImeTextField ref={passphraseRef} aria-label={t("gate.passphrase")} autoComplete="new-password"/><button type="submit">{t("gate.bootstrap")}</button></ImeSafeForm>}
     {session.kind === "awaitingBootstrapConfirmation" && flowId !== undefined && <button onClick={() => void run("recovery", () => api.confirmSessionBootstrapSaved(flowId))}>{t("gate.saved")}</button>}
     {sasVerifying && flowId !== undefined && <button onClick={() => void run("sas", () => api.cancelVerification(flowId))}>{t("action.cancel")}</button>}
+    {verificationFailed && <button className="dialog-button danger" type="button" disabled={gateOperation !== null} onClick={() => setConfirmLocalReset(true)}>{t("gate.resetForNewDevice")}</button>}
+    {confirmLocalReset && <ResetLocalDataConfirmationDialog
+      isBusy={gateOperation !== null}
+      title={t("gate.resetForNewDevice")}
+      copy={t("gate.resetForNewDeviceConfirm")}
+      confirmLabel={t("gate.resetForNewDevice")}
+      onCancel={() => setConfirmLocalReset(false)}
+      onConfirm={() => void resetLocalDataForNewDevice()}
+    />}
     <button onClick={onSignOut}>{t("gate.signOut")}</button>
   </main>;
 }
@@ -5360,18 +5385,24 @@ export function App() {
 export function ResetLocalDataConfirmationDialog({
   isBusy,
   onCancel,
-  onConfirm
+  onConfirm,
+  title = t("settings.resetLocalData"),
+  copy = t("settings.resetLocalDataConfirm"),
+  confirmLabel = t("settings.resetLocalData")
 }: {
   isBusy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  title?: string;
+  copy?: string;
+  confirmLabel?: string;
 }) {
   return (
     <div
       className="dialog-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label={t("settings.resetLocalData")}
+      aria-label={title}
       onKeyDown={(event) => {
         if (event.key === "Escape" && !isBusy) {
           event.preventDefault();
@@ -5380,14 +5411,14 @@ export function ResetLocalDataConfirmationDialog({
       }}
     >
       <div className="dialog-box">
-        <div className="dialog-title">{t("settings.resetLocalData")}</div>
-        <p>{t("settings.resetLocalDataConfirm")}</p>
+        <div className="dialog-title">{title}</div>
+        <p>{copy}</p>
         <div className="dialog-actions">
           <button type="button" className="dialog-button" disabled={isBusy} onClick={onCancel}>
             {t("action.cancel")}
           </button>
           <button type="button" className="dialog-button danger" disabled={isBusy} onClick={onConfirm}>
-            {t("settings.resetLocalData")}
+            {confirmLabel}
           </button>
         </div>
       </div>

@@ -194,8 +194,9 @@ describe("ContextualRightPanel", () => {
     expect(resetHandler).not.toContain("window.confirm");
     expect(source).toContain("resetLocalDataConfirmOpen");
     expect(source.indexOf("resetLocalDataConfirmOpen")).toBeLessThan(
-      source.indexOf("api.resetLocalData()")
+      source.indexOf("async function resetLocalData()")
     );
+    expect(resetHandler).toContain("api.resetLocalData()");
   });
 
   test("reset local data confirmation dialog renders an explicit destructive confirmation", async () => {

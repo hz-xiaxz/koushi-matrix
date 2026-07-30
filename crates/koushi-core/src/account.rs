@@ -105,6 +105,8 @@ const SEARCH_UNAVAILABLE_MESSAGE: &str = "search unavailable";
 const SERVER_LOGOUT_TIMEOUT: Duration = Duration::from_secs(10);
 const ACCOUNT_HYDRATION_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFICATION_METHOD_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+const RECOVERY_TRUST_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(20);
+const RECOVERY_TRUST_SETTLEMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const IDENTITY_RESET_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 const INCOMING_VERIFICATION_OBSERVER_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 const OIDC_REDIRECT_URI: &str = "koushi-desktop://auth/callback";
@@ -348,6 +350,23 @@ fn trace_account_request(stage: &'static str, request_id: RequestId, action: &'s
     );
 }
 
+fn restore_store_event(action: &'static str, request_id: Option<RequestId>) -> DiagnosticEvent {
+    let event = DiagnosticEvent::new(DiagnosticLevel::Debug, "core.account", "restore_store")
+        .field(DiagnosticField::token("action", action));
+    match request_id {
+        Some(request_id) => event.field(DiagnosticField::request_id(
+            "request_id",
+            request_id.connection_id.0,
+            request_id.sequence,
+        )),
+        None => event,
+    }
+}
+
+fn record_restore_store_event(event: DiagnosticEvent) {
+    koushi_diagnostics::record(event);
+}
+
 /// Messages routed to the AccountActor task.
 pub enum AccountMessage {
     Command(AccountCommand),
@@ -465,6 +484,12 @@ pub enum AccountMessage {
         flow_id: u64,
         request_id: RequestId,
         result: Result<(), koushi_sdk::E2eeRecoveryError>,
+    },
+    RecoveryTrustSettlementTimedOut {
+        generation: u64,
+        flow_id: u64,
+        request_id: RequestId,
+        trust: koushi_state::CurrentDeviceTrustState,
     },
     TrustProjectionApplied {
         generation: u64,
@@ -703,6 +728,13 @@ struct PendingRecoveryTask {
     task: crate::executor::JoinHandle<()>,
 }
 
+struct PendingRecoveryCompletion {
+    generation: u64,
+    flow_id: u64,
+    request_id: RequestId,
+    account_key: AccountKey,
+}
+
 struct PendingUiaOperation {
     operation: AccountManagementOperation,
     raw_device_ids: Vec<String>,
@@ -918,7 +950,21 @@ fn record_sas_verification_event(event: DiagnosticEvent) {
 }
 
 fn record_recovery_verification_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record(event);
+    koushi_diagnostics::record_and_stderr(event);
+}
+
+fn local_data_reset_event(stage: &'static str, request_id: RequestId) -> DiagnosticEvent {
+    DiagnosticEvent::new(DiagnosticLevel::Info, "core.local_data_reset", stage).field(
+        DiagnosticField::request_id(
+            "request_id",
+            request_id.connection_id.0,
+            request_id.sequence,
+        ),
+    )
+}
+
+fn record_local_data_reset_event(event: DiagnosticEvent) {
+    koushi_diagnostics::record_and_stderr(event);
 }
 
 fn verification_request_state_token(
@@ -1058,6 +1104,7 @@ fn recovery_failure_token(kind: RecoveryFailureKind) -> &'static str {
         RecoveryFailureKind::InvalidRecoveryKey => "invalid_recovery_key",
         RecoveryFailureKind::Network => "network",
         RecoveryFailureKind::Server => "server",
+        RecoveryFailureKind::Timeout => "timeout",
     }
 }
 
@@ -1185,6 +1232,15 @@ fn begin_restricted_sync_cursor_attempt(restricted_sync_active: bool) -> bool {
     !restricted_sync_active
 }
 
+fn recovery_sync_should_resume(
+    recovery_generation: u64,
+    active_generation: u64,
+    session_promoted: bool,
+    restricted_sync_active: bool,
+) -> bool {
+    recovery_generation == active_generation && !session_promoted && !restricted_sync_active
+}
+
 #[cfg(feature = "qa-bin")]
 async fn refresh_device_keys_and_assert_known(
     session: &MatrixClientSession,
@@ -1250,6 +1306,8 @@ pub struct AccountActor {
     verification_method_discovery_serial: u64,
     verification_method_discovery_failed: bool,
     recovery_task: Option<PendingRecoveryTask>,
+    pending_recovery_completion: Option<PendingRecoveryCompletion>,
+    recovery_trust_settlement_task: Option<crate::executor::JoinHandle<()>>,
     restricted_sync: Option<crate::executor::JoinHandle<()>>,
     pending_ready_events: Vec<CoreEvent>,
     pending_trust_transition: Option<PendingTrustTransition>,
@@ -1429,6 +1487,8 @@ impl AccountActor {
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,
             recovery_task: None,
+            pending_recovery_completion: None,
+            recovery_trust_settlement_task: None,
             restricted_sync: None,
             pending_ready_events: Vec::new(),
             pending_trust_transition: None,
@@ -1931,6 +1991,17 @@ impl AccountActor {
                 } => {
                     self.handle_recovery_finished(generation, flow_id, request_id, result)
                         .await;
+                }
+                AccountMessage::RecoveryTrustSettlementTimedOut {
+                    generation,
+                    flow_id,
+                    request_id,
+                    trust,
+                } => {
+                    self.handle_recovery_trust_settlement_timed_out(
+                        generation, flow_id, request_id, trust,
+                    )
+                    .await;
                 }
                 AccountMessage::TrustProjectionApplied {
                     generation,
@@ -2919,6 +2990,7 @@ impl AccountActor {
         // enter a new command.
         self.composer_draft_leases.revoke_live_generation();
         self.stop_recovery_task().await;
+        self.stop_recovery_trust_settlement_task().await;
         self.stop_provisional_runtime().await;
         self.stop_recovery_observer().await;
         self.stop_incoming_verification_observer().await;
@@ -2943,6 +3015,7 @@ impl AccountActor {
         self.session_promoted = false;
         self.pending_ready_events.clear();
         self.pending_trust_transition = None;
+        self.pending_recovery_completion = None;
     }
 
     /// Ordered shutdown of the ThreadsListActor. Dropping the handle cancels
@@ -7068,8 +7141,9 @@ impl AccountActor {
     }
 
     /// Submit a recovery secret. Calls the auth crate's `recover_e2ee`
-    /// primitive. On success: project E2eeRecoverySucceeded (→ Ready) and emit
-    /// RecoveryCompleted. On failure: classify conservatively to
+    /// primitive. On success, the accepted proof is not enough to enter Ready:
+    /// wait until the SDK reports the current device as Verified. On failure:
+    /// classify conservatively to
     /// InvalidRecoveryKey/Network/Server (never raw error text) and emit
     /// OperationFailed with RecoveryFailed.
     ///
@@ -7085,8 +7159,17 @@ impl AccountActor {
         };
 
         self.stop_recovery_task().await;
+        self.stop_recovery_trust_settlement_task().await;
+        self.pending_recovery_completion = None;
         let generation = self.trust_generation;
         let flow_id = request_id.sequence;
+        let restricted_sync_was_active = self.restricted_sync.is_some();
+        self.stop_restricted_sync().await;
+        record_recovery_verification_event(
+            recovery_verification_event("restricted_sync_paused", flow_id).field(
+                DiagnosticField::boolean("was_active", restricted_sync_was_active),
+            ),
+        );
         record_recovery_verification_event(recovery_verification_event("submitted", flow_id));
         let tx = self.self_tx.clone();
         let task = crate::executor::spawn(async move {
@@ -7143,6 +7226,58 @@ impl AccountActor {
                     recovery_verification_event("settled", flow_id)
                         .field(DiagnosticField::token("terminal", "success")),
                 );
+                let trust_after_recovery = session.current_device_trust();
+                record_recovery_verification_event(
+                    recovery_verification_event("post_recovery_trust_read", flow_id)
+                        .field(DiagnosticField::count("generation", generation))
+                        .field(DiagnosticField::request_id(
+                            "request_id",
+                            request_id.connection_id.0,
+                            request_id.sequence,
+                        ))
+                        .field(DiagnosticField::token(
+                            "trust",
+                            current_device_trust_token(trust_after_recovery),
+                        )),
+                );
+                if trust_after_recovery != koushi_state::CurrentDeviceTrustState::Verified {
+                    self.resume_restricted_sync_after_recovery(
+                        session.clone(),
+                        generation,
+                        flow_id,
+                    );
+                    self.pending_recovery_completion = Some(PendingRecoveryCompletion {
+                        generation,
+                        flow_id,
+                        request_id,
+                        account_key,
+                    });
+                    record_recovery_verification_event(
+                        recovery_verification_event("trust_pending", flow_id)
+                            .field(DiagnosticField::count("generation", generation))
+                            .field(DiagnosticField::request_id(
+                                "request_id",
+                                request_id.connection_id.0,
+                                request_id.sequence,
+                            ))
+                            .field(DiagnosticField::token(
+                                "trust",
+                                current_device_trust_token(trust_after_recovery),
+                            )),
+                    );
+                    let transition_id = self.next_trust_transition_id();
+                    self.send_actions(vec![AppAction::AuthoritativeDeviceTrustChanged {
+                        generation,
+                        transition_id,
+                        trust: trust_after_recovery,
+                    }])
+                    .await;
+                    self.start_recovery_trust_settlement_poll(
+                        generation, flow_id, request_id, session,
+                    )
+                    .await;
+                    return;
+                }
                 if !self
                     .promote_recovered_session_runtime(generation, flow_id, request_id)
                     .await
@@ -7151,52 +7286,12 @@ impl AccountActor {
                 }
                 self.send_actions(vec![AppAction::E2eeRecoverySucceeded])
                     .await;
-                self.send_actions(vec![AppAction::RestoreKeyBackupRequested {
-                    request_id: request_id.sequence,
-                    version: None,
-                }])
-                .await;
-                #[cfg(test)]
-                let recovery_download_override = self
-                    .recovery_download_override
-                    .lock()
-                    .expect("recovery download lock")
-                    .take();
-                #[cfg(test)]
-                let restore_result = if let Some(completion) = recovery_download_override {
-                    if completion.await.unwrap_or(false) {
-                        Ok(koushi_sdk::KeyBackupRestoreSummary {
-                            scope: koushi_sdk::KeyBackupRestoreScope::JoinedRooms,
-                            version: None,
-                            restored_rooms: 0,
-                            total_rooms: Some(0),
-                        })
-                    } else {
-                        Err(koushi_sdk::E2eeTrustError::Sdk(
-                            "controlled recovery download failure".to_owned(),
-                        ))
-                    }
-                } else {
-                    koushi_sdk::download_joined_room_keys_from_backup(&session, None).await
-                };
-                #[cfg(not(test))]
-                let restore_result =
-                    koushi_sdk::download_joined_room_keys_from_backup(&session, None).await;
-                let (actions, events) = project_restore_key_backup_result(
-                    request_id,
-                    account_key.clone(),
-                    restore_result,
-                );
-                self.send_actions(actions).await;
-                for event in events {
-                    self.emit(event);
-                }
-                self.emit(CoreEvent::Account(AccountEvent::RecoveryCompleted {
-                    request_id,
-                    account_key,
-                }));
+                self.complete_recovery_after_verified(request_id, account_key, session)
+                    .await;
             }
             Err(error) => {
+                self.resume_restricted_sync_after_recovery(session.clone(), generation, flow_id);
+                self.pending_recovery_completion = None;
                 let kind = classify_recovery_error(&error);
                 record_recovery_verification_event(
                     recovery_verification_event("settled", flow_id)
@@ -7213,6 +7308,28 @@ impl AccountActor {
                 .await;
                 self.emit_failure(request_id, CoreFailure::RecoveryFailed { kind });
             }
+        }
+    }
+
+    fn resume_restricted_sync_after_recovery(
+        &mut self,
+        session: Arc<MatrixClientSession>,
+        generation: u64,
+        flow_id: u64,
+    ) {
+        let should_resume = recovery_sync_should_resume(
+            generation,
+            self.trust_generation,
+            self.session_promoted,
+            self.restricted_sync.is_some(),
+        );
+        record_recovery_verification_event(
+            recovery_verification_event("restricted_sync_resume_decided", flow_id)
+                .field(DiagnosticField::boolean("will_resume", should_resume)),
+        );
+        if should_resume {
+            let transition_id = self.next_trust_transition_id();
+            self.start_restricted_sync(session, generation, transition_id);
         }
     }
 
@@ -7234,6 +7351,10 @@ impl AccountActor {
                     "request_id",
                     request_id.connection_id.0,
                     request_id.sequence,
+                ))
+                .field(DiagnosticField::token(
+                    "trust",
+                    current_device_trust_token(session.current_device_trust()),
                 )),
         );
         if self.persist_session(&session, &key_id).await.is_err() {
@@ -7243,6 +7364,20 @@ impl AccountActor {
             .await;
             return false;
         }
+        let trust_after_persist = session.current_device_trust();
+        record_recovery_verification_event(
+            recovery_verification_event("persisted", flow_id)
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                ))
+                .field(DiagnosticField::token(
+                    "trust",
+                    current_device_trust_token(trust_after_persist),
+                )),
+        );
         self.provisional_persistable = None;
         self.stop_provisional_runtime().await;
         self.start_incoming_verification_observer(session.clone())
@@ -7250,7 +7385,8 @@ impl AccountActor {
         self.spawn_sync_actor(session.clone()).await;
         self.spawn_account_hydration(session.clone());
         self.start_recovery_observer(session.clone());
-        self.start_session_change_observer(session);
+        let trust_at_promotion = session.current_device_trust();
+        self.start_session_change_observer(session.clone());
         self.session_promoted = true;
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
@@ -7262,9 +7398,187 @@ impl AccountActor {
                     "request_id",
                     request_id.connection_id.0,
                     request_id.sequence,
+                ))
+                .field(DiagnosticField::token(
+                    "trust",
+                    current_device_trust_token(trust_at_promotion),
                 )),
         );
         true
+    }
+
+    async fn complete_recovery_after_verified(
+        &mut self,
+        request_id: RequestId,
+        account_key: AccountKey,
+        session: Arc<MatrixClientSession>,
+    ) {
+        self.send_actions(vec![AppAction::RestoreKeyBackupRequested {
+            request_id: request_id.sequence,
+            version: None,
+        }])
+        .await;
+        #[cfg(test)]
+        let recovery_download_override = self
+            .recovery_download_override
+            .lock()
+            .expect("recovery download lock")
+            .take();
+        #[cfg(test)]
+        let restore_result = if let Some(completion) = recovery_download_override {
+            if completion.await.unwrap_or(false) {
+                Ok(koushi_sdk::KeyBackupRestoreSummary {
+                    scope: koushi_sdk::KeyBackupRestoreScope::JoinedRooms,
+                    version: None,
+                    restored_rooms: 0,
+                    total_rooms: Some(0),
+                })
+            } else {
+                Err(koushi_sdk::E2eeTrustError::Sdk(
+                    "controlled recovery download failure".to_owned(),
+                ))
+            }
+        } else {
+            koushi_sdk::download_joined_room_keys_from_backup(&session, None).await
+        };
+        #[cfg(not(test))]
+        let restore_result =
+            koushi_sdk::download_joined_room_keys_from_backup(&session, None).await;
+        let (actions, events) =
+            project_restore_key_backup_result(request_id, account_key.clone(), restore_result);
+        self.send_actions(actions).await;
+        for event in events {
+            self.emit(event);
+        }
+        self.emit(CoreEvent::Account(AccountEvent::RecoveryCompleted {
+            request_id,
+            account_key,
+        }));
+    }
+
+    async fn start_recovery_trust_settlement_poll(
+        &mut self,
+        generation: u64,
+        flow_id: u64,
+        request_id: RequestId,
+        session: Arc<MatrixClientSession>,
+    ) {
+        self.stop_recovery_trust_settlement_task().await;
+        let tx = self.self_tx.clone();
+        record_recovery_verification_event(
+            recovery_verification_event("trust_settlement_wait_started", flow_id)
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )),
+        );
+        self.recovery_trust_settlement_task = Some(executor::spawn(async move {
+            let started = Instant::now();
+            let mut trust = session.current_device_trust();
+            while started.elapsed() < RECOVERY_TRUST_SETTLEMENT_TIMEOUT {
+                if trust == koushi_state::CurrentDeviceTrustState::Verified {
+                    record_recovery_verification_event(
+                        recovery_verification_event("trust_settlement_wait_finished", flow_id)
+                            .field(DiagnosticField::count("generation", generation))
+                            .field(DiagnosticField::token("outcome", "verified"))
+                            .field(DiagnosticField::milliseconds(
+                                "elapsed_ms",
+                                started.elapsed().as_millis(),
+                            )),
+                    );
+                    let _ = tx
+                        .send(AccountMessage::CurrentDeviceTrustChanged { generation, trust })
+                        .await;
+                    return;
+                }
+                executor::sleep(RECOVERY_TRUST_SETTLEMENT_POLL_INTERVAL).await;
+                trust = session.current_device_trust();
+            }
+            record_recovery_verification_event(
+                recovery_verification_event("trust_settlement_wait_finished", flow_id)
+                    .field(DiagnosticField::count("generation", generation))
+                    .field(DiagnosticField::token("outcome", "timeout"))
+                    .field(DiagnosticField::token(
+                        "trust",
+                        current_device_trust_token(trust),
+                    ))
+                    .field(DiagnosticField::milliseconds(
+                        "elapsed_ms",
+                        started.elapsed().as_millis(),
+                    )),
+            );
+            let _ = tx
+                .send(AccountMessage::RecoveryTrustSettlementTimedOut {
+                    generation,
+                    flow_id,
+                    request_id,
+                    trust,
+                })
+                .await;
+        }));
+    }
+
+    async fn handle_recovery_trust_settlement_timed_out(
+        &mut self,
+        generation: u64,
+        flow_id: u64,
+        request_id: RequestId,
+        trust: koushi_state::CurrentDeviceTrustState,
+    ) {
+        let is_current = self
+            .pending_recovery_completion
+            .as_ref()
+            .is_some_and(|pending| {
+                pending.generation == generation
+                    && pending.flow_id == flow_id
+                    && pending.request_id == request_id
+                    && generation == self.trust_generation
+                    && self.session.is_some()
+            });
+        if !is_current {
+            record_recovery_verification_event(
+                recovery_verification_event("trust_settlement_timeout_ignored", flow_id)
+                    .field(DiagnosticField::count("generation", generation))
+                    .field(DiagnosticField::request_id(
+                        "request_id",
+                        request_id.connection_id.0,
+                        request_id.sequence,
+                    ))
+                    .field(DiagnosticField::token(
+                        "trust",
+                        current_device_trust_token(trust),
+                    )),
+            );
+            return;
+        }
+        self.pending_recovery_completion = None;
+        self.recovery_trust_settlement_task = None;
+        record_recovery_verification_event(
+            recovery_verification_event("trust_settlement_timeout_projected", flow_id)
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                ))
+                .field(DiagnosticField::token(
+                    "trust",
+                    current_device_trust_token(trust),
+                ))
+                .field(DiagnosticField::token("failure_kind", "timeout")),
+        );
+        self.send_actions(vec![AppAction::E2eeRecoveryFailed {
+            message: "session verification timed out".to_owned(),
+        }])
+        .await;
+        self.emit_failure(
+            request_id,
+            CoreFailure::RecoveryFailed {
+                kind: RecoveryFailureKind::Timeout,
+            },
+        );
     }
 
     async fn stop_recovery_task(&mut self) -> Option<u64> {
@@ -7273,6 +7587,13 @@ impl AccountActor {
         pending.task.abort();
         let _ = pending.task.await;
         Some(flow_id)
+    }
+
+    async fn stop_recovery_trust_settlement_task(&mut self) {
+        if let Some(task) = self.recovery_trust_settlement_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
     }
 
     async fn request_authoritative_trust_recheck(&self) {
@@ -7751,6 +8072,11 @@ impl AccountActor {
             .await;
             return;
         }
+        record_verification_admission_event(
+            verification_admission_event("trust_persisted", generation, 0).field(
+                DiagnosticField::token("trust", current_device_trust_token(trust)),
+            ),
+        );
         self.provisional_persistable = None;
         let transition_id = self.next_trust_transition_id();
         self.pending_trust_transition = Some(PendingTrustTransition {
@@ -7896,10 +8222,26 @@ impl AccountActor {
         ));
         self.spawn_account_hydration(session.clone());
         self.start_recovery_observer(session.clone());
-        self.start_session_change_observer(session);
+        self.start_session_change_observer(session.clone());
         self.session_promoted = true;
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
+        }
+        if let Some(pending) = self.pending_recovery_completion.take()
+            && pending.generation == generation
+        {
+            record_recovery_verification_event(
+                recovery_verification_event("verified_projection_applied", pending.flow_id)
+                    .field(DiagnosticField::count("generation", pending.generation))
+                    .field(DiagnosticField::request_id(
+                        "request_id",
+                        pending.request_id.connection_id.0,
+                        pending.request_id.sequence,
+                    )),
+            );
+            self.stop_recovery_trust_settlement_task().await;
+            self.complete_recovery_after_verified(pending.request_id, pending.account_key, session)
+                .await;
         }
     }
 
@@ -7954,17 +8296,64 @@ impl AccountActor {
         key_id: &SessionKeyId,
     ) -> Result<MatrixClientSession, CoreFailure> {
         let store_config = self.store.account_store_config(key_id)?;
+        record_restore_store_event(
+            restore_store_event("store_config_ready", None)
+                .field(DiagnosticField::boolean(
+                    "store_dir_exists",
+                    store_config.store_config.path().exists(),
+                ))
+                .field(DiagnosticField::boolean(
+                    "cache_dir_exists",
+                    store_config
+                        .store_config
+                        .cache_path()
+                        .is_some_and(|path| path.exists()),
+                ))
+                .field(DiagnosticField::boolean(
+                    "encrypted_store",
+                    store_config.store_config.encrypted_at_rest_configured(),
+                )),
+        );
         // Derive the search index configuration. Fail-closed: if the
         // credential store is unreachable, deny the restore (LocalEncryptionUnavailable).
         let search_config = self.store.account_search_index_config(key_id)?;
+        record_restore_store_event(restore_store_event("search_config_ready", None).field(
+            DiagnosticField::boolean(
+                "search_dir_exists",
+                search_config.search_index_config.path().exists(),
+            ),
+        ));
         let encrypted_store = store_config.store_config.encrypted_at_rest_configured();
         let store_config_with_search = store_config
             .store_config
             .with_search_index_store(search_config.search_index_config);
-        let session =
-            koushi_sdk::restore_session_with_store(persistable, Some(&store_config_with_search))
-                .await
-                .map_err(|_| CoreFailure::LocalEncryptionUnavailable)?;
+        let restore_started = Instant::now();
+        record_restore_store_event(restore_store_event("sdk_restore_begin", None));
+        let session = match koushi_sdk::restore_session_with_store(
+            persistable,
+            Some(&store_config_with_search),
+        )
+        .await
+        {
+            Ok(session) => {
+                record_restore_store_event(restore_store_event("sdk_restore_ok", None).field(
+                    DiagnosticField::milliseconds(
+                        "elapsed_ms",
+                        restore_started.elapsed().as_millis(),
+                    ),
+                ));
+                session
+            }
+            Err(_) => {
+                record_restore_store_event(restore_store_event("sdk_restore_failed", None).field(
+                    DiagnosticField::milliseconds(
+                        "elapsed_ms",
+                        restore_started.elapsed().as_millis(),
+                    ),
+                ));
+                return Err(CoreFailure::LocalEncryptionUnavailable);
+            }
+        };
         let event_cache_result = koushi_sdk::enable_event_cache(&session).await;
         self.emit_event_cache_status(encrypted_store, &event_cache_result);
         Ok(session)
@@ -8233,7 +8622,19 @@ impl AccountActor {
     }
 
     async fn handle_reset_local_data(&mut self, request_id: RequestId) {
+        let started_at = Instant::now();
+        record_local_data_reset_event(local_data_reset_event("started", request_id).field(
+            DiagnosticField::boolean("session_key_available", self.session_key_id.is_some()),
+        ));
         let Some(key_id) = self.session_key_id.clone() else {
+            record_local_data_reset_event(
+                local_data_reset_event("rejected", request_id)
+                    .field(DiagnosticField::token("reason", "session_key_unavailable"))
+                    .field(DiagnosticField::milliseconds(
+                        "elapsed_ms",
+                        started_at.elapsed().as_millis(),
+                    )),
+            );
             self.send_actions(vec![AppAction::ResetLocalDataFailed {
                 request_id: request_id.sequence,
             }])
@@ -8242,14 +8643,32 @@ impl AccountActor {
             return;
         };
 
+        record_local_data_reset_event(local_data_reset_event(
+            "session_runtime_stop_started",
+            request_id,
+        ));
         self.stop_current_session_runtime().await;
+        record_local_data_reset_event(
+            local_data_reset_event("session_runtime_stop_finished", request_id).field(
+                DiagnosticField::milliseconds("elapsed_ms", started_at.elapsed().as_millis()),
+            ),
+        );
         self.session_key_id.take();
         self.read_persistence_session_generation = next_read_persistence_session_generation();
         self.store
             .invalidate_read_state_outbox_saves(&key_id, self.read_persistence_session_generation);
 
         drop(self.session.take());
+        record_local_data_reset_event(local_data_reset_event(
+            "persistence_clear_started",
+            request_id,
+        ));
         self.clear_account_persistence(&key_id).await;
+        record_local_data_reset_event(
+            local_data_reset_event("persistence_clear_finished", request_id).field(
+                DiagnosticField::milliseconds("elapsed_ms", started_at.elapsed().as_millis()),
+            ),
+        );
         self.send_actions(vec![
             AppAction::ResetLocalDataCompleted {
                 request_id: request_id.sequence,
@@ -8257,6 +8676,9 @@ impl AccountActor {
             AppAction::LogoutFinished,
         ])
         .await;
+        record_local_data_reset_event(local_data_reset_event("completed", request_id).field(
+            DiagnosticField::milliseconds("elapsed_ms", started_at.elapsed().as_millis()),
+        ));
     }
 
     async fn send_actions(&self, actions: Vec<AppAction>) -> bool {
@@ -9620,6 +10042,14 @@ mod tests {
     }
 
     #[test]
+    fn recovery_resumes_restricted_sync_only_for_the_current_gated_session() {
+        assert!(recovery_sync_should_resume(4, 4, false, false));
+        assert!(!recovery_sync_should_resume(3, 4, false, false));
+        assert!(!recovery_sync_should_resume(4, 4, true, false));
+        assert!(!recovery_sync_should_resume(4, 4, false, true));
+    }
+
+    #[test]
     fn first_restricted_sync_ack_rejects_stale_torn_down_and_promoted_sessions() {
         assert!(first_restricted_sync_is_current(4, 4, true, false));
         assert!(!first_restricted_sync_is_current(3, 4, true, false));
@@ -10448,6 +10878,7 @@ mod tests {
             ),
             (RecoveryFailureKind::Network, "network"),
             (RecoveryFailureKind::Server, "server"),
+            (RecoveryFailureKind::Timeout, "timeout"),
         ];
         for (kind, token) in recovery_failure_kinds {
             assert_eq!(recovery_failure_token(kind), token);
@@ -11169,7 +11600,10 @@ mod tests {
         let emit = compact
             .find("self.emit_event_cache_status(encrypted_store,&event_cache_result);")
             .expect("event cache diagnostic emission");
-        let return_ok = compact.find("Ok(session)").expect("return statement");
+        // rfind: the restore body also contains an `Ok(session) =>` match arm
+        // (session-preservation restore path), so the tail return is the LAST
+        // occurrence, not the first.
+        let return_ok = compact.rfind("Ok(session)").expect("return statement");
 
         assert!(store_config < encrypted_store);
         assert!(restore < enable);
@@ -11600,7 +12034,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recovery_proof_success_enters_shared_authoritative_promotion_path() {
+    async fn recovery_proof_success_waits_for_verified_trust_before_promotion() {
         let (handle, mut action_rx) = login_gated_actor().await;
         let flow_id = 81;
         let request_id = incoming_verification_request_id(flow_id);
@@ -11627,23 +12061,110 @@ mod tests {
                 result: Ok(()),
             })
             .await;
-        while !matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::E2eeRecoverySucceeded])
-        ) {}
         assert_eq!(
             inspect_session_runtime(&handle).await,
-            (true, true, true, false)
+            (true, false, false, true),
+            "accepted recovery proof must not promote until SDK current-device trust is Verified"
         );
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::AuthoritativeDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Unknown,
+                ..
+            }])
+        ));
+
         handle
             .send(AccountMessage::CurrentDeviceTrustChanged {
                 generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await;
+        acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (true, true, true, true),
+            "Verified trust must complete promotion after recovery proof settlement"
+        );
+        loop {
+            let actions = executor::timeout(Duration::from_secs(1), action_rx.recv())
+                .await
+                .expect("restore-key-backup request after recovery verification")
+                .expect("account actions");
+            if matches!(
+                actions.as_slice(),
+                [AppAction::RestoreKeyBackupRequested { .. }]
+            ) {
+                break;
+            }
+        }
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
+        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let (handle, mut action_rx) = login_gated_actor().await;
+        let flow_id = 80;
+        let request_id = incoming_verification_request_id(flow_id);
+        handle
+            .send(AccountMessage::ConfigureSyntheticRecoveryTask {
+                flow_id,
+                pending: false,
+            })
+            .await;
+        handle
+            .send(AccountMessage::RecoveryFinished {
+                generation: 2,
+                flow_id,
+                request_id,
+                result: Ok(()),
+            })
+            .await;
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::AuthoritativeDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Unknown,
+                ..
+            }])
+        ));
+        handle
+            .send(AccountMessage::RecoveryTrustSettlementTimedOut {
+                generation: 2,
+                flow_id,
+                request_id,
                 trust: koushi_state::CurrentDeviceTrustState::Unknown,
             })
             .await;
+        loop {
+            let actions = executor::timeout(Duration::from_secs(1), action_rx.recv())
+                .await
+                .expect("recovery timeout failure projection")
+                .expect("account actions");
+            if matches!(actions.as_slice(), [AppAction::E2eeRecoveryFailed { .. }]) {
+                break;
+            }
+        }
         assert_eq!(
             inspect_session_runtime(&handle).await,
-            (true, true, true, false)
+            (true, false, false, true),
+            "recovery trust timeout must not promote the session or leave normal runtime running"
+        );
+        assert!(
+            koushi_diagnostics::snapshot().records[diagnostic_start..]
+                .iter()
+                .any(|record| {
+                    record.event.source == "core.recovery_verification"
+                        && record.event.stage == "trust_settlement_timeout_projected"
+                        && record.event.fields.iter().any(|field| {
+                            field.key == "failure_kind"
+                                && field.value
+                                    == koushi_diagnostics::DiagnosticValue::Token("timeout")
+                        })
+                }),
+            "timeout projection must be visible in diagnostics"
         );
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
@@ -12575,6 +13096,49 @@ mod tests {
         assert!(
             !restore_last.contains("account_name()") && !restore_account.contains("account_name()"),
             "startup restore diagnostics must not print account identifiers"
+        );
+    }
+
+    #[test]
+    fn verification_restore_diagnostics_separate_trust_timing_from_persistence() {
+        let source = include_str!("account.rs");
+        let restore_into_store = source
+            .split("    async fn restore_into_store")
+            .nth(1)
+            .expect("restore helper should exist")
+            .split("    /// Roll back a failed login bootstrap")
+            .next()
+            .expect("restore helper should precede abort_login");
+        let recovery_success = source
+            .split("async fn handle_recovery_finished")
+            .nth(1)
+            .expect("recovery completion handler should exist")
+            .split("    async fn promote_recovered_session_runtime")
+            .next()
+            .expect("recovery handler should precede promote helper");
+        let recovery_promote = source
+            .split("async fn promote_recovered_session_runtime")
+            .nth(1)
+            .expect("recovery promote helper should exist")
+            .split("    async fn stop_recovery_task")
+            .next()
+            .expect("promote helper should precede recovery task cleanup");
+
+        assert!(
+            restore_into_store.contains("\"store_config_ready\"")
+                && restore_into_store.contains("\"sdk_restore_begin\"")
+                && restore_into_store.contains("\"sdk_restore_ok\""),
+            "restore diagnostics must show store config readiness separately from SDK restore"
+        );
+        assert!(
+            recovery_success.contains("\"post_recovery_trust_read\""),
+            "recovery success must log the immediate SDK trust read before promotion"
+        );
+        assert!(
+            recovery_promote.contains("\"persisted\"")
+                && recovery_promote.contains("\"promoted\"")
+                && recovery_promote.contains("current_device_trust_token"),
+            "recovery promotion must log trust around persistence and promotion"
         );
     }
 
@@ -13598,6 +14162,8 @@ mod tests {
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,
             recovery_task: None,
+            pending_recovery_completion: None,
+            recovery_trust_settlement_task: None,
             restricted_sync: None,
             pending_ready_events: Vec::new(),
             pending_trust_transition: None,

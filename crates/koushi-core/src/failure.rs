@@ -57,6 +57,7 @@ pub enum RecoveryFailureKind {
     InvalidRecoveryKey,
     Network,
     Server,
+    Timeout,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
