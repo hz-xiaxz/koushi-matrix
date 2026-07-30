@@ -61,10 +61,12 @@ emptiness.
 ## Thread Pane State Machine
 
 `ThreadPaneState::Opening` and `ThreadPaneState::Open` retain the intent.
-Opening a draft still emits `OpenThreadTimeline`: the subscription is required
-for live incoming activity and send routing. Presentation treats a matching
-draft `Opening` state as an empty composer-capable pane rather than a loading
-pane. Subscription success moves it to `Open` exactly as today.
+Opening an existing thread enters `Opening` as today. Opening a draft
+immediately enters `Open { is_subscribed: false }` with its Rust-owned composer
+and still emits `OpenThreadTimeline`: the subscription is required for live
+incoming activity and send routing, but draft editing and send acceptance do
+not wait for it. Matching subscription success flips `is_subscribed` to true in
+the same pane.
 
 A matching `ThreadSubmissionAccepted` promotes `NewThreadDraft` to
 `ExistingThread`. This is the earliest authoritative local transition: the

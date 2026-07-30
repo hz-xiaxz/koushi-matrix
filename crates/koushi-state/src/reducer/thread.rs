@@ -251,10 +251,27 @@ pub(crate) fn handle_open_thread(
     }
 
     state.upload_staging.clear_thread_targets_for_room(&room_id);
-    state.thread = ThreadPaneState::Opening {
-        room_id: room_id.clone(),
-        root_event_id: root_event_id.clone(),
-        intent,
+    state.thread = match intent {
+        ThreadOpenIntent::ExistingThread => ThreadPaneState::Opening {
+            room_id: room_id.clone(),
+            root_event_id: root_event_id.clone(),
+            intent,
+        },
+        ThreadOpenIntent::NewThreadDraft => ThreadPaneState::Open {
+            composer: state
+                .composer_drafts
+                .composer_for_thread(&room_id, &root_event_id),
+            staged_uploads: state
+                .upload_staging
+                .items_for_target(&crate::ComposerTarget::Thread {
+                    room_id: room_id.clone(),
+                    root_event_id: root_event_id.clone(),
+                }),
+            room_id: room_id.clone(),
+            root_event_id: root_event_id.clone(),
+            intent,
+            is_subscribed: false,
+        },
     };
     state.thread_attention = ThreadAttentionState::Tracking {
         room_id: room_id.clone(),
@@ -279,6 +296,19 @@ pub(crate) fn handle_thread_subscribed(
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) {
         return Vec::new();
+    }
+    if let ThreadPaneState::Open {
+        room_id: open_room_id,
+        root_event_id: open_root_event_id,
+        is_subscribed,
+        ..
+    } = &mut state.thread
+    {
+        if open_room_id != &room_id || open_root_event_id != &root_event_id || *is_subscribed {
+            return Vec::new();
+        }
+        *is_subscribed = true;
+        return vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)];
     }
     let ThreadPaneState::Opening {
         room_id: opening_room_id,
@@ -360,16 +390,24 @@ pub(crate) fn handle_thread_subscription_failed(
     root_event_id: String,
     _message: String,
 ) -> Vec<AppEffect> {
-    if !is_session_ready(state)
-        || !matches!(
-            &state.thread,
-            ThreadPaneState::Opening {
-                room_id: opening_room_id,
-                root_event_id: opening_root_event_id,
-                ..
-            } if opening_room_id == &room_id && opening_root_event_id == &root_event_id
-        )
-    {
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
+    let matches_pending_subscription = match &state.thread {
+        ThreadPaneState::Opening {
+            room_id: opening_room_id,
+            root_event_id: opening_root_event_id,
+            ..
+        } => opening_room_id == &room_id && opening_root_event_id == &root_event_id,
+        ThreadPaneState::Open {
+            room_id: open_room_id,
+            root_event_id: open_root_event_id,
+            is_subscribed,
+            ..
+        } => open_room_id == &room_id && open_root_event_id == &root_event_id && !*is_subscribed,
+        ThreadPaneState::Closed => false,
+    };
+    if !matches_pending_subscription {
         return Vec::new();
     }
 

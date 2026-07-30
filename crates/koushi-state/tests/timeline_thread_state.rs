@@ -1291,8 +1291,15 @@ fn new_thread_draft_intent_is_retained_and_promoted_by_matching_submission() {
         },
     );
     assert_eq!(
-        thread_intent(&state),
-        Some(ThreadOpenIntent::NewThreadDraft)
+        state.thread,
+        ThreadPaneState::Open {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::NewThreadDraft,
+            is_subscribed: false,
+            composer: ComposerState::default(),
+            staged_uploads: Vec::new(),
+        }
     );
 
     reduce(
@@ -1303,8 +1310,15 @@ fn new_thread_draft_intent_is_retained_and_promoted_by_matching_submission() {
         },
     );
     assert_eq!(
-        thread_intent(&state),
-        Some(ThreadOpenIntent::NewThreadDraft)
+        state.thread,
+        ThreadPaneState::Open {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::NewThreadDraft,
+            is_subscribed: true,
+            composer: ComposerState::default(),
+            staged_uploads: Vec::new(),
+        }
     );
 
     let effects = reduce(

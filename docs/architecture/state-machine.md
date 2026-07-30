@@ -892,8 +892,11 @@ stateDiagram-v2
   batches/diffs keyed by the thread `TimelineKey`. Legacy top-level frontend
   placeholders such as `snapshot.thread` are not authoritative in production.
 - A new-thread draft still subscribes its thread timeline so live remote
-  activity and send routing work. Its opening presentation is immediately
-  composer-capable and its automatic backward-history eligibility is false.
+  activity and send routing work. It enters `Open { is_subscribed: false }`
+  immediately with its Rust-owned composer, so editing and send acceptance do
+  not wait for subscription; matching subscription success flips
+  `is_subscribed` to true in the same pane. Its automatic backward-history
+  eligibility is false.
   Initial-empty, pagination-terminal, replay, reset, layout, and gap-repair
   settlement signals cannot bypass that semantic guard. A matching accepted
   local thread submission or matching event-backed thread activity promotes
@@ -928,15 +931,13 @@ stateDiagram-v2
 stateDiagram-v2
     [*] --> Closed
     Closed --> OpeningExisting: OpenThread(ExistingThread) [Ready, active room]
-    Closed --> OpeningDraft: OpenThread(NewThreadDraft) [Ready, active room]
+    Closed --> OpenDraft: OpenThread(NewThreadDraft) [Ready, active room] / subscribe asynchronously
     OpeningExisting --> OpenExisting: ThreadSubscribed [matching room/root]
-    OpeningDraft --> OpenDraft: ThreadSubscribed [matching room/root]
-    OpeningDraft --> OpeningExisting: ThreadSubmissionAccepted or ThreadActivityObserved [matching room/root]
+    OpenDraft --> OpenDraft: ThreadSubscribed [matching room/root] / is_subscribed=true
     OpenDraft --> OpenExisting: ThreadSubmissionAccepted or ThreadActivityObserved [matching room/root]
     OpeningExisting --> Closed: ThreadSubscriptionFailed [matching room/root]
-    OpeningDraft --> Closed: ThreadSubscriptionFailed [matching room/root]
+    OpenDraft --> Closed: ThreadSubscriptionFailed [matching room/root, not subscribed]
     OpeningExisting --> Closed: CloseThread/SelectRoom/session clear
-    OpeningDraft --> Closed: CloseThread/SelectRoom/session clear
     OpenExisting --> Closed: CloseThread/SelectRoom/session clear
     OpenDraft --> Closed: CloseThread/SelectRoom/session clear
 ```
