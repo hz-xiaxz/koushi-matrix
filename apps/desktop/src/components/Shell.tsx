@@ -292,7 +292,7 @@ export function TopBar({
                 <span className="sync-status-detail">{syncStatus.detail}</span>
               ) : null}
             </span>
-            <ChevronDown size={14} aria-hidden="true" />
+            <ChevronDown size={ICON_SIZE.micro} aria-hidden="true" />
           </button>
           {sessionStatusOpen ? (
             <SessionStatusPopover
