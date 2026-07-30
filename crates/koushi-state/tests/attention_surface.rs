@@ -15,6 +15,7 @@ fn ready_state() -> AppState {
             homeserver: "https://matrix.example.invalid".to_owned(),
             user_id: "@attention:example.invalid".to_owned(),
             device_id: "ATTENTION".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         ..AppState::default()
     }

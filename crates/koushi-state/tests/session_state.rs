@@ -21,6 +21,7 @@ fn session_info() -> SessionInfo {
         homeserver: "https://matrix.example.org".to_owned(),
         user_id: "@user-a:example.invalid".to_owned(),
         device_id: "DEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     }
 }
 
@@ -29,6 +30,7 @@ fn alternate_session_info() -> SessionInfo {
         homeserver: "https://matrix.example.org".to_owned(),
         user_id: "@user-b:example.invalid".to_owned(),
         device_id: "DEVICE-B".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     }
 }
 

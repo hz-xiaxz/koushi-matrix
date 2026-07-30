@@ -10,6 +10,7 @@ fn ready_state() -> AppState {
             homeserver: "https://server.example.invalid".to_owned(),
             user_id: "@alice:example.invalid".to_owned(),
             device_id: "ALICEDEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         rooms: vec![RoomSummary {
             room_id: "!room:example.invalid".to_owned(),
@@ -155,12 +156,14 @@ fn pin_completion_is_ignored_after_session_leaves_ready() {
             homeserver: "https://server.example.invalid".to_owned(),
             user_id: "@alice:example.invalid".to_owned(),
             device_id: "ALICEDEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         SessionState::SwitchingAccount {
             info: SessionInfo {
                 homeserver: "https://server.example.invalid".to_owned(),
                 user_id: "@alice:example.invalid".to_owned(),
                 device_id: "ALICEDEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         },
     ] {

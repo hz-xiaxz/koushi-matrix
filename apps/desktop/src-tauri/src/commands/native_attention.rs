@@ -142,6 +142,7 @@ mod tests {
                     homeserver: "https://example.invalid".to_owned(),
                     user_id: "@me:example.invalid".to_owned(),
                     device_id: "DEVICE".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 }),
                 AppAction::CurrentDeviceTrustChanged(CurrentDeviceTrustState::Verified),
             ])

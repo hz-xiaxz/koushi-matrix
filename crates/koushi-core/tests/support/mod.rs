@@ -26,6 +26,7 @@ pub fn session_info() -> SessionInfo {
         homeserver: "https://example.test".to_owned(),
         user_id: "@alice:example.test".to_owned(),
         device_id: "DEVICE1".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     }
 }
 

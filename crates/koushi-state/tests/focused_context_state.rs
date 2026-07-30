@@ -11,6 +11,7 @@ fn ready_selected_room_state() -> AppState {
             homeserver: "https://matrix.example.org".to_owned(),
             user_id: "@alice:example.invalid".to_owned(),
             device_id: "DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         rooms: vec![RoomSummary {
             room_id: "!room:example.invalid".to_owned(),

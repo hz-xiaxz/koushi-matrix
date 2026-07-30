@@ -9376,6 +9376,7 @@ fn session_info_from_key_id(key_id: &SessionKeyId) -> SessionInfo {
         homeserver: key_id.homeserver.clone(),
         user_id: key_id.user_id.clone(),
         device_id: key_id.device_id.clone(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     }
 }
 
@@ -10221,6 +10222,7 @@ mod tests {
                 homeserver: old_account.homeserver.clone(),
                 user_id: old_account.user_id.clone(),
                 device_id: old_account.device_id.clone(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         );
         let replacement_session = MatrixClientSession::from_client_for_testing(
@@ -10229,6 +10231,7 @@ mod tests {
                 homeserver: replacement_account.homeserver.clone(),
                 user_id: replacement_account.user_id.clone(),
                 device_id: replacement_account.device_id.clone(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         );
         let credential_dir = tempdir().expect("credential tempdir");
@@ -14337,6 +14340,7 @@ mod tests {
                 homeserver: server.uri(),
                 user_id: "@alice:example.org".to_owned(),
                 device_id: "4L1C3".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         );
 
@@ -15180,6 +15184,7 @@ mod tests {
             homeserver: "https://example.test".to_owned(),
             user_id: "@alice:example.test".to_owned(),
             device_id: "DEVICE1".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let account_key = AccountKey(info.user_id.clone());
         let states = stream::iter([

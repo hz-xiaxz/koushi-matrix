@@ -2,16 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionAuthenticationMethod {
-    Password,
-    Sso,
-    OAuth,
-    Token,
-    #[default]
-    Unknown,
-}
+use super::SessionAuthenticationMethod;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -277,6 +277,7 @@ fn logout_lock_and_account_switch_clear_mention_targets() {
         homeserver: "https://example.test".to_owned(),
         user_id: "@self:example.test".to_owned(),
         device_id: "DEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     };
 
     for clear_action in [
@@ -287,6 +288,7 @@ fn logout_lock_and_account_switch_clear_mention_targets() {
                 homeserver: "https://other.test".to_owned(),
                 user_id: "@other:other.test".to_owned(),
                 device_id: "OTHER".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         },
     ] {

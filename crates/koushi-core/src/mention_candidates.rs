@@ -261,6 +261,7 @@ mod tests {
                 homeserver: server.server().uri(),
                 user_id: client.user_id().unwrap().to_string(),
                 device_id: client.device_id().unwrap().to_string(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ))
     }

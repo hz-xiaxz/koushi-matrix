@@ -2209,6 +2209,7 @@ pub mod tests {
                 homeserver: server.uri(),
                 user_id: "@sync-owner:example.invalid".to_owned(),
                 device_id: "SYNCOWNER".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
         let (action_tx, _action_rx) = mpsc::channel(4);
@@ -2277,6 +2278,7 @@ pub mod tests {
                 homeserver: server.uri(),
                 user_id: "@restricted-cursor:example.invalid".to_owned(),
                 device_id: "RESTRICTEDCURSOR".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         );
 
@@ -2386,6 +2388,7 @@ pub mod tests {
                 homeserver: server.uri(),
                 user_id: "@restricted-reopen:example.invalid".to_owned(),
                 device_id: "RESTRICTEDREOPEN".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         );
         let restricted = server
@@ -2459,6 +2462,7 @@ pub mod tests {
                 homeserver: server.uri(),
                 user_id: "@restricted-restart:example.invalid".to_owned(),
                 device_id: "RESTRICTEDRESTART".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
 
@@ -3031,6 +3035,7 @@ pub mod tests {
                     homeserver: "http://synthetic-probe.invalid".to_owned(),
                     user_id: "@probe:example.invalid".to_owned(),
                     device_id: "PROBEDEVICE".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 },
             );
             assert_eq!(probe_backend(&session).await, expected);
@@ -3073,6 +3078,7 @@ pub mod tests {
                 homeserver,
                 user_id: "@probe:example.invalid".to_owned(),
                 device_id: "PROBEDEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
         let (action_tx, _action_rx) = mpsc::channel(4);

@@ -1754,6 +1754,7 @@ mod tests {
                 homeserver: "https://example.test".to_owned(),
                 user_id: "@u:example.test".to_owned(),
                 device_id: "DEV".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
             phase: ProvisionalPhase::CheckingTrust,
         };
@@ -1763,6 +1764,7 @@ mod tests {
                 homeserver: "https://example.test".to_owned(),
                 user_id: "@u:example.test".to_owned(),
                 device_id: "DEV".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
             phase: ProvisionalPhase::DiscoveringMethods,
         };
@@ -3008,6 +3010,7 @@ mod tests {
                 homeserver: "https://example.test".to_owned(),
                 user_id: "@u:example.test".to_owned(),
                 device_id: "DEV".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             }],
         }))
         .expect("serialize");

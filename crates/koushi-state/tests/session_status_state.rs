@@ -11,6 +11,7 @@ fn ready_state() -> AppState {
             homeserver: "https://example.invalid".to_owned(),
             user_id: "@user:example.invalid".to_owned(),
             device_id: "DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         ..AppState::default()
     }
@@ -196,4 +197,35 @@ fn logout_resets_current_session_status() {
         state.current_session_status,
         CurrentSessionStatusState::Idle
     );
+}
+
+#[test]
+fn legacy_session_info_defaults_authentication_method_to_unknown() {
+    let info: SessionInfo = serde_json::from_value(serde_json::json!({
+        "homeserver": "https://example.invalid",
+        "user_id": "@user:example.invalid",
+        "device_id": "DEVICE"
+    }))
+    .expect("legacy session info");
+
+    assert_eq!(
+        info.authentication_method,
+        SessionAuthenticationMethod::Unknown
+    );
+}
+
+#[test]
+fn session_info_serializes_only_the_coarse_authentication_method() {
+    let info: SessionInfo = serde_json::from_value(serde_json::json!({
+        "homeserver": "https://example.invalid",
+        "user_id": "@user:example.invalid",
+        "device_id": "DEVICE",
+        "authentication_method": "oauth"
+    }))
+    .expect("session info");
+
+    let serialized = serde_json::to_string(&info).expect("serialize session info");
+    assert!(serialized.contains(r#""authentication_method":"oauth""#));
+    assert!(!serialized.contains("access_token"));
+    assert!(!serialized.contains("refresh_token"));
 }

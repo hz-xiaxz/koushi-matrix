@@ -919,6 +919,7 @@ mod tests {
                 homeserver: "https://matrix.org".to_owned(),
                 user_id: "@user:matrix.org".to_owned(),
                 device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             }),
             sync: SyncState::Running,
             ..AppState::default()
@@ -1545,6 +1546,7 @@ mod tests {
                     homeserver: "https://matrix.org".to_owned(),
                     user_id: "@user:matrix.org".to_owned(),
                     device_id: "DEVICE".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 },
                 gate: koushi_state::VerificationGateState {
                     methods: vec![
@@ -1579,6 +1581,7 @@ mod tests {
             homeserver: "https://example.invalid".into(),
             user_id: "@private:example.invalid".into(),
             device_id: "PRIVATEDEVICE".into(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let gate = koushi_state::VerificationGateState {
             methods: vec![
@@ -1760,6 +1763,7 @@ mod tests {
             homeserver: "https://matrix.example.invalid".to_owned(),
             user_id: "@fixture:example.invalid".to_owned(),
             device_id: "FIXTURE_DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let avatar = AvatarImage {
             mxc_uri: "mxc://example.invalid/fixture-avatar".to_owned(),

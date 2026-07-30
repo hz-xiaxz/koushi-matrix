@@ -13,6 +13,7 @@ fn ready_state() -> AppState {
             homeserver: "http://127.0.0.1:6167".to_owned(),
             user_id: "@qa:localhost".to_owned(),
             device_id: "LOCALDEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         ..AppState::default()
     }

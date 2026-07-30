@@ -4333,6 +4333,7 @@ impl AppActor {
                         .await;
                 }
                 AppEffect::RestoreSession
+                | AppEffect::RefreshCurrentSessionStatus { .. }
                 | AppEffect::DiscoverLogin { .. }
                 | AppEffect::Login { .. }
                 | AppEffect::DiscoverVerificationMethods
@@ -4457,6 +4458,7 @@ impl AppActor {
                         .await;
                 }
                 AppEffect::RestoreSession
+                | AppEffect::RefreshCurrentSessionStatus { .. }
                 | AppEffect::DiscoverLogin { .. }
                 | AppEffect::Login { .. }
                 | AppEffect::DiscoverVerificationMethods
@@ -5335,6 +5337,7 @@ mod tests {
                     homeserver: "https://example.invalid".to_owned(),
                     user_id: "@other:example.invalid".to_owned(),
                     device_id: "OTHER".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 },
             }),
             ComposerDraftTransitionPolicy::PreservePrevious
@@ -5702,6 +5705,7 @@ mod tests {
                 homeserver: "https://example.invalid".to_owned(),
                 user_id: "@synthetic:example.invalid".to_owned(),
                 device_id: "SYNTHETIC".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             }),
             focused_context: FocusedContextState::Open {
                 room_id: expected.room_id.clone(),
@@ -5786,6 +5790,7 @@ mod tests {
                 homeserver: "https://example.invalid".to_owned(),
                 user_id: "@synthetic:example.invalid".to_owned(),
                 device_id: "SYNTHETIC".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             }),
             ..AppState::default()
         };
@@ -6344,6 +6349,7 @@ mod tests {
                     homeserver: "https://example.invalid".to_owned(),
                     user_id: "@me:example.invalid".to_owned(),
                     device_id: "DEVICE".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 }),
                 AppAction::CurrentDeviceTrustChanged(
                     koushi_state::CurrentDeviceTrustState::Verified,
@@ -6470,6 +6476,7 @@ mod tests {
                 homeserver: "https://example.invalid".to_owned(),
                 user_id: "@me:example.invalid".to_owned(),
                 device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             }),
         );
         reduce(
@@ -6704,6 +6711,7 @@ mod tests {
                     homeserver: "https://example.invalid".to_owned(),
                     user_id: "@me:example.invalid".to_owned(),
                     device_id: "DEVICE".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 }),
                 AppAction::CurrentDeviceTrustChanged(
                     koushi_state::CurrentDeviceTrustState::Verified,
@@ -6811,6 +6819,7 @@ mod tests {
                     homeserver: "https://example.invalid".to_owned(),
                     user_id: "@me:example.invalid".to_owned(),
                     device_id: "DEVICE".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 }),
                 AppAction::CurrentDeviceTrustChanged(
                     koushi_state::CurrentDeviceTrustState::Verified,
@@ -7416,6 +7425,7 @@ mod tests {
             homeserver: "https://example.invalid".to_owned(),
             user_id: "@synthetic:example.invalid".to_owned(),
             device_id: "SYNTHETIC".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let session_key = session_key_id_from_info(&session);
         let old_room = "!old:example.invalid";
@@ -7870,6 +7880,7 @@ mod tests {
             homeserver: "https://example.invalid".into(),
             user_id: "@me:example.invalid".into(),
             device_id: "DEVICE".into(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let gate = koushi_state::VerificationGateState {
             methods: vec![],
@@ -7916,6 +7927,7 @@ mod tests {
             homeserver: "https://example.invalid".into(),
             user_id: "@me:example.invalid".into(),
             device_id: "DEVICE".into(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let gate = koushi_state::VerificationGateState {
             methods: vec![],

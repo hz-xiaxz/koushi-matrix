@@ -58,15 +58,15 @@ pub use session::{
     DelegatedAuthLinks, DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupLocalMode,
     DeviceCleanupOfferReason, DeviceCleanupRemoteOutcome, DeviceCleanupState,
     DeviceSessionListState, DeviceSessionSummary, LoginAttemptId, LoginFlow, LoginFlowKind,
-    ProvisionalPhase, QrLoginState, RecoveryMethod, SessionInfo, SessionState,
-    SoftLogoutReauthState, VerificationAccountKind, VerificationGateFailureKind,
-    VerificationGateRejectReason, VerificationGateState, VerificationMethod,
-    VerificationMethodCapability,
+    ProvisionalPhase, QrLoginState, RecoveryMethod, SessionAuthenticationMethod, SessionInfo,
+    SessionState, SoftLogoutReauthState, VerificationAccountKind,
+    VerificationGateFailureKind, VerificationGateRejectReason, VerificationGateState,
+    VerificationMethod, VerificationMethodCapability,
 };
 pub use session_status::{
     CurrentSessionBackupState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,
     CurrentSessionStatusState, CurrentSessionSyncState, CurrentSessionVerification,
-    OwnIdentityVerification, SessionAuthenticationMethod, SessionStatusRefreshTrigger,
+    OwnIdentityVerification, SessionStatusRefreshTrigger,
 };
 
 // ── Re-exports: settings ────────────────────────────────────────────────────

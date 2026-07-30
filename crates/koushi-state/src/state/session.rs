@@ -236,6 +236,20 @@ pub struct SessionInfo {
     pub homeserver: String,
     pub user_id: String,
     pub device_id: String,
+    #[serde(default)]
+    pub authentication_method: SessionAuthenticationMethod,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAuthenticationMethod {
+    Password,
+    Sso,
+    #[serde(rename = "oauth")]
+    OAuth,
+    Token,
+    #[default]
+    Unknown,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

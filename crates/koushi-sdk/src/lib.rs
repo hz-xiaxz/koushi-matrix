@@ -2565,6 +2565,7 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
                 homeserver: server.server().uri(),
                 user_id: alice_user_id.to_string(),
                 device_id: alice_device_id.to_string(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         };
         let mut observer = observe_incoming_verification_requests(&session).await;
@@ -4325,6 +4326,7 @@ mod current_device_trust_recheck_tests {
                 .device_id()
                 .expect("mock client has a device id")
                 .to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let session = MatrixClientSession::from_client_for_testing(client, info);
         let _query = server
@@ -4384,6 +4386,7 @@ impl PersistableMatrixSession {
                 serde_json::to_string(&SerializedTaggedMatrixSession {
                     auth_kind: PersistableSessionJsonKind::Password,
                     homeserver: self.info.homeserver.clone(),
+                    authentication_method: self.info.authentication_method,
                     session: session.clone(),
                 })
                 .map_err(|error| PasswordLoginError::Serialization(error.to_string()))
@@ -4416,6 +4419,7 @@ impl PersistableMatrixSession {
                 homeserver: serialized.homeserver,
                 user_id: serialized.user_session.meta.user_id.to_string(),
                 device_id: serialized.user_session.meta.device_id.to_string(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::OAuth,
             };
             return Ok(Self {
                 info,
@@ -4433,6 +4437,7 @@ impl PersistableMatrixSession {
             homeserver: serialized.homeserver,
             user_id: session.meta.user_id.to_string(),
             device_id: session.meta.device_id.to_string(),
+            authentication_method: serialized.authentication_method,
         };
         Ok(Self {
             info,
@@ -4479,6 +4484,8 @@ enum PersistableSessionJsonKind {
 #[derive(Deserialize, Serialize)]
 struct SerializedPersistableMatrixSession {
     homeserver: String,
+    #[serde(default)]
+    authentication_method: koushi_state::SessionAuthenticationMethod,
     #[serde(flatten)]
     session: MatrixSession,
 }
@@ -4487,6 +4494,7 @@ struct SerializedPersistableMatrixSession {
 struct SerializedTaggedMatrixSession {
     auth_kind: PersistableSessionJsonKind,
     homeserver: String,
+    authentication_method: koushi_state::SessionAuthenticationMethod,
     #[serde(flatten)]
     session: MatrixSession,
 }
@@ -5674,6 +5682,7 @@ pub async fn login_with_password_with_store(
             homeserver: homeserver.normalized(),
             user_id,
             device_id,
+            authentication_method: koushi_state::SessionAuthenticationMethod::Password,
         },
     })
 }
@@ -5704,6 +5713,7 @@ pub async fn login_with_existing_device(
             homeserver: homeserver.normalized(),
             user_id: response.user_id.to_string(),
             device_id: response.device_id.to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Password,
         },
     })
 }
@@ -5764,14 +5774,18 @@ pub async fn finish_oidc_login(
 ) -> Result<MatrixClientSession, PasswordLoginError> {
     let callback_url =
         Url::parse(callback_url).map_err(|error| PasswordLoginError::Sdk(error.to_string()))?;
-    let (client, homeserver) = match pending {
+    let (client, homeserver, authentication_method) = match pending {
         PendingOidcLogin::OAuth { client, homeserver } => {
             client
                 .oauth()
                 .finish_login(callback_url.into())
                 .await
                 .map_err(|error| PasswordLoginError::Sdk(error.to_string()))?;
-            (client, homeserver)
+            (
+                client,
+                homeserver,
+                koushi_state::SessionAuthenticationMethod::OAuth,
+            )
         }
         PendingOidcLogin::Sso { client, homeserver } => {
             client
@@ -5783,7 +5797,11 @@ pub async fn finish_oidc_login(
                 .send()
                 .await
                 .map_err(|error| PasswordLoginError::Sdk(error.to_string()))?;
-            (client, homeserver)
+            (
+                client,
+                homeserver,
+                koushi_state::SessionAuthenticationMethod::Sso,
+            )
         }
     };
 
@@ -5802,6 +5820,7 @@ pub async fn finish_oidc_login(
             homeserver,
             user_id,
             device_id,
+            authentication_method,
         },
     })
 }
@@ -6713,6 +6732,7 @@ mod start_direct_message_tests {
                 .device_id()
                 .expect("mock client has a device id")
                 .to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         MatrixClientSession { client, info }
     }
@@ -6781,6 +6801,7 @@ mod joined_member_snapshot_tests {
                 .device_id()
                 .expect("mock client has a device id")
                 .to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         MatrixClientSession { client, info }
     }
@@ -9427,6 +9448,7 @@ mod tests {
                 homeserver: client.homeserver().to_string(),
                 user_id: "@probe:example.invalid".to_owned(),
                 device_id: "PROBEDEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         )
     }

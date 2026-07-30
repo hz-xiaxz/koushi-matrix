@@ -12598,6 +12598,7 @@ mod timeline_gap_repair_tracker_tests {
                 homeserver: "http://example.invalid".to_owned(),
                 user_id: ALICE.to_string(),
                 device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
         let gap_topology = |inspection: &MatrixTimelineGapInspection| {
@@ -13382,6 +13383,7 @@ mod timeline_gap_repair_tracker_tests {
                 homeserver: "http://example.invalid".to_owned(),
                 user_id: ALICE.to_string(),
                 device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
         let checkpoint_gap = session
@@ -33015,6 +33017,7 @@ mod tests {
                 homeserver: "http://example.invalid".to_owned(),
                 user_id: ALICE.to_string(),
                 device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
         let account = AccountKey("@restore:test".to_owned());
@@ -33355,6 +33358,7 @@ mod tests {
                 homeserver: "http://example.invalid".to_owned(),
                 user_id: ALICE.to_string(),
                 device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
         let key = TimelineKey::room(AccountKey("@startup:test".to_owned()), room_id.to_string());
@@ -35970,6 +35974,7 @@ mod tests {
                     homeserver: "https://test.test".to_owned(),
                     user_id: "@a:test".to_owned(),
                     device_id: "DEV".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 }),
                 AppAction::CurrentDeviceTrustChanged(
                     koushi_state::CurrentDeviceTrustState::Verified,
@@ -36528,6 +36533,7 @@ mod tests {
                 homeserver: "http://example.invalid".to_owned(),
                 user_id: ALICE.to_string(),
                 device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
         let key = TimelineKey::room(
@@ -38481,6 +38487,7 @@ mod tests {
                     homeserver: "https://test.test".to_owned(),
                     user_id: "@a:test".to_owned(),
                     device_id: "DEV".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 }),
                 AppAction::CurrentDeviceTrustChanged(
                     koushi_state::CurrentDeviceTrustState::Verified,
@@ -38574,6 +38581,7 @@ mod tests {
                     homeserver: "https://test.test".to_owned(),
                     user_id: "@a:test".to_owned(),
                     device_id: "DEV".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 }),
                 AppAction::CurrentDeviceTrustChanged(
                     koushi_state::CurrentDeviceTrustState::Verified,
@@ -38630,6 +38638,7 @@ mod tests {
                     homeserver: "https://test.test".to_owned(),
                     user_id: "@a:test".to_owned(),
                     device_id: "DEV".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 }),
                 AppAction::CurrentDeviceTrustChanged(
                     koushi_state::CurrentDeviceTrustState::Verified,

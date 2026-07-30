@@ -476,6 +476,13 @@ impl FakeDesktopBackend {
                 };
                 vec![AppAction::CurrentDeviceTrustChanged(trust)]
             }
+            AppEffect::RefreshCurrentSessionStatus { request_id, .. } => {
+                vec![AppAction::CurrentSessionStatusRefreshFailed {
+                    request_id: *request_id,
+                    kind: koushi_state::CurrentSessionStatusFailureKind::Unavailable,
+                    checked_at_ms: 0,
+                }]
+            }
             AppEffect::DiscoverVerificationMethods => {
                 let info = match &self.state.session {
                     SessionState::Provisional { info, .. }
@@ -506,6 +513,7 @@ impl FakeDesktopBackend {
             homeserver: self.config.homeserver.clone(),
             user_id: self.config.user_id.clone(),
             device_id: self.config.device_id.clone(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }
     }
 

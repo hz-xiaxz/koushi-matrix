@@ -13,6 +13,7 @@ fn ready_state() -> AppState {
         homeserver: "https://server.example.invalid".to_owned(),
         user_id: "@alice:example.invalid".to_owned(),
         device_id: "ALICEDEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     });
     state
 }

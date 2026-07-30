@@ -15755,6 +15755,7 @@ fn assert_upload_ux_state_contract(room_id: &str) -> Result<(), String> {
             homeserver: "https://qa.example.invalid".to_owned(),
             user_id: "@qa:example.invalid".to_owned(),
             device_id: "QADEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         rooms: vec![native_attention_room(room_id, "QA Room", false, 0, 0, 0)],
         ..AppState::default()
@@ -18217,6 +18218,7 @@ mod tests {
                 homeserver: "https://example.invalid".to_owned(),
                 user_id: "@alice:example.invalid".to_owned(),
                 device_id: "ALICEDEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
             gate: koushi_state::VerificationGateState {
                 methods: vec![koushi_state::VerificationMethodCapability::ExistingDeviceSas],
@@ -20604,6 +20606,7 @@ mod tests {
                 homeserver: "https://example.invalid".to_owned(),
                 user_id: "@ready:example.invalid".to_owned(),
                 device_id: "READYDEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             });
         });
         let started_at = tokio::time::Instant::now();
@@ -22081,6 +22084,7 @@ mod tests {
             homeserver: "https://example.invalid".to_owned(),
             user_id: "@alice:example.invalid".to_owned(),
             device_id: "ALICEDEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
 
         assert_eq!(

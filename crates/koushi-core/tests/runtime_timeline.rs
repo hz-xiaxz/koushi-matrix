@@ -1526,6 +1526,7 @@ async fn account_switch_flushes_old_composer_save_before_new_load() {
         homeserver: "https://new.example.test".to_owned(),
         user_id: "@new:new.example.test".to_owned(),
         device_id: "NEWDEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     };
     runtime
         .inject_actions(vec![

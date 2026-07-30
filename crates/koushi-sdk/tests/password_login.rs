@@ -3,7 +3,7 @@ use koushi_sdk::{
     MatrixRoomListRoom, MatrixRoomListSnapshot, MatrixRoomListSpace, MatrixRoomTags,
     MatrixSearchCandidate, MatrixTimelineItem,
 };
-use koushi_state::{AuthSecret, LoginRequest, RecoveryRequest};
+use koushi_state::{AuthSecret, LoginRequest, RecoveryRequest, SessionAuthenticationMethod};
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -246,6 +246,10 @@ fn sdk_password_login_returns_session_info_without_exposing_secret() {
     assert_eq!(session.info.homeserver, homeserver);
     assert_eq!(session.info.user_id, "@fixture-user:example.invalid");
     assert_eq!(session.info.device_id, "FIXTUREDEVICE");
+    assert_eq!(
+        session.info.authentication_method,
+        SessionAuthenticationMethod::Password
+    );
     assert!(!format!("{session:?}").contains("synthetic-password"));
 }
 
@@ -424,10 +428,58 @@ fn sdk_password_login_exports_redacted_persistable_session() {
 
     assert_eq!(persisted.info, session.info);
     assert_eq!(restored.info, session.info);
+    assert_eq!(
+        restored.info.authentication_method,
+        SessionAuthenticationMethod::Password
+    );
     assert!(json.contains("fixture-access-token"));
     assert!(!format!("{persisted:?}").contains("fixture-access-token"));
     assert!(!format!("{restored:?}").contains("fixture-access-token"));
     assert!(!format!("{persisted:?}").contains("synthetic-password"));
+}
+
+#[test]
+fn persisted_matrix_session_preserves_each_coarse_authentication_method() {
+    let homeserver = spawn_password_login_server(200);
+    let request = LoginRequest {
+        homeserver,
+        username: "fixture-user".to_owned(),
+        password: AuthSecret::new("synthetic-password"),
+        device_display_name: Some("Matrix Desktop Test".to_owned()),
+    };
+    let session =
+        koushi_sdk::login_with_password_blocking(&request).expect("password login should succeed");
+    let persisted = session
+        .persistable_session()
+        .expect("SDK should expose session data");
+
+    for method in [
+        SessionAuthenticationMethod::Password,
+        SessionAuthenticationMethod::Sso,
+        SessionAuthenticationMethod::Token,
+        SessionAuthenticationMethod::Unknown,
+    ] {
+        let mut candidate = persisted.clone();
+        candidate.info.authentication_method = method;
+        let restored = koushi_sdk::PersistableMatrixSession::from_json(
+            &candidate.to_json().expect("persistable session JSON"),
+        )
+        .expect("persisted method should restore");
+        assert_eq!(restored.info.authentication_method, method);
+    }
+}
+
+#[test]
+fn legacy_persisted_matrix_session_defaults_authentication_method_to_unknown() {
+    let restored = koushi_sdk::PersistableMatrixSession::from_json(
+        r#"{"homeserver":"https://matrix.example.invalid","user_id":"@alice:example.invalid","device_id":"ALICEDEVICE","access_token":"synthetic-access"}"#,
+    )
+    .expect("legacy session should deserialize");
+
+    assert_eq!(
+        restored.info.authentication_method,
+        SessionAuthenticationMethod::Unknown
+    );
 }
 
 #[test]
