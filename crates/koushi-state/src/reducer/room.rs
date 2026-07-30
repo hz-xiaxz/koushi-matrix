@@ -68,7 +68,10 @@ pub(crate) fn handle_room_list_updated(
     } else {
         crate::state::NativeAttentionObservationKind::InitialSync
     };
-    if super::native_attention::recompute_native_attention_from_rooms(state, observation) {
+    let (native_attention_changed, native_attention_diagnostic) =
+        super::native_attention::recompute_native_attention_from_rooms(state, observation);
+    effects.push(native_attention_diagnostic);
+    if native_attention_changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged));
     }
 

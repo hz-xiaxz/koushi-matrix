@@ -109,6 +109,12 @@ pub struct NativeAttentionProjectionInput<'a> {
     pub capabilities: NativeAttentionCapabilities,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeAttentionProjection {
+    pub state: NativeAttentionState,
+    pub active_room_match: bool,
+}
+
 struct NativeAttentionCandidateEntry<'a> {
     room_id: &'a str,
     candidate: NativeAttentionCandidate,
@@ -117,6 +123,12 @@ struct NativeAttentionCandidateEntry<'a> {
 pub fn native_attention_state_from_rooms(
     input: NativeAttentionProjectionInput<'_>,
 ) -> NativeAttentionState {
+    native_attention_projection_from_rooms(input).state
+}
+
+pub fn native_attention_projection_from_rooms(
+    input: NativeAttentionProjectionInput<'_>,
+) -> NativeAttentionProjection {
     let mut unread_count = 0;
     let mut highlight_count = 0;
     let mut candidates = Vec::new();
@@ -207,6 +219,8 @@ pub fn native_attention_state_from_rooms(
     });
 
     let candidate_entry = candidates.first();
+    let active_room_match =
+        candidate_entry.is_some_and(|entry| input.active_room_id == Some(entry.room_id));
     let mut candidate = candidate_entry.map(|entry| entry.candidate.clone());
     let mut dispatch = NativeAttentionDispatchState::Idle;
 
@@ -222,15 +236,18 @@ pub fn native_attention_state_from_rooms(
         NativeAttentionCapability::Available | NativeAttentionCapability::Unknown => unread_count,
     };
 
-    NativeAttentionState {
-        summary: NativeAttentionSummary {
-            unread_count,
-            highlight_count,
-            badge_count,
-            candidate,
-            capabilities: input.capabilities,
+    NativeAttentionProjection {
+        state: NativeAttentionState {
+            summary: NativeAttentionSummary {
+                unread_count,
+                highlight_count,
+                badge_count,
+                candidate,
+                capabilities: input.capabilities,
+            },
+            dispatch,
         },
-        dispatch,
+        active_room_match,
     }
 }
 

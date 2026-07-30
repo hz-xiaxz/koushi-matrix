@@ -123,6 +123,15 @@ pub enum AppEffect {
     /// Tell the `SearchActor` to clear its in-memory search document store and
     /// crawler queues before a full local search rebuild.
     RebuildSearchIndex,
+    RecordNativeAttentionRecomputed {
+        observation: crate::NativeAttentionObservationKind,
+        unread_count: u64,
+        badge_count: u64,
+        candidate: Option<crate::RoomAttentionKind>,
+        suppression: Option<crate::NativeAttentionSuppressionReason>,
+        window_focused: bool,
+        active_room_match: bool,
+    },
     EmitUiEvent(UiEvent),
 }
 
