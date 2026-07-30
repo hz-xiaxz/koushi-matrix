@@ -656,6 +656,8 @@ export type MessageId =
   | "gate.locked"
   | "gate.otherDevice"
   | "gate.verifyRecoveryKey"
+  | "gate.noRecoveryKeyTitle"
+  | "gate.noRecoveryKeyCopy"
   | "gate.deviceVerificationDialogTitle"
   | "gate.deviceVerificationDialogCopy"
   | "gate.useRecoveryKey"
@@ -1722,6 +1724,9 @@ const en: Catalog = {
   "gate.locked": "This session must be verified again.",
   "gate.otherDevice": "Verify with another device",
   "gate.verifyRecoveryKey": "Verify with recovery key",
+  "gate.noRecoveryKeyTitle": "No recovery key available",
+  "gate.noRecoveryKeyCopy":
+    "Koushi cannot verify this session without recovery material. Use a Matrix client that is already verified to set up recovery, or reset your cryptographic identity if recovery is genuinely unavailable. This device stays signed in and may appear unverified to other clients until then.",
   "gate.deviceVerificationDialogTitle": "Try device verification?",
   "gate.deviceVerificationDialogCopy": "Device-to-device verification can be unreliable if the other device is offline, slow to sync, or missing keys. We recommend verifying with your recovery key when possible.",
   "gate.useRecoveryKey": "Use recovery key",
@@ -2678,6 +2683,9 @@ const ja: Catalog = {
   "gate.locked": "このセッションは再検証が必要です。",
   "gate.otherDevice": "別のデバイスで検証",
   "gate.verifyRecoveryKey": "リカバリーキーで検証",
+  "gate.noRecoveryKeyTitle": "リカバリーキーがありません",
+  "gate.noRecoveryKeyCopy":
+    "リカバリー情報がないため、Koushi はこのセッションを検証できません。すでに検証済みの Matrix クライアントでリカバリーを設定するか、リカバリーが本当に利用できない場合は暗号 ID をリセットしてください。それまでこの端末はサインインしたままで、他のクライアントには未検証として表示される場合があります。",
   "gate.deviceVerificationDialogTitle": "デバイス検証を試しますか？",
   "gate.deviceVerificationDialogCopy": "デバイス間検証は、相手のデバイスがオフライン、同期が遅い、または鍵が不足している場合に不安定になることがあります。可能な場合はリカバリーキーでの検証をおすすめします。",
   "gate.useRecoveryKey": "リカバリーキーを使う",
