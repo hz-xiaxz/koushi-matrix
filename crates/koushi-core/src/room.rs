@@ -3772,6 +3772,7 @@ pub mod tests {
                 homeserver,
                 user_id: "@observer:example.invalid".to_owned(),
                 device_id: "OBSERVER".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
         let known_room_ids = Arc::new(RwLock::new(BTreeSet::new()));

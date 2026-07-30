@@ -14,6 +14,23 @@ pub async fn query_devices(
 }
 
 #[tauri::command]
+pub async fn refresh_current_session_status(
+    trigger: koushi_state::SessionStatusRefreshTrigger,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        CoreCommand::Account(AccountCommand::RefreshCurrentSessionStatus {
+            request_id,
+            trigger,
+        }),
+    )
+    .await?;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn rename_device(
     device_ordinal: u64,
     display_name: String,

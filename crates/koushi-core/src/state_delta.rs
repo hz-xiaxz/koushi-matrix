@@ -4,15 +4,15 @@ use std::collections::{BTreeMap, HashMap};
 
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, ActivityState, AppError, AppState,
-    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, DeviceCleanupState,
-    DeviceSessionListState, DirectoryState, E2eeTrustState, FilesViewState, FocusedContextState,
-    InvitePreview, InviteWorkflowState, LinkPreviewSettingsState, LiveSignalsState,
-    LocalEncryptionState, MentionCandidatesState, NativeAttentionState, NavigationState,
-    ProfileState, QrLoginState, RoomInteractionState, RoomListProjection, RoomManagementState,
-    RoomNotificationSettings, RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchState,
-    SessionState, SettingsState, SidebarModel, SoftLogoutReauthState, SpaceSummary, SyncMode,
-    SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
-    compose_sidebar_with_account_facts,
+    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, CurrentSessionStatusState,
+    DeviceCleanupState, DeviceSessionListState, DirectoryState, E2eeTrustState, FilesViewState,
+    FocusedContextState, InvitePreview, InviteWorkflowState, LinkPreviewSettingsState,
+    LiveSignalsState, LocalEncryptionState, MentionCandidatesState, NativeAttentionState,
+    NavigationState, ProfileState, QrLoginState, RoomInteractionState, RoomListProjection,
+    RoomManagementState, RoomNotificationSettings, RoomPreferencesState, RoomSummary,
+    SearchCrawlerState, SearchState, SessionState, SettingsState, SidebarModel,
+    SoftLogoutReauthState, SpaceSummary, SyncMode, SyncState, ThreadAttentionState,
+    ThreadPaneState, ThreadsListState, TimelinePaneState, compose_sidebar_with_account_facts,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +26,7 @@ pub struct StateDelta {
 pub struct StateDeltaChangedSlices {
     pub session: Option<SessionState>,
     pub device_cleanup: Option<DeviceCleanupState>,
+    pub current_session_status: Option<CurrentSessionStatusState>,
     pub auth: Option<AuthDiscoveryState>,
     pub device_sessions: Option<DeviceSessionListState>,
     pub account_management: Option<AccountManagementState>,
@@ -94,6 +95,7 @@ pub fn build_state_delta(
 
     changed_slice!(session);
     changed_slice!(device_cleanup);
+    changed_slice!(current_session_status);
     changed_slice!(auth);
     changed_slice!(device_sessions);
     changed_slice!(account_management);
@@ -171,6 +173,7 @@ pub fn build_state_delta(
 fn audit_app_state_delta_slices(state: &AppState) {
     let AppState {
         session: _,
+        current_session_status: _,
         auth: _,
         device_sessions: _,
         account_management: _,

@@ -2,12 +2,12 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createBrowserFakeApi } from "../backend/browserFakeApi";
 import { computeBrowserRoomListProjection } from "../backend/roomListProjection";
-import type { RoomSummary } from "../domain/types";
+import type { CurrentSessionStatusState, RoomSummary } from "../domain/types";
 import { EntityAvatar, Sidebar, TopBar, WorkspaceRail, avatarColorClass } from "./Shell";
 
 afterEach(() => {
@@ -782,5 +782,187 @@ describe("TopBar Matrix connection status", () => {
     const status = screen.getByRole("status", { name: /Sign-in required/ });
     expect(status.textContent).toContain("Sign-in required");
     expect(screen.queryByRole("button", { name: "Restart sync" })).toBeNull();
+  });
+});
+
+describe("TopBar current session status", () => {
+  const readyStatus: CurrentSessionStatusState = {
+    status: "ready",
+    request_id: 369,
+    details: {
+      device_display_name: "Koushi on Linux",
+      device_id: "DEVICE369",
+      authentication_method: "oauth",
+      sync_state: "running",
+      is_cross_signed_by_owner: true,
+      own_identity_verification: "verified",
+      key_backup: "ready",
+      verification: "verified",
+      checked_at_ms: Date.UTC(2026, 6, 30, 12, 0, 0)
+    }
+  };
+
+  function renderStatus(
+    status: CurrentSessionStatusState = readyStatus,
+    overrides: {
+      accountManagementUrl?: string | null;
+      onRefresh?: (trigger: "open" | "manual") => void;
+      onManage?: (url: string | null) => void;
+      onDiagnostics?: () => void;
+    } = {}
+  ) {
+    return render(
+      <TopBar
+        activeSpaceName="Matrix"
+        accountManagementUrl={overrides.accountManagementUrl ?? "https://account.example/manage"}
+        currentSessionStatus={status}
+        deviceId="DEVICE369"
+        homeserver="https://matrix.example"
+        isBusy={false}
+        searchInputRef={{ current: null }}
+        searchQuery=""
+        searchScope="allRooms"
+        sync="running"
+        userId="@alice:matrix.example"
+        onManageAccount={overrides.onManage ?? (() => undefined)}
+        onOpenDiagnostics={overrides.onDiagnostics ?? (() => undefined)}
+        onOpenKeyboardSettings={() => undefined}
+        onRefreshCurrentSessionStatus={overrides.onRefresh ?? (() => undefined)}
+        onRestartSync={() => undefined}
+        onSearchQueryChange={() => undefined}
+        onSearchScopeChange={() => undefined}
+      />
+    );
+  }
+
+  it("opens by pointer, refreshes immediately, and renders every Rust-owned field", () => {
+    const onRefresh = vi.fn();
+    renderStatus(readyStatus, { onRefresh });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open session status" }));
+
+    expect(onRefresh).toHaveBeenCalledWith("open");
+    const dialog = screen.getByRole("dialog", { name: "Current session" });
+    expect(dialog.textContent).toContain("matrix.example");
+    expect(dialog.textContent).toContain("@alice:matrix.example");
+    expect(dialog.textContent).toContain("Koushi on Linux");
+    expect(dialog.textContent).toContain("DEVICE369");
+    expect(dialog.textContent).toContain("OAuth");
+    expect(dialog.textContent).toContain("Running");
+    expect(dialog.textContent).toContain("Verified");
+    expect(dialog.textContent).toContain("Cross-signed");
+    expect(dialog.textContent).toContain("Identity verified");
+    expect(dialog.textContent).toContain("Ready");
+    expect(dialog.textContent).toContain("Last checked");
+  });
+
+  it("supports keyboard opening, manual recheck, and failure replacing stale facts", () => {
+    const onRefresh = vi.fn();
+    const { rerender } = renderStatus(readyStatus, { onRefresh });
+    const trigger = screen.getByRole("button", { name: "Open session status" });
+
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Recheck" }));
+    expect(onRefresh).toHaveBeenLastCalledWith("manual");
+
+    rerender(
+      <TopBar
+        activeSpaceName="Matrix"
+        accountManagementUrl={null}
+        currentSessionStatus={{
+          status: "failed",
+          request_id: 370,
+          kind: "timed_out",
+          checked_at_ms: Date.UTC(2026, 6, 30, 12, 1, 0)
+        }}
+        deviceId="DEVICE369"
+        homeserver="https://matrix.example"
+        isBusy={false}
+        searchInputRef={{ current: null }}
+        searchQuery=""
+        searchScope="allRooms"
+        sync="running"
+        userId="@alice:matrix.example"
+        onManageAccount={() => undefined}
+        onOpenKeyboardSettings={() => undefined}
+        onRefreshCurrentSessionStatus={onRefresh}
+        onRestartSync={() => undefined}
+        onSearchQueryChange={() => undefined}
+        onSearchScopeChange={() => undefined}
+      />
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Current session" });
+    expect(dialog.textContent).toContain("Session check timed out");
+    expect(dialog.textContent).not.toContain("Koushi on Linux");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRefresh).toHaveBeenLastCalledWith("manual");
+  });
+
+  it("copies only Device ID and routes safe management, fallback, and diagnostics actions", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    const onManage = vi.fn();
+    const onDiagnostics = vi.fn();
+    const { rerender } = renderStatus(readyStatus, { onManage, onDiagnostics });
+    fireEvent.click(screen.getByRole("button", { name: "Open session status" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy Device ID" }));
+    expect(writeText).toHaveBeenCalledWith("DEVICE369");
+    fireEvent.click(screen.getByRole("button", { name: "Manage account and devices" }));
+    expect(onManage).toHaveBeenCalledWith("https://account.example/manage");
+
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Current session" })).getByRole("button", {
+        name: "Open diagnostics"
+      })
+    );
+    expect(onDiagnostics).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <TopBar
+        activeSpaceName="Matrix"
+        accountManagementUrl="javascript:alert(1)"
+        currentSessionStatus={readyStatus}
+        deviceId="DEVICE369"
+        homeserver="https://matrix.example"
+        isBusy={false}
+        searchInputRef={{ current: null }}
+        searchQuery=""
+        searchScope="allRooms"
+        sync="running"
+        userId="@alice:matrix.example"
+        onManageAccount={onManage}
+        onOpenKeyboardSettings={() => undefined}
+        onRefreshCurrentSessionStatus={() => undefined}
+        onRestartSync={() => undefined}
+        onSearchQueryChange={() => undefined}
+        onSearchScopeChange={() => undefined}
+      />
+    );
+    expect(screen.getByText(/did not advertise a safe external account destination/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open local account settings" }));
+    expect(onManage).toHaveBeenLastCalledWith(null);
+  });
+
+  it("dismisses on Escape and outside pointer input and returns focus", () => {
+    renderStatus();
+    const trigger = screen.getByRole("button", { name: "Open session status" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog", { name: "Current session" })).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Current session" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "Current session" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });

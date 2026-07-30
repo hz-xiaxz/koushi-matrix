@@ -11,6 +11,7 @@ fn ready_state_with_room(room_id: &str) -> AppState {
             homeserver: "https://server.example.invalid".to_owned(),
             user_id: "@alice:example.invalid".to_owned(),
             device_id: "ALICEDEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         rooms: vec![RoomSummary {
             room_id: room_id.to_owned(),

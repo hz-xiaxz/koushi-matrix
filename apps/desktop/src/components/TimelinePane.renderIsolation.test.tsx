@@ -275,6 +275,7 @@ function makeSnapshot(): DesktopSnapshot {
           user_id: "@user:example.invalid",
           device_id: "DEVICE"
         },
+        current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },
         settings: {

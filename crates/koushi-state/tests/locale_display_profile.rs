@@ -191,3 +191,19 @@ fn private_use_suffix_on_supported_locale_is_sanitized_to_default_profile() {
     let debug = format!("{japanese_private:?} {rtl_private:?}");
     assert!(!debug.contains("private-room-alpha"));
 }
+
+#[test]
+fn display_platform_owns_the_oauth_device_name() {
+    assert_eq!(
+        DisplayPlatform::Macos.oauth_device_display_name(),
+        "Koushi on macOS"
+    );
+    assert_eq!(
+        DisplayPlatform::Windows.oauth_device_display_name(),
+        "Koushi on Windows"
+    );
+    assert_eq!(
+        DisplayPlatform::Linux.oauth_device_display_name(),
+        "Koushi on Linux"
+    );
+}

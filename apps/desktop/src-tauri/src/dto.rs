@@ -14,16 +14,17 @@ use std::collections::BTreeMap;
 use koushi_core::StateDelta;
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, ActivityState, AppError, AppState,
-    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState, DeviceCleanupState,
-    DeviceSessionListState, DirectoryState, DisplayPlatform, E2eeTrustState, FilesViewState,
-    FocusedContextState, InvitePreview, InviteWorkflowState, LinkPreviewSettingsState,
-    LiveSignalsState, LocalEncryptionState, LocaleDisplayProfile, MentionCandidatesState,
-    NativeAttentionCapabilities, NativeAttentionState, NavigationState, ProfileState,
-    ProvisionalPhase, QrLoginState, RoomInteractionState, RoomListProjection, RoomManagementState,
-    RoomNotificationSettings, RoomPreferencesState, RoomSummary, SearchCrawlerState,
-    SearchMatchField, SearchMatchKind, SearchResult, SearchScope, SearchState, SessionState,
-    SettingsState, SidebarModel, SoftLogoutReauthState, SpaceSummary, StagedUploadItem, SyncMode,
-    SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
+    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState,
+    CurrentSessionStatusState, DeviceCleanupState, DeviceSessionListState, DirectoryState,
+    DisplayPlatform, E2eeTrustState, FilesViewState, FocusedContextState, InvitePreview,
+    InviteWorkflowState, LinkPreviewSettingsState, LiveSignalsState, LocalEncryptionState,
+    LocaleDisplayProfile, MentionCandidatesState, NativeAttentionCapabilities,
+    NativeAttentionState, NavigationState, ProfileState, ProvisionalPhase, QrLoginState,
+    RoomInteractionState, RoomListProjection, RoomManagementState, RoomNotificationSettings,
+    RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchMatchField, SearchMatchKind,
+    SearchResult, SearchScope, SearchState, SessionState, SettingsState, SidebarModel,
+    SoftLogoutReauthState, SpaceSummary, StagedUploadItem, SyncMode, SyncState,
+    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     TypographyDisplayProfile, VerificationGateRejectReason, VerificationGateState,
     VerificationMethod, native_attention_capabilities_for_platform, resolve_locale_display_profile,
     resolve_typography_display_profile,
@@ -111,6 +112,8 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<FrontendSessionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_session_status: Option<CurrentSessionStatusState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_cleanup: Option<DeviceCleanupState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthDiscoveryState>,
@@ -182,6 +185,7 @@ pub struct FrontendDomainStateChangedSlices {
 impl FrontendDomainStateChangedSlices {
     fn is_empty(&self) -> bool {
         self.session.is_none()
+            && self.current_session_status.is_none()
             && self.device_cleanup.is_none()
             && self.auth.is_none()
             && self.device_sessions.is_none()
@@ -262,6 +266,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         let mut ui = FrontendUiStateChangedSlices::default();
 
         domain.session = changed.session.map(Into::into);
+        domain.current_session_status = changed.current_session_status;
         domain.device_cleanup = changed.device_cleanup;
         domain.auth = changed.auth;
         domain.device_sessions = changed.device_sessions;
@@ -356,6 +361,7 @@ pub struct FrontendAppState {
 #[derive(Clone, Debug, Serialize)]
 pub struct FrontendDomainState {
     pub session: FrontendSessionState,
+    pub current_session_status: CurrentSessionStatusState,
     pub device_cleanup: DeviceCleanupState,
     pub auth: AuthDiscoveryState,
     pub device_sessions: DeviceSessionListState,
@@ -424,6 +430,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         domain: FrontendDomainState {
             session: state.session.into(),
+            current_session_status: state.current_session_status,
             device_cleanup: state.device_cleanup,
             auth: state.auth,
             device_sessions: state.device_sessions,
@@ -475,7 +482,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
 /// IPC snapshot contract version. Bumped to 2 by #87 Phase 4 (domain/ui sectioning).
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 
-fn frontend_display_platform() -> DisplayPlatform {
+pub(crate) fn frontend_display_platform() -> DisplayPlatform {
     #[cfg(target_os = "macos")]
     {
         DisplayPlatform::Macos
@@ -919,6 +926,7 @@ mod tests {
                 homeserver: "https://matrix.org".to_owned(),
                 user_id: "@user:matrix.org".to_owned(),
                 device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             }),
             sync: SyncState::Running,
             ..AppState::default()
@@ -1545,6 +1553,7 @@ mod tests {
                     homeserver: "https://matrix.org".to_owned(),
                     user_id: "@user:matrix.org".to_owned(),
                     device_id: "DEVICE".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
                 },
                 gate: koushi_state::VerificationGateState {
                     methods: vec![
@@ -1579,6 +1588,7 @@ mod tests {
             homeserver: "https://example.invalid".into(),
             user_id: "@private:example.invalid".into(),
             device_id: "PRIVATEDEVICE".into(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let gate = koushi_state::VerificationGateState {
             methods: vec![
@@ -1760,6 +1770,7 @@ mod tests {
             homeserver: "https://matrix.example.invalid".to_owned(),
             user_id: "@fixture:example.invalid".to_owned(),
             device_id: "FIXTURE_DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let avatar = AvatarImage {
             mxc_uri: "mxc://example.invalid/fixture-avatar".to_owned(),
@@ -1782,6 +1793,19 @@ mod tests {
             },
             sync: SyncState::Running,
             ..AppState::default()
+        };
+        state.current_session_status = koushi_state::CurrentSessionStatusState::Ready {
+            request_id: 369,
+            details: koushi_state::CurrentSessionStatusDetails::new(
+                Some("Fixture Device".to_owned()),
+                session_info.device_id.clone(),
+                koushi_state::SessionAuthenticationMethod::OAuth,
+                koushi_state::CurrentSessionSyncState::Running,
+                true,
+                koushi_state::OwnIdentityVerification::Verified,
+                koushi_state::CurrentSessionBackupState::Ready,
+                1_722_000_000_000,
+            ),
         };
 
         // profile — own + one cached user
@@ -2279,6 +2303,10 @@ mod tests {
             thread: None,
         })
         .expect("maximally-populated state should serialize to JSON");
+        assert_eq!(
+            value["state"]["domain"]["current_session_status"]["status"], "ready",
+            "the complete Rust-owned current-session status must cross the Tauri DTO"
+        );
 
         let golden_path = concat!(
             env!("CARGO_MANIFEST_DIR"),

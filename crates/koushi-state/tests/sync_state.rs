@@ -8,6 +8,7 @@ fn session_info() -> SessionInfo {
         homeserver: "https://matrix.org".to_owned(),
         user_id: "@user:matrix.org".to_owned(),
         device_id: "DEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     }
 }
 

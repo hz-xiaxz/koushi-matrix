@@ -11,6 +11,7 @@ fn ready_state() -> AppState {
             homeserver: "http://127.0.0.1:6167".to_owned(),
             user_id: "@qa:localhost".to_owned(),
             device_id: "LOCALDEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         ..AppState::default()
     }
@@ -90,6 +91,7 @@ fn invite_list_requires_exact_ready_and_clears_on_logout() {
         homeserver: "http://127.0.0.1:6167".to_owned(),
         user_id: "@qa:localhost".to_owned(),
         device_id: "LOCALDEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     });
     reduce(
         &mut locked,
@@ -238,6 +240,7 @@ fn invite_list_is_cleared_on_account_switch() {
         homeserver: "http://127.0.0.1:6167".to_owned(),
         user_id: "@other:localhost".to_owned(),
         device_id: "OTHERDEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
     };
     reduce(
         &mut state,

@@ -5,7 +5,7 @@ use std::{fmt, path::PathBuf};
 
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentScope, AttachmentSort,
-    ComposerDraftRevision, DirectoryQuery, FilesViewScope, FormattedMessageDraft,
+    ComposerDraftRevision, DirectoryQuery, DisplayPlatform, FilesViewScope, FormattedMessageDraft,
     IdentityResetAuthRequest, ImageUploadCompressionMode, InviteScopeSelection,
     JapaneseCatalogProfile, LocalEncryptionHealth, LoginRequest, MentionIntent,
     NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState, PresenceKind,
@@ -102,6 +102,7 @@ impl CoreCommand {
                 | AccountCommand::RestoreLastSession { request_id }
                 | AccountCommand::QuerySavedSessions { request_id }
                 | AccountCommand::QueryDevices { request_id }
+                | AccountCommand::RefreshCurrentSessionStatus { request_id, .. }
                 | AccountCommand::LoadAccountManagementCapabilities { request_id }
                 | AccountCommand::RenameDevice { request_id, .. }
                 | AccountCommand::DeleteDevices { request_id, .. }
@@ -1107,6 +1108,7 @@ pub enum AccountCommand {
     CompleteOidcLogin {
         request_id: RequestId,
         callback_url: String,
+        platform: DisplayPlatform,
     },
     LoginPassword {
         request_id: RequestId,
@@ -1131,6 +1133,10 @@ pub enum AccountCommand {
     },
     QueryDevices {
         request_id: RequestId,
+    },
+    RefreshCurrentSessionStatus {
+        request_id: RequestId,
+        trigger: koushi_state::SessionStatusRefreshTrigger,
     },
     LoadAccountManagementCapabilities {
         request_id: RequestId,
@@ -1334,6 +1340,7 @@ impl AccountCommand {
                 | Self::CancelIdentityReset { .. }
                 | Self::SubmitIdentityResetAuth { .. }
                 | Self::QueryDevices { .. }
+                | Self::RefreshCurrentSessionStatus { .. }
                 | Self::LoadAccountManagementCapabilities { .. }
                 | Self::RenameDevice { .. }
                 | Self::DeleteDevices { .. }
@@ -1421,6 +1428,14 @@ impl fmt::Debug for AccountCommand {
             Self::QueryDevices { request_id } => formatter
                 .debug_struct("QueryDevices")
                 .field("request_id", request_id)
+                .finish(),
+            Self::RefreshCurrentSessionStatus {
+                request_id,
+                trigger,
+            } => formatter
+                .debug_struct("RefreshCurrentSessionStatus")
+                .field("request_id", request_id)
+                .field("trigger", trigger)
                 .finish(),
             Self::LoadAccountManagementCapabilities { request_id } => formatter
                 .debug_struct("LoadAccountManagementCapabilities")

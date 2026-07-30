@@ -11,6 +11,7 @@ fn ready_state() -> AppState {
             homeserver: "https://matrix.example.invalid".to_owned(),
             user_id: "@user:example.invalid".to_owned(),
             device_id: "DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         timeline: koushi_state::TimelinePaneState {
             room_id: Some(ROOM_ID.to_owned()),

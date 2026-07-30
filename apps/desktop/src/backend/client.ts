@@ -30,6 +30,7 @@ import type {
   RoomTagKind,
   SavedSessionInfo,
   SearchScopeKind,
+  SessionStatusRefreshTrigger,
   SettingsPatch,
   StagedUploadCompressionChoice,
   StagedUploadOutputSelection,
@@ -174,6 +175,12 @@ class TauriDesktopApi implements DesktopApi {
 
   async queryDevices(): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("query_devices");
+  }
+
+  async refreshCurrentSessionStatus(
+    trigger: SessionStatusRefreshTrigger
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("refresh_current_session_status", { trigger });
   }
 
   async renameDevice(deviceOrdinal: number, displayName: string): Promise<DesktopSnapshot> {

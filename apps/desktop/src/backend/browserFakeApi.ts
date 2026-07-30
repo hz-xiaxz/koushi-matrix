@@ -50,6 +50,7 @@ import type {
   SavedSessionInfo,
   SearchResult,
   SearchScopeKind,
+  SessionStatusRefreshTrigger,
   SettingsPatch,
   PresenceKind,
   PreparedUploadVariant,
@@ -110,6 +111,7 @@ export interface DesktopApi {
   markRoomAsUnread(roomId: string, unread: boolean): Promise<DesktopSnapshot>;
   setRoomNotificationMode(roomId: string, mode: RoomNotificationMode): Promise<DesktopSnapshot>;
   queryDevices(): Promise<DesktopSnapshot>;
+  refreshCurrentSessionStatus(trigger: SessionStatusRefreshTrigger): Promise<DesktopSnapshot>;
   renameDevice(deviceOrdinal: number, displayName: string): Promise<DesktopSnapshot>;
   deleteDevices(deviceOrdinals: number[]): Promise<DesktopSnapshot>;
   submitAccountManagementUia(flowId: number, password: string): Promise<DesktopSnapshot>;
@@ -979,6 +981,37 @@ class BrowserFakeApi implements DesktopApi {
           inactive: true
         }
       ]
+    };
+    return this.getSnapshot();
+  }
+
+  async refreshCurrentSessionStatus(
+    trigger: SessionStatusRefreshTrigger
+  ): Promise<DesktopSnapshot> {
+    if (!this.isReady()) {
+      return this.getSnapshot();
+    }
+    const requestId = this.nextRequestId();
+    this.snapshot.state.domain.current_session_status = {
+      status: "checking",
+      request_id: requestId,
+      trigger
+    };
+    const session = this.snapshot.state.domain.session;
+    this.snapshot.state.domain.current_session_status = {
+      status: "ready",
+      request_id: requestId,
+      details: {
+        device_display_name: "Koushi on Linux",
+        device_id: session.device_id ?? "",
+        authentication_method: "unknown",
+        sync_state: this.snapshot.state.domain.sync === "running" ? "running" : "stopped",
+        is_cross_signed_by_owner: true,
+        own_identity_verification: "verified",
+        key_backup: "ready",
+        verification: "verified",
+        checked_at_ms: Date.now()
+      }
     };
     return this.getSnapshot();
   }
@@ -4143,6 +4176,7 @@ function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): Desk
           ...session,
           kind: "ready"
         },
+        current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },
         device_sessions: { kind: "idle" },
@@ -4273,6 +4307,7 @@ function createSignedOutSnapshot(): DesktopSnapshot {
       schema_version: 3,
       domain: {
         session: { kind: "signedOut" },
+        current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },
         device_sessions: { kind: "idle" },

@@ -29,6 +29,7 @@ mod room;
 mod room_management;
 mod search;
 mod session;
+mod session_status;
 mod settings;
 mod submission;
 mod sync;
@@ -153,6 +154,7 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             session::handle_bootstrap_recovery_saved_confirmed(state, flow_id)
         }
         AppAction::ProvisionalSessionDiscarded => {
+            session_status::reset(state);
             session::handle_provisional_session_discarded(state)
         }
         AppAction::E2eeRecoveryRequired { info, methods } => {
@@ -338,10 +340,17 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::SessionPersistenceFailed { message } => {
             session::handle_session_persistence_failed(state, message)
         }
-        AppAction::SessionLocked => session::handle_session_locked(state),
-        AppAction::LogoutRequested => session::handle_logout_requested(state),
+        AppAction::SessionLocked => {
+            session_status::reset(state);
+            session::handle_session_locked(state)
+        }
+        AppAction::LogoutRequested => {
+            session_status::reset(state);
+            session::handle_logout_requested(state)
+        }
         AppAction::LogoutFinished => session::handle_logout_finished(state),
         AppAction::SwitchAccountRequested { info } => {
+            session_status::reset(state);
             session::handle_switch_account_requested(state, info)
         }
         AppAction::SoftLogoutReauthRequested { request_id } => {
@@ -394,6 +403,19 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::AccountManagementCapabilitiesLoadFailed => {
             account::handle_account_management_capabilities_load_failed(state)
         }
+        AppAction::CurrentSessionStatusRefreshRequested {
+            request_id,
+            trigger,
+        } => session_status::handle_refresh_requested(state, request_id, trigger),
+        AppAction::CurrentSessionStatusRefreshed {
+            request_id,
+            details,
+        } => session_status::handle_refreshed(state, request_id, details),
+        AppAction::CurrentSessionStatusRefreshFailed {
+            request_id,
+            kind,
+            checked_at_ms,
+        } => session_status::handle_refresh_failed(state, request_id, kind, checked_at_ms),
         AppAction::SettingsLoaded { values } => settings::handle_settings_loaded(state, values),
         AppAction::SettingsLoadFailed { message } => {
             settings::handle_settings_load_failed(state, message)
@@ -2121,6 +2143,7 @@ mod tests {
             homeserver: "https://example.invalid".to_owned(),
             user_id: "@alice:example.invalid".to_owned(),
             device_id: "DEVICE".to_owned(),
+            authentication_method: crate::state::SessionAuthenticationMethod::Unknown,
         });
         state
     }

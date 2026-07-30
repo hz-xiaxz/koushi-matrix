@@ -45,6 +45,7 @@
         },
         "sessions": [
           {
+            "authentication_method": "unknown",
             "device_id": "DEV",
             "homeserver": "https://example.test",
             "user_id": "@u:example.test"
@@ -57,9 +58,7 @@
   "activityMarkedRead": {
     "event": {
       "MarkedRead": {
-        "cleared_event_ids": [
-          "$activity-unread:example.test"
-        ],
+        "cleared_event_ids": ["$activity-unread:example.test"],
         "request_id": {
           "connection_id": 3,
           "sequence": 7
@@ -158,9 +157,7 @@
       "profile": {
         "catalog_locale": "ja",
         "complete": false,
-        "missing_message_ids": [
-          "settings.title"
-        ]
+        "missing_message_ids": ["settings.title"]
       }
     },
     "kind": "CjkTextPolicy"
@@ -448,9 +445,7 @@
           "sequence": 7
         },
         "settings": {
-          "alternate_aliases": [
-            "#private-alt:example.test"
-          ],
+          "alternate_aliases": ["#private-alt:example.test"],
           "avatar_url": "mxc://example.test/avatar",
           "canonical_alias": "#private:example.test",
           "history_visibility": "shared",
@@ -493,9 +488,7 @@
           "sequence": 7
         },
         "settings": {
-          "alternate_aliases": [
-            "#private-alt:example.test"
-          ],
+          "alternate_aliases": ["#private-alt:example.test"],
           "avatar_url": "mxc://example.test/avatar",
           "canonical_alias": "#private:example.test",
           "history_visibility": "shared",
@@ -632,6 +625,21 @@
     "changed": {
       "state": {
         "domain": {
+          "current_session_status": {
+            "details": {
+              "authentication_method": "oauth",
+              "checked_at_ms": 1722000000000,
+              "device_display_name": "Contract Device",
+              "device_id": "CONTRACTDEVICE",
+              "is_cross_signed_by_owner": true,
+              "key_backup": "ready",
+              "own_identity_verification": "verified",
+              "sync_state": "running",
+              "verification": "verified"
+            },
+            "request_id": 369,
+            "status": "ready"
+          },
           "device_cleanup": {
             "kind": "offered",
             "reason": "noProofMethod"

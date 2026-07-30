@@ -37,6 +37,7 @@ const localSecretsRoot = join(repoRoot, ".local-secrets", "headless-local-qa");
 const checks = [
   "scenario safety",
   "scenario login_sync",
+  "scenario session_status",
   "scenario e2ee_trust",
   "scenario device_cleanup",
   "scenario gate_restore",
@@ -691,7 +692,7 @@ function safeTimestamp() {
 
 function printUsage() {
   console.log(
-    "Usage: desktop-headless-local-qa.mjs --run [--server=conduit|tuwunel|synapse|matrixorg|both|all] [--scenario=all|device_cleanup|timeline_reconnect|timeline_legacy_fallback|timeline_legacy_persisted_gap|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--core-backend=probed|legacy|both] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
+    "Usage: desktop-headless-local-qa.mjs --run [--server=conduit|tuwunel|synapse|matrixorg|both|all] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_legacy_fallback|timeline_legacy_persisted_gap|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--core-backend=probed|legacy|both] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
   );
   console.log("Starts a disposable local homeserver and runs non-GUI Matrix SDK QA.");
   console.log("  --server=synapse/matrixorg  Runs local Synapse in Docker.");

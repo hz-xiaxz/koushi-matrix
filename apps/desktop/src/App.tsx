@@ -4922,8 +4922,15 @@ export function App() {
         data-density={displayDensity}
       >
         <TopBar
+          accountManagementUrl={
+            snapshot.state.domain.auth.kind === "ready"
+              ? snapshot.state.domain.auth.delegated.account_management_url
+              : undefined
+          }
           activeRoomName={activeRoom?.display_label ?? null}
           activeSpaceName={activeSpaceName}
+          currentSessionStatus={snapshot.state.domain.current_session_status}
+          deviceId={snapshot.state.domain.session.device_id ?? null}
           homeserver={snapshot.state.domain.session.homeserver ?? null}
           isBusy={isBusy}
           platform={snapshot.state.domain.locale_profile.platform}
@@ -4931,11 +4938,22 @@ export function App() {
           searchQuery={searchQuery}
           searchScope={searchScope}
           sync={snapshot.state.domain.sync}
+          userId={snapshot.state.domain.session.user_id ?? null}
+          onManageAccount={(safeExternalUrl) => {
+            if (safeExternalUrl) {
+              void openExternalHttpUrl(safeExternalUrl);
+              return;
+            }
+            void setRightPanelModeClosingFocusedContext("userSettings");
+          }}
           onOpenKeyboardSettings={() => {
             void setRightPanelModeClosingFocusedContext("keyboardSettings");
           }}
           onOpenDiagnostics={() => {
             void openDiagnostics();
+          }}
+          onRefreshCurrentSessionStatus={(trigger) => {
+            void api.refreshCurrentSessionStatus(trigger).then(setSnapshot);
           }}
           onRestartSync={restartSync}
           onSearchQueryChange={setSearchQuery}

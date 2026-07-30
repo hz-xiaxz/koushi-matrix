@@ -66,23 +66,24 @@ use koushi_state::{
     ActivityMarkReadTarget, ActivityRowKind, ActivityState, AppAction, AppState, AuthSecret,
     ComposerKey, ComposerKeyEvent, ComposerKeyModifiers, ComposerResolvedAction,
     ComposerResolverContext, ComposerSelection, ComposerSendShortcut, ComposerSurface,
-    ComposerTarget, DeviceCleanupLocalMode, DeviceCleanupState, DirectoryQuery,
-    DirectoryRoomSummary, DisplaySettings, IdentityResetAuthRequest, IdentityResetAuthType,
-    IdentityResetState, ImageUploadCompressionMode, KeyBackupStatus, LocalEncryptionHealth,
-    LocalEncryptionState, MentionCandidatesCompleteness, MentionCandidatesTarget, MentionIntent,
-    MentionSurface, MentionTarget, NativeAttentionCapabilities, NativeAttentionCapability,
+    ComposerTarget, CurrentSessionStatusState, CurrentSessionSyncState, DeviceCleanupLocalMode,
+    DeviceCleanupState, DirectoryQuery, DirectoryRoomSummary, DisplaySettings,
+    IdentityResetAuthRequest, IdentityResetAuthType, IdentityResetState,
+    ImageUploadCompressionMode, KeyBackupStatus, LocalEncryptionHealth, LocalEncryptionState,
+    MentionCandidatesCompleteness, MentionCandidatesTarget, MentionIntent, MentionSurface,
+    MentionTarget, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionDispatchState, NativeAttentionObservationKind, NativeAttentionProjectionInput,
     NativeAttentionState, NativeAttentionSuppressionReason, OperationFailureKind, PresenceKind,
     RecoveryRequest, ReplyQuoteState, RoomAttentionKind, RoomListFilter,
     RoomManagementOperationKind, RoomManagementOperationState, RoomMentionPermission,
     RoomModerationAction, RoomNotificationMode, RoomSettingChange, RoomSettingsSnapshot,
     RoomSummary, RoomTags, SasEmoji, ScheduledSendCapability, SearchCrawlerFailureKind,
-    SearchCrawlerRoomState, SearchCrawlerSettings, SearchCrawlerSpeed, SessionInfo, SessionState,
-    SettingsPatch, SettingsPersistenceState, StagedUploadCompressionChoice, StagedUploadItem,
-    StagedUploadKind, TimelineMediaGalleryItem, TimelineMediaGalleryMedia,
-    TimelineMediaGallerySource, TimelineMediaKind, VerificationFlowState, VerificationTarget,
-    build_formatted_message_draft, compose_sidebar, native_attention_state_from_rooms, reduce,
-    resolve_composer_key_action,
+    SearchCrawlerRoomState, SearchCrawlerSettings, SearchCrawlerSpeed, SessionAuthenticationMethod,
+    SessionInfo, SessionState, SessionStatusRefreshTrigger, SettingsPatch,
+    SettingsPersistenceState, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
+    TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
+    TimelineMediaKind, VerificationFlowState, VerificationTarget, build_formatted_message_draft,
+    compose_sidebar, native_attention_state_from_rooms, reduce, resolve_composer_key_action,
 };
 
 const ENV_HOMESERVER: &str = "KOUSHI_LOCAL_QA_HOMESERVER";
@@ -235,6 +236,7 @@ enum QaScenario {
     All,
     Safety,
     LoginSync,
+    SessionStatus,
     CredentialHealth,
     NativeAttention,
     E2eeTrust,
@@ -271,6 +273,7 @@ enum QaScenario {
 enum QaStage {
     Safety,
     LoginSync,
+    SessionStatus,
     CredentialHealth,
     NativeAttention,
     E2eeTrust,
@@ -392,6 +395,7 @@ impl QaScenario {
             "all" => Ok(Self::All),
             "safety" => Ok(Self::Safety),
             "login_sync" => Ok(Self::LoginSync),
+            "session_status" => Ok(Self::SessionStatus),
             "credential_health" => Ok(Self::CredentialHealth),
             "native_attention" => Ok(Self::NativeAttention),
             "e2ee_trust" => Ok(Self::E2eeTrust),
@@ -423,7 +427,7 @@ impl QaScenario {
             "link_preview" => Ok(Self::LinkPreview),
             "cache_restore" => Ok(Self::CacheRestore),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, credential_health, native_attention, e2ee_trust, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_legacy_fallback, timeline_legacy_persisted_gap, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_legacy_fallback, timeline_legacy_persisted_gap, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
             )),
         }
     }
@@ -440,6 +444,10 @@ impl QaScenario {
             ),
             Self::Safety => matches!(stage, QaStage::Safety),
             Self::LoginSync => matches!(stage, QaStage::Safety | QaStage::LoginSync),
+            Self::SessionStatus => matches!(
+                stage,
+                QaStage::Safety | QaStage::LoginSync | QaStage::SessionStatus
+            ),
             Self::CredentialHealth => matches!(
                 stage,
                 QaStage::Safety | QaStage::LoginSync | QaStage::CredentialHealth
@@ -628,6 +636,12 @@ fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
     match stage {
         QaStage::Safety => &["safety=ok"],
         QaStage::LoginSync => &["login_sync=ok"],
+        QaStage::SessionStatus => &[
+            "session_status_checking=ok",
+            "session_status_ready=ok",
+            "session_status_device=ok",
+            "session_status=ok",
+        ],
         QaStage::CredentialHealth => &["credential_health=ok", "fail_closed=ok"],
         QaStage::NativeAttention => &[
             "notification_candidate=ok",
@@ -797,6 +811,10 @@ fn implemented_final_tokens() -> Vec<&'static str> {
     vec![
         "safety=ok",
         "login_sync=ok",
+        "session_status_checking=ok",
+        "session_status_ready=ok",
+        "session_status_device=ok",
+        "session_status=ok",
         "credential_health=ok",
         "fail_closed=ok",
         "notification_candidate=ok",
@@ -881,6 +899,9 @@ fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
     match scenario {
         QaScenario::Safety => vec![QaStage::Safety],
         QaScenario::LoginSync => vec![QaStage::Safety, QaStage::LoginSync],
+        QaScenario::SessionStatus => {
+            vec![QaStage::Safety, QaStage::LoginSync, QaStage::SessionStatus]
+        }
         QaScenario::CredentialHealth => vec![
             QaStage::Safety,
             QaStage::LoginSync,
@@ -1026,6 +1047,7 @@ fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
         QaScenario::All => vec![
             QaStage::Safety,
             QaStage::LoginSync,
+            QaStage::SessionStatus,
             QaStage::CredentialHealth,
             QaStage::NativeAttention,
             QaStage::InvitesDm,
@@ -1067,6 +1089,7 @@ fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static str> {
         | QaScenario::Directory
         | QaScenario::RoomManagement
         | QaScenario::RoomPeopleProjection
+        | QaScenario::SessionStatus
         | QaScenario::CredentialHealth
         | QaScenario::NativeAttention
         | QaScenario::E2eeTrust
@@ -6750,6 +6773,10 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
         }
     }
 
+    if scenario.should_run_stage(QaStage::SessionStatus) {
+        run_session_status_stage(&mut conn_a).await?;
+    }
+
     if scenario.should_run_stage(QaStage::CredentialHealth) {
         run_credential_health_stage(&mut conn_a).await?;
     }
@@ -10925,6 +10952,92 @@ fn authenticated_session_info_from_state(session: &SessionState) -> Option<&Sess
         | SessionState::Authenticating { .. }
         | SessionState::Locked(_)
         | SessionState::LoggingOut => None,
+    }
+}
+
+async fn run_session_status_stage(conn: &mut CoreConnection) -> Result<(), String> {
+    let expected_device_id = match &conn.snapshot().session {
+        SessionState::Ready(info) => info.device_id.clone(),
+        _ => return Err("session_status: current session is not Ready".to_owned()),
+    };
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::Account(
+        AccountCommand::RefreshCurrentSessionStatus {
+            request_id,
+            trigger: SessionStatusRefreshTrigger::Manual,
+        },
+    ))
+    .await
+    .map_err(|_| "session_status: refresh command was rejected".to_owned())?;
+
+    let mut saw_checking = false;
+    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
+    loop {
+        let event = deadline
+            .recv(conn)
+            .await
+            .map_err(|_| "session_status: timed out waiting for settlement".to_owned())?
+            .map_err(|lag| {
+                format!(
+                    "session_status: event stream lagged (skipped={})",
+                    lag.skipped
+                )
+            })?;
+        let CoreEvent::StateChanged(snapshot) = event else {
+            continue;
+        };
+        match &snapshot.current_session_status {
+            CurrentSessionStatusState::Checking {
+                request_id: observed_request_id,
+                trigger: SessionStatusRefreshTrigger::Manual,
+            } if *observed_request_id == request_id.sequence => {
+                if !saw_checking {
+                    println!("session_status_checking=ok");
+                    saw_checking = true;
+                }
+            }
+            CurrentSessionStatusState::Ready {
+                request_id: observed_request_id,
+                details,
+            } if *observed_request_id == request_id.sequence => {
+                if !saw_checking {
+                    return Err(
+                        "session_status: Ready was observed without the Checking transition"
+                            .to_owned(),
+                    );
+                }
+                if details.device_id != expected_device_id {
+                    return Err(
+                        "session_status: SDK facts did not describe the current device".to_owned(),
+                    );
+                }
+                if details.device_display_name.as_deref() != Some(DEVICE_A) {
+                    return Err(
+                        "session_status: server-side current-device name did not match login"
+                            .to_owned(),
+                    );
+                }
+                if details.authentication_method != SessionAuthenticationMethod::Password
+                    || details.sync_state != CurrentSessionSyncState::Running
+                {
+                    return Err(
+                        "session_status: authentication or sync facts did not match runtime"
+                            .to_owned(),
+                    );
+                }
+                println!("session_status_ready=ok");
+                println!("session_status_device=ok");
+                println!("session_status=ok");
+                return Ok(());
+            }
+            CurrentSessionStatusState::Failed {
+                request_id: observed_request_id,
+                ..
+            } if *observed_request_id == request_id.sequence => {
+                return Err("session_status: refresh settled with a coarse failure".to_owned());
+            }
+            _ => {}
+        }
     }
 }
 
@@ -15755,6 +15868,7 @@ fn assert_upload_ux_state_contract(room_id: &str) -> Result<(), String> {
             homeserver: "https://qa.example.invalid".to_owned(),
             user_id: "@qa:example.invalid".to_owned(),
             device_id: "QADEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         rooms: vec![native_attention_room(room_id, "QA Room", false, 0, 0, 0)],
         ..AppState::default()
@@ -18217,6 +18331,7 @@ mod tests {
                 homeserver: "https://example.invalid".to_owned(),
                 user_id: "@alice:example.invalid".to_owned(),
                 device_id: "ALICEDEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
             gate: koushi_state::VerificationGateState {
                 methods: vec![koushi_state::VerificationMethodCapability::ExistingDeviceSas],
@@ -18271,6 +18386,10 @@ mod tests {
         assert_eq!(
             QaScenario::from_env_value("login_sync").unwrap(),
             QaScenario::LoginSync
+        );
+        assert_eq!(
+            QaScenario::from_env_value("session_status").unwrap(),
+            QaScenario::SessionStatus
         );
         assert_eq!(
             QaScenario::from_env_value("room_space").unwrap(),
@@ -18383,6 +18502,7 @@ mod tests {
         for scenario in [
             QaScenario::Safety,
             QaScenario::LoginSync,
+            QaScenario::SessionStatus,
             QaScenario::CredentialHealth,
             QaScenario::NativeAttention,
             QaScenario::RoomSpace,
@@ -18410,6 +18530,22 @@ mod tests {
     }
 
     #[test]
+    fn session_status_scenario_runs_after_login_and_reports_only_safe_tokens() {
+        assert_eq!(
+            stages_for_scenario(QaScenario::SessionStatus),
+            [QaStage::Safety, QaStage::LoginSync, QaStage::SessionStatus]
+        );
+        let report = scenario_report("local", QaScenario::SessionStatus);
+        assert!(report.contains("session_status_checking=ok"));
+        assert!(report.contains("session_status_ready=ok"));
+        assert!(report.contains("session_status_device=ok"));
+        assert!(report.contains("session_status=ok"));
+        assert!(!report.contains('@'));
+        assert!(!report.contains("http"));
+        assert!(!report.contains(DEVICE_A));
+    }
+
+    #[test]
     fn thread_is_allowed_by_preflight() {
         scenario_preflight_error(QaScenario::Thread).unwrap();
     }
@@ -18420,6 +18556,7 @@ mod tests {
             QaScenario::All,
             QaScenario::Safety,
             QaScenario::LoginSync,
+            QaScenario::SessionStatus,
             QaScenario::CredentialHealth,
             QaScenario::NativeAttention,
             QaScenario::E2eeTrust,
@@ -19696,6 +19833,7 @@ mod tests {
         for scenario in [
             QaScenario::Safety,
             QaScenario::LoginSync,
+            QaScenario::SessionStatus,
             QaScenario::CredentialHealth,
             QaScenario::E2eeTrust,
             QaScenario::GateRestore,
@@ -20604,6 +20742,7 @@ mod tests {
                 homeserver: "https://example.invalid".to_owned(),
                 user_id: "@ready:example.invalid".to_owned(),
                 device_id: "READYDEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             });
         });
         let started_at = tokio::time::Instant::now();
@@ -21922,6 +22061,10 @@ mod tests {
             &[
                 "safety=ok",
                 "login_sync=ok",
+                "session_status_checking=ok",
+                "session_status_ready=ok",
+                "session_status_device=ok",
+                "session_status=ok",
                 "credential_health=ok",
                 "fail_closed=ok",
                 "notification_candidate=ok",
@@ -22081,6 +22224,7 @@ mod tests {
             homeserver: "https://example.invalid".to_owned(),
             user_id: "@alice:example.invalid".to_owned(),
             device_id: "ALICEDEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
 
         assert_eq!(
@@ -22584,6 +22728,10 @@ mod tests {
             &[
                 "safety=ok",
                 "login_sync=ok",
+                "session_status_checking=ok",
+                "session_status_ready=ok",
+                "session_status_device=ok",
+                "session_status=ok",
                 "credential_health=ok",
                 "fail_closed=ok",
                 "notification_candidate=ok",

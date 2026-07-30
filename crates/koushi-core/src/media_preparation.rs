@@ -925,6 +925,7 @@ mod tests {
             homeserver: "https://example.invalid".to_owned(),
             user_id: "@first:example.invalid".to_owned(),
             device_id: "FIRST".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         });
         registry.reconcile_snapshot(&snapshot);
         let items = registry.prepare_target(
@@ -943,6 +944,7 @@ mod tests {
                 homeserver: "https://example.invalid".to_owned(),
                 user_id: "@second:example.invalid".to_owned(),
                 device_id: "SECOND".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         };
         registry.reconcile_snapshot(&snapshot);
@@ -952,6 +954,7 @@ mod tests {
             homeserver: "https://example.invalid".to_owned(),
             user_id: "@second:example.invalid".to_owned(),
             device_id: "SECOND".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         });
         registry.reconcile_snapshot(&snapshot);
 

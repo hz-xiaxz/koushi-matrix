@@ -131,6 +131,21 @@
           "width_fold": true
         }
       },
+      "current_session_status": {
+        "details": {
+          "authentication_method": "oauth",
+          "checked_at_ms": 1722000000000,
+          "device_display_name": "Fixture Device",
+          "device_id": "FIXTURE_DEVICE",
+          "is_cross_signed_by_owner": true,
+          "key_backup": "ready",
+          "own_identity_verification": "verified",
+          "sync_state": "running",
+          "verification": "verified"
+        },
+        "request_id": 369,
+        "status": "ready"
+      },
       "device_cleanup": {
         "failureKind": "localData",
         "kind": "localResetFailed",

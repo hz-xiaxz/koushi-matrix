@@ -4,6 +4,8 @@ import {
   type MouseEvent,
   type ReactNode,
   type RefObject,
+  useEffect,
+  useRef,
   useState
 } from "react";
 import {
@@ -24,13 +26,16 @@ import {
 import { t } from "../i18n/messages";
 import type {
   AccountHomeItem,
+  CurrentSessionStatusState,
   DesktopSnapshot,
   DisplayPlatform,
   RoomListItem,
   RoomSummary,
-  SearchScopeKind
+  SearchScopeKind,
+  SessionStatusRefreshTrigger
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
+import { toExternalHttpUrl } from "../domain/externalLinks";
 import { mediaSourceUrl } from "../domain/mediaUrl";
 import { Tooltip } from "./Tooltip";
 import { ImeTextField } from "./ImeTextControl";
@@ -128,8 +133,11 @@ function searchScopePlaceholder(
 }
 
 export function TopBar({
+  accountManagementUrl,
   activeRoomName = null,
   activeSpaceName,
+  currentSessionStatus = { status: "idle" },
+  deviceId = null,
   homeserver,
   isBusy,
   platform = "linux",
@@ -137,15 +145,21 @@ export function TopBar({
   searchQuery,
   searchScope,
   sync,
+  userId = null,
+  onManageAccount = () => undefined,
   onOpenKeyboardSettings,
   onOpenDiagnostics = () => undefined,
+  onRefreshCurrentSessionStatus = () => undefined,
   onRestartSync,
   onSearchQueryChange,
   onSearchScopeChange,
   onStartWindowDrag = () => undefined
 }: {
+  accountManagementUrl?: string | null;
   activeRoomName?: string | null;
   activeSpaceName: string;
+  currentSessionStatus?: CurrentSessionStatusState;
+  deviceId?: string | null;
   homeserver?: string | null;
   isBusy: boolean;
   platform?: DisplayPlatform;
@@ -153,18 +167,63 @@ export function TopBar({
   searchQuery: string;
   searchScope: SearchScopeKind;
   sync: DesktopSnapshot["state"]["domain"]["sync"];
+  userId?: string | null;
+  onManageAccount?: (safeExternalUrl: string | null) => void;
   onOpenKeyboardSettings: () => void;
   onOpenDiagnostics?: () => void;
+  onRefreshCurrentSessionStatus?: (trigger: SessionStatusRefreshTrigger) => void;
   onRestartSync: () => void;
   onSearchQueryChange: (value: string) => void;
   onSearchScopeChange: (value: SearchScopeKind) => void;
   onStartWindowDrag?: () => void;
 }) {
+  const [sessionStatusOpen, setSessionStatusOpen] = useState(false);
+  const sessionStatusHostRef = useRef<HTMLDivElement>(null);
+  const sessionStatusTriggerRef = useRef<HTMLButtonElement>(null);
   const syncStatus = syncStatePresentation(sync);
   const serverLabel = matrixServerLabel(homeserver);
+  const safeAccountManagementUrl = toExternalHttpUrl(accountManagementUrl);
+  const accountManagementResolved = accountManagementUrl !== undefined;
   const syncAriaLabel = serverLabel
     ? `${serverLabel} · ${syncStatus.ariaLabel}`
     : syncStatus.ariaLabel;
+
+  function closeSessionStatus() {
+    setSessionStatusOpen(false);
+    sessionStatusTriggerRef.current?.focus();
+  }
+
+  function openSessionStatus() {
+    setSessionStatusOpen(true);
+    onRefreshCurrentSessionStatus("open");
+  }
+
+  useEffect(() => {
+    if (!sessionStatusOpen) {
+      return undefined;
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSessionStatus();
+      }
+    }
+    function onPointerDown(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !sessionStatusHostRef.current?.contains(event.target)
+      ) {
+        closeSessionStatus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [sessionStatusOpen]);
+
   return (
     <header
       className="titlebar"
@@ -202,18 +261,51 @@ export function TopBar({
         <option value="dms">{t("search.scopeDm")}</option>
       </select>
       <div className="top-actions">
-        <div
-          className="sync-status"
-          data-sync-state={syncStatus.state}
-          role="status"
-          aria-live="polite"
-          aria-label={syncAriaLabel}
-        >
-          <span className={`sync-dot ${isBusy ? "busy" : ""}`} />
-          {serverLabel ? <span className="sync-status-server">{serverLabel}</span> : null}
-          <span className="sync-status-label">{syncStatus.label}</span>
-          {syncStatus.detail ? (
-            <span className="sync-status-detail">{syncStatus.detail}</span>
+        <div className="session-status-host" ref={sessionStatusHostRef}>
+          <button
+            ref={sessionStatusTriggerRef}
+            className="sync-status"
+            data-sync-state={syncStatus.state}
+            type="button"
+            aria-label={t("sessionStatus.open")}
+            aria-expanded={sessionStatusOpen}
+            aria-haspopup="dialog"
+            onClick={() => {
+              if (sessionStatusOpen) {
+                closeSessionStatus();
+              } else {
+                openSessionStatus();
+              }
+            }}
+          >
+            <span
+              className="sync-status-content"
+              data-sync-state={syncStatus.state}
+              role="status"
+              aria-live="polite"
+              aria-label={syncAriaLabel}
+            >
+              <span className={`sync-dot ${isBusy ? "busy" : ""}`} aria-hidden="true" />
+              {serverLabel ? <span className="sync-status-server">{serverLabel}</span> : null}
+              <span className="sync-status-label">{syncStatus.label}</span>
+              {syncStatus.detail ? (
+                <span className="sync-status-detail">{syncStatus.detail}</span>
+              ) : null}
+            </span>
+            <ChevronDown size={ICON_SIZE.micro} aria-hidden="true" />
+          </button>
+          {sessionStatusOpen ? (
+            <SessionStatusPopover
+              accountManagementUrl={safeAccountManagementUrl}
+              accountManagementResolved={accountManagementResolved}
+              currentSessionStatus={currentSessionStatus}
+              deviceId={deviceId}
+              homeserver={serverLabel ?? homeserver ?? null}
+              userId={userId}
+              onManageAccount={onManageAccount}
+              onOpenDiagnostics={onOpenDiagnostics}
+              onRefresh={onRefreshCurrentSessionStatus}
+            />
           ) : null}
         </div>
         {syncStatus.restartable ? (
@@ -246,6 +338,242 @@ export function TopBar({
       </div>
     </header>
   );
+}
+
+function SessionStatusPopover({
+  accountManagementUrl,
+  accountManagementResolved,
+  currentSessionStatus,
+  deviceId,
+  homeserver,
+  userId,
+  onManageAccount,
+  onOpenDiagnostics,
+  onRefresh
+}: {
+  accountManagementUrl: string | null;
+  accountManagementResolved: boolean;
+  currentSessionStatus: CurrentSessionStatusState;
+  deviceId: string | null;
+  homeserver: string | null;
+  userId: string | null;
+  onManageAccount: (safeExternalUrl: string | null) => void;
+  onOpenDiagnostics: () => void;
+  onRefresh: (trigger: SessionStatusRefreshTrigger) => void;
+}) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const details =
+    currentSessionStatus.status === "ready" ? currentSessionStatus.details : null;
+  const displayedDeviceId = details?.device_id ?? deviceId;
+  const checking = currentSessionStatus.status === "checking";
+  const retryLabel =
+    currentSessionStatus.status === "failed"
+      ? t("sessionStatus.retry")
+      : t("sessionStatus.recheck");
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  return (
+    <section
+      ref={dialogRef}
+      className="session-status-popover"
+      role="dialog"
+      aria-label={t("sessionStatus.title")}
+      tabIndex={-1}
+    >
+      <div className="session-status-heading">
+        <strong>{t("sessionStatus.title")}</strong>
+        <span data-session-status={currentSessionStatus.status}>
+          {sessionStatusVerdict(currentSessionStatus)}
+        </span>
+      </div>
+      {currentSessionStatus.status === "failed" ? (
+        <>
+          <p className="session-status-failure">
+            {sessionStatusFailureLabel(currentSessionStatus.kind)}
+          </p>
+          <dl className="session-status-facts">
+            <SessionStatusFact label={t("sessionStatus.homeserver")} value={homeserver} />
+            <SessionStatusFact label={t("sessionStatus.userId")} value={userId} />
+            <SessionStatusFact label={t("sessionStatus.deviceId")} value={displayedDeviceId} />
+          </dl>
+        </>
+      ) : (
+        <dl className="session-status-facts">
+          <SessionStatusFact label={t("sessionStatus.homeserver")} value={homeserver} />
+          <SessionStatusFact label={t("sessionStatus.userId")} value={userId} />
+          <SessionStatusFact
+            label={t("sessionStatus.deviceName")}
+            value={details?.device_display_name}
+          />
+          <SessionStatusFact label={t("sessionStatus.deviceId")} value={displayedDeviceId} />
+          <SessionStatusFact
+            label={t("sessionStatus.authentication")}
+            value={details ? authenticationMethodLabel(details.authentication_method) : null}
+          />
+          <SessionStatusFact
+            label={t("sessionStatus.sync")}
+            value={details ? sessionSyncLabel(details.sync_state) : null}
+          />
+          <SessionStatusFact
+            label={t("sessionStatus.verification")}
+            value={details ? verificationLabel(details.verification) : null}
+          />
+          <SessionStatusFact
+            label={t("sessionStatus.ownerCrossSigning")}
+            value={
+              details
+                ? details.is_cross_signed_by_owner
+                  ? t("sessionStatus.crossSigned")
+                  : t("sessionStatus.notCrossSigned")
+                : null
+            }
+          />
+          <SessionStatusFact
+            label={t("sessionStatus.identity")}
+            value={details ? identityVerificationLabel(details.own_identity_verification) : null}
+          />
+          <SessionStatusFact
+            label={t("sessionStatus.keyBackup")}
+            value={details ? keyBackupLabel(details.key_backup) : null}
+          />
+          <SessionStatusFact
+            label={t("sessionStatus.lastChecked")}
+            value={
+              details
+                ? new Intl.DateTimeFormat(undefined, {
+                    dateStyle: "medium",
+                    timeStyle: "short"
+                  }).format(details.checked_at_ms)
+                : null
+            }
+          />
+        </dl>
+      )}
+      {accountManagementResolved && !accountManagementUrl ? (
+        <p className="session-status-note">{t("sessionStatus.accountManagementFallback")}</p>
+      ) : null}
+      <div className="session-status-actions">
+        <button
+          type="button"
+          disabled={checking}
+          onClick={() => onRefresh("manual")}
+        >
+          {checking ? t("sessionStatus.checking") : retryLabel}
+        </button>
+        <button
+          type="button"
+          disabled={!displayedDeviceId}
+          onClick={() => {
+            if (displayedDeviceId) {
+              void navigator.clipboard?.writeText(displayedDeviceId);
+            }
+          }}
+        >
+          {t("sessionStatus.copyDeviceId")}
+        </button>
+        <button type="button" onClick={() => onManageAccount(accountManagementUrl)}>
+          {accountManagementUrl
+            ? t("sessionStatus.manageAccount")
+            : t("sessionStatus.openLocalSettings")}
+        </button>
+        <button type="button" onClick={onOpenDiagnostics}>
+          {t("diagnostics.open")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SessionStatusFact({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd dir="auto">{value ?? t("sessionStatus.unavailable")}</dd>
+    </div>
+  );
+}
+
+function sessionStatusVerdict(status: CurrentSessionStatusState): string {
+  switch (status.status) {
+    case "idle":
+      return t("sessionStatus.notChecked");
+    case "checking":
+      return t("sessionStatus.checking");
+    case "ready":
+      return verificationLabel(status.details.verification);
+    case "failed":
+      return t("sessionStatus.failed");
+  }
+}
+
+function sessionStatusFailureLabel(kind: "sdk" | "timed_out" | "unavailable"): string {
+  switch (kind) {
+    case "sdk":
+      return t("sessionStatus.failureSdk");
+    case "timed_out":
+      return t("sessionStatus.failureTimedOut");
+    case "unavailable":
+      return t("sessionStatus.failureUnavailable");
+  }
+}
+
+function authenticationMethodLabel(method: string): string {
+  switch (method) {
+    case "password":
+      return t("sessionStatus.authPassword");
+    case "sso":
+      return t("sessionStatus.authSso");
+    case "oauth":
+      return t("sessionStatus.authOauth");
+    case "token":
+      return t("sessionStatus.authToken");
+    default:
+      return t("sessionStatus.unknown");
+  }
+}
+
+function sessionSyncLabel(state: string): string {
+  switch (state) {
+    case "running":
+      return t("sessionStatus.syncRunning");
+    case "starting":
+      return t("sessionStatus.syncStarting");
+    case "error":
+      return t("sessionStatus.syncError");
+    default:
+      return t("sessionStatus.syncStopped");
+  }
+}
+
+function verificationLabel(state: "verified" | "unverified"): string {
+  return state === "verified"
+    ? t("sessionStatus.verified")
+    : t("sessionStatus.unverified");
+}
+
+function identityVerificationLabel(state: "missing" | "unverified" | "verified"): string {
+  switch (state) {
+    case "verified":
+      return t("sessionStatus.identityVerified");
+    case "unverified":
+      return t("sessionStatus.identityUnverified");
+    case "missing":
+      return t("sessionStatus.identityMissing");
+  }
+}
+
+function keyBackupLabel(state: "ready" | "disabled" | "unknown"): string {
+  switch (state) {
+    case "ready":
+      return t("sessionStatus.backupReady");
+    case "disabled":
+      return t("sessionStatus.backupDisabled");
+    case "unknown":
+      return t("sessionStatus.unknown");
+  }
 }
 
 function matrixServerLabel(homeserver: string | null | undefined): string | null {

@@ -163,6 +163,7 @@ function readySnapshot(
         schema_version: 3,
         domain: {
           session: { kind: "ready", homeserver: HOMESERVER, user_id: USER_ID, device_id: DEVICE_ID },
+          current_session_status: { status: "idle" },
           device_cleanup: { kind: "idle" },
           auth: { kind: "unknown" },
           settings: defaultSettingsState(),
@@ -2915,7 +2916,7 @@ function uniqueNonBlank(values: Array<string | null | undefined>): string[] {
 // (plugin:event|*) are handled internally by mockIPC's shouldMockEvents.
 mockIPC(
   (cmd, args) => {
-    if (cmd.startsWith("plugin:dialog|")) {
+    if (cmd.startsWith("plugin:dialog|") || cmd.startsWith("plugin:opener|")) {
       return mock.invoke(cmd, (args ?? {}) as Record<string, unknown>);
     }
     if (cmd.startsWith("plugin:")) {

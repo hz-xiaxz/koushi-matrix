@@ -54,6 +54,17 @@ describe("TauriDesktopApi", () => {
     });
   });
 
+  test("refreshes current-session status with the Rust-owned trigger", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    const api = createDesktopApi();
+    await api.refreshCurrentSessionStatus("manual");
+
+    expect(invoke).toHaveBeenCalledWith("refresh_current_session_status", {
+      trigger: "manual"
+    });
+  });
+
   test("passes OIDC login flow commands to Rust", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
