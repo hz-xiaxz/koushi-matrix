@@ -227,6 +227,14 @@ fn supported_language(primary: &str) -> Option<SupportedLanguage> {
 }
 
 impl DisplayPlatform {
+    pub fn oauth_device_display_name(self) -> &'static str {
+        match self {
+            DisplayPlatform::Macos => "Koushi on macOS",
+            DisplayPlatform::Windows => "Koushi on Windows",
+            DisplayPlatform::Linux => "Koushi on Linux",
+        }
+    }
+
     fn primary_modifier_label(self) -> &'static str {
         match self {
             DisplayPlatform::Macos => "Cmd",

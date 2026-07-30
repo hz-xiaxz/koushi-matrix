@@ -32,12 +32,12 @@ use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, reco
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
     ComposerDraftRevision, ComposerKeyEvent, ComposerResolvedAction, ComposerResolverContext,
-    ComposerSurface, DirectoryQuery, FilesViewScope, FocusedContextState, IdentityResetAuthRequest,
-    ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface,
-    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode,
-    RoomSettingChange, RoomTagKind, SessionInfo, SessionState, SettingsPatch,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, SubmissionId,
-    TimelineScrollAnchor, VerificationCancelReason, build_formatted_message_draft,
+    ComposerSurface, DirectoryQuery, DisplayPlatform, FilesViewScope, FocusedContextState,
+    IdentityResetAuthRequest, ImageUploadCompressionMode, InviteScopeSelection, LoginRequest,
+    MentionIntent, MentionSurface, PresenceKind, RecoveryRequest, RoomListFilter,
+    RoomModerationAction, RoomNotificationMode, RoomSettingChange, RoomTagKind, SessionInfo,
+    SessionState, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
+    SubmissionId, TimelineScrollAnchor, VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(any(debug_assertions, test))]
@@ -1294,10 +1294,12 @@ pub(crate) fn build_start_oidc_login_command(
 pub(crate) fn build_complete_oidc_login_command(
     request_id: koushi_core::RequestId,
     callback_url: String,
+    platform: DisplayPlatform,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::CompleteOidcLogin {
         request_id,
         callback_url,
+        platform,
     })
 }
 

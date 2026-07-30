@@ -5,7 +5,7 @@ use std::{fmt, path::PathBuf};
 
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentScope, AttachmentSort,
-    ComposerDraftRevision, DirectoryQuery, FilesViewScope, FormattedMessageDraft,
+    ComposerDraftRevision, DirectoryQuery, DisplayPlatform, FilesViewScope, FormattedMessageDraft,
     IdentityResetAuthRequest, ImageUploadCompressionMode, InviteScopeSelection,
     JapaneseCatalogProfile, LocalEncryptionHealth, LoginRequest, MentionIntent,
     NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState, PresenceKind,
@@ -1107,6 +1107,7 @@ pub enum AccountCommand {
     CompleteOidcLogin {
         request_id: RequestId,
         callback_url: String,
+        platform: DisplayPlatform,
     },
     LoginPassword {
         request_id: RequestId,

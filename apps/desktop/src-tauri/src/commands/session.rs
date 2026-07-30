@@ -54,7 +54,11 @@ pub async fn complete_oidc_login(
     let mut event_conn = state.inner().runtime.attach();
     let request_id = event_conn.next_request_id();
     event_conn
-        .command(build_complete_oidc_login_command(request_id, callback_url))
+        .command(build_complete_oidc_login_command(
+            request_id,
+            callback_url,
+            crate::dto::frontend_display_platform(),
+        ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
     wait_for_logged_in_authenticated(&mut event_conn, request_id, LOGIN_EVENT_TIMEOUT).await?;

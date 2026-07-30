@@ -317,6 +317,36 @@ fn current_device_trust_token(trust: koushi_state::CurrentDeviceTrustState) -> &
     }
 }
 
+fn record_oauth_device_name_outcome(outcome: koushi_sdk::MatrixOauthDeviceNameOutcome) {
+    use koushi_sdk::MatrixOauthDeviceNameOutcome;
+
+    let (inspection, rename) = match outcome {
+        MatrixOauthDeviceNameOutcome::Present => ("present", None),
+        MatrixOauthDeviceNameOutcome::Renamed => ("empty", Some("success")),
+        MatrixOauthDeviceNameOutcome::RenameFailed => ("empty", Some("failed")),
+        MatrixOauthDeviceNameOutcome::CurrentDeviceMissing
+        | MatrixOauthDeviceNameOutcome::InspectionFailed => ("failed", None),
+    };
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "oauth_device_name", "inspected")
+            .field(DiagnosticField::token("outcome", inspection)),
+    );
+    if let Some(rename) = rename {
+        record(
+            DiagnosticEvent::new(
+                if rename == "success" {
+                    DiagnosticLevel::Info
+                } else {
+                    DiagnosticLevel::Warn
+                },
+                "oauth_device_name",
+                "rename_settled",
+            )
+            .field(DiagnosticField::token("outcome", rename)),
+        );
+    }
+}
+
 fn record_verification_method_discovery_event(event: DiagnosticEvent) {
     koushi_diagnostics::record(event);
 }
@@ -3682,8 +3712,9 @@ impl AccountActor {
             AccountCommand::CompleteOidcLogin {
                 request_id,
                 callback_url,
+                platform,
             } => {
-                self.handle_complete_oidc_login(request_id, callback_url)
+                self.handle_complete_oidc_login(request_id, callback_url, platform)
                     .await;
             }
             AccountCommand::LoginPassword {
@@ -6132,7 +6163,12 @@ impl AccountActor {
         }
     }
 
-    async fn handle_complete_oidc_login(&mut self, request_id: RequestId, callback_url: String) {
+    async fn handle_complete_oidc_login(
+        &mut self,
+        request_id: RequestId,
+        callback_url: String,
+        platform: koushi_state::DisplayPlatform,
+    ) {
         if self.pending_session_teardown.is_some() {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
@@ -6200,6 +6236,13 @@ impl AccountActor {
                 return;
             }
         };
+
+        let device_name_outcome = koushi_sdk::ensure_oauth_device_display_name(
+            &login_session,
+            platform.oauth_device_display_name(),
+        )
+        .await;
+        record_oauth_device_name_outcome(device_name_outcome);
 
         let info = login_session.info.clone();
         let key_id = session_key_id_from_info(&info);
@@ -12321,6 +12364,7 @@ mod tests {
                 .send(AccountMessage::Command(AccountCommand::CompleteOidcLogin {
                     request_id: completion_request_id,
                     callback_url: "http://127.0.0.1/callback?code=fixture&state=fixture".to_owned(),
+                    platform: koushi_state::DisplayPlatform::Linux,
                 },))
                 .await
         );
@@ -14604,6 +14648,7 @@ mod tests {
                 .send(AccountMessage::Command(AccountCommand::CompleteOidcLogin {
                     request_id,
                     callback_url: "http://127.0.0.1/callback?code=fixture&state=fixture".to_owned(),
+                    platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await
         );

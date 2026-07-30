@@ -7631,6 +7631,7 @@ mod tests {
             account_command_projected_action(&AccountCommand::CompleteOidcLogin {
                 request_id,
                 callback_url: "koushi-desktop://auth/callback?code=secret".to_owned(),
+                platform: koushi_state::DisplayPlatform::Linux,
             }),
             None
         );
@@ -7738,6 +7739,7 @@ mod tests {
                 homeserver: "https://example.invalid".to_owned(),
                 user_id: "@user:example.invalid".to_owned(),
                 device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
             gate: koushi_state::VerificationGateState {
                 methods: vec![],
@@ -7977,6 +7979,7 @@ mod tests {
             homeserver: "https://example.invalid".into(),
             user_id: "@me:example.invalid".into(),
             device_id: "DEVICE".into(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
         let gate = koushi_state::VerificationGateState {
             methods: vec![koushi_state::VerificationMethodCapability::RecoveryKey],

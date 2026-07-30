@@ -981,6 +981,7 @@ fn submit_oidc_callback_url(app: tauri::AppHandle, callback_url: String) {
             .command(commands::build_complete_oidc_login_command(
                 request_id,
                 callback_url,
+                dto::frontend_display_platform(),
             ))
             .await;
     });

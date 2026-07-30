@@ -56,6 +56,49 @@ pub enum MatrixCurrentSessionInspectionError {
     IdentityRequest,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixOauthDeviceNameOutcome {
+    Present,
+    Renamed,
+    CurrentDeviceMissing,
+    InspectionFailed,
+    RenameFailed,
+}
+
+pub async fn ensure_oauth_device_display_name(
+    session: &MatrixClientSession,
+    display_name: &str,
+) -> MatrixOauthDeviceNameOutcome {
+    let response = match session.client().devices().await {
+        Ok(response) => response,
+        Err(_) => return MatrixOauthDeviceNameOutcome::InspectionFailed,
+    };
+    let Some(current_device) = response
+        .devices
+        .into_iter()
+        .find(|device| device.device_id.as_str() == session.info.device_id)
+    else {
+        return MatrixOauthDeviceNameOutcome::CurrentDeviceMissing;
+    };
+    if current_device
+        .display_name
+        .as_deref()
+        .is_some_and(|name| !name.trim().is_empty())
+    {
+        return MatrixOauthDeviceNameOutcome::Present;
+    }
+
+    match session
+        .client()
+        .rename_device(&current_device.device_id, display_name)
+        .await
+    {
+        Ok(_) => MatrixOauthDeviceNameOutcome::Renamed,
+        Err(_) => MatrixOauthDeviceNameOutcome::RenameFailed,
+    }
+}
+
 fn classify_own_identity_verification(
     identity_present: bool,
     identity_verified: bool,
@@ -4479,12 +4522,16 @@ mod current_session_status_tests {
     };
     use serde_json::json;
     use vodozemac::Ed25519SecretKey;
-    use wiremock::ResponseTemplate;
+    use wiremock::{
+        Mock, ResponseTemplate,
+        matchers::{body_json, method, path},
+    };
 
     use super::{
         CurrentSessionBackupState, MatrixClientSession, MatrixCurrentSessionInspectionError,
-        OwnIdentityVerification, SessionInfo, classify_current_session_backup,
-        classify_own_identity_verification,
+        MatrixOauthDeviceNameOutcome, OwnIdentityVerification, SessionInfo,
+        classify_current_session_backup, classify_own_identity_verification,
+        ensure_oauth_device_display_name,
     };
 
     async fn session(server: &MatrixMockServer) -> MatrixClientSession {
@@ -4686,6 +4733,57 @@ mod current_session_status_tests {
             OwnIdentityVerification::Unverified
         );
         assert_eq!(status.key_backup, CurrentSessionBackupState::Unknown);
+    }
+
+    #[tokio::test]
+    async fn oauth_device_name_renames_only_an_empty_authoritative_name() {
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _devices = mount_device(&server, Some("   ")).await;
+        let _rename = Mock::given(method("PUT"))
+            .and(path("/_matrix/client/v3/devices/DEVICEID"))
+            .and(body_json(json!({ "display_name": "Koushi on Linux" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(1)
+            .mount_as_scoped(server.server())
+            .await;
+
+        assert_eq!(
+            ensure_oauth_device_display_name(&session, "Koushi on Linux").await,
+            MatrixOauthDeviceNameOutcome::Renamed
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_device_name_preserves_existing_name_and_maps_failures_coarsely() {
+        let named_server = MatrixMockServer::new().await;
+        let named_session = session(&named_server).await;
+        let _devices = mount_device(&named_server, Some("Custom device")).await;
+        assert_eq!(
+            ensure_oauth_device_display_name(&named_session, "Koushi on Linux").await,
+            MatrixOauthDeviceNameOutcome::Present
+        );
+        assert!(
+            named_server
+                .received_requests()
+                .await
+                .expect("request history")
+                .iter()
+                .all(|request| request.method.as_str() != "PUT")
+        );
+
+        let failed_server = MatrixMockServer::new().await;
+        let failed_session = session(&failed_server).await;
+        let _devices = mount_device(&failed_server, None).await;
+        let _rename = Mock::given(method("PUT"))
+            .and(path("/_matrix/client/v3/devices/DEVICEID"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("private raw failure"))
+            .expect(1)
+            .mount_as_scoped(failed_server.server())
+            .await;
+        let outcome = ensure_oauth_device_display_name(&failed_session, "Koushi on Linux").await;
+        assert_eq!(outcome, MatrixOauthDeviceNameOutcome::RenameFailed);
+        assert!(!format!("{outcome:?}").contains("private raw failure"));
     }
 
     #[test]

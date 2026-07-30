@@ -475,7 +475,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
 /// IPC snapshot contract version. Bumped to 2 by #87 Phase 4 (domain/ui sectioning).
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 
-fn frontend_display_platform() -> DisplayPlatform {
+pub(crate) fn frontend_display_platform() -> DisplayPlatform {
     #[cfg(target_os = "macos")]
     {
         DisplayPlatform::Macos
