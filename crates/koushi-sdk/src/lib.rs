@@ -2,10 +2,12 @@ use futures_util::{Stream, StreamExt};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 pub use koushi_state::E2eeRecoveryState;
 use koushi_state::{
-    AuthSecret, CrossSigningStatus, CurrentDeviceTrustState, DelegatedAuthLinks,
+    AuthSecret, CrossSigningStatus, CurrentDeviceTrustState, CurrentSessionBackupState,
+    DelegatedAuthLinks,
     DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupRemoteOutcome,
     IdentityResetAuthRequest, IdentityResetAuthType, KeyBackupStatus, LoginFlow, LoginFlowKind,
-    LoginRequest, RecoveryRequest, RoomAttentionSummary, SasEmoji, SessionInfo,
+    LoginRequest, OwnIdentityVerification, RecoveryRequest, RoomAttentionSummary, SasEmoji,
+    SessionInfo,
     VerificationAccountKind, VerificationGateState, VerificationMethodCapability,
     VerificationTarget, room_attention_summary,
 };
@@ -21,6 +23,67 @@ pub struct CurrentDeviceTrustObservation {
 #[error("current-device trust recheck failed")]
 pub enum CurrentDeviceTrustRecheckError {
     Sdk,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MatrixCurrentSessionInspection {
+    pub device_display_name: Option<String>,
+    pub is_cross_signed_by_owner: bool,
+    pub own_identity_verification: OwnIdentityVerification,
+    pub key_backup: CurrentSessionBackupState,
+}
+
+impl std::fmt::Debug for MatrixCurrentSessionInspection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MatrixCurrentSessionInspection")
+            .field(
+                "device_display_name",
+                &self.device_display_name.as_ref().map(|_| "DeviceName(..)"),
+            )
+            .field("is_cross_signed_by_owner", &self.is_cross_signed_by_owner)
+            .field("own_identity_verification", &self.own_identity_verification)
+            .field("key_backup", &self.key_backup)
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, thiserror::Error)]
+#[serde(rename_all = "snake_case")]
+#[error("current-session inspection failed")]
+pub enum MatrixCurrentSessionInspectionError {
+    Unavailable,
+    DeviceRequest,
+    CurrentDeviceMissing,
+    IdentityRequest,
+}
+
+fn classify_own_identity_verification(
+    identity_present: bool,
+    identity_verified: bool,
+) -> OwnIdentityVerification {
+    if !identity_present {
+        OwnIdentityVerification::Missing
+    } else if identity_verified {
+        OwnIdentityVerification::Verified
+    } else {
+        OwnIdentityVerification::Unverified
+    }
+}
+
+fn classify_current_session_backup(
+    local_state: matrix_sdk::encryption::backups::BackupState,
+    server_probe: Result<bool, ()>,
+) -> CurrentSessionBackupState {
+    use matrix_sdk::encryption::backups::BackupState;
+
+    if local_state == BackupState::Enabled {
+        CurrentSessionBackupState::Ready
+    } else if server_probe.is_ok() {
+        CurrentSessionBackupState::Disabled
+    } else {
+        CurrentSessionBackupState::Unknown
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -4286,6 +4349,63 @@ impl MatrixClientSession {
         Ok(map_sdk_verification_state(subscriber.get()))
     }
 
+    pub async fn inspect_current_session(
+        &self,
+    ) -> Result<MatrixCurrentSessionInspection, MatrixCurrentSessionInspectionError> {
+        let client = self.client();
+        let user_id = client
+            .user_id()
+            .ok_or(MatrixCurrentSessionInspectionError::Unavailable)?;
+        let device_id = client
+            .device_id()
+            .ok_or(MatrixCurrentSessionInspectionError::Unavailable)?;
+
+        let devices = client
+            .devices()
+            .await
+            .map_err(|_| MatrixCurrentSessionInspectionError::DeviceRequest)?;
+        let current_device = devices
+            .devices
+            .into_iter()
+            .find(|device| device.device_id == device_id)
+            .ok_or(MatrixCurrentSessionInspectionError::CurrentDeviceMissing)?;
+
+        let encryption = client.encryption();
+        let own_identity = encryption
+            .request_user_identity(user_id)
+            .await
+            .map_err(|_| MatrixCurrentSessionInspectionError::IdentityRequest)?;
+        let current_crypto_device = encryption
+            .get_device(user_id, device_id)
+            .await
+            .map_err(|_| MatrixCurrentSessionInspectionError::IdentityRequest)?;
+        let is_cross_signed_by_owner = current_crypto_device
+            .as_ref()
+            .is_some_and(|device| device.is_cross_signed_by_owner());
+        let own_identity_verification = classify_own_identity_verification(
+            own_identity.is_some(),
+            own_identity
+                .as_ref()
+                .is_some_and(|identity| identity.is_verified()),
+        );
+
+        let backups = encryption.backups();
+        let local_backup_state = backups.state();
+        let server_probe =
+            if local_backup_state == matrix_sdk::encryption::backups::BackupState::Enabled {
+                Ok(true)
+            } else {
+                backups.fetch_exists_on_server().await.map_err(|_| ())
+            };
+
+        Ok(MatrixCurrentSessionInspection {
+            device_display_name: current_device.display_name,
+            is_cross_signed_by_owner,
+            own_identity_verification,
+            key_backup: classify_current_session_backup(local_backup_state, server_probe),
+        })
+    }
+
     pub fn observe_current_device_trust(&self) -> CurrentDeviceTrustObservation {
         // Subscribe first, then read from the same subscriber so an update
         // cannot be lost between the current-value probe and stream creation.
@@ -4343,6 +4463,263 @@ mod current_device_trust_recheck_tests {
             .expect("empty authoritative response still settles");
 
         assert_eq!(trust, CurrentDeviceTrustState::Unverified);
+    }
+}
+
+#[cfg(test)]
+mod current_session_status_tests {
+    use matrix_sdk::{
+        encryption::backups::BackupState,
+        ruma::{CanonicalJsonValue, owned_user_id},
+        test_utils::mocks::MatrixMockServer,
+    };
+    use matrix_sdk_test::{
+        ruma_response_to_json, test_json::keys_query_sets::KeyQueryResponseTemplate,
+    };
+    use serde_json::json;
+    use vodozemac::Ed25519SecretKey;
+    use wiremock::ResponseTemplate;
+
+    use super::{
+        CurrentSessionBackupState, MatrixClientSession, MatrixCurrentSessionInspectionError,
+        OwnIdentityVerification, SessionInfo, classify_current_session_backup,
+        classify_own_identity_verification,
+    };
+
+    async fn session(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        let info = SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client.user_id().expect("mock user id").to_string(),
+            device_id: client.device_id().expect("mock device id").to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::OAuth,
+        };
+        MatrixClientSession::from_client_for_testing(client, info)
+    }
+
+    async fn mount_device(
+        server: &MatrixMockServer,
+        display_name: Option<&str>,
+    ) -> wiremock::MockGuard {
+        server
+            .mock_devices()
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "devices": [{
+                    "device_id": "DEVICEID",
+                    "display_name": display_name,
+                    "last_seen_ip": "private.invalid",
+                    "last_seen_ts": 1_u64,
+                    "user_id": "@example:localhost"
+                }]
+            })))
+            .expect(1)
+            .mount_as_scoped()
+            .await
+    }
+
+    fn sign_json_for_test(
+        value: &mut serde_json::Value,
+        signing_key: &Ed25519SecretKey,
+        user_id: &str,
+        key_identifier: &str,
+    ) {
+        let mut unsigned = value.clone();
+        let object = unsigned.as_object_mut().expect("device JSON object");
+        object.remove("signatures");
+        object.remove("unsigned");
+        let canonical: CanonicalJsonValue = unsigned.try_into().expect("canonical device JSON");
+        let signature = signing_key.sign(canonical.to_string().as_bytes());
+        value["signatures"][user_id][format!("ed25519:{key_identifier}")] =
+            signature.to_base64().into();
+    }
+
+    #[tokio::test]
+    async fn current_session_status_finds_current_device_display_name() {
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _devices = mount_device(&server, Some("Koushi Workstation")).await;
+        let _identity = server
+            .mock_query_keys()
+            .ok()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        let _backup = server
+            .mock_room_keys_version()
+            .none()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+
+        let status = session
+            .inspect_current_session()
+            .await
+            .expect("authoritative inspection");
+
+        assert_eq!(
+            status.device_display_name.as_deref(),
+            Some("Koushi Workstation")
+        );
+        assert!(!status.is_cross_signed_by_owner);
+        assert_eq!(
+            status.own_identity_verification,
+            OwnIdentityVerification::Missing
+        );
+        assert_eq!(status.key_backup, CurrentSessionBackupState::Disabled);
+        assert!(!format!("{status:?}").contains("Koushi Workstation"));
+        let serialized = serde_json::to_string(&status).expect("serialize coarse status");
+        assert!(!serialized.contains("1234"));
+        assert!(!serialized.contains("private.invalid"));
+    }
+
+    #[tokio::test]
+    async fn current_session_status_rejects_an_absent_current_device() {
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _devices = server
+            .mock_devices()
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "devices": [] })))
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+
+        assert_eq!(
+            session.inspect_current_session().await,
+            Err(MatrixCurrentSessionInspectionError::CurrentDeviceMissing)
+        );
+    }
+
+    #[tokio::test]
+    async fn current_session_status_maps_device_and_identity_failures_coarsely() {
+        let device_server = MatrixMockServer::new().await;
+        let device_session = session(&device_server).await;
+        let _devices = device_server
+            .mock_devices()
+            .error500()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        assert_eq!(
+            device_session.inspect_current_session().await,
+            Err(MatrixCurrentSessionInspectionError::DeviceRequest)
+        );
+
+        let identity_server = MatrixMockServer::new().await;
+        let identity_session = session(&identity_server).await;
+        let _devices = mount_device(&identity_server, None).await;
+        let _identity = identity_server
+            .mock_query_keys()
+            .error500()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        assert_eq!(
+            identity_session.inspect_current_session().await,
+            Err(MatrixCurrentSessionInspectionError::IdentityRequest)
+        );
+    }
+
+    #[tokio::test]
+    async fn current_session_status_reads_owner_cross_signing_and_unverified_own_identity() {
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _devices = mount_device(&server, Some("Signed device")).await;
+        let client = session.client();
+        let user_id = client.user_id().expect("mock user id");
+        let device_id = client.device_id().expect("mock device id");
+        let current_device = client
+            .encryption()
+            .get_device(user_id, device_id)
+            .await
+            .expect("read current device")
+            .expect("mock client stores its own device");
+        let self_signing_key = Ed25519SecretKey::from_slice(b"self1234self1234self1234self1234");
+        let response = KeyQueryResponseTemplate::new(owned_user_id!("@example:localhost"))
+            .with_cross_signing_keys(
+                Ed25519SecretKey::from_slice(b"master12master12master12master12"),
+                Ed25519SecretKey::from_slice(b"self1234self1234self1234self1234"),
+                Ed25519SecretKey::from_slice(b"user1234user1234user1234user1234"),
+            )
+            .build_response();
+        let mut response_json = ruma_response_to_json(response);
+        let device_keys = current_device
+            .keys()
+            .iter()
+            .map(|(key_id, key)| (key_id.to_string(), key.to_base64()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut current_device_json = json!({
+            "user_id": user_id,
+            "device_id": device_id,
+            "algorithms": current_device.algorithms(),
+            "keys": device_keys,
+            "signatures": current_device.signatures(),
+        });
+        sign_json_for_test(
+            &mut current_device_json,
+            &self_signing_key,
+            user_id.as_str(),
+            &self_signing_key.public_key().to_base64(),
+        );
+        response_json["device_keys"][user_id.as_str()][device_id.as_str()] = current_device_json;
+        let _identity = server
+            .mock_query_keys()
+            .respond_with(ResponseTemplate::new(200).set_body_json(response_json))
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        let _backup = server
+            .mock_room_keys_version()
+            .error500()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+
+        let status = session
+            .inspect_current_session()
+            .await
+            .expect("authoritative inspection");
+
+        assert!(status.is_cross_signed_by_owner);
+        assert_eq!(
+            status.own_identity_verification,
+            OwnIdentityVerification::Unverified
+        );
+        assert_eq!(status.key_backup, CurrentSessionBackupState::Unknown);
+    }
+
+    #[test]
+    fn current_session_status_classifies_identity_and_backup_without_secrets() {
+        assert_eq!(
+            classify_own_identity_verification(false, true),
+            OwnIdentityVerification::Missing
+        );
+        assert_eq!(
+            classify_own_identity_verification(true, false),
+            OwnIdentityVerification::Unverified
+        );
+        assert_eq!(
+            classify_own_identity_verification(true, true),
+            OwnIdentityVerification::Verified
+        );
+        assert_eq!(
+            classify_current_session_backup(BackupState::Enabled, Ok(true)),
+            CurrentSessionBackupState::Ready
+        );
+        assert_eq!(
+            classify_current_session_backup(BackupState::Unknown, Ok(false)),
+            CurrentSessionBackupState::Disabled
+        );
+        assert_eq!(
+            classify_current_session_backup(BackupState::Unknown, Err(())),
+            CurrentSessionBackupState::Unknown
+        );
+
+        let error = MatrixCurrentSessionInspectionError::IdentityRequest;
+        assert_eq!(
+            serde_json::to_string(&error).expect("serialize coarse error"),
+            "\"identity_request\""
+        );
+        assert!(!format!("{error:?}").contains("private"));
     }
 }
 

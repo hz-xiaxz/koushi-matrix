@@ -42,6 +42,7 @@ zeroize = "1"
 matrix-sdk = { workspace = true, features = ["testing"] }
 matrix-sdk-test = { workspace = true }
 tempfile = "3"
+vodozemac = "0.10"
 wiremock = "0.6"
 
 # cargo-machete ignore list: ruma types are accessed through matrix_sdk::ruma
