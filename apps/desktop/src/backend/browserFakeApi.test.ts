@@ -1600,6 +1600,34 @@ describe("BrowserFakeApi settings preview", () => {
     });
   });
 
+  test("startDirectMessage gets-or-creates and opens the DM", async () => {
+    // The fake must match the real backend's contract (#368): the first call
+    // creates the DM and opens it, and a repeat call reuses the same room
+    // instead of minting a duplicate.
+    const api = createBrowserFakeApi();
+    const target = "@dm-target:example.invalid";
+    const before = (await api.getSnapshot()).state.domain.rooms.length;
+
+    const created = await api.startDirectMessage(target);
+    const createdRooms = created.state.domain.rooms.filter(
+      (room) => room.is_dm && room.dm_user_ids.length === 1 && room.dm_user_ids[0] === target
+    );
+    expect(createdRooms).toHaveLength(1);
+    expect(created.state.domain.rooms).toHaveLength(before + 1);
+    expect(created.state.ui.navigation.active_room_id).toBe(createdRooms[0].room_id);
+
+    await api.selectRoom("!room-alpha:example.invalid");
+    const reused = await api.startDirectMessage(target);
+
+    expect(
+      reused.state.domain.rooms.filter(
+        (room) => room.is_dm && room.dm_user_ids.length === 1 && room.dm_user_ids[0] === target
+      )
+    ).toHaveLength(1);
+    expect(reused.state.domain.rooms).toHaveLength(before + 1);
+    expect(reused.state.ui.navigation.active_room_id).toBe(createdRooms[0].room_id);
+  });
+
   test("models local encryption health probe as Rust-owned state", async () => {
     const api = createBrowserFakeApi();
 

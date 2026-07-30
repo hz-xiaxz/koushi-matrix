@@ -5852,12 +5852,85 @@ pub async fn start_direct_message(
 ) -> Result<String, MatrixRoomOperationError> {
     let user_id = matrix_sdk::ruma::UserId::parse(user_id)
         .map_err(|_| MatrixRoomOperationError::InvalidUserId)?;
+    // Get-or-create (#368): reuse the existing joined DM whose only direct
+    // target is this user. Unconditional create_dm minted a duplicate DM room
+    // on every repeated "Send message".
+    if let Some(room) = session.client().get_dm_room(&user_id) {
+        return Ok(room.room_id().to_string());
+    }
     let room = session
         .client()
         .create_dm(&user_id)
         .await
         .map_err(MatrixRoomOperationError::from_sdk_error)?;
     Ok(room.room_id().to_string())
+}
+
+#[cfg(test)]
+mod start_direct_message_tests {
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::JoinedRoomBuilder;
+    use serde_json::json;
+
+    use super::{MatrixClientSession, SessionInfo};
+
+    async fn session_for(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        let info = SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client
+                .user_id()
+                .expect("mock client has a user id")
+                .to_string(),
+            device_id: client
+                .device_id()
+                .expect("mock client has a device id")
+                .to_string(),
+        };
+        MatrixClientSession { client, info }
+    }
+
+    #[tokio::test]
+    async fn start_direct_message_reuses_the_existing_joined_dm_room() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let target = matrix_sdk::ruma::user_id!("@dm-target:example.org");
+        let dm_room_id = matrix_sdk::ruma::room_id!("!existing-dm:example.org");
+
+        // Seed a joined room marked as the DM with the target through
+        // m.direct. No createRoom endpoint is mounted, so an accidental
+        // create_dm would fail the call instead of silently passing.
+        server
+            .mock_sync()
+            .ok_and_run(&session.client(), |builder| {
+                builder.add_custom_global_account_data(json!({
+                    "type": "m.direct",
+                    "content": { target: [dm_room_id] }
+                }));
+                builder.add_joined_room(JoinedRoomBuilder::new(dm_room_id));
+            })
+            .await;
+
+        let started = super::start_direct_message(&session, target.as_str())
+            .await
+            .expect("existing DM must be reused without a create call");
+        assert_eq!(started, dm_room_id.to_string());
+    }
+
+    #[tokio::test]
+    async fn start_direct_message_creates_a_room_only_when_no_dm_exists() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let target = matrix_sdk::ruma::user_id!("@fresh-target:example.org");
+
+        server.mock_create_room().ok().mock_once().mount().await;
+
+        let started = super::start_direct_message(&session, target.as_str())
+            .await
+            .expect("a missing DM must be created");
+        // The prebuilt createRoom mock answers with this fixed room id.
+        assert_eq!(started, "!room:example.org");
+    }
 }
 
 pub async fn join_room_by_id(

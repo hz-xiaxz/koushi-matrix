@@ -2868,6 +2868,17 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
+    // Same get-or-create-and-open contract as the real backend (#368): an
+    // existing one-to-one DM with this target is reused, never duplicated.
+    const existing = this.snapshot.state.domain.rooms.find(
+      (room) =>
+        room.is_dm && room.dm_user_ids.length === 1 && room.dm_user_ids[0] === trimmedUserId
+    );
+    if (existing) {
+      await this.selectRoom(existing.room_id);
+      return this.getSnapshot();
+    }
+
     const count = this.snapshot.state.domain.rooms.filter((room) => room.is_dm).length + 1;
     const newRoomId = `!local-dm-${count}:fake.local`;
     const newRoom: RoomSummary = {
