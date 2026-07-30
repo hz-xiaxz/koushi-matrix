@@ -464,6 +464,14 @@ pub enum AccountMessage {
         generation: u64,
         trust: koushi_state::CurrentDeviceTrustState,
     },
+    CheckCurrentDeviceTrust,
+    CurrentDeviceTrustRecheckFinished {
+        generation: u64,
+        result: Result<
+            koushi_state::CurrentDeviceTrustState,
+            koushi_sdk::CurrentDeviceTrustRecheckError,
+        >,
+    },
     FirstRestrictedSyncFinished {
         generation: u64,
         succeeded: bool,
@@ -1302,6 +1310,7 @@ pub struct AccountActor {
     session_promoted: bool,
     trust_generation: u64,
     trust_observer: Option<crate::executor::JoinHandle<()>>,
+    trust_recheck_task: Option<crate::executor::JoinHandle<()>>,
     verification_method_discovery_task: Option<OwnedVerificationMethodDiscoveryTask>,
     verification_method_discovery_serial: u64,
     verification_method_discovery_failed: bool,
@@ -1483,6 +1492,7 @@ impl AccountActor {
             session_promoted: false,
             trust_generation: 0,
             trust_observer: None,
+            trust_recheck_task: None,
             verification_method_discovery_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,
@@ -1820,6 +1830,33 @@ impl AccountActor {
                     self.flush_pending_crawler_notification();
                 }
                 AccountMessage::CurrentDeviceTrustChanged { generation, trust } => {
+                    self.handle_current_device_trust(generation, trust).await;
+                }
+                AccountMessage::CheckCurrentDeviceTrust => {
+                    self.request_authoritative_trust_recheck();
+                }
+                AccountMessage::CurrentDeviceTrustRecheckFinished { generation, result } => {
+                    if generation != self.trust_generation {
+                        continue;
+                    }
+                    self.trust_recheck_task = None;
+                    let trust = match result {
+                        Ok(trust) => trust,
+                        Err(_)
+                            if self.session_promoted
+                                || matches!(
+                                    self.pending_trust_transition,
+                                    Some(PendingTrustTransition {
+                                        generation: pending_generation,
+                                        decision: TrustLifecycleDecision::Promote,
+                                        ..
+                                    }) if pending_generation == generation
+                                ) =>
+                        {
+                            continue;
+                        }
+                        Err(_) => koushi_state::CurrentDeviceTrustState::Unknown,
+                    };
                     self.handle_current_device_trust(generation, trust).await;
                 }
                 AccountMessage::FirstRestrictedSyncFinished {
@@ -3692,7 +3729,7 @@ impl AccountActor {
                 request_id: _,
                 flow_id: _,
             } => {
-                self.request_authoritative_trust_recheck().await;
+                self.request_authoritative_trust_recheck();
             }
             AccountCommand::BootstrapCrossSigning { request_id, auth } => {
                 self.handle_bootstrap_cross_signing(request_id, auth).await;
@@ -3854,7 +3891,7 @@ impl AccountActor {
                     self.discover_verification_methods(self.trust_generation)
                         .await;
                 } else {
-                    self.request_authoritative_trust_recheck().await;
+                    self.request_authoritative_trust_recheck();
                 }
             }
             AccountCommand::AcceptVerification {
@@ -5374,7 +5411,7 @@ impl AccountActor {
                     request_id: flow_id,
                 }])
                 .await;
-                self.request_authoritative_trust_recheck().await;
+                self.request_authoritative_trust_recheck();
                 record_sas_verification_event(sas_waiting_event(
                     flow_id,
                     SasVerificationWaitState::NormalSyncResume,
@@ -7596,17 +7633,27 @@ impl AccountActor {
         }
     }
 
-    async fn request_authoritative_trust_recheck(&self) {
-        let Some(session) = self.session.as_ref() else {
+    fn request_authoritative_trust_recheck(&mut self) {
+        if self.trust_recheck_task.is_some()
+            || matches!(
+                self.pending_trust_transition,
+                Some(PendingTrustTransition { generation, .. })
+                    if generation == self.trust_generation
+            )
+        {
+            return;
+        }
+        let Some(session) = self.session.clone() else {
             return;
         };
-        let _ = self
-            .self_tx
-            .send(AccountMessage::CurrentDeviceTrustChanged {
-                generation: self.trust_generation,
-                trust: session.current_device_trust(),
-            })
-            .await;
+        let generation = self.trust_generation;
+        let tx = self.self_tx.clone();
+        self.trust_recheck_task = Some(executor::spawn(async move {
+            let result = session.recheck_current_device_trust().await;
+            let _ = tx
+                .send(AccountMessage::CurrentDeviceTrustRecheckFinished { generation, result })
+                .await;
+        }));
     }
 
     async fn perform_logout(
@@ -7941,6 +7988,10 @@ impl AccountActor {
             task.abort();
             let _ = task.await;
             self.record_lifecycle_probe("trust_observer_terminated");
+        }
+        if let Some(task) = self.trust_recheck_task.take() {
+            task.abort();
+            let _ = task.await;
         }
         if let Some(owned) = self.verification_method_discovery_task.take() {
             owned.task.abort();
@@ -12230,6 +12281,93 @@ mod tests {
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
 
+    async fn consume_initial_unknown_trust_projection(
+        action_rx: &mut mpsc::Receiver<Vec<AppAction>>,
+    ) {
+        while !matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::AuthoritativeDeviceTrustChanged {
+                trust: koushi_state::CurrentDeviceTrustState::Unknown,
+                ..
+            }])
+        ) {}
+    }
+
+    #[tokio::test]
+    async fn authoritative_trust_recheck_completion_promotes_through_generation_gated_path() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+
+        handle
+            .send(AccountMessage::CurrentDeviceTrustRecheckFinished {
+                generation: 2,
+                result: Ok(koushi_state::CurrentDeviceTrustState::Verified),
+            })
+            .await;
+        acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (true, true, true, true)
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn authoritative_trust_recheck_failure_settles_as_retryable_unknown_trust() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+
+        handle
+            .send(AccountMessage::CurrentDeviceTrustRecheckFinished {
+                generation: 2,
+                result: Err(koushi_sdk::CurrentDeviceTrustRecheckError::Sdk),
+            })
+            .await;
+
+        while !matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::AuthoritativeDeviceTrustChanged {
+                trust: koushi_state::CurrentDeviceTrustState::Unknown,
+                ..
+            }])
+        ) {}
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (true, false, false, true)
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn authoritative_trust_recheck_stale_generation_cannot_promote_session() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+
+        handle
+            .send(AccountMessage::CurrentDeviceTrustRecheckFinished {
+                generation: 1,
+                result: Ok(koushi_state::CurrentDeviceTrustState::Verified),
+            })
+            .await;
+        let runtime = inspect_session_runtime(&handle).await;
+
+        while let Ok(actions) = action_rx.try_recv() {
+            assert!(
+                !matches!(
+                    actions.as_slice(),
+                    [AppAction::AuthoritativeDeviceTrustChanged {
+                        trust: koushi_state::CurrentDeviceTrustState::Verified,
+                        ..
+                    }]
+                ),
+                "a stale recheck completion must not emit a verified projection"
+            );
+        }
+        assert_eq!(runtime, (true, false, false, true));
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
     #[tokio::test]
     async fn verification_to_normal_sync_handoff_has_one_owner() {
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();
@@ -14158,6 +14296,7 @@ mod tests {
             session_promoted: false,
             trust_generation: 0,
             trust_observer: None,
+            trust_recheck_task: None,
             verification_method_discovery_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,

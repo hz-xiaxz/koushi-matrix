@@ -4323,10 +4323,15 @@ impl AppActor {
                         .send(AccountMessage::RejectProvisionalSession { request_id })
                         .await;
                 }
+                AppEffect::CheckCurrentDeviceTrust => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::CheckCurrentDeviceTrust)
+                        .await;
+                }
                 AppEffect::RestoreSession
                 | AppEffect::DiscoverLogin { .. }
                 | AppEffect::Login { .. }
-                | AppEffect::CheckCurrentDeviceTrust
                 | AppEffect::DiscoverVerificationMethods
                 | AppEffect::BeginSessionVerification { .. }
                 | AppEffect::RecoverE2ee(_)
@@ -4442,10 +4447,15 @@ impl AppActor {
                         .send(AccountMessage::RejectProvisionalSession { request_id })
                         .await;
                 }
+                AppEffect::CheckCurrentDeviceTrust => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::CheckCurrentDeviceTrust)
+                        .await;
+                }
                 AppEffect::RestoreSession
                 | AppEffect::DiscoverLogin { .. }
                 | AppEffect::Login { .. }
-                | AppEffect::CheckCurrentDeviceTrust
                 | AppEffect::DiscoverVerificationMethods
                 | AppEffect::BeginSessionVerification { .. }
                 | AppEffect::RecoverE2ee(_)
@@ -6871,6 +6881,39 @@ mod tests {
             assert!(
                 helper.contains("SyncCommand::Stop"),
                 "StopSync effects must route the canonical SyncCommand::Stop path"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_routes_current_device_trust_rechecks_in_both_effect_lanes() {
+        let source = include_str!("runtime.rs");
+        let command_effects = source
+            .split("async fn handle_app_effects")
+            .nth(1)
+            .expect("handle_app_effects should exist")
+            .split("async fn handle_post_projection_effects")
+            .next()
+            .expect("handle_app_effects should precede post projection effects");
+        let actor_projection_effects = source
+            .split("async fn handle_post_projection_effects")
+            .nth(1)
+            .expect("handle_post_projection_effects should exist")
+            .split("async fn handle_ui_event_effects")
+            .next()
+            .expect("post projection effects should precede ui event effects");
+
+        for helper in [command_effects, actor_projection_effects] {
+            let recheck_arm = helper
+                .split("AppEffect::CheckCurrentDeviceTrust")
+                .nth(1)
+                .expect("trust recheck effect should be matched explicitly")
+                .split("AppEffect::")
+                .next()
+                .expect("another effect arm should bound the trust recheck route");
+            assert!(
+                recheck_arm.contains("AccountMessage::CheckCurrentDeviceTrust"),
+                "trust recheck effects must reach the AccountActor instead of being discarded"
             );
         }
     }

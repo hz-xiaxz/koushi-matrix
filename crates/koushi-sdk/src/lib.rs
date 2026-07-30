@@ -16,6 +16,12 @@ pub struct CurrentDeviceTrustObservation {
     pub updates: CurrentDeviceTrustStream,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("current-device trust recheck failed")]
+pub enum CurrentDeviceTrustRecheckError {
+    Sdk,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum IdentityFact {
     Existing,
@@ -3915,6 +3921,24 @@ impl MatrixClientSession {
         map_sdk_verification_state(subscriber.get())
     }
 
+    pub async fn recheck_current_device_trust(
+        &self,
+    ) -> Result<CurrentDeviceTrustState, CurrentDeviceTrustRecheckError> {
+        // Subscribe before the request so the returned value belongs to the
+        // same observation that sees the own-user keys-query settlement.
+        let subscriber = self.client().encryption().verification_state();
+        let client = self.client();
+        let user_id = client
+            .user_id()
+            .ok_or(CurrentDeviceTrustRecheckError::Sdk)?;
+        client
+            .encryption()
+            .request_user_identity(user_id)
+            .await
+            .map_err(|_| CurrentDeviceTrustRecheckError::Sdk)?;
+        Ok(map_sdk_verification_state(subscriber.get()))
+    }
+
     pub fn observe_current_device_trust(&self) -> CurrentDeviceTrustObservation {
         // Subscribe first, then read from the same subscriber so an update
         // cannot be lost between the current-value probe and stream creation.
@@ -3932,6 +3956,45 @@ impl std::fmt::Debug for MatrixClientSession {
             .field("info", &self.info)
             .field("client", &"MatrixClient(..)")
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod current_device_trust_recheck_tests {
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+
+    use super::{CurrentDeviceTrustState, MatrixClientSession, SessionInfo};
+
+    #[tokio::test]
+    async fn recheck_current_device_trust_queries_own_identity() {
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let info = SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client
+                .user_id()
+                .expect("mock client has a user id")
+                .to_string(),
+            device_id: client
+                .device_id()
+                .expect("mock client has a device id")
+                .to_string(),
+        };
+        let session = MatrixClientSession::from_client_for_testing(client, info);
+        let _query = server
+            .mock_query_keys()
+            .ok()
+            .expect(1)
+            .named("authoritative current-device trust recheck")
+            .mount_as_scoped()
+            .await;
+
+        let trust = session
+            .recheck_current_device_trust()
+            .await
+            .expect("empty authoritative response still settles");
+
+        assert_eq!(trust, CurrentDeviceTrustState::Unverified);
     }
 }
 
