@@ -1046,6 +1046,25 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   exactly this and silently stopped `send_reaction` until the reaction
   browser-headless test caught it. Outside-press dismissal belongs to the
   component that owns the panel.
+- A floating-layer popup's size is owned by the measurement it passes to
+  `useFloatingPlacement`, not by CSS. `floatingPlacementStyle` writes the
+  resolved `inlineSize`/`blockSize` as INLINE styles, so a stylesheet
+  `min-inline-size`/`max-inline-size` on the panel is dead code — that is why
+  the `--receipt-tooltip-min/max-inline-size` tokens only ever affected
+  `.reaction-tooltip`. When a popup is the wrong size, fix the measurement.
+- A constant `blockSize` for a variable-length list is a layout bug (#360). The
+  reader popup passed a fixed 132px whatever the reader count, and because
+  `.receipt-tooltip` is a grid its auto rows stretched to fill the slack: two
+  readers rendered as two ~55px rows with a large blank gap between them, which
+  reads as "excessive vertical space". Derive the block size from the row count
+  (`receiptPopupBlockSize`) and pair it with `align-content: start` so residual
+  slack can never stretch rows. Keep the JS row/gap/padding constants in step
+  with the matching `--receipt-tooltip-*` CSS tokens.
+- Assert popup compactness on measured slack, not on a guessed total. The useful
+  invariant is `popupHeight - rowsHeight - (padding + border + row gaps) <
+  lineHeight`; reading padding/border/`rowGap` from `getComputedStyle` keeps the
+  test honest when a token changes. A raw `popupHeight < rowsHeight + lineHeight`
+  bound looks equivalent and fails on correct output.
 - Rendered geometry that keyboard navigation depends on needs one owner.
   `EMOJI_PICKER_GRID_COLUMNS` feeds both `--emoji-picker-columns` and the
   ArrowUp/ArrowDown step, and `styles.contract.test.ts` pins the CSS fallback to

@@ -6964,7 +6964,27 @@ function paginationStateBackfillCompletionReason(state: PaginationState): string
 
 /** Reader popup width; the panel narrows to the pane when it is smaller. */
 const RECEIPT_POPUP_INLINE_SIZE_PX = 260;
-const RECEIPT_POPUP_BLOCK_SIZE_PX = 132;
+/**
+ * Reader popup height follows the row count (#360).
+ *
+ * A fixed height made the popup the same size for two readers as for six, and
+ * because `.receipt-tooltip` is a grid, its auto rows stretched to fill the
+ * slack — two readers rendered as two ~55px rows with a large blank gap. These
+ * mirror the `--receipt-tooltip-*` CSS tokens; keep them in step.
+ */
+const RECEIPT_POPUP_ROW_BLOCK_SIZE_PX = 17;
+const RECEIPT_POPUP_ROW_GAP_PX = 3;
+const RECEIPT_POPUP_PADDING_BLOCK_PX = 8;
+const RECEIPT_POPUP_BORDER_BLOCK_PX = 1;
+
+function receiptPopupBlockSize(rowCount: number): number {
+  const rows = Math.max(rowCount, 1);
+  return (
+    rows * RECEIPT_POPUP_ROW_BLOCK_SIZE_PX +
+    (rows - 1) * RECEIPT_POPUP_ROW_GAP_PX +
+    2 * (RECEIPT_POPUP_PADDING_BLOCK_PX + RECEIPT_POPUP_BORDER_BLOCK_PX)
+  );
+}
 
 /**
  * Read-receipt avatar stack plus its reader popup.
@@ -6991,7 +7011,7 @@ function ReceiptReaders({
   const placement = useFloatingPlacement({
     align: "end",
     anchorRef,
-    blockSize: RECEIPT_POPUP_BLOCK_SIZE_PX,
+    blockSize: receiptPopupBlockSize(details.length),
     inlineSize: RECEIPT_POPUP_INLINE_SIZE_PX,
     placement: "above",
     resolveBoundaryElement: receiptPopupBoundaryElement
