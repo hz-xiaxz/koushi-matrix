@@ -11,10 +11,12 @@ static NATIVE_ATTENTION_SOUND_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex:
 pub(crate) fn build_observe_native_window_focus_command(
     request_id: RequestId,
     focused: bool,
+    observation_generation: u64,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::ObserveNativeWindowFocus {
         request_id,
         focused,
+        observation_generation,
     })
 }
 

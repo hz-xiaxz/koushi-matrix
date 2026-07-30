@@ -8083,6 +8083,7 @@ mod tests {
                     crate::ComposerDraftTransportIdentities::default(),
                 ),
                 timeline_items_count: std::sync::atomic::AtomicUsize::new(0),
+                native_window_focus_generation: std::sync::atomic::AtomicU64::new(0),
             };
             super::search::submit_search_production_path(
                 SYNTHETIC_QUERY.to_owned(),

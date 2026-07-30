@@ -3941,9 +3941,13 @@ impl AppActor {
                 AppCommand::ObserveNativeWindowFocus {
                     request_id,
                     focused,
+                    observation_generation,
                 } => {
                     let effects = self
-                        .reduce_app_action(AppAction::NativeWindowFocusChanged { focused })
+                        .reduce_app_action(AppAction::NativeWindowFocusChanged {
+                            focused,
+                            observation_generation,
+                        })
                         .await;
                     self.handle_app_effects(request_id, effects).await;
                     true
@@ -6028,7 +6032,10 @@ mod tests {
         );
         reduce_with_unread_diagnostics(
             &mut state,
-            AppAction::NativeWindowFocusChanged { focused: false },
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 1,
+            },
         );
 
         room.unread_count = 1;

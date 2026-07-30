@@ -848,9 +848,14 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::NativeAttentionUpdated { attention } => {
             native_attention::handle_native_attention_updated(state, attention)
         }
-        AppAction::NativeWindowFocusChanged { focused } => {
-            native_attention::handle_native_window_focus_changed(state, focused)
-        }
+        AppAction::NativeWindowFocusChanged {
+            focused,
+            observation_generation,
+        } => native_attention::handle_native_window_focus_changed(
+            state,
+            focused,
+            observation_generation,
+        ),
         AppAction::NativeAttentionDispatchStarted { dispatch_id } => {
             native_attention::handle_dispatch_started(state, dispatch_id)
         }
@@ -2903,7 +2908,10 @@ mod tests {
         );
         reduce(
             &mut state,
-            AppAction::NativeWindowFocusChanged { focused: false },
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 1,
+            },
         );
 
         let mut active_room = test_room("!active:example.invalid", None);
@@ -2971,11 +2979,17 @@ mod tests {
         let badge_count = state.native_attention.summary.badge_count;
         reduce(
             &mut state,
-            AppAction::NativeWindowFocusChanged { focused: false },
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 1,
+            },
         );
         reduce(
             &mut state,
-            AppAction::NativeWindowFocusChanged { focused: true },
+            AppAction::NativeWindowFocusChanged {
+                focused: true,
+                observation_generation: 2,
+            },
         );
 
         assert_eq!(
@@ -2990,6 +3004,41 @@ mod tests {
         assert_eq!(
             state.native_attention.dispatch,
             crate::state::NativeAttentionDispatchState::Idle
+        );
+    }
+
+    #[test]
+    fn native_window_focus_generation_rejects_stale_async_delivery() {
+        let mut state = ready_state();
+
+        reduce(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 1,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: true,
+                observation_generation: 3,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 2,
+            },
+        );
+
+        assert!(state.native_attention_context.window_focused);
+        assert_eq!(
+            state
+                .native_attention_context
+                .window_focus_observation_generation,
+            3
         );
     }
 

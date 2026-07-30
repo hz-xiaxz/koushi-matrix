@@ -593,6 +593,7 @@ pub enum AppCommand {
     ObserveNativeWindowFocus {
         request_id: RequestId,
         focused: bool,
+        observation_generation: u64,
     },
     StartNativeAttentionDispatch {
         request_id: RequestId,
@@ -967,10 +968,12 @@ impl fmt::Debug for AppCommand {
             Self::ObserveNativeWindowFocus {
                 request_id,
                 focused,
+                observation_generation,
             } => formatter
                 .debug_struct("ObserveNativeWindowFocus")
                 .field("request_id", request_id)
                 .field("focused", focused)
+                .field("observation_generation", observation_generation)
                 .finish(),
             Self::StartNativeAttentionDispatch {
                 request_id,
@@ -3916,6 +3919,7 @@ mod tests {
         let command = AppCommand::ObserveNativeWindowFocus {
             request_id,
             focused: false,
+            observation_generation: 7,
         };
 
         assert_eq!(
@@ -3928,10 +3932,12 @@ mod tests {
             AppCommand::ObserveNativeWindowFocus {
                 request_id,
                 focused: false,
+                observation_generation: 7,
             }
         );
         assert!(debug.contains("ObserveNativeWindowFocus"), "{debug}");
         assert!(debug.contains("focused: false"), "{debug}");
+        assert!(debug.contains("observation_generation: 7"), "{debug}");
         assert!(!debug.contains("room_id"), "{debug}");
         assert!(!debug.contains("event_id"), "{debug}");
         assert!(!debug.contains("user_id"), "{debug}");

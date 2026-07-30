@@ -769,6 +769,7 @@ pub enum AppAction {
     },
     NativeWindowFocusChanged {
         focused: bool,
+        observation_generation: u64,
     },
     NativeAttentionDispatchStarted {
         dispatch_id: NativeAttentionDispatchId,

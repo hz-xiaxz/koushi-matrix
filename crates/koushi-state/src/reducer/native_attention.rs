@@ -141,7 +141,18 @@ pub(crate) fn recompute_native_attention_from_rooms(
 pub(crate) fn handle_native_window_focus_changed(
     state: &mut AppState,
     focused: bool,
+    observation_generation: u64,
 ) -> Vec<AppEffect> {
+    if observation_generation
+        <= state
+            .native_attention_context
+            .window_focus_observation_generation
+    {
+        return Vec::new();
+    }
+    state
+        .native_attention_context
+        .window_focus_observation_generation = observation_generation;
     if state.native_attention_context.window_focused == focused {
         return Vec::new();
     }

@@ -16,12 +16,14 @@ use super::settings::RoomNotificationMode;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeAttentionContext {
     pub window_focused: bool,
+    pub window_focus_observation_generation: u64,
 }
 
 impl Default for NativeAttentionContext {
     fn default() -> Self {
         Self {
             window_focused: true,
+            window_focus_observation_generation: 0,
         }
     }
 }
