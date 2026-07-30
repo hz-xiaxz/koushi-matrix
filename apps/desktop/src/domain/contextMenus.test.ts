@@ -106,7 +106,8 @@ describe("context menu registry", () => {
       "setRoomFavourite",
       "setRoomLowPriority",
       "markRoomAsRead",
-      "markRoomAsUnread"
+      "markRoomAsUnread",
+      "leaveRoom"
     ]);
     expect(contextMenuItems({ kind: "space" }).map((item) => item.id)).toEqual([
       "selectSpace",
@@ -153,5 +154,36 @@ describe("context menu registry", () => {
         tags: { favourite: null, low_priority: { order: "0.9" } }
       }).map((item) => item.id)
     ).toContain("removeRoomLowPriority");
+  });
+
+  test("room and DM menus end with a confirmation-gated leave action (#373)", () => {
+    // The leave backend already existed end to end; only the menu action was
+    // missing. DM copy differs, but both ids drive the same Matrix room-leave.
+    const roomItems = contextMenuItems({
+      kind: "room",
+      roomId: "!room:example.invalid"
+    });
+    const roomLast = roomItems[roomItems.length - 1];
+    expect(roomLast.id).toBe("leaveRoom");
+    expect(roomLast.labelMessageId).toBe("context.leaveRoom");
+    expect(roomLast.destructive).toBe(true);
+
+    const dmItems = contextMenuItems({
+      kind: "room",
+      roomId: "!dm:example.invalid",
+      dmUserIds: ["@dm:example.invalid"]
+    });
+    const dmLast = dmItems[dmItems.length - 1];
+    expect(dmLast.id).toBe("leaveRoom");
+    expect(dmLast.labelMessageId).toBe("context.leaveConversation");
+    expect(dmLast.destructive).toBe(true);
+
+    // Space handling stays separate: this must not become the room action.
+    expect(
+      contextMenuItems({ kind: "space" }).map((item) => item.id)
+    ).toContain("leaveSpace");
+    expect(
+      contextMenuItems({ kind: "space" }).map((item) => item.id)
+    ).not.toContain("leaveRoom");
   });
 });

@@ -135,6 +135,14 @@ export type MessageId =
   | "context.addToLowPriority"
   | "context.ignoreUser"
   | "context.leaveSpace"
+  | "context.leaveRoom"
+  | "context.leaveConversation"
+  | "room.leaveConfirmTitle"
+  | "room.leaveConfirmTitleDm"
+  | "room.leaveConfirmCopy"
+  | "room.leaveConfirmCopyDm"
+  | "room.leaveConfirmAction"
+  | "room.leaveConfirmActionDm"
   | "context.openKeyboardSettings"
   | "context.openRoomInfo"
   | "context.openSpaceInfo"
@@ -1187,6 +1195,16 @@ const en: Catalog = {
   "context.addToLowPriority": "Move to Low priority",
   "context.ignoreUser": "Ignore",
   "context.leaveSpace": "Leave Space",
+  "context.leaveRoom": "Leave room…",
+  "context.leaveConversation": "Leave conversation…",
+  "room.leaveConfirmTitle": "Leave {name}?",
+  "room.leaveConfirmTitleDm": "Leave conversation with {name}?",
+  "room.leaveConfirmCopy":
+    "This removes {name} from your joined rooms. Messages already on the homeserver are not deleted. If the room is private you may need another invitation to return.",
+  "room.leaveConfirmCopyDm":
+    "This removes your conversation with {name} from your joined rooms. Messages already on the homeserver are not deleted. You may need a new invitation to return.",
+  "room.leaveConfirmAction": "Leave room",
+  "room.leaveConfirmActionDm": "Leave conversation",
   "context.openKeyboardSettings": "Keyboard shortcuts",
   "context.openRoomInfo": "Room info",
   "context.openSpaceInfo": "Space info",
@@ -2144,6 +2162,16 @@ const ja: Catalog = {
   "context.addToLowPriority": "低優先度に移動",
   "context.ignoreUser": "無視",
   "context.leaveSpace": "スペースから退出",
+  "context.leaveRoom": "ルームから退出…",
+  "context.leaveConversation": "会話から退出…",
+  "room.leaveConfirmTitle": "{name} から退出しますか？",
+  "room.leaveConfirmTitleDm": "{name} との会話から退出しますか？",
+  "room.leaveConfirmCopy":
+    "{name} が参加中のルーム一覧から削除されます。ホームサーバー上のメッセージは削除されません。非公開ルームの場合、再参加には招待が必要になることがあります。",
+  "room.leaveConfirmCopyDm":
+    "{name} との会話が参加中のルーム一覧から削除されます。ホームサーバー上のメッセージは削除されません。再開には新しい招待が必要になることがあります。",
+  "room.leaveConfirmAction": "ルームから退出",
+  "room.leaveConfirmActionDm": "会話から退出",
   "context.openKeyboardSettings": "キーボードショートカット",
   "context.openRoomInfo": "ルーム情報",
   "context.openSpaceInfo": "スペース情報",
