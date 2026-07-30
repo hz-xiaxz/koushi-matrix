@@ -3880,6 +3880,16 @@ impl AppActor {
                     self.handle_app_effects(request_id, effects).await;
                     true
                 }
+                AppCommand::ObserveNativeWindowFocus {
+                    request_id,
+                    focused,
+                } => {
+                    let effects = self
+                        .reduce_app_action(AppAction::NativeWindowFocusChanged { focused })
+                        .await;
+                    self.handle_app_effects(request_id, effects).await;
+                    true
+                }
                 AppCommand::StartNativeAttentionDispatch {
                     request_id,
                     dispatch_id,

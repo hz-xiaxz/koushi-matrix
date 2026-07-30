@@ -83,6 +83,7 @@ impl CoreCommand {
                 | AppCommand::PaginateThreadsList { request_id, .. }
                 | AppCommand::RecordLocalEncryptionHealth { request_id, .. }
                 | AppCommand::UpdateNativeAttentionState { request_id, .. }
+                | AppCommand::ObserveNativeWindowFocus { request_id, .. }
                 | AppCommand::StartNativeAttentionDispatch { request_id, .. }
                 | AppCommand::SettleNativeAttentionDispatch { request_id, .. }
                 | AppCommand::UpdateJapaneseCatalogProfile { request_id, .. }
@@ -589,6 +590,10 @@ pub enum AppCommand {
         request_id: RequestId,
         attention: NativeAttentionState,
     },
+    ObserveNativeWindowFocus {
+        request_id: RequestId,
+        focused: bool,
+    },
     StartNativeAttentionDispatch {
         request_id: RequestId,
         dispatch_id: NativeAttentionDispatchId,
@@ -958,6 +963,14 @@ impl fmt::Debug for AppCommand {
                         .as_ref()
                         .map(|_| "AttentionCandidate(..)"),
                 )
+                .finish(),
+            Self::ObserveNativeWindowFocus {
+                request_id,
+                focused,
+            } => formatter
+                .debug_struct("ObserveNativeWindowFocus")
+                .field("request_id", request_id)
+                .field("focused", focused)
                 .finish(),
             Self::StartNativeAttentionDispatch {
                 request_id,
@@ -3895,6 +3908,33 @@ mod tests {
         assert!(debug.contains("unread_count"), "{debug}");
         assert!(debug.contains("suppressed"), "{debug}");
         assert!(!debug.contains("Private Room Name"), "{debug}");
+    }
+
+    #[test]
+    fn observe_native_window_focus_command_is_correlated_and_private_safe() {
+        let request_id = fake_rid(28);
+        let command = AppCommand::ObserveNativeWindowFocus {
+            request_id,
+            focused: false,
+        };
+
+        assert_eq!(
+            CoreCommand::App(command).request_id(),
+            request_id,
+            "focus observation must preserve command correlation"
+        );
+        let debug = format!(
+            "{:?}",
+            AppCommand::ObserveNativeWindowFocus {
+                request_id,
+                focused: false,
+            }
+        );
+        assert!(debug.contains("ObserveNativeWindowFocus"), "{debug}");
+        assert!(debug.contains("focused: false"), "{debug}");
+        assert!(!debug.contains("room_id"), "{debug}");
+        assert!(!debug.contains("event_id"), "{debug}");
+        assert!(!debug.contains("user_id"), "{debug}");
     }
 
     #[test]

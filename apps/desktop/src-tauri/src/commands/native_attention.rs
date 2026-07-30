@@ -8,6 +8,16 @@ trait NativeAttentionSoundBackend {
 struct PlatformNativeAttentionSoundBackend;
 static NATIVE_ATTENTION_SOUND_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+pub(crate) fn build_observe_native_window_focus_command(
+    request_id: RequestId,
+    focused: bool,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::ObserveNativeWindowFocus {
+        request_id,
+        focused,
+    })
+}
+
 #[tauri::command]
 pub(crate) async fn play_native_attention_sound(
     state: State<'_, CoreRuntimeState>,
