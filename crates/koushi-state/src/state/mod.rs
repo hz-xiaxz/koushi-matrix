@@ -59,9 +59,9 @@ pub use session::{
     DeviceCleanupOfferReason, DeviceCleanupRemoteOutcome, DeviceCleanupState,
     DeviceSessionListState, DeviceSessionSummary, LoginAttemptId, LoginFlow, LoginFlowKind,
     ProvisionalPhase, QrLoginState, RecoveryMethod, SessionAuthenticationMethod, SessionInfo,
-    SessionState, SoftLogoutReauthState, VerificationAccountKind,
-    VerificationGateFailureKind, VerificationGateRejectReason, VerificationGateState,
-    VerificationMethod, VerificationMethodCapability,
+    SessionState, SoftLogoutReauthState, VerificationAccountKind, VerificationGateFailureKind,
+    VerificationGateRejectReason, VerificationGateState, VerificationMethod,
+    VerificationMethodCapability,
 };
 pub use session_status::{
     CurrentSessionBackupState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,

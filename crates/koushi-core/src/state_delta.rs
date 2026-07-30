@@ -4,16 +4,15 @@ use std::collections::{BTreeMap, HashMap};
 
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, ActivityState, AppError, AppState,
-    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, DeviceCleanupState,
-    CurrentSessionStatusState,
-    DeviceSessionListState, DirectoryState, E2eeTrustState, FilesViewState, FocusedContextState,
-    InvitePreview, InviteWorkflowState, LinkPreviewSettingsState, LiveSignalsState,
-    LocalEncryptionState, MentionCandidatesState, NativeAttentionState, NavigationState,
-    ProfileState, QrLoginState, RoomInteractionState, RoomListProjection, RoomManagementState,
-    RoomNotificationSettings, RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchState,
-    SessionState, SettingsState, SidebarModel, SoftLogoutReauthState, SpaceSummary, SyncMode,
-    SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
-    compose_sidebar_with_account_facts,
+    AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, CurrentSessionStatusState,
+    DeviceCleanupState, DeviceSessionListState, DirectoryState, E2eeTrustState, FilesViewState,
+    FocusedContextState, InvitePreview, InviteWorkflowState, LinkPreviewSettingsState,
+    LiveSignalsState, LocalEncryptionState, MentionCandidatesState, NativeAttentionState,
+    NavigationState, ProfileState, QrLoginState, RoomInteractionState, RoomListProjection,
+    RoomManagementState, RoomNotificationSettings, RoomPreferencesState, RoomSummary,
+    SearchCrawlerState, SearchState, SessionState, SettingsState, SidebarModel,
+    SoftLogoutReauthState, SpaceSummary, SyncMode, SyncState, ThreadAttentionState,
+    ThreadPaneState, ThreadsListState, TimelinePaneState, compose_sidebar_with_account_facts,
 };
 use serde::{Deserialize, Serialize};
 
