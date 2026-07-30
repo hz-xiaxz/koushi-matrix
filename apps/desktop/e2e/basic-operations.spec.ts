@@ -5279,6 +5279,107 @@ test("read receipt avatars render from Rust projection with overflow and tooltip
   expect(metrics.bottom).toBeLessThanOrEqual(metrics.viewportHeight);
 });
 
+test("Seen popup keeps each reader on one compact line (#360)", async ({ page }) => {
+  await gotoReadyShell(page);
+
+  // Two readers, the first with a realistically long display name — the shape
+  // from the report, where the first entry wrapped and left a large blank gap
+  // before the second.
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          live_signals: {
+            rooms: {
+              "!harness-room:example.invalid": {
+                receipts_by_event: {
+                  "$seed-event:example.invalid": {
+                    readers: [
+                      {
+                        user_id: "@long:example.invalid",
+                        display_name: "Yoshito Azumagawa",
+                        avatar: null,
+                        timestamp_ms: 1_800_000_000_500
+                      },
+                      {
+                        user_id: "@bob:example.invalid",
+                        display_name: "Bob",
+                        avatar: null,
+                        timestamp_ms: 1_800_000_000_300
+                      }
+                    ],
+                    total_count: 2,
+                    overflow_count: 0
+                  }
+                },
+                fully_read_event_id: null,
+                typing_user_ids: []
+              }
+            },
+            presence: {}
+          }
+        }
+      }
+    });
+    window.__harness.pushStateChanged();
+  });
+
+  const receipts = page
+    .locator('[data-event-id="$seed-event:example.invalid"]')
+    .locator(".message-receipts");
+  await receipts.focus();
+  const popup = page.locator("body > .receipt-tooltip");
+  await expect(popup).toBeVisible();
+
+  const layout = await popup.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    const fontSize = Number.parseFloat(styles.fontSize);
+    const rows = Array.from(element.children).map((child) => {
+      const rect = child.getBoundingClientRect();
+      return { height: rect.height, width: rect.width };
+    });
+    const chromeHeight =
+      Number.parseFloat(styles.paddingBlockStart) +
+      Number.parseFloat(styles.paddingBlockEnd) +
+      Number.parseFloat(styles.borderBlockStartWidth) +
+      Number.parseFloat(styles.borderBlockEndWidth) +
+      Number.parseFloat(styles.rowGap || "0") * Math.max(rows.length - 1, 0);
+    return {
+      chromeHeight,
+      fontSize,
+      lineHeight: Number.parseFloat(styles.lineHeight),
+      popupHeight: element.getBoundingClientRect().height,
+      contentWidth: element.clientWidth,
+      rows
+    };
+  });
+
+  expect(layout.rows).toHaveLength(2);
+
+  // Each entry stays on ONE line: a wrapped row would be at least two
+  // line-heights tall. This is the assertion the report's screenshot fails.
+  for (const row of layout.rows) {
+    expect(row.height).toBeLessThan(layout.lineHeight * 1.6);
+    // A long name must not overflow the popup's content box.
+    expect(row.width).toBeLessThanOrEqual(layout.contentWidth + 1);
+  }
+
+  // No large blank vertical gap: the popup is its two single-line rows plus its
+  // own padding/border/row-gap, and nothing more. Before the fix the height was
+  // a constant 132px regardless of reader count, and the grid stretched its
+  // auto rows to fill that slack.
+  const rowsHeight = layout.rows.reduce((total, row) => total + row.height, 0);
+  const slack = layout.popupHeight - rowsHeight - layout.chromeHeight;
+  expect(slack).toBeLessThan(layout.lineHeight);
+
+  // Read-receipt rows use the smaller receipt scale, not body text.
+  expect(layout.fontSize).toBeLessThanOrEqual(12);
+});
+
 test("redact message invokes redact_message and shows the redacted placeholder", async ({
   page
 }) => {
