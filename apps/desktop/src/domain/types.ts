@@ -54,6 +54,7 @@ export interface AppState {
 
 export interface AppDomainState {
   session: SessionState;
+  current_session_status: CurrentSessionStatusState;
   device_cleanup: DeviceCleanupState;
   auth: AuthDiscoveryState;
   device_sessions: DeviceSessionListState;
@@ -510,6 +511,37 @@ export interface SessionState {
   reason?: "existingIdentityWithoutProof" | "userRejected";
   recovery_methods?: RecoveryMethod[];
 }
+
+export type SessionStatusRefreshTrigger = "open" | "manual";
+export type SessionAuthenticationMethod = "password" | "sso" | "oauth" | "token" | "unknown";
+export type CurrentSessionSyncState = "stopped" | "starting" | "running" | "error";
+export type OwnIdentityVerification = "missing" | "unverified" | "verified";
+export type CurrentSessionBackupState = "ready" | "disabled" | "unknown";
+export type CurrentSessionVerification = "verified" | "unverified";
+export type CurrentSessionStatusFailureKind = "sdk" | "timed_out" | "unavailable";
+
+export interface CurrentSessionStatusDetails {
+  device_display_name: string | null;
+  device_id: string;
+  authentication_method: SessionAuthenticationMethod;
+  sync_state: CurrentSessionSyncState;
+  is_cross_signed_by_owner: boolean;
+  own_identity_verification: OwnIdentityVerification;
+  key_backup: CurrentSessionBackupState;
+  verification: CurrentSessionVerification;
+  checked_at_ms: number;
+}
+
+export type CurrentSessionStatusState =
+  | { status: "idle" }
+  | { status: "checking"; request_id: number; trigger: SessionStatusRefreshTrigger }
+  | { status: "ready"; request_id: number; details: CurrentSessionStatusDetails }
+  | {
+      status: "failed";
+      request_id: number;
+      kind: CurrentSessionStatusFailureKind;
+      checked_at_ms: number;
+    };
 
 export type SyncState =
   | "stopped"

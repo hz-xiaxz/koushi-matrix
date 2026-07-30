@@ -163,6 +163,7 @@ function readySnapshot(
         schema_version: 3,
         domain: {
           session: { kind: "ready", homeserver: HOMESERVER, user_id: USER_ID, device_id: DEVICE_ID },
+          current_session_status: { status: "idle" },
           device_cleanup: { kind: "idle" },
           auth: { kind: "unknown" },
           settings: defaultSettingsState(),

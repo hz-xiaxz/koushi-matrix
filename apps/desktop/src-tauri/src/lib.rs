@@ -1253,6 +1253,7 @@ pub fn run() {
             commands::room::mark_room_as_unread,
             commands::room::set_room_notification_mode,
             commands::account::query_devices,
+            commands::account::refresh_current_session_status,
             commands::account::load_account_management_capabilities,
             commands::account::rename_device,
             commands::account::delete_devices,
@@ -2288,15 +2289,17 @@ mod tests {
         };
         use koushi_state::{
             ActivityRow, ActivityStream, ActivityTab, AppState, AttachmentKind, AttachmentResult,
-            AvatarThumbnailState, DeviceCleanupOfferReason, DeviceCleanupState,
-            DirectoryPreviewJoinability, DirectoryPreviewMembership, DirectoryQuery,
-            DirectoryRoomPreview, DirectoryRoomSummary, IdentityResetAuthType, IdentityResetState,
-            JapaneseCatalogProfile, LocalEncryptionHealth, MediaTransferProgress,
-            NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionSummary,
-            PresenceKind, ReplyQuote, ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule,
-            RoomMemberRole, RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot,
-            RoomTagKind, SasEmoji, SearchCrawlerFailureKind, SearchCrawlerRoomState, SubmissionId,
-            SyncMode, UserTrustState, VerificationFlowState, VerificationTarget,
+            AvatarThumbnailState, CurrentSessionBackupState, CurrentSessionStatusDetails,
+            CurrentSessionStatusState, CurrentSessionSyncState, DeviceCleanupOfferReason,
+            DeviceCleanupState, DirectoryPreviewJoinability, DirectoryPreviewMembership,
+            DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary, IdentityResetAuthType,
+            IdentityResetState, JapaneseCatalogProfile, LocalEncryptionHealth,
+            MediaTransferProgress, NativeAttentionCapabilities, NativeAttentionCapability,
+            NativeAttentionSummary, OwnIdentityVerification, PresenceKind, ReplyQuote,
+            ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule, RoomMemberRole,
+            RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot, RoomTagKind, SasEmoji,
+            SearchCrawlerFailureKind, SearchCrawlerRoomState, SessionAuthenticationMethod,
+            SubmissionId, SyncMode, UserTrustState, VerificationFlowState, VerificationTarget,
         };
         use serde_json::json;
 
@@ -3562,6 +3565,19 @@ mod tests {
         );
         state_delta_next.device_cleanup = DeviceCleanupState::Offered {
             reason: DeviceCleanupOfferReason::NoProofMethod,
+        };
+        state_delta_next.current_session_status = CurrentSessionStatusState::Ready {
+            request_id: 369,
+            details: CurrentSessionStatusDetails::new(
+                Some("Contract Device".to_owned()),
+                "CONTRACTDEVICE".to_owned(),
+                SessionAuthenticationMethod::OAuth,
+                CurrentSessionSyncState::Running,
+                true,
+                OwnIdentityVerification::Verified,
+                CurrentSessionBackupState::Ready,
+                1_722_000_000_000,
+            ),
         };
         let state_delta_event = CoreEvent::StateDelta(
             build_state_delta(1, &state_delta_previous, &state_delta_next).expect("fixture delta"),
