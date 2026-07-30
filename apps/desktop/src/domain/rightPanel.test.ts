@@ -155,6 +155,7 @@ function snapshotForPanelMode(
       schema_version: 3,
       domain: {
         session: { kind: sessionKind },
+        device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },
         settings: {
           values: {

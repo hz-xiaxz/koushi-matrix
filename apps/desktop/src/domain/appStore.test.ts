@@ -741,6 +741,7 @@ function makeSnapshot(): DesktopSnapshot {
       schema_version: 3,
       domain: {
         session: { kind: "ready", homeserver: "https://example.invalid", user_id: "@user:example.invalid", device_id: "DEVICE" },
+        device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },
         settings: {
           values: {

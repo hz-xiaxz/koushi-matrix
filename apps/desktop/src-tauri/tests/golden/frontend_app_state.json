@@ -131,6 +131,15 @@
           "width_fold": true
         }
       },
+      "device_cleanup": {
+        "failureKind": "localData",
+        "kind": "localResetFailed",
+        "mode": {
+          "kind": "remoteRemoved",
+          "outcome": "alreadyAbsent"
+        },
+        "request_id": 370
+      },
       "device_sessions": {
         "kind": "idle"
       },

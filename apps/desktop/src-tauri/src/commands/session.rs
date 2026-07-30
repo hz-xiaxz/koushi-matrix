@@ -205,6 +205,47 @@ pub async fn submit_recovery(
 }
 
 #[tauri::command]
+pub async fn start_device_cleanup(
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        build_start_device_cleanup_command(request_id),
+    )
+    .await?;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn submit_device_cleanup_uia(
+    flow_id: u64,
+    password: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        build_submit_device_cleanup_uia_command(request_id, flow_id, AuthSecret::new(password)),
+    )
+    .await?;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn erase_local_data_anyway(
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        build_erase_device_cleanup_local_data_anyway_command(request_id),
+    )
+    .await?;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn logout(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,

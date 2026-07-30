@@ -632,6 +632,10 @@
     "changed": {
       "state": {
         "domain": {
+          "device_cleanup": {
+            "kind": "offered",
+            "reason": "noProofMethod"
+          },
           "search_crawler": {
             "last_active": null,
             "rooms": {

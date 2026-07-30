@@ -1238,6 +1238,9 @@ pub fn run() {
             commands::session::list_saved_sessions,
             commands::session::switch_account,
             commands::session::submit_recovery,
+            commands::session::start_device_cleanup,
+            commands::session::submit_device_cleanup_uia,
+            commands::session::erase_local_data_anyway,
             commands::session::logout,
             commands::session::restart_sync,
             commands::settings::update_settings,
@@ -2282,15 +2285,15 @@ mod tests {
         };
         use koushi_state::{
             ActivityRow, ActivityStream, ActivityTab, AppState, AttachmentKind, AttachmentResult,
-            AvatarThumbnailState, DirectoryPreviewJoinability, DirectoryPreviewMembership,
-            DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary, IdentityResetAuthType,
-            IdentityResetState, JapaneseCatalogProfile, LocalEncryptionHealth,
-            MediaTransferProgress, NativeAttentionCapabilities, NativeAttentionCapability,
-            NativeAttentionSummary, PresenceKind, ReplyQuote, ReplyQuoteState,
-            RoomHistoryVisibility, RoomJoinRule, RoomMemberRole, RoomModerationAction,
-            RoomPermissionFacts, RoomSettingsSnapshot, RoomTagKind, SasEmoji,
-            SearchCrawlerFailureKind, SearchCrawlerRoomState, SubmissionId, SyncMode,
-            UserTrustState, VerificationFlowState, VerificationTarget,
+            AvatarThumbnailState, DeviceCleanupOfferReason, DeviceCleanupState,
+            DirectoryPreviewJoinability, DirectoryPreviewMembership, DirectoryQuery,
+            DirectoryRoomPreview, DirectoryRoomSummary, IdentityResetAuthType, IdentityResetState,
+            JapaneseCatalogProfile, LocalEncryptionHealth, MediaTransferProgress,
+            NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionSummary,
+            PresenceKind, ReplyQuote, ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule,
+            RoomMemberRole, RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot,
+            RoomTagKind, SasEmoji, SearchCrawlerFailureKind, SearchCrawlerRoomState, SubmissionId,
+            SyncMode, UserTrustState, VerificationFlowState, VerificationTarget,
         };
         use serde_json::json;
 
@@ -3553,6 +3556,9 @@ mod tests {
             "!crawler:example.test".to_owned(),
             SearchCrawlerRoomState::Queued,
         );
+        state_delta_next.device_cleanup = DeviceCleanupState::Offered {
+            reason: DeviceCleanupOfferReason::NoProofMethod,
+        };
         let state_delta_event = CoreEvent::StateDelta(
             build_state_delta(1, &state_delta_previous, &state_delta_next).expect("fixture delta"),
         );

@@ -118,6 +118,18 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("submit_recovery", { secret });
   }
 
+  async startDeviceCleanup(): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("start_device_cleanup");
+  }
+
+  async submitDeviceCleanupUia(flowId: number, password: string): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("submit_device_cleanup_uia", { flowId, password });
+  }
+
+  async eraseLocalDataAnyway(): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("erase_local_data_anyway");
+  }
+
   async restartSync(): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("restart_sync");
   }
