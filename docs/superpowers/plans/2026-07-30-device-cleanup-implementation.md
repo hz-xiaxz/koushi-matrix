@@ -394,7 +394,7 @@ TypeScript, Vitest, Playwright, local Conduit/Tuwunel QA.
      e2e/session-verification-gate.spec.ts --workers=1
    PATH=/tmp/koushi-desktop-local-qa-bin:$PATH \
      npm --prefix apps/desktop run qa:headless-local -- \
-     --server=conduit --scenario=e2ee_trust --core \
+     --server=conduit --scenario=device_cleanup --core \
      --core-backend=probed --timeout-ms=240000
    ```
 
