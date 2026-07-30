@@ -15,7 +15,116 @@ const provisionalPhaseCases: Array<[ProvisionalPhase, string]> = [
 ];
 
 describe("SessionVerificationGate interactions", () => {
-  afterEach(cleanup);
+  /**
+   * #370 disables device-to-device (SAS) verification in the end-user UI. The
+   * SDK/core implementation stays intact behind this flag, so the tests that
+   * exercise it opt in explicitly. The production default is covered by its own
+   * tests below.
+   */
+  function enableDeviceVerificationForTest(): void {
+    vi.stubEnv("VITE_KOUSHI_ENABLE_DEVICE_VERIFICATION", "1");
+  }
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+  });
+
+  test("production default hides every device-to-device verification entry point", async () => {
+    // #370: no SAS/QR action may be visible or keyboard-reachable, and the gate
+    // must not be able to start a flow it may not settle. Rust still reports
+    // `existingDeviceSas` as available — that projection stays honest; only the
+    // UI refuses it.
+    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    snapshot.state.domain.session = {
+      kind: "awaitingVerification",
+      user_id: "@u:example.invalid",
+      homeserver: "https://example.invalid",
+      device_id: "D",
+      gate: { methods: ["existingDeviceSas", "recoveryKey"], account_kind: "existingIdentity" }
+    };
+    const startOwnUserSas = vi.fn(async () => snapshot);
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={{ startOwnUserSas, submitRecovery: async () => snapshot }}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "Verify with another device" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Try device verification?" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Try device verification anyway" })
+    ).toBeNull();
+    expect(startOwnUserSas).not.toHaveBeenCalled();
+
+    // Recovery key remains the one enabled verification path.
+    expect(screen.getByRole("button", { name: "Verify with recovery key" })).toBeTruthy();
+  });
+
+  test("production default does not render SAS emoji comparison while verifying", async () => {
+    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    snapshot.state.domain.session = {
+      kind: "verifying",
+      user_id: "@u:example.invalid",
+      homeserver: "https://example.invalid",
+      device_id: "D",
+      method: "existingDeviceSas",
+      flow_id: 370,
+      sas_emojis: Array.from({ length: 7 }, (_, index) => ({
+        symbol: "🐶",
+        description: `emoji-${index}`
+      }))
+    };
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={{
+          startOwnUserSas: async () => snapshot,
+          submitRecovery: async () => snapshot
+        }}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "They match" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "They do not match" })).toBeNull();
+    expect(document.querySelector(".session-verification-emojis")).toBeNull();
+  });
+
+  test("explains the dead end when no recovery material is available", async () => {
+    // Without SAS there is no action left for a user with no recovery key, so
+    // the gate must say so rather than render an empty panel. Nothing is
+    // deleted here: the session stays signed in (#370).
+    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    snapshot.state.domain.session = {
+      kind: "awaitingVerification",
+      user_id: "@u:example.invalid",
+      homeserver: "https://example.invalid",
+      device_id: "D",
+      gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" }
+    };
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={{
+          startOwnUserSas: async () => snapshot,
+          submitRecovery: async () => snapshot
+        }}
+      />
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "No recovery key available" })
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Verify with another device" })).toBeNull();
+    expect(screen.queryByLabelText("Recovery secret")).toBeNull();
+  });
 
   test.each(provisionalPhaseCases)("renders provisional phase %j without a stale retry action", async (phase, copy) => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
@@ -64,6 +173,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("admits SAS and recovery independently and blocks duplicate promise construction", async () => {
+    enableDeviceVerificationForTest();
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas", "recoveryKey"], account_kind: "existingIdentity" } };
     let releaseSas!: (value: typeof snapshot) => void;
@@ -94,6 +204,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("rejected operation settles and permits a later attempt", async () => {
+    enableDeviceVerificationForTest();
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" } };
     const startOwnUserSas = vi.fn().mockRejectedValueOnce(new Error("rejected")).mockResolvedValue(snapshot);
@@ -109,6 +220,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("does not offer recovery-key fallback when only SAS is available", async () => {
+    enableDeviceVerificationForTest();
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" } };
     const startOwnUserSas = vi.fn(async () => snapshot);
