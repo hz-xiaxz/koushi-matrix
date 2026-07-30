@@ -23,6 +23,7 @@ export type ContextMenuActionId =
   | "removeRoomLowPriority"
   | "markRoomAsRead"
   | "markRoomAsUnread"
+  | "leaveRoom"
   | "selectSpace"
   | "openSpaceInfo"
   | "leaveSpace"
@@ -120,7 +121,19 @@ export function contextMenuItems(request: ContextMenuRequest): ContextMenuItem[]
           ? { id: "removeRoomLowPriority", labelMessageId: "context.removeFromLowPriority" }
           : { id: "setRoomLowPriority", labelMessageId: "context.addToLowPriority" },
         { id: "markRoomAsRead", labelMessageId: "room.markAsRead" },
-        { id: "markRoomAsUnread", labelMessageId: "room.markAsUnread" }
+        { id: "markRoomAsUnread", labelMessageId: "room.markAsUnread" },
+        // #373: last, destructive, and confirmation-gated by the caller. DM copy
+        // differs only for readability — both ids drive the same Matrix
+        // room-leave operation. Spaces keep their own `leaveSpace` action so
+        // this does not change whether leaving a Space leaves child rooms.
+        {
+          id: "leaveRoom",
+          labelMessageId:
+            request.dmUserIds?.length === 1
+              ? "context.leaveConversation"
+              : "context.leaveRoom",
+          destructive: true
+        }
       ];
     }
     case "space":

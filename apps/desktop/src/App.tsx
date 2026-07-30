@@ -426,6 +426,22 @@ type ReportDialogState =
   | { kind: "user"; userId: string }
   | { kind: "content"; roomId: string; eventId: string }
   | { kind: "room"; roomId: string };
+/**
+ * Right-panel modes whose content belongs to the selected room (#373). Leaving
+ * that room makes them stale, so they close once the Rust snapshot confirms the
+ * room is gone.
+ */
+const ROOM_BOUND_RIGHT_PANEL_MODES = new Set<RightPanelMode>([
+  "thread",
+  "threads",
+  "focusedContext",
+  "search",
+  "files",
+  "people",
+  "profile",
+  "roomInfo"
+]);
+
 const DEFAULT_CREATE_ROOM_OPTIONS: CreateRoomDialogOptions = {
   aliasLocalpart: "",
   encrypted: true,
@@ -1107,6 +1123,13 @@ export function App() {
   }
   const [searchQuery, setSearchQuery] = useState(() => initialSearchQuery());
   const [searchScope, setSearchScope] = useState<SearchScopeKind>("allRooms");
+  // #373: the room/DM leave confirmation. React owns only dialog visibility and
+  // the in-flight guard; membership and the resulting room list stay Rust-owned.
+  const [pendingRoomLeave, setPendingRoomLeave] = useState<{
+    roomId: string;
+    isDm: boolean;
+  } | null>(null);
+  const [roomLeaveInFlight, setRoomLeaveInFlight] = useState(false);
   const [composerMentions, setComposerMentions] = useState<MentionIntent>(EMPTY_MENTION_INTENT);
   const [threadComposerMentions, setThreadComposerMentions] = useState<Record<string, MentionIntent>>({});
   const mainComposerOverlayRef = useRef<{
@@ -2542,6 +2565,38 @@ export function App() {
 
   async function probeLocalEncryptionHealth() {
     setSnapshot(await api.probeLocalEncryptionHealth());
+  }
+
+  /** Rust-projected display label for the room in the leave confirmation. */
+  function roomLeaveDisplayName(roomId: string): string {
+    return (
+      snapshot?.state.domain.rooms.find((room) => room.room_id === roomId)?.display_label ??
+      roomId
+    );
+  }
+
+  async function leavePendingRoom() {
+    const target = pendingRoomLeave;
+    if (!target || roomLeaveInFlight) {
+      return;
+    }
+    setRoomLeaveInFlight(true);
+    try {
+      // The room stays visible and selected until the Rust snapshot drops it.
+      const nextSnapshot = await api.leaveRoom(target.roomId);
+      setSnapshot(nextSnapshot);
+      setPendingRoomLeave(null);
+      const stillJoined = nextSnapshot.state.domain.rooms.some(
+        (room) => room.room_id === target.roomId
+      );
+      if (!stillJoined && ROOM_BOUND_RIGHT_PANEL_MODES.has(effectiveRightPanelMode)) {
+        await setRightPanelModeClosingFocusedContext("closed");
+      }
+    } finally {
+      // On failure the dialog stays open with the room and selection unchanged,
+      // so the user can retry without losing context.
+      setRoomLeaveInFlight(false);
+    }
   }
 
   async function resetLocalData() {
@@ -4532,6 +4587,15 @@ export function App() {
         case "reportRoom":
           openReportDialog({ kind: "room", roomId: target.roomId });
           return;
+        case "leaveRoom":
+          // #373: never leave straight from the menu click. The confirmation
+          // owns the destructive step; the Rust `leave_room` command owns the
+          // membership change and the resulting room list.
+          setPendingRoomLeave({
+            roomId: target.roomId,
+            isDm: Boolean(target.dmUserId)
+          });
+          return;
         default:
           break;
       }
@@ -5355,6 +5419,26 @@ export function App() {
           onCancel={() => setResetLocalDataConfirmOpen(false)}
           onConfirm={() => {
             void resetLocalData();
+          }}
+        />
+      ) : null}
+      {pendingRoomLeave ? (
+        <ResetLocalDataConfirmationDialog
+          isBusy={roomLeaveInFlight}
+          title={t(
+            pendingRoomLeave.isDm ? "room.leaveConfirmTitleDm" : "room.leaveConfirmTitle",
+            { name: roomLeaveDisplayName(pendingRoomLeave.roomId) }
+          )}
+          copy={t(
+            pendingRoomLeave.isDm ? "room.leaveConfirmCopyDm" : "room.leaveConfirmCopy",
+            { name: roomLeaveDisplayName(pendingRoomLeave.roomId) }
+          )}
+          confirmLabel={t(
+            pendingRoomLeave.isDm ? "room.leaveConfirmActionDm" : "room.leaveConfirmAction"
+          )}
+          onCancel={() => setPendingRoomLeave(null)}
+          onConfirm={() => {
+            void leavePendingRoom();
           }}
         />
       ) : null}
