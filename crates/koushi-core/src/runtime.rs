@@ -2817,6 +2817,9 @@ impl AppActor {
                     AccountCommand::RestoreSession { .. }
                         | AccountCommand::RestoreLastSession { .. }
                         | AccountCommand::ResetLocalData { .. }
+                        | AccountCommand::StartDeviceCleanup { .. }
+                        | AccountCommand::SubmitDeviceCleanupUia { .. }
+                        | AccountCommand::EraseDeviceCleanupLocalDataAnyway { .. }
                         | AccountCommand::SubmitRecovery { .. }
                         | AccountCommand::StartSessionBootstrap { .. }
                         | AccountCommand::ConfirmSessionBootstrapSaved { .. }
@@ -5058,6 +5061,24 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         AccountCommand::ResetLocalData { request_id } => Some(AppAction::ResetLocalDataRequested {
             request_id: request_id.sequence,
         }),
+        AccountCommand::StartDeviceCleanup { request_id } => {
+            Some(AppAction::DeviceCleanupStartRequested {
+                request_id: request_id.sequence,
+            })
+        }
+        AccountCommand::SubmitDeviceCleanupUia {
+            request_id: _,
+            flow_id,
+            ..
+        } => Some(AppAction::DeviceCleanupUiaSubmitted {
+            request_id: *flow_id,
+            flow_id: *flow_id,
+        }),
+        AccountCommand::EraseDeviceCleanupLocalDataAnyway { request_id } => {
+            Some(AppAction::DeviceCleanupEraseLocalAnywayRequested {
+                request_id: request_id.sequence,
+            })
+        }
         AccountCommand::SubmitIdentityResetAuth { flow_id, .. } => {
             Some(AppAction::ResetIdentityAuthSubmitted {
                 request_id: *flow_id,
@@ -7638,6 +7659,42 @@ mod tests {
         assert_eq!(
             account_command_projected_action(&AccountCommand::ResetLocalData { request_id }),
             Some(AppAction::ResetLocalDataRequested { request_id: 17 })
+        );
+    }
+
+    #[test]
+    fn device_cleanup_commands_project_correlated_pending_state_before_routing() {
+        let start_request_id = RequestId {
+            connection_id: RuntimeConnectionId(1),
+            sequence: 21,
+        };
+        let submit_request_id = RequestId {
+            connection_id: RuntimeConnectionId(1),
+            sequence: 22,
+        };
+
+        assert_eq!(
+            account_command_projected_action(&AccountCommand::StartDeviceCleanup {
+                request_id: start_request_id,
+            }),
+            Some(AppAction::DeviceCleanupStartRequested { request_id: 21 })
+        );
+        assert_eq!(
+            account_command_projected_action(&AccountCommand::SubmitDeviceCleanupUia {
+                request_id: submit_request_id,
+                flow_id: 21,
+                password: koushi_state::AuthSecret::new("private-password"),
+            }),
+            Some(AppAction::DeviceCleanupUiaSubmitted {
+                request_id: 21,
+                flow_id: 21,
+            })
+        );
+        assert_eq!(
+            account_command_projected_action(&AccountCommand::EraseDeviceCleanupLocalDataAnyway {
+                request_id: submit_request_id,
+            },),
+            Some(AppAction::DeviceCleanupEraseLocalAnywayRequested { request_id: 22 })
         );
     }
 
