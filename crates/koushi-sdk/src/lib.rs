@@ -3,13 +3,11 @@ use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, reco
 pub use koushi_state::E2eeRecoveryState;
 use koushi_state::{
     AuthSecret, CrossSigningStatus, CurrentDeviceTrustState, CurrentSessionBackupState,
-    DelegatedAuthLinks,
-    DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupRemoteOutcome,
-    IdentityResetAuthRequest, IdentityResetAuthType, KeyBackupStatus, LoginFlow, LoginFlowKind,
-    LoginRequest, OwnIdentityVerification, RecoveryRequest, RoomAttentionSummary, SasEmoji,
-    SessionInfo,
-    VerificationAccountKind, VerificationGateState, VerificationMethodCapability,
-    VerificationTarget, room_attention_summary,
+    DelegatedAuthLinks, DeviceCleanupAuthMode, DeviceCleanupFailureKind,
+    DeviceCleanupRemoteOutcome, IdentityResetAuthRequest, IdentityResetAuthType, KeyBackupStatus,
+    LoginFlow, LoginFlowKind, LoginRequest, OwnIdentityVerification, RecoveryRequest,
+    RoomAttentionSummary, SasEmoji, SessionInfo, VerificationAccountKind, VerificationGateState,
+    VerificationMethodCapability, VerificationTarget, room_attention_summary,
 };
 
 pub type CurrentDeviceTrustStream = Pin<Box<dyn Stream<Item = CurrentDeviceTrustState> + Send>>;
@@ -1658,6 +1656,7 @@ mod device_cleanup_tests {
                     .device_id()
                     .expect("mock client has a device id")
                     .to_string(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         )
     }
@@ -1697,6 +1696,7 @@ mod device_cleanup_tests {
                 homeserver: client.homeserver().to_string(),
                 user_id: client.user_id().expect("OAuth user").to_string(),
                 device_id: client.device_id().expect("OAuth device").to_string(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::OAuth,
             },
         );
         assert_eq!(
@@ -1740,6 +1740,7 @@ mod device_cleanup_tests {
                 homeserver: client.homeserver().to_string(),
                 user_id: client.user_id().expect("OAuth user").to_string(),
                 device_id: client.device_id().expect("OAuth device").to_string(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::OAuth,
             },
         );
         client
