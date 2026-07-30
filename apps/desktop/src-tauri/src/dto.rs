@@ -1834,6 +1834,7 @@ mod tests {
                 pinned_events: vec![PinnedEvent {
                     event_id: "$pinned:example.invalid".to_owned(),
                     sender: Some("@fixture:example.invalid".to_owned()),
+                    sender_label: Some("Fixture User".to_owned()),
                     body_preview: Some("Pinned fixture message".to_owned()),
                     redacted: false,
                 }],
@@ -1985,6 +1986,10 @@ mod tests {
                         receipts_by_event: BTreeMap::new(),
                         fully_read_event_id: Some("$read:example.invalid".to_owned()),
                         typing_user_ids: vec!["@other:example.invalid".to_owned()],
+                        typing_users: vec![koushi_state::LiveTypingUser {
+                            user_id: "@other:example.invalid".to_owned(),
+                            display_label: Some("Other Person".to_owned()),
+                        }],
                     },
                 );
                 m
@@ -2137,6 +2142,7 @@ mod tests {
                 mimetype: Some("image/png".to_owned()),
                 room_id: "!room:example.invalid".to_owned(),
                 sender: "@fixture:example.invalid".to_owned(),
+                sender_label: Some("Fixture User".to_owned()),
                 size: Some(1024),
                 source_mxc: "mxc://example.invalid/attach".to_owned(),
                 thumbnail_mxc: None,

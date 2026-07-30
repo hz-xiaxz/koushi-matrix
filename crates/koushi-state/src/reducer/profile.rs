@@ -33,10 +33,16 @@ pub(crate) fn handle_own_profile_updated(
         refresh_open_room_summary_display_projection(state, own_user_id.as_deref());
     let native_attention_changed =
         room_list_changed && refresh_native_attention_candidate_display_projection(state);
+    let live_signals_changed = crate::state::refresh_live_typing_user_display_projection(
+        &mut state.live_signals,
+        &state.profile,
+        own_user_id.as_deref(),
+    );
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
+        live_signals_changed,
     )
 }
 
@@ -72,10 +78,16 @@ pub(crate) fn handle_user_profiles_updated(
         refresh_open_room_summary_display_projection(state, own_user_id.as_deref());
     let native_attention_changed =
         room_list_changed && refresh_native_attention_candidate_display_projection(state);
+    let live_signals_changed = crate::state::refresh_live_typing_user_display_projection(
+        &mut state.live_signals,
+        &state.profile,
+        own_user_id.as_deref(),
+    );
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
+        live_signals_changed,
     )
 }
 
@@ -106,10 +118,16 @@ pub(crate) fn handle_local_user_aliases_loaded(
         refresh_open_room_summary_display_projection(state, own_user_id.as_deref());
     let native_attention_changed =
         room_list_changed && refresh_native_attention_candidate_display_projection(state);
+    let live_signals_changed = crate::state::refresh_live_typing_user_display_projection(
+        &mut state.live_signals,
+        &state.profile,
+        own_user_id.as_deref(),
+    );
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
+        live_signals_changed,
     )
 }
 
@@ -141,10 +159,16 @@ pub(crate) fn handle_local_user_alias_update_requested(
         refresh_open_room_summary_display_projection(state, own_user_id.as_deref());
     let native_attention_changed =
         room_list_changed && refresh_native_attention_candidate_display_projection(state);
+    let live_signals_changed = crate::state::refresh_live_typing_user_display_projection(
+        &mut state.live_signals,
+        &state.profile,
+        own_user_id.as_deref(),
+    );
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
+        live_signals_changed,
     )
 }
 
@@ -334,10 +358,16 @@ pub(crate) fn handle_profile_update_succeeded(
         refresh_open_room_summary_display_projection(state, own_user_id.as_deref());
     let native_attention_changed =
         room_list_changed && refresh_native_attention_candidate_display_projection(state);
+    let live_signals_changed = crate::state::refresh_live_typing_user_display_projection(
+        &mut state.live_signals,
+        &state.profile,
+        own_user_id.as_deref(),
+    );
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
+        live_signals_changed,
     )
 }
 

@@ -78,7 +78,8 @@ pub use profile::{
     LocalUserAliasUpdateState, OwnProfile, ProfileState, ProfileUpdateRequest, ProfileUpdateState,
     UserProfile, is_ignored_user, normalize_local_user_alias,
     refresh_profile_user_display_projection, refresh_room_settings_member_display_projection,
-    refresh_room_summary_display_projection, resolve_user_display_name,
+    refresh_room_summary_display_projection, resolve_optional_user_display_name,
+    resolve_user_display_name,
 };
 
 // ── Re-exports: room ────────────────────────────────────────────────────────
@@ -198,7 +199,8 @@ pub use basic_operation::{BasicOperationRequest, BasicOperationState};
 // ── Re-exports: live_signals ────────────────────────────────────────────────
 pub use live_signals::{
     LiveEventReceiptSummary, LiveEventReceipts, LiveReadReceipt, LiveRoomSignalUpdate,
-    LiveSignalsState, PresenceKind, RoomLiveSignals,
+    LiveSignalsState, LiveTypingUser, PresenceKind, RoomLiveSignals,
+    refresh_live_typing_user_display_projection,
 };
 
 // ── Re-exports: mention candidates ──────────────────────────────────────────

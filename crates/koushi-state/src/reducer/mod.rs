@@ -1700,6 +1700,7 @@ pub(crate) fn profile_changed_effects(
     room_management_changed: bool,
     room_list_changed: bool,
     native_attention_changed: bool,
+    live_signals_changed: bool,
 ) -> Vec<AppEffect> {
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::ProfileChanged)];
     if room_list_changed {
@@ -1710,6 +1711,9 @@ pub(crate) fn profile_changed_effects(
     }
     if native_attention_changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged));
+    }
+    if live_signals_changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::LiveSignalsChanged));
     }
     effects
 }
@@ -2469,6 +2473,7 @@ mod tests {
                 .into(),
                 fully_read_event_id: None,
                 typing_user_ids: Vec::new(),
+                typing_users: Vec::new(),
             })
         );
 

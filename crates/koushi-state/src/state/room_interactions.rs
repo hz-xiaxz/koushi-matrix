@@ -12,6 +12,8 @@ pub struct RoomInteractionState {
 pub struct PinnedEvent {
     pub event_id: String,
     pub sender: Option<String>,
+    #[serde(default)]
+    pub sender_label: Option<String>,
     pub body_preview: Option<String>,
     pub redacted: bool,
 }

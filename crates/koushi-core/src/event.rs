@@ -10,7 +10,8 @@ use koushi_state::{
     LocalEncryptionHealth, MediaTransferProgress, NativeAttentionDispatchId,
     NativeAttentionSummary, OperationFailureKind, PinnedEvent, PresenceKind, ProfileState,
     ReplyQuote, RoomModerationAction, RoomSettingsSnapshot, RoomTagKind, SessionState,
-    SubmissionId, SyncMode, ThreadsListItem, VerificationFlowState, resolve_user_display_name,
+    SubmissionId, SyncMode, ThreadsListItem, VerificationFlowState,
+    resolve_optional_user_display_name, resolve_user_display_name,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -2133,15 +2134,32 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
 }
 
 pub fn project_timeline_item_display_labels(item: &mut TimelineItem, state: &AppState) {
-    item.sender_label = timeline_sender_label(item.sender.as_deref(), state);
+    item.sender_label =
+        timeline_sender_label(item.sender.as_deref(), item.sender_label.as_deref(), state);
     item.is_hidden = (state.settings.values.display.hide_redacted && item.is_redacted)
         || koushi_state::is_ignored_user(&state.profile, item.sender.as_deref());
     if let Some(reply_quote) = item.reply_quote.as_mut() {
-        reply_quote.sender_label = timeline_sender_label(reply_quote.sender.as_deref(), state);
+        reply_quote.sender_label = timeline_sender_label(
+            reply_quote.sender.as_deref(),
+            reply_quote.sender_label.as_deref(),
+            state,
+        );
     }
     if let Some(thread_summary) = item.thread_summary.as_mut() {
-        thread_summary.latest_sender_label =
-            timeline_sender_label(thread_summary.latest_sender.as_deref(), state);
+        thread_summary.latest_sender_label = timeline_sender_label(
+            thread_summary.latest_sender.as_deref(),
+            thread_summary.latest_sender_label.as_deref(),
+            state,
+        );
+    }
+    for reaction in &mut item.reactions {
+        for sender in &mut reaction.sender_preview {
+            sender.display_label = timeline_sender_label(
+                Some(sender.user_id.as_str()),
+                sender.display_label.as_deref(),
+                state,
+            );
+        }
     }
 }
 
@@ -2160,14 +2178,18 @@ fn project_timeline_diff_display_labels(diff: &mut TimelineDiff, state: &AppStat
     }
 }
 
-fn timeline_sender_label(sender: Option<&str>, state: &AppState) -> Option<String> {
+fn timeline_sender_label(
+    sender: Option<&str>,
+    upstream_display_label: Option<&str>,
+    state: &AppState,
+) -> Option<String> {
     let sender = sender?;
-    Some(resolve_user_display_name(
+    resolve_optional_user_display_name(
         &state.profile,
         sender,
-        None,
+        upstream_display_label,
         timeline_projection_own_user_id(state),
-    ))
+    )
 }
 
 pub fn timeline_projection_own_user_id(state: &AppState) -> Option<&str> {
@@ -2235,7 +2257,13 @@ pub struct ReactionGroup {
     pub count: u32,
     pub reacted_by_me: bool,
     pub my_reaction_event_id: Option<String>,
-    pub sender_preview: Vec<String>,
+    pub sender_preview: Vec<ReactionSender>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReactionSender {
+    pub user_id: String,
+    pub display_label: Option<String>,
 }
 
 /// `VectorDiff`-shaped update preserving positional operations so the UI can
@@ -2506,7 +2534,10 @@ mod tests {
                 count: 2,
                 reacted_by_me: true,
                 my_reaction_event_id: Some("$reaction:test".to_owned()),
-                sender_preview: vec!["@alice:example.invalid".to_owned()],
+                sender_preview: vec![ReactionSender {
+                    user_id: "@alice:example.invalid".to_owned(),
+                    display_label: Some("Alice".to_owned()),
+                }],
             }],
             can_react: true,
             is_redacted: false,

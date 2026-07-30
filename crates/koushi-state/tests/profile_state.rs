@@ -2,7 +2,8 @@ use koushi_state::{
     AppAction, AppEffect, AppState, AvatarImage, AvatarThumbnailState, InvitePreview,
     LiveEventReceipts, LiveReadReceipt, LocalUserAliasUpdateState, OwnProfile,
     ProfileUpdateRequest, ProfileUpdateState, RoomSummary, RoomTags, SessionInfo, SessionState,
-    SpaceSummary, UiEvent, UserProfile, reduce, resolve_user_display_name,
+    SpaceSummary, UiEvent, UserProfile, reduce, resolve_optional_user_display_name,
+    resolve_user_display_name,
 };
 use std::collections::BTreeMap;
 
@@ -26,6 +27,77 @@ fn avatar(mxc_uri: &str) -> AvatarImage {
 
 fn profile_changed() -> Vec<AppEffect> {
     vec![AppEffect::EmitUiEvent(UiEvent::ProfileChanged)]
+}
+
+#[test]
+fn optional_people_facing_label_preserves_precedence_without_mxid_fallback() {
+    let mut profiles = ready_state().profile;
+    profiles.own.display_name = Some("Own Name".to_owned());
+    profiles.users.insert(
+        "@profile:example.invalid".to_owned(),
+        UserProfile {
+            user_id: "@profile:example.invalid".to_owned(),
+            display_name: Some("Profile Name".to_owned()),
+            display_label: String::new(),
+            original_display_label: String::new(),
+            mention_search_terms: Vec::new(),
+            avatar: None,
+        },
+    );
+    profiles.local_aliases.insert(
+        "@aliased:example.invalid".to_owned(),
+        "Local Alias".to_owned(),
+    );
+
+    assert_eq!(
+        resolve_optional_user_display_name(
+            &profiles,
+            "@aliased:example.invalid",
+            Some("Room Name"),
+            Some("@me:example.invalid"),
+        )
+        .as_deref(),
+        Some("Local Alias")
+    );
+    assert_eq!(
+        resolve_optional_user_display_name(
+            &profiles,
+            "@room:example.invalid",
+            Some("Room Name"),
+            Some("@me:example.invalid"),
+        )
+        .as_deref(),
+        Some("Room Name")
+    );
+    assert_eq!(
+        resolve_optional_user_display_name(
+            &profiles,
+            "@profile:example.invalid",
+            None,
+            Some("@me:example.invalid"),
+        )
+        .as_deref(),
+        Some("Profile Name")
+    );
+    assert_eq!(
+        resolve_optional_user_display_name(
+            &profiles,
+            "@me:example.invalid",
+            None,
+            Some("@me:example.invalid"),
+        )
+        .as_deref(),
+        Some("Own Name")
+    );
+    assert_eq!(
+        resolve_optional_user_display_name(
+            &profiles,
+            "@unknown:example.invalid",
+            None,
+            Some("@me:example.invalid"),
+        ),
+        None
+    );
 }
 
 #[test]
@@ -642,6 +714,65 @@ fn local_user_aliases_override_read_receipt_reader_labels() {
         .get("$event:localhost")
         .expect("receipt summary");
     assert_eq!(summary.readers[0].display_name.as_deref(), Some("Bobby"));
+}
+
+#[test]
+fn typing_user_labels_follow_profile_and_local_alias_updates_without_mxid_fallback() {
+    let mut state = ready_state();
+
+    reduce(
+        &mut state,
+        AppAction::TypingUsersUpdated {
+            room_id: "!room:localhost".to_owned(),
+            user_ids: vec!["@unknown:localhost".to_owned(), "@bob:localhost".to_owned()],
+        },
+    );
+    assert_eq!(
+        state.live_signals.rooms["!room:localhost"].typing_users,
+        vec![
+            koushi_state::LiveTypingUser {
+                user_id: "@bob:localhost".to_owned(),
+                display_label: None,
+            },
+            koushi_state::LiveTypingUser {
+                user_id: "@unknown:localhost".to_owned(),
+                display_label: None,
+            },
+        ]
+    );
+
+    reduce(
+        &mut state,
+        AppAction::UserProfilesUpdated {
+            profiles: vec![UserProfile {
+                user_id: "@bob:localhost".to_owned(),
+                display_name: Some("Bob Upstream".to_owned()),
+                display_label: String::new(),
+                original_display_label: String::new(),
+                mention_search_terms: Vec::new(),
+                avatar: None,
+            }],
+        },
+    );
+    assert_eq!(
+        state.live_signals.rooms["!room:localhost"].typing_users[0]
+            .display_label
+            .as_deref(),
+        Some("Bob Upstream")
+    );
+
+    reduce(
+        &mut state,
+        AppAction::LocalUserAliasesLoaded {
+            aliases: BTreeMap::from([("@bob:localhost".to_owned(), "Bobby".to_owned())]),
+        },
+    );
+    assert_eq!(
+        state.live_signals.rooms["!room:localhost"].typing_users[0]
+            .display_label
+            .as_deref(),
+        Some("Bobby")
+    );
 }
 
 #[test]

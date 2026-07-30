@@ -6421,7 +6421,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connection_projects_timeline_sender_labels_from_latest_snapshot() {
+    async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_policy() {
         let (command_tx, _command_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = broadcast::channel(4);
         let mut state = AppState::default();
@@ -6524,7 +6524,7 @@ mod tests {
                     event_id: "$event:example.invalid".to_owned(),
                 },
                 sender: Some("@alice:example.invalid".to_owned()),
-                sender_label: None,
+                sender_label: Some("Alice Room Name".to_owned()),
                 sender_avatar: None,
                 body: Some("hello".to_owned()),
                 notice_i18n: None,
@@ -6552,7 +6552,16 @@ mod tests {
                 media: None,
                 link_previews: None,
                 link_ranges: Vec::new(),
-                reactions: Vec::new(),
+                reactions: vec![crate::event::ReactionGroup {
+                    key: "👍".to_owned(),
+                    count: 1,
+                    reacted_by_me: false,
+                    my_reaction_event_id: None,
+                    sender_preview: vec![crate::event::ReactionSender {
+                        user_id: "@bob:example.invalid".to_owned(),
+                        display_label: Some("Bob Room Name".to_owned()),
+                    }],
+                }],
                 can_react: false,
                 is_redacted: false,
                 is_hidden: false,
@@ -6570,6 +6579,10 @@ mod tests {
                 let item = items.first().expect("projected item");
                 assert_eq!(item.sender.as_deref(), Some("@alice:example.invalid"));
                 assert_eq!(item.sender_label.as_deref(), Some("Alice Alias"));
+                assert_eq!(
+                    item.reactions[0].sender_preview[0].display_label.as_deref(),
+                    Some("Bob Alias")
+                );
                 let quote = item.reply_quote.as_ref().expect("reply quote");
                 assert_eq!(quote.sender.as_deref(), Some("@bob:example.invalid"));
                 assert_eq!(quote.sender_label.as_deref(), Some("Bob Alias"));
@@ -6598,8 +6611,8 @@ mod tests {
                     id: TimelineItemId::Event {
                         event_id: "$later:example.invalid".to_owned(),
                     },
-                    sender: Some("@alice:example.invalid".to_owned()),
-                    sender_label: None,
+                    sender: Some("@room-only:example.invalid".to_owned()),
+                    sender_label: Some("Room-only Person".to_owned()),
                     sender_avatar: None,
                     body: Some("later".to_owned()),
                     notice_i18n: None,
@@ -6634,8 +6647,8 @@ mod tests {
                 else {
                     panic!("expected push-back diff");
                 };
-                assert_eq!(item.sender.as_deref(), Some("@alice:example.invalid"));
-                assert_eq!(item.sender_label.as_deref(), Some("Alice Alias"));
+                assert_eq!(item.sender.as_deref(), Some("@room-only:example.invalid"));
+                assert_eq!(item.sender_label.as_deref(), Some("Room-only Person"));
             }
             other => panic!("expected projected timeline diff event, got {other:?}"),
         }

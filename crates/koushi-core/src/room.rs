@@ -3279,6 +3279,7 @@ fn pinned_events_from_ids(event_ids: Vec<String>) -> Vec<PinnedEvent> {
         .map(|event_id| PinnedEvent {
             event_id,
             sender: None,
+            sender_label: None,
             body_preview: None,
             redacted: false,
         })

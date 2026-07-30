@@ -409,6 +409,7 @@ impl SearchDocumentStore {
                     room_id: event.room_id.clone(),
                     event_id: event.event_id.clone(),
                     sender: event.sender.clone(),
+                    sender_label: None,
                     timestamp_ms: event.timestamp_ms,
                     kind: attachment.kind.clone(),
                     filename: attachment.filename.as_str().to_owned(),

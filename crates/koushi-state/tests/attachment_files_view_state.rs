@@ -1,7 +1,7 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, AttachmentFilter, AttachmentKind, AttachmentResult,
     AttachmentScope, AttachmentSort, FilesViewScope, FilesViewState, SessionInfo, SessionState,
-    SpaceSummary, UiEvent, reduce,
+    SpaceSummary, UiEvent, UserProfile, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -50,6 +50,7 @@ fn attachment(event_id: &str) -> AttachmentResult {
         mimetype: Some("application/pdf".to_owned()),
         room_id: "!room:example.invalid".to_owned(),
         sender: "@user-a:example.invalid".to_owned(),
+        sender_label: None,
         size: Some(12_345),
         source_mxc: "mxc://example.invalid/synthetic-source".to_owned(),
         thumbnail_mxc: None,
@@ -143,6 +144,46 @@ fn files_view_query_succeeded_transitions_to_open_with_results() {
         effects,
         vec![AppEffect::EmitUiEvent(UiEvent::FilesViewChanged)]
     );
+}
+
+#[test]
+fn files_view_results_project_optional_friendly_sender_labels() {
+    let mut state = ready_state();
+    state.profile.users.insert(
+        "@other:example.invalid".to_owned(),
+        UserProfile {
+            user_id: "@other:example.invalid".to_owned(),
+            display_name: Some("Other Person".to_owned()),
+            display_label: String::new(),
+            original_display_label: String::new(),
+            mention_search_terms: Vec::new(),
+            avatar: None,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::FilesViewOpened {
+            request_id: 81,
+            scope: room_scope(),
+            filter: filter(),
+            sort: sort(),
+        },
+    );
+    let mut item = attachment("$friendly:example.invalid");
+    item.sender = "@other:example.invalid".to_owned();
+
+    reduce(
+        &mut state,
+        AppAction::FilesViewQuerySucceeded {
+            request_id: 81,
+            items: vec![item],
+        },
+    );
+
+    let FilesViewState::Open { items, .. } = &state.files_view else {
+        panic!("files view should be open");
+    };
+    assert_eq!(items[0].sender_label.as_deref(), Some("Other Person"));
 }
 
 #[test]

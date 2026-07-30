@@ -91,6 +91,8 @@ pub struct AttachmentResult {
     pub mimetype: Option<String>,
     pub room_id: String,
     pub sender: String,
+    #[serde(default)]
+    pub sender_label: Option<String>,
     pub size: Option<u64>,
     pub source_mxc: String,
     pub thumbnail_mxc: Option<String>,
@@ -113,6 +115,10 @@ impl fmt::Debug for AttachmentResult {
             .field("mimetype", &self.mimetype)
             .field("room_id", &"RoomId(..)")
             .field("sender", &"UserId(..)")
+            .field(
+                "sender_label",
+                &self.sender_label.as_ref().map(|_| "SenderLabel(..)"),
+            )
             .field("size", &self.size)
             .field("source_mxc", &"MxcUri(..)")
             .field(

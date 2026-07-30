@@ -235,6 +235,44 @@ pub fn resolve_user_display_name(
     )
 }
 
+/// Resolve a people-facing label without ever synthesizing the Matrix user ID
+/// as display text. Identity/detail surfaces can keep using
+/// [`resolve_user_display_name`]; ordinary labels should use this helper and
+/// render their localized unknown-user fallback when it returns `None`.
+pub fn resolve_optional_user_display_name(
+    profiles: &ProfileState,
+    user_id: &str,
+    upstream_display_name: Option<&str>,
+    own_user_id: Option<&str>,
+) -> Option<String> {
+    profiles
+        .local_aliases
+        .get(user_id)
+        .map(String::as_str)
+        .or_else(|| {
+            upstream_display_name
+                .map(str::trim)
+                .filter(|display_name| !display_name.is_empty())
+        })
+        .or_else(|| {
+            profiles
+                .users
+                .get(user_id)
+                .and_then(|profile| profile.display_name.as_deref())
+                .map(str::trim)
+                .filter(|display_name| !display_name.is_empty())
+        })
+        .or_else(|| {
+            own_user_id
+                .is_some_and(|own| own == user_id)
+                .then_some(profiles.own.display_name.as_deref())
+                .flatten()
+                .map(str::trim)
+                .filter(|display_name| !display_name.is_empty())
+        })
+        .map(str::to_owned)
+}
+
 pub fn original_user_display_name(
     profiles: &ProfileState,
     user_id: &str,

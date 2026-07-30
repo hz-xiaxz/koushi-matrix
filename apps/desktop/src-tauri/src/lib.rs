@@ -3454,6 +3454,7 @@ mod tests {
                     room_id: "!r:example.test".to_owned(),
                     event_id: "$f1".to_owned(),
                     sender: "@u:example.test".to_owned(),
+                    sender_label: Some("Test User".to_owned()),
                     timestamp_ms: 1,
                     kind: AttachmentKind::Image,
                     filename: "photo.png".to_owned(),

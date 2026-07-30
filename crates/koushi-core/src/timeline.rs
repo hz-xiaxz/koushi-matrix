@@ -129,15 +129,15 @@ use crate::command::{
 };
 use crate::event::{
     CoreEvent, LinkPreview, LinkPreviewState, LiveSignalsEvent, PaginationDirection,
-    PaginationState, ReactionGroup, ThreadRootProjectionDto, ThreadRootProjectionSourceDto,
-    ThreadRootProjectionStateDto, ThreadSummaryDto, TimelineAnchorRestoreStatus, TimelineDiff,
-    TimelineEvent, TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia,
-    TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions,
-    TimelineMessageKind, TimelineMessageSource, TimelineNavigationSnapshot, TimelineNoticeI18n,
-    TimelineNoticeI18nKey, TimelineResyncReason, TimelineSendFailureReason, TimelineSendState,
-    TimelineSpoilerSpan, TimelineUnableToDecrypt, TimelineUnableToDecryptReason,
-    TimelineUnreadPosition, TimelineViewportObservation, message_actions_for_timeline_item,
-    message_source_for_timeline_item,
+    PaginationState, ReactionGroup, ReactionSender, ThreadRootProjectionDto,
+    ThreadRootProjectionSourceDto, ThreadRootProjectionStateDto, ThreadSummaryDto,
+    TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition,
+    TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind, TimelineMediaSource,
+    TimelineMediaThumbnail, TimelineMessageActions, TimelineMessageKind, TimelineMessageSource,
+    TimelineNavigationSnapshot, TimelineNoticeI18n, TimelineNoticeI18nKey, TimelineResyncReason,
+    TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan, TimelineUnableToDecrypt,
+    TimelineUnableToDecryptReason, TimelineUnreadPosition, TimelineViewportObservation,
+    message_actions_for_timeline_item, message_source_for_timeline_item,
 };
 use crate::executor;
 use crate::failure::{CoreFailure, TimelineFailureKind};
@@ -9086,7 +9086,15 @@ fn reaction_groups_from_cached_relation_events(
                     .and_then(|own| senders.get(own))
                     .cloned()
                     .flatten(),
-                sender_preview: senders.keys().take(3).cloned().collect(),
+                sender_preview: senders
+                    .keys()
+                    .take(3)
+                    .cloned()
+                    .map(|user_id| ReactionSender {
+                        user_id,
+                        display_label: None,
+                    })
+                    .collect(),
             }
         })
         .collect()
@@ -24393,7 +24401,14 @@ pub(crate) fn reaction_groups_from_sdk(
                     }
                 })
             }),
-            sender_preview: senders.keys().take(3).map(ToString::to_string).collect(),
+            sender_preview: senders
+                .keys()
+                .take(3)
+                .map(|sender| ReactionSender {
+                    user_id: sender.to_string(),
+                    display_label: None,
+                })
+                .collect(),
         })
         .collect()
 }
@@ -25818,7 +25833,16 @@ mod tests {
             count: 2,
             reacted_by_me: true,
             my_reaction_event_id: Some("$reaction:test".to_owned()),
-            sender_preview: vec!["@alice:test".to_owned(), "@bob:test".to_owned()],
+            sender_preview: vec![
+                ReactionSender {
+                    user_id: "@alice:test".to_owned(),
+                    display_label: Some("Alice".to_owned()),
+                },
+                ReactionSender {
+                    user_id: "@bob:test".to_owned(),
+                    display_label: Some("Bob".to_owned()),
+                },
+            ],
         }];
         revised_root.actions = TimelineMessageActions {
             can_copy: false,
@@ -40461,7 +40485,11 @@ mod tests {
             Some("$reaction:me")
         );
         assert_eq!(
-            groups[0].sender_preview,
+            groups[0]
+                .sender_preview
+                .iter()
+                .map(|sender| sender.user_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["@me:test", "@alice:test", "@bob:test"]
         );
     }
@@ -40493,7 +40521,14 @@ mod tests {
         let groups = reaction_groups_from_sdk(&reactions, None);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].count, 1);
-        assert_eq!(groups[0].sender_preview, vec!["@alice:test"]);
+        assert_eq!(
+            groups[0]
+                .sender_preview
+                .iter()
+                .map(|sender| sender.user_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["@alice:test"]
+        );
     }
 
     #[test]
