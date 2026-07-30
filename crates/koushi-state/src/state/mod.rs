@@ -27,6 +27,7 @@ mod room_interactions;
 mod room_management;
 mod search;
 mod session;
+mod session_status;
 mod settings;
 mod sync;
 mod thread;
@@ -61,6 +62,11 @@ pub use session::{
     SoftLogoutReauthState, VerificationAccountKind, VerificationGateFailureKind,
     VerificationGateRejectReason, VerificationGateState, VerificationMethod,
     VerificationMethodCapability,
+};
+pub use session_status::{
+    CurrentSessionBackupState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,
+    CurrentSessionStatusState, CurrentSessionSyncState, CurrentSessionVerification,
+    OwnIdentityVerification, SessionAuthenticationMethod, SessionStatusRefreshTrigger,
 };
 
 // ── Re-exports: settings ────────────────────────────────────────────────────
@@ -223,6 +229,8 @@ pub struct AppState {
     pub session: SessionState,
     #[serde(default)]
     pub device_cleanup: DeviceCleanupState,
+    #[serde(default)]
+    pub current_session_status: CurrentSessionStatusState,
     pub auth: AuthDiscoveryState,
     #[serde(default)]
     pub device_sessions: DeviceSessionListState,
@@ -294,6 +302,7 @@ impl Default for AppState {
         Self {
             session: SessionState::SignedOut,
             device_cleanup: DeviceCleanupState::Idle,
+            current_session_status: CurrentSessionStatusState::Idle,
             auth: AuthDiscoveryState::Unknown,
             device_sessions: DeviceSessionListState::Idle,
             account_management: AccountManagementState::Idle,

@@ -191,6 +191,36 @@ stateDiagram-v2
   unverified peer devices remain non-blocking; blocked devices and cryptographic
   integrity/key-mismatch failures remain failures.
 
+### Current-session status
+
+`CurrentSessionStatusState` is an observational Ready-session slice. It does
+not promote, demote, unlock, or otherwise alter `SessionState`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Checking: RefreshRequested(open/manual)
+    Ready --> Checking: RefreshRequested(open/manual)
+    Failed --> Checking: RefreshRequested(open/manual)
+    Checking --> Ready: Refreshed(matching request)
+    Checking --> Failed: RefreshFailed(matching request)
+    Checking --> Checking: duplicate/stale request ignored
+    Ready --> Ready: stale completion ignored
+    Failed --> Failed: stale completion ignored
+    Checking --> Idle: LogoutRequested/session clear
+    Ready --> Idle: LogoutRequested/session clear
+    Failed --> Idle: LogoutRequested/session clear
+```
+
+- Only a Ready session admits a refresh, and only one refresh may be active.
+- `Ready.details.verification` is Rust-owned and is `Verified` only when the
+  current device is owner-cross-signed and the own identity is verified.
+  Sync and key-backup facts stay explicit and do not independently change that
+  verdict.
+- A matching failure replaces prior successful details with a coarse `Failed`
+  state. Identifiers and raw SDK errors are excluded from generic diagnostics
+  and redacted from custom `Debug`.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Stopped

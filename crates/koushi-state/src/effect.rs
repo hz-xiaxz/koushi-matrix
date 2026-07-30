@@ -18,6 +18,10 @@ pub enum AppEffect {
         request: LoginRequest,
     },
     CheckCurrentDeviceTrust,
+    RefreshCurrentSessionStatus {
+        request_id: u64,
+        trigger: crate::SessionStatusRefreshTrigger,
+    },
     DiscoverVerificationMethods,
     BeginSessionVerification {
         method: VerificationMethod,
