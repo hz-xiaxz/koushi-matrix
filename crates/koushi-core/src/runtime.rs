@@ -146,7 +146,65 @@ fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Ve
     if let Some(input) = room_list_trace {
         unread_trace::trace_room_list_applied(&input, &state.rooms);
     }
+    for effect in &effects {
+        record_native_attention_recomputed(effect);
+    }
     effects
+}
+
+fn record_native_attention_recomputed(effect: &AppEffect) {
+    let AppEffect::RecordNativeAttentionRecomputed {
+        observation,
+        unread_count,
+        badge_count,
+        candidate,
+        suppression,
+        window_focused,
+        active_room_match,
+    } = effect
+    else {
+        return;
+    };
+
+    let observation = match observation {
+        koushi_state::NativeAttentionObservationKind::Live => "live",
+        koushi_state::NativeAttentionObservationKind::InitialSync => "initial_sync",
+        koushi_state::NativeAttentionObservationKind::Backfill => "backfill",
+        koushi_state::NativeAttentionObservationKind::SelfEvent => "self_event",
+    };
+    let candidate = match candidate {
+        Some(koushi_state::RoomAttentionKind::Message) => "message",
+        Some(koushi_state::RoomAttentionKind::Dm) => "dm",
+        Some(koushi_state::RoomAttentionKind::Mention) => "mention",
+        None => "none",
+    };
+    let suppression = match suppression {
+        Some(koushi_state::NativeAttentionSuppressionReason::InitialSync) => "initial_sync",
+        Some(koushi_state::NativeAttentionSuppressionReason::Backfill) => "backfill",
+        Some(koushi_state::NativeAttentionSuppressionReason::SelfMessage) => "self_message",
+        Some(koushi_state::NativeAttentionSuppressionReason::WindowFocused) => "window_focused",
+        Some(koushi_state::NativeAttentionSuppressionReason::RoomMuted) => "room_muted",
+        Some(koushi_state::NativeAttentionSuppressionReason::LowPriority) => "low_priority",
+        Some(koushi_state::NativeAttentionSuppressionReason::Duplicate) => "duplicate",
+        Some(koushi_state::NativeAttentionSuppressionReason::CapabilityUnavailable) => {
+            "capability_unavailable"
+        }
+        None => "none",
+    };
+
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "native.attention", "recomputed")
+            .field(DiagnosticField::token("observation", observation))
+            .field(DiagnosticField::count("unread_count", *unread_count))
+            .field(DiagnosticField::count("badge_count", *badge_count))
+            .field(DiagnosticField::token("candidate", candidate))
+            .field(DiagnosticField::token("suppression", suppression))
+            .field(DiagnosticField::boolean("window_focused", *window_focused))
+            .field(DiagnosticField::boolean(
+                "active_room_match",
+                *active_room_match,
+            )),
+    );
 }
 
 fn composer_draft_account_matches(
@@ -3880,6 +3938,20 @@ impl AppActor {
                     self.handle_app_effects(request_id, effects).await;
                     true
                 }
+                AppCommand::ObserveNativeWindowFocus {
+                    request_id,
+                    focused,
+                    observation_generation,
+                } => {
+                    let effects = self
+                        .reduce_app_action(AppAction::NativeWindowFocusChanged {
+                            focused,
+                            observation_generation,
+                        })
+                        .await;
+                    self.handle_app_effects(request_id, effects).await;
+                    true
+                }
                 AppCommand::StartNativeAttentionDispatch {
                     request_id,
                     dispatch_id,
@@ -4368,7 +4440,8 @@ impl AppActor {
                 | AppEffect::ResetIdentity { .. }
                 | AppEffect::PersistSession(_)
                 | AppEffect::PaginateTimelineBackwards { .. }
-                | AppEffect::SendText { .. } => {}
+                | AppEffect::SendText { .. }
+                | AppEffect::RecordNativeAttentionRecomputed { .. } => {}
             }
         }
     }
@@ -4517,6 +4590,7 @@ impl AppActor {
                 | AppEffect::NotifySearchCrawlerRoomsAvailable { .. }
                 | AppEffect::InvalidateSearchCrawlerCache
                 | AppEffect::RebuildSearchIndex
+                | AppEffect::RecordNativeAttentionRecomputed { .. }
                 | AppEffect::EmitUiEvent(_) => {}
             }
         }
@@ -5893,6 +5967,148 @@ mod tests {
                 .unwrap()
                 .contains(private_room_id)
         );
+    }
+
+    #[test]
+    fn native_attention_recomputed_diagnostic_records_private_safe_fields() {
+        let child = std::process::Command::new(
+            std::env::current_exe().expect("current test executable should be available"),
+        )
+        .args([
+            "--exact",
+            "runtime::tests::native_attention_recomputed_diagnostic_records_private_safe_fields_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .status()
+        .expect("native-attention diagnostic child should start");
+        assert!(
+            child.success(),
+            "native-attention diagnostic child failed: {child}"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn native_attention_recomputed_diagnostic_records_private_safe_fields_child() {
+        let mut state = AppState {
+            session: SessionState::Ready(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@synthetic:example.invalid".to_owned(),
+                device_id: "SYNTHETIC".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            ..AppState::default()
+        };
+        let private_room_id = "!private-native-attention:example.invalid";
+        let private_event_id = "$private-event:example.invalid";
+        let private_user_id = "@private-sender:example.invalid";
+        let private_room_label = "Private native attention room";
+        let private_message = "Private native attention body";
+        let mut room = unread_diagnostic_room(private_room_id);
+        room.display_name = private_room_label.to_owned();
+        room.display_label = private_room_label.to_owned();
+        room.original_display_label = private_room_label.to_owned();
+        room.unread_count = 0;
+        room.notification_count = 0;
+        room.highlight_count = 0;
+        room.marked_unread = false;
+        room.latest_event = Some(RoomLatestEventSummary {
+            event_id: private_event_id.to_owned(),
+            relation_type: None,
+            relation_event_id: None,
+            sender_id: Some(private_user_id.to_owned()),
+            sender_label: Some("Private sender".to_owned()),
+            sender_avatar: None,
+            preview: Some(private_message.to_owned()),
+            timestamp_ms: 42,
+        });
+        reduce_with_unread_diagnostics(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![room.clone()],
+            },
+        );
+        reduce_with_unread_diagnostics(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 1,
+            },
+        );
+
+        room.unread_count = 1;
+        room.notification_count = 1;
+        room.recency_stamp = Some(43);
+        room.latest_event
+            .as_mut()
+            .expect("latest event")
+            .timestamp_ms = 43;
+        reduce_with_unread_diagnostics(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![room],
+            },
+        );
+
+        let event = koushi_diagnostics::snapshot()
+            .records
+            .into_iter()
+            .rev()
+            .find(|record| {
+                record.event.source == "native.attention" && record.event.stage == "recomputed"
+            })
+            .expect("native-attention recomputation should be diagnosed")
+            .event;
+        assert_eq!(
+            event
+                .fields
+                .iter()
+                .map(|field| (field.key, field.value.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "observation",
+                    koushi_diagnostics::DiagnosticValue::Token("live"),
+                ),
+                (
+                    "unread_count",
+                    koushi_diagnostics::DiagnosticValue::Count(1),
+                ),
+                ("badge_count", koushi_diagnostics::DiagnosticValue::Count(1),),
+                (
+                    "candidate",
+                    koushi_diagnostics::DiagnosticValue::Token("message"),
+                ),
+                (
+                    "suppression",
+                    koushi_diagnostics::DiagnosticValue::Token("none"),
+                ),
+                (
+                    "window_focused",
+                    koushi_diagnostics::DiagnosticValue::Boolean(false),
+                ),
+                (
+                    "active_room_match",
+                    koushi_diagnostics::DiagnosticValue::Boolean(true),
+                ),
+            ]
+        );
+        let serialized = serde_json::to_string(&event).unwrap();
+        for private_value in [
+            private_room_id,
+            private_event_id,
+            private_user_id,
+            private_room_label,
+            private_message,
+        ] {
+            assert!(
+                !serialized.contains(private_value),
+                "diagnostic leaked private value: {private_value}"
+            );
+        }
     }
 
     #[test]

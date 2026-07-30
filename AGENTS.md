@@ -273,6 +273,15 @@ reverse.
   `<gate> > /tmp/x.log 2>&1; echo "EXIT=$?"` and report that number. A
   2026-07-25 change claimed a green `cargo test --workspace` this way and
   pushed a red DTO golden to CI.
+- Do not explain an unusually long CI step as normal repository variance
+  without comparing it to recent successful runs. Inspect the same job step's
+  duration in a recent green run; once the current step exceeds twice that
+  baseline, stop passive waiting and reproduce the exact workflow command
+  locally (including integration tests and exclusions), or inspect the
+  completed job log if available. A 2026-07-31 PR waited about 40 minutes on a
+  Rust workspace step whose recent green baseline was about 5 minutes; the
+  exact local CI command exposed seven integration-test expectation failures
+  that an earlier `--lib`-only gate had missed.
 - Native / manual GUI inspection is the last and weakest layer: a confirmation
   only, never the primary correctness gate.
 

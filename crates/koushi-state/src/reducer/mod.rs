@@ -848,6 +848,14 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::NativeAttentionUpdated { attention } => {
             native_attention::handle_native_attention_updated(state, attention)
         }
+        AppAction::NativeWindowFocusChanged {
+            focused,
+            observation_generation,
+        } => native_attention::handle_native_window_focus_changed(
+            state,
+            focused,
+            observation_generation,
+        ),
         AppAction::NativeAttentionDispatchStarted { dispatch_id } => {
             native_attention::handle_dispatch_started(state, dispatch_id)
         }
@@ -2883,6 +2891,154 @@ mod tests {
             crate::state::NativeAttentionDispatchState::Suppressed {
                 reason: crate::state::NativeAttentionSuppressionReason::WindowFocused,
             }
+        );
+    }
+
+    #[test]
+    fn unfocused_active_room_live_unread_creates_native_attention_candidate() {
+        let mut state = ready_state();
+        state.navigation.active_room_id = Some("!active:example.invalid".to_owned());
+
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![test_room("!active:example.invalid", None)],
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 1,
+            },
+        );
+
+        let mut active_room = test_room("!active:example.invalid", None);
+        active_room.unread_count = 2;
+        active_room.notification_count = 2;
+        active_room.latest_event = Some(latest_event("$active-new:example.invalid", 44));
+        active_room.recency_stamp = Some(44);
+
+        let effects = reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![active_room],
+            },
+        );
+
+        assert!(effects.contains(&AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged)));
+        assert_eq!(state.native_attention.summary.badge_count, 2);
+        assert_eq!(
+            state.native_attention.summary.candidate,
+            Some(crate::state::NativeAttentionCandidate {
+                room_display_name: "!active:example.invalid".to_owned(),
+                kind: crate::state::RoomAttentionKind::Message,
+                unread_count: 2,
+                highlight_count: 0,
+            })
+        );
+        assert_eq!(
+            state.native_attention.dispatch,
+            crate::state::NativeAttentionDispatchState::Idle
+        );
+    }
+
+    #[test]
+    fn focus_change_does_not_replay_existing_native_attention_candidate() {
+        let mut state = ready_state();
+        state.navigation.active_room_id = Some("!active:example.invalid".to_owned());
+
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![
+                    test_room("!active:example.invalid", None),
+                    test_room("!other:example.invalid", None),
+                ],
+            },
+        );
+
+        let mut other_room = test_room("!other:example.invalid", None);
+        other_room.unread_count = 1;
+        other_room.notification_count = 1;
+        other_room.latest_event = Some(latest_event("$other-new:example.invalid", 45));
+        other_room.recency_stamp = Some(45);
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![test_room("!active:example.invalid", None), other_room],
+            },
+        );
+        assert!(state.native_attention.summary.candidate.is_some());
+
+        let unread_count = state.native_attention.summary.unread_count;
+        let badge_count = state.native_attention.summary.badge_count;
+        reduce(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 1,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: true,
+                observation_generation: 2,
+            },
+        );
+
+        assert_eq!(
+            state.native_attention.summary.unread_count, unread_count,
+            "focus changes must preserve unread totals"
+        );
+        assert_eq!(
+            state.native_attention.summary.badge_count, badge_count,
+            "focus changes must preserve badge totals"
+        );
+        assert_eq!(state.native_attention.summary.candidate, None);
+        assert_eq!(
+            state.native_attention.dispatch,
+            crate::state::NativeAttentionDispatchState::Idle
+        );
+    }
+
+    #[test]
+    fn native_window_focus_generation_rejects_stale_async_delivery() {
+        let mut state = ready_state();
+
+        reduce(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 1,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: true,
+                observation_generation: 3,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::NativeWindowFocusChanged {
+                focused: false,
+                observation_generation: 2,
+            },
+        );
+
+        assert!(state.native_attention_context.window_focused);
+        assert_eq!(
+            state
+                .native_attention_context
+                .window_focus_observation_generation,
+            3
         );
     }
 

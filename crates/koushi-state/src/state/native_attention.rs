@@ -13,6 +13,21 @@ use super::room::{
 };
 use super::settings::RoomNotificationMode;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeAttentionContext {
+    pub window_focused: bool,
+    pub window_focus_observation_generation: u64,
+}
+
+impl Default for NativeAttentionContext {
+    fn default() -> Self {
+        Self {
+            window_focused: true,
+            window_focus_observation_generation: 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NativeAttentionState {
     pub summary: NativeAttentionSummary,
@@ -96,6 +111,12 @@ pub struct NativeAttentionProjectionInput<'a> {
     pub capabilities: NativeAttentionCapabilities,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeAttentionProjection {
+    pub state: NativeAttentionState,
+    pub active_room_match: bool,
+}
+
 struct NativeAttentionCandidateEntry<'a> {
     room_id: &'a str,
     candidate: NativeAttentionCandidate,
@@ -104,6 +125,12 @@ struct NativeAttentionCandidateEntry<'a> {
 pub fn native_attention_state_from_rooms(
     input: NativeAttentionProjectionInput<'_>,
 ) -> NativeAttentionState {
+    native_attention_projection_from_rooms(input).state
+}
+
+pub fn native_attention_projection_from_rooms(
+    input: NativeAttentionProjectionInput<'_>,
+) -> NativeAttentionProjection {
     let mut unread_count = 0;
     let mut highlight_count = 0;
     let mut candidates = Vec::new();
@@ -194,6 +221,8 @@ pub fn native_attention_state_from_rooms(
     });
 
     let candidate_entry = candidates.first();
+    let active_room_match =
+        candidate_entry.is_some_and(|entry| input.active_room_id == Some(entry.room_id));
     let mut candidate = candidate_entry.map(|entry| entry.candidate.clone());
     let mut dispatch = NativeAttentionDispatchState::Idle;
 
@@ -209,15 +238,18 @@ pub fn native_attention_state_from_rooms(
         NativeAttentionCapability::Available | NativeAttentionCapability::Unknown => unread_count,
     };
 
-    NativeAttentionState {
-        summary: NativeAttentionSummary {
-            unread_count,
-            highlight_count,
-            badge_count,
-            candidate,
-            capabilities: input.capabilities,
+    NativeAttentionProjection {
+        state: NativeAttentionState {
+            summary: NativeAttentionSummary {
+                unread_count,
+                highlight_count,
+                badge_count,
+                candidate,
+                capabilities: input.capabilities,
+            },
+            dispatch,
         },
-        dispatch,
+        active_room_match,
     }
 }
 
@@ -365,4 +397,83 @@ pub enum NativeAttentionSuppressionReason {
     LowPriority,
     Duplicate,
     CapabilityUnavailable,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{RoomSummary, RoomTags};
+
+    fn unread_room() -> RoomSummary {
+        RoomSummary {
+            room_id: "!room:example.invalid".to_owned(),
+            display_name: "Room".to_owned(),
+            display_label: "Room".to_owned(),
+            original_display_label: "Room".to_owned(),
+            avatar: None,
+            is_dm: false,
+            dm_user_ids: Vec::new(),
+            tags: RoomTags::default(),
+            unread_count: 2,
+            notification_count: 2,
+            highlight_count: 0,
+            marked_unread: false,
+            recency_stamp: Some(42),
+            conversation_activity: None,
+            latest_event: None,
+            parent_space_ids: Vec::new(),
+            dm_space_ids: Vec::new(),
+            is_encrypted: false,
+            joined_members: 2,
+        }
+    }
+
+    fn project(observation: NativeAttentionObservationKind) -> NativeAttentionProjection {
+        let rooms = [unread_room()];
+        native_attention_projection_from_rooms(NativeAttentionProjectionInput {
+            rooms: &rooms,
+            active_room_id: None,
+            muted_room_ids: &[],
+            room_notification_modes: &HashMap::new(),
+            ignored_user_ids: &BTreeSet::new(),
+            window_focused: false,
+            observation,
+            previous_candidate: None,
+            capabilities: NativeAttentionCapabilities::default(),
+        })
+    }
+
+    #[test]
+    fn native_attention_observation_suppresses_non_live_candidates() {
+        for (observation, reason) in [
+            (
+                NativeAttentionObservationKind::InitialSync,
+                NativeAttentionSuppressionReason::InitialSync,
+            ),
+            (
+                NativeAttentionObservationKind::Backfill,
+                NativeAttentionSuppressionReason::Backfill,
+            ),
+            (
+                NativeAttentionObservationKind::SelfEvent,
+                NativeAttentionSuppressionReason::SelfMessage,
+            ),
+        ] {
+            let projection = project(observation);
+            assert_eq!(projection.state.summary.unread_count, 2);
+            assert_eq!(projection.state.summary.badge_count, 2);
+            assert_eq!(projection.state.summary.candidate, None);
+            assert_eq!(
+                projection.state.dispatch,
+                NativeAttentionDispatchState::Suppressed { reason }
+            );
+        }
+
+        let live = project(NativeAttentionObservationKind::Live);
+        assert_eq!(live.state.summary.unread_count, 2);
+        assert_eq!(live.state.summary.badge_count, 2);
+        assert!(live.state.summary.candidate.is_some());
+        assert_eq!(live.state.dispatch, NativeAttentionDispatchState::Idle);
+        assert!(!live.active_room_match);
+    }
 }

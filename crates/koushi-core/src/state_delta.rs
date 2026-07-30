@@ -217,6 +217,7 @@ fn audit_app_state_delta_slices(state: &AppState) {
         e2ee_trust: _,
         local_encryption: _,
         native_attention: _,
+        native_attention_context: _,
         cjk_text_policy: _,
         errors: _,
         device_cleanup: _,

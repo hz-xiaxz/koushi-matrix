@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -172,6 +172,7 @@ pub struct CoreRuntimeState {
     pub(crate) composer_draft_transport: Mutex<ComposerDraftTransportIdentities>,
     /// Tauri-side timeline item count (updated by event loop; QA title only).
     pub(crate) timeline_items_count: AtomicUsize,
+    pub(crate) native_window_focus_generation: AtomicU64,
 }
 
 #[derive(Default)]
@@ -486,6 +487,22 @@ fn window_event_should_persist(event: &tauri::WindowEvent) -> bool {
             | tauri::WindowEvent::ScaleFactorChanged { .. }
             | tauri::WindowEvent::Destroyed
     )
+}
+
+fn observed_native_window_focus(event: &tauri::WindowEvent) -> Option<bool> {
+    match event {
+        tauri::WindowEvent::Focused(focused) => Some(*focused),
+        _ => None,
+    }
+}
+
+fn next_native_window_focus_generation(counter: &AtomicU64) -> Option<u64> {
+    counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .ok()
+        .and_then(|previous| previous.checked_add(1))
 }
 
 fn window_event_should_stop_background_tasks(event: &tauri::WindowEvent) -> bool {
@@ -1141,6 +1158,7 @@ pub fn run() {
                 connection: TokioMutex::new(command_conn),
                 composer_draft_transport: Mutex::new(ComposerDraftTransportIdentities::default()),
                 timeline_items_count: AtomicUsize::new(0),
+                native_window_focus_generation: AtomicU64::new(0),
             };
             app.manage(core_state);
             install_oidc_deep_link_handler(app)?;
@@ -1203,6 +1221,25 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if window.label() == "main" {
+                if let Some(focused) = observed_native_window_focus(event) {
+                    let core_state = window.state::<CoreRuntimeState>();
+                    if let Some(observation_generation) = next_native_window_focus_generation(
+                        &core_state.native_window_focus_generation,
+                    ) {
+                        let app_handle = window.app_handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            let core_state = app_handle.state::<CoreRuntimeState>();
+                            let request_id = core_state.connection.lock().await.next_request_id();
+                            let command = commands::native_attention::
+                                build_observe_native_window_focus_command(
+                                    request_id,
+                                    focused,
+                                    observation_generation,
+                                );
+                            let _ = commands::submit_core_command(&core_state, command).await;
+                        });
+                    }
+                }
                 #[cfg(target_os = "macos")]
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     let _ = persist_current_window_state(window);
@@ -1422,7 +1459,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     use super::{
         CORE_EVENT_NAME, STATE_EVENT_NAME, forwarded_webview_events_for_core_event,
@@ -1430,7 +1467,8 @@ mod tests {
     };
     use super::{
         PersistedWindowState, WindowWorkArea, desktop_menu_items, desktop_standard_menu_items,
-        load_window_state_with_base, persist_window_state_with_base,
+        load_window_state_with_base, next_native_window_focus_generation,
+        observed_native_window_focus, persist_window_state_with_base,
         persisted_window_state_from_geometry, persisted_window_state_is_restorable,
         qa_control_pipe_path_from_env_value, qa_login_pipe_path_from_env_value,
         restore_session_enabled_from_env_value, restored_window_geometry,
@@ -2119,6 +2157,45 @@ mod tests {
         assert!(!window_event_should_persist(&tauri::WindowEvent::Focused(
             true
         )));
+    }
+
+    #[test]
+    fn observed_native_window_focus_extracts_only_focus_events() {
+        assert_eq!(
+            observed_native_window_focus(&tauri::WindowEvent::Focused(true)),
+            Some(true)
+        );
+        assert_eq!(
+            observed_native_window_focus(&tauri::WindowEvent::Focused(false)),
+            Some(false)
+        );
+        assert_eq!(
+            observed_native_window_focus(&tauri::WindowEvent::Resized(tauri::PhysicalSize::new(
+                1280, 820
+            ))),
+            None
+        );
+        assert_eq!(
+            observed_native_window_focus(&tauri::WindowEvent::Moved(tauri::PhysicalPosition::new(
+                30, 50
+            ))),
+            None
+        );
+        assert_eq!(
+            observed_native_window_focus(&tauri::WindowEvent::Destroyed),
+            None
+        );
+    }
+
+    #[test]
+    fn native_window_focus_generation_is_monotonic_and_exhaustion_safe() {
+        let counter = AtomicU64::new(0);
+        assert_eq!(next_native_window_focus_generation(&counter), Some(1));
+        assert_eq!(next_native_window_focus_generation(&counter), Some(2));
+
+        let exhausted = AtomicU64::new(u64::MAX);
+        assert_eq!(next_native_window_focus_generation(&exhausted), None);
+        assert_eq!(exhausted.load(Ordering::Relaxed), u64::MAX);
     }
 
     #[test]

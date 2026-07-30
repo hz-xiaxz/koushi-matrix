@@ -156,10 +156,11 @@ pub use local_encryption::{LocalEncryptionHealth, LocalEncryptionState};
 // ── Re-exports: native_attention ─────────────────────────────────────────────
 pub use native_attention::{
     NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
-    NativeAttentionDispatchId, NativeAttentionDispatchState, NativeAttentionObservationKind,
-    NativeAttentionProjectionInput, NativeAttentionSoundOutcome, NativeAttentionState,
-    NativeAttentionSummary, NativeAttentionSuppressionReason,
-    native_attention_capabilities_for_platform, native_attention_state_from_rooms,
+    NativeAttentionContext, NativeAttentionDispatchId, NativeAttentionDispatchState,
+    NativeAttentionObservationKind, NativeAttentionProjection, NativeAttentionProjectionInput,
+    NativeAttentionSoundOutcome, NativeAttentionState, NativeAttentionSummary,
+    NativeAttentionSuppressionReason, native_attention_capabilities_for_platform,
+    native_attention_projection_from_rooms, native_attention_state_from_rooms,
 };
 
 // ── Re-exports: cjk ─────────────────────────────────────────────────────────
@@ -293,6 +294,8 @@ pub struct AppState {
     pub e2ee_trust: E2eeTrustState,
     pub local_encryption: LocalEncryptionState,
     pub native_attention: NativeAttentionState,
+    #[serde(skip)]
+    pub native_attention_context: NativeAttentionContext,
     pub cjk_text_policy: CjkTextPolicyState,
     pub errors: Vec<AppError>,
 }
@@ -346,6 +349,7 @@ impl Default for AppState {
             e2ee_trust: E2eeTrustState::default(),
             local_encryption: LocalEncryptionState::Unknown,
             native_attention: NativeAttentionState::default(),
+            native_attention_context: NativeAttentionContext::default(),
             cjk_text_policy: CjkTextPolicyState::default(),
             errors: Vec::new(),
         }
@@ -357,6 +361,23 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn native_attention_context_is_process_local_and_defaults_focused() {
+        let state = AppState::default();
+
+        assert!(state.native_attention_context.window_focused);
+        assert!(
+            serde_json::to_value(&state)
+                .unwrap()
+                .get("native_attention_context")
+                .is_none()
+        );
+
+        let restored: AppState = serde_json::from_value(serde_json::to_value(state).unwrap())
+            .expect("serialized AppState should restore");
+        assert!(restored.native_attention_context.window_focused);
+    }
 
     #[test]
     fn timeline_media_download_state_serializes_as_tagged_union() {
