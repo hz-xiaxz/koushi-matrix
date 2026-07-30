@@ -13843,10 +13843,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("address");
         std::thread::spawn(move || {
-            for _ in 0..256 {
-                let Ok((mut stream, _)) = listener.accept() else {
-                    return;
-                };
+            while let Ok((mut stream, _)) = listener.accept() {
                 let mut request = Vec::new();
                 let mut buffer = [0_u8; 4096];
                 loop {
@@ -13893,6 +13890,43 @@ mod tests {
             }
         });
         format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn quarantine_password_server_outlives_the_legacy_request_budget() {
+        let homeserver = spawn_quarantine_password_server();
+        let address = homeserver
+            .strip_prefix("http://")
+            .expect("fixture homeserver scheme")
+            .parse::<std::net::SocketAddr>()
+            .expect("fixture homeserver address");
+
+        for request_number in 0..300 {
+            use std::io::{Read, Write};
+
+            let mut stream = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(1))
+                .unwrap_or_else(|error| {
+                    panic!("fixture stopped at request {request_number}: {error}")
+                });
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .expect("fixture read timeout");
+            stream
+                .write_all(
+                    b"GET /_matrix/client/versions HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                )
+                .expect("fixture request");
+            let mut response = String::new();
+            stream
+                .read_to_string(&mut response)
+                .unwrap_or_else(|error| {
+                    panic!("fixture response {request_number} failed: {error}")
+                });
+            assert!(
+                response.contains(r#"{"versions":["v1.7"]}"#),
+                "fixture response {request_number}: {response}"
+            );
+        }
     }
 
     #[test]
