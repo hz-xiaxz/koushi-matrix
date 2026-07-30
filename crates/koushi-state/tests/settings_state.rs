@@ -63,7 +63,7 @@ fn app_state_carries_default_non_secret_settings() {
         state.settings.values.timeline,
         TimelineSettings {
             auto_load_older_messages: true,
-            thread_root_order: TimelineThreadRootOrder::RootEvent,
+            thread_root_order: TimelineThreadRootOrder::LatestReply,
         }
     );
     assert_eq!(state.settings.persistence, SettingsPersistenceState::Idle);
@@ -228,7 +228,7 @@ fn settings_values_deserialize_legacy_without_timeline_as_default_true() {
         values.timeline,
         TimelineSettings {
             auto_load_older_messages: true,
-            thread_root_order: TimelineThreadRootOrder::RootEvent,
+            thread_root_order: TimelineThreadRootOrder::LatestReply,
         }
     );
 }
@@ -260,15 +260,15 @@ fn timeline_auto_load_older_messages_defaults_to_true() {
 }
 
 #[test]
-fn timeline_thread_root_order_defaults_to_root_event() {
+fn timeline_thread_root_order_defaults_to_latest_reply() {
     assert_eq!(
         TimelineSettings::default().thread_root_order,
-        TimelineThreadRootOrder::RootEvent
+        TimelineThreadRootOrder::LatestReply
     );
 }
 
 #[test]
-fn timeline_thread_root_order_patch_accepts_latest_reply_and_legacy_settings_default_to_root_event()
+fn timeline_thread_root_order_patch_accepts_root_event_and_legacy_settings_default_to_latest_reply()
 {
     let mut state = AppState::default();
     reduce(
@@ -277,7 +277,7 @@ fn timeline_thread_root_order_patch_accepts_latest_reply_and_legacy_settings_def
             request_id: 89,
             patch: SettingsPatch {
                 timeline: Some(TimelineSettings {
-                    thread_root_order: TimelineThreadRootOrder::LatestReply,
+                    thread_root_order: TimelineThreadRootOrder::RootEvent,
                     ..TimelineSettings::default()
                 }),
                 ..SettingsPatch::default()
@@ -287,15 +287,19 @@ fn timeline_thread_root_order_patch_accepts_latest_reply_and_legacy_settings_def
 
     assert_eq!(
         state.settings.values.timeline.thread_root_order,
-        TimelineThreadRootOrder::LatestReply
+        TimelineThreadRootOrder::RootEvent
     );
 
+    // A store written before the key existed carries no persisted value; it
+    // picks up the product default (latest-reply placement). An explicitly
+    // persisted "rootEvent" keeps the user's choice via the serde round-trip
+    // fixture above.
     let legacy_timeline =
         serde_json::from_str::<TimelineSettings>(r#"{ "auto_load_older_messages": true }"#)
             .expect("legacy timeline settings should deserialize");
     assert_eq!(
         legacy_timeline.thread_root_order,
-        TimelineThreadRootOrder::RootEvent
+        TimelineThreadRootOrder::LatestReply
     );
 }
 

@@ -242,6 +242,9 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
       },
       timeline: {
         auto_load_older_messages: true,
+        // Deliberately NOT the product default (latestReply since #366):
+        // the thread-placement specs exercise the rootEvent -> latestReply
+        // opt-in transition from this seeded user choice.
         thread_root_order: { kind: "rootEvent" }
       },
       search_crawler: {

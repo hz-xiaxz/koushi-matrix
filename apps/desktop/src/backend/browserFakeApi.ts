@@ -4277,7 +4277,8 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
       },
       timeline: {
         auto_load_older_messages: true,
-        thread_root_order: { kind: "rootEvent" }
+        // Mirrors the Rust product default (#366): latest-reply placement on.
+        thread_root_order: { kind: "latestReply" }
       },
       search_crawler: {
         speed: "standard" as const,
