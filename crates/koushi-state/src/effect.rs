@@ -149,6 +149,7 @@ pub enum UiEvent {
     DirectoryChanged,
     ActivityChanged,
     RoomManagementChanged,
+    MentionCandidatesChanged,
     LocalEncryptionChanged,
     NativeAttentionChanged,
     CjkTextPolicyChanged,

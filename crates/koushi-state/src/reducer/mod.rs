@@ -21,6 +21,7 @@ mod e2ee;
 mod invite_workflow;
 mod live_signals;
 mod local_encryption;
+mod mention;
 mod native_attention;
 mod navigation;
 mod profile;
@@ -402,6 +403,41 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::UserProfilesUpdated { profiles } => {
             profile::handle_user_profiles_updated(state, profiles)
         }
+        AppAction::MentionCandidatesDemanded {
+            request_id,
+            generation,
+            room_id,
+            surface,
+            query,
+        } => mention::handle_demanded(state, request_id, generation, room_id, surface, query),
+        AppAction::MentionCandidatesProjected {
+            request_id,
+            generation,
+            room_id,
+            surface,
+            query,
+            completeness,
+            candidates,
+            room_mention_allowed,
+        } => mention::handle_projected(
+            state,
+            request_id,
+            generation,
+            room_id,
+            surface,
+            query,
+            completeness,
+            candidates,
+            room_mention_allowed,
+        ),
+        AppAction::MentionCandidatesFailed {
+            request_id,
+            generation,
+            room_id,
+            surface,
+            query,
+            kind,
+        } => mention::handle_failed(state, request_id, generation, room_id, surface, query, kind),
         AppAction::LocalUserAliasesLoaded { aliases } => {
             profile::handle_local_user_aliases_loaded(state, aliases)
         }
@@ -1474,6 +1510,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     let had_directory = state.directory != DirectoryState::default();
     let had_activity = state.activity != ActivityState::Closed;
     let had_room_management = state.room_management != Default::default();
+    let had_mention_candidates = state.mention_candidates != Default::default();
     let had_local_encryption = state.local_encryption != LocalEncryptionState::Unknown;
     let had_native_attention = state.native_attention != Default::default();
     let had_files_view = state.files_view != FilesViewState::Closed;
@@ -1497,6 +1534,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.directory = DirectoryState::default();
     state.activity = ActivityState::Closed;
     state.room_management = Default::default();
+    state.mention_candidates = Default::default();
     state.profile = Default::default();
     state.timeline = Default::default();
     state.thread = ThreadPaneState::Closed;
@@ -1572,6 +1610,9 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     }
     if had_room_management {
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomManagementChanged));
+    }
+    if had_mention_candidates {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::MentionCandidatesChanged));
     }
     if had_local_encryption {
         effects.push(AppEffect::EmitUiEvent(UiEvent::LocalEncryptionChanged));

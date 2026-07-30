@@ -18,6 +18,7 @@ mod files_view;
 mod invite_workflow;
 mod live_signals;
 mod local_encryption;
+mod mention;
 mod native_attention;
 mod navigation;
 mod profile;
@@ -200,6 +201,13 @@ pub use live_signals::{
     LiveSignalsState, PresenceKind, RoomLiveSignals,
 };
 
+// ── Re-exports: mention candidates ──────────────────────────────────────────
+pub use mention::{
+    MAX_MENTION_CANDIDATE_TARGETS, MentionCandidate, MentionCandidateMembership,
+    MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionCandidatesState,
+    MentionCandidatesTarget, MentionSurface, RoomMentionPermission,
+};
+
 // ── Helper used by search_crawler submodule via crate::state::default_true ──
 pub(crate) fn default_true() -> bool {
     true
@@ -252,6 +260,8 @@ pub struct AppState {
     pub media_gallery: MediaGalleryStore,
     pub directory: DirectoryState,
     pub room_management: RoomManagementState,
+    #[serde(default)]
+    pub mention_candidates: MentionCandidatesState,
     pub activity: ActivityState,
     pub timeline: TimelinePaneState,
     pub thread: ThreadPaneState,
@@ -304,6 +314,7 @@ impl Default for AppState {
             media_gallery: MediaGalleryStore::default(),
             directory: DirectoryState::default(),
             room_management: RoomManagementState::default(),
+            mention_candidates: MentionCandidatesState::default(),
             activity: ActivityState::Closed,
             timeline: TimelinePaneState::default(),
             thread: ThreadPaneState::Closed,
