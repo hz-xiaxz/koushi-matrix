@@ -4434,6 +4434,7 @@ test("reply quote block renders from Rust-owned timeline item data", async ({ pa
       reply_quote: {
         event_id: "$root:example.invalid",
         sender: "@quoted-user:example.invalid",
+        sender_label: "Quoted User",
         body_preview: "Quoted source from Rust state",
         state: "ready"
       },
@@ -4451,7 +4452,8 @@ test("reply quote block renders from Rust-owned timeline item data", async ({ pa
 
   const row = page.locator('[data-event-id="$reply:example.invalid"]');
   await expect(row.locator(".reply-quote")).toBeVisible();
-  await expect(row.getByText("@quoted-user:example.invalid", { exact: true })).toBeVisible();
+  await expect(row.getByText("Quoted User", { exact: true })).toBeVisible();
+  await expect(row).not.toContainText("@quoted-user:example.invalid");
   await expect(row.getByText("Quoted source from Rust state", { exact: true })).toBeVisible();
   await expect(row).not.toContainText("$root:example.invalid");
 });
@@ -5235,7 +5237,13 @@ test("live signals render from Rust state and dispatch read/typing commands", as
                 }
               },
               fully_read_event_id: "$seed-event:example.invalid",
-              typing_user_ids: ["@typing-user:example.invalid"]
+              typing_user_ids: ["@typing-user:example.invalid"],
+              typing_users: [
+                {
+                  user_id: "@typing-user:example.invalid",
+                  display_label: "Typing User"
+                }
+              ]
             }
           },
           presence: {
@@ -5252,7 +5260,10 @@ test("live signals render from Rust state and dispatch read/typing commands", as
   await expect(row.locator(".presence-dot[data-presence='online']")).toBeVisible();
   await expect(row.locator(".message-receipts")).toHaveAttribute("aria-label", /Read by 1/);
   await expect(page.getByText("Read up to here", { exact: true })).toBeVisible();
-  await expect(page.getByText("@typing-user:example.invalid is typing", { exact: true })).toBeVisible();
+  await expect(page.getByText("Typing User is typing", { exact: true })).toBeVisible();
+  await expect(page.locator(".typing-indicator")).not.toContainText(
+    "@typing-user:example.invalid"
+  );
   await expect.poll(() => invocationCount(page, "send_read_receipt")).toBeGreaterThanOrEqual(1);
   await expect.poll(() => invocationCount(page, "set_fully_read")).toBeGreaterThanOrEqual(1);
 
@@ -5321,7 +5332,8 @@ test("read receipt avatars render from Rust projection with overflow and tooltip
                 }
               },
               fully_read_event_id: null,
-              typing_user_ids: []
+              typing_user_ids: [],
+              typing_users: []
             }
           },
           presence: {}
@@ -5411,7 +5423,8 @@ test("Seen popup keeps each reader on one compact line (#360)", async ({ page })
                   }
                 },
                 fully_read_event_id: null,
-                typing_user_ids: []
+                typing_user_ids: [],
+                typing_users: []
               }
             },
             presence: {}
