@@ -2,7 +2,9 @@ use crate::{
     action::LoginRequest,
     effect::{AppEffect, UiEvent},
     state::{
-        AppError, AppState, CurrentDeviceTrustState, LoginAttemptId, ProvisionalPhase,
+        AppError, AppState, CurrentDeviceTrustState, DeviceCleanupAuthMode,
+        DeviceCleanupFailureKind, DeviceCleanupLocalMode, DeviceCleanupOfferReason,
+        DeviceCleanupRemoteOutcome, DeviceCleanupState, LoginAttemptId, ProvisionalPhase,
         SessionState, SoftLogoutReauthState, SyncState, VerificationAccountKind,
         VerificationGateFailureKind, VerificationGateRejectReason, VerificationGateState,
         VerificationMethod, VerificationMethodCapability,
@@ -32,6 +34,7 @@ fn install_provisional_session(
     info: crate::state::SessionInfo,
 ) -> Vec<AppEffect> {
     let cleared_login_error = clear_login_failed_errors(state);
+    state.device_cleanup = DeviceCleanupState::Idle;
     state.session = SessionState::Provisional {
         info,
         phase: ProvisionalPhase::CheckingTrust,
@@ -86,6 +89,7 @@ fn promote_verified_session(
     info: crate::state::SessionInfo,
 ) -> Vec<AppEffect> {
     state.session = SessionState::Ready(info.clone());
+    state.device_cleanup = DeviceCleanupState::Idle;
     state.sync = SyncState::Starting;
     vec![
         AppEffect::PersistSession(info),
@@ -132,6 +136,7 @@ pub(crate) fn handle_current_device_trust_changed(
                 info,
                 phase: ProvisionalPhase::DiscoveringMethods,
             };
+            state.device_cleanup = DeviceCleanupState::Idle;
             vec![
                 AppEffect::DiscoverVerificationMethods,
                 AppEffect::EmitUiEvent(UiEvent::SessionChanged),
@@ -143,6 +148,9 @@ pub(crate) fn handle_current_device_trust_changed(
                 phase: ProvisionalPhase::RecheckingTrust {
                     failure: Some(VerificationGateFailureKind::Sdk),
                 },
+            };
+            state.device_cleanup = DeviceCleanupState::Offered {
+                reason: DeviceCleanupOfferReason::RecoveryFailed,
             };
             vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
         }
@@ -184,12 +192,12 @@ pub(crate) fn handle_verification_methods_discovered(
         return Vec::new();
     };
     let info = info.clone();
+    let mut gate = gate;
     if gate.account_kind == VerificationAccountKind::ExistingIdentity && gate.methods.is_empty() {
-        state.session = SessionState::Rejecting {
-            info,
-            reason: VerificationGateRejectReason::ExistingIdentityWithoutProof,
+        gate.failure = Some(VerificationGateFailureKind::NoProofMethod);
+        state.device_cleanup = DeviceCleanupState::Offered {
+            reason: DeviceCleanupOfferReason::NoProofMethod,
         };
-        return vec![AppEffect::RejectProvisionalSession];
     }
     state.session = SessionState::AwaitingVerification { info, gate };
     vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
@@ -213,6 +221,9 @@ pub(crate) fn handle_verification_method_discovery_failed(
             failure: Some(kind),
         },
     };
+    state.device_cleanup = DeviceCleanupState::Offered {
+        reason: DeviceCleanupOfferReason::RecoveryFailed,
+    };
     vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
 }
 
@@ -231,6 +242,7 @@ pub(crate) fn handle_verification_method_discovery_retry_started(
         info: info.clone(),
         phase: ProvisionalPhase::DiscoveringMethods,
     };
+    state.device_cleanup = DeviceCleanupState::Idle;
     vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
 }
 
@@ -262,6 +274,7 @@ pub(crate) fn handle_verification_method_submitted(
     let info = info.clone();
     let mut gate = gate.clone();
     gate.failure = None;
+    state.device_cleanup = DeviceCleanupState::Idle;
     state.session = SessionState::Verifying {
         info,
         gate,
@@ -299,10 +312,196 @@ pub(crate) fn handle_verification_gate_attempt_failed(
     }
     let mut gate = gate.clone();
     gate.failure = Some(kind);
+    state.device_cleanup = DeviceCleanupState::Offered {
+        reason: DeviceCleanupOfferReason::RecoveryFailed,
+    };
     state.session = SessionState::AwaitingVerification {
         info: info.clone(),
         gate,
     };
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+}
+
+pub(crate) fn handle_device_cleanup_start_requested(
+    state: &mut AppState,
+    request_id: u64,
+) -> Vec<AppEffect> {
+    state.device_cleanup = match state.device_cleanup {
+        DeviceCleanupState::Offered { .. } | DeviceCleanupState::RemoteFailed { .. } => {
+            DeviceCleanupState::ResolvingRemote { request_id }
+        }
+        DeviceCleanupState::LocalResetFailed { mode, .. } => match mode {
+            DeviceCleanupLocalMode::RemoteRemoved { .. } => {
+                DeviceCleanupState::ResettingLocal { request_id, mode }
+            }
+            DeviceCleanupLocalMode::RemoteMayRemain => {
+                DeviceCleanupState::ErasingLocalAnyway { request_id }
+            }
+        },
+        _ => return Vec::new(),
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+}
+
+pub(crate) fn handle_device_cleanup_remote_started(
+    state: &mut AppState,
+    request_id: u64,
+    auth_mode: DeviceCleanupAuthMode,
+) -> Vec<AppEffect> {
+    if !matches!(
+        state.device_cleanup,
+        DeviceCleanupState::ResolvingRemote {
+            request_id: active_request_id
+        } if active_request_id == request_id
+    ) {
+        return Vec::new();
+    }
+    state.device_cleanup = DeviceCleanupState::RemovingRemote {
+        request_id,
+        auth_mode,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+}
+
+pub(crate) fn handle_device_cleanup_uia_required(
+    state: &mut AppState,
+    request_id: u64,
+    flow_id: u64,
+) -> Vec<AppEffect> {
+    if !matches!(
+        state.device_cleanup,
+        DeviceCleanupState::RemovingRemote {
+            request_id: active_request_id,
+            auth_mode: DeviceCleanupAuthMode::Legacy,
+        } if active_request_id == request_id
+    ) {
+        return Vec::new();
+    }
+    state.device_cleanup = DeviceCleanupState::AwaitingUia {
+        request_id,
+        flow_id,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+}
+
+pub(crate) fn handle_device_cleanup_uia_submitted(
+    state: &mut AppState,
+    request_id: u64,
+    flow_id: u64,
+) -> Vec<AppEffect> {
+    if !matches!(
+        state.device_cleanup,
+        DeviceCleanupState::AwaitingUia {
+            request_id: active_request_id,
+            flow_id: active_flow_id,
+        } if active_request_id == request_id && active_flow_id == flow_id
+    ) {
+        return Vec::new();
+    }
+    state.device_cleanup = DeviceCleanupState::RemovingRemote {
+        request_id,
+        auth_mode: DeviceCleanupAuthMode::Legacy,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+}
+
+pub(crate) fn handle_device_cleanup_remote_settled(
+    state: &mut AppState,
+    request_id: u64,
+    outcome: DeviceCleanupRemoteOutcome,
+) -> Vec<AppEffect> {
+    if !matches!(
+        state.device_cleanup,
+        DeviceCleanupState::RemovingRemote {
+            request_id: active_request_id,
+            ..
+        } if active_request_id == request_id
+    ) {
+        return Vec::new();
+    }
+    state.device_cleanup = DeviceCleanupState::ResettingLocal {
+        request_id,
+        mode: DeviceCleanupLocalMode::RemoteRemoved { outcome },
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+}
+
+pub(crate) fn handle_device_cleanup_remote_failed(
+    state: &mut AppState,
+    request_id: u64,
+    auth_mode: DeviceCleanupAuthMode,
+    kind: DeviceCleanupFailureKind,
+) -> Vec<AppEffect> {
+    if !matches!(
+        state.device_cleanup,
+        DeviceCleanupState::RemovingRemote {
+            request_id: active_request_id,
+            auth_mode: active_auth_mode,
+        } if active_request_id == request_id && active_auth_mode == auth_mode
+    ) {
+        return Vec::new();
+    }
+    state.device_cleanup = DeviceCleanupState::RemoteFailed {
+        request_id,
+        auth_mode,
+        failure: kind,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+}
+
+pub(crate) fn handle_device_cleanup_erase_local_anyway_requested(
+    state: &mut AppState,
+    request_id: u64,
+) -> Vec<AppEffect> {
+    if !matches!(
+        state.device_cleanup,
+        DeviceCleanupState::RemoteFailed { .. }
+    ) {
+        return Vec::new();
+    }
+    state.device_cleanup = DeviceCleanupState::ErasingLocalAnyway { request_id };
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+}
+
+pub(crate) fn handle_device_cleanup_local_reset_failed(
+    state: &mut AppState,
+    request_id: u64,
+    kind: DeviceCleanupFailureKind,
+) -> Vec<AppEffect> {
+    let mode = match state.device_cleanup {
+        DeviceCleanupState::ResettingLocal {
+            request_id: active_request_id,
+            mode,
+        } if active_request_id == request_id => mode,
+        DeviceCleanupState::ErasingLocalAnyway {
+            request_id: active_request_id,
+        } if active_request_id == request_id => DeviceCleanupLocalMode::RemoteMayRemain,
+        _ => return Vec::new(),
+    };
+    state.device_cleanup = DeviceCleanupState::LocalResetFailed {
+        request_id,
+        mode,
+        failure: kind,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+}
+
+pub(crate) fn handle_device_cleanup_completed(
+    state: &mut AppState,
+    request_id: u64,
+) -> Vec<AppEffect> {
+    if !matches!(
+        state.device_cleanup,
+        DeviceCleanupState::ResettingLocal {
+            request_id: active_request_id,
+            ..
+        } | DeviceCleanupState::ErasingLocalAnyway {
+            request_id: active_request_id,
+        } if active_request_id == request_id
+    ) {
+        return Vec::new();
+    }
+    *state = AppState::default();
     vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
 }
 
@@ -402,6 +601,7 @@ pub(crate) fn handle_verification_session_rejected(
         return Vec::new();
     }
     state.session = SessionState::Rejecting { info, reason };
+    state.device_cleanup = DeviceCleanupState::Idle;
     state.sync = SyncState::Stopped;
     let mut effects = vec![AppEffect::RejectProvisionalSession];
     effects.extend(clear_session_views(state));
@@ -591,6 +791,7 @@ pub(crate) fn handle_session_locked(state: &mut AppState) -> Vec<AppEffect> {
 
 pub(crate) fn handle_logout_requested(state: &mut AppState) -> Vec<AppEffect> {
     state.session = SessionState::LoggingOut;
+    state.device_cleanup = DeviceCleanupState::Idle;
     state.sync = SyncState::Stopped;
     let mut effects = vec![
         AppEffect::StopSync,

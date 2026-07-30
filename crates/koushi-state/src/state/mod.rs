@@ -54,8 +54,10 @@ pub use sync::{SyncLifecycleStatus, SyncMode, SyncModeFailureKind, SyncState};
 pub use session::{
     AccountManagementCapabilities, AccountManagementOperation, AccountManagementState,
     AuthDiscoveryState, AuthFailureKind, CapabilityState, CurrentDeviceTrustState,
-    DelegatedAuthLinks, DeviceSessionListState, DeviceSessionSummary, LoginAttemptId, LoginFlow,
-    LoginFlowKind, ProvisionalPhase, QrLoginState, RecoveryMethod, SessionInfo, SessionState,
+    DelegatedAuthLinks, DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupLocalMode,
+    DeviceCleanupOfferReason, DeviceCleanupRemoteOutcome, DeviceCleanupState,
+    DeviceSessionListState, DeviceSessionSummary, LoginAttemptId, LoginFlow, LoginFlowKind,
+    ProvisionalPhase, QrLoginState, RecoveryMethod, SessionInfo, SessionState,
     SoftLogoutReauthState, VerificationAccountKind, VerificationGateFailureKind,
     VerificationGateRejectReason, VerificationGateState, VerificationMethod,
     VerificationMethodCapability,
@@ -219,6 +221,8 @@ pub(crate) fn default_true() -> bool {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppState {
     pub session: SessionState,
+    #[serde(default)]
+    pub device_cleanup: DeviceCleanupState,
     pub auth: AuthDiscoveryState,
     #[serde(default)]
     pub device_sessions: DeviceSessionListState,
@@ -289,6 +293,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             session: SessionState::SignedOut,
+            device_cleanup: DeviceCleanupState::Idle,
             auth: AuthDiscoveryState::Unknown,
             device_sessions: DeviceSessionListState::Idle,
             account_management: AccountManagementState::Idle,

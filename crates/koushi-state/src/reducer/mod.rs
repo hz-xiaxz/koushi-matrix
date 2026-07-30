@@ -107,6 +107,39 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::VerificationGateAttemptFailed { flow_id, kind } => {
             session::handle_verification_gate_attempt_failed(state, flow_id, kind)
         }
+        AppAction::DeviceCleanupStartRequested { request_id } => {
+            session::handle_device_cleanup_start_requested(state, request_id)
+        }
+        AppAction::DeviceCleanupRemoteStarted {
+            request_id,
+            auth_mode,
+        } => session::handle_device_cleanup_remote_started(state, request_id, auth_mode),
+        AppAction::DeviceCleanupUiaRequired {
+            request_id,
+            flow_id,
+        } => session::handle_device_cleanup_uia_required(state, request_id, flow_id),
+        AppAction::DeviceCleanupUiaSubmitted {
+            request_id,
+            flow_id,
+        } => session::handle_device_cleanup_uia_submitted(state, request_id, flow_id),
+        AppAction::DeviceCleanupRemoteSettled {
+            request_id,
+            outcome,
+        } => session::handle_device_cleanup_remote_settled(state, request_id, outcome),
+        AppAction::DeviceCleanupRemoteFailed {
+            request_id,
+            auth_mode,
+            kind,
+        } => session::handle_device_cleanup_remote_failed(state, request_id, auth_mode, kind),
+        AppAction::DeviceCleanupEraseLocalAnywayRequested { request_id } => {
+            session::handle_device_cleanup_erase_local_anyway_requested(state, request_id)
+        }
+        AppAction::DeviceCleanupLocalResetFailed { request_id, kind } => {
+            session::handle_device_cleanup_local_reset_failed(state, request_id, kind)
+        }
+        AppAction::DeviceCleanupCompleted { request_id } => {
+            session::handle_device_cleanup_completed(state, request_id)
+        }
         AppAction::VerificationSessionRejected { reason } => {
             session::handle_verification_session_rejected(state, reason)
         }
