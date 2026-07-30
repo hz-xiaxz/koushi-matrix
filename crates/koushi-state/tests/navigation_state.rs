@@ -1,10 +1,10 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, AvatarImage, AvatarThumbnailState, ConversationActivity,
     ConversationActivitySource, MainTimelineAnchor, NativeAttentionObservationKind,
-    NativeAttentionProjectionInput, RoomLatestEventSummary, RoomListFilter, RoomListSort,
-    RoomNotificationMode, RoomNotificationSettings, RoomSummary, RoomTags, SearchCrawlerSettings,
-    SessionInfo, SessionState, SpaceSummary, ThreadPaneState, TimelinePaneState,
-    TimelineScrollAnchorEdge, UiEvent, UserProfile, compose_sidebar,
+    NativeAttentionProjectionInput, NativeAttentionSuppressionReason, RoomLatestEventSummary,
+    RoomListFilter, RoomListSort, RoomNotificationMode, RoomNotificationSettings, RoomSummary,
+    RoomTags, SearchCrawlerSettings, SessionInfo, SessionState, SpaceSummary, ThreadPaneState,
+    TimelinePaneState, TimelineScrollAnchorEdge, UiEvent, UserProfile, compose_sidebar,
     compose_sidebar_with_account_facts, compute_room_list_projection,
     native_attention_state_from_rooms, reduce,
 };
@@ -54,6 +54,18 @@ fn spaces() -> Vec<SpaceSummary> {
 
 fn search_crawler_settings_standard() -> SearchCrawlerSettings {
     SearchCrawlerSettings::default()
+}
+
+fn initial_attention_diagnostic(unread_count: u64, active_room_match: bool) -> AppEffect {
+    AppEffect::RecordNativeAttentionRecomputed {
+        observation: NativeAttentionObservationKind::InitialSync,
+        unread_count,
+        badge_count: unread_count,
+        candidate: None,
+        suppression: (unread_count > 0).then_some(NativeAttentionSuppressionReason::InitialSync),
+        window_focused: true,
+        active_room_match,
+    }
 }
 
 fn rooms() -> Vec<RoomSummary> {
@@ -435,6 +447,7 @@ fn room_list_update_replaces_state_and_emits_room_list_event() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            initial_attention_diagnostic(10, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
@@ -491,6 +504,7 @@ fn room_list_update_selects_first_room_when_no_room_is_active() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            initial_attention_diagnostic(10, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
@@ -580,6 +594,7 @@ fn room_list_update_clears_missing_active_space_and_room() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            initial_attention_diagnostic(0, false),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec!["global-room".to_owned()],
                 settings: search_crawler_settings_standard(),
@@ -739,6 +754,7 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            initial_attention_diagnostic(7, true),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec!["room-a".to_owned(), "room-b".to_owned()],
@@ -848,6 +864,7 @@ fn room_list_update_moves_active_room_when_it_disappears_from_selected_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            initial_attention_diagnostic(2, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec!["room-b".to_owned()],
@@ -914,6 +931,7 @@ fn room_list_update_keeps_active_dm_global_with_selected_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            initial_attention_diagnostic(10, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
@@ -1132,6 +1150,7 @@ fn room_list_update_keeps_empty_selected_space_empty() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            initial_attention_diagnostic(10, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
