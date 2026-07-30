@@ -11600,7 +11600,10 @@ mod tests {
         let emit = compact
             .find("self.emit_event_cache_status(encrypted_store,&event_cache_result);")
             .expect("event cache diagnostic emission");
-        let return_ok = compact.find("Ok(session)").expect("return statement");
+        // rfind: the restore body also contains an `Ok(session) =>` match arm
+        // (session-preservation restore path), so the tail return is the LAST
+        // occurrence, not the first.
+        let return_ok = compact.rfind("Ok(session)").expect("return statement");
 
         assert!(store_config < encrypted_store);
         assert!(restore < enable);

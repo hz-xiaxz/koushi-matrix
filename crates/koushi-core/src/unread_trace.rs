@@ -262,14 +262,38 @@ mod tests {
     #[test]
     fn activity_plain_unread_non_candidates_are_suppressed() {
         let room = private_room();
-        let before = koushi_diagnostics::snapshot().records.len();
 
         trace_activity_room("activity_recent_event", &room, false, "plain_unread_only");
         trace_activity_room("activity_placeholder", &room, false, "plain_unread_only");
 
-        let after = koushi_diagnostics::snapshot().records.len();
+        // The contract is that a non-candidate (emitted == false)
+        // plain-unread-only trace is never recorded at all, so no record with
+        // that exact signature may exist. Asserting on the shared diagnostics
+        // buffer LENGTH instead is racy: parallel tests append concurrently
+        // and a before/after count can differ by unrelated records.
+        let records = koushi_diagnostics::snapshot().records;
+        let suppressed = records
+            .iter()
+            .filter(|record| {
+                record.event.source == "core.unread"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "reason"
+                            && matches!(
+                                field.value,
+                                koushi_diagnostics::DiagnosticValue::Token("plain_unread_only")
+                            )
+                    })
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "emitted"
+                            && matches!(
+                                field.value,
+                                koushi_diagnostics::DiagnosticValue::Boolean(false)
+                            )
+                    })
+            })
+            .count();
         assert_eq!(
-            after, before,
+            suppressed, 0,
             "plain-unread-only activity non-candidates are high-volume noise"
         );
     }
