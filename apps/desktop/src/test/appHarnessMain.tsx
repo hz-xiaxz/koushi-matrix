@@ -2916,7 +2916,7 @@ function uniqueNonBlank(values: Array<string | null | undefined>): string[] {
 // (plugin:event|*) are handled internally by mockIPC's shouldMockEvents.
 mockIPC(
   (cmd, args) => {
-    if (cmd.startsWith("plugin:dialog|")) {
+    if (cmd.startsWith("plugin:dialog|") || cmd.startsWith("plugin:opener|")) {
       return mock.invoke(cmd, (args ?? {}) as Record<string, unknown>);
     }
     if (cmd.startsWith("plugin:")) {

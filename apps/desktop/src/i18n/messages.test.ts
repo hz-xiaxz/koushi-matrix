@@ -97,6 +97,16 @@ describe("i18n message catalog", () => {
     );
   });
 
+  test("localizes the current-session status surface without changing protocol tokens", () => {
+    expect(t("sessionStatus.title")).toBe("Current session");
+    expect(t("sessionStatus.failureTimedOut")).toBe("Session check timed out");
+    expect(t("sessionStatus.title", {}, "ja")).toBe("現在のセッション");
+    expect(t("sessionStatus.failureTimedOut", {}, "ja")).toBe(
+      "セッションの確認がタイムアウトしました"
+    );
+    expect(t("sessionStatus.authOauth", {}, "ja")).toBe("OAuth 認証");
+  });
+
   test("distinguishes ordinary and threaded reply labels in shipped locales", () => {
     expect(t("timeline.replyToMessage")).toBe("Reply to message");
     expect(t("timeline.replyInThread")).toBe("Reply in thread");

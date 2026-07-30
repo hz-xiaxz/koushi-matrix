@@ -715,6 +715,25 @@ button:disabled {
   color: var(--text);
   font-size: 12px;
   font-weight: 800;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sync-status:hover,
+.sync-status[aria-expanded="true"] {
+  background: var(--surface-hover);
+}
+
+.sync-status:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.sync-status-content {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
 }
 
 .sync-status-server,
@@ -764,6 +783,100 @@ button:disabled {
 .sync-status[data-sync-state="failed"] {
   border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
   background: rgb(229 72 77 / 25%);
+}
+
+.session-status-host {
+  position: relative;
+}
+
+.session-status-popover {
+  position: absolute;
+  z-index: 80;
+  inset-block-start: calc(100% + 8px);
+  inset-inline-end: 0;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 64px));
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--text);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-lg);
+}
+
+.session-status-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-block-end: 12px;
+}
+
+.session-status-heading > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.session-status-facts {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.session-status-facts > div {
+  display: grid;
+  grid-template-columns: minmax(112px, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+}
+
+.session-status-facts dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.session-status-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 750;
+  text-align: end;
+}
+
+.session-status-failure,
+.session-status-note {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.session-status-failure {
+  color: var(--danger);
+}
+
+.session-status-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-block-start: 14px;
+}
+
+.session-status-actions button {
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.session-status-actions button:hover:not(:disabled) {
+  background: var(--surface-hover);
 }
 
 .app-grid {

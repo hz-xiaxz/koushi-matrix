@@ -1,0 +1,220 @@
+import { expect, test, type Page } from "@playwright/test";
+
+async function gotoReadyShell(page: Page): Promise<void> {
+  await page.goto("/appHarness.html");
+  await expect(page.getByRole("button", { name: "Open session status" })).toBeVisible();
+}
+
+async function seedReadyStatus(page: Page, accountManagementUrl: string | null): Promise<void> {
+  await page.evaluate((managementUrl) => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          auth: {
+            kind: "ready",
+            homeserver: snapshot.state.domain.session.homeserver ?? "",
+            flows: [],
+            delegated: {
+              registration_url: null,
+              account_management_url: managementUrl
+            }
+          },
+          current_session_status: {
+            status: "ready",
+            request_id: 369,
+            details: {
+              device_display_name: "Harness Desktop",
+              device_id: "HARNESSDEVICE",
+              authentication_method: "oauth",
+              sync_state: "running",
+              is_cross_signed_by_owner: true,
+              own_identity_verification: "verified",
+              key_backup: "ready",
+              verification: "verified",
+              checked_at_ms: Date.UTC(2026, 6, 30, 12, 0, 0)
+            }
+          }
+        }
+      }
+    });
+    window.__harness.setCommandResponse("refresh_current_session_status", ({ trigger }) => {
+      const current = window.__harness.currentSnapshot();
+      const checking = {
+        ...current,
+        state: {
+          ...current.state,
+          domain: {
+            ...current.state.domain,
+            current_session_status: {
+              status: "checking" as const,
+              request_id: trigger === "open" ? 370 : 371,
+              trigger
+            }
+          }
+        }
+      };
+      window.__harness.setSnapshot(checking);
+      return checking;
+    });
+    window.__harness.pushStateChanged();
+  }, accountManagementUrl);
+}
+
+test("session popover refreshes through IPC and replaces stale facts on failure", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await seedReadyStatus(page, "https://account.example.invalid/manage");
+  await page.evaluate(() => window.__harness.clearInvocations());
+
+  const trigger = page.getByRole("button", { name: "Open session status" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Current session" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toBeFocused();
+  await expect(dialog).not.toContainText("Harness Desktop");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.invocationsOf("refresh_current_session_status")[0]?.args
+      )
+    )
+    .toEqual({ trigger: "open" });
+
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          current_session_status: {
+            status: "ready",
+            request_id: 370,
+            details: {
+              device_display_name: "Harness Desktop",
+              device_id: "HARNESSDEVICE",
+              authentication_method: "oauth",
+              sync_state: "running",
+              is_cross_signed_by_owner: true,
+              own_identity_verification: "verified",
+              key_backup: "ready",
+              verification: "verified",
+              checked_at_ms: Date.UTC(2026, 6, 30, 12, 0, 0)
+            }
+          }
+        }
+      }
+    });
+    window.__harness.pushStateChanged();
+  });
+  await expect(dialog).toContainText("Harness Desktop");
+  await expect(dialog).toContainText("HARNESSDEVICE");
+  await expect(dialog).toContainText("OAuth");
+  await expect(dialog).toContainText("Cross-signed");
+  await expect(dialog).toContainText("Identity verified");
+
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText(value: string) {
+          (window as unknown as { __copiedSessionDeviceId: string }).__copiedSessionDeviceId =
+            value;
+          return Promise.resolve();
+        }
+      }
+    });
+    window.__harness.setCommandResponse("plugin:opener|open_url", null);
+  });
+  await dialog.getByRole("button", { name: "Copy Device ID" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __copiedSessionDeviceId?: string }).__copiedSessionDeviceId
+      )
+    )
+    .toBe("HARNESSDEVICE");
+  await dialog.getByRole("button", { name: "Manage account and devices" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.invocationsOf("plugin:opener|open_url").at(-1)?.args.url
+      )
+    )
+    .toBe("https://account.example.invalid/manage");
+
+  await dialog.getByRole("button", { name: "Recheck" }).click();
+  await expect(dialog.getByRole("button", { name: "Checking" })).toBeDisabled();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.invocationsOf("refresh_current_session_status").at(-1)?.args
+      )
+    )
+    .toEqual({ trigger: "manual" });
+
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          current_session_status: {
+            status: "failed",
+            request_id: 371,
+            kind: "timed_out",
+            checked_at_ms: Date.UTC(2026, 6, 30, 12, 1, 0)
+          }
+        }
+      }
+    });
+    window.__harness.pushStateChanged();
+  });
+  await expect(dialog).toContainText("Session check timed out");
+  await expect(dialog).not.toContainText("Harness Desktop");
+  await dialog.getByRole("button", { name: "Retry" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.invocationsOf("refresh_current_session_status").at(-1)?.args
+      )
+    )
+    .toEqual({ trigger: "manual" });
+
+  await dialog.getByRole("button", { name: "Open diagnostics" }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("get_diagnostic_snapshot").length))
+    .toBe(1);
+});
+
+test("session popover dismisses accessibly and falls back to local account settings", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await seedReadyStatus(page, "javascript:alert(1)");
+
+  const trigger = page.getByRole("button", { name: "Open session status" });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Current session" });
+  await expect(dialog).toContainText("did not advertise a safe external account destination");
+  await dialog.getByRole("button", { name: "Open local account settings" }).click();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await page.locator(".top-search").click();
+  await expect(dialog).toBeHidden();
+});

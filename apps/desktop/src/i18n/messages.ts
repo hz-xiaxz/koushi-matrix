@@ -442,6 +442,50 @@ export type MessageId =
   | "search.scopeDm"
   | "search.scopeRoom"
   | "search.scopeSpace"
+  | "sessionStatus.accountManagementFallback"
+  | "sessionStatus.authentication"
+  | "sessionStatus.authOauth"
+  | "sessionStatus.authPassword"
+  | "sessionStatus.authSso"
+  | "sessionStatus.authToken"
+  | "sessionStatus.backupDisabled"
+  | "sessionStatus.backupReady"
+  | "sessionStatus.checking"
+  | "sessionStatus.copyDeviceId"
+  | "sessionStatus.crossSigned"
+  | "sessionStatus.deviceId"
+  | "sessionStatus.deviceName"
+  | "sessionStatus.failed"
+  | "sessionStatus.failureSdk"
+  | "sessionStatus.failureTimedOut"
+  | "sessionStatus.failureUnavailable"
+  | "sessionStatus.homeserver"
+  | "sessionStatus.identity"
+  | "sessionStatus.identityMissing"
+  | "sessionStatus.identityUnverified"
+  | "sessionStatus.identityVerified"
+  | "sessionStatus.keyBackup"
+  | "sessionStatus.lastChecked"
+  | "sessionStatus.manageAccount"
+  | "sessionStatus.notChecked"
+  | "sessionStatus.notCrossSigned"
+  | "sessionStatus.open"
+  | "sessionStatus.openLocalSettings"
+  | "sessionStatus.ownerCrossSigning"
+  | "sessionStatus.recheck"
+  | "sessionStatus.retry"
+  | "sessionStatus.sync"
+  | "sessionStatus.syncError"
+  | "sessionStatus.syncRunning"
+  | "sessionStatus.syncStarting"
+  | "sessionStatus.syncStopped"
+  | "sessionStatus.title"
+  | "sessionStatus.unavailable"
+  | "sessionStatus.unverified"
+  | "sessionStatus.unknown"
+  | "sessionStatus.userId"
+  | "sessionStatus.verification"
+  | "sessionStatus.verified"
   | "settings.accounts"
   | "settings.appearance"
   | "settings.accountSwitcher"
@@ -1531,6 +1575,51 @@ const en: Catalog = {
   "search.scopeDm": "DM",
   "search.scopeRoom": "Room",
   "search.scopeSpace": "Space",
+  "sessionStatus.accountManagementFallback":
+    "This homeserver did not advertise a safe external account destination. Open local settings instead.",
+  "sessionStatus.authentication": "Authentication",
+  "sessionStatus.authOauth": "OAuth",
+  "sessionStatus.authPassword": "Password",
+  "sessionStatus.authSso": "SSO",
+  "sessionStatus.authToken": "Access token",
+  "sessionStatus.backupDisabled": "Disabled",
+  "sessionStatus.backupReady": "Ready",
+  "sessionStatus.checking": "Checking",
+  "sessionStatus.copyDeviceId": "Copy Device ID",
+  "sessionStatus.crossSigned": "Cross-signed",
+  "sessionStatus.deviceId": "Device ID",
+  "sessionStatus.deviceName": "Device name",
+  "sessionStatus.failed": "Check failed",
+  "sessionStatus.failureSdk": "Session check failed",
+  "sessionStatus.failureTimedOut": "Session check timed out",
+  "sessionStatus.failureUnavailable": "Session status is unavailable",
+  "sessionStatus.homeserver": "Homeserver",
+  "sessionStatus.identity": "Own identity",
+  "sessionStatus.identityMissing": "Identity missing",
+  "sessionStatus.identityUnverified": "Identity unverified",
+  "sessionStatus.identityVerified": "Identity verified",
+  "sessionStatus.keyBackup": "Key backup",
+  "sessionStatus.lastChecked": "Last checked",
+  "sessionStatus.manageAccount": "Manage account and devices",
+  "sessionStatus.notChecked": "Not checked",
+  "sessionStatus.notCrossSigned": "Not cross-signed",
+  "sessionStatus.open": "Open session status",
+  "sessionStatus.openLocalSettings": "Open local account settings",
+  "sessionStatus.ownerCrossSigning": "Owner cross-signing",
+  "sessionStatus.recheck": "Recheck",
+  "sessionStatus.retry": "Retry",
+  "sessionStatus.sync": "Sync",
+  "sessionStatus.syncError": "Error",
+  "sessionStatus.syncRunning": "Running",
+  "sessionStatus.syncStarting": "Starting",
+  "sessionStatus.syncStopped": "Stopped",
+  "sessionStatus.title": "Current session",
+  "sessionStatus.unavailable": "Unavailable",
+  "sessionStatus.unverified": "Unverified",
+  "sessionStatus.unknown": "Unknown",
+  "sessionStatus.userId": "User ID",
+  "sessionStatus.verification": "Verification",
+  "sessionStatus.verified": "Verified",
   "settings.accounts": "Accounts",
   "settings.appearance": "Appearance",
   "settings.accountSwitcher": "Account switcher",
@@ -2519,6 +2608,51 @@ const ja: Catalog = {
   "search.scopeDm": "ダイレクト",
   "search.scopeRoom": "ルーム",
   "search.scopeSpace": "スペース",
+  "sessionStatus.accountManagementFallback":
+    "このホームサーバーは安全な外部アカウント管理先を通知していません。代わりにローカル設定を開きます。",
+  "sessionStatus.authentication": "認証方法",
+  "sessionStatus.authOauth": "OAuth 認証",
+  "sessionStatus.authPassword": "パスワード",
+  "sessionStatus.authSso": "SSO 認証",
+  "sessionStatus.authToken": "アクセストークン",
+  "sessionStatus.backupDisabled": "無効",
+  "sessionStatus.backupReady": "準備完了",
+  "sessionStatus.checking": "確認中",
+  "sessionStatus.copyDeviceId": "デバイス ID をコピー",
+  "sessionStatus.crossSigned": "クロス署名済み",
+  "sessionStatus.deviceId": "デバイス ID",
+  "sessionStatus.deviceName": "デバイス名",
+  "sessionStatus.failed": "確認失敗",
+  "sessionStatus.failureSdk": "セッションの確認に失敗しました",
+  "sessionStatus.failureTimedOut": "セッションの確認がタイムアウトしました",
+  "sessionStatus.failureUnavailable": "セッション状態を確認できません",
+  "sessionStatus.homeserver": "ホームサーバー",
+  "sessionStatus.identity": "自分の ID",
+  "sessionStatus.identityMissing": "ID がありません",
+  "sessionStatus.identityUnverified": "ID は未検証です",
+  "sessionStatus.identityVerified": "ID を検証済み",
+  "sessionStatus.keyBackup": "鍵バックアップ",
+  "sessionStatus.lastChecked": "最終確認",
+  "sessionStatus.manageAccount": "アカウントとデバイスを管理",
+  "sessionStatus.notChecked": "未確認",
+  "sessionStatus.notCrossSigned": "クロス署名なし",
+  "sessionStatus.open": "セッション状態を開く",
+  "sessionStatus.openLocalSettings": "ローカルのアカウント設定を開く",
+  "sessionStatus.ownerCrossSigning": "所有者のクロス署名",
+  "sessionStatus.recheck": "再確認",
+  "sessionStatus.retry": "再試行",
+  "sessionStatus.sync": "同期",
+  "sessionStatus.syncError": "エラー",
+  "sessionStatus.syncRunning": "実行中",
+  "sessionStatus.syncStarting": "開始中",
+  "sessionStatus.syncStopped": "停止中",
+  "sessionStatus.title": "現在のセッション",
+  "sessionStatus.unavailable": "利用不可",
+  "sessionStatus.unverified": "未検証",
+  "sessionStatus.unknown": "不明",
+  "sessionStatus.userId": "ユーザー ID",
+  "sessionStatus.verification": "検証",
+  "sessionStatus.verified": "検証済み",
   "settings.accounts": "アカウント",
   "settings.appearance": "外観",
   "settings.accountSwitcher": "アカウント切り替え",
