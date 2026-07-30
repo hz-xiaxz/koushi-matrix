@@ -3432,6 +3432,11 @@ button:disabled {
   z-index: var(--receipt-tooltip-z-index);
   display: grid;
   gap: var(--receipt-tooltip-gap);
+  /* #360: the floating layer pins an explicit block size, and grid auto rows
+     stretch to fill it — two readers in a 132px box became two 55px rows with
+     a large blank gap between them. `start` keeps rows at their natural height
+     no matter how much slack the measured box has. */
+  align-content: start;
   padding-block: var(--receipt-tooltip-padding-block);
   padding-inline: var(--receipt-tooltip-padding-inline);
   border: 1px solid var(--line);
@@ -3444,6 +3449,15 @@ button:disabled {
   line-height: 1.35;
   overflow: hidden;
   pointer-events: none;
+}
+
+/* #360: one reader per line. A name longer than the popup truncates instead of
+   wrapping, so the popup height stays proportional to the reader count. */
+.receipt-tooltip > * {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .typing-indicator {
