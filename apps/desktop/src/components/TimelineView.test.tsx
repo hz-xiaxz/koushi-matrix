@@ -999,7 +999,7 @@ describe("TimelineView", () => {
 
     fireEvent.click(within(row!).getByRole("button", { name: "Message actions" }));
     fireEvent.click(
-      within(row!).getByRole("menuitem", { name: "Set alias for @bob:example.invalid" })
+      within(row!).getByRole("menuitem", { name: "Set alias for Unknown user" })
     );
 
     fireEvent.change(screen.getByRole("textbox", { name: "Alias" }), {
@@ -4837,6 +4837,7 @@ describe("TimelineView", () => {
             "!room:example.invalid": {
               fully_read_event_id: null,
               typing_user_ids: [],
+              typing_users: [],
               receipts_by_event: {
                 "$seen:example.invalid": {
                   total_count: 1,
@@ -5558,6 +5559,7 @@ describe("TimelineView", () => {
             "!room:example.invalid": {
               fully_read_event_id: null,
               typing_user_ids: [],
+              typing_users: [],
               receipts_by_event: {
                 "$seen": {
                   total_count: 2,
@@ -5640,6 +5642,7 @@ describe("TimelineView", () => {
             "!room:example.invalid": {
               fully_read_event_id: null,
               typing_user_ids: [],
+              typing_users: [],
               receipts_by_event: {
                 "$seen": {
                   total_count: 1,
@@ -5754,7 +5757,7 @@ describe("TimelineView", () => {
     expect(actions!.classList.contains("message-actions-floating")).toBe(true);
   });
 
-  it("surfaces reaction senders in a hoverable tooltip using profile labels", async () => {
+  it("surfaces Rust-projected reaction sender labels without profile-map repair", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
       listenCoreEvents(nextListener) {
@@ -5807,7 +5810,10 @@ describe("TimelineView", () => {
                     count: 2,
                     reacted_by_me: false,
                     my_reaction_event_id: null,
-                    sender_preview: ["@ken:example.invalid", "@satoshi:example.invalid"]
+                    sender_preview: [
+                      { user_id: "@ken:example.invalid", display_label: "Ken Alias" },
+                      { user_id: "@satoshi:example.invalid", display_label: "Satoshi" }
+                    ]
                   }
                 ]
               }
@@ -5819,7 +5825,7 @@ describe("TimelineView", () => {
 
     await waitFor(() => {
       expect(screen.getByText("😢")).toBeTruthy();
-      expect(screen.getByText("Ken Inayoshi and Satoshi Terasaki reacted with 😢")).toBeTruthy();
+      expect(screen.getByText("Ken Alias and Satoshi reacted with 😢")).toBeTruthy();
     });
   });
 
@@ -5843,6 +5849,7 @@ describe("TimelineView", () => {
             "!room:example.invalid": {
               fully_read_event_id: null,
               typing_user_ids: [],
+              typing_users: [],
               receipts_by_event: {
                 "$reacted-seen": {
                   total_count: 1,
@@ -5882,7 +5889,9 @@ describe("TimelineView", () => {
                     count: 1,
                     reacted_by_me: false,
                     my_reaction_event_id: null,
-                    sender_preview: ["@ken:example.invalid"]
+                    sender_preview: [
+                      { user_id: "@ken:example.invalid", display_label: "Ken Alias" }
+                    ]
                   }
                 ]
               }
@@ -10179,7 +10188,7 @@ describe("TimelineView", () => {
           count: 1,
           reacted_by_me: false,
           my_reaction_event_id: null,
-          sender_preview: ["@bob:example.invalid"]
+          sender_preview: [{ user_id: "@bob:example.invalid", display_label: "Bob" }]
         }
       ],
       can_react: true
@@ -10203,7 +10212,8 @@ describe("TimelineView", () => {
             }
           },
           fully_read_event_id: null,
-          typing_user_ids: []
+          typing_user_ids: [],
+          typing_users: []
         }
       },
       presence: {}
@@ -10249,7 +10259,13 @@ describe("TimelineView", () => {
         "!room:example.invalid": {
           receipts_by_event: {},
           fully_read_event_id: null,
-          typing_user_ids: ["@hironeishida:matrix.org"]
+          typing_user_ids: ["@hironeishida:matrix.org"],
+          typing_users: [
+            {
+              user_id: "@hironeishida:matrix.org",
+              display_label: "Hirone Ishida"
+            }
+          ]
         }
       },
       presence: {}
@@ -10279,14 +10295,20 @@ describe("TimelineView", () => {
     expect(screen.queryByText("@hironeishida:matrix.org is typing")).toBeNull();
   });
 
-  it("falls back to the Matrix user id for typing indicators without profile data", async () => {
+  it("uses a friendly fallback for typing indicators without a projected label", async () => {
     const transport = baseTransport({});
     const liveSignals: LiveSignalsState = {
       rooms: {
         "!room:example.invalid": {
           receipts_by_event: {},
           fully_read_event_id: null,
-          typing_user_ids: ["@unknown:example.invalid"]
+          typing_user_ids: ["@unknown:example.invalid"],
+          typing_users: [
+            {
+              user_id: "@unknown:example.invalid",
+              display_label: null
+            }
+          ]
         }
       },
       presence: {}
@@ -10302,6 +10324,7 @@ describe("TimelineView", () => {
       />
     );
 
-    expect(screen.getByText("@unknown:example.invalid is typing")).toBeTruthy();
+    expect(screen.getByText("Unknown user is typing")).toBeTruthy();
+    expect(screen.queryByText("@unknown:example.invalid is typing")).toBeNull();
   });
 });

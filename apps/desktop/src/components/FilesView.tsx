@@ -9,6 +9,7 @@ import { useState } from "react";
 
 import { t } from "../i18n/messages";
 import { ImeTextField } from "./ImeTextControl";
+import { peopleFacingLabel } from "../app/uiShared";
 import type {
   AttachmentFilter,
   AttachmentKind,
@@ -159,7 +160,7 @@ function FilesViewRow({ item }: { item: AttachmentResult }) {
       <span className="files-view-row-main" dir="auto">
         <span className="files-view-row-name">{item.filename}</span>
         <span className="files-view-row-meta">
-          {item.sender}
+          {peopleFacingLabel(item.sender_label)}
           {date ? ` · ${date}` : null}
           {size ? ` · ${size}` : null}
         </span>

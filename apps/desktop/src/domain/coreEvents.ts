@@ -100,7 +100,12 @@ export interface ReactionGroup {
   count: number;
   reacted_by_me: boolean;
   my_reaction_event_id: string | null;
-  sender_preview: string[];
+  sender_preview: ReactionSender[];
+}
+
+export interface ReactionSender {
+  user_id: string;
+  display_label: string | null;
 }
 
 export type TimelineMediaKind = "Image" | "File" | "Audio" | "Video";
@@ -630,6 +635,7 @@ export type RoomTagKind = "favourite" | "lowPriority";
 export interface PinnedEvent {
   event_id: string;
   sender: string | null;
+  sender_label: string | null;
   body_preview: string | null;
   redacted: boolean;
 }

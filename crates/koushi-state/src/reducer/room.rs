@@ -401,10 +401,22 @@ pub(crate) fn handle_room_tag_removed(
 pub(crate) fn handle_room_pinned_events_updated(
     state: &mut AppState,
     room_id: String,
-    pinned: Vec<PinnedEvent>,
+    mut pinned: Vec<PinnedEvent>,
 ) -> Vec<AppEffect> {
     if !has_session_projection_context(state) {
         return Vec::new();
+    }
+
+    let own_user_id = session_user_id(state);
+    for event in &mut pinned {
+        event.sender_label = event.sender.as_deref().and_then(|sender| {
+            crate::state::resolve_optional_user_display_name(
+                &state.profile,
+                sender,
+                event.sender_label.as_deref(),
+                own_user_id,
+            )
+        });
     }
 
     let entry = state.room_interactions.entry(room_id).or_default();

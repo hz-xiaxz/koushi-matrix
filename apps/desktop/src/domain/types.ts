@@ -76,6 +76,7 @@ export interface AppDomainState {
   room_interactions: Record<string, RoomInteractionState>;
   directory: DirectoryState;
   room_management: RoomManagementState;
+  mention_candidates: MentionCandidatesState;
   activity: ActivityState;
   thread_attention: ThreadAttentionState;
   search: SearchState;
@@ -296,6 +297,36 @@ export type MentionTarget =
   | { kind: "user"; user_id: string; display_label: string }
   | { kind: "room"; room_id: string; display_label: string }
   | { kind: "roomMention"; display_label: string };
+
+export type MentionSurface = "main" | "thread";
+export type MentionCandidatesCompleteness = "loading" | "partial" | "complete" | "failed";
+export type RoomMentionPermission = "allowed" | "denied" | "unknown";
+export type MentionCandidateMembership = "joined";
+export type MentionCandidatesFailureKind = "network" | "forbidden" | "sdk";
+
+export interface MentionCandidate {
+  user_id: string;
+  display_label: string | null;
+  original_display_label: string | null;
+  avatar: AvatarImage | null;
+  membership: MentionCandidateMembership;
+}
+
+export interface MentionCandidatesTarget {
+  room_id: string;
+  generation: number;
+  request_id: number;
+  query: string;
+  surface: MentionSurface;
+  completeness: MentionCandidatesCompleteness;
+  candidates: MentionCandidate[];
+  room_mention_allowed: RoomMentionPermission;
+  failure_kind: MentionCandidatesFailureKind | null;
+}
+
+export interface MentionCandidatesState {
+  targets: MentionCandidatesTarget[];
+}
 
 export interface MentionIntent {
   targets: MentionTarget[];
@@ -755,6 +786,7 @@ export interface RoomInteractionState {
 export interface PinnedEvent {
   event_id: string;
   sender: string | null;
+  sender_label: string | null;
   body_preview: string | null;
   redacted: boolean;
 }
@@ -1311,6 +1343,12 @@ export interface RoomLiveSignals {
   receipts_by_event: Record<string, LiveEventReceiptSummary>;
   fully_read_event_id: string | null;
   typing_user_ids: string[];
+  typing_users: LiveTypingUser[];
+}
+
+export interface LiveTypingUser {
+  user_id: string;
+  display_label: string | null;
 }
 
 export interface LiveReadReceipt {
@@ -1679,6 +1717,7 @@ export interface AttachmentResult {
   room_id: string;
   event_id: string;
   sender: string;
+  sender_label: string | null;
   timestamp_ms: number;
   kind: AttachmentKind;
   filename: string;

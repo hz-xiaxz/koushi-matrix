@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::profile::{
-    AvatarImage, ProfileState, original_user_display_name, resolve_user_display_name,
+    AvatarImage, ProfileState, original_user_display_name, resolve_optional_user_display_name,
+    resolve_user_display_name,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -17,6 +18,14 @@ pub struct RoomLiveSignals {
     pub receipts_by_event: BTreeMap<String, LiveEventReceiptSummary>,
     pub fully_read_event_id: Option<String>,
     pub typing_user_ids: Vec<String>,
+    #[serde(default)]
+    pub typing_users: Vec<LiveTypingUser>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LiveTypingUser {
+    pub user_id: String,
+    pub display_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -68,12 +77,49 @@ impl LiveRoomSignalUpdate {
             })
             .collect();
 
+        let typing_user_ids = sorted_unique(self.typing_user_ids);
+        let typing_users = typing_user_ids
+            .iter()
+            .map(|user_id| LiveTypingUser {
+                user_id: user_id.clone(),
+                display_label: resolve_optional_user_display_name(
+                    profiles,
+                    user_id,
+                    None,
+                    own_user_id,
+                ),
+            })
+            .collect();
         RoomLiveSignals {
             receipts_by_event,
             fully_read_event_id: self.fully_read_event_id,
-            typing_user_ids: sorted_unique(self.typing_user_ids),
+            typing_user_ids,
+            typing_users,
         }
     }
+}
+
+pub fn refresh_live_typing_user_display_projection(
+    live_signals: &mut LiveSignalsState,
+    profiles: &ProfileState,
+    own_user_id: Option<&str>,
+) -> bool {
+    let mut changed = false;
+    for room in live_signals.rooms.values_mut() {
+        for typing_user in &mut room.typing_users {
+            let display_label = resolve_optional_user_display_name(
+                profiles,
+                &typing_user.user_id,
+                None,
+                own_user_id,
+            );
+            if typing_user.display_label != display_label {
+                typing_user.display_label = display_label;
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

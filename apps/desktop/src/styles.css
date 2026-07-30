@@ -4299,6 +4299,12 @@ mark {
   text-transform: uppercase;
 }
 
+.composer-autocomplete-loading {
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
 .composer-autocomplete-option {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);

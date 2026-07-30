@@ -99,7 +99,11 @@ describe("appStore projection cache", () => {
     setAppStoreSnapshot(previous);
 
     const firstForwardDestinations = selectForwardDestinations({ snapshot: previous });
-    const firstMentionCandidates = selectMentionCandidates({ snapshot: previous });
+    const firstMentionCandidates = selectMentionCandidates(
+      { snapshot: previous },
+      "!room:example.invalid",
+      "main"
+    );
 
     const next = structuredClone(previous);
     next.state.domain.search_crawler = {
@@ -123,15 +127,21 @@ describe("appStore projection cache", () => {
     }
 
     expect(selectForwardDestinations({ snapshot: secondSnapshot })).toBe(firstForwardDestinations);
-    expect(selectMentionCandidates({ snapshot: secondSnapshot })).toBe(firstMentionCandidates);
+    expect(
+      selectMentionCandidates({ snapshot: secondSnapshot }, "!room:example.invalid", "main")
+    ).toBe(firstMentionCandidates);
   });
 
-  test("updates selector outputs when rooms or profile users change", () => {
+  test("keeps mention output stable when rooms or account-wide profiles change", () => {
     const previous = makeSnapshot();
     setAppStoreSnapshot(previous);
 
     const firstForwardDestinations = selectForwardDestinations({ snapshot: previous });
-    const firstMentionCandidates = selectMentionCandidates({ snapshot: previous });
+    const firstMentionCandidates = selectMentionCandidates(
+      { snapshot: previous },
+      "!room:example.invalid",
+      "main"
+    );
 
     const roomsChanged = structuredClone(previous);
     roomsChanged.state.domain.rooms = [
@@ -160,7 +170,9 @@ describe("appStore projection cache", () => {
     expect(selectForwardDestinations({ snapshot: afterRoomsChange })).not.toBe(
       firstForwardDestinations
     );
-    expect(selectMentionCandidates({ snapshot: afterRoomsChange })).toBe(firstMentionCandidates);
+    expect(
+      selectMentionCandidates({ snapshot: afterRoomsChange }, "!room:example.invalid", "main")
+    ).toBe(firstMentionCandidates);
 
     const usersChanged = structuredClone(afterRoomsChange);
     usersChanged.state.domain.profile.users["@delta-user:example.invalid"] = {
@@ -180,27 +192,65 @@ describe("appStore projection cache", () => {
     expect(selectForwardDestinations({ snapshot: afterUsersChange })).toBe(
       selectForwardDestinations({ snapshot: afterRoomsChange })
     );
-    expect(selectMentionCandidates({ snapshot: afterUsersChange })).not.toBe(
+    expect(
+      selectMentionCandidates({ snapshot: afterUsersChange }, "!room:example.invalid", "main")
+    ).toBe(
       firstMentionCandidates
     );
   });
 
-  test("projects mention candidates with user avatars and @room", () => {
+  test("projects the exact room and surface candidates with avatars and permission-aware @room", () => {
     const snapshot = makeSnapshot();
     const avatar = {
       mxc_uri: "mxc://example.invalid/alice",
       thumbnail: { kind: "notRequested" as const }
     };
-    snapshot.state.domain.profile.users["@alice:example.invalid"] = {
-      user_id: "@alice:example.invalid",
-      display_name: "Alice",
-      display_label: "Alice",
-      original_display_label: "Alice",
-      mention_search_terms: ["alice", "@alice:example.invalid"],
-      avatar
-    };
+    snapshot.state.domain.mention_candidates.targets = [
+      {
+        room_id: "!room:example.invalid",
+        generation: 1,
+        request_id: 7,
+        query: "ali",
+        surface: "main",
+        completeness: "complete",
+        candidates: [
+          {
+            user_id: "@alice:example.invalid",
+            display_label: "Alice",
+            original_display_label: "Alice",
+            avatar,
+            membership: "joined"
+          }
+        ],
+        room_mention_allowed: "allowed",
+        failure_kind: null
+      },
+      {
+        room_id: "!other:example.invalid",
+        generation: 1,
+        request_id: 8,
+        query: "",
+        surface: "thread",
+        completeness: "complete",
+        candidates: [
+          {
+            user_id: "@mallory:example.invalid",
+            display_label: "Mallory",
+            original_display_label: "Mallory",
+            avatar: null,
+            membership: "joined"
+          }
+        ],
+        room_mention_allowed: "denied",
+        failure_kind: null
+      }
+    ];
 
-    const candidates = selectMentionCandidates({ snapshot });
+    const candidates = selectMentionCandidates(
+      { snapshot },
+      "!room:example.invalid",
+      "main"
+    );
 
     expect(candidates).toContainEqual(
       expect.objectContaining({
@@ -209,14 +259,100 @@ describe("appStore projection cache", () => {
         target: expect.objectContaining({ kind: "user", user_id: "@alice:example.invalid" })
       })
     );
+    expect(candidates.map((candidate) => candidate.key)).toEqual([
+      "@alice:example.invalid",
+      "roomMention"
+    ]);
     expect(candidates).toContainEqual(
       expect.objectContaining({
         key: "roomMention",
         label: "@room",
-        searchText: expect.stringContaining("notify the whole room"),
         target: { kind: "roomMention", display_label: "room" }
       })
     );
+    expect(
+      selectMentionCandidates({ snapshot }, "!other:example.invalid", "main")
+    ).toEqual([]);
+    expect(
+      selectMentionCandidates({ snapshot }, "!other:example.invalid", "thread").map(
+        (candidate) => candidate.key
+      )
+    ).toEqual(["@mallory:example.invalid"]);
+  });
+
+  test("fails closed instead of using account-wide profiles", () => {
+    const snapshot = makeSnapshot();
+    snapshot.state.domain.profile.users["@global-only:example.invalid"] = {
+      user_id: "@global-only:example.invalid",
+      display_name: "Global only",
+      display_label: "Global only",
+      original_display_label: "Global only",
+      mention_search_terms: ["global"],
+      avatar: null
+    };
+
+    expect(
+      selectMentionCandidates({ snapshot }, "!room:example.invalid", "main")
+    ).toEqual([]);
+  });
+
+  test("consumes two-person and group DM joined-member projections without special-case limits", () => {
+    const snapshot = makeSnapshot();
+    const candidate = (userId: string, label: string) => ({
+      user_id: userId,
+      display_label: label,
+      original_display_label: label,
+      avatar: null,
+      membership: "joined" as const
+    });
+    snapshot.state.domain.mention_candidates.targets = [
+      {
+        room_id: "!two-person-dm:example.invalid",
+        generation: 1,
+        request_id: 20,
+        query: "",
+        surface: "main",
+        completeness: "complete",
+        candidates: [
+          candidate("@self:example.invalid", "Me"),
+          candidate("@peer:example.invalid", "Peer")
+        ],
+        room_mention_allowed: "denied",
+        failure_kind: null
+      },
+      {
+        room_id: "!group-dm:example.invalid",
+        generation: 1,
+        request_id: 21,
+        query: "",
+        surface: "main",
+        completeness: "complete",
+        candidates: [
+          candidate("@self:example.invalid", "Me"),
+          candidate("@peer-a:example.invalid", "Peer A"),
+          candidate("@peer-b:example.invalid", "Peer B")
+        ],
+        room_mention_allowed: "denied",
+        failure_kind: null
+      }
+    ];
+
+    expect(
+      selectMentionCandidates(
+        { snapshot },
+        "!two-person-dm:example.invalid",
+        "main"
+      ).map((item) => item.key)
+    ).toEqual(["@self:example.invalid", "@peer:example.invalid"]);
+    expect(
+      selectMentionCandidates({ snapshot }, "!group-dm:example.invalid", "main").map(
+        (item) => item.key
+      )
+    ).toEqual([
+      "@self:example.invalid",
+      "@peer-a:example.invalid",
+      "@peer-b:example.invalid"
+    ]);
   });
 
   test("notifies selector subscribers only when the selected slice changes", () => {
@@ -738,6 +874,7 @@ function makeSnapshot(): DesktopSnapshot {
         join: { kind: "idle" },
       },
         room_management: { selected_room_id: null, settings: null, operation: { kind: "idle" } },
+        mention_candidates: { targets: [] },
         activity: { kind: "closed" },
         thread_attention: { kind: "closed" },
         search: { kind: "closed" },

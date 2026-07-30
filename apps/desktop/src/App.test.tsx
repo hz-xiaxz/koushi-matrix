@@ -245,7 +245,7 @@ describe("ContextualRightPanel", () => {
               count: 2,
               reacted_by_me: true,
               my_reaction_event_id: "$reaction:example.invalid",
-              sender_preview: ["@alice:example.invalid"]
+              sender_preview: [{ user_id: "@alice:example.invalid", display_label: "Alice" }]
             }
           ]
         }}
@@ -346,7 +346,8 @@ describe("ContextualRightPanel", () => {
 
     expect(markup).toContain('class="thread-summary-chip"');
     expect(markup).toContain("3 replies");
-    expect(markup).toContain("@bob:example.invalid: Latest thread reply");
+    expect(markup).toContain("Unknown user: Latest thread reply");
+    expect(markup).not.toContain("@bob:example.invalid: Latest thread reply");
     expect(markup).toContain('aria-label="Open thread, 3 replies');
   });
 
@@ -713,7 +714,7 @@ describe("ContextualRightPanel", () => {
                 count: 2,
                 reacted_by_me: true,
                 my_reaction_event_id: null,
-                sender_preview: ["@alice:example.invalid"]
+                sender_preview: [{ user_id: "@alice:example.invalid", display_label: "Alice" }]
               }
             ]
           } as TimelineItem
@@ -2279,7 +2280,8 @@ describe("Timeline item row rendering", () => {
     );
 
     expect(markup).toContain('class="reply-quote"');
-    expect(markup).toContain("@alice:example.invalid");
+    expect(markup).toContain("Unknown user");
+    expect(markup).not.toContain("@alice:example.invalid");
     expect(markup).toContain("Original quoted body");
     expect(markup).not.toContain("$root:example.invalid");
   });

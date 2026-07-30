@@ -232,7 +232,10 @@ describe("timeline display projection", () => {
           count: 2,
           reacted_by_me: false,
           my_reaction_event_id: null,
-          sender_preview: ["@one:example.invalid", "@two:example.invalid"]
+          sender_preview: [
+            { user_id: "@one:example.invalid", display_label: "One" },
+            { user_id: "@two:example.invalid", display_label: "Two" }
+          ]
         }
       ]
     });

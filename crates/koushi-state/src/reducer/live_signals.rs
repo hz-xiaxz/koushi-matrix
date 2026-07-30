@@ -79,18 +79,16 @@ pub(crate) fn handle_typing_users_updated(
         return Vec::new();
     }
 
+    let own_user_id = session_user_id(state).map(str::to_owned);
     let normalized = crate::state::LiveRoomSignalUpdate {
         receipts_by_event: Vec::new(),
         fully_read_event_id: None,
         typing_user_ids: user_ids,
     }
-    .into_room_signals();
-    state
-        .live_signals
-        .rooms
-        .entry(room_id)
-        .or_default()
-        .typing_user_ids = normalized.typing_user_ids;
+    .into_room_signals_with_profiles(&state.profile, own_user_id.as_deref());
+    let room = state.live_signals.rooms.entry(room_id).or_default();
+    room.typing_user_ids = normalized.typing_user_ids;
+    room.typing_users = normalized.typing_users;
     vec![AppEffect::EmitUiEvent(UiEvent::LiveSignalsChanged)]
 }
 

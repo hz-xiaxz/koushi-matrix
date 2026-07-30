@@ -250,7 +250,8 @@ test("single read receipt renders avatar initials and count", async ({ page }) =
                     }
                   },
                   fully_read_event_id: null,
-                  typing_user_ids: []
+                  typing_user_ids: [],
+                  typing_users: []
                 }
               }
             }
@@ -316,7 +317,8 @@ test("multiple read receipts render stacked avatars", async ({ page }) => {
                     }
                   },
                   fully_read_event_id: null,
-                  typing_user_ids: []
+                  typing_user_ids: [],
+                  typing_users: []
                 }
               }
             }
@@ -374,7 +376,8 @@ test("overflow count is shown when overflow_count > 0", async ({ page }) => {
                     }
                   },
                   fully_read_event_id: null,
-                  typing_user_ids: []
+                  typing_user_ids: [],
+                  typing_users: []
                 }
               }
             }
@@ -537,7 +540,8 @@ test("read receipt row is right-aligned within the message column", async ({ pag
                     }
                   },
                   fully_read_event_id: null,
-                  typing_user_ids: []
+                  typing_user_ids: [],
+                  typing_users: []
                 }
               }
             }

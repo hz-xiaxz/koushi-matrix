@@ -1390,8 +1390,9 @@ sanitizes it before exposing it through `TimelineItem.formatted`.
 
 Profiles and avatars are Rust-owned account and room projections.
 `AppState.profile.own` holds the current account display name and avatar,
-`AppState.profile.users` holds the per-user profile cache used by timeline and
-member surfaces, `AppState.profile.local_aliases` holds personal local display
+`AppState.profile.users` holds the account-scoped per-user profile cache used by
+timeline and profile surfaces; it is not evidence of membership in a room.
+`AppState.profile.local_aliases` holds personal local display
 aliases keyed by Matrix user id, and room/space/invite summaries carry their
 own avatar DTOs.
 React renders these DTOs and dispatches typed profile commands only; it must not
@@ -1423,13 +1424,55 @@ stateDiagram-v2
     AliasSaving --> AliasSaving: stale success/failure ignored
 ```
 
+Room mention candidates are an independent bounded domain slice keyed
+logically by `(room_id, surface)`, where `surface` is `main` or `thread`. Both
+surfaces for one room may be demanded concurrently. Only SDK members proven to
+have `join` membership are eligible; account profile-cache presence is never an
+eligibility signal.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Absent
+    Absent --> Loading: QueryMentionCandidates / generation++
+    Loading --> Complete: members_no_sync(JOIN) [members synced]
+    Loading --> Partial: members_no_sync(JOIN) [members incomplete]
+    Partial --> Refreshing: members(JOIN) refresh started
+    Refreshing --> Complete: refresh succeeded [matching account/room/surface/request/query/generation]
+    Refreshing --> Failed: refresh failed [matching account/room/surface/request/query/generation]
+    Loading --> Loading: newer query / generation++
+    Partial --> Loading: newer query / generation++
+    Complete --> Loading: newer query or base-room membership update / generation++
+    Failed --> Loading: newer query or base-room membership update / generation++
+    Refreshing --> Refreshing: stale completion ignored
+    Loading --> Absent: target eviction / logout / lock / account switch / session clear
+    Partial --> Absent: target eviction / logout / lock / account switch / session clear
+    Complete --> Absent: target eviction / logout / lock / account switch / session clear
+    Failed --> Absent: target eviction / logout / lock / account switch / session clear
+```
+
+- The no-sync projection is fail-closed: `Loading`/`Partial` may contain only
+  cached users already proven joined. Invited, knocked, left, banned, and
+  account-global-only profiles are absent.
+- One room membership refresh is shared by concurrently demanded main/thread
+  targets. A base-room membership update invalidates the actor's directory and
+  recomputes every demanded target for that room without restarting the actor.
+- Exact account, room, surface, request, query, and generation must match before
+  refresh settlement. Room selection changes the consumed target immediately;
+  late room-A data cannot appear in room B.
+- Rust owns alias/display-name/MXID-localpart matching, Unicode/CJK
+  normalization, exact-before-prefix-before-substring ranking, collation, and
+  stable user-id tie-breaking. React preserves the supplied order.
+- `@room` is a separate synthetic result. `Allowed` includes it, `Denied`
+  excludes it, and `Unknown` fails closed rather than becoming allowed.
+
 - Profile actions are accepted only for a Ready session. Late profile snapshots
   after logout, lock, or account switch are ignored.
-- Joined-room member profiles enter `AppState.profile.users` through the
+- Joined-room member profiles may enter `AppState.profile.users` through the
   Rust-owned room-list observation path (`RoomActor` normalizes SDK active
-  member profiles and emits `UserProfilesUpdated`). GUI mention autocomplete
-  and member/person surfaces consume this projection; React must not query
-  Matrix profiles or create member candidates from DOM/timeline strings.
+  member profiles and emits `UserProfilesUpdated`), but cache presence never
+  makes a user eligible for room mention autocomplete. React must not query
+  Matrix profiles or create member candidates from profile, DOM, or timeline
+  data.
 - `ProfileUpdateRequested { request_id, request }` is accepted only when no
   profile update is in flight. It records either `SettingDisplayName` or
   `SettingAvatar` and emits `ProfileChanged`.
@@ -1441,16 +1484,20 @@ stateDiagram-v2
   hydrates them after login/restore, and `SetLocalUserAlias` writes them through
   the SDK account-data boundary. They never become Matrix profile updates,
   room events, outgoing message content, notification text, or QA tokens.
-- Alias display resolution is Rust-owned:
+- Alias display resolution is Rust-owned. Identity/detail contexts may use
   `alias ?? upstream display name ?? profile cache/own profile ?? MXID`.
+  Normal people-facing contexts use
+  `alias ?? room/upstream display name ?? profile cache/own profile ?? none`.
   Timeline/read-receipt/member/person surfaces must consume the Rust-resolved
-  DTO labels; React must not join user ids to `local_aliases` or invent a
-  separate alias cache.
+  optional DTO labels; React must not join user ids to `local_aliases`, invent
+  a separate alias cache, or promote a raw user id when a friendly label is
+  absent.
 - Per-user profile DTOs carry `display_label`, `original_display_label`, and
-  `mention_search_terms` as Rust-owned projections. `display_label` may contain
-  a local alias; `original_display_label` is the alias-free upstream,
-  own-profile, or MXID context value. GUI mention autocomplete, mention
-  highlighting, profile views, and tooltips consume the projected fields and
+  `mention_search_terms` as Rust-owned profile/search projections.
+  `display_label` may contain a local alias; `original_display_label` is the
+  alias-free upstream, own-profile, or identity-context value. Room mention
+  autocomplete instead consumes `AppState.mention_candidates`; profile views,
+  mention highlighting, and tooltips may consume the profile projection but
   must not recompute alias precedence or strip aliases in React.
 - Room summaries carry `display_label` as the Rust-projected room list/header
   label and `original_display_label` as the alias-free room/DM context label.
@@ -2896,11 +2943,12 @@ stateDiagram-v2
   spoiler span in `formatted_body`, `/me` becomes an emote message, and
   unsupported slash commands fail locally as `UnsupportedSlashCommand` before a
   submitted composer transaction clears draft state.
-- Mention autocomplete candidates are Rust-owned profile/member DTOs. React may
-  show the popover, track selected draft pills, and pass a typed
-  `MentionIntent`; it must not synthesize Matrix mention content, infer members
-  from rendered timeline text, or repair send behavior if the Rust resolver
-  returns `noop`/failure.
+- Mention autocomplete candidates are Rust-owned room/surface DTOs from
+  `AppState.mention_candidates`. React may show the popover, track selected
+  draft pills, render partial/loading state, and pass a typed `MentionIntent`;
+  it must not scan `ProfileState.users`, infer membership, normalize or rank
+  candidates, append `@room`, synthesize Matrix mention content, or repair send
+  behavior if the Rust resolver returns `noop`/failure.
 - Timeline mention pills are presentation over Rust-owned timeline body text
   and Rust-owned `ProfileState.users`. They do not create, modify, or infer
   Matrix `m.mentions`; send semantics remain in the Rust composer path.

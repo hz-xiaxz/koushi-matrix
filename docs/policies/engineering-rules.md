@@ -294,16 +294,21 @@ Rules:
    notification text, QA tokens, logs, issue evidence, or normal `Debug` output.
    Rust reducers own alias set/clear/list and display-name resolution; React
    must not maintain an alias cache separate from `AppState.profile`.
-   `UserProfile.display_label`, `UserProfile.original_display_label`, and
-   `UserProfile.mention_search_terms` are the person/mention DTO contract.
-   React may use those projected fields but must not recompute alias
-   precedence from `local_aliases` or derive original names by stripping an
-   alias.
+   `ProfileState.users` is an account-scoped profile cache, not evidence that a
+   user belongs to any particular room. `UserProfile.display_label`,
+   `UserProfile.original_display_label`, and `UserProfile.mention_search_terms`
+   remain profile/search projections, but mention eligibility comes only from
+   the room-keyed `AppState.mention_candidates` slice. React may use projected
+   label fields but must not recompute alias precedence from `local_aliases`,
+   derive original names by stripping an alias, or promote a cached profile
+   into a room member.
    Timeline sender surfaces use the same contract:
    `TimelineItem.sender_label`, `ReplyQuote.sender_label`, and
    `ThreadSummaryDto.latest_sender_label` are Rust-projected display fields.
    Raw sender ids stay identity/source data and must not be used as normal
-   timeline display labels when a projected label is present.
+   primary labels. Rust-owned people-facing label fields are optional; when
+   one is absent React renders the localized unknown-user label instead of
+   promoting the raw Matrix user id.
    Existing timeline rows are relabeled only from Rust-provided
    `TimelineEvent::DisplayLabelsUpdated` patches. React may apply the supplied
    `user_id -> display_label` values to already-loaded rows by matching raw
@@ -810,10 +815,16 @@ GUI automation is a thin smoke layer, never the primary correctness gate.
    sanitized `br` remains a break, direct list element children remain `li`,
    inline spacing and pre/code text remain intact, and pretty/minified markup
    must have equivalent browser layout.
-   Composer mention GUI tests must use Rust-shaped `ProfileState.users` member
-   profiles for autocomplete candidates. React may render the popover/pills and
-   pass a typed `MentionIntent`, but it must not synthesize Matrix
-   `m.mentions`, formatted HTML, slash semantics, or fallback send behavior.
+   Composer mention GUI tests must use Rust-shaped room/surface entries from
+   `AppState.mention_candidates`. Each entry contains only users proven to have
+   joined the named room plus an independently projected, permission-checked
+   `@room` result. Rust owns membership eligibility, query normalization,
+   Unicode/CJK matching, ordering, completeness, room-notification permission,
+   and stale-result fencing. React may render the popover/pills and loading
+   state and pass a typed `MentionIntent`, but it must not scan
+   `ProfileState.users`, filter or sort candidates, append `@room`, synthesize
+   Matrix `m.mentions`, formatted HTML, slash semantics, or fallback send
+   behavior.
    Timeline mention pills are display-only decoration over Rust-owned
    timeline body/profile snapshots; React must not infer mention semantics from
    rendered text.

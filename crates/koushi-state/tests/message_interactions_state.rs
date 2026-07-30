@@ -1,6 +1,7 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, OperationFailureKind, PinOp, PinOperationState, PinnedEvent,
-    ReplyQuote, ReplyQuoteState, RoomSummary, RoomTags, SessionInfo, SessionState, UiEvent, reduce,
+    ReplyQuote, ReplyQuoteState, RoomSummary, RoomTags, SessionInfo, SessionState, UiEvent,
+    UserProfile, reduce,
 };
 
 fn ready_state() -> AppState {
@@ -39,6 +40,7 @@ fn pinned(event_id: &str, body_preview: Option<&str>) -> PinnedEvent {
     PinnedEvent {
         event_id: event_id.to_owned(),
         sender: Some("Alice".to_owned()),
+        sender_label: None,
         body_preview: body_preview.map(str::to_owned),
         redacted: false,
     }
@@ -394,6 +396,39 @@ fn pinned_state_update_replaces_room_pinned_list() {
             .expect("room interaction state")
             .pinned_events,
         vec![pinned("$two:example.invalid", None)]
+    );
+}
+
+#[test]
+fn pinned_state_projects_optional_friendly_sender_label() {
+    let mut state = ready_state();
+    state.profile.users.insert(
+        "@bob:example.invalid".to_owned(),
+        UserProfile {
+            user_id: "@bob:example.invalid".to_owned(),
+            display_name: Some("Bob".to_owned()),
+            display_label: String::new(),
+            original_display_label: String::new(),
+            mention_search_terms: Vec::new(),
+            avatar: None,
+        },
+    );
+    let mut event = pinned("$friendly:example.invalid", Some("hello"));
+    event.sender = Some("@bob:example.invalid".to_owned());
+
+    reduce(
+        &mut state,
+        AppAction::RoomPinnedEventsUpdated {
+            room_id: "!room:example.invalid".to_owned(),
+            pinned: vec![event],
+        },
+    );
+
+    assert_eq!(
+        state.room_interactions["!room:example.invalid"].pinned_events[0]
+            .sender_label
+            .as_deref(),
+        Some("Bob")
     );
 }
 

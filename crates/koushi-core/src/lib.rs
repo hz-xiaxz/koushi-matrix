@@ -23,6 +23,7 @@ pub mod link_preview;
 mod live_catchup;
 mod live_tail_freshness;
 pub mod media_preparation;
+pub(crate) mod mention_candidates;
 pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 pub mod room;
@@ -51,9 +52,9 @@ pub use event::{
     AccountEvent, ActivityEvent, AppStateSnapshot, CjkTextPolicyEvent, CoreEvent, E2eeTrustEvent,
     IntentNoOpReason, IntentOutcome, LinkPreview, LinkPreviewImage, LinkPreviewState,
     LocalEncryptionEvent, NativeAttentionEvent, PaginationDirection, PaginationState,
-    ReactionGroup, RoomEvent, SearchEvent, SearchResultItem, SyncBackendKind, SyncEvent,
-    TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId,
-    TimelineMedia, TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail,
+    ReactionGroup, ReactionSender, RoomEvent, SearchEvent, SearchResultItem, SyncBackendKind,
+    SyncEvent, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition, TimelineItem,
+    TimelineItemId, TimelineMedia, TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail,
     TimelineMessageKind, TimelineNavigationSnapshot, TimelineResyncReason,
     TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan, TimelineUnreadPosition,
     TimelineViewportObservation,

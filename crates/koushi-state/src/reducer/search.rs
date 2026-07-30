@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-use super::is_session_ready;
+use super::{is_session_ready, session_user_id};
 
 pub(crate) fn handle_search_edited(
     state: &mut AppState,
@@ -488,7 +488,7 @@ pub(crate) fn handle_files_view_query_requested(
 pub(crate) fn handle_files_view_query_succeeded(
     state: &mut AppState,
     request_id: u64,
-    items: Vec<crate::state::AttachmentResult>,
+    mut items: Vec<crate::state::AttachmentResult>,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) {
         return Vec::new();
@@ -506,6 +506,16 @@ pub(crate) fn handle_files_view_query_succeeded(
 
     if current_request_id != request_id {
         return Vec::new();
+    }
+
+    let own_user_id = session_user_id(state);
+    for item in &mut items {
+        item.sender_label = crate::state::resolve_optional_user_display_name(
+            &state.profile,
+            &item.sender,
+            item.sender_label.as_deref(),
+            own_user_id,
+        );
     }
 
     state.files_view = FilesViewState::Open {

@@ -153,6 +153,7 @@ describe("qaWindowTitle", () => {
                 {
                   event_id: "$private-event:example.test",
                   sender: "@private-user:example.test",
+                  sender_label: "Private User",
                   body_preview: "private body",
                   redacted: false
                 }

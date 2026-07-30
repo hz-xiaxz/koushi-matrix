@@ -188,8 +188,9 @@ function readySnapshot(
         query: { kind: "closed" },
         preview: { kind: "closed" },
         join: { kind: "idle" },
-      },
+          },
           room_management: { selected_room_id: null, settings: null, operation: { kind: "idle" } },
+          mention_candidates: { targets: [] },
           activity: { kind: "closed" }, thread_attention: { kind: "closed" },
           search: { kind: "closed" }, search_crawler: { rooms: {}, last_active: null },
           live_signals: defaultLiveSignalsState(),
@@ -878,6 +879,71 @@ function isDesktopSnapshotLike(value: unknown): value is DesktopSnapshot {
 // Snapshot-returning commands the App calls. Default snapshot stays ready so
 // any unanticipated snapshot read still renders the shell.
 mock.setCommandResponse("get_snapshot", () => currentSnapshot);
+mock.setCommandResponse(
+  "query_mention_candidates",
+  ({
+    roomId,
+    surface,
+    query
+  }: {
+    roomId: string;
+    surface: "main" | "thread";
+    query: string;
+  }) => {
+    const members =
+      surface === "thread"
+        ? [
+            {
+              user_id: "@bob:example.invalid",
+              display_label: "Bob",
+              original_display_label: "Bob",
+              avatar: null,
+              membership: "joined" as const
+            }
+          ]
+        : [
+            {
+              user_id: "@alice:example.invalid",
+              display_label: "Alice",
+              original_display_label: "Alice",
+              avatar: null,
+              membership: "joined" as const
+            }
+          ];
+    const normalizedQuery = query.toLowerCase();
+    const target = {
+      room_id: roomId,
+      generation: 1,
+      request_id: 1,
+      query,
+      surface,
+      completeness: "complete" as const,
+      candidates: members.filter((member) =>
+        `${member.display_label} ${member.user_id}`.toLowerCase().includes(normalizedQuery)
+      ),
+      room_mention_allowed: "allowed" as const,
+      failure_kind: null
+    };
+    currentSnapshot = {
+      ...currentSnapshot,
+      state: {
+        ...currentSnapshot.state,
+        domain: {
+          ...currentSnapshot.state.domain,
+          mention_candidates: {
+            targets: currentSnapshot.state.domain.mention_candidates.targets
+              .filter(
+                (candidateTarget) =>
+                  candidateTarget.room_id !== roomId ||
+                  candidateTarget.surface !== surface
+              )
+              .concat(target)
+          }
+        }
+      }
+    };
+  }
+);
 mock.setCommandResponse("get_diagnostic_snapshot", () => ({
   entries: [],
   droppedEntries: 0
@@ -2944,7 +3010,12 @@ async function boot() {
         count: 1,
         reacted_by_me: false,
         my_reaction_event_id: null,
-        sender_preview: ["@other-user:example.invalid"]
+        sender_preview: [
+          {
+            user_id: "@other-user:example.invalid",
+            display_label: "Other User"
+          }
+        ]
       }
     ]
   };

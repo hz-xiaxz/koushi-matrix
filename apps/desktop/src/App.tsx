@@ -5038,6 +5038,14 @@ export function App() {
               void updateSettings({ composer: { math_mode: enabled } });
             }}
             onMentionIntentChange={setComposerMentions}
+            onMentionQueryChange={(roomId, query) => {
+              if (query !== null) {
+                void applyLatestTextSnapshot(`mention-main:${roomId}`, async () => {
+                  await api.queryMentionCandidates(roomId, "main", query);
+                  return api.getSnapshot();
+                });
+              }
+            }}
             onOpenThread={openThread}
             onOpenMatrixTarget={(target) => {
               void openMatrixTarget(target);
@@ -5222,6 +5230,14 @@ export function App() {
           threadComposerMentionIntents={threadComposerMentions}
           onThreadMentionIntentChange={(roomId, rootEventId, mentions) => {
             updateThreadComposerMentions(roomId, rootEventId, mentions);
+          }}
+          onThreadMentionQueryChange={(roomId, query) => {
+            if (query !== null) {
+              void applyLatestTextSnapshot(`mention-thread:${roomId}`, async () => {
+                await api.queryMentionCandidates(roomId, "thread", query);
+                return api.getSnapshot();
+              });
+            }
           }}
           onThreadAttachFiles={(roomId, rootEventId, files) => {
             void stageThreadUploadFiles(roomId, rootEventId, files);

@@ -169,6 +169,7 @@ impl CoreCommand {
                 | RoomCommand::DismissDirectoryPreview { request_id }
                 | RoomCommand::JoinDirectoryRoom { request_id, .. }
                 | RoomCommand::LoadRoomSettings { request_id, .. }
+                | RoomCommand::QueryMentionCandidates { request_id, .. }
                 | RoomCommand::ReshareRoomKey { request_id, .. }
                 | RoomCommand::UpdateRoomSetting { request_id, .. }
                 | RoomCommand::ModerateRoomMember { request_id, .. }
@@ -1863,6 +1864,13 @@ pub enum RoomCommand {
         request_id: RequestId,
         room_id: String,
     },
+    QueryMentionCandidates {
+        request_id: RequestId,
+        account_key: AccountKey,
+        room_id: String,
+        surface: koushi_state::MentionSurface,
+        query: String,
+    },
     ReshareRoomKey {
         request_id: RequestId,
         room_id: String,
@@ -2078,6 +2086,15 @@ impl fmt::Debug for RoomCommand {
                 .debug_struct("LoadRoomSettings")
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
+                .finish(),
+            Self::QueryMentionCandidates {
+                request_id,
+                surface,
+                ..
+            } => formatter
+                .debug_struct("QueryMentionCandidates")
+                .field("request_id", request_id)
+                .field("surface", surface)
                 .finish(),
             Self::ReshareRoomKey { request_id, .. } => formatter
                 .debug_struct("ReshareRoomKey")
@@ -3392,6 +3409,40 @@ mod tests {
             assert!(!debug.contains("private-public-alias"), "{debug}");
             assert!(!debug.contains("example.invalid"), "{debug}");
             assert!(!debug.contains("opaque-page-token"), "{debug}");
+        }
+    }
+
+    #[test]
+    fn mention_candidate_command_is_correlated_and_redacts_private_values() {
+        let request_id = fake_rid(151);
+        let command = RoomCommand::QueryMentionCandidates {
+            request_id,
+            account_key: AccountKey("@private-account:example.invalid".to_owned()),
+            room_id: "!private-room:example.invalid".to_owned(),
+            surface: koushi_state::MentionSurface::Thread,
+            query: "Private Person Alias".to_owned(),
+        };
+
+        assert_eq!(
+            CoreCommand::Room(RoomCommand::QueryMentionCandidates {
+                request_id,
+                account_key: AccountKey("@private-account:example.invalid".to_owned()),
+                room_id: "!private-room:example.invalid".to_owned(),
+                surface: koushi_state::MentionSurface::Thread,
+                query: "Private Person Alias".to_owned(),
+            })
+            .request_id(),
+            request_id
+        );
+        let debug = format!("{command:?}");
+        assert!(debug.contains("QueryMentionCandidates"), "{debug}");
+        assert!(debug.contains("Thread"), "{debug}");
+        for private_value in [
+            "@private-account:example.invalid",
+            "!private-room:example.invalid",
+            "Private Person Alias",
+        ] {
+            assert!(!debug.contains(private_value), "{debug}");
         }
     }
 

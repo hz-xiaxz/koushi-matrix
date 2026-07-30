@@ -12,18 +12,20 @@ use crate::state::{
     DelegatedAuthLinks, DeviceSessionSummary, DirectoryQuery, DirectoryRoomPreview,
     DirectoryRoomSummary, E2eeRecoveryState, FilesViewScope, IdentityResetAuthType,
     InviteDestinationResult, InviteScopeSelection, JapaneseCatalogProfile, LiveEventReceipts,
-    LocalEncryptionHealth, LoginAttemptId, LoginFlow, NativeAttentionDispatchId,
-    NativeAttentionSoundOutcome, NativeAttentionState, NavigationState, OperationFailureKind,
-    OwnProfile, PinnedEvent, PresenceKind, ProfileUpdateRequest, RecoveryKeyDeliveryState,
-    RecoveryMethod, RoomListFilter, RoomListProjection, RoomModerationAction, RoomPreferencesState,
-    RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags,
-    SasEmoji, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, SearchResult,
-    SearchScope, SessionInfo, SettingsPatch, SettingsValues, SpaceSummary,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
-    SyncLifecycleStatus, SyncMode, TimelineContinuityInspection, TimelineGapRepairFailureKind,
-    TimelineMediaDownloadState, TimelineMediaGalleryItem, TimelineScrollAnchor,
-    TrustOperationFailureKind, UserProfile, VerificationCancelReason, VerificationGateFailureKind,
-    VerificationGateState, VerificationMethod, VerificationTarget,
+    LocalEncryptionHealth, LoginAttemptId, LoginFlow, MentionCandidate,
+    MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
+    NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState, NavigationState,
+    OperationFailureKind, OwnProfile, PinnedEvent, PresenceKind, ProfileUpdateRequest,
+    RecoveryKeyDeliveryState, RecoveryMethod, RoomListFilter, RoomListProjection,
+    RoomMentionPermission, RoomModerationAction, RoomPreferencesState, RoomSettingChange,
+    RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji,
+    ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope,
+    SessionInfo, SettingsPatch, SettingsValues, SpaceSummary, StagedUploadCompressionChoice,
+    StagedUploadItem, StagedUploadOutputSelection, SyncLifecycleStatus, SyncMode,
+    TimelineContinuityInspection, TimelineGapRepairFailureKind, TimelineMediaDownloadState,
+    TimelineMediaGalleryItem, TimelineScrollAnchor, TrustOperationFailureKind, UserProfile,
+    VerificationCancelReason, VerificationGateFailureKind, VerificationGateState,
+    VerificationMethod, VerificationTarget,
 };
 
 #[derive(Clone, Eq, PartialEq)]
@@ -128,6 +130,31 @@ pub enum AppAction {
     },
     UserProfilesUpdated {
         profiles: Vec<UserProfile>,
+    },
+    MentionCandidatesDemanded {
+        request_id: u64,
+        generation: u64,
+        room_id: String,
+        surface: MentionSurface,
+        query: String,
+    },
+    MentionCandidatesProjected {
+        request_id: u64,
+        generation: u64,
+        room_id: String,
+        surface: MentionSurface,
+        query: String,
+        completeness: MentionCandidatesCompleteness,
+        candidates: Vec<MentionCandidate>,
+        room_mention_allowed: RoomMentionPermission,
+    },
+    MentionCandidatesFailed {
+        request_id: u64,
+        generation: u64,
+        room_id: String,
+        surface: MentionSurface,
+        query: String,
+        kind: MentionCandidatesFailureKind,
     },
     LocalUserAliasesLoaded {
         aliases: std::collections::BTreeMap<String, String>,
@@ -1199,6 +1226,47 @@ impl fmt::Debug for AppAction {
                 .debug_struct("LoginSubmitted")
                 .field("attempt_id", attempt_id)
                 .field("request", request)
+                .finish(),
+            Self::MentionCandidatesDemanded {
+                request_id,
+                generation,
+                surface,
+                ..
+            } => formatter
+                .debug_struct("MentionCandidatesDemanded")
+                .field("request_id", request_id)
+                .field("generation", generation)
+                .field("surface", surface)
+                .finish(),
+            Self::MentionCandidatesProjected {
+                request_id,
+                generation,
+                surface,
+                completeness,
+                candidates,
+                room_mention_allowed,
+                ..
+            } => formatter
+                .debug_struct("MentionCandidatesProjected")
+                .field("request_id", request_id)
+                .field("generation", generation)
+                .field("surface", surface)
+                .field("completeness", completeness)
+                .field("candidate_count", &candidates.len())
+                .field("room_mention_allowed", room_mention_allowed)
+                .finish(),
+            Self::MentionCandidatesFailed {
+                request_id,
+                generation,
+                surface,
+                kind,
+                ..
+            } => formatter
+                .debug_struct("MentionCandidatesFailed")
+                .field("request_id", request_id)
+                .field("generation", generation)
+                .field("surface", surface)
+                .field("kind", kind)
                 .finish(),
             Self::DirectoryQueryRequested { request_id, query } => formatter
                 .debug_struct("DirectoryQueryRequested")

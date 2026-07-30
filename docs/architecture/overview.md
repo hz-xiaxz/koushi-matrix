@@ -62,8 +62,16 @@ Crate responsibilities:
   that state; it does not own trust decisions. Personal local user aliases are
   also Rust-owned profile state: `ProfileState.local_aliases` stores the
   account-data-backed map, reducer actions own set/clear/list lifecycle, and
-  display-name resolution follows `alias ?? upstream display name ?? MXID`
-  before React sees labels. Timeline relabeling after profile or alias changes
+  display-name resolution follows the surface-specific Rust policy before
+  React sees labels. Normal people-facing labels remain optional and do not
+  promote an MXID when no friendly label exists. `ProfileState.users` is an
+  account-scoped cache, not room-membership evidence.
+  `AppState.mention_candidates` is the room/surface-keyed, joined-member-only
+  autocomplete projection. Rust owns membership eligibility, query
+  normalization, Unicode/CJK matching, deterministic ranking, completeness,
+  `@room` permission, and stale-result fencing; React owns only popup
+  visibility/focus and typed mention intent. Timeline relabeling after profile
+  or alias changes
   is also a Rust-owned `CoreEvent::Timeline` patch stream; React may match rows
   by raw identity fields and apply Rust-provided labels, but it must not
   recompute alias precedence. React may render the DTO and dispatch typed alias
@@ -235,7 +243,11 @@ An in-process actor system in `koushi-core`:
   (`SpaceSummary`/`RoomSummary`/`InvitePreview`), create/invite/join/space
   operations, invite accept/decline, DM start, public directory query and
   join-by-alias, unread counts, DM classification, and Matrix room tags
-  (`m.tag` favourite / low priority).
+  (`m.tag` favourite / low priority). It also owns the demanded room member
+  directory for mention autocomplete: cached `JOIN` members produce a
+  fail-closed partial projection, incomplete lazy-loaded membership triggers
+  one SDK refresh, and base-room membership updates invalidate and recompute
+  every demanded main/thread target for that room.
   On the sliding-sync backend it consumes the one `RoomListService` owned by
   the running `SyncService`; constructing additional ad-hoc
   `RoomListService` instances is prohibited — they are not driven by the
@@ -316,6 +328,12 @@ An in-process actor system in `koushi-core`:
   list, and expose an overflow count before the data reaches `TimelineView`.
   React must not join receipt user ids with profile maps or choose receipt
   ordering locally.
+- Room-scoped mention demand enters `RoomActor` through
+  `RoomCommand::QueryMentionCandidates`. The actor publishes reducer actions,
+  `AppState.mention_candidates` flows through the versioned state-delta
+  transport and WebView projection store, and selectors consume only the exact
+  `(room_id, surface)` entry. Late refresh results are fenced by account, room,
+  surface, request, query, and generation before publication.
 - Account-wide Activity is projected in `AppActor` from Rust-owned timeline
   observations plus room unread/tag summaries. `TimelineView` and focused
   timelines remain event-driven render surfaces; they do not own the Activity

@@ -270,6 +270,28 @@ pub async fn load_room_settings(
 }
 
 #[tauri::command]
+pub async fn query_mention_candidates(
+    room_id: String,
+    surface: MentionSurface,
+    query: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<(), String> {
+    let request_id = next_request_id(state.inner()).await;
+    let account_key = account_key_from_snapshot(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        CoreCommand::Room(RoomCommand::QueryMentionCandidates {
+            request_id,
+            account_key,
+            room_id,
+            surface,
+            query,
+        }),
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn repair_room_timeline(
     room_id: String,
     app: AppHandle,

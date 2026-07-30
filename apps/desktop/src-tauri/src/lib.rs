@@ -1341,6 +1341,7 @@ pub fn run() {
             commands::room::pin_event,
             commands::room::unpin_event,
             commands::room::load_room_settings,
+            commands::room::query_mention_candidates,
             commands::room::repair_room_timeline,
             commands::room::reshare_room_key,
             commands::room::update_room_setting,
@@ -2341,7 +2342,10 @@ mod tests {
                 count: 2,
                 reacted_by_me: true,
                 my_reaction_event_id: Some("$reaction:test".to_owned()),
-                sender_preview: vec!["@u:example.test".to_owned()],
+                sender_preview: vec![koushi_core::ReactionSender {
+                    user_id: "@u:example.test".to_owned(),
+                    display_label: Some("Test User".to_owned()),
+                }],
             }],
             can_react: true,
             is_redacted: false,
@@ -2637,7 +2641,12 @@ mod tests {
                         "count": 2,
                         "reacted_by_me": true,
                         "my_reaction_event_id": "$reaction:test",
-                        "sender_preview": ["@u:example.test"]
+                        "sender_preview": [
+                            {
+                                "user_id": "@u:example.test",
+                                "display_label": "Test User"
+                            }
+                        ]
                     }
                 ]
             })
@@ -3454,6 +3463,7 @@ mod tests {
                     room_id: "!r:example.test".to_owned(),
                     event_id: "$f1".to_owned(),
                     sender: "@u:example.test".to_owned(),
+                    sender_label: Some("Test User".to_owned()),
                     timestamp_ms: 1,
                     kind: AttachmentKind::Image,
                     filename: "photo.png".to_owned(),

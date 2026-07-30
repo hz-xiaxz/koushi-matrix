@@ -18,6 +18,7 @@ mod files_view;
 mod invite_workflow;
 mod live_signals;
 mod local_encryption;
+mod mention;
 mod native_attention;
 mod navigation;
 mod profile;
@@ -77,7 +78,8 @@ pub use profile::{
     LocalUserAliasUpdateState, OwnProfile, ProfileState, ProfileUpdateRequest, ProfileUpdateState,
     UserProfile, is_ignored_user, normalize_local_user_alias,
     refresh_profile_user_display_projection, refresh_room_settings_member_display_projection,
-    refresh_room_summary_display_projection, resolve_user_display_name,
+    refresh_room_summary_display_projection, resolve_optional_user_display_name,
+    resolve_user_display_name,
 };
 
 // ── Re-exports: room ────────────────────────────────────────────────────────
@@ -197,7 +199,15 @@ pub use basic_operation::{BasicOperationRequest, BasicOperationState};
 // ── Re-exports: live_signals ────────────────────────────────────────────────
 pub use live_signals::{
     LiveEventReceiptSummary, LiveEventReceipts, LiveReadReceipt, LiveRoomSignalUpdate,
-    LiveSignalsState, PresenceKind, RoomLiveSignals,
+    LiveSignalsState, LiveTypingUser, PresenceKind, RoomLiveSignals,
+    refresh_live_typing_user_display_projection,
+};
+
+// ── Re-exports: mention candidates ──────────────────────────────────────────
+pub use mention::{
+    MAX_MENTION_CANDIDATE_TARGETS, MentionCandidate, MentionCandidateMembership,
+    MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionCandidatesState,
+    MentionCandidatesTarget, MentionSurface, RoomMentionPermission,
 };
 
 // ── Helper used by search_crawler submodule via crate::state::default_true ──
@@ -252,6 +262,8 @@ pub struct AppState {
     pub media_gallery: MediaGalleryStore,
     pub directory: DirectoryState,
     pub room_management: RoomManagementState,
+    #[serde(default)]
+    pub mention_candidates: MentionCandidatesState,
     pub activity: ActivityState,
     pub timeline: TimelinePaneState,
     pub thread: ThreadPaneState,
@@ -304,6 +316,7 @@ impl Default for AppState {
             media_gallery: MediaGalleryStore::default(),
             directory: DirectoryState::default(),
             room_management: RoomManagementState::default(),
+            mention_candidates: MentionCandidatesState::default(),
             activity: ActivityState::Closed,
             timeline: TimelinePaneState::default(),
             thread: ThreadPaneState::Closed,

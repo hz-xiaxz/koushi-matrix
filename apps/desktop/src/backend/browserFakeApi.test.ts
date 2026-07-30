@@ -773,7 +773,8 @@ describe("BrowserFakeApi settings preview", () => {
         }
       },
       fully_read_event_id: null,
-      typing_user_ids: []
+      typing_user_ids: [],
+      typing_users: []
     };
 
     await api.sendReadReceipt("!room-alpha:example.invalid", eventId);
@@ -941,6 +942,49 @@ describe("BrowserFakeApi settings preview", () => {
     ).toMatchObject({
       display_label: "Member 1",
       original_display_label: "Member 1"
+    });
+  });
+
+  test("queries mention candidates only from the loaded room member projection", async () => {
+    const api = createBrowserFakeApi();
+    const loaded = await api.loadRoomSettings("!room-alpha:example.invalid");
+    const roomMember = loaded.state.domain.room_management.settings?.members[0];
+    expect(roomMember).toBeDefined();
+    await api.queryMentionCandidates(
+      "!room-alpha:example.invalid",
+      "thread",
+      roomMember!.display_label
+    );
+
+    const queried = await api.getSnapshot();
+    expect(
+      queried.state.domain.mention_candidates.targets.find(
+        (target) =>
+          target.room_id === "!room-alpha:example.invalid" &&
+          target.surface === "thread"
+      )
+    ).toMatchObject({
+      query: roomMember!.display_label,
+      completeness: "complete",
+      candidates: [
+        expect.objectContaining({
+          user_id: roomMember!.user_id,
+          membership: "joined"
+        })
+      ]
+    });
+
+    await api.queryMentionCandidates("!other:example.invalid", "main", "");
+    const failClosed = await api.getSnapshot();
+    expect(
+      failClosed.state.domain.mention_candidates.targets.find(
+        (target) =>
+          target.room_id === "!other:example.invalid" &&
+          target.surface === "main"
+      )
+    ).toMatchObject({
+      completeness: "partial",
+      candidates: []
     });
   });
 

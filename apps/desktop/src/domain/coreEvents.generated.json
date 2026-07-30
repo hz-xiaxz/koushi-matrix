@@ -587,6 +587,7 @@
             "mimetype": "image/png",
             "room_id": "!r:example.test",
             "sender": "@u:example.test",
+            "sender_label": "Test User",
             "size": 1234,
             "source_mxc": "mxc://example.invalid/abc",
             "thread_root": null,
@@ -759,7 +760,10 @@
                 "my_reaction_event_id": "$reaction:test",
                 "reacted_by_me": true,
                 "sender_preview": [
-                  "@u:example.test"
+                  {
+                    "display_label": "Test User",
+                    "user_id": "@u:example.test"
+                  }
                 ]
               }
             ],
@@ -846,7 +850,10 @@
                     "my_reaction_event_id": "$reaction:test",
                     "reacted_by_me": true,
                     "sender_preview": [
-                      "@u:example.test"
+                      {
+                        "display_label": "Test User",
+                        "user_id": "@u:example.test"
+                      }
                     ]
                   }
                 ],

@@ -4312,20 +4312,31 @@ impl AccountActor {
 
         match koushi_sdk::update_local_user_alias(session, &user_id, alias.as_deref()).await {
             Ok(aliases) => {
+                let aliases = aliases.aliases;
+                let _ = self
+                    .room_actor
+                    .send(RoomMessage::LocalUserAliasesUpdated {
+                        aliases: aliases.clone(),
+                    })
+                    .await;
                 self.send_actions(vec![
                     AppAction::LocalUserAliasUpdateSucceeded {
                         request_id: request_id.sequence,
                     },
-                    AppAction::LocalUserAliasesLoaded {
-                        aliases: aliases.aliases,
-                    },
+                    AppAction::LocalUserAliasesLoaded { aliases },
                 ])
                 .await;
             }
             Err(error) => {
-                if let Some(action @ AppAction::LocalUserAliasesLoaded { .. }) =
-                    local_user_aliases_action_from_session(session).await
-                {
+                if let Some(action) = local_user_aliases_action_from_session(session).await {
+                    if let AppAction::LocalUserAliasesLoaded { aliases } = &action {
+                        let _ = self
+                            .room_actor
+                            .send(RoomMessage::LocalUserAliasesUpdated {
+                                aliases: aliases.clone(),
+                            })
+                            .await;
+                    }
                     self.send_actions(vec![
                         AppAction::LocalUserAliasUpdateFailed {
                             request_id: request_id.sequence,
@@ -4619,6 +4630,15 @@ impl AccountActor {
             let _ = self
                 .timeline_manager
                 .send(TimelineMessage::IgnoredUsersUpdated { user_ids })
+                .await;
+        }
+        if let Some(aliases) = actions.iter().find_map(|action| match action {
+            AppAction::LocalUserAliasesLoaded { aliases } => Some(aliases.clone()),
+            _ => None,
+        }) {
+            let _ = self
+                .room_actor
+                .send(RoomMessage::LocalUserAliasesUpdated { aliases })
                 .await;
         }
         self.send_actions(actions).await;

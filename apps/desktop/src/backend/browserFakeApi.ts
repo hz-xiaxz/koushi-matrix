@@ -58,6 +58,7 @@ import type {
   LiveEventReceiptSummary,
   LiveReadReceipt,
   MentionIntent,
+  MentionSurface,
   OidcAuthorization,
   SpaceSummary,
   SubmissionResponse,
@@ -318,6 +319,11 @@ export interface DesktopApi {
   dismissDirectoryPreview(): Promise<DesktopSnapshot>;
   joinRoom(roomId: string): Promise<DesktopSnapshot>;
   loadRoomSettings(roomId: string): Promise<DesktopSnapshot>;
+  queryMentionCandidates(
+    roomId: string,
+    surface: MentionSurface,
+    query: string
+  ): Promise<void>;
   repairRoomTimeline(roomId: string): Promise<DesktopSnapshot>;
   updateRoomSetting(roomId: string, change: RoomSettingChange): Promise<DesktopSnapshot>;
   moderateRoomMember(
@@ -1839,6 +1845,15 @@ class BrowserFakeApi implements DesktopApi {
     const roomSignals = ensureRoomLiveSignals(this.snapshot, roomId);
     const withoutSelf = roomSignals.typing_user_ids.filter((userId) => userId !== session.user_id);
     roomSignals.typing_user_ids = isTyping ? [...withoutSelf, session.user_id] : withoutSelf;
+    roomSignals.typing_users = roomSignals.typing_user_ids.map((userId) => ({
+      user_id: userId,
+      display_label:
+        this.snapshot.state.domain.profile.local_aliases[userId]?.trim() ||
+        this.snapshot.state.domain.profile.users[userId]?.display_label?.trim() ||
+        (userId === session.user_id
+          ? this.snapshot.state.domain.profile.own.display_name?.trim() || null
+          : null)
+    }));
   }
 
   async setPresence(presence: PresenceKind): Promise<DesktopSnapshot> {
@@ -2536,6 +2551,63 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
+  async queryMentionCandidates(
+    roomId: string,
+    surface: MentionSurface,
+    query: string
+  ): Promise<void> {
+    const normalizedRoomId = roomId.trim();
+    if (!this.canUseSyncedViews() || !normalizedRoomId) {
+      return;
+    }
+    const previous = this.snapshot.state.domain.mention_candidates.targets.find(
+      (target) => target.room_id === normalizedRoomId && target.surface === surface
+    );
+    const settings =
+      this.snapshot.state.domain.room_management.selected_room_id === normalizedRoomId &&
+      this.snapshot.state.domain.room_management.settings?.room_id === normalizedRoomId
+        ? this.snapshot.state.domain.room_management.settings
+        : null;
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const candidates = (settings?.members ?? [])
+      .filter((member) =>
+        [member.display_label, member.original_display_label, member.user_id].some((value) =>
+          value.toLocaleLowerCase().includes(normalizedQuery)
+        )
+      )
+      .map((member) => ({
+        user_id: member.user_id,
+        display_label: member.display_label || null,
+        original_display_label: member.original_display_label || null,
+        avatar: member.avatar_url
+          ? {
+              mxc_uri: member.avatar_url,
+              thumbnail: { kind: "notRequested" as const }
+            }
+          : null,
+        membership: "joined" as const
+      }));
+    const target = {
+      room_id: normalizedRoomId,
+      generation: (previous?.generation ?? 0) + 1,
+      request_id: this.nextRequestId(),
+      query,
+      surface,
+      completeness: settings ? ("complete" as const) : ("partial" as const),
+      candidates,
+      room_mention_allowed: "unknown" as const,
+      failure_kind: null
+    };
+    this.snapshot.state.domain.mention_candidates.targets =
+      this.snapshot.state.domain.mention_candidates.targets
+        .filter(
+          (candidateTarget) =>
+            candidateTarget.room_id !== normalizedRoomId ||
+            candidateTarget.surface !== surface
+        )
+        .concat(target);
+  }
+
   async reshareRoomKey(_roomId: string): Promise<DesktopSnapshot> {
     return this.getSnapshot();
   }
@@ -3102,7 +3174,13 @@ class BrowserFakeApi implements DesktopApi {
           ? entry.pinned_events
           : [
               ...entry.pinned_events,
-              { event_id: eventId, sender: null, body_preview: null, redacted: false }
+              {
+                event_id: eventId,
+                sender: null,
+                sender_label: null,
+                body_preview: null,
+                redacted: false
+              }
             ],
         pin_operation: { kind: "idle" }
       }
@@ -4070,6 +4148,7 @@ function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): Desk
         room_interactions: {},
         directory: defaultDirectoryState(),
         room_management: defaultRoomManagementState(),
+        mention_candidates: { targets: [] },
         activity: { kind: "closed" },
         thread_attention: { kind: "closed" },
         search: { kind: "closed" },
@@ -4198,6 +4277,7 @@ function createSignedOutSnapshot(): DesktopSnapshot {
         room_interactions: {},
         directory: defaultDirectoryState(),
         room_management: defaultRoomManagementState(),
+        mention_candidates: { targets: [] },
         activity: { kind: "closed" },
         thread_attention: { kind: "closed" },
         search: { kind: "closed" },
@@ -4685,7 +4765,8 @@ function ensureRoomLiveSignals(
   snapshot.state.domain.live_signals.rooms[roomId] ??= {
     receipts_by_event: {},
     fully_read_event_id: null,
-    typing_user_ids: []
+    typing_user_ids: [],
+    typing_users: []
   };
   return snapshot.state.domain.live_signals.rooms[roomId];
 }
@@ -5526,6 +5607,7 @@ function attachmentResultFromMessage(message: TimelineMessage): AttachmentResult
     room_id: message.room_id,
     event_id: message.event_id,
     sender: message.sender,
+    sender_label: null,
     timestamp_ms: message.timestamp_ms,
     kind: "file",
     filename,

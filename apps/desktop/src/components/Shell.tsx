@@ -310,22 +310,17 @@ export function WorkspaceRail({
     <nav className="workspace-rail" aria-label={t("workspace.workspaces")}>
       <div className="workspace-rail-main">
         <div className="workspace-list workspace-system-list">
-          <Tooltip label={snapshot.sidebar.account_home.display_name}>
-            {(tooltipProps) => (
-              <button
-                className={`workspace-button workspace-system-button workspace-home-button ${
-                  snapshot.sidebar.account_home.is_active ? "is-active" : ""
-                }`}
-                data-count={snapshot.sidebar.account_home.attention_count || undefined}
-                type="button"
-                aria-label={accountHomeLabel(snapshot.sidebar.account_home)}
-                onClick={() => onSelectSpace(null)}
-                {...tooltipProps}
-              >
-                <Home size={ICON_SIZE.rail} />
-              </button>
-            )}
-          </Tooltip>
+          <button
+            className={`workspace-button workspace-system-button workspace-home-button ${
+              snapshot.sidebar.account_home.is_active ? "is-active" : ""
+            }`}
+            data-count={snapshot.sidebar.account_home.attention_count || undefined}
+            type="button"
+            aria-label={accountHomeLabel(snapshot.sidebar.account_home)}
+            onClick={() => onSelectSpace(null)}
+          >
+            <Home size={ICON_SIZE.rail} />
+          </button>
         </div>
         <div className="workspace-rail-separator" role="separator" aria-orientation="horizontal" />
         <div className="workspace-list workspace-space-list">

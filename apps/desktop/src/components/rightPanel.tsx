@@ -26,11 +26,11 @@ import {
   forwardDestinationsFromSnapshot,
   ICON_SIZE,
   ignoreComposerKeyAction,
-  mentionCandidatesFromSnapshot,
   pinnedEventsForRoom,
   shortcutLabelProfileFromLocaleProfile,
   threadReplyToTimelineMessage
 } from "../app/uiShared";
+import { selectMentionCandidates } from "../domain/appStore";
 import type { DisplayDensity, SpaceLocalOverrides } from "../app/localPresentation";
 import {
   roomOrSpaceForPeoplePanelScope,
@@ -145,6 +145,7 @@ export function ContextualRightPanel({
   onThreadClearUploadStaging = () => undefined,
   onThreadLoadStagedUploadPreview = async () => [],
   onThreadMentionIntentChange = () => undefined,
+  onThreadMentionQueryChange = () => undefined,
   onThreadRetryStagedUploadPreparation = () => undefined,
   onThreadReplySend,
   onThreadScheduleSend,
@@ -274,6 +275,10 @@ export function ContextualRightPanel({
     roomId: string,
     rootEventId: string,
     mentions: MentionIntent
+  ) => void;
+  onThreadMentionQueryChange?: (
+    roomId: string,
+    query: string | null
   ) => void;
   onThreadRetryStagedUploadPreparation?: (
     roomId: string,
@@ -661,6 +666,17 @@ export function ContextualRightPanel({
     (threadDraftKeyValue ? threadComposerMentionIntents[threadDraftKeyValue] : undefined) ?? {
       targets: []
     };
+  const threadMentionCandidates = selectMentionCandidates(
+    { snapshot },
+    threadRoomId ?? null,
+    "thread"
+  );
+  const threadMentionCandidateTarget = snapshot.state.domain.mention_candidates.targets.find(
+    (target) => target.room_id === threadRoomId && target.surface === "thread"
+  );
+  const threadMentionCandidatesLoading =
+    threadMentionCandidateTarget?.completeness === "loading" ||
+    threadMentionCandidateTarget?.completeness === "partial";
   const threadTimelineKeyValue =
     currentUserId && timelineTransport && threadRoomId && rootEventId
       ? threadTimelineKey(currentUserId, threadRoomId, rootEventId)
@@ -769,7 +785,8 @@ export function ContextualRightPanel({
         }
         isSending={threadSendPending}
         hasStagedUploads={threadStagedUploads.length > 0}
-        mentionCandidates={mentionCandidatesFromSnapshot(snapshot)}
+        mentionCandidates={threadMentionCandidates}
+        mentionCandidatesLoading={threadMentionCandidatesLoading}
         mentionIntent={threadMentionIntent}
         resolveComposerKeyAction={onResolveComposerKeyAction}
         canEdit={threadState.kind === "open" && Boolean(threadRoomId && rootEventId && threadComposer)}
@@ -786,6 +803,11 @@ export function ContextualRightPanel({
         onMentionIntentChange={(mentions) => {
           if (threadRoomId && rootEventId) {
             onThreadMentionIntentChange(threadRoomId, rootEventId, mentions);
+          }
+        }}
+        onMentionQueryChange={(query) => {
+          if (threadRoomId) {
+            onThreadMentionQueryChange(threadRoomId, query);
           }
         }}
         onScheduleSend={

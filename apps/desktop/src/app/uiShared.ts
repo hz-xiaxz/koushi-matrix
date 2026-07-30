@@ -17,14 +17,24 @@ import type {
   RoomTags,
   StagedUploadItem,
   TimelineMediaGalleryItem,
-  TimelineMessage,
-  UserProfile
+  TimelineMessage
 } from "../domain/types";
-import type { MentionCandidate } from "../domain/projectionTypes";
 import type { ContextMenuItem } from "../domain/contextMenus";
 import { t } from "../i18n/messages";
 
 export type { MentionCandidate } from "../domain/projectionTypes";
+
+export function peopleFacingLabel(
+  ...projectedLabels: Array<string | null | undefined>
+): string {
+  for (const label of projectedLabels) {
+    const normalized = label?.trim();
+    if (normalized && !/^@[^\s:]+:[^\s]+$/u.test(normalized)) {
+      return normalized;
+    }
+  }
+  return t("people.unknownUser");
+}
 
 // ===== Types =====
 
@@ -137,13 +147,6 @@ export type SyncPresentation = {
 export const EMPTY_ROOM_TAGS: RoomTags = { favourite: null, low_priority: null };
 
 export const EMPTY_MENTION_INTENT: MentionIntent = { targets: [] };
-const ROOM_MENTION_CANDIDATE: MentionCandidate = {
-  key: "roomMention",
-  label: "@room",
-  searchText: "room @room notify the whole room",
-  target: { kind: "roomMention", display_label: "room" }
-};
-
 export const ICON_SIZE = {
   micro: 14,
   compact: 15,
@@ -376,43 +379,6 @@ export function forwardDestinationsFromSnapshot(
     room_id: room.room_id,
     display_name: room.display_label
   }));
-}
-
-export function mentionCandidatesFromSnapshot(
-  snapshot: import("../domain/types").DesktopSnapshot
-): MentionCandidate[] {
-  return [
-    ...Object.values(snapshot.state.domain.profile.users)
-      .map((profile) => {
-        const label = mentionLabel(profile);
-        const target: MentionTarget = {
-          kind: "user",
-          user_id: profile.user_id,
-          display_label: label
-        };
-        return {
-          key: profile.user_id,
-          label,
-          searchText: (
-            profile.mention_search_terms.length
-              ? profile.mention_search_terms.join(" ")
-              : `${label} ${profile.user_id}`
-          ).toLowerCase(),
-          avatar: profile.avatar,
-          target
-        };
-      })
-      .sort(
-        (a, b) =>
-          a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) ||
-          a.key.localeCompare(b.key)
-      ),
-    ROOM_MENTION_CANDIDATE
-  ];
-}
-
-export function mentionLabel(profile: UserProfile): string {
-  return profile.display_label.trim() || profile.user_id;
 }
 
 export function activeMentionQuery(value: string): { start: number; end: number; query: string } | null {

@@ -17,13 +17,13 @@ use koushi_state::{
     AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState,
     DeviceSessionListState, DirectoryState, DisplayPlatform, E2eeTrustState, FilesViewState,
     FocusedContextState, InvitePreview, InviteWorkflowState, LinkPreviewSettingsState,
-    LiveSignalsState, LocalEncryptionState, LocaleDisplayProfile, NativeAttentionCapabilities,
-    NativeAttentionState, NavigationState, ProfileState, ProvisionalPhase, QrLoginState,
-    RoomInteractionState, RoomListProjection, RoomManagementState, RoomNotificationSettings,
-    RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchMatchField, SearchMatchKind,
-    SearchResult, SearchScope, SearchState, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceSummary, StagedUploadItem, SyncMode, SyncState,
-    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
+    LiveSignalsState, LocalEncryptionState, LocaleDisplayProfile, MentionCandidatesState,
+    NativeAttentionCapabilities, NativeAttentionState, NavigationState, ProfileState,
+    ProvisionalPhase, QrLoginState, RoomInteractionState, RoomListProjection, RoomManagementState,
+    RoomNotificationSettings, RoomPreferencesState, RoomSummary, SearchCrawlerState,
+    SearchMatchField, SearchMatchKind, SearchResult, SearchScope, SearchState, SessionState,
+    SettingsState, SidebarModel, SoftLogoutReauthState, SpaceSummary, StagedUploadItem, SyncMode,
+    SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     TypographyDisplayProfile, VerificationGateRejectReason, VerificationGateState,
     VerificationMethod, native_attention_capabilities_for_platform, resolve_locale_display_profile,
     resolve_typography_display_profile,
@@ -156,6 +156,8 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_management: Option<RoomManagementState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub mention_candidates: Option<MentionCandidatesState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub activity: Option<ActivityState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_attention: Option<ThreadAttentionState>,
@@ -200,6 +202,7 @@ impl FrontendDomainStateChangedSlices {
             && self.room_interactions.is_none()
             && self.directory.is_none()
             && self.room_management.is_none()
+            && self.mention_candidates.is_none()
             && self.activity.is_none()
             && self.thread_attention.is_none()
             && self.search.is_none()
@@ -286,6 +289,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         domain.room_interactions = changed.room_interactions;
         domain.directory = changed.directory;
         domain.room_management = changed.room_management;
+        domain.mention_candidates = changed.mention_candidates;
         domain.activity = changed.activity;
         domain.thread_attention = changed.thread_attention;
         domain.search = changed.search.map(Into::into);
@@ -370,6 +374,7 @@ pub struct FrontendDomainState {
     pub room_interactions: BTreeMap<String, RoomInteractionState>,
     pub directory: DirectoryState,
     pub room_management: RoomManagementState,
+    pub mention_candidates: MentionCandidatesState,
     pub activity: ActivityState,
     pub thread_attention: ThreadAttentionState,
     pub search: FrontendSearchState,
@@ -436,6 +441,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             room_interactions: state.room_interactions,
             directory: state.directory,
             room_management: state.room_management,
+            mention_candidates: state.mention_candidates,
             activity: state.activity,
             thread_attention: state.thread_attention,
             search: state.search.into(),
@@ -1834,6 +1840,7 @@ mod tests {
                 pinned_events: vec![PinnedEvent {
                     event_id: "$pinned:example.invalid".to_owned(),
                     sender: Some("@fixture:example.invalid".to_owned()),
+                    sender_label: Some("Fixture User".to_owned()),
                     body_preview: Some("Pinned fixture message".to_owned()),
                     redacted: false,
                 }],
@@ -1884,6 +1891,49 @@ mod tests {
                 }],
             }),
             operation: RoomManagementOperationState::Idle,
+        };
+
+        // mention_candidates — partial main and complete thread targets
+        state.mention_candidates = koushi_state::MentionCandidatesState {
+            targets: vec![
+                koushi_state::MentionCandidatesTarget {
+                    room_id: "!room:example.invalid".to_owned(),
+                    generation: 7,
+                    request_id: 70,
+                    query: "fi".to_owned(),
+                    surface: koushi_state::MentionSurface::Main,
+                    completeness: koushi_state::MentionCandidatesCompleteness::Partial,
+                    candidates: vec![koushi_state::MentionCandidate {
+                        user_id: "@fixture:example.invalid".to_owned(),
+                        display_label: Some("Fixture User".to_owned()),
+                        original_display_label: Some("Fixture User".to_owned()),
+                        avatar: Some(koushi_state::AvatarImage {
+                            mxc_uri: "mxc://example.invalid/mention-avatar".to_owned(),
+                            thumbnail: koushi_state::AvatarThumbnailState::NotRequested,
+                        }),
+                        membership: koushi_state::MentionCandidateMembership::Joined,
+                    }],
+                    room_mention_allowed: koushi_state::RoomMentionPermission::Allowed,
+                    failure_kind: None,
+                },
+                koushi_state::MentionCandidatesTarget {
+                    room_id: "!room:example.invalid".to_owned(),
+                    generation: 8,
+                    request_id: 71,
+                    query: String::new(),
+                    surface: koushi_state::MentionSurface::Thread,
+                    completeness: koushi_state::MentionCandidatesCompleteness::Complete,
+                    candidates: vec![koushi_state::MentionCandidate {
+                        user_id: "@unlabelled:example.invalid".to_owned(),
+                        display_label: None,
+                        original_display_label: None,
+                        avatar: None,
+                        membership: koushi_state::MentionCandidateMembership::Joined,
+                    }],
+                    room_mention_allowed: koushi_state::RoomMentionPermission::Denied,
+                    failure_kind: None,
+                },
+            ],
         };
 
         // activity — open with populated streams
@@ -1985,6 +2035,10 @@ mod tests {
                         receipts_by_event: BTreeMap::new(),
                         fully_read_event_id: Some("$read:example.invalid".to_owned()),
                         typing_user_ids: vec!["@other:example.invalid".to_owned()],
+                        typing_users: vec![koushi_state::LiveTypingUser {
+                            user_id: "@other:example.invalid".to_owned(),
+                            display_label: Some("Other Person".to_owned()),
+                        }],
                     },
                 );
                 m
@@ -2137,6 +2191,7 @@ mod tests {
                 mimetype: Some("image/png".to_owned()),
                 room_id: "!room:example.invalid".to_owned(),
                 sender: "@fixture:example.invalid".to_owned(),
+                sender_label: Some("Fixture User".to_owned()),
                 size: Some(1024),
                 source_mxc: "mxc://example.invalid/attach".to_owned(),
                 thumbnail_mxc: None,

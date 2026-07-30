@@ -69,18 +69,20 @@ use koushi_state::{
     ComposerTarget, DirectoryQuery, DirectoryRoomSummary, DisplaySettings,
     IdentityResetAuthRequest, IdentityResetAuthType, IdentityResetState,
     ImageUploadCompressionMode, KeyBackupStatus, LocalEncryptionHealth, LocalEncryptionState,
-    MentionIntent, MentionTarget, NativeAttentionCapabilities, NativeAttentionCapability,
+    MentionCandidatesCompleteness, MentionCandidatesTarget, MentionIntent, MentionSurface,
+    MentionTarget, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionDispatchState, NativeAttentionObservationKind, NativeAttentionProjectionInput,
     NativeAttentionState, NativeAttentionSuppressionReason, OperationFailureKind, PresenceKind,
     RecoveryRequest, ReplyQuoteState, RoomAttentionKind, RoomListFilter,
-    RoomManagementOperationKind, RoomManagementOperationState, RoomModerationAction,
-    RoomNotificationMode, RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTags, SasEmoji,
-    ScheduledSendCapability, SearchCrawlerFailureKind, SearchCrawlerRoomState,
-    SearchCrawlerSettings, SearchCrawlerSpeed, SessionInfo, SessionState, SettingsPatch,
-    SettingsPersistenceState, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
-    TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
-    TimelineMediaKind, VerificationFlowState, VerificationTarget, build_formatted_message_draft,
-    compose_sidebar, native_attention_state_from_rooms, reduce, resolve_composer_key_action,
+    RoomManagementOperationKind, RoomManagementOperationState, RoomMentionPermission,
+    RoomModerationAction, RoomNotificationMode, RoomSettingChange, RoomSettingsSnapshot,
+    RoomSummary, RoomTags, SasEmoji, ScheduledSendCapability, SearchCrawlerFailureKind,
+    SearchCrawlerRoomState, SearchCrawlerSettings, SearchCrawlerSpeed, SessionInfo, SessionState,
+    SettingsPatch, SettingsPersistenceState, StagedUploadCompressionChoice, StagedUploadItem,
+    StagedUploadKind, TimelineMediaGalleryItem, TimelineMediaGalleryMedia,
+    TimelineMediaGallerySource, TimelineMediaKind, VerificationFlowState, VerificationTarget,
+    build_formatted_message_draft, compose_sidebar, native_attention_state_from_rooms, reduce,
+    resolve_composer_key_action,
 };
 
 const ENV_HOMESERVER: &str = "KOUSHI_LOCAL_QA_HOMESERVER";
@@ -243,6 +245,7 @@ enum QaScenario {
     RoomSpace,
     Directory,
     RoomManagement,
+    RoomPeopleProjection,
     Timeline,
     TimelineReconnect,
     TimelineLegacyFallback,
@@ -277,6 +280,7 @@ enum QaStage {
     RoomSpace,
     Directory,
     RoomManagement,
+    RoomPeopleProjection,
     Timeline,
     TimelineReconnect,
     TimelineLegacyFallback,
@@ -396,6 +400,7 @@ impl QaScenario {
             "room_space" => Ok(Self::RoomSpace),
             "directory" => Ok(Self::Directory),
             "room_management" => Ok(Self::RoomManagement),
+            "room_people_projection" => Ok(Self::RoomPeopleProjection),
             "timeline" => Ok(Self::Timeline),
             "timeline_reconnect" => Ok(Self::TimelineReconnect),
             "timeline_legacy_fallback" => Ok(Self::TimelineLegacyFallback),
@@ -415,7 +420,7 @@ impl QaScenario {
             "link_preview" => Ok(Self::LinkPreview),
             "cache_restore" => Ok(Self::CacheRestore),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, credential_health, native_attention, e2ee_trust, invites_dm, room_space, directory, room_management, timeline, timeline_reconnect, timeline_legacy_fallback, timeline_legacy_persisted_gap, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, credential_health, native_attention, e2ee_trust, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_legacy_fallback, timeline_legacy_persisted_gap, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
             )),
         }
     }
@@ -469,6 +474,13 @@ impl QaScenario {
             Self::RoomManagement => matches!(
                 stage,
                 QaStage::Safety | QaStage::LoginSync | QaStage::RoomSpace | QaStage::RoomManagement
+            ),
+            Self::RoomPeopleProjection => matches!(
+                stage,
+                QaStage::Safety
+                    | QaStage::LoginSync
+                    | QaStage::RoomSpace
+                    | QaStage::RoomPeopleProjection
             ),
             Self::Timeline => matches!(
                 stage,
@@ -663,6 +675,14 @@ fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
         QaStage::RoomSpace => &["room_space=ok"],
         QaStage::Directory => &["directory_query=ok", "directory_join=ok"],
         QaStage::RoomManagement => &["room_settings=ok", "moderation=ok", "permission_guard=ok"],
+        QaStage::RoomPeopleProjection => &[
+            "room_people_joined_scope=ok",
+            "room_people_alias_search=ok",
+            "room_people_surface_isolation=ok",
+            "room_people_membership_refresh=ok",
+            "room_people_mentions_content=ok",
+            "room_people_projection=ok",
+        ],
         QaStage::Timeline => &["timeline=ok", "timeline_nav=ok", "hide_redacted=ok"],
         QaStage::TimelineReconnect => &[
             "timeline_reconnect_recv_after_reconnect=ok",
@@ -878,6 +898,12 @@ fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             QaStage::RoomSpace,
             QaStage::RoomManagement,
         ],
+        QaScenario::RoomPeopleProjection => vec![
+            QaStage::Safety,
+            QaStage::LoginSync,
+            QaStage::RoomSpace,
+            QaStage::RoomPeopleProjection,
+        ],
         QaScenario::Timeline => vec![
             QaStage::Safety,
             QaStage::LoginSync,
@@ -991,6 +1017,7 @@ fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             QaStage::RoomSpace,
             QaStage::Directory,
             QaStage::RoomManagement,
+            QaStage::RoomPeopleProjection,
             QaStage::Timeline,
             QaStage::Activity,
             QaStage::Composer,
@@ -1024,6 +1051,7 @@ fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static str> {
         QaScenario::RoomSpace
         | QaScenario::Directory
         | QaScenario::RoomManagement
+        | QaScenario::RoomPeopleProjection
         | QaScenario::CredentialHealth
         | QaScenario::NativeAttention
         | QaScenario::E2eeTrust
@@ -1851,6 +1879,535 @@ async fn join_directory_room_for_qa(
         .await
         .map_err(|e| format!("{label}: submit join by alias failed: {e}"))?;
     wait_for_room_joined(conn_b, join_id, public_room_id, label).await
+}
+
+async fn run_room_people_projection_stage(
+    config: &QaConfig,
+    conn_a: &mut CoreConnection,
+    conn_b: &mut CoreConnection,
+    account_key_a: &AccountKey,
+    account_key_b: &AccountKey,
+    room_id: &str,
+) -> Result<(), String> {
+    let user_a_id = format!("@{}:{}", config.user_a, config.server_name);
+    let user_b_id = format!("@{}:{}", config.user_b, config.server_name);
+    let user_c_id = config.dm_scope_control_user_id()?;
+
+    let profile_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Account(AccountCommand::SetDisplayName {
+            request_id: profile_id,
+            display_name: Some("Room People Known".to_owned()),
+        }))
+        .await
+        .map_err(|e| format!("room people: submit display-name update failed: {e}"))?;
+    wait_for_profile_updated(conn_a, profile_id, "room people display-name update").await?;
+
+    let main_target = query_mention_candidates(
+        conn_a,
+        account_key_a,
+        room_id,
+        MentionSurface::Main,
+        "",
+        "room people main candidates",
+    )
+    .await?;
+    assert_joined_candidate_scope(&main_target, [&user_a_id, &user_b_id], &user_c_id)?;
+    if main_target.room_mention_allowed != RoomMentionPermission::Allowed {
+        return Err(
+            "room people: room mention permission was not allowed for the room creator".to_owned(),
+        );
+    }
+    if !main_target.candidates.iter().any(|candidate| {
+        candidate.user_id == user_a_id
+            && candidate.display_label.as_deref() == Some("Room People Known")
+    }) {
+        return Err("room people: known room display label was not projected".to_owned());
+    }
+    if !main_target
+        .candidates
+        .iter()
+        .any(|candidate| candidate.user_id == user_b_id)
+    {
+        return Err(
+            "room people: joined member with an optional label was not projected".to_owned(),
+        );
+    }
+    println!("room_people_joined_scope=ok");
+
+    let alias_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Account(AccountCommand::SetLocalUserAlias {
+            request_id: alias_id,
+            user_id: user_b_id.clone(),
+            alias: Some("Room People Personal Alias".to_owned()),
+        }))
+        .await
+        .map_err(|e| format!("room people: submit local alias update failed: {e}"))?;
+    wait_for_local_alias(
+        conn_a,
+        alias_id,
+        &user_b_id,
+        "Room People Personal Alias",
+        "room people local alias update",
+    )
+    .await?;
+    let aliased_target = query_mention_candidates(
+        conn_a,
+        account_key_a,
+        room_id,
+        MentionSurface::Main,
+        "personal alias",
+        "room people alias candidates",
+    )
+    .await?;
+    if aliased_target.candidates.len() != 1
+        || aliased_target.candidates[0].user_id != user_b_id
+        || aliased_target.candidates[0].display_label.as_deref()
+            != Some("Room People Personal Alias")
+    {
+        return Err(
+            "room people: local alias did not drive candidate matching and label".to_owned(),
+        );
+    }
+    println!("room_people_alias_search=ok");
+
+    let main_target = query_mention_candidates(
+        conn_a,
+        account_key_a,
+        room_id,
+        MentionSurface::Main,
+        "",
+        "room people restored main candidates",
+    )
+    .await?;
+    let thread_target = query_mention_candidates(
+        conn_a,
+        account_key_a,
+        room_id,
+        MentionSurface::Thread,
+        &config.user_b,
+        "room people thread candidates",
+    )
+    .await?;
+    if thread_target.candidates.len() != 1 || thread_target.candidates[0].user_id != user_b_id {
+        return Err("room people: thread target did not retain its independent query".to_owned());
+    }
+    let retained_main = conn_a
+        .snapshot()
+        .mention_candidates
+        .target(room_id, MentionSurface::Main)
+        .cloned()
+        .ok_or_else(|| "room people: main target disappeared after thread query".to_owned())?;
+    assert_joined_candidate_scope(&retained_main, [&user_a_id, &user_b_id], &user_c_id)?;
+    println!("room_people_surface_isolation=ok");
+
+    let leave_id = conn_b.next_request_id();
+    conn_b
+        .command(CoreCommand::Room(RoomCommand::LeaveRoom {
+            request_id: leave_id,
+            room_id: room_id.to_owned(),
+        }))
+        .await
+        .map_err(|e| format!("room people: submit leave failed: {e}"))?;
+    wait_for_room_left(conn_b, leave_id, room_id, "room people member leave").await?;
+    wait_for_mention_candidate_ids(
+        conn_a,
+        room_id,
+        MentionSurface::Main,
+        [&user_a_id],
+        "room people candidates after leave",
+    )
+    .await?;
+
+    let invite_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Room(RoomCommand::InviteUser {
+            request_id: invite_id,
+            room_id: room_id.to_owned(),
+            user_id: user_b_id.clone(),
+        }))
+        .await
+        .map_err(|e| format!("room people: submit reinvite failed: {e}"))?;
+    wait_for_user_invited(
+        conn_a,
+        invite_id,
+        room_id,
+        &user_b_id,
+        "room people reinvite",
+    )
+    .await?;
+    let rejoin_id = conn_b.next_request_id();
+    conn_b
+        .command(CoreCommand::Room(RoomCommand::JoinRoom {
+            request_id: rejoin_id,
+            room_id: room_id.to_owned(),
+        }))
+        .await
+        .map_err(|e| format!("room people: submit rejoin failed: {e}"))?;
+    wait_for_room_joined(conn_b, rejoin_id, room_id, "room people member rejoin").await?;
+    wait_for_mention_candidate_ids(
+        conn_a,
+        room_id,
+        MentionSurface::Main,
+        [&user_a_id, &user_b_id],
+        "room people candidates after rejoin",
+    )
+    .await?;
+    println!("room_people_membership_refresh=ok");
+
+    let key = TimelineKey::room(account_key_a.clone(), room_id.to_owned());
+    let subscribe_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
+            request_id: subscribe_id,
+            key: key.clone(),
+        }))
+        .await
+        .map_err(|e| format!("room people: submit timeline subscribe failed: {e}"))?;
+    wait_for_initial_items(conn_a, &key, subscribe_id, "room people timeline subscribe").await?;
+    let key_b = TimelineKey::room(account_key_b.clone(), room_id.to_owned());
+    let subscribe_b_id = conn_b.next_request_id();
+    conn_b
+        .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
+            request_id: subscribe_b_id,
+            key: key_b.clone(),
+        }))
+        .await
+        .map_err(|e| format!("room people: submit receiver timeline subscribe failed: {e}"))?;
+    wait_for_initial_items(
+        conn_b,
+        &key_b,
+        subscribe_b_id,
+        "room people receiver timeline subscribe",
+    )
+    .await?;
+
+    let body = "Room people structured mention QA";
+    let transaction_id = "qa-room-people-mention";
+    let send_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Timeline(TimelineCommand::SendText {
+            request_id: send_id,
+            key: key.clone(),
+            transaction_id: transaction_id.to_owned(),
+            body: body.to_owned(),
+            mentions: MentionIntent {
+                targets: vec![MentionTarget::User {
+                    user_id: user_b_id.clone(),
+                    display_label: thread_target.candidates[0]
+                        .display_label
+                        .clone()
+                        .unwrap_or_else(|| "Unknown user".to_owned()),
+                }],
+            },
+        }))
+        .await
+        .map_err(|e| format!("room people: submit structured mention failed: {e}"))?;
+    wait_for_send_flow_completion(
+        conn_a,
+        send_id,
+        &key,
+        transaction_id,
+        body,
+        "room people structured mention",
+    )
+    .await?;
+    let received = wait_for_item_with_body(
+        conn_b,
+        &key_b,
+        body,
+        "room people receiver structured mention",
+    )
+    .await?;
+    let received_event_id = match received.id {
+        TimelineItemId::Event { event_id } => event_id,
+        TimelineItemId::Transaction { .. } | TimelineItemId::Synthetic { .. } => {
+            return Err("room people: receiver mention did not have a remote event id".to_owned());
+        }
+    };
+    let source_id = conn_b.next_request_id();
+    conn_b
+        .command(CoreCommand::Timeline(TimelineCommand::LoadMessageSource {
+            request_id: source_id,
+            key: key_b.clone(),
+            event_id: received_event_id,
+        }))
+        .await
+        .map_err(|e| format!("room people: submit message-source load failed: {e}"))?;
+    wait_for_structured_mention_source(
+        conn_b,
+        source_id,
+        &user_b_id,
+        "room people structured mention source",
+    )
+    .await?;
+    let unsubscribe_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Timeline(TimelineCommand::Unsubscribe {
+            request_id: unsubscribe_id,
+            key,
+        }))
+        .await
+        .map_err(|e| format!("room people: submit timeline unsubscribe failed: {e}"))?;
+    let unsubscribe_b_id = conn_b.next_request_id();
+    conn_b
+        .command(CoreCommand::Timeline(TimelineCommand::Unsubscribe {
+            request_id: unsubscribe_b_id,
+            key: key_b,
+        }))
+        .await
+        .map_err(|e| format!("room people: submit receiver timeline unsubscribe failed: {e}"))?;
+    println!("room_people_mentions_content=ok");
+    println!("room_people_projection=ok");
+    Ok(())
+}
+
+fn assert_joined_candidate_scope<const N: usize>(
+    target: &MentionCandidatesTarget,
+    expected_user_ids: [&String; N],
+    excluded_user_id: &str,
+) -> Result<(), String> {
+    if target.completeness != MentionCandidatesCompleteness::Complete {
+        return Err("room people: candidate target was not complete".to_owned());
+    }
+    let actual = target
+        .candidates
+        .iter()
+        .map(|candidate| candidate.user_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let expected = expected_user_ids
+        .into_iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    if actual != expected || actual.contains(excluded_user_id) {
+        return Err("room people: candidate target did not match joined-room scope".to_owned());
+    }
+    Ok(())
+}
+
+async fn query_mention_candidates(
+    conn: &mut CoreConnection,
+    account_key: &AccountKey,
+    room_id: &str,
+    surface: MentionSurface,
+    query: &str,
+    label: &str,
+) -> Result<MentionCandidatesTarget, String> {
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::Room(RoomCommand::QueryMentionCandidates {
+        request_id,
+        account_key: account_key.clone(),
+        room_id: room_id.to_owned(),
+        surface,
+        query: query.to_owned(),
+    }))
+    .await
+    .map_err(|e| format!("{label}: submit failed: {e}"))?;
+    wait_for_mention_target(conn, room_id, surface, Some(request_id), label, |target| {
+        target.completeness == MentionCandidatesCompleteness::Complete
+    })
+    .await
+}
+
+async fn wait_for_mention_candidate_ids<const N: usize>(
+    conn: &mut CoreConnection,
+    room_id: &str,
+    surface: MentionSurface,
+    expected_user_ids: [&String; N],
+    label: &str,
+) -> Result<MentionCandidatesTarget, String> {
+    let expected = expected_user_ids
+        .into_iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    wait_for_mention_target(conn, room_id, surface, None, label, |target| {
+        target.completeness == MentionCandidatesCompleteness::Complete
+            && target
+                .candidates
+                .iter()
+                .map(|candidate| candidate.user_id.as_str())
+                .collect::<BTreeSet<_>>()
+                == expected
+    })
+    .await
+}
+
+async fn wait_for_mention_target(
+    conn: &mut CoreConnection,
+    room_id: &str,
+    surface: MentionSurface,
+    request_id: Option<RequestId>,
+    label: &str,
+    predicate: impl Fn(&MentionCandidatesTarget) -> bool,
+) -> Result<MentionCandidatesTarget, String> {
+    let deadline = QaEventDeadline::after(ROOM_LIST_EVENT_TIMEOUT);
+    loop {
+        if let Some(target) = conn
+            .snapshot()
+            .mention_candidates
+            .target(room_id, surface)
+            .filter(|target| {
+                request_id.is_none_or(|request_id| target.request_id == request_id.sequence)
+                    && predicate(target)
+            })
+            .cloned()
+        {
+            return Ok(target);
+        }
+        let event = deadline
+            .recv(conn)
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for mention candidate projection"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+        if let CoreEvent::OperationFailed {
+            request_id: event_request_id,
+            failure,
+        } = event
+            && request_id == Some(event_request_id)
+        {
+            return Err(format!(
+                "{label}: mention candidate command failed: {failure:?}"
+            ));
+        }
+    }
+}
+
+async fn wait_for_profile_updated(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    label: &str,
+) -> Result<(), String> {
+    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
+    loop {
+        let event = deadline
+            .recv(conn)
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for profile update"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+        match event {
+            CoreEvent::Account(AccountEvent::ProfileUpdated {
+                request_id: event_request_id,
+                ..
+            }) if event_request_id == request_id => return Ok(()),
+            CoreEvent::OperationFailed {
+                request_id: event_request_id,
+                failure,
+            } if event_request_id == request_id => {
+                return Err(format!("{label}: profile update failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn wait_for_local_alias(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    user_id: &str,
+    expected_alias: &str,
+    label: &str,
+) -> Result<(), String> {
+    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
+    loop {
+        if conn
+            .snapshot()
+            .profile
+            .local_aliases
+            .get(user_id)
+            .is_some_and(|alias| alias == expected_alias)
+        {
+            return Ok(());
+        }
+        let event = deadline
+            .recv(conn)
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for local alias projection"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+        if let CoreEvent::OperationFailed {
+            request_id: event_request_id,
+            failure,
+        } = event
+            && event_request_id == request_id
+        {
+            return Err(format!("{label}: local alias update failed: {failure:?}"));
+        }
+    }
+}
+
+async fn wait_for_room_left(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    room_id: &str,
+    label: &str,
+) -> Result<(), String> {
+    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
+    loop {
+        let event = deadline
+            .recv(conn)
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for room leave"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+        match event {
+            CoreEvent::Room(RoomEvent::RoomLeft {
+                request_id: event_request_id,
+                room_id: event_room_id,
+            }) if event_request_id == request_id => {
+                if event_room_id != room_id {
+                    return Err(format!("{label}: room leave target mismatch"));
+                }
+                return Ok(());
+            }
+            CoreEvent::OperationFailed {
+                request_id: event_request_id,
+                failure,
+            } if event_request_id == request_id => {
+                return Err(format!("{label}: room leave failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn wait_for_structured_mention_source(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    mentioned_user_id: &str,
+    label: &str,
+) -> Result<(), String> {
+    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
+    loop {
+        let event = deadline
+            .recv(conn)
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for message source"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+        match event {
+            CoreEvent::Timeline(TimelineEvent::MessageSourceLoaded {
+                request_id: event_request_id,
+                source,
+                ..
+            }) if event_request_id == request_id => {
+                let user_ids = source
+                    .original_json
+                    .as_ref()
+                    .and_then(|json| json.pointer("/content/m.mentions/user_ids"))
+                    .and_then(serde_json::Value::as_array)
+                    .ok_or_else(|| format!("{label}: source lacked structured mention user ids"))?;
+                if user_ids.len() != 1 || user_ids[0].as_str() != Some(mentioned_user_id) {
+                    return Err(format!("{label}: structured mention user ids mismatch"));
+                }
+                return Ok(());
+            }
+            CoreEvent::OperationFailed {
+                request_id: event_request_id,
+                failure,
+            } if event_request_id == request_id => {
+                return Err(format!("{label}: message-source load failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
 }
 
 async fn run_room_management_stage(
@@ -6193,6 +6750,18 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
     let room_list_b = room_list_summary(&snapshot_b);
     println!("room_list_b={room_list_b}");
     println!("room_space=ok");
+
+    if scenario.should_run_stage(QaStage::RoomPeopleProjection) {
+        run_room_people_projection_stage(
+            &config,
+            &mut conn_a,
+            &mut conn_b,
+            &account_key_a,
+            &account_key_b,
+            &room_id,
+        )
+        .await?;
+    }
 
     if scenario.should_run_stage(QaStage::RoomManagement) {
         run_room_management_stage(

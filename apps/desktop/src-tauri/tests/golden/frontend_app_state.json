@@ -254,6 +254,12 @@
             "receipts_by_event": {},
             "typing_user_ids": [
               "@other:example.invalid"
+            ],
+            "typing_users": [
+              {
+                "display_label": "Other Person",
+                "user_id": "@other:example.invalid"
+              }
             ]
           }
         }
@@ -270,6 +276,53 @@
         },
         "platform": "linux",
         "pseudo_locale": "none"
+      },
+      "mention_candidates": {
+        "targets": [
+          {
+            "candidates": [
+              {
+                "avatar": {
+                  "mxc_uri": "mxc://example.invalid/mention-avatar",
+                  "thumbnail": {
+                    "kind": "notRequested"
+                  }
+                },
+                "display_label": "Fixture User",
+                "membership": "joined",
+                "original_display_label": "Fixture User",
+                "user_id": "@fixture:example.invalid"
+              }
+            ],
+            "completeness": "partial",
+            "failure_kind": null,
+            "generation": 7,
+            "query": "fi",
+            "request_id": 70,
+            "room_id": "!room:example.invalid",
+            "room_mention_allowed": "allowed",
+            "surface": "main"
+          },
+          {
+            "candidates": [
+              {
+                "avatar": null,
+                "display_label": null,
+                "membership": "joined",
+                "original_display_label": null,
+                "user_id": "@unlabelled:example.invalid"
+              }
+            ],
+            "completeness": "complete",
+            "failure_kind": null,
+            "generation": 8,
+            "query": "",
+            "request_id": 71,
+            "room_id": "!room:example.invalid",
+            "room_mention_allowed": "denied",
+            "surface": "thread"
+          }
+        ]
       },
       "native_attention": {
         "dispatch": {
@@ -359,7 +412,8 @@
               "body_preview": "Pinned fixture message",
               "event_id": "$pinned:example.invalid",
               "redacted": false,
-              "sender": "@fixture:example.invalid"
+              "sender": "@fixture:example.invalid",
+              "sender_label": "Fixture User"
             }
           ]
         }
@@ -607,6 +661,7 @@
             "mimetype": "image/png",
             "room_id": "!room:example.invalid",
             "sender": "@fixture:example.invalid",
+            "sender_label": "Fixture User",
             "size": 1024,
             "source_mxc": "mxc://example.invalid/attach",
             "thread_root": null,
