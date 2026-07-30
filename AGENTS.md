@@ -1264,6 +1264,35 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   MSC4186 invite-list contract is complete; do not hard-code SyncService as the
   meaning of `probed`.
 
+## Device-to-Device Verification Is Disabled in the UI (#370)
+
+- SAS / device-to-device / QR verification is **not offered in the end-user UI**.
+  Recovery key is the only supported verification path. The flow works only
+  intermittently, and a user who starts it can be stranded behind the
+  verification gate while an unverified device stays registered on the
+  homeserver, which then makes other Matrix clients warn.
+- `deviceToDeviceVerificationEnabled()` in `App.tsx` is the single owner of that
+  decision (`VITE_KOUSHI_ENABLE_DEVICE_VERIFICATION=1` opts in). The SDK/core
+  implementation is deliberately untouched, so the flag is the only thing
+  between it and the UI: re-enabling is a decision, not a rebuild. Do not add a
+  second gate, and do not branch on `methods.includes("existingDeviceSas")`
+  without also consulting the flag.
+- Rust still projects `existingDeviceSas` in `gate.methods` when the homeserver
+  offers it. That projection stays honest — only the UI refuses it. Do not
+  "fix" this by removing the method from the Rust projection.
+- Tests that exercise the SAS implementation must opt in explicitly
+  (`vi.stubEnv`), and `SessionVerificationGate.test.tsx` also pins the
+  production default: no SAS button, no confirm dialog, no emoji comparison, and
+  `startOwnUserSas` never invoked. Remember `vi.unstubAllEnvs()` in `afterEach`.
+- With SAS gone, a user holding no recovery material has no action left in the
+  gate, so it renders explicit `gate.noRecoveryKey*` guidance instead of an
+  empty panel. Nothing is deleted there: the session stays signed in.
+- **Still open in #370:** the explicit destructive
+  `Cancel sign-in and remove this device…` path — remote-first device deletion,
+  idempotent already-absent handling, retryable failure, and the OAuth/MAS vs
+  password-UIA split. Verification failure must never auto-delete the server
+  device or local data; that remains true today because no such path exists yet.
+
 ## E2EE Trust Phase B GUI Notes
 
 - Trust GUI controls are transport clients only. Add Tauri commands as thin
