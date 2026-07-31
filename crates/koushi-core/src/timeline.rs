@@ -6760,6 +6760,13 @@ struct TimelineRelayBatch {
     gap_repair_projections: BTreeSet<CausalProjectionId>,
 }
 
+impl TimelineRelayBatch {
+    fn retain_gap_repair_projections_for_actor(&mut self, actor_generation: u64) {
+        self.gap_repair_projections
+            .retain(|projection| projection.actor_generation == actor_generation);
+    }
+}
+
 fn timeline_key_trace_kind(key: &TimelineKey) -> &'static str {
     match &key.kind {
         TimelineKind::Room { .. } => "room",
@@ -13777,7 +13784,7 @@ mod timeline_gap_repair_tracker_tests {
     }
 
     #[test]
-    fn stale_prior_actor_gap_projection_is_not_relayed_repeatedly() {
+    fn stale_prior_actor_gap_projection_is_removed_from_every_relay_batch() {
         let current_actor_generation = 9;
         let stale = CausalProjectionId {
             actor_generation: current_actor_generation - 1,
@@ -13791,17 +13798,19 @@ mod timeline_gap_repair_tracker_tests {
         };
 
         for _ in 0..3 {
-            assert!(
-                gap_repair_projections_for_actor(BTreeSet::from([stale]), current_actor_generation)
-                    .is_empty(),
-                "a superseded actor descriptor must not enter another relay batch"
+            let mut batch = TimelineRelayBatch {
+                generation: TimelineGeneration(4),
+                diffs: Vec::new(),
+                thread_attention_provenance: ThreadAttentionBatchProvenance::default(),
+                gap_repair_projections: BTreeSet::from([stale, current]),
+            };
+            batch.retain_gap_repair_projections_for_actor(current_actor_generation);
+            assert_eq!(
+                batch.gap_repair_projections,
+                BTreeSet::from([current]),
+                "every relay batch must drop superseded descriptors and retain current identity"
             );
         }
-        assert_eq!(
-            gap_repair_projections_for_actor(BTreeSet::from([current]), current_actor_generation),
-            BTreeSet::from([current]),
-            "the current actor descriptor must retain its causal identity"
-        );
     }
 
     #[test]
@@ -14575,14 +14584,6 @@ fn gap_repair_projections_from_sdk_diffs(
             | eyeball_im::VectorDiff::PopBack => {}
         }
     }
-    projections
-}
-
-fn gap_repair_projections_for_actor(
-    mut projections: BTreeSet<CausalProjectionId>,
-    actor_generation: u64,
-) -> BTreeSet<CausalProjectionId> {
-    projections.retain(|projection| projection.actor_generation == actor_generation);
     projections
 }
 
@@ -21012,11 +21013,14 @@ async fn run_diff_relay(
         };
 
         let thread_attention_provenance = ThreadAttentionBatchProvenance::from_sdk_diffs(&diffs);
-        let gap_repair_projections = gap_repair_projections_for_actor(
-            gap_repair_projections_from_sdk_diffs(&diffs),
-            actor_generation,
-        );
-        for projection in &gap_repair_projections {
+        let mut batch = TimelineRelayBatch {
+            generation,
+            gap_repair_projections: gap_repair_projections_from_sdk_diffs(&diffs),
+            diffs,
+            thread_attention_provenance,
+        };
+        batch.retain_gap_repair_projections_for_actor(actor_generation);
+        for projection in &batch.gap_repair_projections {
             record_timeline_gap_projection_boundary(
                 "relay_received",
                 "queued",
@@ -21026,15 +21030,10 @@ async fn run_diff_relay(
                 Some(projection.projection_batch),
                 None,
                 None,
-                gap_repair_projections.len(),
+                batch.gap_repair_projections.len(),
             );
         }
-        match actor_tx.try_send(TimelineRelayBatch {
-            generation,
-            diffs,
-            thread_attention_provenance,
-            gap_repair_projections,
-        }) {
+        match actor_tx.try_send(batch) {
             Ok(_) => {}
             Err(mpsc::error::TrySendError::Full(batch)) => {
                 for projection in &batch.gap_repair_projections {
