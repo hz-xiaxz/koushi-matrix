@@ -276,7 +276,15 @@ test("stale session anchor cannot win when a large prepend lands during room re-
           )
       )
     )
-    .toHaveLength(1);
+    .toEqual([
+      {
+        source: "timeline.scroll",
+        message:
+          "stage=room_reentry_restore session_mode=anchor anchor_age=stale " +
+          "anchor_is_live=false path=cleared_to_live_edge",
+        timestampMs: expect.any(Number)
+      }
+    ]);
 });
 
 test("initial short load grows to the live edge on later PushBack", async ({ page }) => {

@@ -477,6 +477,25 @@ type TimelineViewportSessionMemory =
   | { mode: "live-edge" }
   | { mode: "anchor"; anchor: TimelineScrollAnchor };
 
+type TimelineSessionAnchorAgeBucket = "none" | "fresh" | "recent" | "stale";
+
+function timelineSessionAnchorAgeBucket(
+  anchor: TimelineScrollAnchor | null,
+  nowMs = Date.now()
+): TimelineSessionAnchorAgeBucket {
+  if (!anchor) {
+    return "none";
+  }
+  const ageMs = Math.max(0, nowMs - anchor.updated_at_ms);
+  if (ageMs < 30_000) {
+    return "fresh";
+  }
+  if (ageMs < 5 * 60_000) {
+    return "recent";
+  }
+  return "stale";
+}
+
 type TimelineBackfillRequestEpoch = {
   id: number;
   timelineKeyHash: string;
@@ -2628,6 +2647,10 @@ export const TimelineView = memo(function TimelineView({
   const timelineKeyHashRef = useRef(timelineKeyHash);
   timelineKeyHashRef.current = timelineKeyHash;
   const sessionRoomScrollAnchorRef = useRef<TimelineScrollAnchor | null>(null);
+  const initialRoomScrollAnchorPresentRef = useRef<boolean | null>(null);
+  const roomReentrySessionModeRef = useRef<"none" | "live_edge" | "anchor">("none");
+  const roomReentryAnchorAgeRef = useRef<TimelineSessionAnchorAgeBucket>("none");
+  const roomReentryDiagnosticKeyRef = useRef<string | null>(null);
   const roomTimelineRoomId = "Room" in timelineKey.kind ? timelineKey.kind.Room.room_id : null;
   const readSignalRoomId =
     "Room" in timelineKey.kind
@@ -3232,6 +3255,10 @@ export const TimelineView = memo(function TimelineView({
         backfillRequestEpochRef.current = null;
         backfillRetryFenceRef.current = null;
         initialItemsSeenForTimelineKeyRef.current = timelineKeyHashRef.current;
+        const entryAnchor = sessionRoomScrollAnchorRef.current;
+        initialRoomScrollAnchorPresentRef.current = entryAnchor
+          ? canonicalTimelineContainsActivityEventId(event.InitialItems.items, entryAnchor.event_id)
+          : null;
         recordTimelineInitialItems(event.InitialItems.items.length);
         cancelScrollFollowUpFrames();
         resetActiveMeasurementDeferral({ clearMountedIds: true });
@@ -3439,6 +3466,17 @@ export const TimelineView = memo(function TimelineView({
     const sessionViewport = timelineViewportSessionMemory.get(timelineKeyHash) ?? null;
     sessionRoomScrollAnchorRef.current =
       sessionViewport?.mode === "anchor" ? sessionViewport.anchor : null;
+    initialRoomScrollAnchorPresentRef.current = null;
+    roomReentrySessionModeRef.current =
+      sessionViewport?.mode === "anchor"
+        ? "anchor"
+        : sessionViewport?.mode === "live-edge"
+          ? "live_edge"
+          : "none";
+    roomReentryAnchorAgeRef.current = timelineSessionAnchorAgeBucket(
+      sessionViewport?.mode === "anchor" ? sessionViewport.anchor : null
+    );
+    roomReentryDiagnosticKeyRef.current = null;
     anchorAsyncGenerationRef.current += 1;
     pendingAnchorRef.current = null;
     anchorRestorePendingRef.current = false;
@@ -3478,6 +3516,17 @@ export const TimelineView = memo(function TimelineView({
     const sessionViewport = timelineViewportSessionMemory.get(timelineKeyHash) ?? null;
     sessionRoomScrollAnchorRef.current =
       sessionViewport?.mode === "anchor" ? sessionViewport.anchor : null;
+    initialRoomScrollAnchorPresentRef.current = null;
+    roomReentrySessionModeRef.current =
+      sessionViewport?.mode === "anchor"
+        ? "anchor"
+        : sessionViewport?.mode === "live-edge"
+          ? "live_edge"
+          : "none";
+    roomReentryAnchorAgeRef.current = timelineSessionAnchorAgeBucket(
+      sessionViewport?.mode === "anchor" ? sessionViewport.anchor : null
+    );
+    roomReentryDiagnosticKeyRef.current = null;
     setNavigationSnapshot(null);
     setViewportAtBottom(false);
     lastViewportObservationRef.current = null;
@@ -4396,6 +4445,24 @@ export const TimelineView = memo(function TimelineView({
     const roomAnchorAlreadyRestored =
       activeRoomAnchorSignature !== null &&
       restoredRoomScrollAnchorSignatureRef.current === activeRoomAnchorSignature;
+    const emitRoomReentryDecision = (
+      path: "dom" | "virtual_fallback" | "cleared_to_live_edge" | "live_edge",
+      anchorIsLive: boolean
+    ) => {
+      if (
+        initialLiveEdgeScrollKey === null ||
+        roomReentryDiagnosticKeyRef.current === initialLiveEdgeScrollKey
+      ) {
+        return;
+      }
+      roomReentryDiagnosticKeyRef.current = initialLiveEdgeScrollKey;
+      emitDiagnosticLog(
+        "timeline.scroll",
+        `stage=room_reentry_restore session_mode=${roomReentrySessionModeRef.current} ` +
+          `anchor_age=${roomReentryAnchorAgeRef.current} anchor_is_live=${String(anchorIsLive)} ` +
+          `path=${path}`
+      );
+    };
     let roomAnchorRestored = false;
     if (
       timelineInitialized &&
@@ -4422,15 +4489,17 @@ export const TimelineView = memo(function TimelineView({
         return restored;
       };
 
-      const anchorIsLive = canonicalTimelineContainsActivityEventId(
-        items,
-        activeRoomAnchor.event_id
-      );
+      const anchorIsLive =
+        initialRoomScrollAnchorPresentRef.current !== false &&
+        canonicalTimelineContainsActivityEventId(items, activeRoomAnchor.event_id);
       if (anchorIsLive) {
         roomScrollAnchorRestorePendingRef.current = true;
         runWithScrollWriteReason("roomRestore", () => {
           roomAnchorRestored = restoreActiveRoomAnchor();
         });
+        if (roomAnchorRestored) {
+          emitRoomReentryDecision("dom", true);
+        }
         if (
           !roomAnchorRestored &&
           container &&
@@ -4441,6 +4510,7 @@ export const TimelineView = memo(function TimelineView({
             (row) => row.activity_event_id === activeRoomAnchor.event_id
           );
           if (anchorIndex >= 0) {
+            emitRoomReentryDecision("virtual_fallback", true);
             const anchorTop = timelineHeightModel.offsets[anchorIndex] ?? 0;
             const anchorHeight = timelineItemHeightAtIndex(timelineHeightModel, anchorIndex);
             const targetScrollTop =
@@ -4479,6 +4549,7 @@ export const TimelineView = memo(function TimelineView({
           roomScrollAnchorRestorePendingRef.current = false;
         }
       } else if (container) {
+        emitRoomReentryDecision("cleared_to_live_edge", false);
         sessionRoomScrollAnchorRef.current = null;
         setViewportIntentToLiveEdge();
         restoredRoomScrollAnchorSignatureRef.current = activeRoomAnchorSignature;
@@ -4496,6 +4567,7 @@ export const TimelineView = memo(function TimelineView({
       !roomScrollAnchorRestorePendingRef.current
     ) {
       if (container) {
+        emitRoomReentryDecision("live_edge", false);
         setViewportIntentToLiveEdge();
         runWithScrollWriteReason("liveEdge", () => {
           scrollContainerToBottom(container);
@@ -4579,6 +4651,7 @@ export const TimelineView = memo(function TimelineView({
   }, [
     applyViewportIntent,
     generation,
+    emitDiagnosticLog,
     roomId,
     roomTimelineRoomId,
     initialLiveEdgeScrollKey,
@@ -5075,11 +5148,19 @@ export const TimelineView = memo(function TimelineView({
     if (!isProgrammaticEcho) {
       markScrollActivityActive();
     }
-    const isUserDrivenScroll = userScrollInputPendingRef.current && !isProgrammaticEcho;
+    const userInputPending = userScrollInputPendingRef.current;
+    const actuallyAtBottom = Boolean(container && isScrolledToBottom(container));
+    if (userInputPending && actuallyAtBottom) {
+      setViewportIntentToLiveEdge();
+      if (isProgrammaticEcho) {
+        userScrollInputPendingRef.current = false;
+      }
+    }
+    const isUserDrivenScroll = userInputPending && !isProgrammaticEcho;
     pendingScrollFrameUserInputRef.current =
       pendingScrollFrameUserInputRef.current || isUserDrivenScroll;
     if (!isProgrammaticEcho && container) {
-      const atBottom = isScrolledToBottom(container);
+      const atBottom = actuallyAtBottom;
       if (isUserDrivenScroll) {
         // A genuine user scroll takes viewport control back from any jump.
         jumpViewportControlRef.current = false;
