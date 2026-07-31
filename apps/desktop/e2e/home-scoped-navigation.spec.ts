@@ -32,16 +32,14 @@ test("Home owns Explore and Invites; a selected space shows neither", async ({ p
   await expect(page.getByRole("button", { name: t("workspace.invites"), exact: true })).toHaveCount(0);
 });
 
-test("a selected space shows no Threads nav entry", async ({ page }) => {
-  // The sidebar entry opened the *selected room's* threads, which reads as
-  // space-scoped from where it sat. The room header owns that entry point now.
+test("a selected space exposes the aggregate Threads nav entry", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("complementary", { name: t("workspace.rooms") })).toBeVisible();
 
   await selectSpace(page);
 
   const sidebar = page.getByRole("complementary", { name: t("workspace.rooms") });
-  await expect(sidebar.getByRole("button", { name: t("workspace.threads") })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: t("workspace.threads") })).toBeVisible();
 });
 
 test("the room header exposes Threads with no unread thread activity", async ({ page }) => {

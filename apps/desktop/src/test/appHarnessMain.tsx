@@ -2243,7 +2243,7 @@ mock.setCommandResponse("submit_search", ({ query }: { query?: string }) => {
     kind: "results",
     request_id: 1,
     query: String(query ?? "Alpha"),
-    scope: "allRooms",
+    scope: "currentRoom",
     results: [
       {
         room_id: ROOM_ID,

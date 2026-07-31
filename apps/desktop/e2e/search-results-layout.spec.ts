@@ -52,7 +52,7 @@ async function openSearchPanelWithResult(page: Page): Promise<void> {
                 kind: "results",
                 request_id: 91,
                 query: String(query ?? "refactoring"),
-                scope: "allRooms",
+                scope: "currentRoom",
                 results: [
                   {
                     room_id: roomId,

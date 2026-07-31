@@ -3998,6 +3998,9 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
   await expect(page.getByRole("textbox", { name: "Message composer" })).toHaveValue("");
 
   await page.getByRole("button", { name: "Edit scheduled send" }).click();
+  const scheduledBody = page.getByRole("textbox", { name: "Scheduled message" });
+  await expect(scheduledBody).toHaveValue("Phase B scheduled body");
+  await scheduledBody.fill("Phase B edited scheduled body");
   await page.getByLabel("Scheduled send time").fill("2030-01-03T04:05");
   await page.getByRole("button", { name: "Save scheduled send" }).click();
   await expect
@@ -4006,6 +4009,7 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
     )
     .toEqual({
       scheduledId: "scheduled-harness-1",
+      body: "Phase B edited scheduled body",
       sendAtMs: editedSendAt
     });
   await expect(page.getByRole("region", { name: "Scheduled messages" })).not.toContainText(
@@ -4023,7 +4027,7 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
             ...current.state.ui.timeline,
             scheduled_sends: current.state.ui.timeline.scheduled_sends.map((item) =>
               item.scheduled_id === "scheduled-harness-1"
-                ? { ...item, send_at_ms: editedSendAt }
+                ? { ...item, body: "Phase B edited scheduled body", send_at_ms: editedSendAt }
                 : item
             )
           }
@@ -4043,7 +4047,7 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
     )
     .toEqual({ scheduledId: "scheduled-harness-1" });
   await expect(page.getByRole("region", { name: "Scheduled messages" })).toContainText(
-    "Phase B scheduled body"
+    "Phase B edited scheduled body"
   );
   await page.evaluate(() => {
     const current = window.__harness.currentSnapshot();
@@ -4508,6 +4512,8 @@ test("pin and unpin actions dispatch typed commands and pinned banner waits for 
     window.__harness.pushStateChanged();
   }, HARNESS_ROOM_ID);
 
+  await expect(page.getByRole("button", { name: "Pinned · 1", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Pinned · 1", exact: true }).click();
   await expect(pinnedRegion).toBeVisible();
   await expect(pinnedRegion.getByText("Pinned preview from Rust state", { exact: true })).toBeVisible();
 
@@ -4608,11 +4614,13 @@ test("pin and unpin actions render the Tauri snapshot response without a manual 
   await row.hover();
   await row.getByRole("button", { name: "Pin message" }).click();
   await expect.poll(() => invocationCount(page, "pin_event")).toBeGreaterThanOrEqual(1);
+  await page.getByRole("button", { name: "Pinned · 1", exact: true }).click();
   await expect(pinnedRegion.getByText("Pinned from Tauri response", { exact: true })).toBeVisible();
 
   await pinnedRegion.getByRole("button", { name: "Unpin message" }).click({ force: true });
   await expect.poll(() => invocationCount(page, "unpin_event")).toBeGreaterThanOrEqual(1);
   await expect(pinnedRegion).toHaveCount(0);
+  await expect(page.getByText("No pinned messages", { exact: true })).toBeVisible();
 });
 
 test("message action menu copies Rust-owned body and permalink values", async ({ page }) => {
@@ -6334,7 +6342,7 @@ test("Japanese locale renders shell labels and CJK text without clipping", async
                 kind: "results",
                 request_id: 32,
                 query: String(query ?? "ABC123"),
-                scope: "allRooms",
+                scope: "currentRoom",
                 results: [
                   {
                     room_id: "!harness-room:example.invalid",
@@ -8273,28 +8281,31 @@ test("timeline header Threads button opens the threads list and row opens a thre
         }
       }
     });
-    window.__harness.setCommandResponse("open_threads_list", ({ roomId: incomingRoomId }) => {
-      const current = window.__harness.currentSnapshot();
-      const next = {
-        ...current,
-        state: {
-          ...current.state,
-          ui: {
-            ...current.state.ui,
-            threads_list: {
-              kind: "open",
-              room_id: String(incomingRoomId),
-              request_id: 1,
-              items: [],
-              is_paginating: false,
-              end_reached: true
+    window.__harness.setCommandResponse(
+      "open_threads_list",
+      ({ scope }: { scope: { kind: string; room_id?: string } }) => {
+        const current = window.__harness.currentSnapshot();
+        const next = {
+          ...current,
+          state: {
+            ...current.state,
+            ui: {
+              ...current.state.ui,
+              threads_list: {
+                kind: "open",
+                room_id: scope.room_id ?? HARNESS_ROOM_ID,
+                request_id: 1,
+                items: [],
+                is_paginating: false,
+                end_reached: true
+              }
             }
           }
-        }
-      };
-      window.__harness.setSnapshot(next);
-      return next;
-    });
+        };
+        window.__harness.setSnapshot(next);
+        return next;
+      }
+    );
     window.__harness.pushStateChanged();
     window.__harness.clearInvocations();
   }, HARNESS_ROOM_ID);
@@ -8313,7 +8324,9 @@ test("timeline header Threads button opens the threads list and row opens a thre
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("open_threads_list")[0]?.args)
     )
-    .toEqual({ roomId: "!harness-room:example.invalid" });
+    .toEqual({
+      scope: { kind: "room", room_id: "!harness-room:example.invalid" }
+    });
 
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
@@ -8329,6 +8342,7 @@ test("timeline header Threads button opens the threads list and row opens a thre
           request_id: 1,
           items: [
             {
+              room_id: "!harness-room:example.invalid",
               root_event_id: "$thread-root:example.invalid",
               root_sender: "@thread-root-sender:example.invalid",
               root_sender_label: null,
@@ -8484,19 +8498,14 @@ test("rail Home and sidebar Threads navigation buttons dispatch Rust-owned comma
   await page.evaluate(() => window.__harness.clearInvocations());
 
   const sidebar = page.getByRole("complementary", { name: t("workspace.rooms") });
-  // #330: a room's thread list is opened from the room header, where "this room"
-  // is implied, rather than from a sidebar entry that looked space-scoped.
-  await expect(sidebar.getByRole("button", { name: t("workspace.threads") })).toHaveCount(0);
-  await page
-    .locator(".channel-actions")
-    .getByRole("button", { name: t("workspace.threads") })
-    .click();
+  await expect(sidebar.getByRole("button", { name: t("workspace.threads") })).toBeVisible();
+  await sidebar.getByRole("button", { name: t("workspace.threads") }).click();
   await expect.poll(() => invocationCount(page, "open_threads_list")).toBeGreaterThanOrEqual(1);
   await expect
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("open_threads_list")[0]?.args)
     )
-    .toEqual({ roomId: HARNESS_ROOM_ID });
+    .toEqual({ scope: { kind: "home" } });
 
   await page.evaluate(() => window.__harness.clearInvocations());
   await page
@@ -8508,6 +8517,13 @@ test("rail Home and sidebar Threads navigation buttons dispatch Rust-owned comma
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("select_space")[0]?.args))
     .toEqual({ spaceId: null });
   await expect(page.getByRole("main", { name: t("workspace.activity") })).toBeVisible();
+
+  await sidebar.getByRole("button", { name: t("workspace.threads") }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("open_threads_list").at(-1)?.args)
+    )
+    .toEqual({ scope: { kind: "home" } });
 
   // Explore is account-global, so it becomes reachable only at Home.
   await sidebar.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
