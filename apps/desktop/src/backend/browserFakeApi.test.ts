@@ -52,6 +52,126 @@ function receipt(
   };
 }
 
+describe("BrowserFakeApi Space member audit", () => {
+  const spaceId = "!space-alpha:example.invalid";
+  const childOnlyUserId = "@child-only:example.invalid";
+
+  test("starts with joined, invited, child-only, and incomplete fixtures", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.getSnapshot();
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.selected_space_id).toBe(spaceId);
+    expect(members.space_joined.map((entry) => entry.user_id)).toContain(
+      "@joined:example.invalid"
+    );
+    expect(members.space_invited.map((entry) => entry.user_id)).toContain(
+      "@invited:example.invalid"
+    );
+    expect(members.child_room_only.map((entry) => entry.user_id)).toContain(
+      childOnlyUserId
+    );
+    expect(members.child_room_count).toBe(2);
+    expect(members.complete_child_room_count).toBe(1);
+    expect(members.incomplete_child_room_count).toBe(1);
+  });
+
+  test("loads the requested Space generation and preserves classified sections", async () => {
+    const api = createBrowserFakeApi();
+
+    const snapshot = await api.loadSpaceMembers(spaceId, 7);
+
+    expect(snapshot.state.domain.space_members).toMatchObject({
+      selected_space_id: spaceId,
+      generation: 7,
+      operation: { kind: "idle" },
+      space_joined: expect.any(Array),
+      space_invited: expect.any(Array),
+      child_room_only: expect.any(Array)
+    });
+  });
+
+  test("switching Spaces fences and clears the previous member projection", async () => {
+    const api = createBrowserFakeApi();
+
+    const snapshot = await api.selectSpace("!space-beta:example.invalid");
+
+    expect(snapshot.state.domain.space_members).toMatchObject({
+      selected_space_id: "!space-beta:example.invalid",
+      generation: 2,
+      space_joined: [],
+      space_invited: [],
+      child_room_only: [],
+      operation: { kind: "idle" }
+    });
+  });
+
+  test("keeps an invite in the pending operation state when settlement is deferred", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
+
+    const snapshot = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.child_room_only.map((entry) => entry.user_id)).not.toContain(
+      childOnlyUserId
+    );
+    expect(members.space_invited).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          user_id: childOnlyUserId,
+          invite_pending: true,
+          membership: "space_invited"
+        })
+      ])
+    );
+    expect(members.operation).toMatchObject({
+      kind: "inviting",
+      space_id: spaceId,
+      user_id: childOnlyUserId,
+      generation: 1
+    });
+  });
+
+  test("settles a successful fake invite as a non-pending Space invitation", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "success" });
+
+    const snapshot = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.space_invited).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          user_id: childOnlyUserId,
+          invite_pending: false,
+          membership: "space_invited"
+        })
+      ])
+    );
+    expect(members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("returns a failed fake invite to the child-only section", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "failure" });
+
+    const snapshot = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.child_room_only.map((entry) => entry.user_id)).toContain(
+      childOnlyUserId
+    );
+    expect(members.space_invited.map((entry) => entry.user_id)).not.toContain(
+      childOnlyUserId
+    );
+    expect(members.operation).toMatchObject({
+      kind: "failed",
+      space_id: spaceId,
+      user_id: childOnlyUserId,
+      generation: 1,
+      failureKind: "sdk"
+    });
+  });
+});
+
 describe("BrowserFakeApi settings preview", () => {
   test("verification retries clear the completed attempt failure", async () => {
     for (const method of ["existingDeviceSas", "recoveryKey"] as const) {

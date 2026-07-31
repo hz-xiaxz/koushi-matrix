@@ -394,6 +394,7 @@
           },
           "display_name": "Fixture User"
         },
+        "room_users": {},
         "update": {
           "kind": "idle"
         },
@@ -630,6 +631,19 @@
       },
       "soft_logout_reauth": {
         "kind": "idle"
+      },
+      "space_members": {
+        "child_room_count": 0,
+        "child_room_only": [],
+        "complete_child_room_count": 0,
+        "generation": 0,
+        "incomplete_child_room_count": 0,
+        "operation": {
+          "kind": "idle"
+        },
+        "selected_space_id": null,
+        "space_invited": [],
+        "space_joined": []
       },
       "spaces": [
         {

@@ -306,6 +306,36 @@ pub async fn load_room_settings(
 }
 
 #[tauri::command]
+pub async fn load_space_members(
+    space_id: String,
+    generation: u64,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_load_space_members_command(
+            request_id, space_id, generation,
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    wait_for_room_operation(
+        &mut event_conn,
+        request_id,
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        |event, expected_request_id| {
+            space_members_loaded_event_matches(event, expected_request_id, generation)
+        },
+        "Space member load did not complete",
+        "Space member load failed",
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn query_mention_candidates(
     room_id: String,
     surface: MentionSurface,
@@ -680,6 +710,37 @@ pub async fn invite_user(
         },
         "user invite did not complete",
         "user invite failed",
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn invite_user_to_space(
+    space_id: String,
+    user_id: String,
+    generation: u64,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_invite_user_to_space_command(
+            request_id, space_id, user_id, generation,
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    wait_for_room_operation(
+        &mut event_conn,
+        request_id,
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        |event, expected_request_id| {
+            space_member_invite_settled_event_matches(event, expected_request_id, generation)
+        },
+        "Space member invite did not complete",
+        "Space member invite failed",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;

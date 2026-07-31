@@ -456,6 +456,28 @@ describe("TauriDesktopApi", () => {
     });
   });
 
+  test("passes Space member audit actions with the generation fence", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    const api = createDesktopApi();
+    await api.loadSpaceMembers("!space:example.invalid", 4);
+    await api.inviteUserToSpace(
+      "!space:example.invalid",
+      "@target:example.invalid",
+      4
+    );
+
+    expect(invoke).toHaveBeenCalledWith("load_space_members", {
+      spaceId: "!space:example.invalid",
+      generation: 4
+    });
+    expect(invoke).toHaveBeenCalledWith("invite_user_to_space", {
+      spaceId: "!space:example.invalid",
+      userId: "@target:example.invalid",
+      generation: 4
+    });
+  });
+
   test("passes activity actions to Rust-owned activity commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 

@@ -1163,6 +1163,36 @@ where
     }
 }
 
+pub(crate) fn space_members_loaded_event_matches(
+    event: &RoomEvent,
+    expected_request_id: RequestId,
+    expected_generation: u64,
+) -> bool {
+    matches!(
+        event,
+        RoomEvent::SpaceMembersLoaded {
+            request_id,
+            generation,
+            ..
+        } if *request_id == expected_request_id && *generation == expected_generation
+    )
+}
+
+pub(crate) fn space_member_invite_settled_event_matches(
+    event: &RoomEvent,
+    expected_request_id: RequestId,
+    expected_generation: u64,
+) -> bool {
+    matches!(
+        event,
+        RoomEvent::SpaceMemberInviteSettled {
+            request_id,
+            generation,
+            ..
+        } if *request_id == expected_request_id && *generation == expected_generation
+    )
+}
+
 async fn wait_for_direct_message_started<S: SelectEventSource + ?Sized>(
     event_conn: &mut S,
     operation_request_id: RequestId,
@@ -2594,6 +2624,18 @@ pub(crate) fn build_load_room_settings_command(
     })
 }
 
+pub(crate) fn build_load_space_members_command(
+    request_id: koushi_core::RequestId,
+    space_id: String,
+    generation: u64,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::LoadSpaceMembers {
+        request_id,
+        space_id,
+        generation,
+    })
+}
+
 pub(crate) fn build_repair_room_timeline_command(
     request_id: koushi_core::RequestId,
     room_id: String,
@@ -2835,6 +2877,20 @@ pub(crate) fn build_invite_user_command(
         request_id,
         room_id,
         user_id,
+    })
+}
+
+pub(crate) fn build_invite_user_to_space_command(
+    request_id: koushi_core::RequestId,
+    space_id: String,
+    user_id: String,
+    generation: u64,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::InviteUserToSpace {
+        request_id,
+        space_id,
+        user_id,
+        generation,
     })
 }
 
@@ -7608,6 +7664,127 @@ mod tests {
                 "{fn_name} should return the current snapshot"
             );
         }
+    }
+
+    #[test]
+    fn load_space_members_and_invite_user_to_space_build_exact_commands_and_wait_for_events() {
+        let source = commands_source();
+
+        for (fn_name, matcher_token) in [
+            (
+                "pub async fn load_space_members",
+                "space_members_loaded_event_matches",
+            ),
+            (
+                "pub async fn invite_user_to_space",
+                "space_member_invite_settled_event_matches",
+            ),
+        ] {
+            let fn_offset = source
+                .find(fn_name)
+                .unwrap_or_else(|| panic!("{fn_name} command should exist"));
+            let rest = &source[fn_offset..];
+            let end = rest.find("\n#[tauri::command]").unwrap_or(rest.len());
+            let command_source = &rest[..end];
+
+            assert!(
+                command_source.contains("wait_for_room_operation"),
+                "{fn_name} should wait for the correlated RoomEvent"
+            );
+            assert!(
+                command_source.contains(matcher_token),
+                "{fn_name} should wait through {matcher_token}"
+            );
+            assert!(command_source.contains("current_snapshot"));
+        }
+
+        match super::build_load_space_members_command(
+            fake_request_id(301),
+            "!space:example.org".to_owned(),
+            4,
+        ) {
+            CoreCommand::Room(RoomCommand::LoadSpaceMembers {
+                request_id,
+                space_id,
+                generation,
+            }) => {
+                assert_eq!(request_id, fake_request_id(301));
+                assert_eq!(space_id, "!space:example.org");
+                assert_eq!(generation, 4);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        match super::build_invite_user_to_space_command(
+            fake_request_id(302),
+            "!space:example.org".to_owned(),
+            "@child:example.org".to_owned(),
+            4,
+        ) {
+            CoreCommand::Room(RoomCommand::InviteUserToSpace {
+                request_id,
+                space_id,
+                user_id,
+                generation,
+            }) => {
+                assert_eq!(request_id, fake_request_id(302));
+                assert_eq!(space_id, "!space:example.org");
+                assert_eq!(user_id, "@child:example.org");
+                assert_eq!(generation, 4);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn space_member_event_waits_reject_wrong_generation() {
+        let wrong_load = koushi_core::RoomEvent::SpaceMembersLoaded {
+            request_id: fake_request_id(303),
+            generation: 3,
+            joined_count: 0,
+            invited_count: 0,
+            child_room_only_count: 0,
+            incomplete_child_room_count: 0,
+        };
+        let matching_load = koushi_core::RoomEvent::SpaceMembersLoaded {
+            request_id: fake_request_id(303),
+            generation: 4,
+            joined_count: 0,
+            invited_count: 0,
+            child_room_only_count: 0,
+            incomplete_child_room_count: 0,
+        };
+        assert!(!super::space_members_loaded_event_matches(
+            &wrong_load,
+            fake_request_id(303),
+            4,
+        ));
+        assert!(super::space_members_loaded_event_matches(
+            &matching_load,
+            fake_request_id(303),
+            4,
+        ));
+
+        let wrong_invite = koushi_core::RoomEvent::SpaceMemberInviteSettled {
+            request_id: fake_request_id(304),
+            generation: 3,
+            outcome: koushi_state::SpaceMemberInviteOutcome::Invited,
+        };
+        let matching_invite = koushi_core::RoomEvent::SpaceMemberInviteSettled {
+            request_id: fake_request_id(304),
+            generation: 4,
+            outcome: koushi_state::SpaceMemberInviteOutcome::Invited,
+        };
+        assert!(!super::space_member_invite_settled_event_matches(
+            &wrong_invite,
+            fake_request_id(304),
+            4,
+        ));
+        assert!(super::space_member_invite_settled_event_matches(
+            &matching_invite,
+            fake_request_id(304),
+            4,
+        ));
     }
 
     #[test]

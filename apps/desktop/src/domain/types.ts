@@ -68,6 +68,7 @@ export interface AppDomainState {
   locale_profile: LocaleDisplayProfile;
   typography_profile: TypographyDisplayProfile;
   profile: ProfileState;
+  space_members: SpaceMembersState;
   sync: SyncState;
   sync_mode: SyncMode;
   spaces: SpaceSummary[];
@@ -680,6 +681,60 @@ export interface SpaceSummary {
   avatar: AvatarImage | null;
   child_room_ids: string[];
 }
+
+export interface SpaceMembersState {
+  selected_space_id: string | null;
+  generation: number;
+  space_joined: SpaceMemberEntry[];
+  space_invited: SpaceMemberEntry[];
+  child_room_only: SpaceMemberEntry[];
+  child_room_count: number;
+  complete_child_room_count: number;
+  incomplete_child_room_count: number;
+  operation: SpaceMembersOperationState;
+}
+
+export interface SpaceMemberEntry {
+  user_id: string;
+  display_name: string | null;
+  display_label: string;
+  original_display_label: string;
+  avatar_url: string | null;
+  power_level: number | null;
+  role: RoomMemberRole;
+  membership: SpaceMemberMembership;
+  child_room_ids: string[];
+  invite_pending: boolean;
+}
+
+export type SpaceMemberMembership =
+  | "space_joined"
+  | "space_invited"
+  | "child_room_only";
+
+export type SpaceMembersOperationState =
+  | { kind: "idle" }
+  | {
+      kind: "loading";
+      request_id: number | null;
+      space_id: string;
+      generation: number;
+    }
+  | {
+      kind: "inviting";
+      request_id: number;
+      space_id: string;
+      user_id: string;
+      generation: number;
+    }
+  | {
+      kind: "failed";
+      request_id: number;
+      space_id: string;
+      user_id: string | null;
+      generation: number;
+      failureKind: OperationFailureKind;
+    };
 
 export type RoomTagKind = "favourite" | "lowPriority";
 

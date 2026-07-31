@@ -76,7 +76,9 @@ import type {
   AttachmentScope,
   AttachmentSort,
   FilesViewScope,
-  UserProfile
+  UserProfile,
+  SpaceMemberEntry,
+  SpaceMembersState
 } from "../domain/types";
 import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
 import type {
@@ -340,6 +342,12 @@ export interface DesktopApi {
   dismissDirectoryPreview(): Promise<DesktopSnapshot>;
   joinRoom(roomId: string): Promise<DesktopSnapshot>;
   loadRoomSettings(roomId: string): Promise<DesktopSnapshot>;
+  loadSpaceMembers(spaceId: string, generation: number): Promise<DesktopSnapshot>;
+  inviteUserToSpace(
+    spaceId: string,
+    userId: string,
+    generation: number
+  ): Promise<DesktopSnapshot>;
   queryMentionCandidates(
     roomId: string,
     surface: MentionSurface,
@@ -402,6 +410,7 @@ export interface ComposerDraftAccountOwner {
 export interface BrowserFakeApiOptions {
   restoreSession?: boolean;
   session?: "ready" | "signedOut" | "needsRecovery" | "locked";
+  spaceMemberInviteOutcome?: "pending" | "success" | "failure";
 }
 
 export function createBrowserFakeApi(options: BrowserFakeApiOptions = {}): DesktopApi {
@@ -410,6 +419,9 @@ export function createBrowserFakeApi(options: BrowserFakeApiOptions = {}): Deskt
 
 class BrowserFakeApi implements DesktopApi {
   private snapshot: DesktopSnapshot;
+  private readonly spaceMemberInviteOutcome: NonNullable<
+    BrowserFakeApiOptions["spaceMemberInviteOutcome"]
+  >;
   private requestSequence = 1_000;
   private composerRendererGeneration = 0n;
   private nextComposerLeaseId = 0n;
@@ -548,6 +560,7 @@ class BrowserFakeApi implements DesktopApi {
   }
 
   constructor(options: BrowserFakeApiOptions) {
+    this.spaceMemberInviteOutcome = options.spaceMemberInviteOutcome ?? "success";
     this.snapshot = createInitialSnapshot(initialSession(options));
   }
 
@@ -786,6 +799,14 @@ class BrowserFakeApi implements DesktopApi {
       spaceId && this.snapshot.state.domain.spaces.some((space) => space.space_id === spaceId)
         ? spaceId
         : null;
+    if (this.snapshot.state.domain.space_members.selected_space_id !== nextSpaceId) {
+      const generation = this.snapshot.state.domain.space_members.generation + 1;
+      this.snapshot.state.domain.space_members = {
+        ...emptyBrowserFakeSpaceMembersState(),
+        selected_space_id: nextSpaceId,
+        generation
+      };
+    }
     this.snapshot.state.ui.navigation.active_space_id = nextSpaceId;
     this.refreshRoomListProjection();
     this.refreshSidebar();
@@ -2634,6 +2655,120 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
+  async loadSpaceMembers(spaceId: string, generation: number): Promise<DesktopSnapshot> {
+    if (!this.canUseSyncedViews() || !spaceId.trim()) {
+      return this.getSnapshot();
+    }
+
+    const normalizedSpaceId = spaceId.trim();
+    const requestId = this.nextRequestId();
+    this.snapshot.state.domain.space_members = {
+      ...this.snapshot.state.domain.space_members,
+      selected_space_id: normalizedSpaceId,
+      generation,
+      operation: {
+        kind: "loading",
+        request_id: requestId,
+        space_id: normalizedSpaceId,
+        generation
+      }
+    };
+
+    await Promise.resolve();
+
+    this.snapshot.state.domain.space_members = {
+      ...this.snapshot.state.domain.space_members,
+      operation: { kind: "idle" }
+    };
+    return this.getSnapshot();
+  }
+
+  async inviteUserToSpace(
+    spaceId: string,
+    userId: string,
+    generation: number
+  ): Promise<DesktopSnapshot> {
+    if (!this.canUseSyncedViews() || !spaceId.trim() || !userId.trim()) {
+      return this.getSnapshot();
+    }
+
+    const normalizedSpaceId = spaceId.trim();
+    const normalizedUserId = userId.trim();
+    const current = this.snapshot.state.domain.space_members;
+    const childOnly = current.child_room_only.find(
+      (entry) => entry.user_id === normalizedUserId
+    );
+    if (
+      current.selected_space_id !== normalizedSpaceId ||
+      current.generation !== generation ||
+      !childOnly ||
+      current.operation.kind === "inviting"
+    ) {
+      return this.getSnapshot();
+    }
+
+    const requestId = this.nextRequestId();
+    const pendingEntry: SpaceMemberEntry = {
+      ...childOnly,
+      membership: "space_invited",
+      invite_pending: true
+    };
+    const inviting: SpaceMembersState = {
+      ...current,
+      space_invited: [...current.space_invited, pendingEntry].sort(compareSpaceMemberEntries),
+      child_room_only: current.child_room_only.filter(
+        (entry) => entry.user_id !== normalizedUserId
+      ),
+      operation: {
+        kind: "inviting",
+        request_id: requestId,
+        space_id: normalizedSpaceId,
+        user_id: normalizedUserId,
+        generation
+      }
+    };
+    this.snapshot.state.domain.space_members = inviting;
+
+    if (this.spaceMemberInviteOutcome === "pending") {
+      return this.getSnapshot();
+    }
+
+    if (this.spaceMemberInviteOutcome === "success") {
+      this.snapshot.state.domain.space_members = {
+        ...this.snapshot.state.domain.space_members,
+        space_invited: this.snapshot.state.domain.space_members.space_invited.map((entry) =>
+          entry.user_id === normalizedUserId ? { ...entry, invite_pending: false } : entry
+        ),
+        operation: { kind: "idle" }
+      };
+    } else {
+      this.snapshot.state.domain.space_members = {
+        ...this.snapshot.state.domain.space_members,
+        space_invited: this.snapshot.state.domain.space_members.space_invited.filter(
+          (entry) => entry.user_id !== normalizedUserId
+        ),
+        child_room_only: [
+          ...this.snapshot.state.domain.space_members.child_room_only,
+          {
+            ...childOnly,
+            membership: "child_room_only" as const,
+            invite_pending: false
+          }
+        ].sort(compareSpaceMemberEntries),
+        operation: {
+          kind: "failed",
+          request_id: requestId,
+          space_id: normalizedSpaceId,
+          user_id: normalizedUserId,
+          generation,
+          failureKind: "sdk"
+        }
+      };
+    }
+
+    return this.getSnapshot();
+  }
+
   async queryMentionCandidates(
     roomId: string,
     surface: MentionSurface,
@@ -4202,6 +4337,84 @@ function isCompleteSpaceOrder(spaces: SpaceSummary[], spaceIds: string[]): boole
   return [...currentSpaceIds].every((spaceId) => requestedSpaceIds.has(spaceId));
 }
 
+function compareSpaceMemberEntries(left: SpaceMemberEntry, right: SpaceMemberEntry): number {
+  return (
+    left.display_label.localeCompare(right.display_label) ||
+    left.user_id.localeCompare(right.user_id)
+  );
+}
+
+function browserFakeSpaceMemberEntry(
+  userId: string,
+  displayLabel: string,
+  membership: SpaceMemberEntry["membership"],
+  childRoomIds: string[] = []
+): SpaceMemberEntry {
+  return {
+    user_id: userId,
+    display_name: displayLabel,
+    display_label: displayLabel,
+    original_display_label: displayLabel,
+    avatar_url: null,
+    power_level: 0,
+    role: "user",
+    membership,
+    child_room_ids: childRoomIds,
+    invite_pending: false
+  };
+}
+
+function emptyBrowserFakeSpaceMembersState(): SpaceMembersState {
+  return {
+    selected_space_id: null,
+    generation: 0,
+    space_joined: [],
+    space_invited: [],
+    child_room_only: [],
+    child_room_count: 0,
+    complete_child_room_count: 0,
+    incomplete_child_room_count: 0,
+    operation: { kind: "idle" }
+  };
+}
+
+function createBrowserFakeSpaceMembersState(spaceId: string): SpaceMembersState {
+  const spaceJoined = [
+    browserFakeSpaceMemberEntry(
+      "@joined:example.invalid",
+      "Joined Member",
+      "space_joined"
+    )
+  ];
+  const spaceInvited = [
+    browserFakeSpaceMemberEntry(
+      "@invited:example.invalid",
+      "Invited Member",
+      "space_invited"
+    )
+  ];
+  const childRoomOnly = [
+    browserFakeSpaceMemberEntry(
+      "@child-only:example.invalid",
+      "Child-only Member",
+      "child_room_only",
+      ["!room-alpha:example.invalid", "!room-planning:example.invalid"]
+    )
+  ];
+
+  return {
+    selected_space_id: spaceId,
+    generation: 1,
+    space_joined: spaceJoined,
+    space_invited: spaceInvited,
+    child_room_only: childRoomOnly,
+    child_room_count: 2,
+    complete_child_room_count: 1,
+    incomplete_child_room_count: 1,
+    operation: { kind: "idle" }
+  };
+}
+
 function createInitialSnapshot(session: BrowserFakeApiOptions["session"]): DesktopSnapshot {
   if (session === "signedOut") {
     return createSignedOutSnapshot();
@@ -4244,6 +4457,7 @@ function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): Desk
         locale_profile: defaultLocaleDisplayProfile(),
         typography_profile: defaultTypographyDisplayProfile(),
         profile: defaultProfileState(session.user_id),
+        space_members: createBrowserFakeSpaceMembersState(active_space_id),
         sync: "running",
         sync_mode: { kind: "unsupported" },
         spaces,
@@ -4375,6 +4589,7 @@ function createSignedOutSnapshot(): DesktopSnapshot {
         locale_profile: defaultLocaleDisplayProfile(),
         typography_profile: defaultTypographyDisplayProfile(),
         profile: defaultProfileState(null),
+        space_members: emptyBrowserFakeSpaceMembersState(),
         sync: "stopped",
         sync_mode: { kind: "unsupported" },
         spaces: [],

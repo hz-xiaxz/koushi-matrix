@@ -6,7 +6,7 @@ Plan: `docs/superpowers/plans/2026-07-31-space-members-profile-cache.md`
 
 - [x] Task 1 — SDK explicit membership facts
 - [x] Task 2 — Rust state/core/profile/invite transitions
-- [ ] Task 3 — Tauri/Desktop transport
+- [x] Task 3 — Tauri/Desktop transport
 - [ ] Task 4 — approved Space Members UI
 - [ ] Task 5 — integrated review, verification, and DMG
 
@@ -201,6 +201,40 @@ Final verification for this milestone:
     rustfmt reports the repository's existing nightly-only option warnings.
 - Scope remained limited to SDK/core/state diagnostics and timeline behavior;
   no Desktop/Tauri/room People changes or network profile lookup were added.
+
+## Task 3 evidence — 2026-08-01
+
+- Added the `load_space_members(spaceId, generation)` and
+  `invite_user_to_space(spaceId, userId, generation)` Tauri handlers, exact
+  Core command builders, command registration, and request/event wait paths.
+  Both wait predicates require the correlated request ID and generation;
+  wrong-generation `SpaceMembersLoaded` and `SpaceMemberInviteSettled` events
+  are rejected by the focused Rust regression test.
+- Added `space_members` to the Tauri frontend snapshot and changed-slices DTO
+  boundary. This fixes the existing IPC omission that otherwise left the
+  Rust-owned Space member state invisible to Desktop.
+- Added serde-matching TypeScript domain types, Desktop API/client methods and
+  exact invoke-shape coverage.
+- Added BrowserFakeApi joined, invited, child-room-only, incomplete-child,
+  pending-invite, successful-invite, failed-invite, and Space-switch fixtures
+  and transitions. Four existing snapshot fixtures were updated only to
+  provide the new required `space_members` field; no Task 4 UI was added.
+- Verification:
+  - `npx vitest run src/backend/client.test.ts src/backend/browserFakeApi.test.ts`
+    — 2 files and 84 tests passed.
+  - `npm run typecheck` — passed.
+  - `cargo test -p koushi-desktop load_space_members --lib -- --nocapture`
+    — 1 passed.
+  - `cargo test -p koushi-desktop space_member --lib -- --nocapture`
+    — 3 passed.
+  - `cargo test -p koushi-desktop frontend_snapshot_serializes_to_the_typescript_contract --lib -- --nocapture`
+    — 1 passed.
+  - `cargo test -p koushi-desktop frontend_app_state_golden_matches_maximally_populated_state --lib -- --nocapture`
+    — 1 passed.
+  - `cargo check -p koushi-desktop` — passed; only existing koushi-core
+    unused/dead-code warnings remain.
+  - `cargo fmt --all -- --check` and `git diff --check` — passed. Stable
+    rustfmt reports the repository's existing nightly-only option warnings.
 
 ## Decisions and invariants
 
