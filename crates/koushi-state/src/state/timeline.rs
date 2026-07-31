@@ -820,10 +820,12 @@ impl ScheduledSendStore {
     pub fn reschedule(
         &mut self,
         scheduled_id: &str,
+        body: String,
         send_at_ms: u64,
         handle: ScheduledSendHandle,
     ) -> Option<ScheduledSendItem> {
         let item = self.items.get_mut(scheduled_id)?;
+        item.body = body;
         item.send_at_ms = send_at_ms;
         item.handle = handle;
         item.is_dispatching = false;

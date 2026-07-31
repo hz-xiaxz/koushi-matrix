@@ -37,8 +37,8 @@ use koushi_state::{
     MentionIntent, MentionSurface, PresenceKind, RecoveryRequest, RoomListFilter,
     RoomModerationAction, RoomNotificationMode, RoomSettingChange, RoomTagKind, SessionInfo,
     SessionState, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
-    SubmissionId, ThreadOpenIntent, TimelineScrollAnchor, VerificationCancelReason,
-    build_formatted_message_draft,
+    SubmissionId, ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor,
+    VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(any(debug_assertions, test))]
@@ -594,6 +594,7 @@ async fn wait_for_main_timeline_anchor(
     request_id: RequestId,
     room_id: &str,
     event_id: &str,
+    allow_live_fallback: bool,
     timeout: std::time::Duration,
 ) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + timeout;
@@ -626,7 +627,11 @@ async fn wait_for_main_timeline_anchor(
                 request_id: settled_request_id,
                 outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing),
             }) if settled_request_id == request_id => {
-                settlement = Some(MainTimelineSettlement::LiveFallback);
+                if allow_live_fallback {
+                    settlement = Some(MainTimelineSettlement::LiveFallback);
+                } else {
+                    return Err("pinned event is not available in the timeline".to_owned());
+                }
             }
             Ok(CoreEvent::IntentLifecycle {
                 request_id: settled_request_id,
@@ -1465,12 +1470,9 @@ pub(crate) fn build_open_thread_command(
 
 pub(crate) fn build_open_threads_list_command(
     request_id: koushi_core::RequestId,
-    room_id: String,
+    scope: ThreadsListScope,
 ) -> CoreCommand {
-    CoreCommand::App(AppCommand::OpenThreadsList {
-        request_id,
-        room_id,
-    })
+    CoreCommand::App(AppCommand::OpenThreadsList { request_id, scope })
 }
 
 pub(crate) fn build_close_threads_list_command(request_id: koushi_core::RequestId) -> CoreCommand {
@@ -1479,12 +1481,9 @@ pub(crate) fn build_close_threads_list_command(request_id: koushi_core::RequestI
 
 pub(crate) fn build_paginate_threads_list_command(
     request_id: koushi_core::RequestId,
-    room_id: String,
+    scope: ThreadsListScope,
 ) -> CoreCommand {
-    CoreCommand::App(AppCommand::PaginateThreadsList {
-        request_id,
-        room_id,
-    })
+    CoreCommand::App(AppCommand::PaginateThreadsList { request_id, scope })
 }
 
 pub(crate) fn build_bootstrap_cross_signing_command(
@@ -1958,14 +1957,16 @@ pub(crate) fn build_cancel_scheduled_send_command(
 pub(crate) fn build_reschedule_scheduled_send_command(
     request_id: koushi_core::RequestId,
     scheduled_id: String,
+    body: String,
     send_at_ms: u64,
 ) -> Option<CoreCommand> {
-    if scheduled_id.trim().is_empty() {
+    if scheduled_id.trim().is_empty() || body.trim().is_empty() {
         return None;
     }
     Some(CoreCommand::App(AppCommand::RescheduleScheduledSend {
         request_id,
         scheduled_id,
+        body,
         send_at_ms,
     }))
 }
@@ -2573,6 +2574,16 @@ pub(crate) fn build_unpin_event_command(
     })
 }
 
+pub(crate) fn build_refresh_pinned_events_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::RefreshPinnedEvents {
+        request_id,
+        room_id,
+    })
+}
+
 pub(crate) fn build_load_room_settings_command(
     request_id: koushi_core::RequestId,
     room_id: String,
@@ -3128,11 +3139,14 @@ fn resolve_search_scope_from_active_room(
     match scope {
         SearchScopeKind::CurrentRoom => active_room_id
             .map(|room_id| SearchScope::CurrentRoom { room_id })
-            .unwrap_or(SearchScope::AllRooms),
+            .unwrap_or_else(|| SearchScope::CurrentRoom {
+                room_id: String::new(),
+            }),
         SearchScopeKind::CurrentSpace => active_space_id
             .map(|space_id| SearchScope::CurrentSpace { space_id })
-            .unwrap_or(SearchScope::AllRooms),
-        SearchScopeKind::Dms => SearchScope::Dms,
+            .unwrap_or_else(|| SearchScope::CurrentSpace {
+                space_id: String::new(),
+            }),
         SearchScopeKind::AllRooms => SearchScope::AllRooms,
     }
 }
@@ -3491,12 +3505,11 @@ mod tests {
             "current-space searches must preserve the selected scope kind instead of collapsing to global"
         );
         assert!(
-            resolver.contains("SearchScope::Dms"),
-            "DM searches must preserve the selected scope kind instead of collapsing to global"
+            resolver.contains("SearchScope::CurrentRoom"),
+            "Room/DM searches must preserve the selected conversation instead of collapsing to global"
         );
         assert!(
-            !resolver.contains("CurrentSpace | SearchScopeKind::AllRooms => SearchScope::Global")
-                && !resolver.contains("SearchScopeKind::Dms => SearchScope::Global"),
+            !resolver.contains("unwrap_or(SearchScope::AllRooms)"),
             "non-all search scopes must not silently round-trip as allRooms"
         );
     }
@@ -4540,6 +4553,7 @@ mod tests {
         match build_reschedule_scheduled_send_command(
             fake_request_id(35),
             "scheduled-1".to_owned(),
+            "edited scheduled body".to_owned(),
             1_900_000_060_000,
         )
         .expect("reschedule_scheduled_send should build a command")
@@ -4547,10 +4561,12 @@ mod tests {
             CoreCommand::App(AppCommand::RescheduleScheduledSend {
                 request_id,
                 scheduled_id,
+                body,
                 send_at_ms,
             }) => {
                 assert_eq!(request_id, fake_request_id(35));
                 assert_eq!(scheduled_id, "scheduled-1");
+                assert_eq!(body, "edited scheduled body");
                 assert_eq!(send_at_ms, 1_900_000_060_000);
             }
             other => panic!("unexpected command: {other:?}"),
@@ -5503,7 +5519,9 @@ mod tests {
 
         assert_eq!(
             resolve_search_scope_from_active_room(SearchScopeKind::CurrentRoom, None, None),
-            SearchScope::AllRooms
+            SearchScope::CurrentRoom {
+                room_id: String::new()
+            }
         );
         assert_eq!(
             resolve_search_scope_from_active_room(
@@ -5515,15 +5533,6 @@ mod tests {
                 space_id: "!space:example.org".to_owned()
             }
         );
-        assert_eq!(
-            resolve_search_scope_from_active_room(
-                SearchScopeKind::Dms,
-                Some(room_id.clone()),
-                None
-            ),
-            SearchScope::Dms
-        );
-
         match build_close_search_command(fake_request_id(16)) {
             CoreCommand::App(AppCommand::CloseSearch { request_id }) => {
                 assert_eq!(request_id, fake_request_id(16));

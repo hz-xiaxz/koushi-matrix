@@ -834,7 +834,7 @@ tokens, paths, or raw errors.
   content when that root is present, including after reschedule/restart.
 - `ScheduledSendCreated` inserts a queued item and advances the matching
   composer's causal revision through the Rust draft store.
-  `ScheduledSendRescheduled` updates the due timestamp and handle;
+  `ScheduledSendRescheduled` updates the message body, due timestamp, and handle;
   `ScheduledSendCancelled` and `ScheduledSendDispatched` remove the item. Room
   pruning, logout, lock, and account switch clear or retain the backing store by
   joined-room account context.
@@ -872,7 +872,14 @@ stateDiagram-v2
 
 - The thread pane is either closed, opening a root event, or open with a focused
   thread timeline. Every opening/open pane retains a Rust-owned
-  `ThreadOpenIntent`: `ExistingThread` or `NewThreadDraft`.
+  `ThreadOpenIntent`: `ExistingThread`, `NewThreadDraft`, or `PinnedReply { event_id }`.
+- The Threads panel is a separate Rust-owned `ThreadsListState`. Its
+  `ThreadsListScope` is `Room`, `Home`, or `Space`; `Home` and `Space` resolve
+  their participating room IDs from Rust-owned room/space projections before
+  opening one bounded SDK `ThreadListService` per room. The actor merges rows,
+  deduplicates by `(room_id, root_event_id)`, and preserves each row's owning
+  `room_id` for navigation. React may render and paginate the projection but
+  must not aggregate visible room or timeline data locally.
 - The open-thread entry point chooses `ExistingThread` for a room timeline row
   whose Rust-projected `thread_summary.reply_count` is positive and for every
   Threads-list entry. A room-timeline “Reply in thread” action whose root has no

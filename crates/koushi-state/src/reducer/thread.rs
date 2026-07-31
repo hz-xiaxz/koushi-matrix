@@ -3,7 +3,8 @@ use crate::{
     effect::{AppEffect, UiEvent},
     state::{
         AppError, AppState, FocusedContextState, PendingComposerSendKind, ThreadAttentionState,
-        ThreadOpenIntent, ThreadPaneState, ThreadsListState, sort_threads_list_items,
+        ThreadOpenIntent, ThreadPaneState, ThreadsListScope, ThreadsListState,
+        sort_threads_list_items,
     },
 };
 
@@ -252,11 +253,13 @@ pub(crate) fn handle_open_thread(
 
     state.upload_staging.clear_thread_targets_for_room(&room_id);
     state.thread = match intent {
-        ThreadOpenIntent::ExistingThread => ThreadPaneState::Opening {
-            room_id: room_id.clone(),
-            root_event_id: root_event_id.clone(),
-            intent,
-        },
+        ThreadOpenIntent::ExistingThread | ThreadOpenIntent::PinnedReply { .. } => {
+            ThreadPaneState::Opening {
+                room_id: room_id.clone(),
+                root_event_id: root_event_id.clone(),
+                intent,
+            }
+        }
         ThreadOpenIntent::NewThreadDraft => ThreadPaneState::Open {
             composer: state
                 .composer_drafts
@@ -321,7 +324,7 @@ pub(crate) fn handle_thread_subscribed(
     if opening_room_id != &room_id || opening_root_event_id != &root_event_id {
         return Vec::new();
     }
-    let intent = *intent;
+    let intent = intent.clone();
 
     let staged_uploads = state
         .upload_staging
@@ -376,7 +379,10 @@ fn promote_matching_thread_intent(
     };
     if open_room_id != room_id
         || open_root_event_id != root_event_id
-        || *intent == ThreadOpenIntent::ExistingThread
+        || matches!(
+            intent,
+            ThreadOpenIntent::ExistingThread | ThreadOpenIntent::PinnedReply { .. }
+        )
     {
         return false;
     }
@@ -576,23 +582,69 @@ pub(crate) fn handle_open_threads_list(
     if !is_session_ready(state) {
         return Vec::new();
     }
-    if state.navigation.active_room_id.as_deref() != Some(room_id.as_str()) {
-        return Vec::new();
+    let scope = ThreadsListScope::from_scope_key(&room_id);
+    match &scope {
+        ThreadsListScope::Room {
+            room_id: target_room_id,
+        } if state.navigation.active_room_id.as_deref() != Some(target_room_id.as_str()) => {
+            return Vec::new();
+        }
+        ThreadsListScope::Home if state.navigation.active_space_id.is_some() => return Vec::new(),
+        ThreadsListScope::Space { space_id }
+            if state.navigation.active_space_id.as_deref() != Some(space_id.as_str()) =>
+        {
+            return Vec::new();
+        }
+        _ => {}
     }
     if state.threads_list.room_id() == Some(room_id.as_str())
         && matches!(state.threads_list, ThreadsListState::Loading { .. })
     {
         return Vec::new();
     }
+    let room_ids = match &scope {
+        ThreadsListScope::Room { room_id } => vec![room_id.clone()],
+        ThreadsListScope::Home => state
+            .rooms
+            .iter()
+            .map(|room| room.room_id.clone())
+            .collect(),
+        ThreadsListScope::Space { space_id } => {
+            let Some(space) = state
+                .spaces
+                .iter()
+                .find(|space| space.space_id == *space_id)
+            else {
+                return Vec::new();
+            };
+            state
+                .rooms
+                .iter()
+                .filter(|room| {
+                    space.child_room_ids.contains(&room.room_id)
+                        || room.parent_space_ids.iter().any(|id| id == space_id)
+                })
+                .map(|room| room.room_id.clone())
+                .collect()
+        }
+    };
     state.threads_list = ThreadsListState::Loading {
         room_id: room_id.clone(),
         request_id,
     };
-    vec![
-        AppEffect::SubscribeThreadsList {
+    let subscribe_effect = match scope {
+        ThreadsListScope::Room { .. } => AppEffect::SubscribeThreadsList {
             request_id,
             room_id,
         },
+        scope => AppEffect::SubscribeThreadsListScoped {
+            request_id,
+            scope,
+            room_ids,
+        },
+    };
+    vec![
+        subscribe_effect,
         AppEffect::EmitUiEvent(UiEvent::ThreadsListChanged),
     ]
 }

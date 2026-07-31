@@ -173,6 +173,8 @@ import type {
   SearchScopeKind,
   SettingsPatch,
   ThreadOpenIntent,
+  ThreadsListScope,
+  PinnedEventNavigation,
   TimelineScrollAnchor
 } from "./domain/types";
 import { stageAttachmentFiles } from "./domain/attachmentIngestion";
@@ -446,6 +448,7 @@ const ROOM_BOUND_RIGHT_PANEL_MODES = new Set<RightPanelMode>([
   "focusedContext",
   "search",
   "files",
+  "pinned",
   "people",
   "profile",
   "roomInfo"
@@ -589,6 +592,16 @@ function inviteScopeKey(scope: InviteScopeSelection): string {
 
 function inviteScopeFromWorkflow(workflow: InviteWorkflowState): InviteScopeSelection {
   return workflow.scope_plan?.default_scope ?? DEFAULT_INVITE_SCOPE;
+}
+
+function threadsListScopeFromKey(key: string): ThreadsListScope {
+  if (key === "home") {
+    return { kind: "home" };
+  }
+  if (key.startsWith("space:")) {
+    return { kind: "space", space_id: key.slice("space:".length) };
+  }
+  return { kind: "room", room_id: key };
 }
 
 function safeDownloadFilename(filename: string): string {
@@ -1237,7 +1250,7 @@ export function App() {
     }
   }
   const [searchQuery, setSearchQuery] = useState(() => initialSearchQuery());
-  const [searchScope, setSearchScope] = useState<SearchScopeKind>("allRooms");
+  const [searchScope, setSearchScope] = useState<SearchScopeKind>("currentRoom");
   // #373: the room/DM leave confirmation. React owns only dialog visibility and
   // the in-flight guard; membership and the resulting room list stay Rust-owned.
   const [pendingRoomLeave, setPendingRoomLeave] = useState<{
@@ -1378,6 +1391,7 @@ export function App() {
   const [loginPasswordFilled, setLoginPasswordFilled] = useState(false);
   const [recoverySecretFilled, setRecoverySecretFilled] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>("closed");
+  const [pinnedNavigation, setPinnedNavigation] = useState<PinnedEventNavigation | null>(null);
   const [selectedProfileUserId, setSelectedProfileUserId] = useState<string | null>(null);
   const [peoplePanelScope, setPeoplePanelScope] = useState<PeoplePanelScope | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -3828,9 +3842,9 @@ export function App() {
     }
   }
 
-  async function rescheduleScheduledSend(scheduledId: string, sendAtMs: number) {
+  async function rescheduleScheduledSend(scheduledId: string, body: string, sendAtMs: number) {
     try {
-      setSnapshot(await api.rescheduleScheduledSend(scheduledId, sendAtMs));
+      setSnapshot(await api.rescheduleScheduledSend(scheduledId, body, sendAtMs));
     } catch {
       // Command failures are surfaced through the Rust-owned error/event path.
     }
@@ -4078,10 +4092,72 @@ export function App() {
     setRightPanelMode("closed");
   }
 
-  async function openThreadsListPanel(roomId: string) {
+  async function openThreadsListPanel(scope: ThreadsListScope) {
     await closeFocusedContextIfHiddenBy("threads");
-    setSnapshot(await api.openThreadsList(roomId));
+    setSnapshot(await api.openThreadsList(scope));
     setRightPanelMode("threads");
+  }
+
+  async function openPinnedMessagesPanel(roomId: string) {
+    if (!roomId) return;
+    setPinnedNavigation(null);
+    await closeFocusedContextIfHiddenBy("pinned");
+    setRightPanelMode("pinned");
+  }
+
+  async function openPinnedEvent(
+    roomId: string,
+    eventId: string,
+    threadRootEventId: string | null
+  ) {
+    setPinnedNavigation({
+      room_id: roomId,
+      event_id: eventId,
+      thread_root_event_id: threadRootEventId,
+      status: "loading"
+    });
+    if (threadRootEventId) {
+      try {
+        if (snapshot?.state.ui.navigation.active_room_id !== roomId) {
+          await selectRoom(roomId);
+        }
+        await openThread(roomId, threadRootEventId, {
+          pinnedReply: { event_id: eventId }
+        });
+        setPinnedNavigation(null);
+      } catch {
+        setPinnedNavigation({
+          room_id: roomId,
+          event_id: eventId,
+          thread_root_event_id: threadRootEventId,
+          status: "failed"
+        });
+      }
+      return;
+    }
+
+    try {
+      const nextSnapshot = await api.openPinnedEvent(roomId, eventId);
+      setSnapshot(nextSnapshot);
+      setPrimaryView("timeline");
+      setRightPanelMode("pinned");
+      setPinnedNavigation(null);
+    } catch {
+      setPinnedNavigation({
+        room_id: roomId,
+        event_id: eventId,
+        thread_root_event_id: null,
+        status: "failed"
+      });
+    }
+  }
+
+  function retryPinnedEvent(
+    roomId: string,
+    eventId: string,
+    threadRootEventId: string | null
+  ) {
+    void openPinnedEvent(roomId, eventId, threadRootEventId);
   }
 
   async function closeThreadsListPanel() {
@@ -4089,8 +4165,8 @@ export function App() {
     setRightPanelMode("closed");
   }
 
-  async function paginateThreadsList(roomId: string) {
-    setSnapshot(await api.paginateThreadsList(roomId));
+  async function paginateThreadsList(scope: ThreadsListScope) {
+    setSnapshot(await api.paginateThreadsList(scope));
   }
 
   async function openFilesView(scope: FilesViewScope) {
@@ -4891,6 +4967,13 @@ export function App() {
   const activeSpaceName = activeSpace
     ? spaceDisplayName(activeSpace.space_id, activeSpace.display_name, spaceLocalOverrides)
     : snapshot.sidebar.account_home.display_name;
+  const threadsListScope: ThreadsListScope = activeSpace
+    ? { kind: "space", space_id: activeSpace.space_id }
+    : { kind: "home" };
+  const openThreadsListScope: ThreadsListScope =
+    snapshot.state.ui.threads_list.kind === "closed"
+      ? threadsListScope
+      : threadsListScopeFromKey(snapshot.state.ui.threads_list.room_id);
   const activeSearchState = correlatedSearchState(
     snapshot.state.domain.search,
     searchQuery,
@@ -5049,6 +5132,9 @@ export function App() {
           onOpenInvites={() => {
             void (homeContextActive ? openHomeInvitesView() : openInvitesView());
           }}
+          onOpenThreads={() => {
+            void openThreadsListPanel(threadsListScope);
+          }}
           onOpenSpaceInfo={() => {
             void setRightPanelModeClosingFocusedContext("spaceInfo");
           }}
@@ -5200,8 +5286,8 @@ export function App() {
             onReply={(roomId, eventId) => {
               void setComposerReplyTarget(roomId, eventId);
             }}
-            onRescheduleScheduledSend={(scheduledId, sendAtMs) => {
-              void rescheduleScheduledSend(scheduledId, sendAtMs);
+            onRescheduleScheduledSend={(scheduledId, body, sendAtMs) => {
+              void rescheduleScheduledSend(scheduledId, body, sendAtMs);
             }}
             onScheduleSend={(sendAtMs, body) => {
               void scheduleSend(sendAtMs, body);
@@ -5214,7 +5300,12 @@ export function App() {
             onSetLocalUserAlias={(userId, alias) => {
               void setLocalUserAlias(userId, alias);
             }}
-            onUnpinPinnedEvent={unpinPinnedEvent}
+            onOpenPinnedMessages={() => {
+              const roomId = snapshot.state.ui.navigation.active_room_id;
+              if (roomId) {
+                void openPinnedMessagesPanel(roomId);
+              }
+            }}
             onOpenPeople={async () => {
               const roomId = snapshot.state.ui.navigation.active_room_id;
               if (roomId) {
@@ -5231,7 +5322,7 @@ export function App() {
             onOpenThreads={() => {
               const roomId = snapshot.state.ui.navigation.active_room_id;
               if (roomId) {
-                void openThreadsListPanel(roomId);
+                void openThreadsListPanel({ kind: "room", room_id: roomId });
               }
             }}
             onToggleRoomInfo={() => {
@@ -5258,6 +5349,7 @@ export function App() {
           displayDensity={displayDensity}
           isRecoveryBusy={isBusy}
           mode={effectiveRightPanelMode}
+          threadsListScope={openThreadsListScope}
           peoplePanelScope={peoplePanelScope}
           selectedProfileUserId={selectedProfileUserId}
           recoverySecretFilled={recoverySecretFilled}
@@ -5282,6 +5374,14 @@ export function App() {
           onOpenFiles={(scope) => {
             void openFilesView(scope);
           }}
+          onOpenPinnedEvent={(roomId, eventId, threadRootEventId) => {
+            void openPinnedEvent(roomId, eventId, threadRootEventId);
+          }}
+          onUnpinPinnedEvent={(roomId, eventId) => {
+            void unpinPinnedEvent(roomId, eventId);
+          }}
+          pinnedNavigation={pinnedNavigation}
+          onRetryPinnedEvent={retryPinnedEvent}
           onOpenSpaceMembers={
             activeSpace
               ? async () => {
@@ -5317,8 +5417,8 @@ export function App() {
           onRefreshFilesView={(scope, filter, sort) => {
             void refreshFilesView(scope, filter, sort);
           }}
-          onPaginateThreadsList={(roomId) => {
-            void paginateThreadsList(roomId);
+          onPaginateThreadsList={(scope) => {
+            void paginateThreadsList(scope);
           }}
           onOpenKeyboardSettings={() => {
             void setRightPanelModeClosingFocusedContext("keyboardSettings");

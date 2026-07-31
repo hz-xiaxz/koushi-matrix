@@ -904,6 +904,7 @@ pub enum AppAction {
     },
     ScheduledSendRescheduled {
         scheduled_id: String,
+        body: String,
         send_at_ms: u64,
         handle: ScheduledSendHandle,
     },

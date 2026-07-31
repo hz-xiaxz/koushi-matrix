@@ -102,6 +102,11 @@ pub enum AppEffect {
         request_id: u64,
         room_id: String,
     },
+    SubscribeThreadsListScoped {
+        request_id: u64,
+        scope: crate::state::ThreadsListScope,
+        room_ids: Vec<String>,
+    },
     PaginateThreadsList {
         request_id: u64,
         room_id: String,

@@ -16,6 +16,7 @@ import {
 import { t } from "../i18n/messages";
 import type {
   DesktopSnapshot,
+  PinnedEventNavigation,
   ScheduledSendCapability,
   ScheduledSendItem,
   SearchResult,
@@ -31,6 +32,7 @@ import {
   type TimelineRowActionHandlers
 } from "./TimelineView";
 import { ImeSafeForm } from "./ImeTextControl";
+import { Composer } from "./composer";
 import {
   ICON_SIZE,
   formatUploadBytes,
@@ -245,9 +247,10 @@ function ScheduledMessagesList({
   capability: ScheduledSendCapability;
   items: ScheduledSendItem[];
   onCancel: (scheduledId: string) => void;
-  onReschedule: (scheduledId: string, sendAtMs: number) => void;
+  onReschedule: (scheduledId: string, body: string, sendAtMs: number) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBody, setEditBody] = useState("");
   const [editValue, setEditValue] = useState("");
 
   if (items.length === 0) {
@@ -256,6 +259,7 @@ function ScheduledMessagesList({
 
   function openEdit(item: ScheduledSendItem) {
     setEditingId(item.scheduled_id);
+    setEditBody(item.body);
     setEditValue(datetimeLocalValueFromTimestamp(item.send_at_ms));
   }
 
@@ -265,7 +269,10 @@ function ScheduledMessagesList({
     if (sendAtMs === null) {
       return;
     }
-    onReschedule(item.scheduled_id, sendAtMs);
+    if (!editBody.trim()) {
+      return;
+    }
+    onReschedule(item.scheduled_id, editBody, sendAtMs);
     setEditingId(null);
   }
 
@@ -301,6 +308,18 @@ function ScheduledMessagesList({
                   className="scheduled-message-edit"
                   onSubmit={(event) => submitEdit(event, item)}
                 >
+                  <Composer
+                    editorOnly
+                    ariaLabel={t("scheduled.bodyInput")}
+                    composerMode={{ kind: "plain" }}
+                    draftKey={`scheduled:${item.scheduled_id}`}
+                    isSending={false}
+                    roomName={t("scheduled.title")}
+                    value={editBody}
+                    onCancelReply={() => undefined}
+                    onSend={() => undefined}
+                    onValueChange={setEditBody}
+                  />
                   <label className="scheduled-send-field">
                     <span>{t("scheduled.timeInput")}</span>
                     <input
@@ -321,7 +340,9 @@ function ScheduledMessagesList({
                     <button
                       className="timeline-send-bar-action"
                       type="submit"
-                      disabled={scheduledSendTimestampFromInput(editValue) === null}
+                      disabled={
+                        scheduledSendTimestampFromInput(editValue) === null || !editBody.trim()
+                      }
                     >
                       {t("scheduled.save")}
                     </button>
@@ -360,10 +381,18 @@ function ScheduledMessagesList({
 function PinnedEventsList({
   roomId,
   pinnedEvents,
+  profileUsers = {},
+  onOpen,
+  navigation = null,
+  onRetry,
   onUnpin
 }: {
   roomId: string;
   pinnedEvents: DesktopSnapshot["state"]["domain"]["room_interactions"][string]["pinned_events"];
+  profileUsers?: Record<string, UserProfile>;
+  onOpen?: (roomId: string, eventId: string, threadRootEventId: string | null) => void;
+  navigation?: PinnedEventNavigation | null;
+  onRetry?: (roomId: string, eventId: string, threadRootEventId: string | null) => void;
   onUnpin: (roomId: string, eventId: string) => void;
 }) {
   return (
@@ -373,20 +402,78 @@ function PinnedEventsList({
         <span>{t("timeline.pinnedMessages")}</span>
       </div>
       <div className="pinned-events-list">
-        {pinnedEvents.map((event) => (
+        {pinnedEvents.map((event) => {
+          const profile = event.sender ? profileUsers[event.sender] : undefined;
+          const senderLabel = peopleFacingLabel(
+            profile?.display_label,
+            event.sender_label,
+            event.sender
+          );
+          const avatarSource =
+            profile?.avatar?.thumbnail.kind === "ready"
+              ? mediaSourceUrl(profile.avatar.thumbnail.source_url)
+              : null;
+          return (
           <div className="pinned-event" key={event.event_id}>
-            <div className="pinned-event-main">
-              {event.sender ? (
+            <button
+              className="pinned-event-main pinned-event-open"
+              type="button"
+              aria-label={
+                event.body_preview ??
+                (event.state === "unableToDecrypt"
+                  ? t("timeline.pinnedEventUnableToDecrypt")
+                  : t("timeline.pinnedMessage"))
+              }
+              disabled={navigation?.event_id === event.event_id && navigation.status === "loading"}
+              onClick={() =>
+                onOpen?.(roomId, event.event_id, event.thread_root_event_id ?? null)
+              }
+            >
+              <span className="pinned-event-avatar" aria-hidden="true">
+                {avatarSource ? (
+                  <img src={avatarSource} alt={undefined} />
+                ) : (
+                  initials(senderLabel)
+                )}
+              </span>
+              <span className="pinned-event-details">
                 <span className="pinned-event-sender" dir="auto">
-                  {peopleFacingLabel(event.sender_label)}
+                  {senderLabel}
                 </span>
-              ) : null}
               <span className="pinned-event-body" dir="auto">
                 {event.redacted
                   ? t("timeline.redactedMessage")
+                  : event.state === "unableToDecrypt"
+                    ? t("timeline.pinnedEventUnableToDecrypt")
+                    : event.state === "unavailable"
+                      ? t("timeline.pinnedEventUnavailable")
                   : event.body_preview ?? t("timeline.pinnedMessage")}
               </span>
-            </div>
+              {event.timestamp_ms ? (
+                <time className="pinned-event-time" dateTime={new Date(event.timestamp_ms).toISOString()}>
+                  {formatScheduledSendTime(event.timestamp_ms)}
+                </time>
+              ) : null}
+              </span>
+            </button>
+            {navigation?.event_id === event.event_id ? (
+              <span className="pinned-event-navigation-status" role="status">
+                {navigation.status === "loading"
+                  ? t("timeline.pinnedNavigationLoading")
+                  : t("timeline.pinnedNavigationFailed")}
+                {navigation.status === "failed" && onRetry ? (
+                  <button
+                    className="pinned-event-retry"
+                    type="button"
+                    onClick={() =>
+                      onRetry(roomId, event.event_id, event.thread_root_event_id ?? null)
+                    }
+                  >
+                    {t("timeline.pinnedNavigationRetry")}
+                  </button>
+                ) : null}
+              </span>
+            ) : null}
             <button
               className="pinned-event-action"
               type="button"
@@ -396,9 +483,30 @@ function PinnedEventsList({
               <PinOff size={ICON_SIZE.micro} aria-hidden="true" />
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
     </section>
+  );
+}
+
+function PinnedMessagesEntry({
+  count,
+  onOpen
+}: {
+  count: number;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      className="pinned-events-entry"
+      type="button"
+      aria-label={t("timeline.pinnedMessagesCount", { count })}
+      onClick={onOpen}
+    >
+      <Pin size={ICON_SIZE.compact} aria-hidden="true" />
+      <span>{t("timeline.pinnedMessagesCount", { count })}</span>
+    </button>
   );
 }
 
@@ -661,6 +769,7 @@ export {
   MediaViewer,
   ScheduledMessagesList,
   PinnedEventsList,
+  PinnedMessagesEntry,
   SearchResults,
   MessageArticle
 };

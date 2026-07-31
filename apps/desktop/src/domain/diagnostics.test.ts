@@ -82,6 +82,7 @@ describe("diagnosticReport", () => {
               request_id: 7,
               items: [
                 {
+                  room_id: "!private-room:example.invalid",
                   root_event_id: "$private-event:example.invalid",
                   root_sender: "@alice:example.invalid",
                   root_sender_label: "Alice",

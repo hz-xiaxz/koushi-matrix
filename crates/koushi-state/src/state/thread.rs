@@ -6,11 +6,48 @@ use super::errors::OperationFailureKind;
 use super::settings::ThreadListOrder;
 use super::timeline::{ComposerState, StagedUploadItem};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ThreadOpenIntent {
     ExistingThread,
     NewThreadDraft,
+    PinnedReply { event_id: String },
+}
+
+/// Scope used by the Threads panel. The reducer keeps the legacy `room_id`
+/// snapshot field as a stable scope key (`home`, `space:<space_id>`, or the
+/// room id) so older state consumers keep their correlation contract while
+/// the actor can aggregate the resolved room ids in Rust.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ThreadsListScope {
+    Room { room_id: String },
+    Home,
+    Space { space_id: String },
+}
+
+impl ThreadsListScope {
+    pub fn scope_key(&self) -> String {
+        match self {
+            Self::Room { room_id } => room_id.clone(),
+            Self::Home => "home".to_owned(),
+            Self::Space { space_id } => format!("space:{space_id}"),
+        }
+    }
+
+    pub fn from_scope_key(scope_key: &str) -> Self {
+        if scope_key == "home" {
+            Self::Home
+        } else if let Some(space_id) = scope_key.strip_prefix("space:") {
+            Self::Space {
+                space_id: space_id.to_owned(),
+            }
+        } else {
+            Self::Room {
+                room_id: scope_key.to_owned(),
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -103,6 +140,7 @@ impl ThreadsListState {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ThreadsListItem {
+    pub room_id: String,
     pub root_event_id: String,
     pub root_sender: String,
     pub root_sender_label: Option<String>,

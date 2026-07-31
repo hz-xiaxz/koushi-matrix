@@ -303,7 +303,9 @@ fn submitting_scoped_search_carries_rust_resolved_room_filter() {
         AppAction::SearchSubmitted {
             request_id: 12,
             query: "GPT".to_owned(),
-            scope: SearchScope::Dms,
+            scope: SearchScope::CurrentRoom {
+                room_id: "dm-child".to_owned(),
+            },
         },
     );
 
@@ -313,7 +315,9 @@ fn submitting_scoped_search_carries_rust_resolved_room_filter() {
             AppEffect::SearchMessages {
                 request_id: 12,
                 query: "GPT".to_owned(),
-                scope: SearchScope::Dms,
+                scope: SearchScope::CurrentRoom {
+                    room_id: "dm-child".to_owned(),
+                },
                 room_filter: SearchRoomFilter::OnlyRooms(vec!["dm-child".to_owned()]),
             },
             AppEffect::EmitUiEvent(UiEvent::SearchChanged),

@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MessageArticle, PinnedEventsList } from "./mediaLists";
+import {
+  MessageArticle,
+  PinnedEventsList,
+  PinnedMessagesEntry,
+  ScheduledMessagesList
+} from "./mediaLists";
 
 afterEach(cleanup);
 
@@ -27,6 +32,46 @@ describe("people-facing media list labels", () => {
 
     expect(screen.getByText("Pinned Alias")).toBeTruthy();
     expect(screen.queryByText("@private:example.invalid")).toBeNull();
+  });
+
+  it("navigates by the owning room and exact event ID from a pinned row", () => {
+    const onOpen = vi.fn();
+    render(
+      <PinnedEventsList
+        roomId="!room:example.invalid"
+        pinnedEvents={[
+          {
+            event_id: "$pinned:example.invalid",
+            sender: "@private:example.invalid",
+            sender_label: "Pinned Alias",
+            body_preview: "Pinned body",
+            redacted: false,
+            timestamp_ms: 1_800_000_000_000,
+            state: "ready",
+            thread_root_event_id: null
+          }
+        ]}
+        onOpen={onOpen}
+        onUnpin={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Pinned body/ }));
+
+    expect(onOpen).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$pinned:example.invalid",
+      null
+    );
+  });
+
+  it("opens the pinned panel from the compact timeline entry", () => {
+    const onOpen = vi.fn();
+    render(<PinnedMessagesEntry count={3} onOpen={onOpen} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pinned · 3" }));
+
+    expect(onOpen).toHaveBeenCalledOnce();
   });
 
   it("renders a profile label in fixture message metadata and fails closed when absent", () => {
@@ -70,5 +115,35 @@ describe("people-facing media list labels", () => {
     rerender(<MessageArticle {...props} profileUsers={{}} />);
     expect(screen.getByText("Unknown user")).toBeTruthy();
     expect(screen.queryByText(message.sender)).toBeNull();
+  });
+});
+
+describe("scheduled message editing", () => {
+  it("edits the body and time through the shared composer controls", () => {
+    const onReschedule = vi.fn();
+    render(
+      <ScheduledMessagesList
+        capability="localFallback"
+        items={[
+          {
+            scheduled_id: "scheduled-1",
+            room_id: "!room:example.invalid",
+            body: "Original body",
+            send_at_ms: Date.UTC(2030, 0, 1, 12, 0),
+            handle: { kind: "local" }
+          }
+        ]}
+        onCancel={() => undefined}
+        onReschedule={onReschedule}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit scheduled send" }));
+    const body = screen.getByRole("textbox", { name: "Scheduled message" });
+    expect(body).toHaveProperty("value", "Original body");
+    fireEvent.change(body, { target: { value: "Edited **body**" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save scheduled send" }));
+
+    expect(onReschedule).toHaveBeenCalledWith("scheduled-1", "Edited **body**", expect.any(Number));
   });
 });

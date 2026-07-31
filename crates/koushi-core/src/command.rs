@@ -169,6 +169,7 @@ impl CoreCommand {
                 | RoomCommand::RemoveTag { request_id, .. }
                 | RoomCommand::PinEvent { request_id, .. }
                 | RoomCommand::UnpinEvent { request_id, .. }
+                | RoomCommand::RefreshPinnedEvents { request_id, .. }
                 | RoomCommand::QueryDirectory { request_id, .. }
                 | RoomCommand::PreviewJoinTarget { request_id, .. }
                 | RoomCommand::DismissDirectoryPreview { request_id }
@@ -438,6 +439,7 @@ pub enum AppCommand {
     RescheduleScheduledSend {
         request_id: RequestId,
         scheduled_id: String,
+        body: String,
         send_at_ms: u64,
     },
     OpenThread {
@@ -460,6 +462,7 @@ pub enum AppCommand {
         request_id: RequestId,
         room_id: String,
         event_id: String,
+        allow_live_fallback: bool,
     },
     /// Confirms that the canonical WebView timeline store applied one exact
     /// InitialItems projection. The projection request id remains stable when
@@ -574,14 +577,14 @@ pub enum AppCommand {
     },
     OpenThreadsList {
         request_id: RequestId,
-        room_id: String,
+        scope: koushi_state::ThreadsListScope,
     },
     CloseThreadsList {
         request_id: RequestId,
     },
     PaginateThreadsList {
         request_id: RequestId,
-        room_id: String,
+        scope: koushi_state::ThreadsListScope,
     },
     RecordLocalEncryptionHealth {
         request_id: RequestId,
@@ -725,6 +728,7 @@ impl fmt::Debug for AppCommand {
             Self::RescheduleScheduledSend {
                 request_id,
                 scheduled_id,
+                body: _,
                 send_at_ms,
             } => formatter
                 .debug_struct("RescheduleScheduledSend")
@@ -1902,6 +1906,10 @@ pub enum RoomCommand {
         room_id: String,
         event_id: String,
     },
+    RefreshPinnedEvents {
+        request_id: RequestId,
+        room_id: String,
+    },
     QueryDirectory {
         request_id: RequestId,
         query: DirectoryQuery,
@@ -2113,6 +2121,11 @@ impl fmt::Debug for RoomCommand {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("event_id", &"EventId(..)")
+                .finish(),
+            Self::RefreshPinnedEvents { request_id, .. } => formatter
+                .debug_struct("RefreshPinnedEvents")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
                 .finish(),
             Self::QueryDirectory { request_id, query } => formatter
                 .debug_struct("QueryDirectory")
@@ -2988,14 +3001,15 @@ pub enum SearchCommand {
 pub enum ThreadsListCommand {
     Open {
         request_id: RequestId,
-        room_id: String,
+        scope: koushi_state::ThreadsListScope,
+        room_ids: Vec<String>,
     },
     Close {
         request_id: RequestId,
     },
     Paginate {
         request_id: RequestId,
-        room_id: String,
+        scope: koushi_state::ThreadsListScope,
     },
 }
 
@@ -3004,7 +3018,6 @@ pub enum SearchScope {
     AllRooms,
     CurrentRoom { room_id: String },
     CurrentSpace { space_id: String },
-    Dms,
 }
 
 fn search_room_filter_debug(filter: &SearchRoomFilter) -> (&'static str, usize) {
@@ -3834,6 +3847,7 @@ mod tests {
                 request_id,
                 room_id: "!private-room:example.invalid".to_owned(),
                 event_id: "$private-event:example.invalid".to_owned(),
+                allow_live_fallback: false,
             },
             AppCommand::AcknowledgeTimelineProjection {
                 request_id,

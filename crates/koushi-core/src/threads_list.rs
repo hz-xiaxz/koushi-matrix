@@ -1,15 +1,15 @@
-//! ThreadsListActor: per-room thread list subscription and pagination.
+//! ThreadsListActor: scoped thread list subscription and pagination.
 //!
-//! Wraps the SDK `ThreadListService` and projects `ThreadListItem`s into the
-//! app-owned `ThreadsListItem` DTO. All state transitions are delivered as
-//! typed `AppAction`s (and mirrored as `CoreEvent::ThreadsList` events) so the
-//! reducer owns the UI snapshot.
+//! Wraps one SDK `ThreadListService` per room in the requested scope and
+//! projects `ThreadListItem`s into the app-owned `ThreadsListItem` DTO. All
+//! state transitions are delivered as typed `AppAction`s (and mirrored as
+//! `CoreEvent::ThreadsList` events) so the reducer owns the UI snapshot.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use futures_util::StreamExt;
-use koushi_state::{AppAction, OperationFailureKind, ThreadsListItem};
+use futures_util::{StreamExt, future::join_all};
+use koushi_state::{AppAction, OperationFailureKind, ThreadsListItem, ThreadsListScope};
 use matrix_sdk::ruma::RoomId;
 use matrix_sdk_ui::timeline::thread_list_service::{
     ThreadListItem as SdkThreadListItem, ThreadListServiceError,
@@ -281,25 +281,37 @@ pub(crate) fn activity_is_newer(
 
 /// Messages routed to a `ThreadsListActor`.
 pub enum ThreadsListMessage {
-    Open { request_id: RequestId },
-    Close { request_id: RequestId },
-    Paginate { request_id: RequestId },
+    Open {
+        request_id: RequestId,
+        scope: ThreadsListScope,
+        room_ids: Vec<String>,
+    },
+    Close {
+        request_id: RequestId,
+    },
+    Paginate {
+        request_id: RequestId,
+    },
     Shutdown,
 }
 
 /// Handle to a `ThreadsListActor` background task.
 pub struct ThreadsListActorHandle {
     tx: mpsc::Sender<ThreadsListMessage>,
-    room_id: String,
 }
 
 impl ThreadsListActorHandle {
-    pub async fn open(&self, _request_id: RequestId, room_id: String) -> bool {
-        // The handle is keyed to a room; the caller already verified the room id.
-        let _ = room_id;
+    pub async fn open(
+        &self,
+        request_id: RequestId,
+        scope: ThreadsListScope,
+        room_ids: Vec<String>,
+    ) -> bool {
         self.tx
             .send(ThreadsListMessage::Open {
-                request_id: _request_id,
+                request_id,
+                scope,
+                room_ids,
             })
             .await
             .is_ok()
@@ -318,17 +330,12 @@ impl ThreadsListActorHandle {
             .await
             .is_ok()
     }
-
-    pub fn room_id(&self) -> &str {
-        self.room_id.as_str()
-    }
 }
 
 pub struct ThreadsListActor {
     session: Arc<koushi_sdk::MatrixClientSession>,
     action_tx: mpsc::Sender<Vec<AppAction>>,
     event_tx: broadcast::Sender<CoreEvent>,
-    room_id: String,
     msg_rx: mpsc::Receiver<ThreadsListMessage>,
 }
 
@@ -337,18 +344,16 @@ impl ThreadsListActor {
         session: Arc<koushi_sdk::MatrixClientSession>,
         action_tx: mpsc::Sender<Vec<AppAction>>,
         event_tx: broadcast::Sender<CoreEvent>,
-        room_id: String,
     ) -> ThreadsListActorHandle {
         let (tx, msg_rx) = mpsc::channel(16);
         let actor = ThreadsListActor {
             session,
             action_tx,
             event_tx,
-            room_id: room_id.clone(),
             msg_rx,
         };
         executor::spawn(actor.run());
-        ThreadsListActorHandle { tx, room_id }
+        ThreadsListActorHandle { tx }
     }
 
     async fn run(mut self) {
@@ -361,8 +366,12 @@ impl ThreadsListActor {
                         break;
                     }
                 }
-                ThreadsListMessage::Open { request_id } => {
-                    active = self.open_subscription(request_id).await;
+                ThreadsListMessage::Open {
+                    request_id,
+                    scope,
+                    room_ids,
+                } => {
+                    active = self.open_subscription(request_id, scope, room_ids).await;
                 }
                 ThreadsListMessage::Paginate { request_id } => {
                     if let Some(sub) = active.as_ref() {
@@ -374,84 +383,102 @@ impl ThreadsListActor {
         // Dropping `active` cancels the SDK subscription background tasks.
     }
 
-    async fn open_subscription(&self, request_id: RequestId) -> Option<ActiveSubscription> {
-        let room_id = match RoomId::parse(self.room_id.as_str()) {
-            Ok(id) => id,
-            Err(_) => {
-                self.emit_failed(request_id, OperationFailureKind::Invalid)
-                    .await;
-                return None;
-            }
-        };
-        let room = match self.session.client().get_room(&room_id) {
-            Some(room) => room,
-            None => {
-                self.emit_failed(request_id, OperationFailureKind::NotFound)
-                    .await;
-                return None;
-            }
-        };
-
-        let service = Arc::new(ThreadListService::new(room));
-        let (_, items_subscriber) = service.subscribe_to_items_updates();
-        if let Err(_) = service.paginate().await {
-            self.emit_failed(request_id, OperationFailureKind::Sdk)
-                .await;
-            return None;
+    async fn open_subscription(
+        &self,
+        request_id: RequestId,
+        scope: ThreadsListScope,
+        room_ids: Vec<String>,
+    ) -> Option<ActiveSubscription> {
+        let mut services = BTreeMap::new();
+        for room_id in room_ids {
+            let room_id_value = match RoomId::parse(room_id.as_str()) {
+                Ok(id) => id,
+                Err(_) => {
+                    self.emit_failed(&scope, request_id, OperationFailureKind::Invalid)
+                        .await;
+                    return None;
+                }
+            };
+            let room = match self.session.client().get_room(&room_id_value) {
+                Some(room) => room,
+                None => {
+                    self.emit_failed(&scope, request_id, OperationFailureKind::NotFound)
+                        .await;
+                    return None;
+                }
+            };
+            services.insert(room_id, Arc::new(ThreadListService::new(room)));
         }
-        let items = service.items();
-        let projected: Vec<ThreadsListItem> = items.iter().map(project_item).collect();
-        let end_reached = matches!(
-            service.pagination_state(),
-            ThreadListPaginationState::Idle { end_reached: true }
-        );
 
-        self.emit_opened(request_id, projected.clone(), end_reached)
-            .await;
-
+        let item_subscribers = services
+            .iter()
+            .map(|(room_id, service)| {
+                let (_, subscriber) = service.subscribe_to_items_updates();
+                (room_id.clone(), Arc::clone(service), subscriber)
+            })
+            .collect::<Vec<_>>();
         let (items_tx, mut items_rx) = mpsc::channel(64);
         let (pagination_tx, mut pagination_rx) = mpsc::channel(16);
         let (pagination_request_tx, mut pagination_request_rx) = mpsc::channel(16);
         let (pagination_failure_tx, mut pagination_failure_rx) = mpsc::channel(16);
 
-        let items_relay_handle = {
-            let service = Arc::clone(&service);
-            let mut subscriber = items_subscriber;
-            executor::spawn(async move {
-                loop {
-                    match subscriber.next().await {
-                        Some(_) => {
-                            if items_tx.send(service.items()).await.is_err() {
-                                break;
+        let items_relay_handles = item_subscribers
+            .into_iter()
+            .map(|(room_id, service, mut subscriber)| {
+                let items_tx = items_tx.clone();
+                executor::spawn(async move {
+                    loop {
+                        match subscriber.next().await {
+                            Some(_) => {
+                                if items_tx.send(room_id.clone()).await.is_err() {
+                                    break;
+                                }
                             }
+                            None => break,
                         }
-                        None => break,
                     }
-                }
+                    drop(service);
+                })
             })
-        };
+            .collect::<Vec<_>>();
 
-        let pagination_relay_handle = {
-            let service = Arc::clone(&service);
-            let mut subscriber = service.subscribe_to_pagination_state_updates();
-            executor::spawn(async move {
-                loop {
-                    match subscriber.next().await {
-                        Some(state) => {
-                            if pagination_tx.send(state).await.is_err() {
-                                break;
-                            }
+        let pagination_relay_handles = services
+            .iter()
+            .map(|(room_id, service)| {
+                let room_id = room_id.clone();
+                let pagination_tx = pagination_tx.clone();
+                let mut subscriber = service.subscribe_to_pagination_state_updates();
+                executor::spawn(async move {
+                    while let Some(state) = subscriber.next().await {
+                        if pagination_tx.send((room_id.clone(), state)).await.is_err() {
+                            break;
                         }
-                        None => break,
                     }
-                }
+                })
             })
-        };
+            .collect::<Vec<_>>();
+        drop(items_tx);
+        drop(pagination_tx);
+
+        let initial_results =
+            join_all(services.iter().map(|(room_id, service)| async move {
+                (room_id.clone(), service.paginate().await)
+            }))
+            .await;
+        if initial_results.iter().any(|(_, result)| result.is_err()) {
+            self.emit_failed(&scope, request_id, OperationFailureKind::Sdk)
+                .await;
+            return None;
+        }
+        let projected = projected_items(&services);
+        let initial_end_reached = end_reached(&services);
+        self.emit_opened(&scope, request_id, projected, initial_end_reached)
+            .await;
 
         let action_tx = self.action_tx.clone();
         let event_tx = self.event_tx.clone();
-        let room_id = self.room_id.clone();
-        let update_service = Arc::clone(&service);
+        let update_services = services.clone();
+        let update_scope = scope.clone();
         let update_task = executor::spawn(async move {
             let mut current_request_id = request_id;
             let mut failed_pagination_request_id: Option<u64> = None;
@@ -464,39 +491,42 @@ impl ThreadsListActor {
                     Some((failed_request_id, failure_kind)) = pagination_failure_rx.recv() => {
                         current_request_id = failed_request_id;
                         failed_pagination_request_id = Some(failed_request_id.sequence);
+                        let scope_key = update_scope.scope_key();
                         let _ = action_tx.send(vec![AppAction::ThreadsListFailed {
                             request_id: failed_request_id.sequence,
-                            room_id: room_id.clone(),
+                            room_id: scope_key.clone(),
                             failure_kind,
                         }]).await;
                         let _ = event_tx.send(CoreEvent::ThreadsList(ThreadsListEvent::Failed {
                             request_id: failed_request_id,
-                            room_id: room_id.clone(),
+                            room_id: scope_key,
                             failure_kind,
                         }));
                     }
-                    Some(items) = items_rx.recv() => {
-                        let projected: Vec<ThreadsListItem> = items.iter().map(project_item).collect();
+                    Some(_) = items_rx.recv() => {
+                        let projected = projected_items(&update_services);
+                        let scope_key = update_scope.scope_key();
                         let _ = action_tx.send(vec![AppAction::ThreadsListUpdated {
                             request_id: current_request_id.sequence,
-                            room_id: room_id.clone(),
+                            room_id: scope_key.clone(),
                             items: projected.clone(),
                             is_paginating: false,
-                            end_reached: false,
+                            end_reached: crate::threads_list::end_reached(&update_services),
                         }]).await;
                         let _ = event_tx.send(CoreEvent::ThreadsList(ThreadsListEvent::Updated {
                             request_id: current_request_id,
-                            room_id: room_id.clone(),
+                            room_id: scope_key,
                             items: projected,
                             is_paginating: false,
-                            end_reached: false,
+                            end_reached: crate::threads_list::end_reached(&update_services),
                         }));
                     }
-                    Some(state) = pagination_rx.recv() => {
-                        let items = update_service.items();
-                        let projected: Vec<ThreadsListItem> = items.iter().map(project_item).collect();
-                        let end_reached = matches!(state, ThreadListPaginationState::Idle { end_reached: true });
-                        let is_paginating = matches!(state, ThreadListPaginationState::Loading);
+                    Some((_, _state)) = pagination_rx.recv() => {
+                        let projected = projected_items(&update_services);
+                        let is_paginating = update_services.values().any(|service| {
+                            matches!(service.pagination_state(), ThreadListPaginationState::Loading)
+                        });
+                        let end_reached = crate::threads_list::end_reached(&update_services);
                         if !is_paginating && failed_pagination_request_id == Some(current_request_id.sequence) {
                             failed_pagination_request_id = None;
                             continue;
@@ -507,7 +537,7 @@ impl ThreadsListActor {
                         let action = if is_paginating {
                             AppAction::ThreadsListUpdated {
                                 request_id: current_request_id.sequence,
-                                room_id: room_id.clone(),
+                                room_id: update_scope.scope_key(),
                                 items: projected.clone(),
                                 is_paginating: true,
                                 end_reached,
@@ -515,7 +545,7 @@ impl ThreadsListActor {
                         } else {
                             AppAction::ThreadsListPaginationCompleted {
                                 request_id: current_request_id.sequence,
-                                room_id: room_id.clone(),
+                                room_id: update_scope.scope_key(),
                                 items: projected.clone(),
                                 end_reached,
                             }
@@ -524,7 +554,7 @@ impl ThreadsListActor {
                         let event = if is_paginating {
                             CoreEvent::ThreadsList(ThreadsListEvent::Updated {
                                 request_id: current_request_id,
-                                room_id: room_id.clone(),
+                                room_id: update_scope.scope_key(),
                                 items: projected.clone(),
                                 is_paginating: true,
                                 end_reached,
@@ -532,7 +562,7 @@ impl ThreadsListActor {
                         } else {
                             CoreEvent::ThreadsList(ThreadsListEvent::PaginationCompleted {
                                 request_id: current_request_id,
-                                room_id: room_id.clone(),
+                                room_id: update_scope.scope_key(),
                                 items: projected,
                                 end_reached,
                             })
@@ -545,22 +575,23 @@ impl ThreadsListActor {
         });
 
         Some(ActiveSubscription {
-            service,
+            services,
             pagination_request_tx,
             pagination_failure_tx,
-            _items_relay: items_relay_handle,
-            _pagination_relay: pagination_relay_handle,
+            _items_relay: items_relay_handles,
+            _pagination_relay: pagination_relay_handles,
             _update_task: update_task,
         })
     }
 
     async fn emit_opened(
         &self,
+        scope: &ThreadsListScope,
         request_id: RequestId,
         items: Vec<ThreadsListItem>,
         end_reached: bool,
     ) {
-        let room_id = self.room_id.clone();
+        let room_id = scope.scope_key();
         let _ = self
             .action_tx
             .send(vec![AppAction::ThreadsListOpened {
@@ -580,8 +611,13 @@ impl ThreadsListActor {
             }));
     }
 
-    async fn emit_failed(&self, request_id: RequestId, failure_kind: OperationFailureKind) {
-        let room_id = self.room_id.clone();
+    async fn emit_failed(
+        &self,
+        scope: &ThreadsListScope,
+        request_id: RequestId,
+        failure_kind: OperationFailureKind,
+    ) {
+        let room_id = scope.scope_key();
         let _ = self
             .action_tx
             .send(vec![AppAction::ThreadsListFailed {
@@ -601,11 +637,11 @@ impl ThreadsListActor {
 }
 
 struct ActiveSubscription {
-    service: Arc<ThreadListService>,
+    services: BTreeMap<String, Arc<ThreadListService>>,
     pagination_request_tx: mpsc::Sender<RequestId>,
     pagination_failure_tx: mpsc::Sender<(RequestId, OperationFailureKind)>,
-    _items_relay: executor::JoinHandle<()>,
-    _pagination_relay: executor::JoinHandle<()>,
+    _items_relay: Vec<executor::JoinHandle<()>>,
+    _pagination_relay: Vec<executor::JoinHandle<()>>,
     _update_task: executor::JoinHandle<()>,
 }
 
@@ -614,11 +650,11 @@ impl ActiveSubscription {
         if self.pagination_request_tx.send(request_id).await.is_err() {
             return;
         }
-        if let Err(error) = self.service.paginate().await {
-            let failure_kind = classify_thread_list_error(&error);
+        let results = join_all(self.services.values().map(|service| service.paginate())).await;
+        if let Some(error) = results.into_iter().find_map(Result::err) {
             let _ = self
                 .pagination_failure_tx
-                .send((request_id, failure_kind))
+                .send((request_id, classify_thread_list_error(&error)))
                 .await;
         }
     }
@@ -631,8 +667,9 @@ fn classify_thread_list_error(error: &ThreadListServiceError) -> OperationFailur
     }
 }
 
-fn project_item(item: &SdkThreadListItem) -> ThreadsListItem {
+fn project_item(room_id: &str, item: &SdkThreadListItem) -> ThreadsListItem {
     ThreadsListItem {
+        room_id: room_id.to_owned(),
         root_event_id: item.root_event.event_id.to_string(),
         root_sender: item.root_event.sender.to_string(),
         root_sender_label: sender_label(&item.root_event.sender_profile),
@@ -651,6 +688,29 @@ fn project_item(item: &SdkThreadListItem) -> ThreadsListItem {
         latest_timestamp_ms: item.latest_event.as_ref().map(|e| e.timestamp.0.into()),
         reply_count: item.num_replies,
     }
+}
+
+fn projected_items(services: &BTreeMap<String, Arc<ThreadListService>>) -> Vec<ThreadsListItem> {
+    let mut seen = HashSet::new();
+    let mut projected = Vec::new();
+    for (room_id, service) in services {
+        for item in service.items() {
+            let item = project_item(room_id, &item);
+            if seen.insert((item.room_id.clone(), item.root_event_id.clone())) {
+                projected.push(item);
+            }
+        }
+    }
+    projected
+}
+
+fn end_reached(services: &BTreeMap<String, Arc<ThreadListService>>) -> bool {
+    services.values().all(|service| {
+        matches!(
+            service.pagination_state(),
+            ThreadListPaginationState::Idle { end_reached: true }
+        )
+    })
 }
 
 fn sender_label(profile: &TimelineDetails<matrix_sdk_ui::timeline::Profile>) -> Option<String> {
@@ -1094,7 +1154,7 @@ mod tests {
         );
 
         let pagination_updates = source
-            .split("Some(state) = pagination_rx.recv()")
+            .split("Some((_, _state)) = pagination_rx.recv()")
             .nth(1)
             .expect("pagination update branch")
             .split("else => break")
@@ -1140,11 +1200,11 @@ mod tests {
             "thread-list item/pagination relays must not drop terminal updates"
         );
         assert!(
-            open_subscription.contains("items_tx.send(service.items()).await"),
+            open_subscription.contains("items_tx.send(room_id.clone()).await"),
             "item relay should await reliable delivery to the update task"
         );
         assert!(
-            open_subscription.contains("pagination_tx.send(state).await"),
+            open_subscription.contains("pagination_tx.send((room_id.clone(), state)).await"),
             "pagination relay should await terminal state delivery to the update task"
         );
         assert!(
@@ -1165,9 +1225,10 @@ mod tests {
         );
         assert!(
             open_subscription
-                .contains("self.emit_failed(request_id, OperationFailureKind::Invalid)")
-                && open_subscription
-                    .contains("self.emit_failed(request_id, OperationFailureKind::NotFound)"),
+                .contains("self.emit_failed(&scope, request_id, OperationFailureKind::Invalid)")
+                && open_subscription.contains(
+                    "self.emit_failed(&scope, request_id, OperationFailureKind::NotFound)"
+                ),
             "open failures should preserve parse/not-found failure kinds"
         );
     }

@@ -216,6 +216,7 @@ fn scheduled_send_cancel_and_reschedule_update_store_and_projection() {
         &mut state,
         AppAction::ScheduledSendRescheduled {
             scheduled_id: "sched-1".to_owned(),
+            body: "edited scheduled body".to_owned(),
             send_at_ms: 1_900_000_030_000,
             handle: ScheduledSendHandle::Server {
                 delay_id: "server-delay-id".to_owned(),
@@ -231,6 +232,10 @@ fn scheduled_send_cancel_and_reschedule_update_store_and_projection() {
         ScheduledSendHandle::Server {
             delay_id: "server-delay-id".to_owned()
         }
+    );
+    assert_eq!(
+        state.timeline.scheduled_sends[0].body,
+        "edited scheduled body"
     );
 
     reduce(

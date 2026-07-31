@@ -640,6 +640,9 @@ export interface PinnedEvent {
   sender_label: string | null;
   body_preview: string | null;
   redacted: boolean;
+  timestamp_ms?: number | null;
+  state?: "ready" | "unableToDecrypt" | "unavailable";
+  thread_root_event_id?: string | null;
 }
 
 export interface ReplyQuote {

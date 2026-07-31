@@ -308,8 +308,6 @@ export function roomIsInScope(
       );
       return Boolean(activeSpace?.child_room_ids.includes(roomId));
     }
-    case "dms":
-      return snapshot.state.domain.rooms.some((room) => room.room_id === roomId && room.is_dm);
     case "allRooms":
       return true;
   }

@@ -138,6 +138,7 @@ impl FakeDesktopBackend {
         self.dispatch(AppAction::OpenThread {
             room_id: DEFAULT_ROOM_ID.to_owned(),
             root_event_id: "$alpha-update".to_owned(),
+            intent: koushi_state::ThreadOpenIntent::ExistingThread,
         });
     }
 
@@ -433,6 +434,7 @@ impl FakeDesktopBackend {
             | AppEffect::StopSync
             | AppEffect::EmitUiEvent(_)
             | AppEffect::SubscribeThreadsList { .. }
+            | AppEffect::SubscribeThreadsListScoped { .. }
             | AppEffect::PaginateThreadsList { .. }
             | AppEffect::UnsubscribeThreadsList
             // The fake backend has no SearchActor; silently ignore crawler
@@ -711,6 +713,7 @@ impl FakeDesktopBackend {
             | ThreadPaneState::Opening {
                 room_id,
                 root_event_id,
+                ..
             } => (room_id, root_event_id),
             ThreadPaneState::Closed => return None,
         };

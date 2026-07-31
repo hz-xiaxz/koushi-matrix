@@ -346,6 +346,12 @@ An in-process actor system in `koushi-core`:
   timelines remain event-driven render surfaces; they do not own the Activity
   state machine. React dispatches typed Activity commands and focused-context
   opens using event references supplied by Rust.
+- `ThreadsListActor` (per account session) — scoped thread-list subscriptions.
+  A room scope uses one SDK `ThreadListService`; Home and Space scopes resolve
+  their Rust-owned room sets first and use one bounded service per room. The
+  actor merges rows, deduplicates by `(room_id, root_event_id)`, preserves the
+  owning room on every row, and owns pagination completion/failure. React
+  renders this projection and never aggregates room or timeline data itself.
 - Account-level live signals such as presence are Rust-owned state in
   `AppState.live_signals.presence`. In the current Phase A contract,
   `AccountCommand::SetPresence` records the requested presence and emits typed

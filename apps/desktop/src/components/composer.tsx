@@ -72,6 +72,7 @@ import {
 
 export const Composer = memo(function Composer({
   surface = "main",
+  editorOnly = false,
   canEdit = true,
   composerMode,
   hasStagedUploads = false,
@@ -96,6 +97,7 @@ export const Composer = memo(function Composer({
   onValueChange
 }: {
   surface?: ComposerSurface;
+  editorOnly?: boolean;
   canEdit?: boolean;
   composerMode: ComposerModeProp;
   hasStagedUploads?: boolean;
@@ -471,7 +473,7 @@ export const Composer = memo(function Composer({
 
   return (
     <section
-      className={`composer${fileDragActive ? " is-file-drag-over" : ""}`}
+      className={`composer${editorOnly ? " is-editor-only" : ""}${fileDragActive ? " is-file-drag-over" : ""}`}
       aria-label={ariaLabel}
       data-file-drag-over={fileDragActive ? "true" : "false"}
       onDragEnter={onAttachmentDragEnter}
@@ -482,7 +484,7 @@ export const Composer = memo(function Composer({
       <div className="composer-drop-overlay" aria-hidden={!fileDragActive}>
         {t("composer.dropFiles")}
       </div>
-      {composerMode.kind === "reply" ? (
+      {!editorOnly && composerMode.kind === "reply" ? (
         <div className="composer-reply-banner">
           <span className="composer-reply-label">{t("composer.replying")}</span>
           <button
@@ -591,7 +593,7 @@ export const Composer = memo(function Composer({
         }}
         onChange={(event) => updateLocalValue(event.target.value)}
       />
-      <div className="composer-footer">
+      {!editorOnly ? <div className="composer-footer">
         <div>
           <input
             ref={fileInputRef}
@@ -662,7 +664,7 @@ export const Composer = memo(function Composer({
         >
           <Send size={ICON_SIZE.input} />
         </button>
-      </div>
+      </div> : null}
       {scheduleOpen && onScheduleSend ? (
         <ImeSafeForm className="scheduled-send-form" onSubmit={submitSchedule}>
           <label className="scheduled-send-field">

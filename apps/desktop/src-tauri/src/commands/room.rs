@@ -240,6 +240,42 @@ pub async fn unpin_event(
 }
 
 #[tauri::command]
+pub async fn refresh_pinned_events(
+    room_id: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_refresh_pinned_events_command(
+            request_id,
+            room_id.clone(),
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    wait_for_room_operation(
+        &mut event_conn,
+        request_id,
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        |event, _| {
+            matches!(
+                event,
+                RoomEvent::PinnedEventsUpdated {
+                    room_id: updated_room_id,
+                    ..
+                } if updated_room_id == &room_id
+            )
+        },
+        "pinned messages refresh did not complete",
+        "pinned messages refresh failed",
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn load_room_settings(
     room_id: String,
     app: AppHandle,

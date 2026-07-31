@@ -54,7 +54,7 @@ describe("App search lifecycle", () => {
     });
 
     await waitFor(() => {
-      expect(submitSearch).toHaveBeenCalledWith("Pending", "allRooms");
+      expect(submitSearch).toHaveBeenCalledWith("Pending", "currentRoom");
     });
     expect(await screen.findByText('Searching for "Pending"')).toBeTruthy();
   });
@@ -83,7 +83,7 @@ describe("App search lifecycle", () => {
     });
 
     await waitFor(() => {
-      expect(submitSearch).toHaveBeenCalledWith("Beta", "allRooms");
+      expect(submitSearch).toHaveBeenCalledWith("Beta", "currentRoom");
     });
     expect(await screen.findByText('Searching for "Beta"')).toBeTruthy();
     expect(screen.queryByText(/result[s]? for "Alpha"/)).toBeNull();
@@ -101,7 +101,7 @@ describe("App search lifecycle", () => {
     });
 
     await waitFor(() => {
-      expect(submitSearch).toHaveBeenCalledWith("GP", "allRooms");
+      expect(submitSearch).toHaveBeenCalledWith("GP", "currentRoom");
     });
     expect(await screen.findAllByText("Search term is too short")).toHaveLength(2);
     expect(screen.queryByText('Searching for "GP"')).toBeNull();
@@ -110,7 +110,7 @@ describe("App search lifecycle", () => {
       fireEvent.change(searchInput, { target: { value: "GPT" } });
     });
     await waitFor(() => {
-      expect(submitSearch).toHaveBeenCalledWith("GPT", "allRooms");
+      expect(submitSearch).toHaveBeenCalledWith("GPT", "currentRoom");
     });
     await waitFor(() => {
       expect(screen.queryByText("Search term is too short")).toBeNull();
@@ -120,7 +120,7 @@ describe("App search lifecycle", () => {
       fireEvent.change(searchInput, { target: { value: "通" } });
     });
     await waitFor(() => {
-      expect(submitSearch).toHaveBeenCalledWith("通", "allRooms");
+      expect(submitSearch).toHaveBeenCalledWith("通", "currentRoom");
     });
     expect(await screen.findAllByText("Search term is too short")).toHaveLength(2);
 
@@ -128,7 +128,7 @@ describe("App search lifecycle", () => {
       fireEvent.change(searchInput, { target: { value: "通院" } });
     });
     await waitFor(() => {
-      expect(submitSearch).toHaveBeenCalledWith("通院", "allRooms");
+      expect(submitSearch).toHaveBeenCalledWith("通院", "currentRoom");
     });
     await waitFor(() => {
       expect(screen.queryByText("Search term is too short")).toBeNull();
@@ -146,17 +146,17 @@ describe("App search lifecycle", () => {
       fireEvent.change(searchInput, { target: { value: "GPT" } });
     });
     await waitFor(() => {
-      expect(submitSearch).toHaveBeenCalledWith("GPT", "allRooms");
+      expect(submitSearch).toHaveBeenCalledWith("GPT", "currentRoom");
     });
 
     await act(async () => {
       fireEvent.change(screen.getByRole("combobox", { name: "Search scope" }), {
-        target: { value: "dms" }
+        target: { value: "allRooms" }
       });
     });
 
     await waitFor(() => {
-      expect(submitSearch).toHaveBeenCalledWith("GPT", "dms");
+      expect(submitSearch).toHaveBeenCalledWith("GPT", "allRooms");
     });
   });
 
@@ -164,6 +164,12 @@ describe("App search lifecycle", () => {
     const api = createBrowserFakeApi();
 
     await renderAppWithApi(api);
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Search scope" }), {
+        target: { value: "allRooms" }
+      });
+    });
 
     const searchInput = await screen.findByRole("textbox", { name: "Search" });
     await act(async () => {

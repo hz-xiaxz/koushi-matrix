@@ -1,6 +1,6 @@
 import type { LinkPreview } from "./linkPreview";
 
-export type SearchScopeKind = "currentRoom" | "currentSpace" | "dms" | "allRooms";
+export type SearchScopeKind = "currentRoom" | "currentSpace" | "allRooms";
 
 export interface CreateRoomRequest {
   name: string;
@@ -849,6 +849,16 @@ export interface PinnedEvent {
   sender_label: string | null;
   body_preview: string | null;
   redacted: boolean;
+  timestamp_ms?: number | null;
+  state?: "ready" | "unableToDecrypt" | "unavailable";
+  thread_root_event_id?: string | null;
+}
+
+export interface PinnedEventNavigation {
+  room_id: string;
+  event_id: string;
+  thread_root_event_id: string | null;
+  status: "loading" | "failed";
 }
 
 export type PinOp = "pin" | "unpin";
@@ -1654,7 +1664,10 @@ export interface CjkCollationProfile {
   case_first: string | null;
 }
 
-export type ThreadOpenIntent = "existingThread" | "newThreadDraft";
+export type ThreadOpenIntent =
+  | "existingThread"
+  | "newThreadDraft"
+  | { pinnedReply: { event_id: string } };
 
 export type ThreadPaneState =
   | { kind: "closed" }
@@ -1686,6 +1699,7 @@ export type ThreadAttentionState =
     };
 
 export interface ThreadsListItem {
+  room_id: string;
   root_event_id: string;
   root_sender: string;
   root_sender_label: string | null;
@@ -1698,6 +1712,11 @@ export interface ThreadsListItem {
   latest_timestamp_ms: number | null;
   reply_count: number;
 }
+
+export type ThreadsListScope =
+  | { kind: "room"; room_id: string }
+  | { kind: "home" }
+  | { kind: "space"; space_id: string };
 
 export type ThreadsListState =
   | { kind: "closed" }

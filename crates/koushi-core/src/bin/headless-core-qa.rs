@@ -3975,6 +3975,7 @@ async fn run_scheduled_send_stage(
     conn.command(CoreCommand::App(AppCommand::RescheduleScheduledSend {
         request_id: reschedule_id,
         scheduled_id: scheduled_id.clone(),
+        body: SCHEDULED_CREATE_BODY.to_owned(),
         send_at_ms: rescheduled_at_ms,
     }))
     .await

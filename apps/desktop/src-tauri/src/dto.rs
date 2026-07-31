@@ -811,7 +811,6 @@ impl From<SearchState> for FrontendSearchState {
 pub enum SearchScopeKind {
     CurrentRoom,
     CurrentSpace,
-    Dms,
     AllRooms,
 }
 
@@ -826,7 +825,9 @@ impl SearchScopeKind {
                 .map(|room_id| SearchScope::CurrentRoom {
                     room_id: room_id.clone(),
                 })
-                .unwrap_or(SearchScope::AllRooms),
+                .unwrap_or_else(|| SearchScope::CurrentRoom {
+                    room_id: String::new(),
+                }),
             Self::CurrentSpace => state
                 .navigation
                 .active_space_id
@@ -834,8 +835,9 @@ impl SearchScopeKind {
                 .map(|space_id| SearchScope::CurrentSpace {
                     space_id: space_id.clone(),
                 })
-                .unwrap_or(SearchScope::AllRooms),
-            Self::Dms => SearchScope::Dms,
+                .unwrap_or_else(|| SearchScope::CurrentSpace {
+                    space_id: String::new(),
+                }),
             Self::AllRooms => SearchScope::AllRooms,
         }
     }
@@ -846,7 +848,6 @@ impl From<SearchScope> for SearchScopeKind {
         match scope {
             SearchScope::CurrentRoom { .. } => Self::CurrentRoom,
             SearchScope::CurrentSpace { .. } => Self::CurrentSpace,
-            SearchScope::Dms => Self::Dms,
             SearchScope::AllRooms => Self::AllRooms,
         }
     }
@@ -1892,6 +1893,9 @@ mod tests {
                     sender_label: Some("Fixture User".to_owned()),
                     body_preview: Some("Pinned fixture message".to_owned()),
                     redacted: false,
+                    timestamp_ms: Some(1_800_000_000_000),
+                    state: koushi_state::PinnedEventState::Ready,
+                    thread_root_event_id: None,
                 }],
                 pin_operation: PinOperationState::Pending {
                     request_id: 42,
@@ -2261,6 +2265,7 @@ mod tests {
             room_id: "!room:example.invalid".to_owned(),
             request_id: 11,
             items: vec![ThreadsListItem {
+                room_id: "!room:example.invalid".to_owned(),
                 root_event_id: "$thread-root:example.invalid".to_owned(),
                 root_sender: "@fixture:example.invalid".to_owned(),
                 root_sender_label: Some("Fixture User".to_owned()),

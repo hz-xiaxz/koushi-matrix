@@ -70,6 +70,7 @@ import type {
   TimelineMessage,
   ThreadOpenIntent,
   ThreadsListItem,
+  ThreadsListScope,
   UploadStagingRequestItem,
   AttachmentFilter,
   AttachmentScope,
@@ -155,6 +156,7 @@ export interface DesktopApi {
   reorderSpaces(spaceIds: string[]): Promise<DesktopSnapshot>;
   selectRoom(roomId: string): Promise<DesktopSnapshot>;
   openActivityEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
+  openPinnedEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   selectSearchResult(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   acknowledgeTimelineProjection(
     projectionRequestId: import("../domain/coreEvents").RequestId,
@@ -233,7 +235,11 @@ export interface DesktopApi {
   ): Promise<DesktopSnapshot>;
   clearUploadStaging(target: ComposerTarget): Promise<DesktopSnapshot>;
   cancelScheduledSend(scheduledId: string): Promise<DesktopSnapshot>;
-  rescheduleScheduledSend(scheduledId: string, sendAtMs: number): Promise<DesktopSnapshot>;
+  rescheduleScheduledSend(
+    scheduledId: string,
+    body: string,
+    sendAtMs: number
+  ): Promise<DesktopSnapshot>;
   retrySend(roomId: string, transactionId: string): Promise<DesktopSnapshot>;
   cancelSend(roomId: string, transactionId: string): Promise<DesktopSnapshot>;
   sendReaction(roomId: string, eventId: string, reactionKey: string): Promise<DesktopSnapshot>;
@@ -302,9 +308,9 @@ export interface DesktopApi {
     intent: ThreadOpenIntent
   ): Promise<DesktopSnapshot>;
   closeThread(): Promise<DesktopSnapshot>;
-  openThreadsList(roomId: string): Promise<DesktopSnapshot>;
+  openThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot>;
   closeThreadsList(): Promise<DesktopSnapshot>;
-  paginateThreadsList(roomId: string): Promise<DesktopSnapshot>;
+  paginateThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot>;
   openFilesView(scope: FilesViewScope, filter: AttachmentFilter, sort: AttachmentSort): Promise<DesktopSnapshot>;
   closeFilesView(): Promise<DesktopSnapshot>;
   setThreadComposerDraft(
@@ -1443,6 +1449,10 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
+  async openPinnedEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+    return this.openActivityEvent(roomId, eventId);
+  }
+
   async acknowledgeTimelineProjection(): Promise<void> {
     // Browser fakes apply snapshots synchronously and have no Core actor lease.
   }
@@ -1818,14 +1828,15 @@ class BrowserFakeApi implements DesktopApi {
 
   async rescheduleScheduledSend(
     scheduledId: string,
+    body: string,
     sendAtMs: number
   ): Promise<DesktopSnapshot> {
-    if (!this.canUseSyncedViews() || !Number.isFinite(sendAtMs)) {
+    if (!this.canUseSyncedViews() || !body.trim() || !Number.isFinite(sendAtMs)) {
       return this.getSnapshot();
     }
     this.snapshot.state.ui.timeline.scheduled_sends =
       this.snapshot.state.ui.timeline.scheduled_sends.map((item) =>
-        item.scheduled_id === scheduledId ? { ...item, send_at_ms: sendAtMs } : item
+        item.scheduled_id === scheduledId ? { ...item, body, send_at_ms: sendAtMs } : item
       );
     return this.getSnapshot();
   }
@@ -2195,18 +2206,23 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
-  async openThreadsList(roomId: string): Promise<DesktopSnapshot> {
+  async openThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot> {
     if (!this.canUseSyncedViews()) {
       return this.getSnapshot();
     }
-    if (!this.snapshot.state.domain.rooms.some((room) => room.room_id === roomId)) {
+    const resolved = resolveThreadsListScope(scope, this.snapshot);
+    if (
+      scope.kind === "room" &&
+      !this.snapshot.state.domain.rooms.some((room) => room.room_id === scope.room_id)
+    ) {
       return this.getSnapshot();
     }
+    const scopeKey = threadsListScopeKey(scope);
     this.snapshot.state.ui.threads_list = {
       kind: "open",
-      room_id: roomId,
+      room_id: scopeKey,
       request_id: 0,
-      items: threadsListItemsForRoom(roomId),
+      items: threadsListItemsForRooms(resolved.room_ids),
       is_paginating: false,
       end_reached: true,
     };
@@ -2262,14 +2278,14 @@ class BrowserFakeApi implements DesktopApi {
     return scope;
   }
 
-  async paginateThreadsList(roomId: string): Promise<DesktopSnapshot> {
+  async paginateThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot> {
     if (!this.canUseSyncedViews()) {
       return this.getSnapshot();
     }
     const list = this.snapshot.state.ui.threads_list;
     if (
       list.kind === "open" &&
-      list.room_id === roomId &&
+      list.room_id === threadsListScopeKey(scope) &&
       !list.is_paginating &&
       !list.end_reached
     ) {
@@ -3246,7 +3262,10 @@ class BrowserFakeApi implements DesktopApi {
                 sender: null,
                 sender_label: null,
                 body_preview: null,
-                redacted: false
+                redacted: false,
+                timestamp_ms: null,
+                state: "ready",
+                thread_root_event_id: null
               }
             ],
         pin_operation: { kind: "idle" }
@@ -5637,15 +5656,16 @@ const threadReplies = [
   }
 ];
 
-function threadsListItemsForRoom(roomId: string): ThreadsListItem[] {
+function threadsListItemsForRooms(roomIds: string[]): ThreadsListItem[] {
   return timelineMessages
-    .filter((message) => message.room_id === roomId && message.reply_count > 0)
+    .filter((message) => roomIds.includes(message.room_id) && message.reply_count > 0)
     .map((message) => {
       const replies = threadReplies
-        .filter((reply) => reply.room_id === roomId && reply.root_event_id === message.event_id)
+        .filter((reply) => reply.room_id === message.room_id && reply.root_event_id === message.event_id)
         .sort((left, right) => left.timestamp_ms - right.timestamp_ms);
       const latestReply = replies[replies.length - 1] ?? null;
       return {
+        room_id: message.room_id,
         root_event_id: message.event_id,
         root_sender: message.sender,
         root_sender_label: message.sender,
@@ -5659,6 +5679,33 @@ function threadsListItemsForRoom(roomId: string): ThreadsListItem[] {
         reply_count: Math.max(message.reply_count, replies.length)
       };
     });
+}
+
+function threadsListScopeKey(scope: ThreadsListScope): string {
+  if (scope.kind === "home") return "home";
+  if (scope.kind === "space") return `space:${scope.space_id}`;
+  return scope.room_id;
+}
+
+function resolveThreadsListScope(
+  scope: ThreadsListScope,
+  snapshot: DesktopSnapshot
+): { room_ids: string[] } {
+  if (scope.kind === "room") {
+    return { room_ids: [scope.room_id] };
+  }
+  if (scope.kind === "home") {
+    return { room_ids: snapshot.state.domain.rooms.map((room) => room.room_id) };
+  }
+  const space = snapshot.state.domain.spaces.find((candidate) => candidate.space_id === scope.space_id);
+  const room_ids = snapshot.state.domain.rooms
+    .filter(
+      (room) =>
+        space?.child_room_ids.includes(room.room_id) === true ||
+        room.parent_space_ids.includes(scope.space_id)
+    )
+    .map((room) => room.room_id);
+  return { room_ids };
 }
 
 function attachmentResultsForScope(

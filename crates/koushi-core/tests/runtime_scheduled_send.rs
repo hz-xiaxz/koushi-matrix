@@ -222,6 +222,7 @@ async fn app_command_schedules_cancel_and_reschedules_local_fallback_send() {
     conn.command(CoreCommand::App(AppCommand::RescheduleScheduledSend {
         request_id: conn.next_request_id(),
         scheduled_id: scheduled_id.clone(),
+        body: "edited scheduled body".to_owned(),
         send_at_ms: future_epoch_ms(Duration::from_secs(120)),
     }))
     .await
@@ -237,6 +238,10 @@ async fn app_command_schedules_cancel_and_reschedules_local_fallback_send() {
     assert_eq!(
         rescheduled.timeline.scheduled_sends[0].scheduled_id,
         scheduled_id
+    );
+    assert_eq!(
+        rescheduled.timeline.scheduled_sends[0].body,
+        "edited scheduled body"
     );
 
     conn.command(CoreCommand::App(AppCommand::CancelScheduledSend {

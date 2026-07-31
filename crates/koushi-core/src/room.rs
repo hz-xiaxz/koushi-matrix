@@ -53,7 +53,7 @@
 //! classified into `RoomFailureKind`.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::{Arc, RwLock},
 };
 
@@ -74,10 +74,10 @@ use koushi_state::{
     DirectoryRoomSummary, INVITE_ALREADY_IN_SPACE_MESSAGE, InviteDestination,
     InviteDestinationResult, InviteDestinationResultKind, InvitePreview, InviteScopeSelection,
     MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
-    OperationFailureKind, PinnedEvent, RoomHistoryVisibility, RoomJoinRule, RoomMemberRole,
-    RoomMemberSummary, RoomMentionPermission, RoomModerationAction, RoomNotificationMode,
-    RoomPermissionFacts, RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTagInfo,
-    RoomTagKind, RoomTags, SpaceSummary, UserProfile, UserTrustState,
+    OperationFailureKind, PinnedEvent, PinnedEventState, RoomHistoryVisibility, RoomJoinRule,
+    RoomMemberRole, RoomMemberSummary, RoomMentionPermission, RoomModerationAction,
+    RoomNotificationMode, RoomPermissionFacts, RoomSettingChange, RoomSettingsSnapshot,
+    RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SpaceSummary, UserProfile, UserTrustState,
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -144,6 +144,10 @@ pub enum RoomMessage {
     /// demanded rooms are recomputed; `None` means the broadcast lagged and
     /// every demanded room must be self-healed.
     MentionMembershipChanged { room_ids: Option<BTreeSet<String>> },
+    /// A sync update changed the authoritative `m.room.pinned_events` state.
+    /// The actor reloads only the affected rooms so external pin/unpin actions
+    /// become visible without polling every room.
+    PinnedEventsChanged { room_ids: BTreeSet<String> },
     /// Ordered shutdown.
     Shutdown,
 }
@@ -308,6 +312,9 @@ impl RoomActor {
                 }
                 RoomMessage::MentionMembershipChanged { room_ids } => {
                     self.handle_mention_membership_changed(room_ids).await;
+                }
+                RoomMessage::PinnedEventsChanged { room_ids } => {
+                    self.handle_pinned_events_changed(room_ids).await;
                 }
             }
         }
@@ -517,6 +524,12 @@ impl RoomActor {
                 event_id,
             } => {
                 self.handle_unpin_event(request_id, room_id, event_id).await;
+            }
+            RoomCommand::RefreshPinnedEvents {
+                request_id,
+                room_id,
+            } => {
+                self.handle_refresh_pinned_events(request_id, room_id).await;
             }
             RoomCommand::QueryDirectory { request_id, query } => {
                 self.handle_query_directory(request_id, query).await;
@@ -1777,19 +1790,49 @@ impl RoomActor {
         }
     }
 
+    async fn handle_refresh_pinned_events(&self, request_id: RequestId, room_id: String) {
+        let Some(session) = &self.session else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        match load_pinned_events_for_room(session, &room_id).await {
+            Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
+            Err(kind) => {
+                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
+            }
+        }
+    }
+
+    async fn handle_pinned_events_changed(&self, room_ids: BTreeSet<String>) {
+        let Some(session) = &self.session else {
+            return;
+        };
+        for room_id in room_ids {
+            match load_pinned_events_for_room(session, &room_id).await {
+                Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
+                Err(_kind) => {
+                    // A background sync refresh has no request to fail. Keep
+                    // the previous projection and wait for the next state
+                    // update; only classified failure state may cross the
+                    // Core boundary.
+                }
+            }
+        }
+    }
+
     async fn project_pinned_events_after_success(&self, request_id: RequestId, room_id: String) {
         let Some(session) = &self.session else {
             return;
         };
-        let pinned = match koushi_sdk::load_pinned_event_ids(session, &room_id).await {
-            Ok(event_ids) => pinned_events_from_ids(event_ids),
-            Err(error) => {
-                let kind = classify_room_error(&error);
+        match load_pinned_events_for_room(session, &room_id).await {
+            Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
+            Err(kind) => {
                 self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
-                return;
             }
-        };
+        }
+    }
 
+    async fn project_pinned_events(&self, room_id: String, pinned: Vec<PinnedEvent>) {
         self.reduce_reliable(vec![AppAction::RoomPinnedEventsUpdated {
             room_id: room_id.clone(),
             pinned: pinned.clone(),
@@ -2700,6 +2743,7 @@ async fn run_live_room_list_observation_with_sources(
                 let mut lagged = false;
                 let mut invite_update_observed = false;
                 let mut updated_joined_room_ids = BTreeSet::new();
+                let mut pinned_event_room_ids = BTreeSet::new();
                 match room_update {
                     Ok(updates) => {
                         update_count = 1;
@@ -2707,6 +2751,7 @@ async fn run_live_room_list_observation_with_sources(
                         updated_joined_room_ids.extend(
                             updates.joined.keys().map(ToString::to_string),
                         );
+                        pinned_event_room_ids.extend(crate::room::pinned_event_room_ids(&updates));
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => lagged = true,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -2721,6 +2766,7 @@ async fn run_live_room_list_observation_with_sources(
                             updated_joined_room_ids.extend(
                                 updates.joined.keys().map(ToString::to_string),
                             );
+                            pinned_event_room_ids.extend(crate::room::pinned_event_room_ids(&updates));
                         }
                         Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
                             lagged = true;
@@ -2817,6 +2863,13 @@ async fn run_live_room_list_observation_with_sources(
                     let _ = room_tx
                         .send(RoomMessage::MentionMembershipChanged {
                             room_ids: (!lagged).then_some(updated_joined_room_ids),
+                        })
+                        .await;
+                }
+                if !pinned_event_room_ids.is_empty() {
+                    let _ = room_tx
+                        .send(RoomMessage::PinnedEventsChanged {
+                            room_ids: pinned_event_room_ids,
                         })
                         .await;
                 }
@@ -3044,17 +3097,26 @@ async fn run_legacy_room_list_observation(
                         .keys()
                         .map(ToString::to_string)
                         .collect::<BTreeSet<_>>();
+                    let mut pinned_event_room_ids = crate::room::pinned_event_room_ids(&batch);
                     // Coalesce: drain any additionally pending update batches;
                     // one refresh covers them all.
                     while let Ok(batch) = updates_rx.try_recv() {
                         updated_joined_room_ids.extend(
                             batch.joined.keys().map(ToString::to_string),
                         );
+                        pinned_event_room_ids.extend(crate::room::pinned_event_room_ids(&batch));
                     }
                     if !updated_joined_room_ids.is_empty() {
                         let _ = room_tx
                             .send(RoomMessage::MentionMembershipChanged {
                                 room_ids: Some(updated_joined_room_ids),
+                            })
+                            .await;
+                    }
+                    if !pinned_event_room_ids.is_empty() {
+                        let _ = room_tx
+                            .send(RoomMessage::PinnedEventsChanged {
+                                room_ids: pinned_event_room_ids,
                             })
                             .await;
                     }
@@ -3083,6 +3145,33 @@ async fn run_legacy_room_list_observation(
             },
         }
     }
+}
+
+fn state_contains_pinned_events(state: &matrix_sdk_base::sync::State) -> bool {
+    let events = match state {
+        matrix_sdk_base::sync::State::Before(events)
+        | matrix_sdk_base::sync::State::After(events) => events,
+    };
+    events.iter().any(|event| {
+        serde_json::from_str::<serde_json::Value>(event.json().get())
+            .ok()
+            .and_then(|json| {
+                json.get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .as_deref()
+            == Some("m.room.pinned_events")
+    })
+}
+
+fn pinned_event_room_ids(updates: &matrix_sdk_base::sync::RoomUpdates) -> BTreeSet<String> {
+    updates
+        .joined
+        .iter()
+        .filter(|(_, update)| state_contains_pinned_events(&update.state))
+        .map(|(room_id, _)| room_id.to_string())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -3293,17 +3382,116 @@ fn user_profile_mention_search_terms(user_id: &str, display_name: Option<&str>) 
     terms
 }
 
-fn pinned_events_from_ids(event_ids: Vec<String>) -> Vec<PinnedEvent> {
-    event_ids
-        .into_iter()
-        .map(|event_id| PinnedEvent {
-            event_id,
-            sender: None,
-            sender_label: None,
-            body_preview: None,
-            redacted: false,
-        })
-        .collect()
+async fn load_pinned_events_for_room(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<Vec<PinnedEvent>, RoomFailureKind> {
+    let event_ids = koushi_sdk::load_pinned_event_ids(session, room_id)
+        .await
+        .map_err(|error| classify_room_error(&error))?;
+    Ok(load_pinned_events(session, room_id, event_ids).await)
+}
+
+async fn load_pinned_events(
+    session: &MatrixClientSession,
+    room_id: &str,
+    event_ids: Vec<String>,
+) -> Vec<PinnedEvent> {
+    let Ok(parsed_room_id) = matrix_sdk::ruma::RoomId::parse(room_id) else {
+        return event_ids
+            .into_iter()
+            .map(pinned_event_unavailable)
+            .collect();
+    };
+    let Some(room) = session.client().get_room(&parsed_room_id) else {
+        return event_ids
+            .into_iter()
+            .map(pinned_event_unavailable)
+            .collect();
+    };
+
+    let mut seen = HashSet::new();
+    let mut projected = Vec::new();
+    for event_id in event_ids {
+        if !seen.insert(event_id.clone()) {
+            continue;
+        }
+        let Ok(parsed_event_id) = matrix_sdk::ruma::EventId::parse(&event_id) else {
+            projected.push(pinned_event_unavailable(event_id));
+            continue;
+        };
+        let pinned = match room.load_or_fetch_event(&parsed_event_id, None).await {
+            Ok(event) => pinned_event_from_raw(event_id.clone(), event.raw().json().get()),
+            Err(_) => pinned_event_unavailable(event_id),
+        };
+        projected.push(pinned);
+    }
+    projected
+}
+
+fn pinned_event_unavailable(event_id: String) -> PinnedEvent {
+    PinnedEvent {
+        event_id,
+        sender: None,
+        sender_label: None,
+        body_preview: None,
+        redacted: false,
+        timestamp_ms: None,
+        state: PinnedEventState::Unavailable,
+        thread_root_event_id: None,
+    }
+}
+
+fn pinned_event_from_raw(event_id: String, raw_json: &str) -> PinnedEvent {
+    let Ok(raw) = serde_json::from_str::<serde_json::Value>(raw_json) else {
+        return pinned_event_unavailable(event_id);
+    };
+    let event_id = raw
+        .get("event_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or(event_id);
+    let sender = raw
+        .get("sender")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let timestamp_ms = raw
+        .get("origin_server_ts")
+        .and_then(serde_json::Value::as_u64);
+    let redacted = raw
+        .get("unsigned")
+        .and_then(|unsigned| unsigned.get("redacted_because"))
+        .is_some();
+    let content = raw.get("content").unwrap_or(&serde_json::Value::Null);
+    let thread_root_event_id = content
+        .get("m.relates_to")
+        .and_then(|relation| relation.get("rel_type"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|rel_type| *rel_type == "m.thread")
+        .and_then(|_| content.get("m.relates_to"))
+        .and_then(|relation| relation.get("event_id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let is_encrypted =
+        raw.get("type").and_then(serde_json::Value::as_str) == Some("m.room.encrypted");
+    let body_preview = content
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    PinnedEvent {
+        event_id,
+        sender,
+        sender_label: None,
+        body_preview,
+        redacted,
+        timestamp_ms,
+        state: if is_encrypted {
+            PinnedEventState::UnableToDecrypt
+        } else {
+            PinnedEventState::Ready
+        },
+        thread_root_event_id,
+    }
 }
 
 fn replace_known_room_ids(known_room_ids: &Arc<RwLock<BTreeSet<String>>>, rooms: &[RoomSummary]) {
@@ -5502,6 +5690,34 @@ pub mod tests {
 
         assert!(!projection_body.contains("AppAction::PinEventCompleted"));
         assert!(!projection_body.contains("AppAction::UnpinEventCompleted"));
+    }
+
+    #[test]
+    fn pinned_raw_projection_preserves_event_order_metadata_and_thread_relation() {
+        let event = pinned_event_from_raw(
+            "$fallback:example.invalid".to_owned(),
+            r#"{
+                "event_id":"$reply:example.invalid",
+                "sender":"@bob:example.invalid",
+                "origin_server_ts":1800000000000,
+                "type":"m.room.message",
+                "content":{
+                    "msgtype":"m.text",
+                    "body":"Pinned reply",
+                    "m.relates_to":{"rel_type":"m.thread","event_id":"$root:example.invalid"}
+                }
+            }"#,
+        );
+
+        assert_eq!(event.event_id, "$reply:example.invalid");
+        assert_eq!(event.sender.as_deref(), Some("@bob:example.invalid"));
+        assert_eq!(event.timestamp_ms, Some(1_800_000_000_000));
+        assert_eq!(event.body_preview.as_deref(), Some("Pinned reply"));
+        assert_eq!(
+            event.thread_root_event_id.as_deref(),
+            Some("$root:example.invalid")
+        );
+        assert_eq!(event.state, PinnedEventState::Ready);
     }
 
     #[test]

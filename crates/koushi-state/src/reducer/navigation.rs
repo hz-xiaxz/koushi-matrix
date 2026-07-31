@@ -165,7 +165,7 @@ fn close_current_room_search_for_room_change(
         | SearchState::Results { scope, .. }
         | SearchState::Failed { scope, .. } => match scope {
             SearchScope::CurrentRoom { room_id } => next_room_id != Some(room_id.as_str()),
-            SearchScope::CurrentSpace { .. } | SearchScope::Dms | SearchScope::AllRooms => false,
+            SearchScope::CurrentSpace { .. } | SearchScope::AllRooms => false,
         },
         SearchState::Closed => false,
     };

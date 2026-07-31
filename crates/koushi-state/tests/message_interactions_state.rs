@@ -44,6 +44,9 @@ fn pinned(event_id: &str, body_preview: Option<&str>) -> PinnedEvent {
         sender_label: None,
         body_preview: body_preview.map(str::to_owned),
         redacted: false,
+        timestamp_ms: None,
+        state: koushi_state::PinnedEventState::Ready,
+        thread_root_event_id: None,
     }
 }
 
@@ -399,6 +402,29 @@ fn pinned_state_update_replaces_room_pinned_list() {
             .expect("room interaction state")
             .pinned_events,
         vec![pinned("$two:example.invalid", None)]
+    );
+}
+
+#[test]
+fn pinned_projection_preserves_order_and_thread_relation_metadata() {
+    let mut state = ready_state();
+    let mut first = pinned("$first:example.invalid", Some("first"));
+    first.timestamp_ms = Some(1_800_000_000_000);
+    first.state = koushi_state::PinnedEventState::Ready;
+    let mut reply = pinned("$reply:example.invalid", Some("reply"));
+    reply.thread_root_event_id = Some("$root:example.invalid".to_owned());
+
+    reduce(
+        &mut state,
+        AppAction::RoomPinnedEventsUpdated {
+            room_id: "!room:example.invalid".to_owned(),
+            pinned: vec![first.clone(), reply.clone()],
+        },
+    );
+
+    assert_eq!(
+        state.room_interactions["!room:example.invalid"].pinned_events,
+        vec![first, reply]
     );
 }
 

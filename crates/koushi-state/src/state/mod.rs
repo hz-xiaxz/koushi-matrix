@@ -110,7 +110,8 @@ pub use invite_workflow::{
 
 // ── Re-exports: room_interactions ──────────────────────────────────────────
 pub use room_interactions::{
-    PinOp, PinOperationState, PinnedEvent, ReplyQuote, ReplyQuoteState, RoomInteractionState,
+    PinOp, PinOperationState, PinnedEvent, PinnedEventState, ReplyQuote, ReplyQuoteState,
+    RoomInteractionState,
 };
 
 // ── Re-exports: navigation ──────────────────────────────────────────────────
@@ -187,8 +188,8 @@ pub use timeline::{
 // ── Re-exports: thread ──────────────────────────────────────────────────────
 pub use thread::{
     ThreadAttentionState, ThreadOpenIntent, ThreadPaneState, ThreadRootProjectionActivity,
-    ThreadRootProjectionState, ThreadRootProjectionStatus, ThreadsListItem, ThreadsListState,
-    sort_threads_list_items,
+    ThreadRootProjectionState, ThreadRootProjectionStatus, ThreadsListItem, ThreadsListScope,
+    ThreadsListState, sort_threads_list_items,
 };
 
 // ── Re-exports: search ──────────────────────────────────────────────────────

@@ -2392,6 +2392,7 @@ export const TimelineView = memo(function TimelineView({
   ignoredUserIds = [],
   suppressPaginationUi = false,
   automaticBackfillEligible = true,
+  initialTargetEventId = null,
   isAnchored = false,
   onReturnToLive,
   autoLoadOlderMessages = false,
@@ -2445,6 +2446,8 @@ export const TimelineView = memo(function TimelineView({
   ignoredUserIds?: string[];
   suppressPaginationUi?: boolean;
   automaticBackfillEligible?: boolean;
+  /** Event ID to center once a thread timeline has materialized its rows. */
+  initialTargetEventId?: string | null;
   // #161: main pane is anchored to a jump-to-date event; the live-edge control
   // returns to the live timeline instead of scrolling within the focused window.
   isAnchored?: boolean;
@@ -2601,6 +2604,7 @@ export const TimelineView = memo(function TimelineView({
   const initialLiveEdgeScrollAppliedRef = useRef<string | null>(null);
   /** Tracks whether the current focused key already centered its target row. */
   const focusedTargetRestoreAppliedRef = useRef<string | null>(null);
+  const initialThreadTargetRestoreAppliedRef = useRef<string | null>(null);
   /** Deduplicates privacy-safe focused-target restoration diagnostics. */
   const lastFocusedTargetRestoreDiagnosticRef = useRef<string | null>(null);
   /** Keeps the live edge pinned when measured virtual heights change. */
@@ -4847,6 +4851,35 @@ export const TimelineView = memo(function TimelineView({
   ]);
 
   useLayoutEffect(() => {
+    if (
+      presentationContext !== "thread" ||
+      !initialTargetEventId ||
+      !timelineInitialized ||
+      initialThreadTargetRestoreAppliedRef.current === initialTargetEventId
+    ) {
+      return;
+    }
+    const container = containerRef.current;
+    const targetRow = container
+      ? findTimelineEventNode(container, "activity", initialTargetEventId)
+      : null;
+    if (targetRow) {
+      runWithScrollWriteReason("jumpToEvent", () => {
+        targetRow.scrollIntoView({ block: "center", inline: "nearest" });
+      });
+      initialThreadTargetRestoreAppliedRef.current = initialTargetEventId;
+    }
+  }, [
+    initialTargetEventId,
+    items,
+    presentationContext,
+    runWithScrollWriteReason,
+    timelineInitialized,
+    virtualWindow.virtualized,
+    visibleRows
+  ]);
+
+  useLayoutEffect(() => {
     if (roomTimelineRoomId === null) {
       return;
     }
@@ -5747,6 +5780,11 @@ export const TimelineView = memo(function TimelineView({
                 onEdit={onEdit}
                 onRedact={onRedact}
                 isPinned={contentEventId ? pinnedEventIds.includes(contentEventId) : false}
+                isTarget={
+                  presentationContext === "thread" &&
+                  initialTargetEventId !== null &&
+                  (contentEventId === initialTargetEventId || activityEventId === initialTargetEventId)
+                }
                 onPin={onPin}
                 onUnpin={onUnpin}
                 onDownloadMedia={onDownloadMedia}
@@ -5932,6 +5970,7 @@ export function TimelineItemRow({
   onEdit,
   onRedact,
   isPinned = false,
+  isTarget = false,
   onPin = () => undefined,
   onUnpin = () => undefined,
   onDownloadMedia = () => undefined,
@@ -5989,6 +6028,7 @@ export function TimelineItemRow({
   onEdit: TimelineRowActionHandlers["onEdit"];
   onRedact: TimelineRowActionHandlers["onRedact"];
   isPinned?: boolean;
+  isTarget?: boolean;
   onPin?: TimelineRowActionHandlers["onPin"];
   onUnpin?: TimelineRowActionHandlers["onUnpin"];
   onDownloadMedia?: TimelineRowActionHandlers["onDownloadMedia"];
@@ -6763,7 +6803,7 @@ export function TimelineItemRow({
 
   return (
     <article
-      className="message"
+      className={`message${isTarget ? " pinned-target" : ""}`}
       data-item-id={domId}
       data-row-id={domId}
       data-content-event-id={eventId ?? undefined}

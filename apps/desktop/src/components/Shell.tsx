@@ -18,6 +18,7 @@ import {
   HelpCircle,
   Home,
   MessageCircle,
+  MessageSquare,
   Plus,
   RefreshCw,
   Search,
@@ -119,8 +120,6 @@ function searchScopePlaceholder(
   switch (scope) {
     case "allRooms":
       return t("workspace.searchEverywhere");
-    case "dms":
-      return t("workspace.searchDms");
     case "currentRoom": {
       const roomName = activeRoomName?.trim();
       // With no room selected there is no target to name; claiming one would
@@ -258,7 +257,6 @@ export function TopBar({
         <option value="allRooms">{t("search.scopeAll")}</option>
         <option value="currentSpace">{t("search.scopeSpace")}</option>
         <option value="currentRoom">{t("search.scopeRoom")}</option>
-        <option value="dms">{t("search.scopeDm")}</option>
       </select>
       <div className="top-actions">
         <div className="session-status-host" ref={sessionStatusHostRef}>
@@ -750,6 +748,7 @@ export function Sidebar({
   onOpenActivity,
   onOpenExplore,
   onOpenInvites,
+  onOpenThreads = () => undefined,
   onOpenSpaceInfo,
   onJoinRoom,
   onSelectRoom
@@ -764,6 +763,7 @@ export function Sidebar({
   onOpenActivity: () => void;
   onOpenExplore: () => void;
   onOpenInvites: () => void;
+  onOpenThreads?: () => void;
   onOpenSpaceInfo: () => void;
   onJoinRoom?: (roomId: string) => void;
   onSelectRoom: (roomId: string) => void;
@@ -829,6 +829,14 @@ export function Sidebar({
           onClick={onNewDm}
         >
           <MessageCircle size={ICON_SIZE.control} />
+        </button>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label={t("threads.title")}
+          onClick={onOpenThreads}
+        >
+          <MessageSquare size={ICON_SIZE.control} />
         </button>
         <button
           className="icon-button"
