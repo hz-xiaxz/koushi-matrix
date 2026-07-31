@@ -513,6 +513,16 @@ export function clearTimelineViewportSessionMemoryForTests(): void {
   timelineViewportSessionMemory.clear();
 }
 
+export function setTimelineViewportSessionAnchorForTests(
+  timelineKey: TimelineKey,
+  anchor: TimelineScrollAnchor
+): void {
+  timelineViewportSessionMemory.set(JSON.stringify(timelineKey), {
+    mode: "anchor",
+    anchor
+  });
+}
+
 function captureRoomScrollAnchor(container: HTMLElement): CapturedTimelineScrollAnchor | null {
   const containerRect = container.getBoundingClientRect();
   const nodes = container.querySelectorAll<HTMLElement>("[data-activity-event-id]");

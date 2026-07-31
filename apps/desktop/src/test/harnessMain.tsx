@@ -15,7 +15,9 @@ import { roomTimelineKey } from "../domain/coreEvents";
 import type { TimelineScrollDiagnostics } from "../domain/timelineScrollDiagnostics";
 import type { TimelineMediaDownloadState } from "../domain/types";
 import {
+  setTimelineViewportSessionAnchorForTests,
   TimelineView,
+  type TimelineDiagnosticLogEntry,
   type TimelineTransport
 } from "../components/TimelineView";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
@@ -29,6 +31,18 @@ declare global {
       invocationsOf(command: string): IpcInvocation[];
       scrollDiagnostics(): TimelineScrollDiagnostics | null;
       resetScrollDiagnostics(): void;
+      showRoom(roomId: string): void;
+      seedTimelineViewportSessionAnchor(
+        roomId: string,
+        anchor: {
+          event_id: string;
+          edge: "top" | "bottom";
+          offset_px: number;
+          updated_at_ms: number;
+        }
+      ): void;
+      diagnosticLogs(): readonly TimelineDiagnosticLogEntry[];
+      clearDiagnosticLogs(): void;
     };
   }
 }
@@ -49,6 +63,8 @@ let latestScrollDiagnostics: TimelineScrollDiagnostics | null = null;
 let scrollDiagnosticsBaseline: TimelineScrollDiagnostics | null = null;
 let mediaDownloads: Record<string, TimelineMediaDownloadState> = {};
 let renderTimeline: () => void = () => undefined;
+let currentRoomId = ROOM_ID;
+let diagnosticLogs: TimelineDiagnosticLogEntry[] = [];
 
 function cloneScrollDiagnostics(
   diagnostics: TimelineScrollDiagnostics
@@ -151,6 +167,17 @@ window.__harness = {
     scrollDiagnosticsBaseline = latestScrollDiagnostics
       ? cloneScrollDiagnostics(latestScrollDiagnostics)
       : null;
+  },
+  showRoom: (roomId) => {
+    currentRoomId = roomId;
+    renderTimeline();
+  },
+  seedTimelineViewportSessionAnchor: (roomId, anchor) => {
+    setTimelineViewportSessionAnchorForTests(roomTimelineKey(ACCOUNT_KEY, roomId), anchor);
+  },
+  diagnosticLogs: () => diagnosticLogs,
+  clearDiagnosticLogs: () => {
+    diagnosticLogs = [];
   }
 };
 
@@ -253,8 +280,9 @@ const timelineRoot = createRoot(root);
 renderTimeline = () => {
   timelineRoot.render(
     <TimelineView
-      roomId={ROOM_ID}
-      timelineKey={roomTimelineKey(ACCOUNT_KEY, ROOM_ID)}
+      key={currentRoomId}
+      roomId={currentRoomId}
+      timelineKey={roomTimelineKey(ACCOUNT_KEY, currentRoomId)}
       transport={transport}
       autoLoadOlderMessages={autoLoadOlderMessages}
       continuity={{ kind: "healthy", generation: 1, authoritative_start: true }}
@@ -264,6 +292,9 @@ renderTimeline = () => {
       }}
       onScrollDiagnosticsChange={(diagnostics) => {
         latestScrollDiagnostics = diagnostics;
+      }}
+      onDiagnosticLogEntry={(entry) => {
+        diagnosticLogs = [...diagnosticLogs, entry];
       }}
     />
   );
