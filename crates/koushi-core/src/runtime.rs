@@ -2095,15 +2095,49 @@ impl AppActor {
                         }
                         let mut navigation_projection_cause = None;
                         if let Some((generation, transition_id)) = trust_projection_transition {
-                            let _ = self
+                            let ready = matches!(self.state.session, SessionState::Ready(_));
+                            let locked = matches!(self.state.session, SessionState::Locked(_));
+                            record(
+                                DiagnosticEvent::new(
+                                    DiagnosticLevel::Info,
+                                    "core.verification_admission",
+                                    if ready {
+                                        "trust_projection_reduced_ready"
+                                    } else if locked {
+                                        "trust_projection_reduced_locked"
+                                    } else {
+                                        "trust_projection_reduced_gated"
+                                    },
+                                )
+                                .field(DiagnosticField::count("generation", generation))
+                                .field(DiagnosticField::count("transition_id", transition_id)),
+                            );
+                            let delivered = self
                                 .account_actor
                                 .send(AccountMessage::TrustProjectionApplied {
                                     generation,
                                     transition_id,
-                                    ready: matches!(self.state.session, SessionState::Ready(_)),
-                                    locked: matches!(self.state.session, SessionState::Locked(_)),
+                                    ready,
+                                    locked,
                                 })
                                 .await;
+                            record(
+                                DiagnosticEvent::new(
+                                    if delivered {
+                                        DiagnosticLevel::Info
+                                    } else {
+                                        DiagnosticLevel::Warn
+                                    },
+                                    "core.verification_admission",
+                                    if delivered {
+                                        "trust_projection_ack_delivered"
+                                    } else {
+                                        "trust_projection_ack_delivery_failed"
+                                    },
+                                )
+                                .field(DiagnosticField::count("generation", generation))
+                                .field(DiagnosticField::count("transition_id", transition_id)),
+                            );
                         }
                         // After reduce: determine outcome and emit IntentLifecycle
                         // for correlated pending SelectRoom intents.

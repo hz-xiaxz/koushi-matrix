@@ -191,3 +191,31 @@ teardown and replay it after the current query settles.
 Run the focused actor tests, the complete core library suite, and the Conduit
 `media` scenario with the process restricted to two CPUs. The constrained
 scenario must complete without `phase=rechecking_trust`.
+
+### Task 7: Invalidate a projection mismatch before later demand arrives
+
+**Files:**
+- Modify: `crates/koushi-core/src/account.rs`
+- Modify: `crates/koushi-core/src/runtime.rs`
+- Modify: `crates/koushi-core/src/bin/headless-core-qa.rs`
+
+- [x] **Step 1: Reproduce the ack-before-demand ordering**
+
+Drive a Verified promotion, acknowledge the exact transition while the reducer
+is still gated, and only then send `CheckCurrentDeviceTrust`. Require the later
+request to start a query. Before the fix it times out because the mismatched
+transition remains pending after its ack.
+
+- [x] **Step 2: Clear every exact mismatched projection**
+
+When an ack names the current generation and transition but its reducer state
+does not match Ready/Locked, clear that obsolete transition regardless of
+whether recheck demand is already pending. Start the query immediately when
+demand is present; otherwise the later request starts normally.
+
+- [x] **Step 3: Add one-capture diagnostics and verify the constrained path**
+
+Record private-data-free trust stage tokens around query and projection
+delivery, and include only an explicit allowlist in the headless login timeout.
+Run its privacy test, the focused regression, the existing trust-recheck and
+AppActor-ack gates, and repeated two-CPU Conduit `login_sync` scenarios.
