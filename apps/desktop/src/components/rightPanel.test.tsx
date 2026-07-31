@@ -195,6 +195,8 @@ describe("ContextualRightPanel people composition", () => {
     expect(screen.queryByRole("heading", { name: "People", level: 2 })).toBeNull();
     expect(screen.getByText("Space member")).toBeTruthy();
     expect(screen.getByText("Child member")).toBeTruthy();
+    expect(screen.getByText("In child rooms: Alpha Room")).toBeTruthy();
+    expect(screen.queryByText(room.room_id)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Open profile for Space member" }));
     fireEvent.click(screen.getByRole("button", { name: "Invite to Space" }));

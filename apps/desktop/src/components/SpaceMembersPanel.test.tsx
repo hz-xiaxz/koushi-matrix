@@ -99,7 +99,7 @@ describe("SpaceMembersPanel", () => {
     expect(screen.queryByText("Alice")).toBeNull();
   });
 
-  it("shows the child-room context and invokes the invite callback", () => {
+  it("uses compact child-room labels without exposing raw room ids", () => {
     const onInviteUser = vi.fn();
     render(
       <SpaceMembersPanel
@@ -107,16 +107,74 @@ describe("SpaceMembersPanel", () => {
         canInvite={true}
         onInviteUser={onInviteUser}
         onOpenProfile={vi.fn()}
+        childRoomLabels={new Map([
+          ["!room-alpha:example.invalid", "Alpha"],
+          ["!room-beta:example.invalid", "Beta"]
+        ])}
       />
     );
 
-    expect(
-      screen.getByText(
-        "In child rooms: !room-alpha:example.invalid, !room-beta:example.invalid"
-      )
-    ).toBeTruthy();
+    expect(screen.getByText("In child rooms: Alpha, Beta")).toBeTruthy();
+    expect(screen.queryByText(/!room-alpha:example\.invalid/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Invite to Space" }));
 
+    expect(onInviteUser).toHaveBeenCalledWith("@carol:example.invalid");
+  });
+
+  it("uses a localized count for more than two child rooms without exposing ids", () => {
+    render(
+      <SpaceMembersPanel
+        state={state({
+          child_room_only: [
+            member("@carol:example.invalid", "Carol", "child_room_only", {
+              child_room_ids: [
+                "!room-alpha:example.invalid",
+                "!room-beta:example.invalid",
+                "!room-gamma:example.invalid"
+              ]
+            })
+          ],
+          child_room_count: 3
+        })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        childRoomLabels={new Map([
+          ["!room-alpha:example.invalid", "Alpha"],
+          ["!room-beta:example.invalid", "Beta"],
+          ["!room-gamma:example.invalid", "Gamma"]
+        ])}
+      />
+    );
+
+    expect(screen.getByText("In 3 child rooms")).toBeTruthy();
+    expect(screen.queryByText(/!room-(alpha|beta|gamma):example\.invalid/)).toBeNull();
+  });
+
+  it("announces invite failure and keeps the child-only row retryable", () => {
+    const onInviteUser = vi.fn();
+    render(
+      <SpaceMembersPanel
+        state={state({
+          operation: {
+            kind: "failed",
+            request_id: 12,
+            space_id: "!space:example.invalid",
+            user_id: "@carol:example.invalid",
+            generation: 4,
+            failureKind: "network"
+          }
+        })}
+        canInvite={true}
+        onInviteUser={onInviteUser}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("alert").textContent).toMatch(/invite failed/i);
+    const inviteButton = screen.getByRole("button", { name: "Invite to Space" });
+    expect((inviteButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(inviteButton);
     expect(onInviteUser).toHaveBeenCalledWith("@carol:example.invalid");
   });
 

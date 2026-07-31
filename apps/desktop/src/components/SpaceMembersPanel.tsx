@@ -16,6 +16,7 @@ export type SpaceInviteAvailabilityReason =
 export interface SpaceMembersPanelProps {
   state: SpaceMembersState;
   canInvite: boolean;
+  childRoomLabels?: ReadonlyMap<string, string>;
   onInviteUser: (userId: string) => void;
   onOpenProfile: (userId: string) => void;
   onOpenContextMenu?: OpenContextMenu;
@@ -78,9 +79,23 @@ function inviteAvailabilityReasonForEntry(
   return availabilityReason ?? "available";
 }
 
+function childRoomContext(
+  entry: SpaceMemberEntry,
+  childRoomLabels: ReadonlyMap<string, string>
+): string {
+  const labels = entry.child_room_ids
+    .map((roomId) => childRoomLabels.get(roomId)?.trim() ?? "")
+    .filter(Boolean);
+  if (entry.child_room_ids.length <= 2 && labels.length === entry.child_room_ids.length) {
+    return t("spaceMembers.childRoomContext", { rooms: labels.join(", ") });
+  }
+  return t("spaceMembers.childRoomCount", { count: entry.child_room_ids.length });
+}
+
 export function SpaceMembersPanel({
   state,
   canInvite,
+  childRoomLabels = new Map<string, string>(),
   onInviteUser,
   onOpenProfile,
   onOpenContextMenu,
@@ -168,6 +183,12 @@ export function SpaceMembersPanel({
         />
       </div>
 
+      {state.operation.kind === "failed" ? (
+        <p className="space-members-invite-failure" role="alert">
+          {t("spaceMembers.inviteFailed")}
+        </p>
+      ) : null}
+
       {state.incomplete_child_room_count > 0 ? (
         <p className="space-members-sync-notice" role="status">
           {t("spaceMembers.syncIncomplete")}
@@ -233,9 +254,7 @@ export function SpaceMembersPanel({
                         </span>
                         {section.id === "child-only" && entry.child_room_ids.length > 0 ? (
                           <span className="space-members-meta" dir="auto">
-                            {t("spaceMembers.childRoomContext", {
-                              rooms: entry.child_room_ids.join(", ")
-                            })}
+                            {childRoomContext(entry, childRoomLabels)}
                           </span>
                         ) : null}
                       </span>

@@ -1564,8 +1564,10 @@ export function App() {
   const loginPasswordRef = useRef<HTMLInputElement>(null);
   const recoverySecretRef = useRef<HTMLInputElement>(null);
   const roomSettingsLoadRef = useRef<string | null>(null);
+  const roomSettingsRequestRef = useRef(0);
   const spaceSettingsLoadRef = useRef<string | null>(null);
   const spaceSettingsRequestRef = useRef(0);
+  const spaceNavigationRequestRef = useRef(0);
   const spaceMembersOpenRequestRef = useRef(0);
   const spaceMembersInviteRequestRef = useRef(0);
   const appTimelineTransport = useMemo<TimelineTransport | null>(() => {
@@ -2424,7 +2426,18 @@ export function App() {
       return;
     }
     roomSettingsLoadRef.current = activeRoomId;
-    void api.loadRoomSettings(activeRoomId).then(setSnapshot);
+    const requestId = ++roomSettingsRequestRef.current;
+    void api.loadRoomSettings(activeRoomId).then((nextSnapshot) => {
+      if (
+        roomSettingsRequestRef.current !== requestId ||
+        snapshotRef.current?.state.ui.navigation.active_room_id !== activeRoomId ||
+        nextSnapshot.state.ui.navigation.active_room_id !== activeRoomId ||
+        !exactRoomSettingsForRoom(nextSnapshot, activeRoomId)
+      ) {
+        return;
+      }
+      setSnapshot(nextSnapshot);
+    });
   }, [
     rightPanelMode,
     snapshot?.state.ui.navigation.active_room_id,
@@ -2982,14 +2995,29 @@ export function App() {
     return (await Promise.all(drains)).every(Boolean);
   }
 
+  const invalidatePeoplePanelForNavigation = useCallback((): void => {
+    roomSettingsRequestRef.current += 1;
+    roomSettingsLoadRef.current = null;
+    spaceNavigationRequestRef.current += 1;
+    spaceSettingsRequestRef.current += 1;
+    spaceSettingsLoadRef.current = null;
+    spaceMembersOpenRequestRef.current += 1;
+    spaceMembersInviteRequestRef.current += 1;
+    setPeoplePanelScope(null);
+    setSelectedProfileUserId(null);
+    setRightPanelMode((mode) =>
+      mode === "people" || mode === "profile" ? "closed" : mode
+    );
+  }, []);
+
   const openHomeSelection = useCallback(
     async (selection = homeSelection, trigger: ActivityOpenTrigger = "other") => {
     const transitionStartedAt = Date.now();
     const homeSelectionKind = selection.kind;
     const currentSnapshot = snapshotRef.current;
+    invalidatePeoplePanelForNavigation();
+    const navigationRequestId = ++spaceNavigationRequestRef.current;
     setContextMenu(null);
-    spaceMembersOpenRequestRef.current += 1;
-    spaceMembersInviteRequestRef.current += 1;
     if (selection.kind === "activity") {
       const activity = currentSnapshot?.state.domain.activity;
       const previousTab =
@@ -3026,6 +3054,9 @@ export function App() {
       message: `stage=after_composer_drain elapsed_ms=${composerDrainFinishedAt - composerDrainStartedAt} outcome=continue`
     });
     const homeSnapshot = await api.selectSpace(null);
+    if (spaceNavigationRequestRef.current !== navigationRequestId) {
+      return;
+    }
     const selectSpaceFinishedAt = Date.now();
     appendDiagnosticLog({
       timestampMs: selectSpaceFinishedAt,
@@ -3072,21 +3103,48 @@ export function App() {
       message: `stage=after_view_apply elapsed_ms_since_start=${viewAppliedAt - transitionStartedAt} view=activity`
     });
     },
-    [appendDiagnosticLog, homeSelection, primaryView, setSnapshot]
+    [appendDiagnosticLog, homeSelection, invalidatePeoplePanelForNavigation, primaryView, setSnapshot]
   );
 
   async function selectSpace(spaceId: string | null) {
     setContextMenu(null);
-    spaceMembersOpenRequestRef.current += 1;
-    spaceMembersInviteRequestRef.current += 1;
+    invalidatePeoplePanelForNavigation();
     if (spaceId === null) {
       await openHomeActivityView("home_rail");
       return;
     }
+    const navigationRequestId = ++spaceNavigationRequestRef.current;
     if (!(await drainActiveComposerScopesForNavigation(true, true))) return;
+    if (spaceNavigationRequestRef.current !== navigationRequestId) return;
     setPrimaryView("timeline");
     const nextSnapshot = await api.selectSpace(spaceId);
+    if (spaceNavigationRequestRef.current !== navigationRequestId) return;
     setSnapshot(nextSnapshot);
+
+    const selectedSpaceId = nextSnapshot.state.ui.navigation.active_space_id;
+    const generation = nextSnapshot.state.domain.space_members.generation;
+    if (
+      selectedSpaceId !== spaceId ||
+      nextSnapshot.state.domain.space_members.selected_space_id !== spaceId
+    ) {
+      return;
+    }
+
+    try {
+      const membersSnapshot = await api.loadSpaceMembers(spaceId, generation);
+      if (
+        spaceNavigationRequestRef.current !== navigationRequestId ||
+        snapshotRef.current?.state.ui.navigation.active_space_id !== spaceId ||
+        membersSnapshot.state.ui.navigation.active_space_id !== spaceId ||
+        membersSnapshot.state.domain.space_members.selected_space_id !== spaceId ||
+        membersSnapshot.state.domain.space_members.generation !== generation
+      ) {
+        return;
+      }
+      setSnapshot(membersSnapshot);
+    } catch {
+      return;
+    }
   }
 
   async function reorderSpaces(spaceIds: string[]) {
@@ -3098,6 +3156,9 @@ export function App() {
     const transitionStartedAt = Date.now();
     const selectedRoom = snapshot?.state.domain.rooms.find((room) => room.room_id === roomId);
     const previousActiveRoomId = snapshot?.state.ui.navigation.active_room_id ?? null;
+    if (previousActiveRoomId !== roomId) {
+      invalidatePeoplePanelForNavigation();
+    }
     appendDiagnosticLog({
       timestampMs: transitionStartedAt,
       source: "room.transition",
@@ -4857,15 +4918,24 @@ export function App() {
     }
 
     const requestId = ++spaceMembersInviteRequestRef.current;
-    const nextSnapshot = await api.inviteUserToSpace(fence.spaceId, userId, fence.generation);
-    if (
-      spaceMembersInviteRequestRef.current !== requestId ||
-      !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
-      !spaceMembersSnapshotMatches(nextSnapshot, fence)
-    ) {
-      return;
+    try {
+      const nextSnapshot = await api.inviteUserToSpace(fence.spaceId, userId, fence.generation);
+      if (
+        spaceMembersInviteRequestRef.current !== requestId ||
+        !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
+        !spaceMembersSnapshotMatches(nextSnapshot, fence)
+      ) {
+        return;
+      }
+      setSnapshot(nextSnapshot);
+    } catch {
+      if (
+        spaceMembersInviteRequestRef.current === requestId &&
+        spaceMembersSnapshotMatches(snapshotRef.current, fence)
+      ) {
+        appendSpaceMembersDiagnosticLog("invite outcome=transport_rejected");
+      }
     }
-    setSnapshot(nextSnapshot);
   }
 
   async function closeFocusedContextPanel() {
@@ -5528,10 +5598,19 @@ export function App() {
               }
             }}
             onOpenPeople={async () => {
-              const roomId = snapshot.state.ui.navigation.active_room_id;
+              const roomId = snapshotRef.current?.state.ui.navigation.active_room_id;
+              const requestId = ++roomSettingsRequestRef.current;
               if (roomId) {
                 roomSettingsLoadRef.current = null;
                 const next = await api.loadRoomSettings(roomId);
+                if (
+                  roomSettingsRequestRef.current !== requestId ||
+                  snapshotRef.current?.state.ui.navigation.active_room_id !== roomId ||
+                  next.state.ui.navigation.active_room_id !== roomId ||
+                  !exactRoomSettingsForRoom(next, roomId)
+                ) {
+                  return;
+                }
                 setSnapshot(next);
                 setPeoplePanelScope({ kind: "room", roomId });
               } else {
@@ -5618,11 +5697,21 @@ export function App() {
           canInviteToSpace={canInviteToSpace}
           spaceInviteAvailabilityReason={spaceInviteAvailabilityReason}
           onOpenPeople={async () => {
-            if (activeRoom) {
+            const roomId = snapshotRef.current?.state.ui.navigation.active_room_id;
+            const requestId = ++roomSettingsRequestRef.current;
+            if (roomId) {
               roomSettingsLoadRef.current = null;
-              const next = await api.loadRoomSettings(activeRoom.room_id);
+              const next = await api.loadRoomSettings(roomId);
+              if (
+                roomSettingsRequestRef.current !== requestId ||
+                snapshotRef.current?.state.ui.navigation.active_room_id !== roomId ||
+                next.state.ui.navigation.active_room_id !== roomId ||
+                !exactRoomSettingsForRoom(next, roomId)
+              ) {
+                return;
+              }
               setSnapshot(next);
-              setPeoplePanelScope({ kind: "room", roomId: activeRoom.room_id });
+              setPeoplePanelScope({ kind: "room", roomId });
             } else {
               setPeoplePanelScope(null);
             }

@@ -991,8 +991,10 @@ export type MessageId =
   | "spaceMembers.sectionInvited"
   | "spaceMembers.sectionChildOnly"
   | "spaceMembers.childRoomContext"
+  | "spaceMembers.childRoomCount"
   | "spaceMembers.invite"
   | "spaceMembers.invitePending"
+  | "spaceMembers.inviteFailed"
   | "spaceMembers.syncIncomplete"
   | "spaceMembers.noResults"
   | "threads.empty"
@@ -2158,8 +2160,10 @@ const en: Catalog = {
   "spaceMembers.sectionInvited": "Invitation pending",
   "spaceMembers.sectionChildOnly": "Not in Space",
   "spaceMembers.childRoomContext": "In child rooms: {rooms}",
+  "spaceMembers.childRoomCount": "In {count} child rooms",
   "spaceMembers.invite": "Invite to Space",
   "spaceMembers.invitePending": "Invitation pending",
+  "spaceMembers.inviteFailed": "Invite failed. Try again.",
   "spaceMembers.syncIncomplete": "Some child rooms are still syncing",
   "spaceMembers.noResults": "No space members found",
   "threads.empty": "No threads",
@@ -3210,8 +3214,10 @@ const ja: Catalog = {
   "spaceMembers.sectionInvited": "招待保留",
   "spaceMembers.sectionChildOnly": "スペース未参加",
   "spaceMembers.childRoomContext": "参加中の子ルーム: {rooms}",
+  "spaceMembers.childRoomCount": "参加中の子ルーム {count} 個",
   "spaceMembers.invite": "スペースに招待",
   "spaceMembers.invitePending": "招待保留",
+  "spaceMembers.inviteFailed": "招待に失敗しました。もう一度お試しください。",
   "spaceMembers.syncIncomplete": "一部の子ルームを同期中です",
   "spaceMembers.noResults": "スペースのメンバーが見つかりません",
   "threads.empty": "スレッドがありません",

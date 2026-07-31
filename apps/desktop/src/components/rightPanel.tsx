@@ -494,6 +494,12 @@ export function ContextualRightPanel({
       snapshot.state.domain.rooms,
       snapshot.state.domain.spaces
     );
+    const childRoomLabels = new Map<string, string>(
+      snapshot.state.domain.rooms.map((room) => [
+        room.room_id,
+        room.display_label.trim() || room.display_name.trim()
+      ])
+    );
     return (
       <aside className="thread-pane" aria-label={t("panel.context")}>
         {mode === "profile" && selectedProfileUserId ? (
@@ -518,6 +524,7 @@ export function ContextualRightPanel({
           <SpaceMembersPanel
             state={snapshot.state.domain.space_members}
             canInvite={canInviteToSpace}
+            childRoomLabels={childRoomLabels}
             onInviteUser={onInviteUserToSpace}
             onOpenProfile={onOpenProfile ?? (() => undefined)}
             onOpenContextMenu={onOpenContextMenu}
