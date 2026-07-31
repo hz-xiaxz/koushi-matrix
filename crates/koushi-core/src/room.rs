@@ -88,7 +88,7 @@ use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
 use crate::event::{CoreEvent, ReportKind, RoomEvent};
 use crate::executor;
 use crate::failure::{CoreFailure, RoomFailureKind};
-use crate::ids::RequestId;
+use crate::ids::{RequestId, RuntimeConnectionId};
 use crate::mention_candidates::{MentionMemberInput, project_candidates};
 use crate::unread_trace;
 
@@ -100,6 +100,8 @@ const CREATE_SPACE_FAILED_MESSAGE: &str = "Space creation failed";
 const LINK_SPACE_CHILD_FAILED_MESSAGE: &str = "Linking the room to the space failed";
 
 type SpaceChildLinkKey = (String, String);
+
+const SPACE_MEMBER_REFRESH_CONNECTION_ID: RuntimeConnectionId = RuntimeConnectionId(0);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MissingSpaceChildLink {
@@ -147,6 +149,16 @@ pub enum RoomMessage {
     /// demanded rooms are recomputed; `None` means the broadcast lagged and
     /// every demanded room must be self-healed.
     MentionMembershipChanged { room_ids: Option<BTreeSet<String>> },
+    /// Completion of a local-only sync-driven Space-member projection.
+    SpaceMembersProjectionRefreshed {
+        request_id: RequestId,
+        session_generation: u64,
+        demand_generation: u64,
+        refresh_generation: u64,
+        space_id: String,
+        generation: u64,
+        result: Result<MatrixSpaceMembersProjection, MatrixRoomOperationError>,
+    },
     /// A sync update changed the authoritative `m.room.pinned_events` state.
     /// The actor reloads only the affected rooms so external pin/unpin actions
     /// become visible without polling every room.
@@ -194,6 +206,12 @@ pub struct RoomActor {
     mention_refresh_sequence: u64,
     mention_session_generation: u64,
     mention_local_aliases: BTreeMap<String, String>,
+    space_member_demand: Option<SpaceMemberDemand>,
+    space_member_demand_generation: u64,
+    space_member_refresh_sequence: u64,
+    space_member_session_generation: u64,
+    space_member_refresh_in_flight: Option<SpaceMemberRefreshFence>,
+    space_member_refresh_pending: bool,
     action_tx: mpsc::Sender<Vec<AppAction>>,
     event_tx: broadcast::Sender<CoreEvent>,
     self_tx: mpsc::Sender<RoomMessage>,
@@ -205,6 +223,22 @@ struct MentionDemand {
     request_id: RequestId,
     generation: u64,
     query: String,
+}
+
+#[derive(Clone)]
+struct SpaceMemberDemand {
+    space_id: String,
+    generation: u64,
+    child_room_ids: BTreeSet<String>,
+    demand_generation: u64,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct SpaceMemberRefreshFence {
+    request_id: RequestId,
+    session_generation: u64,
+    demand_generation: u64,
+    refresh_generation: u64,
 }
 
 impl RoomActor {
@@ -224,6 +258,12 @@ impl RoomActor {
             mention_refresh_sequence: 0,
             mention_session_generation: 0,
             mention_local_aliases: BTreeMap::new(),
+            space_member_demand: None,
+            space_member_demand_generation: 0,
+            space_member_refresh_sequence: 0,
+            space_member_session_generation: 0,
+            space_member_refresh_in_flight: None,
+            space_member_refresh_pending: false,
             action_tx,
             event_tx,
             self_tx: tx.clone(),
@@ -246,6 +286,7 @@ impl RoomActor {
                 RoomMessage::SessionEstablished { session } => {
                     // Room operations become available; observation starts
                     // later on SyncStarted (backend then known).
+                    self.reset_space_member_session();
                     self.session = Some(session);
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
@@ -259,6 +300,7 @@ impl RoomActor {
                     // loop (from an earlier SyncStarted) is stopped before the
                     // replacement is spawned.
                     self.stop_observation().await;
+                    self.reset_space_member_session();
                     self.session = Some(session.clone());
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
@@ -283,11 +325,13 @@ impl RoomActor {
                 }
                 RoomMessage::SyncStopped => {
                     self.stop_observation().await;
+                    self.reset_space_member_session();
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
                 }
                 RoomMessage::SessionCleared => {
                     self.stop_observation().await;
+                    self.reset_space_member_session();
                     self.session = None;
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
@@ -315,6 +359,26 @@ impl RoomActor {
                 }
                 RoomMessage::MentionMembershipChanged { room_ids } => {
                     self.handle_mention_membership_changed(room_ids).await;
+                }
+                RoomMessage::SpaceMembersProjectionRefreshed {
+                    request_id,
+                    session_generation,
+                    demand_generation,
+                    refresh_generation,
+                    space_id,
+                    generation,
+                    result,
+                } => {
+                    self.handle_space_members_projection_refreshed(
+                        request_id,
+                        session_generation,
+                        demand_generation,
+                        refresh_generation,
+                        space_id,
+                        generation,
+                        result,
+                    )
+                    .await;
                 }
                 RoomMessage::PinnedEventsChanged { room_ids } => {
                     self.handle_pinned_events_changed(room_ids).await;
@@ -929,12 +993,17 @@ impl RoomActor {
     }
 
     async fn handle_load_space_members(
-        &self,
+        &mut self,
         request_id: RequestId,
         space_id: String,
         generation: u64,
     ) {
-        let Some(session) = &self.session else {
+        // A new explicit load supersedes any sync-driven demand. The state
+        // action still carries the request/Space/generation fences, while the
+        // actor fence prevents an older detached refresh from installing a
+        // demand for the previous Space.
+        self.clear_space_member_demand();
+        let Some(session) = self.session.clone() else {
             let kind = OperationFailureKind::Sdk;
             self.reduce_reliable(vec![AppAction::SpaceMembersLoadFailed {
                 request_id: request_id.sequence,
@@ -947,8 +1016,13 @@ impl RoomActor {
             return;
         };
 
-        match koushi_sdk::matrix_space_members_projection(session, &space_id).await {
+        match koushi_sdk::matrix_space_members_projection(&session, &space_id).await {
             Ok(raw_projection) => {
+                self.install_space_member_demand(
+                    &space_id,
+                    generation,
+                    &raw_projection.child_room_ids,
+                );
                 let profile_updates = user_profiles_from_space_projection(&raw_projection);
                 let projection = state_space_members_projection(raw_projection.clone(), generation);
                 record_core_space_members_projection_with_raw(
@@ -989,6 +1063,139 @@ impl RoomActor {
                         kind: classify_room_error(&error),
                     },
                 );
+            }
+        }
+    }
+
+    async fn handle_space_membership_changed(&mut self, room_ids: Option<&BTreeSet<String>>) {
+        let Some(demand) = self.space_member_demand.clone() else {
+            return;
+        };
+        if !space_members_update_affects_demand(&demand.space_id, &demand.child_room_ids, room_ids)
+        {
+            return;
+        }
+        if self.space_member_refresh_in_flight.is_some() {
+            self.space_member_refresh_pending = true;
+            return;
+        }
+        self.start_space_member_refresh(demand);
+    }
+
+    fn start_space_member_refresh(&mut self, demand: SpaceMemberDemand) {
+        let Some(session) = self.session.clone() else {
+            return;
+        };
+
+        self.space_member_refresh_sequence =
+            self.space_member_refresh_sequence.wrapping_add(1).max(1);
+        let refresh_generation = self.space_member_refresh_sequence;
+        let request_id = RequestId {
+            connection_id: SPACE_MEMBER_REFRESH_CONNECTION_ID,
+            sequence: refresh_generation,
+        };
+        let session_generation = self.space_member_session_generation;
+        let fence = SpaceMemberRefreshFence {
+            request_id,
+            session_generation,
+            demand_generation: demand.demand_generation,
+            refresh_generation,
+        };
+        self.space_member_refresh_in_flight = Some(fence);
+
+        let room_tx = self.self_tx.clone();
+        let space_id = demand.space_id.clone();
+        let generation = demand.generation;
+        let demand_generation = demand.demand_generation;
+        let _ = executor::spawn(async move {
+            let result = koushi_sdk::matrix_space_members_projection(&session, &space_id).await;
+            let _ = room_tx
+                .send(RoomMessage::SpaceMembersProjectionRefreshed {
+                    request_id,
+                    session_generation,
+                    demand_generation,
+                    refresh_generation,
+                    space_id,
+                    generation,
+                    result,
+                })
+                .await;
+        });
+    }
+
+    async fn handle_space_members_projection_refreshed(
+        &mut self,
+        request_id: RequestId,
+        session_generation: u64,
+        demand_generation: u64,
+        refresh_generation: u64,
+        space_id: String,
+        generation: u64,
+        result: Result<MatrixSpaceMembersProjection, MatrixRoomOperationError>,
+    ) {
+        let Some(demand) = self.space_member_demand.clone() else {
+            return;
+        };
+        let is_current = space_member_refresh_fence_is_current(
+            self.space_member_refresh_in_flight,
+            SpaceMemberRefreshFence {
+                request_id,
+                session_generation,
+                demand_generation,
+                refresh_generation,
+            },
+            self.space_member_session_generation,
+            demand.demand_generation,
+            &space_id,
+            generation,
+            &demand.space_id,
+            demand.generation,
+        );
+        if !is_current {
+            record_space_member_refresh_event("stale_completion_ignored", false);
+            return;
+        }
+
+        self.space_member_refresh_in_flight = None;
+        let should_refresh_again = std::mem::take(&mut self.space_member_refresh_pending);
+        match result {
+            Ok(raw_projection) => {
+                let profiles = user_profiles_from_space_projection(&raw_projection);
+                let projection = state_space_members_projection(raw_projection.clone(), generation);
+                record_core_space_members_projection_with_raw(
+                    "sync_refresh",
+                    generation,
+                    &raw_projection,
+                    &projection,
+                    "success",
+                );
+                self.reduce_reliable(vec![
+                    AppAction::SpaceMembersBackgroundProjectionReconciled {
+                        request_id: request_id.sequence,
+                        space_id: space_id.clone(),
+                        generation,
+                        projection,
+                        profiles,
+                    },
+                ])
+                .await;
+                self.install_space_member_demand(
+                    &space_id,
+                    generation,
+                    &raw_projection.child_room_ids,
+                );
+            }
+            Err(_error) => {
+                // A background lookup failure is deliberately silent at the
+                // state layer: the last-known projection remains visible and
+                // the next relevant sync update may retry it.
+                record_core_space_members_load_failure("sync_refresh", generation);
+            }
+        }
+
+        if should_refresh_again {
+            if let Some(demand) = self.space_member_demand.clone() {
+                self.start_space_member_refresh(demand);
             }
         }
     }
@@ -2430,6 +2637,9 @@ impl RoomActor {
     }
 
     async fn handle_mention_membership_changed(&mut self, room_ids: Option<BTreeSet<String>>) {
+        self.handle_space_membership_changed(room_ids.as_ref())
+            .await;
+
         let demanded_rooms = self
             .mention_demands
             .keys()
@@ -2606,6 +2816,40 @@ impl RoomActor {
         self.mention_local_aliases.clear();
         self.mention_refresh_sequence = 0;
         self.mention_session_generation = self.mention_session_generation.wrapping_add(1);
+    }
+
+    fn reset_space_member_session(&mut self) {
+        self.space_member_session_generation =
+            self.space_member_session_generation.wrapping_add(1).max(1);
+        self.clear_space_member_demand();
+    }
+
+    fn clear_space_member_demand(&mut self) {
+        self.space_member_demand = None;
+        self.space_member_demand_generation =
+            self.space_member_demand_generation.wrapping_add(1).max(1);
+        self.space_member_refresh_in_flight = None;
+        self.space_member_refresh_pending = false;
+        self.space_member_refresh_sequence = 0;
+    }
+
+    fn install_space_member_demand(
+        &mut self,
+        space_id: &str,
+        generation: u64,
+        child_room_ids: &[String],
+    ) {
+        self.space_member_demand_generation =
+            self.space_member_demand_generation.wrapping_add(1).max(1);
+        let child_room_ids = child_room_ids.iter().cloned().collect::<BTreeSet<_>>();
+        let child_room_count = child_room_ids.len();
+        self.space_member_demand = Some(SpaceMemberDemand {
+            space_id: space_id.to_owned(),
+            generation,
+            child_room_ids,
+            demand_generation: self.space_member_demand_generation,
+        });
+        record_space_member_demand_event("installed", generation, child_room_count);
     }
 
     fn emit(&self, event: CoreEvent) {
@@ -3817,6 +4061,81 @@ fn record_core_space_members_projection_with_metrics(
     record(event.field(DiagnosticField::token("freshness_status", "not_tracked")));
 }
 
+fn space_members_update_affects_demand(
+    space_id: &str,
+    child_room_ids: &BTreeSet<String>,
+    updated_room_ids: Option<&BTreeSet<String>>,
+) -> bool {
+    updated_room_ids.map_or(true, |updated| {
+        updated.contains(space_id)
+            || updated
+                .iter()
+                .any(|room_id| child_room_ids.contains(room_id))
+    })
+}
+
+fn space_members_refresh_is_current(
+    result_space_id: &str,
+    result_generation: u64,
+    demanded_space_id: &str,
+    demanded_generation: u64,
+) -> bool {
+    result_space_id == demanded_space_id && result_generation == demanded_generation
+}
+
+fn space_member_refresh_fence_is_current(
+    active_fence: Option<SpaceMemberRefreshFence>,
+    expected_fence: SpaceMemberRefreshFence,
+    current_session_generation: u64,
+    current_demand_generation: u64,
+    result_space_id: &str,
+    result_generation: u64,
+    demanded_space_id: &str,
+    demanded_generation: u64,
+) -> bool {
+    active_fence == Some(expected_fence)
+        && current_session_generation == expected_fence.session_generation
+        && current_demand_generation == expected_fence.demand_generation
+        && space_members_refresh_is_current(
+            result_space_id,
+            result_generation,
+            demanded_space_id,
+            demanded_generation,
+        )
+}
+
+fn record_space_member_demand_event(
+    outcome: &'static str,
+    generation: u64,
+    child_room_count: usize,
+) {
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.space_members_projection",
+            "demand",
+        )
+        .field(DiagnosticField::token("outcome", outcome))
+        .field(DiagnosticField::count("generation", generation))
+        .field(DiagnosticField::count(
+            "child_room_count",
+            child_room_count as u64,
+        )),
+    );
+}
+
+fn record_space_member_refresh_event(outcome: &'static str, applied: bool) {
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.space_members_projection",
+            "background_refresh",
+        )
+        .field(DiagnosticField::token("outcome", outcome))
+        .field(DiagnosticField::boolean("applied", applied)),
+    );
+}
+
 fn record_core_space_members_load_failure(trigger: &'static str, generation: u64) {
     record(
         DiagnosticEvent::new(
@@ -4602,6 +4921,112 @@ pub mod tests {
             false,
         ));
         assert!(!invite_projection_required(None, &changed, true, true,));
+    }
+
+    #[test]
+    fn space_member_sync_updates_are_relevant_only_for_the_demanded_scope() {
+        let child_room_ids = BTreeSet::from([
+            "!child-a:example.invalid".to_owned(),
+            "!child-b:example.invalid".to_owned(),
+        ]);
+        let space_update = BTreeSet::from(["!space:example.invalid".to_owned()]);
+        let child_update = BTreeSet::from(["!child-a:example.invalid".to_owned()]);
+        let unrelated_update = BTreeSet::from(["!unrelated:example.invalid".to_owned()]);
+
+        assert!(space_members_update_affects_demand(
+            "!space:example.invalid",
+            &child_room_ids,
+            Some(&space_update),
+        ));
+        assert!(space_members_update_affects_demand(
+            "!space:example.invalid",
+            &child_room_ids,
+            Some(&child_update),
+        ));
+        assert!(!space_members_update_affects_demand(
+            "!space:example.invalid",
+            &child_room_ids,
+            Some(&unrelated_update),
+        ));
+        assert!(space_members_update_affects_demand(
+            "!space:example.invalid",
+            &child_room_ids,
+            None,
+        ));
+        assert!(!space_members_update_affects_demand(
+            "!space:example.invalid",
+            &child_room_ids,
+            Some(&BTreeSet::new()),
+        ));
+    }
+
+    #[test]
+    fn stale_space_member_refreshes_are_rejected_by_space_and_generation() {
+        assert!(space_members_refresh_is_current(
+            "!space:example.invalid",
+            4,
+            "!space:example.invalid",
+            4,
+        ));
+        assert!(!space_members_refresh_is_current(
+            "!space:example.invalid",
+            3,
+            "!space:example.invalid",
+            4,
+        ));
+        assert!(!space_members_refresh_is_current(
+            "!old-space:example.invalid",
+            4,
+            "!space:example.invalid",
+            4,
+        ));
+    }
+
+    #[test]
+    fn stale_space_member_refreshes_are_rejected_by_session_demand_and_request_fences() {
+        let fence = SpaceMemberRefreshFence {
+            request_id: make_request_id(1),
+            session_generation: 2,
+            demand_generation: 3,
+            refresh_generation: 4,
+        };
+        let current = |active_fence, session_generation, demand_generation, request_id| {
+            space_member_refresh_fence_is_current(
+                active_fence,
+                SpaceMemberRefreshFence {
+                    request_id,
+                    ..fence
+                },
+                session_generation,
+                demand_generation,
+                "!space:example.invalid",
+                4,
+                "!space:example.invalid",
+                4,
+            )
+        };
+
+        assert!(current(Some(fence), 2, 3, make_request_id(1)));
+        assert!(!current(Some(fence), 1, 3, make_request_id(1)));
+        assert!(!current(Some(fence), 2, 9, make_request_id(1)));
+        assert!(!current(Some(fence), 2, 3, make_request_id(2)));
+    }
+
+    #[test]
+    fn existing_membership_change_message_routes_to_space_refresh() {
+        let source = include_str!("room.rs");
+        let handler = source
+            .split("async fn handle_mention_membership_changed")
+            .nth(1)
+            .expect("membership change handler exists")
+            .split("async fn handle_mention_local_aliases_updated")
+            .next()
+            .expect("membership change handler boundary exists");
+
+        assert!(
+            handler.contains("handle_space_membership_changed"),
+            "the existing MentionMembershipChanged message must refresh demanded Space members"
+        );
     }
 
     // --- Error classification ---
@@ -6377,6 +6802,7 @@ pub mod tests {
     fn space_members_projection_load_path_emits_non_empty_child_profile_observations() {
         let raw = MatrixSpaceMembersProjection {
             space_id: "!space:example.invalid".to_owned(),
+            child_room_ids: vec!["!child:example.invalid".to_owned()],
             space_joined: Vec::new(),
             space_invited: Vec::new(),
             child_room_only: vec![MatrixSpaceMemberEntry {
@@ -6441,14 +6867,40 @@ pub mod tests {
     }
 
     #[test]
+    fn background_space_member_lookup_failure_preserves_state_and_only_records_diagnostic() {
+        let source = include_str!("room.rs");
+        let failure_path = source
+            .split("async fn handle_space_members_projection_refreshed")
+            .nth(1)
+            .expect("background refresh handler exists")
+            .split("async fn handle_invite_user_to_space")
+            .next()
+            .expect("background refresh handler boundary exists")
+            .split("Err(_error) =>")
+            .nth(1)
+            .expect("background lookup failure branch exists");
+
+        assert!(failure_path.contains("record_core_space_members_load_failure"));
+        assert!(!failure_path.contains("SpaceMembersBackgroundProjectionReconciled"));
+        assert!(!failure_path.contains("SpaceMembersLoadFailed"));
+    }
+
+    #[test]
     fn failed_space_member_diagnostics_do_not_fabricate_member_counts() {
         let before = koushi_diagnostics::snapshot().records.len();
-        record_core_space_members_load_failure("load", 7);
+        record_core_space_members_load_failure("sync_refresh", 7);
         let record = koushi_diagnostics::snapshot()
             .records
             .into_iter()
             .skip(before)
-            .find(|record| record.event.source == "core.space_members_projection")
+            .find(|record| {
+                record.event.source == "core.space_members_projection"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "outcome"
+                            && field.value
+                                == koushi_diagnostics::DiagnosticValue::Token("lookup_failed")
+                    })
+            })
             .expect("Space load failure diagnostic");
 
         assert!(record.event.fields.iter().any(|field| {

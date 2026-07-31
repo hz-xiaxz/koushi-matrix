@@ -5612,6 +5612,10 @@ pub struct MatrixRoomSettingsSnapshot {
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixSpaceMembersProjection {
     pub space_id: String,
+    /// The child-room scope used by RoomActor for sync-driven local refresh.
+    /// This is store-derived metadata, not member/profile data.
+    #[serde(default)]
+    pub child_room_ids: Vec<String>,
     pub space_joined: Vec<MatrixSpaceMemberEntry>,
     pub space_invited: Vec<MatrixSpaceMemberEntry>,
     pub child_room_only: Vec<MatrixSpaceMemberEntry>,
@@ -7805,6 +7809,10 @@ mod space_member_projection_tests {
             projection.child_room_only[0].child_room_ids,
             vec![child_a.to_string(), child_b.to_string()]
         );
+        assert_eq!(
+            projection.child_room_ids,
+            vec![child_a.to_string(), child_b.to_string()]
+        );
         assert_eq!(projection.child_room_count, 2);
         assert_eq!(projection.incomplete_child_room_count, 2);
         assert_eq!(projection.space_joined_input_count, 2);
@@ -7826,6 +7834,7 @@ mod space_member_projection_tests {
         };
         let projection = super::MatrixSpaceMembersProjection {
             space_id: "!space:example.invalid".to_owned(),
+            child_room_ids: vec!["!child:example.invalid".to_owned()],
             space_joined: vec![entry.clone()],
             space_invited: Vec::new(),
             child_room_only: Vec::new(),
@@ -9340,9 +9349,11 @@ pub async fn matrix_space_members_projection(
         local_lookup_success_count,
         local_lookup_failure_count,
     ));
+    let child_room_count = child_room_ids.len();
 
     Ok(MatrixSpaceMembersProjection {
         space_id: space_id.to_owned(),
+        child_room_ids,
         space_joined,
         space_invited,
         child_room_only,
@@ -9352,7 +9363,7 @@ pub async fn matrix_space_members_projection(
         child_join_input_count: facts.child_join_input_count,
         child_join_union_count: facts.child_join_union_count,
         duplicate_child_membership_count: facts.duplicate_child_membership_count,
-        child_room_count: child_room_ids.len(),
+        child_room_count,
         complete_child_room_count,
         incomplete_child_room_count,
     })

@@ -48,6 +48,340 @@ fn projection(generation: u64, child_only: Vec<SpaceMemberEntry>) -> SpaceMember
     }
 }
 
+fn space_entry(membership: SpaceMemberMembership) -> SpaceMemberEntry {
+    SpaceMemberEntry {
+        membership,
+        invite_pending: false,
+        ..child_only_entry()
+    }
+}
+
+#[test]
+fn background_projection_reconciles_an_idle_state() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 40,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoaded {
+            request_id: 40,
+            projection: projection(2, vec![child_only_entry()]),
+        },
+    );
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id: 43,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            projection: SpaceMembersProjection {
+                space_joined: vec![space_entry(SpaceMemberMembership::SpaceJoined)],
+                ..projection(2, vec![])
+            },
+            profiles: Vec::new(),
+        },
+    );
+    assert_eq!(state.space_members.space_joined.len(), 1);
+    assert!(state.space_members.child_room_only.is_empty());
+}
+
+#[test]
+fn background_projection_resolves_observed_profiles_before_publishing_rows() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 43,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoaded {
+            request_id: 43,
+            projection: projection(2, vec![child_only_entry()]),
+        },
+    );
+
+    let mut entry = space_entry(SpaceMemberMembership::SpaceJoined);
+    entry.display_name = None;
+    entry.display_label = "Unknown user".to_owned();
+    entry.original_display_label = "Unknown user".to_owned();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id: 44,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            projection: SpaceMembersProjection {
+                space_joined: vec![entry],
+                ..projection(2, vec![])
+            },
+            profiles: vec![UserProfile {
+                user_id: USER_ID.to_owned(),
+                display_name: Some("Observed profile".to_owned()),
+                display_label: "Observed profile".to_owned(),
+                original_display_label: "Observed profile".to_owned(),
+                mention_search_terms: Vec::new(),
+                avatar: None,
+            }],
+        },
+    );
+
+    assert_eq!(
+        state.space_members.space_joined[0].display_label,
+        "Observed profile"
+    );
+    assert_eq!(
+        state.profile.users[USER_ID].display_name.as_deref(),
+        Some("Observed profile")
+    );
+}
+
+#[test]
+fn background_projection_settles_an_invite_when_authoritative_invite_or_join_appears() {
+    for membership in [
+        SpaceMemberMembership::SpaceInvited,
+        SpaceMemberMembership::SpaceJoined,
+    ] {
+        let mut state = ready_state();
+        reduce(
+            &mut state,
+            AppAction::SpaceMembersLoadRequested {
+                request_id: 44,
+                space_id: SPACE_ID.to_owned(),
+                generation: 2,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::SpaceMembersLoaded {
+                request_id: 44,
+                projection: projection(2, vec![child_only_entry()]),
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::SpaceMemberInviteRequested {
+                request_id: 45,
+                space_id: SPACE_ID.to_owned(),
+                user_id: USER_ID.to_owned(),
+                generation: 2,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::SpaceMembersBackgroundProjectionReconciled {
+                request_id: 46,
+                space_id: SPACE_ID.to_owned(),
+                generation: 2,
+                projection: SpaceMembersProjection {
+                    space_joined: (membership == SpaceMemberMembership::SpaceJoined)
+                        .then(|| space_entry(membership.clone()))
+                        .into_iter()
+                        .collect(),
+                    space_invited: (membership == SpaceMemberMembership::SpaceInvited)
+                        .then(|| space_entry(membership.clone()))
+                        .into_iter()
+                        .collect(),
+                    ..projection(2, vec![])
+                },
+                profiles: Vec::new(),
+            },
+        );
+        assert!(matches!(
+            state.space_members.operation,
+            SpaceMembersOperationState::Idle
+        ));
+        assert_eq!(
+            state.space_members.space_joined.len(),
+            (membership == SpaceMemberMembership::SpaceJoined) as usize
+        );
+        assert_eq!(
+            state.space_members.space_invited.len(),
+            (membership == SpaceMemberMembership::SpaceInvited) as usize
+        );
+    }
+}
+
+#[test]
+fn background_projection_preserves_last_known_entries_when_child_scope_is_incomplete() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 42,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoaded {
+            request_id: 42,
+            projection: projection(2, vec![child_only_entry()]),
+        },
+    );
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id: 48,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            projection: SpaceMembersProjection {
+                incomplete_child_room_count: 1,
+                complete_child_room_count: 0,
+                ..projection(2, vec![])
+            },
+            profiles: Vec::new(),
+        },
+    );
+
+    assert!(state.space_members.space_joined.is_empty());
+    assert_eq!(state.space_members.child_room_only.len(), 1);
+}
+
+#[test]
+fn incomplete_background_projection_keeps_pending_invite_until_authoritative_membership() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 48,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoaded {
+            request_id: 48,
+            projection: projection(2, vec![child_only_entry()]),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteRequested {
+            request_id: 49,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+        },
+    );
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id: 50,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            projection: SpaceMembersProjection {
+                incomplete_child_room_count: 1,
+                complete_child_room_count: 0,
+                ..projection(2, vec![])
+            },
+            profiles: Vec::new(),
+        },
+    );
+
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Inviting { request_id: 49, .. }
+    ));
+    assert_eq!(state.space_members.space_invited.len(), 1);
+    assert!(state.space_members.space_invited[0].invite_pending);
+}
+
+#[test]
+fn background_projection_is_ignored_while_the_explicit_load_is_loading() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 41,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id: 49,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            projection: SpaceMembersProjection {
+                space_joined: vec![space_entry(SpaceMemberMembership::SpaceJoined)],
+                ..projection(2, vec![])
+            },
+            profiles: Vec::new(),
+        },
+    );
+
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Loading {
+            request_id: Some(41),
+            ..
+        }
+    ));
+    assert!(state.space_members.space_joined.is_empty());
+}
+
+#[test]
+fn stale_background_projection_cannot_cross_space_or_generation_fences() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 42,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoaded {
+            request_id: 42,
+            projection: projection(2, vec![child_only_entry()]),
+        },
+    );
+
+    for stale_projection in [
+        SpaceMembersProjection {
+            space_id: "!other-space:example.invalid".to_owned(),
+            ..projection(2, vec![space_entry(SpaceMemberMembership::SpaceJoined)])
+        },
+        SpaceMembersProjection {
+            generation: 1,
+            ..projection(1, vec![space_entry(SpaceMemberMembership::SpaceJoined)])
+        },
+    ] {
+        reduce(
+            &mut state,
+            AppAction::SpaceMembersBackgroundProjectionReconciled {
+                request_id: 47,
+                space_id: stale_projection.space_id.clone(),
+                generation: stale_projection.generation,
+                projection: stale_projection,
+                profiles: Vec::new(),
+            },
+        );
+    }
+
+    assert!(state.space_members.space_joined.is_empty());
+    assert_eq!(state.space_members.child_room_only.len(), 1);
+}
+
 #[test]
 fn loaded_projection_is_generation_fenced_and_keeps_three_sections() {
     let mut state = ready_state();

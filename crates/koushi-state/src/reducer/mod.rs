@@ -477,6 +477,15 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             projection,
             profiles,
         } => space_members::handle_projection_reconciled(state, request_id, projection, profiles),
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id,
+            space_id,
+            generation,
+            projection,
+            profiles,
+        } => space_members::handle_background_projection_reconciled(
+            state, request_id, space_id, generation, projection, profiles,
+        ),
         AppAction::SpaceMembersLoadFailed {
             request_id,
             space_id,

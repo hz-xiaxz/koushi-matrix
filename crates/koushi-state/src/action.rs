@@ -170,6 +170,16 @@ pub enum AppAction {
         projection: SpaceMembersProjection,
         profiles: Vec<UserProfile>,
     },
+    /// A sync-driven local projection refresh. Unlike the initial load path,
+    /// this is accepted while the projection is idle or an invite is pending,
+    /// but only for the selected Space and its current generation.
+    SpaceMembersBackgroundProjectionReconciled {
+        request_id: u64,
+        space_id: String,
+        generation: u64,
+        projection: SpaceMembersProjection,
+        profiles: Vec<UserProfile>,
+    },
     SpaceMemberInviteRequested {
         request_id: u64,
         space_id: String,

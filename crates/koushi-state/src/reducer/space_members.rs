@@ -165,10 +165,42 @@ pub(crate) fn handle_projection_reconciled(
     effects
 }
 
+pub(crate) fn handle_background_projection_reconciled(
+    state: &mut AppState,
+    request_id: u64,
+    space_id: String,
+    generation: u64,
+    projection: SpaceMembersProjection,
+    profiles: Vec<crate::state::UserProfile>,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state)
+        || state.space_members.selected_space_id.as_deref() != Some(space_id.as_str())
+        || state.space_members.generation != generation
+        || projection.space_id != space_id
+        || projection.generation != generation
+        || !matches!(
+            state.space_members.operation,
+            SpaceMembersOperationState::Idle | SpaceMembersOperationState::Inviting { .. }
+        )
+    {
+        return Vec::new();
+    }
+
+    let pending = pending_operation(state);
+    let mut effects = super::profile::handle_user_profiles_updated(state, profiles);
+    let authoritative = apply_reconciled_projection_during_invite(state, projection);
+    if pending.is_some() && authoritative {
+        state.space_members.operation = SpaceMembersOperationState::Idle;
+    }
+    let _ = request_id;
+    effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    effects
+}
+
 fn apply_reconciled_projection_during_invite(
     state: &mut AppState,
     projection: SpaceMembersProjection,
-) {
+) -> bool {
     let pending = pending_operation(state);
     let pending_entry = pending.as_ref().and_then(|(_, _, user_id, _)| {
         state
@@ -179,15 +211,17 @@ fn apply_reconciled_projection_during_invite(
             .cloned()
     });
     let mut resolved = resolve_space_members_projection(projection, &state.profile);
+    let authoritative = pending.as_ref().is_some_and(|(_, _, user_id, _)| {
+        resolved
+            .space_joined
+            .iter()
+            .chain(resolved.space_invited.iter())
+            .any(|entry| entry.user_id == *user_id)
+    });
     if resolved.incomplete_child_room_count > 0 {
         merge_incomplete_projection(&state.space_members, &mut resolved);
     }
     if let Some((_, _, user_id, _)) = pending {
-        let authoritative = resolved
-            .space_joined
-            .iter()
-            .chain(resolved.space_invited.iter())
-            .any(|entry| entry.user_id == user_id);
         if !authoritative {
             if let Some(mut entry) = pending_entry {
                 remove_projection_entry(&mut resolved, &user_id);
@@ -199,6 +233,7 @@ fn apply_reconciled_projection_during_invite(
     }
     sort_projection(&mut resolved);
     apply_projection(&mut state.space_members, resolved);
+    authoritative
 }
 
 pub(crate) fn handle_load_failed(

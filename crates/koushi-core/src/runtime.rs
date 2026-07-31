@@ -485,6 +485,11 @@ fn profile_resolution_diagnostic_event(
             projection,
             profiles,
             ..
+        }
+        | AppAction::SpaceMembersBackgroundProjectionReconciled {
+            projection,
+            profiles,
+            ..
         } => {
             for entry in projection
                 .space_joined
