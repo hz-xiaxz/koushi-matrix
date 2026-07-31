@@ -164,3 +164,30 @@ minimal SDK topic commit, and update the parent gitlink.
 Re-run the SDK wrapper/core library tests and the Conduit `media` scenario
 against the updated gitlink. Push the parent commit and require the complete PR
 CI, including the advisory Core homeserver QA job, to finish green before merge.
+
+### Task 6: Preserve explicit recheck demand across actor scheduling races
+
+**Files:**
+- Modify: `crates/koushi-core/src/account.rs`
+
+- [x] **Step 1: Reproduce both dropped-demand orderings**
+
+Use a controllable local `/keys/query` fixture to prove that
+`CheckCurrentDeviceTrust` is replayed when a pending trust projection does not
+match the reducer state, and that a second explicit request arriving while the
+first query is in flight is replayed after settlement. Both tests must fail
+against the original coalescing logic.
+
+- [x] **Step 2: Make coalescing lossless**
+
+Keep at most one authoritative query in flight, but retain a boolean demand
+when another explicit reducer request arrives. A matching projection ack may
+satisfy redundant demand; a mismatched ack must discard the obsolete
+transition and start the pending query. Clear deferred demand on session
+teardown and replay it after the current query settles.
+
+- [x] **Step 3: Verify the constrained reproduction**
+
+Run the focused actor tests, the complete core library suite, and the Conduit
+`media` scenario with the process restricted to two CPUs. The constrained
+scenario must complete without `phase=rechecking_trust`.
