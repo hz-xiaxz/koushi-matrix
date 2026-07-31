@@ -8489,6 +8489,48 @@ fn gate_session_phase(session: &SessionState) -> &'static str {
     }
 }
 
+fn trust_admission_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticSnapshot) -> String {
+    const ALLOWED_STAGES: &[&str] = &[
+        "restricted_catch_up_started",
+        "trust_recheck_requested",
+        "trust_recheck_started",
+        "trust_recheck_finished_verified",
+        "trust_recheck_finished_unverified",
+        "trust_recheck_finished_unknown",
+        "trust_recheck_finished_failed",
+        "trust_persisted",
+        "restricted_catch_up_stopped",
+        "restricted_catch_up_skipped",
+        "ready_projection_dispatched",
+        "trust_projection_reduced_ready",
+        "trust_projection_reduced_locked",
+        "trust_projection_reduced_gated",
+        "trust_projection_ack_delivered",
+        "trust_projection_ack_delivery_failed",
+        "trust_projection_ack_mismatch",
+        "ready_projection_ack",
+        "lock_projection_ack",
+        "normal_sync_started",
+    ];
+    let mut stages = snapshot
+        .records
+        .iter()
+        .rev()
+        .filter(|record| {
+            record.event.source == "core.verification_admission"
+                && ALLOWED_STAGES.contains(&record.event.stage)
+        })
+        .take(12)
+        .map(|record| record.event.stage)
+        .collect::<Vec<_>>();
+    stages.reverse();
+    if stages.is_empty() {
+        "none".to_owned()
+    } else {
+        stages.join(">")
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Room-list helpers
 // ---------------------------------------------------------------------------
@@ -10645,10 +10687,12 @@ async fn wait_for_logged_in<S: QaSnapshotEventSource + ?Sized>(
                 // "promotion never happened" from "promotion in flight" or
                 // "event correlated to another request". Without it the
                 // message was identical for every hypothesis (#375).
+                let trust_path =
+                    trust_admission_diagnostic_summary(&koushi_diagnostics::snapshot());
                 return ready_account_key(conn).ok_or_else(|| {
                     format!(
-                        "{label}: timed out waiting for LoggedIn event; phase={}",
-                        gate_session_phase(&conn.snapshot().session)
+                        "{label}: timed out waiting for LoggedIn event; phase={}; trust_path={trust_path}",
+                        gate_session_phase(&conn.snapshot().session),
                     )
                 });
             }
@@ -17838,6 +17882,61 @@ mod tests {
     use koushi_core::event::{ThreadSummaryDto, TimelineGapPosition, TimelineMessageActions};
 
     #[test]
+    fn trust_admission_timeout_summary_is_allowlisted_and_private_safe() {
+        use koushi_diagnostics::{
+            DiagnosticEvent, DiagnosticField, DiagnosticLevel, DiagnosticRecord, DiagnosticSnapshot,
+        };
+
+        let record = |event| DiagnosticRecord {
+            timestamp_ms: 0,
+            event,
+        };
+        let snapshot = DiagnosticSnapshot {
+            records: vec![
+                record(
+                    DiagnosticEvent::new(
+                        DiagnosticLevel::Info,
+                        "core.verification_admission",
+                        "trust_recheck_requested",
+                    )
+                    .field(DiagnosticField::token(
+                        "ignored_private_field",
+                        "@private:example.invalid",
+                    )),
+                ),
+                record(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "other.source",
+                    "trust_recheck_started",
+                )),
+                record(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.verification_admission",
+                    "unallowlisted-private-stage",
+                )),
+                record(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.verification_admission",
+                    "trust_recheck_started",
+                )),
+                record(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.verification_admission",
+                    "trust_recheck_finished_verified",
+                )),
+            ],
+            dropped_records: 0,
+        };
+
+        let summary = trust_admission_diagnostic_summary(&snapshot);
+        assert_eq!(
+            summary,
+            "trust_recheck_requested>trust_recheck_started>trust_recheck_finished_verified"
+        );
+        assert!(!summary.contains("private"));
+    }
+
+    #[test]
     fn invite_timeout_diagnostic_summary_is_allowlisted_and_private_safe() {
         use koushi_diagnostics::{
             DiagnosticEvent, DiagnosticField, DiagnosticLevel, DiagnosticRecord, DiagnosticSnapshot,
@@ -20784,9 +20883,11 @@ mod tests {
 
         // The phase token is part of the contract now (#375): it is what makes
         // one failed CI capture diagnosable.
-        assert_eq!(
-            error,
-            "login remains pending: timed out waiting for LoggedIn event; phase=signed_out"
+        assert!(
+            error.starts_with(
+                "login remains pending: timed out waiting for LoggedIn event; phase=signed_out; trust_path="
+            ),
+            "unexpected timeout diagnostic: {error}"
         );
         assert_eq!(
             tokio::time::Instant::now().duration_since(started_at),
