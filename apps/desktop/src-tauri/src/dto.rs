@@ -1893,6 +1893,9 @@ mod tests {
                     sender_label: Some("Fixture User".to_owned()),
                     body_preview: Some("Pinned fixture message".to_owned()),
                     redacted: false,
+                    timestamp_ms: Some(1_800_000_000_000),
+                    state: koushi_state::PinnedEventState::Ready,
+                    thread_root_event_id: None,
                 }],
                 pin_operation: PinOperationState::Pending {
                     request_id: 42,
@@ -2262,6 +2265,7 @@ mod tests {
             room_id: "!room:example.invalid".to_owned(),
             request_id: 11,
             items: vec![ThreadsListItem {
+                room_id: "!room:example.invalid".to_owned(),
                 root_event_id: "$thread-root:example.invalid".to_owned(),
                 root_sender: "@fixture:example.invalid".to_owned(),
                 root_sender_label: Some("Fixture User".to_owned()),

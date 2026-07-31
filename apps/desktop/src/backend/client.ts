@@ -41,7 +41,8 @@ import type {
   CreateRoomRequest,
   FilesViewScope,
   SubmissionResponse,
-  ThreadOpenIntent
+  ThreadOpenIntent,
+  ThreadsListScope
 } from "../domain/types";
 import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
 import type { RequestId, TimelineKey } from "../domain/coreEvents";
@@ -760,8 +761,8 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("close_thread");
   }
 
-  async openThreadsList(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_threads_list", { roomId });
+  async openThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("open_threads_list", { scope });
   }
 
   async closeThreadsList(): Promise<DesktopSnapshot> {
@@ -780,8 +781,8 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("close_files_view");
   }
 
-  async paginateThreadsList(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("paginate_threads_list", { roomId });
+  async paginateThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("paginate_threads_list", { scope });
   }
 
   async setThreadComposerDraft(
@@ -838,6 +839,10 @@ class TauriDesktopApi implements DesktopApi {
 
   async openActivityEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("open_activity_event", { roomId, eventId });
+  }
+
+  async openPinnedEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("open_pinned_event", { roomId, eventId });
   }
 
   async acknowledgeTimelineProjection(

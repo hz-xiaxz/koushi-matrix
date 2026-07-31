@@ -1998,6 +1998,27 @@ button:disabled {
   background: var(--surface);
 }
 
+.pinned-events-entry {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  inline-size: 100%;
+  min-height: 34px;
+  padding: 0 20px;
+  border-block: 1px solid var(--line);
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: start;
+}
+
+.pinned-events-entry:hover,
+.pinned-events-entry:focus-visible {
+  color: var(--brand-contrast);
+  background: var(--brand);
+}
+
 .pinned-events-heading {
   display: flex;
   align-items: center;
@@ -2033,6 +2054,70 @@ button:disabled {
   color: var(--text);
   font-size: 13px;
   line-height: 1.35;
+}
+
+.pinned-event-open {
+  inline-size: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+
+.pinned-event-avatar {
+  display: inline-grid;
+  flex: 0 0 24px;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  overflow: hidden;
+  border-radius: 50%;
+  color: var(--text-inverse);
+  background: var(--brand);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.pinned-event-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pinned-event-details {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.pinned-event-open:hover,
+.pinned-event-open:focus-visible {
+  color: var(--brand);
+}
+
+.pinned-event-time {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.pinned-event-navigation-status {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pinned-event-retry {
+  padding: 2px 7px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-pill);
+  color: inherit;
+  background: transparent;
+  font-size: inherit;
+  font-weight: inherit;
 }
 
 .pinned-event-sender {
@@ -2515,6 +2600,15 @@ button:disabled {
 
 .message:hover {
   background: var(--surface-hover);
+}
+
+.message.pinned-target {
+  animation: pinned-target-highlight 2.4s ease-out;
+}
+
+@keyframes pinned-target-highlight {
+  from { background: color-mix(in srgb, var(--brand) 28%, transparent); }
+  to { background: transparent; }
 }
 
 .avatar {

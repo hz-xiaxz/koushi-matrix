@@ -167,7 +167,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: "Activity" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Explore" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Invites" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Threads" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Threads" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Rooms/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /DMs/ })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Rooms" })).toBeTruthy();
@@ -395,9 +395,9 @@ describe("Sidebar", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Home" })).toBeNull();
-    // #330: a space sidebar is the room list for that space. Threads is
-    // room-scoped and is reached from the room header instead.
-    expect(screen.queryByRole("button", { name: "Threads" })).toBeNull();
+    // Threads remains available from the workspace header; the room list is
+    // still scoped to the selected space.
+    expect(screen.getByRole("button", { name: "Threads" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Rooms" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Direct Messages" })).toBeNull();
   });

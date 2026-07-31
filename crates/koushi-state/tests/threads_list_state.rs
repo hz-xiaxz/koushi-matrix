@@ -1,7 +1,7 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, OperationFailureKind, RoomSummary, RoomTags, SessionInfo,
-    SessionState, ThreadRootProjectionActivity, ThreadRootProjectionStatus, ThreadsListItem,
-    ThreadsListState, UiEvent, reduce,
+    SessionState, SpaceSummary, ThreadRootProjectionActivity, ThreadRootProjectionStatus,
+    ThreadsListItem, ThreadsListState, UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -60,6 +60,7 @@ fn selected_room_state(room_id: &str) -> AppState {
 
 fn thread_item(root_event_id: &str) -> ThreadsListItem {
     ThreadsListItem {
+        room_id: "room-a".to_owned(),
         root_event_id: root_event_id.to_owned(),
         root_sender: "@user-a:example.invalid".to_owned(),
         root_sender_label: Some("User A".to_owned()),
@@ -357,6 +358,57 @@ fn open_threads_list_transitions_to_loading_and_emits_subscribe_effect() {
             AppEffect::EmitUiEvent(UiEvent::ThreadsListChanged),
         ]
     );
+}
+
+#[test]
+fn home_threads_list_resolves_all_rooms_in_rust() {
+    let mut state = ready_state();
+
+    let effects = reduce(
+        &mut state,
+        AppAction::OpenThreadsList {
+            request_id: 30,
+            room_id: "home".to_owned(),
+        },
+    );
+
+    assert!(
+        matches!(state.threads_list, ThreadsListState::Loading { ref room_id, .. } if room_id == "home")
+    );
+    assert!(effects.contains(&AppEffect::SubscribeThreadsListScoped {
+        request_id: 30,
+        scope: koushi_state::ThreadsListScope::Home,
+        room_ids: vec!["room-a".to_owned(), "room-b".to_owned()],
+    }));
+}
+
+#[test]
+fn space_threads_list_resolves_child_and_parent_rooms_in_rust() {
+    let mut state = ready_state();
+    state.navigation.active_space_id = Some("space-a".to_owned());
+    state.spaces = vec![SpaceSummary {
+        space_id: "space-a".to_owned(),
+        display_name: "Space A".to_owned(),
+        avatar: None,
+        child_room_ids: vec!["room-a".to_owned()],
+    }];
+    state.rooms[1].parent_space_ids = vec!["space-a".to_owned()];
+
+    let effects = reduce(
+        &mut state,
+        AppAction::OpenThreadsList {
+            request_id: 31,
+            room_id: "space:space-a".to_owned(),
+        },
+    );
+
+    assert!(effects.contains(&AppEffect::SubscribeThreadsListScoped {
+        request_id: 31,
+        scope: koushi_state::ThreadsListScope::Space {
+            space_id: "space-a".to_owned(),
+        },
+        room_ids: vec!["room-a".to_owned(), "room-b".to_owned()],
+    }));
 }
 
 #[test]

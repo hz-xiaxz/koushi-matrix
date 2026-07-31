@@ -1477,7 +1477,7 @@ fn open_thread_state_with_intent(
 fn thread_intent(state: &AppState) -> Option<ThreadOpenIntent> {
     match &state.thread {
         ThreadPaneState::Opening { intent, .. } | ThreadPaneState::Open { intent, .. } => {
-            Some(*intent)
+            Some(intent.clone())
         }
         ThreadPaneState::Closed => None,
     }
@@ -2409,6 +2409,7 @@ fn send_text_failed_preserves_reply_mode_for_retry() {
 
 fn thread_item(root_event_id: &str, root_ts: u64, latest_ts: Option<u64>) -> ThreadsListItem {
     ThreadsListItem {
+        room_id: "room-a".to_owned(),
         root_event_id: root_event_id.to_owned(),
         root_sender: "@sender:example.invalid".to_owned(),
         root_sender_label: None,

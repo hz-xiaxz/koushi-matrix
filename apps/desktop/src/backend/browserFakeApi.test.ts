@@ -1113,7 +1113,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("selectRoom closes dependent panes like the Rust reducer", async () => {
     const api = createBrowserFakeApi();
 
-    await api.openThreadsList("!room-alpha:example.invalid");
+    await api.openThreadsList({ kind: "room", room_id: "!room-alpha:example.invalid" });
     const selected = await api.selectRoom("!room-planning:example.invalid");
 
     expect(selected.state.ui.navigation.active_room_id).toBe("!room-planning:example.invalid");
@@ -1187,7 +1187,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("openThreadsList mirrors visible timeline thread summaries", async () => {
     const api = createBrowserFakeApi();
 
-    const opened = await api.openThreadsList("!room-alpha:example.invalid");
+    const opened = await api.openThreadsList({ kind: "room", room_id: "!room-alpha:example.invalid" });
 
     expect(opened.state.ui.threads_list).toMatchObject({
       kind: "open",
@@ -1203,6 +1203,32 @@ describe("BrowserFakeApi settings preview", () => {
         })
       ]
     });
+  });
+
+  test("openThreadsList aggregates Home and Space scopes with owning room ids", async () => {
+    const api = createBrowserFakeApi();
+
+    const home = await api.openThreadsList({ kind: "home" });
+    expect(home.state.ui.threads_list).toMatchObject({ kind: "open", room_id: "home" });
+    expect(
+      home.state.ui.threads_list.kind === "open"
+        ? home.state.ui.threads_list.items.every((item) => item.room_id)
+        : false
+    ).toBe(true);
+
+    const space = await api.openThreadsList({
+      kind: "space",
+      space_id: "!space-alpha:example.invalid"
+    });
+    expect(space.state.ui.threads_list).toMatchObject({
+      kind: "open",
+      room_id: "space:!space-alpha:example.invalid"
+    });
+    expect(
+      space.state.ui.threads_list.kind === "open"
+        ? space.state.ui.threads_list.items.every((item) => item.room_id === "!room-alpha:example.invalid")
+        : false
+    ).toBe(true);
   });
 
   test("openFilesView mirrors visible timeline attachments", async () => {

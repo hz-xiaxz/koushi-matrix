@@ -31,14 +31,14 @@ pub async fn close_files_view(
 
 #[tauri::command]
 pub async fn open_threads_list(
-    room_id: String,
+    scope: koushi_state::ThreadsListScope,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let request_id = next_request_id(state.inner()).await;
     submit_core_command(
         state.inner(),
-        build_open_threads_list_command(request_id, room_id),
+        build_open_threads_list_command(request_id, scope),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
@@ -58,14 +58,14 @@ pub async fn close_threads_list(
 
 #[tauri::command]
 pub async fn paginate_threads_list(
-    room_id: String,
+    scope: koushi_state::ThreadsListScope,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let request_id = next_request_id(state.inner()).await;
     submit_core_command(
         state.inner(),
-        build_paginate_threads_list_command(request_id, room_id),
+        build_paginate_threads_list_command(request_id, scope),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;

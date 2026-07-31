@@ -16,6 +16,21 @@ pub struct PinnedEvent {
     pub sender_label: Option<String>,
     pub body_preview: Option<String>,
     pub redacted: bool,
+    #[serde(default)]
+    pub timestamp_ms: Option<u64>,
+    #[serde(default)]
+    pub state: PinnedEventState,
+    #[serde(default)]
+    pub thread_root_event_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PinnedEventState {
+    #[default]
+    Ready,
+    UnableToDecrypt,
+    Unavailable,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]

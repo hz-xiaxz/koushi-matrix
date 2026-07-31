@@ -2733,31 +2733,24 @@ impl AccountActor {
         match command {
             ThreadsListCommand::Open {
                 request_id,
-                room_id,
+                scope,
+                room_ids,
             } => {
                 let Some(session) = self.session.clone() else {
-                    self.emit_threads_list_failed(request_id, room_id).await;
+                    self.emit_threads_list_failed(request_id, scope.scope_key())
+                        .await;
                     self.emit_failure(request_id, CoreFailure::SessionRequired);
                     return;
                 };
-                if self
-                    .threads_list_actor
-                    .as_ref()
-                    .map(|handle| handle.room_id() != room_id)
-                    .unwrap_or(false)
-                {
-                    self.threads_list_actor = None;
-                }
                 if self.threads_list_actor.is_none() {
                     self.threads_list_actor = Some(crate::threads_list::ThreadsListActor::spawn(
                         session,
                         self.action_tx.clone(),
                         self.event_tx.clone(),
-                        room_id.clone(),
                     ));
                 }
                 if let Some(handle) = &self.threads_list_actor {
-                    let _ = handle.open(request_id, room_id).await;
+                    let _ = handle.open(request_id, scope, room_ids).await;
                 }
             }
             ThreadsListCommand::Close { request_id } => {
@@ -2767,12 +2760,10 @@ impl AccountActor {
             }
             ThreadsListCommand::Paginate {
                 request_id,
-                room_id,
+                scope: _,
             } => {
                 if let Some(handle) = &self.threads_list_actor {
-                    if handle.room_id() == room_id {
-                        let _ = handle.paginate(request_id).await;
-                    }
+                    let _ = handle.paginate(request_id).await;
                 }
             }
         }

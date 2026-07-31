@@ -37,8 +37,8 @@ use koushi_state::{
     MentionIntent, MentionSurface, PresenceKind, RecoveryRequest, RoomListFilter,
     RoomModerationAction, RoomNotificationMode, RoomSettingChange, RoomTagKind, SessionInfo,
     SessionState, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
-    SubmissionId, ThreadOpenIntent, TimelineScrollAnchor, VerificationCancelReason,
-    build_formatted_message_draft,
+    SubmissionId, ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor,
+    VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(any(debug_assertions, test))]
@@ -594,6 +594,7 @@ async fn wait_for_main_timeline_anchor(
     request_id: RequestId,
     room_id: &str,
     event_id: &str,
+    allow_live_fallback: bool,
     timeout: std::time::Duration,
 ) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + timeout;
@@ -626,7 +627,11 @@ async fn wait_for_main_timeline_anchor(
                 request_id: settled_request_id,
                 outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing),
             }) if settled_request_id == request_id => {
-                settlement = Some(MainTimelineSettlement::LiveFallback);
+                if allow_live_fallback {
+                    settlement = Some(MainTimelineSettlement::LiveFallback);
+                } else {
+                    return Err("pinned event is not available in the timeline".to_owned());
+                }
             }
             Ok(CoreEvent::IntentLifecycle {
                 request_id: settled_request_id,
@@ -1465,12 +1470,9 @@ pub(crate) fn build_open_thread_command(
 
 pub(crate) fn build_open_threads_list_command(
     request_id: koushi_core::RequestId,
-    room_id: String,
+    scope: ThreadsListScope,
 ) -> CoreCommand {
-    CoreCommand::App(AppCommand::OpenThreadsList {
-        request_id,
-        room_id,
-    })
+    CoreCommand::App(AppCommand::OpenThreadsList { request_id, scope })
 }
 
 pub(crate) fn build_close_threads_list_command(request_id: koushi_core::RequestId) -> CoreCommand {
@@ -1479,12 +1481,9 @@ pub(crate) fn build_close_threads_list_command(request_id: koushi_core::RequestI
 
 pub(crate) fn build_paginate_threads_list_command(
     request_id: koushi_core::RequestId,
-    room_id: String,
+    scope: ThreadsListScope,
 ) -> CoreCommand {
-    CoreCommand::App(AppCommand::PaginateThreadsList {
-        request_id,
-        room_id,
-    })
+    CoreCommand::App(AppCommand::PaginateThreadsList { request_id, scope })
 }
 
 pub(crate) fn build_bootstrap_cross_signing_command(
@@ -2572,6 +2571,16 @@ pub(crate) fn build_unpin_event_command(
         request_id,
         room_id,
         event_id,
+    })
+}
+
+pub(crate) fn build_refresh_pinned_events_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::RefreshPinnedEvents {
+        request_id,
+        room_id,
     })
 }
 

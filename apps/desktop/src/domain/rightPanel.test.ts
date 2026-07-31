@@ -116,6 +116,9 @@ describe("right panel context menu routing", () => {
     expect(effectiveRightPanelModeForSnapshot("search", snapshotForPanelMode("ready", false))).toBe(
       "search"
     );
+    expect(effectiveRightPanelModeForSnapshot("pinned", snapshotForPanelMode("ready", false))).toBe(
+      "pinned"
+    );
   });
 });
 

@@ -2343,6 +2343,18 @@ mock.setCommandResponse(
     return setCurrentSnapshot(next);
   }
 );
+mock.setCommandResponse(
+  "open_pinned_event",
+  ({ roomId, eventId }: { roomId: string; eventId: string }) => {
+    const next = currentSnapshot;
+    next.state.ui.navigation.active_room_id = roomId;
+    next.state.ui.navigation.main_timeline_anchor = { event_id: eventId };
+    next.state.ui.timeline.room_id = roomId;
+    next.state.ui.timeline.is_subscribed = true;
+    next.state.ui.focused_context = { kind: "closed" };
+    return setCurrentSnapshot(next);
+  }
+);
 mock.setCommandResponse("close_focused_context", () => {
   const next: DesktopSnapshot = {
     ...currentSnapshot,

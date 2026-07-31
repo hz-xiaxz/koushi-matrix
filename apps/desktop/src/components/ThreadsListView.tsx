@@ -5,24 +5,25 @@ import { peopleFacingLabel } from "../app/uiShared";
 import type {
   ThreadOpenIntent,
   ThreadsListItem,
+  ThreadsListScope,
   ThreadsListState
 } from "../domain/types";
 
 export interface ThreadsListViewProps {
   threadsList: ThreadsListState;
-  roomId: string | null;
+  scope: ThreadsListScope;
   onClose: () => void;
   onOpenThread: (
     roomId: string,
     rootEventId: string,
     intent: ThreadOpenIntent
   ) => void;
-  onPaginate: (roomId: string) => void;
+  onPaginate: (scope: ThreadsListScope) => void;
 }
 
 export function ThreadsListView({
   threadsList,
-  roomId,
+  scope,
   onOpenThread,
   onPaginate
 }: ThreadsListViewProps) {
@@ -43,21 +44,19 @@ export function ThreadsListView({
           <ul className="threads-list" role="listbox" aria-label={t("threads.title")}>
             {threadsList.items.map((item) => (
               <ThreadsListRow
-                key={item.root_event_id}
+                key={`${item.room_id}:${item.root_event_id}`}
                 item={item}
                 onClick={() => {
-                  if (roomId) {
-                    onOpenThread(roomId, item.root_event_id, "existingThread");
-                  }
+                  onOpenThread(item.room_id, item.root_event_id, "existingThread");
                 }}
               />
             ))}
           </ul>
-          {!threadsList.end_reached && !threadsList.is_paginating && roomId ? (
+          {!threadsList.end_reached && !threadsList.is_paginating ? (
             <button
               className="threads-list-load-more"
               type="button"
-              onClick={() => onPaginate(roomId)}
+              onClick={() => onPaginate(scope)}
             >
               {t("activity.loadMore")}
             </button>

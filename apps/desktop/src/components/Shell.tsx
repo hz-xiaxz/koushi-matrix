@@ -18,6 +18,7 @@ import {
   HelpCircle,
   Home,
   MessageCircle,
+  MessageSquare,
   Plus,
   RefreshCw,
   Search,
@@ -747,6 +748,7 @@ export function Sidebar({
   onOpenActivity,
   onOpenExplore,
   onOpenInvites,
+  onOpenThreads = () => undefined,
   onOpenSpaceInfo,
   onJoinRoom,
   onSelectRoom
@@ -761,6 +763,7 @@ export function Sidebar({
   onOpenActivity: () => void;
   onOpenExplore: () => void;
   onOpenInvites: () => void;
+  onOpenThreads?: () => void;
   onOpenSpaceInfo: () => void;
   onJoinRoom?: (roomId: string) => void;
   onSelectRoom: (roomId: string) => void;
@@ -826,6 +829,14 @@ export function Sidebar({
           onClick={onNewDm}
         >
           <MessageCircle size={ICON_SIZE.control} />
+        </button>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label={t("threads.title")}
+          onClick={onOpenThreads}
+        >
+          <MessageSquare size={ICON_SIZE.control} />
         </button>
         <button
           className="icon-button"

@@ -721,6 +721,7 @@ fn settings_loaded_recomputes_room_list_projection_and_sorts_open_threads() {
         request_id: 1,
         items: vec![
             koushi_state::ThreadsListItem {
+                room_id: "room-a".to_owned(),
                 root_event_id: "$latest:example.invalid".to_owned(),
                 root_sender: "@bob:example.invalid".to_owned(),
                 root_sender_label: None,
@@ -734,6 +735,7 @@ fn settings_loaded_recomputes_room_list_projection_and_sorts_open_threads() {
                 reply_count: 0,
             },
             koushi_state::ThreadsListItem {
+                room_id: "room-a".to_owned(),
                 root_event_id: "$older:example.invalid".to_owned(),
                 root_sender: "@bob:example.invalid".to_owned(),
                 root_sender_label: None,
@@ -804,6 +806,7 @@ fn settings_update_recomputes_room_list_projection_and_resorts_open_threads() {
         request_id: 1,
         items: vec![
             koushi_state::ThreadsListItem {
+                room_id: "room-a".to_owned(),
                 root_event_id: "$latest:example.invalid".to_owned(),
                 root_sender: "@bob:example.invalid".to_owned(),
                 root_sender_label: None,
@@ -817,6 +820,7 @@ fn settings_update_recomputes_room_list_projection_and_resorts_open_threads() {
                 reply_count: 0,
             },
             koushi_state::ThreadsListItem {
+                room_id: "room-a".to_owned(),
                 root_event_id: "$older:example.invalid".to_owned(),
                 root_sender: "@bob:example.invalid".to_owned(),
                 root_sender_label: None,

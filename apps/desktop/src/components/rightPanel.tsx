@@ -16,7 +16,9 @@ import type {
   SavedSessionInfo,
   SearchResult,
   SettingsPatch,
-  ThreadOpenIntent
+  PinnedEventNavigation,
+  ThreadOpenIntent,
+  ThreadsListScope
 } from "../domain/types";
 import {
   focusedTimelineKey,
@@ -52,7 +54,7 @@ import { SpaceInfoPanel } from "./SpaceInfoPanel";
 import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
 import { PeoplePanel, ProfilePanel } from "./PeoplePanel";
-import { MessageArticle, SearchResults } from "./mediaLists";
+import { MessageArticle, PinnedEventsList, SearchResults } from "./mediaLists";
 import { ThreadComposer } from "./composer";
 import { UploadStagingDialog } from "./dialogs";
 
@@ -63,6 +65,7 @@ export function ContextualRightPanel({
   displayDensity = "comfortable",
   isRecoveryBusy,
   mode,
+  threadsListScope = { kind: "home" },
   peoplePanelScope = null,
   selectedProfileUserId = null,
   recoverySecretFilled,
@@ -79,6 +82,10 @@ export function ContextualRightPanel({
   onClosePanel,
   onOpenThread,
   onOpenFiles,
+  onOpenPinnedEvent = () => undefined,
+  onUnpinPinnedEvent = () => undefined,
+  pinnedNavigation = null,
+  onRetryPinnedEvent = () => undefined,
   onOpenSpaceMembers,
   onOpenPeople: _onOpenPeople,
   onOpenProfile,
@@ -164,6 +171,7 @@ export function ContextualRightPanel({
   displayDensity?: DisplayDensity;
   isRecoveryBusy: boolean;
   mode: RightPanelMode;
+  threadsListScope?: ThreadsListScope;
   peoplePanelScope?: PeoplePanelScope | null;
   roomInfoInitialSection?: "members" | null;
   selectedProfileUserId?: string | null;
@@ -185,12 +193,16 @@ export function ContextualRightPanel({
     intent: ThreadOpenIntent
   ) => void;
   onOpenFiles: (scope: FilesViewScope) => void;
+  onOpenPinnedEvent?: (roomId: string, eventId: string, threadRootEventId: string | null) => void;
+  onUnpinPinnedEvent?: (roomId: string, eventId: string) => void;
+  pinnedNavigation?: PinnedEventNavigation | null;
+  onRetryPinnedEvent?: (roomId: string, eventId: string, threadRootEventId: string | null) => void;
   onOpenSpaceMembers?: () => void;
   onOpenPeople?: () => void;
   onOpenProfile?: (userId: string) => void;
   onBackToPeople?: () => void;
   onRefreshFilesView: (scope: AttachmentScope, filter: AttachmentFilter, sort: AttachmentSort) => void;
-  onPaginateThreadsList: (roomId: string) => void;
+  onPaginateThreadsList: (scope: ThreadsListScope) => void;
   onOpenKeyboardSettings: () => void;
   onOpenRecovery: () => void;
   onProbeLocalEncryption: () => void;
@@ -570,13 +582,38 @@ export function ContextualRightPanel({
     );
   }
 
+  if (mode === "pinned") {
+    const pinnedRoomId = activeRoom?.room_id ?? snapshot.state.ui.timeline.room_id;
+    const pinnedEvents = pinnedRoomId
+      ? snapshot.state.domain.room_interactions[pinnedRoomId]?.pinned_events ?? []
+      : [];
+    return (
+      <aside className="thread-pane" aria-label={t("panel.context")}>
+        <PanelHeader title={t("timeline.pinnedMessages")} onClose={onClosePanel} />
+        {pinnedRoomId && pinnedEvents.length > 0 ? (
+          <PinnedEventsList
+            roomId={pinnedRoomId}
+            pinnedEvents={pinnedEvents}
+            profileUsers={snapshot.state.domain.profile.users}
+            onOpen={onOpenPinnedEvent}
+            navigation={pinnedNavigation}
+            onRetry={onRetryPinnedEvent}
+            onUnpin={onUnpinPinnedEvent}
+          />
+        ) : (
+          <p className="panel-empty-state">{t("timeline.pinnedMessagesEmpty")}</p>
+        )}
+      </aside>
+    );
+  }
+
   if (mode === "threads") {
     return (
       <aside className="thread-pane" aria-label={t("panel.context")}>
         <PanelHeader title={t("threads.title")} onClose={onClosePanel} />
         <ThreadsListView
           threadsList={snapshot.state.ui.threads_list}
-          roomId={activeRoom?.room_id ?? null}
+          scope={threadsListScope}
           onClose={onClosePanel}
           onOpenThread={onOpenThread}
           onPaginate={onPaginateThreadsList}
@@ -717,7 +754,15 @@ export function ContextualRightPanel({
             pinnedEventIds={threadPinnedEventIds}
             forwardDestinations={forwardDestinationsFromSnapshot(snapshot)}
             onSetLocalUserAlias={onSetLocalUserAlias}
-            automaticBackfillEligible={threadState.intent === "existingThread"}
+            automaticBackfillEligible={
+              threadState.intent === "existingThread" ||
+              (typeof threadState.intent === "object" && "pinnedReply" in threadState.intent)
+            }
+            initialTargetEventId={
+              typeof threadState.intent === "object" && "pinnedReply" in threadState.intent
+                ? threadState.intent.pinnedReply.event_id
+                : null
+            }
             autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
             codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
             searchQuery={searchQuery}

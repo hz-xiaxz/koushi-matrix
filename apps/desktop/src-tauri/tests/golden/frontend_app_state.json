@@ -437,7 +437,10 @@
               "event_id": "$pinned:example.invalid",
               "redacted": false,
               "sender": "@fixture:example.invalid",
-              "sender_label": "Fixture User"
+              "sender_label": "Fixture User",
+              "state": "ready",
+              "thread_root_event_id": null,
+              "timestamp_ms": 1800000000000
             }
           ]
         }
@@ -753,6 +756,7 @@
             "latest_sender_label": "Other Fixture",
             "latest_timestamp_ms": 810000,
             "reply_count": 3,
+            "room_id": "!room:example.invalid",
             "root_body_preview": "Thread root preview",
             "root_event_id": "$thread-root:example.invalid",
             "root_sender": "@fixture:example.invalid",

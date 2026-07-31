@@ -60,7 +60,7 @@ import {
   RoomMediaGallery,
   MediaViewer,
   ScheduledMessagesList,
-  PinnedEventsList,
+  PinnedMessagesEntry,
   SearchResults
 } from "./mediaLists";
 import { Composer } from "./composer";
@@ -722,7 +722,8 @@ export function TimelinePane({
   onScheduleSend,
   onSendText,
   onSetLocalUserAlias,
-  onUnpinPinnedEvent,
+  onUnpinPinnedEvent: _onUnpinPinnedEvent,
+  onOpenPinnedMessages = () => undefined,
   onOpenPeople,
   onOpenThreads,
   onToggleRoomInfo,
@@ -769,7 +770,9 @@ export function TimelinePane({
   onScheduleSend: (sendAtMs: number, body: string) => void;
   onSendText: (body: string) => void;
   onSetLocalUserAlias: (userId: string, alias: string | null) => void;
-  onUnpinPinnedEvent: (roomId: string, eventId: string) => void;
+  /** Kept for fixture compatibility; pinned unpin actions live in the panel. */
+  onUnpinPinnedEvent?: (roomId: string, eventId: string) => void;
+  onOpenPinnedMessages?: () => void;
   onOpenPeople: () => void;
   onOpenThreads: () => void;
   onToggleRoomInfo: () => void;
@@ -880,7 +883,6 @@ export function TimelinePane({
   const onScheduleSendStable = useStableEvent(onScheduleSend);
   const onSendTextStable = useStableEvent(onSendText);
   const onSetLocalUserAliasStable = useStableEvent(onSetLocalUserAlias);
-  const onUnpinPinnedEventStable = useStableEvent(onUnpinPinnedEvent);
   const onOpenPeopleStable = useStableEvent(onOpenPeople);
   const onOpenThreadsStable = useStableEvent(onOpenThreads);
   const onToggleRoomInfoStable = useStableEvent(onToggleRoomInfo);
@@ -979,11 +981,7 @@ export function TimelinePane({
       ) : null}
       <section className="timeline-scroll">
         {timelineRoomId && pinnedEvents.length > 0 ? (
-          <PinnedEventsList
-            roomId={timelineRoomId}
-            pinnedEvents={pinnedEvents}
-            onUnpin={onUnpinPinnedEventStable}
-          />
+          <PinnedMessagesEntry count={pinnedEvents.length} onOpen={onOpenPinnedMessages} />
         ) : null}
         {showSearchResults ? (
           <SearchResults

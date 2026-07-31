@@ -1157,6 +1157,7 @@ struct PendingFocusedNavigation {
     key: TimelineKey,
     room_id: String,
     event_id: String,
+    allow_live_fallback: bool,
 }
 
 fn take_acknowledged_focused_navigation(
@@ -1218,8 +1219,10 @@ fn focused_navigation_outcome_after_reduce(
     if settled {
         if target_found {
             IntentOutcome::Committed
-        } else {
+        } else if navigation.allow_live_fallback {
             IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing)
+        } else {
+            IntentOutcome::FailedNoOp(IntentNoOpReason::TimelineTargetMissing)
         }
     } else if !matches!(state.session, SessionState::Ready(_)) {
         IntentOutcome::FailedNoOp(IntentNoOpReason::SessionNotReady)
@@ -2068,6 +2071,7 @@ impl AppActor {
                                     },
                                     room_id: room_id.clone(),
                                     event_id: event_id.clone(),
+                                    allow_live_fallback: true,
                                 });
                             }
                         }
@@ -3449,6 +3453,7 @@ impl AppActor {
                     request_id,
                     room_id,
                     event_id,
+                    allow_live_fallback,
                 } => {
                     self.ensure_room_event_cached(request_id, &room_id, &event_id)
                         .await;
@@ -3473,6 +3478,7 @@ impl AppActor {
                         key,
                         room_id: room_id.clone(),
                         event_id: event_id.clone(),
+                        allow_live_fallback,
                     });
                     let effects = self
                         .reduce_app_action(AppAction::OpenFocusedContext { room_id, event_id })
@@ -3702,6 +3708,7 @@ impl AppActor {
                             },
                             room_id: room_id.clone(),
                             event_id: event_id.clone(),
+                            allow_live_fallback: true,
                         });
                         let effects = self
                             .reduce_app_action(AppAction::OpenFocusedContext {
@@ -4099,14 +4106,11 @@ impl AppActor {
                     self.handle_app_effects(request_id, effects).await;
                     true
                 }
-                AppCommand::OpenThreadsList {
-                    request_id,
-                    room_id,
-                } => {
+                AppCommand::OpenThreadsList { request_id, scope } => {
                     let effects = self
                         .reduce_app_action(AppAction::OpenThreadsList {
                             request_id: request_id.sequence,
-                            room_id,
+                            room_id: scope.scope_key(),
                         })
                         .await;
                     self.handle_app_effects(request_id, effects).await;
@@ -4117,14 +4121,11 @@ impl AppActor {
                     self.handle_app_effects(request_id, effects).await;
                     true
                 }
-                AppCommand::PaginateThreadsList {
-                    request_id,
-                    room_id,
-                } => {
+                AppCommand::PaginateThreadsList { request_id, scope } => {
                     let effects = self
                         .reduce_app_action(AppAction::PaginateThreadsList {
                             request_id: request_id.sequence,
-                            room_id,
+                            room_id: scope.scope_key(),
                         })
                         .await;
                     self.handle_app_effects(request_id, effects).await;
@@ -4529,7 +4530,29 @@ impl AppActor {
                         .send(crate::account::AccountMessage::ThreadsListCommand(
                             crate::command::ThreadsListCommand::Open {
                                 request_id,
-                                room_id,
+                                scope: koushi_state::ThreadsListScope::Room {
+                                    room_id: room_id.clone(),
+                                },
+                                room_ids: vec![room_id],
+                            },
+                        ))
+                        .await;
+                }
+                AppEffect::SubscribeThreadsListScoped {
+                    request_id: effect_request_id,
+                    scope,
+                    room_ids,
+                } => {
+                    if effect_request_id != request_id.sequence {
+                        continue;
+                    }
+                    let _ = self
+                        .account_actor
+                        .send(crate::account::AccountMessage::ThreadsListCommand(
+                            crate::command::ThreadsListCommand::Open {
+                                request_id,
+                                scope,
+                                room_ids,
                             },
                         ))
                         .await;
@@ -4546,7 +4569,7 @@ impl AppActor {
                         .send(crate::account::AccountMessage::ThreadsListCommand(
                             crate::command::ThreadsListCommand::Paginate {
                                 request_id,
-                                room_id,
+                                scope: koushi_state::ThreadsListScope::from_scope_key(&room_id),
                             },
                         ))
                         .await;
@@ -4803,6 +4826,7 @@ impl AppActor {
                 | AppEffect::SearchMessages { .. }
                 | AppEffect::SearchAttachments { .. }
                 | AppEffect::SubscribeThreadsList { .. }
+                | AppEffect::SubscribeThreadsListScoped { .. }
                 | AppEffect::PaginateThreadsList { .. }
                 | AppEffect::UnsubscribeThreadsList
                 | AppEffect::NotifySearchCrawlerRoomsAvailable { .. }
@@ -5701,6 +5725,7 @@ mod tests {
             },
             room_id: "!room:example.invalid".to_owned(),
             event_id: "$target".to_owned(),
+            allow_live_fallback: true,
         }
     }
 
@@ -6070,6 +6095,13 @@ mod tests {
         assert_eq!(
             focused_navigation_outcome_after_reduce(&state, &expected, false),
             IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing)
+        );
+
+        let mut pinned_navigation = expected.clone();
+        pinned_navigation.allow_live_fallback = false;
+        assert_eq!(
+            focused_navigation_outcome_after_reduce(&state, &pinned_navigation, false),
+            IntentOutcome::FailedNoOp(IntentNoOpReason::TimelineTargetMissing)
         );
 
         state.navigation.active_room_id = Some("!other:example.invalid".to_owned());

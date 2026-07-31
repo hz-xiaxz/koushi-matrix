@@ -93,6 +93,31 @@ pub async fn select_room(
         SELECT_ROOM_EVENT_TIMEOUT,
     )
     .await?;
+    let refresh_request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_refresh_pinned_events_command(
+            refresh_request_id,
+            selected_room_id.clone(),
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    wait_for_room_operation(
+        &mut event_conn,
+        refresh_request_id,
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        |event, _| {
+            matches!(
+                event,
+                RoomEvent::PinnedEventsUpdated {
+                    room_id: updated_room_id,
+                    ..
+                } if updated_room_id == &selected_room_id
+            )
+        },
+        "pinned messages refresh did not complete",
+        "pinned messages refresh failed",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     current_snapshot(state.inner()).await
 }
@@ -104,7 +129,17 @@ pub async fn open_activity_event(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    open_anchored_timeline(room_id, event_id, app, state).await
+    open_anchored_timeline(room_id, event_id, app, state, true).await
+}
+
+#[tauri::command]
+pub async fn open_pinned_event(
+    room_id: String,
+    event_id: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    open_anchored_timeline(room_id, event_id, app, state, false).await
 }
 
 #[tauri::command]
@@ -114,7 +149,7 @@ pub async fn select_search_result(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    open_anchored_timeline(room_id, event_id, app, state).await
+    open_anchored_timeline(room_id, event_id, app, state, true).await
 }
 
 async fn open_anchored_timeline(
@@ -122,6 +157,7 @@ async fn open_anchored_timeline(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
+    allow_live_fallback: bool,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let selected_room_id = room_id.clone();
     let mut event_conn = state.runtime.attach();
@@ -162,6 +198,7 @@ async fn open_anchored_timeline(
             request_id: open_request_id,
             room_id: room_id.clone(),
             event_id: event_id.clone(),
+            allow_live_fallback,
         }))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
@@ -170,6 +207,7 @@ async fn open_anchored_timeline(
         open_request_id,
         &room_id,
         &event_id,
+        allow_live_fallback,
         FOCUSED_CONTEXT_EVENT_TIMEOUT,
     )
     .await?;

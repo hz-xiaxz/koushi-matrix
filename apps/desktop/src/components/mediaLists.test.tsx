@@ -3,7 +3,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MessageArticle, PinnedEventsList, ScheduledMessagesList } from "./mediaLists";
+import {
+  MessageArticle,
+  PinnedEventsList,
+  PinnedMessagesEntry,
+  ScheduledMessagesList
+} from "./mediaLists";
 
 afterEach(cleanup);
 
@@ -27,6 +32,46 @@ describe("people-facing media list labels", () => {
 
     expect(screen.getByText("Pinned Alias")).toBeTruthy();
     expect(screen.queryByText("@private:example.invalid")).toBeNull();
+  });
+
+  it("navigates by the owning room and exact event ID from a pinned row", () => {
+    const onOpen = vi.fn();
+    render(
+      <PinnedEventsList
+        roomId="!room:example.invalid"
+        pinnedEvents={[
+          {
+            event_id: "$pinned:example.invalid",
+            sender: "@private:example.invalid",
+            sender_label: "Pinned Alias",
+            body_preview: "Pinned body",
+            redacted: false,
+            timestamp_ms: 1_800_000_000_000,
+            state: "ready",
+            thread_root_event_id: null
+          }
+        ]}
+        onOpen={onOpen}
+        onUnpin={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Pinned body/ }));
+
+    expect(onOpen).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$pinned:example.invalid",
+      null
+    );
+  });
+
+  it("opens the pinned panel from the compact timeline entry", () => {
+    const onOpen = vi.fn();
+    render(<PinnedMessagesEntry count={3} onOpen={onOpen} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pinned · 3" }));
+
+    expect(onOpen).toHaveBeenCalledOnce();
   });
 
   it("renders a profile label in fixture message metadata and fails closed when absent", () => {

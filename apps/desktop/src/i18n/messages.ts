@@ -890,7 +890,14 @@ export type MessageId =
   | "timeline.spoiler"
   | "timeline.unpinMessage"
   | "timeline.pinnedMessages"
+  | "timeline.pinnedMessagesCount"
   | "timeline.pinnedMessage"
+  | "timeline.pinnedMessagesEmpty"
+  | "timeline.pinnedEventUnableToDecrypt"
+  | "timeline.pinnedEventUnavailable"
+  | "timeline.pinnedNavigationLoading"
+  | "timeline.pinnedNavigationFailed"
+  | "timeline.pinnedNavigationRetry"
   | "timeline.replyQuoteMissing"
   | "timeline.replyQuoteUnavailable"
   | "timeline.replyQuoteUnknownSender"
@@ -2036,7 +2043,14 @@ const en: Catalog = {
   "timeline.spoiler": "Spoiler",
   "timeline.unpinMessage": "Unpin message",
   "timeline.pinnedMessages": "Pinned messages",
+  "timeline.pinnedMessagesCount": "Pinned · {count}",
   "timeline.pinnedMessage": "Pinned message",
+  "timeline.pinnedMessagesEmpty": "No pinned messages",
+  "timeline.pinnedEventUnableToDecrypt": "Unable to decrypt this message",
+  "timeline.pinnedEventUnavailable": "Pinned message unavailable",
+  "timeline.pinnedNavigationLoading": "Opening pinned message…",
+  "timeline.pinnedNavigationFailed": "Could not open pinned message",
+  "timeline.pinnedNavigationRetry": "Retry",
   "timeline.replyQuoteMissing": "Original message unavailable",
   "timeline.replyQuoteUnavailable": "Original message unavailable",
   "timeline.replyQuoteUnknownSender": "Unknown sender",
@@ -3068,7 +3082,14 @@ const ja: Catalog = {
   "timeline.spoiler": "スポイラー",
   "timeline.unpinMessage": "メッセージのピン留めを解除",
   "timeline.pinnedMessages": "ピン留めメッセージ",
+  "timeline.pinnedMessagesCount": "ピン留め · {count}",
   "timeline.pinnedMessage": "ピン留めメッセージ",
+  "timeline.pinnedMessagesEmpty": "ピン留めメッセージはありません",
+  "timeline.pinnedEventUnableToDecrypt": "このメッセージを復号できません",
+  "timeline.pinnedEventUnavailable": "ピン留めメッセージを利用できません",
+  "timeline.pinnedNavigationLoading": "ピン留めメッセージを開いています…",
+  "timeline.pinnedNavigationFailed": "ピン留めメッセージを開けませんでした",
+  "timeline.pinnedNavigationRetry": "再試行",
   "timeline.replyQuoteMissing": "元のメッセージを利用できません",
   "timeline.replyQuoteUnavailable": "元のメッセージを利用できません",
   "timeline.replyQuoteUnknownSender": "不明な送信者",
