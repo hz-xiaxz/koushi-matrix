@@ -5616,6 +5616,16 @@ pub struct MatrixSpaceMembersProjection {
     pub space_invited: Vec<MatrixSpaceMemberEntry>,
     pub child_room_only: Vec<MatrixSpaceMemberEntry>,
     pub child_room_profiles: Vec<MatrixSpaceMemberEntry>,
+    #[serde(default)]
+    pub space_joined_input_count: usize,
+    #[serde(default)]
+    pub space_invited_input_count: usize,
+    #[serde(default)]
+    pub child_join_input_count: usize,
+    #[serde(default)]
+    pub child_join_union_count: usize,
+    #[serde(default)]
+    pub duplicate_child_membership_count: usize,
     pub child_room_count: usize,
     pub complete_child_room_count: usize,
     pub incomplete_child_room_count: usize,
@@ -5630,6 +5640,14 @@ impl fmt::Debug for MatrixSpaceMembersProjection {
             .field("space_invited_count", &self.space_invited.len())
             .field("child_room_only_count", &self.child_room_only.len())
             .field("child_room_profile_count", &self.child_room_profiles.len())
+            .field("space_joined_input_count", &self.space_joined_input_count)
+            .field("space_invited_input_count", &self.space_invited_input_count)
+            .field("child_join_input_count", &self.child_join_input_count)
+            .field("child_join_union_count", &self.child_join_union_count)
+            .field(
+                "duplicate_child_membership_count",
+                &self.duplicate_child_membership_count,
+            )
             .field("child_room_count", &self.child_room_count)
             .field("complete_child_room_count", &self.complete_child_room_count)
             .field(
@@ -5670,7 +5688,7 @@ impl fmt::Debug for MatrixSpaceMemberEntry {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct MatrixRoomMemberSummary {
     pub user_id: String,
     pub display_name: Option<String>,
@@ -5680,11 +5698,39 @@ pub struct MatrixRoomMemberSummary {
     pub user_trust: Option<MatrixUserTrustState>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+impl fmt::Debug for MatrixRoomMemberSummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatrixRoomMemberSummary")
+            .field("user_id", &"UserId(..)")
+            .field(
+                "display_name",
+                &self.display_name.as_ref().map(|_| "DisplayName(..)"),
+            )
+            .field("has_avatar", &self.avatar_url.is_some())
+            .field("power_level", &self.power_level)
+            .field("role", &self.role)
+            .field("user_trust", &self.user_trust)
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub struct MatrixJoinedMemberSnapshot {
     pub members: Vec<MatrixRoomMemberSummary>,
     pub complete: bool,
     pub room_mention_allowed: Option<bool>,
+}
+
+impl fmt::Debug for MatrixJoinedMemberSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatrixJoinedMemberSnapshot")
+            .field("member_count", &self.members.len())
+            .field("complete", &self.complete)
+            .field("room_mention_allowed", &self.room_mention_allowed)
+            .finish()
+    }
 }
 
 impl MatrixClientSession {
@@ -5702,6 +5748,39 @@ impl MatrixClientSession {
     ) -> Result<MatrixJoinedMemberSnapshot, MatrixRoomOperationError> {
         let room = matrix_room(self, room_id)?;
         matrix_joined_member_snapshot(&room, true).await
+    }
+
+    /// Read the requested member profiles from the already populated local
+    /// encrypted SDK room store. This deliberately uses `get_member_no_sync`:
+    /// a receipt/Seen render must never fan out to the homeserver.
+    pub async fn room_member_profiles_no_sync(
+        &self,
+        room_id: &str,
+        user_ids: &[String],
+    ) -> Result<Vec<MatrixUserProfile>, MatrixRoomOperationError> {
+        let room = matrix_room(self, room_id)?;
+        let mut unique_user_ids = BTreeSet::new();
+        for user_id in user_ids {
+            if matrix_sdk::ruma::UserId::parse(user_id).is_ok() {
+                unique_user_ids.insert(user_id.as_str());
+            }
+        }
+
+        let mut profiles = Vec::with_capacity(unique_user_ids.len());
+        for user_id in unique_user_ids {
+            let Ok(user_id) = matrix_sdk::ruma::UserId::parse(user_id) else {
+                continue;
+            };
+            let Ok(Some(member)) = room.get_member_no_sync(&user_id).await else {
+                continue;
+            };
+            profiles.push(MatrixUserProfile {
+                user_id: member.user_id().to_string(),
+                display_name: member.display_name().map(ToOwned::to_owned),
+                avatar_mxc_uri: member.avatar_url().map(ToString::to_string),
+            });
+        }
+        Ok(profiles)
     }
 }
 
@@ -7646,6 +7725,11 @@ mod space_member_projection_tests {
         );
         assert_eq!(projection.child_room_count, 2);
         assert_eq!(projection.incomplete_child_room_count, 2);
+        assert_eq!(projection.space_joined_input_count, 2);
+        assert_eq!(projection.space_invited_input_count, 1);
+        assert_eq!(projection.child_join_input_count, 4);
+        assert_eq!(projection.child_join_union_count, 3);
+        assert_eq!(projection.duplicate_child_membership_count, 1);
     }
 
     #[test]
@@ -7663,18 +7747,55 @@ mod space_member_projection_tests {
             space_joined: vec![entry.clone()],
             space_invited: Vec::new(),
             child_room_only: Vec::new(),
-            child_room_profiles: vec![entry],
+            child_room_profiles: vec![entry.clone()],
+            space_joined_input_count: 1,
+            space_invited_input_count: 0,
+            child_join_input_count: 0,
+            child_join_union_count: 0,
+            duplicate_child_membership_count: 0,
             child_room_count: 1,
             complete_child_room_count: 1,
             incomplete_child_room_count: 0,
         };
 
-        let debug = format!("{projection:?}");
-        assert!(debug.contains("space_joined_count"));
-        assert!(!debug.contains("@private:example.invalid"));
-        assert!(!debug.contains("Private name"));
-        assert!(!debug.contains("mxc://example.invalid/avatar"));
-        assert!(!debug.contains("!child:example.invalid"));
+        for debug in [format!("{entry:?}"), format!("{projection:?}")] {
+            assert!(debug.contains("space_joined_count") || debug.contains("child_room_count"));
+            assert!(!debug.contains("@private:example.invalid"));
+            assert!(!debug.contains("Private name"));
+            assert!(!debug.contains("mxc://example.invalid/avatar"));
+            assert!(!debug.contains("!child:example.invalid"));
+        }
+    }
+
+    #[test]
+    fn local_member_profile_debug_redacts_identifiers_names_and_mxc_uris() {
+        let summary = super::MatrixRoomMemberSummary {
+            user_id: "@private:example.invalid".to_owned(),
+            display_name: Some("Private member".to_owned()),
+            avatar_url: Some("mxc://example.invalid/member-avatar".to_owned()),
+            power_level: Some(50),
+            role: super::MatrixRoomMemberRole::Moderator,
+            user_trust: Some(super::MatrixUserTrustState::Verified),
+        };
+        let snapshot = super::MatrixJoinedMemberSnapshot {
+            members: vec![summary],
+            complete: true,
+            room_mention_allowed: Some(true),
+        };
+        let profile = super::MatrixUserProfile {
+            user_id: "@private:example.invalid".to_owned(),
+            display_name: Some("Private member".to_owned()),
+            avatar_mxc_uri: Some("mxc://example.invalid/member-avatar".to_owned()),
+        };
+
+        for debug in [format!("{snapshot:?}"), format!("{profile:?}")] {
+            assert!(!debug.contains("@private:example.invalid"), "{debug}");
+            assert!(!debug.contains("Private member"), "{debug}");
+            assert!(
+                !debug.contains("mxc://example.invalid/member-avatar"),
+                "{debug}"
+            );
+        }
     }
 }
 
@@ -8625,6 +8746,7 @@ struct SpaceMemberIdFacts {
     space_invited_ids: Vec<String>,
     child_room_only_ids: Vec<String>,
     child_room_ids: BTreeMap<String, Vec<String>>,
+    child_join_input_count: usize,
     child_join_union_count: usize,
     duplicate_child_membership_count: usize,
 }
@@ -8682,6 +8804,7 @@ where
         space_invited_ids: space_invited_ids.into_iter().collect(),
         child_room_only_ids,
         child_room_ids,
+        child_join_input_count: child_membership_count,
         child_join_union_count,
         duplicate_child_membership_count,
     }
@@ -8735,7 +8858,11 @@ fn space_members_scope_diagnostic_event(
     child_room_count: usize,
     complete_child_room_count: usize,
     incomplete_child_room_count: usize,
+    space_joined_input_count: usize,
+    space_invited_input_count: usize,
+    child_join_input_count: usize,
     child_join_union_count: usize,
+    duplicate_child_membership_count: usize,
     child_room_only_count: usize,
     local_lookup_success_count: usize,
     local_lookup_failure_count: usize,
@@ -8757,6 +8884,18 @@ fn space_members_scope_diagnostic_event(
         space_invited_count as u64,
     ))
     .field(DiagnosticField::count(
+        "space_joined_input_count",
+        space_joined_input_count as u64,
+    ))
+    .field(DiagnosticField::count(
+        "space_invited_input_count",
+        space_invited_input_count as u64,
+    ))
+    .field(DiagnosticField::count(
+        "child_join_input_count",
+        child_join_input_count as u64,
+    ))
+    .field(DiagnosticField::count(
         "child_room_count",
         child_room_count as u64,
     ))
@@ -8773,6 +8912,10 @@ fn space_members_scope_diagnostic_event(
         child_join_union_count as u64,
     ))
     .field(DiagnosticField::count(
+        "duplicate_child_membership_count",
+        duplicate_child_membership_count as u64,
+    ))
+    .field(DiagnosticField::count(
         "child_room_only_count",
         child_room_only_count as u64,
     ))
@@ -8784,6 +8927,19 @@ fn space_members_scope_diagnostic_event(
         "local_member_store_lookup_failure_count",
         local_lookup_failure_count as u64,
     ))
+    .field(DiagnosticField::count(
+        "input_count",
+        (space_joined_input_count + space_invited_input_count + child_join_input_count) as u64,
+    ))
+    .field(DiagnosticField::count(
+        "output_count",
+        (space_joined_count + space_invited_count + child_room_only_count) as u64,
+    ))
+    .field(DiagnosticField::count(
+        "deduplicated_count",
+        duplicate_child_membership_count as u64,
+    ))
+    .field(DiagnosticField::token("freshness_status", "not_tracked"))
     .field(DiagnosticField::boolean(
         "network_member_sync_attempted",
         false,
@@ -8804,7 +8960,7 @@ pub async fn matrix_space_members_projection(
         Ok(room) => room,
         Err(error) => {
             record(space_members_scope_diagnostic_event(
-                0, 0, 0, 0, 0, 0, 0, 0, 1,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
             ));
             return Err(error);
         }
@@ -8949,7 +9105,11 @@ pub async fn matrix_space_members_projection(
         child_room_ids.len(),
         complete_child_room_count,
         incomplete_child_room_count,
+        space_joined_members.len(),
+        space_invited_members.len(),
+        facts.child_join_input_count,
         facts.child_join_union_count,
+        facts.duplicate_child_membership_count,
         child_room_only.len(),
         local_lookup_success_count,
         local_lookup_failure_count,
@@ -8961,6 +9121,11 @@ pub async fn matrix_space_members_projection(
         space_invited,
         child_room_only,
         child_room_profiles: child_profiles.values().cloned().collect(),
+        space_joined_input_count: space_joined_members.len(),
+        space_invited_input_count: space_invited_members.len(),
+        child_join_input_count: facts.child_join_input_count,
+        child_join_union_count: facts.child_join_union_count,
+        duplicate_child_membership_count: facts.duplicate_child_membership_count,
         child_room_count: child_room_ids.len(),
         complete_child_room_count,
         incomplete_child_room_count,
@@ -11370,7 +11535,7 @@ mod tests {
 
     #[test]
     fn space_members_scope_diagnostic_is_private_data_free() {
-        let event = space_members_scope_diagnostic_event(2, 1, 3, 2, 1, 4, 2, 1, 0);
+        let event = space_members_scope_diagnostic_event(2, 1, 3, 2, 1, 2, 1, 4, 4, 1, 2, 1, 0);
 
         assert_eq!(event.source, "sdk.space_members_scope");
         let rendered = format!("{event:?}");

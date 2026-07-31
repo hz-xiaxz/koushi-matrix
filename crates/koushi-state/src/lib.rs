@@ -113,10 +113,11 @@ pub use state::{
     native_attention_capabilities_for_platform, native_attention_state_from_rooms,
     refresh_live_receipt_display_projection, refresh_live_typing_user_display_projection,
     refresh_profile_user_display_projection, refresh_room_settings_member_display_projection,
-    refresh_room_summary_display_projection, resolve_optional_user_display_name,
-    resolve_people_label, resolve_user_display_name, room_activity_unread_count,
-    room_attention_kind, room_attention_summary, room_settings_share_link, search_query_too_short,
-    sort_threads_list_items, staged_upload_item_with_completed_output,
+    refresh_room_summary_display_projection, resolve_live_receipt_profile,
+    resolve_optional_user_display_name, resolve_people_label, resolve_user_display_name,
+    room_activity_unread_count, room_attention_kind, room_attention_summary,
+    room_settings_share_link, search_query_too_short, sort_threads_list_items,
+    staged_upload_item_with_completed_output,
 };
 pub use submission::{
     ComposerSubmissionTarget, ComposerSubmissionTerminalOutcome, ComposerTarget, SubmissionId,

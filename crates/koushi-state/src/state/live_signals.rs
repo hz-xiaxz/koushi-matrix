@@ -1,19 +1,26 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use serde::{Deserialize, Serialize};
 
-use super::profile::{
-    AvatarImage, ProfileResolutionInput, ProfileState, UserProfile,
-    resolve_optional_user_display_name, resolve_people_label,
-};
+use super::profile::{AvatarImage, ProfileState, UserProfile, resolve_optional_user_display_name};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LiveSignalsState {
     pub rooms: BTreeMap<String, RoomLiveSignals>,
     pub presence: BTreeMap<String, PresenceKind>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+impl fmt::Debug for LiveSignalsState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LiveSignalsState")
+            .field("room_count", &self.rooms.len())
+            .field("presence_count", &self.presence.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoomLiveSignals {
     pub receipts_by_event: BTreeMap<String, LiveEventReceiptSummary>,
     pub fully_read_event_id: Option<String>,
@@ -22,13 +29,37 @@ pub struct RoomLiveSignals {
     pub typing_users: Vec<LiveTypingUser>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+impl fmt::Debug for RoomLiveSignals {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RoomLiveSignals")
+            .field("receipt_event_count", &self.receipts_by_event.len())
+            .field(
+                "fully_read_event_present",
+                &self.fully_read_event_id.is_some(),
+            )
+            .field("typing_user_count", &self.typing_user_ids.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LiveTypingUser {
     pub user_id: String,
     pub display_label: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+impl fmt::Debug for LiveTypingUser {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LiveTypingUser")
+            .field("user_id", &"UserId(..)")
+            .field("has_display_label", &self.display_label.is_some())
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LiveReadReceipt {
     pub user_id: String,
     pub display_name: Option<String>,
@@ -38,24 +69,83 @@ pub struct LiveReadReceipt {
     pub timestamp_ms: Option<u64>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+impl fmt::Debug for LiveReadReceipt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LiveReadReceipt")
+            .field("user_id", &"UserId(..)")
+            .field("has_display_name", &self.display_name.is_some())
+            .field(
+                "has_original_display_label",
+                &(!self.original_display_label.is_empty()),
+            )
+            .field("has_avatar", &self.avatar.is_some())
+            .field("timestamp_present", &self.timestamp_ms.is_some())
+            .finish()
+    }
+}
+
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LiveEventReceiptSummary {
     pub readers: Vec<LiveReadReceipt>,
     pub total_count: u64,
     pub overflow_count: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+impl fmt::Debug for LiveEventReceiptSummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LiveEventReceiptSummary")
+            .field("reader_count", &self.readers.len())
+            .field("total_count", &self.total_count)
+            .field("overflow_count", &self.overflow_count)
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LiveEventReceipts {
     pub event_id: String,
     pub receipts: Vec<LiveReadReceipt>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+impl fmt::Debug for LiveEventReceipts {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LiveEventReceipts")
+            .field("event_id", &"EventId(..)")
+            .field("receipt_count", &self.receipts.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LiveRoomSignalUpdate {
     pub receipts_by_event: Vec<LiveEventReceipts>,
     pub fully_read_event_id: Option<String>,
     pub typing_user_ids: Vec<String>,
+}
+
+impl fmt::Debug for LiveRoomSignalUpdate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LiveRoomSignalUpdate")
+            .field("receipt_event_count", &self.receipts_by_event.len())
+            .field(
+                "receipt_count",
+                &self
+                    .receipts_by_event
+                    .iter()
+                    .map(|entry| entry.receipts.len())
+                    .sum::<usize>(),
+            )
+            .field(
+                "fully_read_event_present",
+                &self.fully_read_event_id.is_some(),
+            )
+            .field("typing_user_count", &self.typing_user_ids.len())
+            .finish()
+    }
 }
 
 impl LiveRoomSignalUpdate {
@@ -111,6 +201,40 @@ impl LiveRoomSignalUpdate {
             typing_users,
         }
     }
+}
+
+/// Resolve a receipt/Seen label using the same precedence as the display
+/// projection. Core diagnostics call this function so source counts describe
+/// the actual resolver rather than a second approximation of it.
+pub fn resolve_live_receipt_profile(
+    receipt: &LiveReadReceipt,
+    profiles: &ProfileState,
+    relevant_room_profiles: Option<&BTreeMap<String, UserProfile>>,
+    own_user_id: Option<&str>,
+) -> super::profile::ProfileResolution {
+    let own_profile = own_user_id
+        .filter(|user_id| *user_id == receipt.user_id)
+        .map(|_| &profiles.own);
+    let relevant_room_profile =
+        relevant_room_profiles.and_then(|room_profiles| room_profiles.get(&receipt.user_id));
+    let user_profile = profiles.users.get(&receipt.user_id);
+    let receipt_display_name = receipt
+        .display_name
+        .as_deref()
+        .filter(|label| label.trim() != "Unknown user");
+
+    super::profile::resolve_people_label(super::profile::ProfileResolutionInput {
+        local_alias: profiles
+            .local_aliases
+            .get(&receipt.user_id)
+            .map(String::as_str),
+        relevant_room_label: relevant_room_profile
+            .and_then(|profile| profile.display_name.as_deref()),
+        space_room_label: None,
+        payload_label: receipt_display_name,
+        cached_label: user_profile.and_then(|profile| profile.display_name.as_deref()),
+        local_homeserver_label: own_profile.and_then(|profile| profile.display_name.as_deref()),
+    })
 }
 
 pub fn refresh_live_typing_user_display_projection(
@@ -246,19 +370,8 @@ fn enrich_receipt(
         .or_else(|| relevant_room_profile.and_then(|profile| profile.display_name.as_deref()))
         .or_else(|| user_profile.and_then(|profile| profile.display_name.as_deref()))
         .or_else(|| own_profile.and_then(|profile| profile.display_name.as_deref()));
-    let display_label = resolve_people_label(ProfileResolutionInput {
-        local_alias: profiles
-            .local_aliases
-            .get(&receipt.user_id)
-            .map(String::as_str),
-        relevant_room_label: relevant_room_profile
-            .and_then(|profile| profile.display_name.as_deref()),
-        space_room_label: None,
-        payload_label: receipt_display_name.as_deref(),
-        cached_label: user_profile.and_then(|profile| profile.display_name.as_deref()),
-        local_homeserver_label: own_profile.and_then(|profile| profile.display_name.as_deref()),
-    })
-    .label;
+    let display_label =
+        resolve_live_receipt_profile(&receipt, profiles, relevant_room_profiles, own_user_id).label;
     let original_display_label = original_source
         .map(str::trim)
         .filter(|value| !value.is_empty())

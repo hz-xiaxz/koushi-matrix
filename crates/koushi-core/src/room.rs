@@ -80,6 +80,8 @@ use koushi_state::{
     RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SpaceMemberEntry, SpaceMemberInviteOutcome,
     SpaceMemberMembership, SpaceMembersProjection, SpaceSummary, UserProfile, UserTrustState,
 };
+#[cfg(test)]
+use koushi_state::{ProfileResolutionInput, ProfileResolutionSource, resolve_people_label};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
@@ -948,9 +950,14 @@ impl RoomActor {
         match koushi_sdk::matrix_space_members_projection(session, &space_id).await {
             Ok(raw_projection) => {
                 let profile_updates = user_profiles_from_space_projection(&raw_projection);
-                let projection = state_space_members_projection(raw_projection, generation);
-                record_core_space_members_projection("load", generation, &projection, "success");
-                record_core_profile_resolution(&projection);
+                let projection = state_space_members_projection(raw_projection.clone(), generation);
+                record_core_space_members_projection_with_raw(
+                    "load",
+                    generation,
+                    &raw_projection,
+                    &projection,
+                    "success",
+                );
                 self.reduce_reliable(vec![AppAction::SpaceMembersProjectionReconciled {
                     request_id: request_id.sequence,
                     projection: projection.clone(),
@@ -3703,44 +3710,125 @@ fn record_core_space_members_projection(
     projection: &SpaceMembersProjection,
     outcome: &'static str,
 ) {
-    record(
-        DiagnosticEvent::new(
-            DiagnosticLevel::Debug,
-            "core.space_members_projection",
-            "projection",
-        )
-        .field(DiagnosticField::token("trigger", trigger))
-        .field(DiagnosticField::count("generation", generation))
-        .field(DiagnosticField::count(
-            "space_joined_count",
-            projection.space_joined.len() as u64,
-        ))
-        .field(DiagnosticField::count(
-            "space_invited_count",
-            projection.space_invited.len() as u64,
-        ))
-        .field(DiagnosticField::count(
-            "child_room_only_count",
-            projection.child_room_only.len() as u64,
-        ))
-        .field(DiagnosticField::count(
-            "child_room_count",
-            projection.child_room_count as u64,
-        ))
-        .field(DiagnosticField::count(
-            "complete_child_room_count",
-            projection.complete_child_room_count as u64,
-        ))
-        .field(DiagnosticField::count(
-            "incomplete_child_room_count",
-            projection.incomplete_child_room_count as u64,
-        ))
-        .field(DiagnosticField::boolean(
-            "incomplete",
-            projection.incomplete_child_room_count > 0,
-        ))
-        .field(DiagnosticField::token("outcome", outcome)),
+    record_core_space_members_projection_with_metrics(
+        trigger, generation, projection, None, outcome,
     );
+}
+
+fn record_core_space_members_projection_with_raw(
+    trigger: &'static str,
+    generation: u64,
+    raw_projection: &MatrixSpaceMembersProjection,
+    projection: &SpaceMembersProjection,
+    outcome: &'static str,
+) {
+    record_core_space_members_projection_with_metrics(
+        trigger,
+        generation,
+        projection,
+        Some(raw_projection),
+        outcome,
+    );
+}
+
+fn record_core_space_members_projection_with_metrics(
+    trigger: &'static str,
+    generation: u64,
+    projection: &SpaceMembersProjection,
+    raw_projection: Option<&MatrixSpaceMembersProjection>,
+    outcome: &'static str,
+) {
+    let output_count = projection.space_joined.len()
+        + projection.space_invited.len()
+        + projection.child_room_only.len();
+    let mut event = DiagnosticEvent::new(
+        DiagnosticLevel::Debug,
+        "core.space_members_projection",
+        "projection",
+    )
+    .field(DiagnosticField::token("trigger", trigger))
+    .field(DiagnosticField::count("generation", generation))
+    .field(DiagnosticField::count(
+        "space_joined_count",
+        projection.space_joined.len() as u64,
+    ))
+    .field(DiagnosticField::count(
+        "space_invited_count",
+        projection.space_invited.len() as u64,
+    ))
+    .field(DiagnosticField::count(
+        "child_room_only_count",
+        projection.child_room_only.len() as u64,
+    ))
+    .field(DiagnosticField::count(
+        "child_room_count",
+        projection.child_room_count as u64,
+    ))
+    .field(DiagnosticField::count(
+        "complete_child_room_count",
+        projection.complete_child_room_count as u64,
+    ))
+    .field(DiagnosticField::count(
+        "incomplete_child_room_count",
+        projection.incomplete_child_room_count as u64,
+    ))
+    .field(DiagnosticField::count("output_count", output_count as u64))
+    .field(DiagnosticField::count(
+        "space_joined_output_count",
+        projection.space_joined.len() as u64,
+    ))
+    .field(DiagnosticField::count(
+        "space_invited_output_count",
+        projection.space_invited.len() as u64,
+    ))
+    .field(DiagnosticField::count(
+        "child_room_only_output_count",
+        projection.child_room_only.len() as u64,
+    ))
+    .field(DiagnosticField::boolean(
+        "incomplete",
+        projection.incomplete_child_room_count > 0,
+    ))
+    .field(DiagnosticField::token("outcome", outcome));
+
+    if let Some(raw_projection) = raw_projection {
+        let input_count = raw_projection.space_joined_input_count
+            + raw_projection.space_invited_input_count
+            + raw_projection.child_join_input_count;
+        event = event
+            .field(DiagnosticField::count("input_count", input_count as u64))
+            .field(DiagnosticField::count(
+                "space_joined_input_count",
+                raw_projection.space_joined_input_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "space_invited_input_count",
+                raw_projection.space_invited_input_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "child_join_input_count",
+                raw_projection.child_join_input_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "deduplicated_count",
+                raw_projection.duplicate_child_membership_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "child_join_union_count",
+                raw_projection.child_join_union_count as u64,
+            ))
+            .field(DiagnosticField::token("input_tracking_status", "tracked"));
+    } else {
+        event = event
+            .field(DiagnosticField::token("input_count", "not_tracked"))
+            .field(DiagnosticField::token("deduplicated_count", "not_tracked"))
+            .field(DiagnosticField::token(
+                "input_tracking_status",
+                "not_tracked",
+            ));
+    }
+
+    record(event.field(DiagnosticField::token("freshness_status", "not_tracked")));
 }
 
 fn record_core_space_members_operation(
@@ -3766,49 +3854,74 @@ fn record_core_space_members_operation(
     );
 }
 
+#[cfg(test)]
 fn record_core_profile_resolution(projection: &SpaceMembersProjection) {
-    // This milestone records only the inputs visible at the SDK projection
-    // boundary. Full source/input/output/cache accounting belongs to the next
-    // diagnostics milestone and is intentionally marked as deferred below.
-    let input_count = projection
+    let entries = projection
         .space_joined
         .iter()
         .chain(projection.space_invited.iter())
-        .chain(projection.child_room_only.iter())
-        .count();
-    let observed_label_count = projection
-        .space_joined
-        .iter()
-        .chain(projection.space_invited.iter())
-        .chain(projection.child_room_only.iter())
-        .filter(|entry| {
-            entry
-                .display_name
-                .as_deref()
-                .is_some_and(|label| !label.trim().is_empty())
+        .chain(projection.child_room_only.iter());
+    let mut counts = [0_u64; 7];
+    let input_count = entries
+        .map(|entry| {
+            let (relevant_room_label, space_room_label) =
+                match entry.membership {
+                    SpaceMemberMembership::ChildRoomOnly => (
+                        entry.display_name.as_deref().filter(|label| {
+                            !label.trim().is_empty() && label.trim() != "Unknown user"
+                        }),
+                        None,
+                    ),
+                    SpaceMemberMembership::SpaceJoined | SpaceMemberMembership::SpaceInvited => (
+                        None,
+                        entry.display_name.as_deref().filter(|label| {
+                            !label.trim().is_empty() && label.trim() != "Unknown user"
+                        }),
+                    ),
+                };
+            let resolution = resolve_people_label(ProfileResolutionInput {
+                local_alias: None,
+                relevant_room_label,
+                space_room_label,
+                payload_label: None,
+                cached_label: None,
+                local_homeserver_label: None,
+            });
+            let index = match resolution.source {
+                ProfileResolutionSource::LocalAlias => 0,
+                ProfileResolutionSource::RelevantRoom => 1,
+                ProfileResolutionSource::SpaceRoom => 2,
+                ProfileResolutionSource::Payload => 3,
+                ProfileResolutionSource::GlobalCache => 4,
+                ProfileResolutionSource::LocalHomeserver => 5,
+                ProfileResolutionSource::Unresolved => 6,
+            };
+            counts[index] += 1;
         })
-        .count();
-    let unresolved_count = input_count.saturating_sub(observed_label_count);
+        .count() as u64;
     record(
         DiagnosticEvent::new(
             DiagnosticLevel::Debug,
             "core.profile_resolution",
             "space_member_projection",
         )
+        .field(DiagnosticField::count("input_count", input_count))
+        .field(DiagnosticField::count("output_count", input_count))
+        .field(DiagnosticField::count("local_alias_count", counts[0]))
+        .field(DiagnosticField::count("relevant_room_count", counts[1]))
+        .field(DiagnosticField::count("space_room_count", counts[2]))
+        .field(DiagnosticField::count("payload_count", counts[3]))
+        .field(DiagnosticField::count("global_cache_count", counts[4]))
+        .field(DiagnosticField::count("local_homeserver_count", counts[5]))
+        .field(DiagnosticField::count("unresolved_count", counts[6]))
         .field(DiagnosticField::token(
-            "resolution_stage",
-            "projection_observation",
+            "cache_stale_hit_status",
+            "not_tracked",
         ))
-        .field(DiagnosticField::count("input_count", input_count as u64))
-        .field(DiagnosticField::count(
-            "observed_label_count",
-            observed_label_count as u64,
-        ))
-        .field(DiagnosticField::count(
-            "unresolved_count",
-            unresolved_count as u64,
-        ))
-        .field(DiagnosticField::boolean("state_resolution_deferred", true)),
+        .field(DiagnosticField::token(
+            "cache_freshness_status",
+            "not_tracked",
+        )),
     );
 }
 
@@ -6258,6 +6371,11 @@ pub mod tests {
                 child_room_ids: vec!["!child:example.invalid".to_owned()],
             }],
             child_room_profiles: Vec::new(),
+            space_joined_input_count: 0,
+            space_invited_input_count: 0,
+            child_join_input_count: 1,
+            child_join_union_count: 1,
+            duplicate_child_membership_count: 0,
             child_room_count: 1,
             complete_child_room_count: 1,
             incomplete_child_room_count: 0,

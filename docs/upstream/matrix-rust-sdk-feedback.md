@@ -241,6 +241,13 @@ Current SDK-only patch area:
 
 ## Non-Upstream Desktop Decisions
 
+- Local-only member profile adapter (2026-08-01, diagnostics/privacy milestone):
+  `crates/koushi-sdk` exposes `room_member_profiles_no_sync`, which validates
+  requested user IDs and reads only already-populated room-store entries through
+  `get_member_no_sync`; it performs no member sync or homeserver request. The
+  `koushi-core` receipt action builder remains a pure, testable helper for the
+  next milestone; wiring it into `TimelineActor` is intentionally still
+  outstanding. This is an application adapter, not a vendored SDK patch.
 - Tauri native menu accelerators, Element-like right-panel modes, settings placement, and keyboard shortcut parity are app-shell behavior only.
 - Element Desktop/Web was used as a UX reference. No Element Web/Desktop source code, assets, or icons have been copied into this repository.
 - Search results in the desktop app remain exact-verified before display; raw ngram candidates are not a user-facing result type.

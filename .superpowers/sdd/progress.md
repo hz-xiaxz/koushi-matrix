@@ -48,9 +48,11 @@ Plan: `docs/superpowers/plans/2026-07-31-space-members-profile-cache.md`
   fan-out or plaintext profile store was introduced.
 - Added `core.space_members_projection` and `core.profile_resolution` with
   count/token/bool fields only. The privacy test serializes diagnostics and
-  rejects Matrix IDs, names, MXC URLs, and raw profile content. Profile source
-  resolution remains state-owned, so the core boundary marks those detailed
-  cache/source counters as deferred rather than duplicating AppState.
+  rejects Matrix IDs, names, MXC URLs, and raw profile content. The completion
+  milestone records actual `ProfileResolutionSource` outcomes for aliases,
+  relevant rooms, Spaces, payloads, global cache, local homeserver profiles,
+  and unresolved labels; cache freshness is explicitly `not_tracked` because
+  this state has no freshness metadata.
 - Evidence:
   - `cargo fmt --all` — passed (stable rustfmt emitted warnings for unsupported
     nightly-only formatting options).
@@ -107,18 +109,49 @@ Verification for this milestone:
 
 Deferred to the next review milestone:
 
-- I5: the touched core diagnostic records only actual projection-boundary
-  input/observed/unresolved counts and explicitly marks state resolution as
-  deferred. Full source/input/output/cache-hit/miss/stale/duplicate/dedupe
-  accounting remains to be implemented; no fabricated zero counters are used.
 - I6: room-local profile precedence and reducer coverage are in place, but the
   TimelineActor producer and the full production Seen-profile observation path
   remain. No network profile fan-out was added.
-- I7: the touched SDK projection and profile-resolution `Debug` implementations
-  are redacted and covered, while a broader raw SDK/profile-debug audit and
-  additional boundary coverage remain.
 - I8: the C1 production routing test is complete; production-path coverage for
   the remaining load/failure/profile-observation routes remains.
+
+## Diagnostics/privacy completion milestone — 2026-08-01
+
+- I5 completed: `profile_resolution_diagnostic_event` now counts actual
+  resolver source outcomes, while Space projection diagnostics report raw SDK
+  input, projected output, child-union deduplication, and `not_tracked`
+  freshness when unavailable. Stale and duplicate command rejections carry
+  explicit sanitized outcomes.
+- I7 completed: Debug output for local member snapshots, raw Space projection
+  and entries, profiles, live receipts, and profile-resolution input/results
+  reports only redacted presence/count/source facts.
+- Timeline receipt profile lookup remains a pure, tested SDK/action-building
+  helper. The exact remaining production task is to call it from TimelineActor
+  receipt-diff handling and deliver profile observations before receipt actions;
+  it is intentionally not wired in this milestone.
+
+Final verification for this milestone:
+
+- `cargo test -p koushi-state --test space_members_state -- --nocapture` — 12
+  passed.
+- `cargo test -p koushi-state --test profile_state -- --nocapture` — 29 passed.
+- `cargo test -p koushi-sdk --lib -- --nocapture` — 114 passed.
+- Focused core diagnostics/privacy/fencing/helper tests — 8 passed total:
+  profile-source accounting, receipt diagnostics, Space diagnostics privacy,
+  command fencing, pure receipt action construction, and Space projection
+  diagnostics.
+- `cargo check -p koushi-state`, `cargo check -p koushi-sdk`, and
+  `cargo check -p koushi-core --lib` — passed. Core retains only existing
+  `media_preparation` / `read_state` warnings.
+- `cargo fmt --all -- --check` and `git diff --check` — passed. Stable rustfmt
+  reports the repository's existing nightly-only option warnings.
+- A full `cargo test -p koushi-core --lib -- --nocapture` sweep was attempted;
+  it encountered the unrelated existing account assertion failure in
+  `account::tests::own_user_sas_proof_success_enters_shared_authoritative_promotion_path`
+  and then a connection-reset/over-60-second hang in
+  `account::tests::soft_logout_reauth_joins_old_observers_before_subscribing_replacements`.
+  The sweep was stopped after the bounded wait; all milestone-focused core
+  tests passed independently.
 
 ## Decisions and invariants
 

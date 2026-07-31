@@ -63,6 +63,8 @@ use std::time::{Duration, Instant};
 
 use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+#[cfg(test)]
+use koushi_sdk::MatrixUserProfile;
 use koushi_sdk::{
     MatrixClientSession, MatrixCommittedRoomTimelineBackend,
     MatrixCommittedRoomTimelineCheckpoint as MatrixRoomSubscriptionCheckpoint,
@@ -73,6 +75,8 @@ use koushi_sdk::{
     MatrixTimelineGapRepairResult,
 };
 use koushi_search::{AttachmentDocument, SensitiveString};
+#[cfg(test)]
+use koushi_state::UserProfile;
 use koushi_state::{
     ActivityRow, AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState,
     ComposerFormattingOptions, ComposerSendIntent, FormattedMessageDraft, LiveEventReceipts,
@@ -23350,6 +23354,71 @@ fn live_event_receipts_from_sdk_items<'a>(
         .collect()
 }
 
+#[cfg(test)]
+fn build_live_receipt_observation_actions(
+    room_id: &str,
+    receipts_by_event: Vec<LiveEventReceipts>,
+    profiles: Vec<MatrixUserProfile>,
+) -> Vec<AppAction> {
+    let profile_actions = profiles
+        .into_iter()
+        .map(|profile| {
+            let display_label = profile
+                .display_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|label| !label.is_empty())
+                .unwrap_or("Unknown user")
+                .to_owned();
+            UserProfile {
+                user_id: profile.user_id,
+                display_name: profile.display_name,
+                display_label: display_label.clone(),
+                original_display_label: display_label,
+                mention_search_terms: Vec::new(),
+                avatar: profile.avatar_mxc_uri.map(|mxc_uri| AvatarImage {
+                    mxc_uri,
+                    thumbnail: AvatarThumbnailState::NotRequested,
+                }),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut actions = Vec::with_capacity(usize::from(!profile_actions.is_empty()) * 2 + 1);
+    if !profile_actions.is_empty() {
+        actions.push(AppAction::LiveRoomProfilesObserved {
+            room_id: room_id.to_owned(),
+            profiles: profile_actions.clone(),
+        });
+        actions.push(AppAction::UserProfilesUpdated {
+            profiles: profile_actions,
+        });
+    }
+    actions.push(AppAction::LiveRoomReceiptsUpdated {
+        room_id: room_id.to_owned(),
+        receipts_by_event,
+    });
+    actions
+}
+
+#[cfg(test)]
+async fn live_receipt_observation_actions_from_sdk_receipts(
+    session: &MatrixClientSession,
+    room_id: &str,
+    receipts_by_event: Vec<LiveEventReceipts>,
+) -> Vec<AppAction> {
+    let user_ids = receipts_by_event
+        .iter()
+        .flat_map(|entry| entry.receipts.iter())
+        .map(|receipt| receipt.user_id.clone())
+        .collect::<Vec<_>>();
+    let profiles = session
+        .room_member_profiles_no_sync(room_id, &user_ids)
+        .await
+        .unwrap_or_default();
+    build_live_receipt_observation_actions(room_id, receipts_by_event, profiles)
+}
+
 fn collect_live_event_receipts_from_diff(
     diff: &eyeball_im::VectorDiff<Arc<SdkTimelineItem>>,
     out: &mut Vec<LiveEventReceipts>,
@@ -37262,6 +37331,188 @@ mod tests {
                 .receipts
                 .iter()
                 .any(|receipt| receipt.user_id == "@bob:example.test")
+        );
+    }
+
+    #[test]
+    fn live_receipt_observation_action_builder_is_pure_and_orders_profiles_first() {
+        let actions = build_live_receipt_observation_actions(
+            "!room:example.test",
+            vec![LiveEventReceipts {
+                event_id: "$event:example.test".to_owned(),
+                receipts: vec![LiveReadReceipt {
+                    user_id: "@bob:example.test".to_owned(),
+                    display_name: None,
+                    original_display_label: String::new(),
+                    avatar: None,
+                    timestamp_ms: Some(1),
+                }],
+            }],
+            vec![MatrixUserProfile {
+                user_id: "@bob:example.test".to_owned(),
+                display_name: Some("Bob".to_owned()),
+                avatar_mxc_uri: None,
+            }],
+        );
+
+        assert!(matches!(
+            actions.as_slice(),
+            [
+                AppAction::LiveRoomProfilesObserved { profiles, .. },
+                AppAction::UserProfilesUpdated { profiles: cached },
+                AppAction::LiveRoomReceiptsUpdated { .. },
+            ] if profiles[0].display_label == "Bob"
+                && cached[0].display_label == "Bob"
+        ));
+    }
+
+    #[tokio::test]
+    async fn local_receipt_observation_helper_builds_profile_then_receipt_actions() {
+        use koushi_state::{AppState, SessionInfo, SessionState, reduce};
+        use matrix_sdk::assert_next_with_timeout;
+        use matrix_sdk::ruma::{event_id, room_id, user_id};
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_test::{ALICE, JoinedRoomBuilder, event_factory::EventFactory};
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let room_id = room_id!("!receipt-profiles:example.test");
+        let bob = user_id!("@bob:example.test");
+        let room = server.sync_joined_room(&client, room_id).await;
+        server
+            .sync_room(
+                &client,
+                JoinedRoomBuilder::new(room_id).add_state_event(
+                    EventFactory::new()
+                        .room(room_id)
+                        .member(bob)
+                        .display_name("Relevant room member")
+                        .into_raw_sync_state(),
+                ),
+            )
+            .await;
+
+        let timeline = koushi_timeline_builder(
+            &room,
+            TimelineFocus::Live {
+                hide_threaded_events: false,
+            },
+        )
+        .build()
+        .await
+        .expect("timeline");
+        let (_initial_items, mut stream) = timeline.subscribe().await;
+        let factory = EventFactory::new().room(room_id);
+        server
+            .sync_room(
+                &client,
+                JoinedRoomBuilder::new(room_id)
+                    .add_timeline_event(
+                        factory
+                            .text_msg("receipt source")
+                            .event_id(event_id!("$receipt-source:example.test"))
+                            .sender(bob)
+                            .into_raw_sync(),
+                    )
+                    .add_timeline_event(
+                        factory
+                            .text_msg("second receipt source")
+                            .event_id(event_id!("$receipt-source-two:example.test"))
+                            .sender(bob)
+                            .into_raw_sync(),
+                    ),
+            )
+            .await;
+
+        let diffs = assert_next_with_timeout!(stream);
+        let mut receipts_by_event = Vec::new();
+        for diff in &diffs {
+            collect_live_event_receipts_from_diff(diff, &mut receipts_by_event);
+        }
+        let observed_receipts = receipts_by_event
+            .iter()
+            .find(|entry| {
+                entry
+                    .receipts
+                    .iter()
+                    .any(|receipt| receipt.user_id == bob.as_str())
+            })
+            .cloned()
+            .expect("timeline diff should contain a real receipt for the member");
+
+        let session = MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: "http://example.invalid".to_owned(),
+                user_id: ALICE.to_string(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        );
+        let mut state = AppState {
+            session: SessionState::Ready(session.info.clone()),
+            ..AppState::default()
+        };
+        reduce(
+            &mut state,
+            AppAction::LiveRoomReceiptsUpdated {
+                room_id: room_id.to_string(),
+                receipts_by_event: vec![observed_receipts.clone()],
+            },
+        );
+        assert_eq!(
+            state.live_signals.rooms[room_id.as_str()].receipts_by_event
+                [&observed_receipts.event_id]
+                .readers[0]
+                .display_name
+                .as_deref(),
+            Some("Unknown user")
+        );
+
+        let action_batch = live_receipt_observation_actions_from_sdk_receipts(
+            &session,
+            room_id.as_str(),
+            vec![observed_receipts.clone()],
+        )
+        .await;
+        assert!(matches!(
+            action_batch.first(),
+            Some(AppAction::LiveRoomProfilesObserved {
+                room_id: observed_room_id,
+                profiles,
+            }) if observed_room_id == room_id.as_str()
+                && profiles.iter().any(|profile| {
+                    profile.user_id == bob.as_str()
+                        && profile.display_name.as_deref() == Some("Relevant room member")
+                })
+        ));
+        assert!(matches!(
+            action_batch.last(),
+            Some(AppAction::LiveRoomReceiptsUpdated { room_id: observed_room_id, .. })
+                if observed_room_id == room_id.as_str()
+        ));
+
+        for action in action_batch {
+            reduce(&mut state, action);
+        }
+
+        assert_eq!(
+            state.profile.room_users[room_id.as_str()][bob.as_str()]
+                .display_name
+                .as_deref(),
+            Some("Relevant room member")
+        );
+        assert_eq!(
+            state.profile.users[bob.as_str()].display_name.as_deref(),
+            Some("Relevant room member")
+        );
+        assert_eq!(
+            state.live_signals.rooms[room_id.as_str()].receipts_by_event
+                [&observed_receipts.event_id]
+                .readers[0]
+                .display_name
+                .as_deref(),
+            Some("Relevant room member")
         );
     }
 

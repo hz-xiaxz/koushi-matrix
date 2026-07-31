@@ -22,11 +22,12 @@ use koushi_state::{
     ActivityRowKind, ActivityState, ActivityStream, ActivityTab, AppAction, AppEffect, AppState,
     ComposerDraftProtection, ComposerDraftRevision, ComposerDraftStore, ComposerTarget,
     FocusedContextState, LoginAttemptId, NavigationState, OperationFailureKind,
-    ProfileUpdateRequest, RoomLatestEventSummary, RoomNotificationMode, RoomSummary,
-    ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, ScheduledSendStore,
-    SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection, SpaceSummary,
-    SubmissionId, ThreadPaneState, UiEvent, admit_space_member_invite, admit_space_members_load,
-    reduce, room_activity_unread_count,
+    ProfileResolutionInput, ProfileResolutionSource, ProfileUpdateRequest, RoomLatestEventSummary,
+    RoomNotificationMode, RoomSummary, ScheduledSendCapability, ScheduledSendHandle,
+    ScheduledSendItem, ScheduledSendStore, SearchScope as AppSearchScope, SessionState,
+    SpaceMemberEntry, SpaceMemberMembership, SpaceMembersCommandRejection, SpaceSummary,
+    SubmissionId, ThreadPaneState, UiEvent, UserProfile, admit_space_member_invite,
+    admit_space_members_load, reduce, resolve_people_label, room_activity_unread_count,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -185,6 +186,16 @@ fn record_space_member_command_rejection(
         SpaceMembersCommandRejection::AlreadyInvited => "already_invited",
         SpaceMembersCommandRejection::NotChildRoomOnly => "not_child_room_only",
     };
+    let outcome = match rejection {
+        SpaceMembersCommandRejection::StaleGeneration => "stale_generation",
+        SpaceMembersCommandRejection::InviteAlreadyInFlight
+        | SpaceMembersCommandRejection::AlreadyJoined
+        | SpaceMembersCommandRejection::AlreadyInvited => "duplicate",
+        SpaceMembersCommandRejection::NoSelectedSpace
+        | SpaceMembersCommandRejection::WrongSpace
+        | SpaceMembersCommandRejection::LoadBlockedByInvite
+        | SpaceMembersCommandRejection::NotChildRoomOnly => "rejected",
+    };
     record(
         DiagnosticEvent::new(
             DiagnosticLevel::Debug,
@@ -192,8 +203,303 @@ fn record_space_member_command_rejection(
             "command_rejected",
         )
         .field(DiagnosticField::token("trigger", trigger))
-        .field(DiagnosticField::token("reason", reason)),
+        .field(DiagnosticField::token("reason", reason))
+        .field(DiagnosticField::token("outcome", outcome))
+        .field(DiagnosticField::count("rejection_count", 1)),
     );
+}
+
+#[derive(Default)]
+struct ProfileResolutionDiagnosticCounts {
+    input_count: u64,
+    output_count: u64,
+    local_alias_count: u64,
+    relevant_room_count: u64,
+    space_room_count: u64,
+    payload_count: u64,
+    global_cache_count: u64,
+    local_homeserver_count: u64,
+    unresolved_count: u64,
+    cache_hit_count: u64,
+    cache_miss_count: u64,
+}
+
+impl ProfileResolutionDiagnosticCounts {
+    fn observe(&mut self, input: ProfileResolutionInput<'_>) {
+        self.input_count += 1;
+        let cache_available = input.cached_label.is_some_and(has_profile_label);
+        if cache_available {
+            self.cache_hit_count += 1;
+        } else {
+            self.cache_miss_count += 1;
+        }
+
+        let resolution = resolve_people_label(input);
+        self.output_count += 1;
+        match resolution.source {
+            ProfileResolutionSource::LocalAlias => self.local_alias_count += 1,
+            ProfileResolutionSource::RelevantRoom => self.relevant_room_count += 1,
+            ProfileResolutionSource::SpaceRoom => self.space_room_count += 1,
+            ProfileResolutionSource::Payload => self.payload_count += 1,
+            ProfileResolutionSource::GlobalCache => self.global_cache_count += 1,
+            ProfileResolutionSource::LocalHomeserver => self.local_homeserver_count += 1,
+            ProfileResolutionSource::Unresolved => self.unresolved_count += 1,
+        }
+    }
+
+    fn event(self, trigger: &'static str) -> DiagnosticEvent {
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.profile_resolution",
+            "resolution",
+        )
+        .field(DiagnosticField::token("trigger", trigger))
+        .field(DiagnosticField::count("input_count", self.input_count))
+        .field(DiagnosticField::count("output_count", self.output_count))
+        .field(DiagnosticField::count(
+            "local_alias_count",
+            self.local_alias_count,
+        ))
+        .field(DiagnosticField::count(
+            "relevant_room_count",
+            self.relevant_room_count,
+        ))
+        .field(DiagnosticField::count(
+            "space_room_count",
+            self.space_room_count,
+        ))
+        .field(DiagnosticField::count("payload_count", self.payload_count))
+        .field(DiagnosticField::count(
+            "global_cache_count",
+            self.global_cache_count,
+        ))
+        .field(DiagnosticField::count(
+            "local_homeserver_count",
+            self.local_homeserver_count,
+        ))
+        .field(DiagnosticField::count(
+            "unresolved_count",
+            self.unresolved_count,
+        ))
+        .field(DiagnosticField::count(
+            "cache_hit_count",
+            self.cache_hit_count,
+        ))
+        .field(DiagnosticField::count(
+            "cache_miss_count",
+            self.cache_miss_count,
+        ))
+        .field(DiagnosticField::token(
+            "cache_stale_hit_status",
+            "not_tracked",
+        ))
+        .field(DiagnosticField::token(
+            "cache_freshness_status",
+            "not_tracked",
+        ))
+    }
+}
+
+fn has_profile_label(label: &str) -> bool {
+    let label = label.trim();
+    !label.is_empty() && label != "Unknown user"
+}
+
+fn profile_display_label(profile: &UserProfile) -> Option<&str> {
+    profile
+        .display_name
+        .as_deref()
+        .filter(|label| has_profile_label(label))
+}
+
+fn session_user_id(state: &AppState) -> Option<&str> {
+    match &state.session {
+        SessionState::Provisional { info, .. }
+        | SessionState::AwaitingVerification { info, .. }
+        | SessionState::Verifying { info, .. }
+        | SessionState::AwaitingBootstrapConfirmation { info, .. }
+        | SessionState::Rejecting { info, .. }
+        | SessionState::Ready(info)
+        | SessionState::Locked(info)
+        | SessionState::SwitchingAccount { info } => Some(info.user_id.as_str()),
+        SessionState::SignedOut
+        | SessionState::Restoring
+        | SessionState::Authenticating { .. }
+        | SessionState::LoggingOut => None,
+    }
+}
+
+fn relevant_room_profile_label<'a>(
+    state: &'a AppState,
+    room_id: &str,
+    user_id: &str,
+) -> Option<&'a str> {
+    state
+        .profile
+        .room_users
+        .get(room_id)
+        .and_then(|profiles| profiles.get(user_id))
+        .and_then(profile_display_label)
+}
+
+fn space_room_profile_label<'a>(
+    state: &'a AppState,
+    room_id: &str,
+    user_id: &str,
+) -> Option<&'a str> {
+    let room = state.rooms.iter().find(|room| room.room_id == room_id)?;
+    room.parent_space_ids.iter().find_map(|space_id| {
+        state
+            .profile
+            .room_users
+            .get(space_id)
+            .and_then(|profiles| profiles.get(user_id))
+            .and_then(profile_display_label)
+    })
+}
+
+fn local_homeserver_profile_label<'a>(state: &'a AppState, user_id: &str) -> Option<&'a str> {
+    (session_user_id(state) == Some(user_id))
+        .then(|| state.profile.own.display_name.as_deref())
+        .flatten()
+        .filter(|label| has_profile_label(label))
+}
+
+fn observe_receipt_profile_resolution(
+    state: &AppState,
+    room_id: &str,
+    receipt: &koushi_state::LiveReadReceipt,
+    counts: &mut ProfileResolutionDiagnosticCounts,
+) {
+    let cached_label = state
+        .profile
+        .users
+        .get(&receipt.user_id)
+        .and_then(profile_display_label);
+    let payload_label = receipt
+        .display_name
+        .as_deref()
+        .filter(|label| has_profile_label(label))
+        .or_else(|| {
+            has_profile_label(&receipt.original_display_label)
+                .then_some(receipt.original_display_label.as_str())
+        });
+    counts.observe(ProfileResolutionInput {
+        local_alias: state
+            .profile
+            .local_aliases
+            .get(&receipt.user_id)
+            .map(String::as_str)
+            .filter(|label| has_profile_label(label)),
+        relevant_room_label: relevant_room_profile_label(state, room_id, &receipt.user_id),
+        space_room_label: space_room_profile_label(state, room_id, &receipt.user_id),
+        payload_label,
+        cached_label,
+        local_homeserver_label: local_homeserver_profile_label(state, &receipt.user_id),
+    });
+}
+
+fn observe_space_member_profile_resolution(
+    state: &AppState,
+    entry: &SpaceMemberEntry,
+    observed_profiles: &[UserProfile],
+    counts: &mut ProfileResolutionDiagnosticCounts,
+) {
+    let cached_label = observed_profiles
+        .iter()
+        .find(|profile| profile.user_id == entry.user_id)
+        .and_then(profile_display_label)
+        .or_else(|| {
+            state
+                .profile
+                .users
+                .get(&entry.user_id)
+                .and_then(profile_display_label)
+        });
+    let (relevant_room_label, space_room_label) = match entry.membership {
+        SpaceMemberMembership::ChildRoomOnly => (
+            entry
+                .display_name
+                .as_deref()
+                .filter(|label| has_profile_label(label)),
+            None,
+        ),
+        SpaceMemberMembership::SpaceJoined | SpaceMemberMembership::SpaceInvited => (
+            None,
+            entry
+                .display_name
+                .as_deref()
+                .filter(|label| has_profile_label(label)),
+        ),
+    };
+    counts.observe(ProfileResolutionInput {
+        local_alias: state
+            .profile
+            .local_aliases
+            .get(&entry.user_id)
+            .map(String::as_str)
+            .filter(|label| has_profile_label(label)),
+        relevant_room_label,
+        space_room_label,
+        payload_label: None,
+        cached_label,
+        local_homeserver_label: local_homeserver_profile_label(state, &entry.user_id),
+    });
+}
+
+fn profile_resolution_diagnostic_event(
+    state: &AppState,
+    action: &AppAction,
+) -> Option<DiagnosticEvent> {
+    let mut counts = ProfileResolutionDiagnosticCounts::default();
+    let trigger = match action {
+        AppAction::LiveRoomReceiptsUpdated {
+            room_id,
+            receipts_by_event,
+        }
+        | AppAction::LiveRoomReceiptsWindowReconciled {
+            room_id,
+            receipts_by_event,
+            ..
+        } => {
+            for receipt in receipts_by_event
+                .iter()
+                .flat_map(|entry| entry.receipts.iter())
+            {
+                observe_receipt_profile_resolution(state, room_id, receipt, &mut counts);
+            }
+            "live_receipt"
+        }
+        AppAction::SpaceMembersLoaded { projection, .. } => {
+            for entry in projection
+                .space_joined
+                .iter()
+                .chain(projection.space_invited.iter())
+                .chain(projection.child_room_only.iter())
+            {
+                observe_space_member_profile_resolution(state, entry, &[], &mut counts);
+            }
+            "space_member_projection"
+        }
+        AppAction::SpaceMembersProjectionReconciled {
+            projection,
+            profiles,
+            ..
+        } => {
+            for entry in projection
+                .space_joined
+                .iter()
+                .chain(projection.space_invited.iter())
+                .chain(projection.child_room_only.iter())
+            {
+                observe_space_member_profile_resolution(state, entry, profiles, &mut counts);
+            }
+            "space_member_projection"
+        }
+        _ => return None,
+    };
+
+    (counts.input_count > 0).then(|| counts.event(trigger))
 }
 
 fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
@@ -204,6 +510,9 @@ fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Ve
         _ => None,
     };
     if let Some(event) = live_receipt_profile_diagnostic_event(state, &action) {
+        record(event);
+    }
+    if let Some(event) = profile_resolution_diagnostic_event(state, &action) {
         record(event);
     }
     let effects = reduce(state, action);
@@ -6478,6 +6787,132 @@ mod tests {
                 "profile_cache_miss"
             ))
         );
+    }
+
+    #[test]
+    fn profile_resolution_diagnostic_counts_actual_resolution_sources() {
+        let room_id = "!resolution-room:example.invalid";
+        let mut state = AppState {
+            session: SessionState::Ready(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@own:example.invalid".to_owned(),
+                device_id: "OWN".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            ..AppState::default()
+        };
+        let profile = |user_id: &str, display_name: &str| UserProfile {
+            user_id: user_id.to_owned(),
+            display_name: Some(display_name.to_owned()),
+            display_label: String::new(),
+            original_display_label: String::new(),
+            mention_search_terms: Vec::new(),
+            avatar: None,
+        };
+        state.profile.local_aliases.insert(
+            "@alias:example.invalid".to_owned(),
+            "Private alias".to_owned(),
+        );
+        state.profile.users.insert(
+            "@cached:example.invalid".to_owned(),
+            profile("@cached:example.invalid", "Cached label"),
+        );
+        state
+            .profile
+            .room_users
+            .entry(room_id.to_owned())
+            .or_default()
+            .insert(
+                "@room:example.invalid".to_owned(),
+                profile("@room:example.invalid", "Room label"),
+            );
+
+        let receipt = |user_id: &str, display_name: Option<&str>| LiveReadReceipt {
+            user_id: user_id.to_owned(),
+            display_name: display_name.map(ToOwned::to_owned),
+            original_display_label: String::new(),
+            avatar: None,
+            timestamp_ms: Some(42),
+        };
+        let action = AppAction::LiveRoomReceiptsUpdated {
+            room_id: room_id.to_owned(),
+            receipts_by_event: vec![
+                LiveEventReceipts {
+                    event_id: "$alias-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@alias:example.invalid", None)],
+                },
+                LiveEventReceipts {
+                    event_id: "$room-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@room:example.invalid", None)],
+                },
+                LiveEventReceipts {
+                    event_id: "$payload-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@payload:example.invalid", Some("Payload label"))],
+                },
+                LiveEventReceipts {
+                    event_id: "$cache-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@cached:example.invalid", None)],
+                },
+                LiveEventReceipts {
+                    event_id: "$unknown-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@unknown:example.invalid", None)],
+                },
+            ],
+        };
+
+        let event = profile_resolution_diagnostic_event(&state, &action)
+            .expect("profile resolution diagnostics should be emitted");
+        let field = |key| {
+            event
+                .fields
+                .iter()
+                .find(|field| field.key == key)
+                .map(|field| &field.value)
+        };
+        assert_eq!(
+            field("input_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(5))
+        );
+        assert_eq!(
+            field("output_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(5))
+        );
+        assert_eq!(
+            field("local_alias_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("relevant_room_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("payload_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("global_cache_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("unresolved_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("cache_stale_hit_status"),
+            Some(&koushi_diagnostics::DiagnosticValue::Token("not_tracked"))
+        );
+
+        let encoded = serde_json::to_string(&event).expect("diagnostic should serialize");
+        for forbidden in [
+            "@alias:example.invalid",
+            "Private alias",
+            "mxc://example.invalid/avatar",
+        ] {
+            assert!(
+                !encoded.contains(forbidden),
+                "diagnostic leaked {forbidden}"
+            );
+        }
     }
 
     #[test]

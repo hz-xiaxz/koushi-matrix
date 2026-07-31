@@ -69,13 +69,14 @@ fn profile_resolution_debug_redacts_inputs_and_results() {
         space_room_label: Some("Space label"),
         payload_label: Some("Payload label"),
         cached_label: Some("Cached label"),
-        local_homeserver_label: Some("Homeserver label"),
+        local_homeserver_label: Some("mxc://example.invalid/private-avatar"),
     };
     let input_debug = format!("{input:?}");
     assert!(input_debug.contains("has_relevant_room_label"));
     assert!(!input_debug.contains("Private alias"));
     assert!(!input_debug.contains("Room label"));
     assert!(!input_debug.contains("Payload label"));
+    assert!(!input_debug.contains("mxc://example.invalid/private-avatar"));
 
     let result = resolve_people_label(input);
     let result_debug = format!("{result:?}");
@@ -1321,4 +1322,26 @@ fn avatar_thumbnail_state_debug_redacts_ready_source_url() {
     let failed_debug = format!("{:?}", failed);
     assert!(failed_debug.contains("request_id"), "{failed_debug}");
     assert!(failed_debug.contains("kind"), "{failed_debug}");
+}
+
+#[test]
+fn live_receipt_debug_redacts_identifiers_names_and_mxc_uris() {
+    let receipts = LiveEventReceipts {
+        event_id: "$private-event:example.invalid".to_owned(),
+        receipts: vec![LiveReadReceipt {
+            user_id: "@private:example.invalid".to_owned(),
+            display_name: Some("Private name".to_owned()),
+            original_display_label: "Private original".to_owned(),
+            avatar: Some(avatar("mxc://example.invalid/private-avatar")),
+            timestamp_ms: Some(42),
+        }],
+    };
+    let debug = format!("{receipts:?}");
+    assert!(!debug.contains("$private-event:example.invalid"), "{debug}");
+    assert!(!debug.contains("@private:example.invalid"), "{debug}");
+    assert!(!debug.contains("Private name"), "{debug}");
+    assert!(
+        !debug.contains("mxc://example.invalid/private-avatar"),
+        "{debug}"
+    );
 }

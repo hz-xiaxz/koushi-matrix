@@ -221,6 +221,7 @@ pub use live_signals::{
     LiveEventReceiptSummary, LiveEventReceipts, LiveReadReceipt, LiveRoomSignalUpdate,
     LiveSignalsState, LiveTypingUser, PresenceKind, RoomLiveSignals,
     refresh_live_receipt_display_projection, refresh_live_typing_user_display_projection,
+    resolve_live_receipt_profile,
 };
 
 // ── Re-exports: mention candidates ──────────────────────────────────────────
