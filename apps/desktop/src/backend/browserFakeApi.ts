@@ -255,7 +255,12 @@ export interface DesktopApi {
   reportContent(roomId: string, eventId: string, reason: string): Promise<DesktopSnapshot>;
   reportRoom(roomId: string, reason: string): Promise<DesktopSnapshot>;
   setAvatar(mimeType: string, bytes: number[]): Promise<DesktopSnapshot>;
-  editMessage(roomId: string, eventId: string, body: string): Promise<DesktopSnapshot>;
+  editMessage(
+    roomId: string,
+    eventId: string,
+    body: string,
+    mentions?: MentionIntent
+  ): Promise<DesktopSnapshot>;
   redactMessage(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   loadMessageSource(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   requestRoomKey(
@@ -2049,7 +2054,8 @@ class BrowserFakeApi implements DesktopApi {
   async editMessage(
     roomId: string,
     eventId: string,
-    body: string
+    body: string,
+    _mentions: MentionIntent = { targets: [] }
   ): Promise<DesktopSnapshot> {
     if (!this.isReady() || body.trim().length === 0) {
       return this.getSnapshot();
@@ -3273,11 +3279,17 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
+    const currentActivity = this.snapshot.state.domain.activity;
+    if (currentActivity.kind !== "closed") {
+      return this.getSnapshot();
+    }
+    const selectedTab = currentActivity.last_selected_tab ?? "recent";
+
     const requestId = this.nextRequestId();
     this.snapshot.state.domain.activity = {
       kind: "opening",
       request_id: requestId,
-      tab: "recent"
+      tab: selectedTab
     };
 
     await Promise.resolve();
@@ -3289,7 +3301,7 @@ class BrowserFakeApi implements DesktopApi {
     );
     this.snapshot.state.domain.activity = {
       kind: "open",
-      active_tab: "recent",
+      active_tab: selectedTab,
       recent: streams.recent,
       unread: streams.unread,
       mark_read: { kind: "idle" }
@@ -3319,7 +3331,17 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
-    this.snapshot.state.domain.activity = { kind: "closed" };
+    const activity = this.snapshot.state.domain.activity;
+    const lastSelectedTab =
+      activity.kind === "open"
+        ? activity.active_tab
+        : activity.kind === "opening"
+          ? activity.tab
+          : activity.last_selected_tab ?? "recent";
+    this.snapshot.state.domain.activity = {
+      kind: "closed",
+      last_selected_tab: lastSelectedTab
+    };
     return this.getSnapshot();
   }
 

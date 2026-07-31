@@ -574,8 +574,13 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("set_avatar", { mimeType, bytes });
   }
 
-  async editMessage(roomId: string, eventId: string, body: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("edit_message", { roomId, eventId, body });
+  async editMessage(
+    roomId: string,
+    eventId: string,
+    body: string,
+    mentions: MentionIntent = { targets: [] }
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("edit_message", { roomId, eventId, body, mentions });
   }
 
   async redactMessage(roomId: string, eventId: string): Promise<DesktopSnapshot> {

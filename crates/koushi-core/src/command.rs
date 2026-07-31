@@ -2579,6 +2579,7 @@ pub enum TimelineCommand {
         key: TimelineKey,
         event_id: String,
         body: String,
+        mentions: MentionIntent,
     },
     Redact {
         request_id: RequestId,

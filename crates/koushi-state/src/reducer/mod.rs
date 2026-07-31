@@ -1576,7 +1576,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     let had_profile = state.profile != Default::default();
     let had_room_interactions = !state.room_interactions.is_empty();
     let had_directory = state.directory != DirectoryState::default();
-    let had_activity = state.activity != ActivityState::Closed;
+    let had_activity = !matches!(state.activity, ActivityState::Closed { .. });
     let had_room_management = state.room_management != Default::default();
     let had_mention_candidates = state.mention_candidates != Default::default();
     let had_local_encryption = state.local_encryption != LocalEncryptionState::Unknown;
@@ -1600,7 +1600,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.upload_staging = Default::default();
     state.media_gallery = Default::default();
     state.directory = DirectoryState::default();
-    state.activity = ActivityState::Closed;
+    state.activity = ActivityState::default();
     state.room_management = Default::default();
     state.mention_candidates = Default::default();
     state.profile = Default::default();

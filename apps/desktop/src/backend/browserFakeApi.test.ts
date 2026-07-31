@@ -1608,6 +1608,30 @@ describe("BrowserFakeApi settings preview", () => {
     ).toBe(false);
   });
 
+  test("preserves the selected activity tab across close and duplicate open", async () => {
+    const api = createBrowserFakeApi();
+
+    await api.openActivity();
+    const selected = await api.setActivityTab("unread");
+    expect(selected.state.domain.activity).toMatchObject({
+      kind: "open",
+      active_tab: "unread"
+    });
+
+    await api.closeActivity();
+    const reopened = await api.openActivity();
+    expect(reopened.state.domain.activity).toMatchObject({
+      kind: "open",
+      active_tab: "unread"
+    });
+
+    const duplicate = await api.openActivity();
+    expect(duplicate.state.domain.activity).toMatchObject({
+      kind: "open",
+      active_tab: "unread"
+    });
+  });
+
   test("removes notification-only rooms from activity recent unless highlighted", async () => {
     const api = createBrowserFakeApi();
 

@@ -2371,12 +2371,13 @@ mod tests {
             DeviceCleanupState, DirectoryPreviewJoinability, DirectoryPreviewMembership,
             DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary, IdentityResetAuthType,
             IdentityResetState, JapaneseCatalogProfile, LocalEncryptionHealth,
-            MediaTransferProgress, NativeAttentionCapabilities, NativeAttentionCapability,
-            NativeAttentionSummary, OwnIdentityVerification, PresenceKind, ReplyQuote,
-            ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule, RoomMemberRole,
-            RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot, RoomTagKind, SasEmoji,
-            SearchCrawlerFailureKind, SearchCrawlerRoomState, SessionAuthenticationMethod,
-            SubmissionId, SyncMode, UserTrustState, VerificationFlowState, VerificationTarget,
+            MediaTransferProgress, MentionIntent, MentionTarget, NativeAttentionCapabilities,
+            NativeAttentionCapability, NativeAttentionSummary, OwnIdentityVerification,
+            PresenceKind, ReplyQuote, ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule,
+            RoomMemberRole, RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot,
+            RoomTagKind, SasEmoji, SearchCrawlerFailureKind, SearchCrawlerRoomState,
+            SessionAuthenticationMethod, SubmissionId, SyncMode, UserTrustState,
+            VerificationFlowState, VerificationTarget,
         };
         use serde_json::json;
 
@@ -2445,6 +2446,12 @@ mod tests {
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24e1".to_owned()),
+                editable_mentions: Some(MentionIntent {
+                    targets: vec![MentionTarget::User {
+                        user_id: "@mention:example.test".to_owned(),
+                        display_label: "Mention User".to_owned(),
+                    }],
+                }),
             },
             send_state: None,
             unable_to_decrypt: None,
@@ -2505,6 +2512,7 @@ mod tests {
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24media1".to_owned()),
+                editable_mentions: None,
             },
             send_state: None,
             unable_to_decrypt: None,
@@ -2581,6 +2589,7 @@ mod tests {
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24reply1".to_owned()),
+                editable_mentions: None,
             },
             send_state: None,
             unable_to_decrypt: None,
@@ -2639,6 +2648,7 @@ mod tests {
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24linkpreview1".to_owned()),
+                editable_mentions: None,
             },
             send_state: None,
             unable_to_decrypt: None,
@@ -2719,7 +2729,14 @@ mod tests {
                     "can_forward": true,
                     "can_permalink": true,
                     "can_view_source": true,
-                    "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1"
+                    "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1",
+                    "editable_mentions": {
+                        "targets": [{
+                            "kind": "user",
+                            "user_id": "@mention:example.test",
+                            "display_label": "Mention User"
+                        }]
+                    }
                 },
                 "reactions": [
                     {

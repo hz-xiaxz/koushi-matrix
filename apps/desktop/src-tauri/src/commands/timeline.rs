@@ -1891,6 +1891,7 @@ pub async fn edit_message(
     room_id: String,
     event_id: String,
     body: String,
+    mentions: Option<koushi_state::MentionIntent>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
@@ -1899,9 +1900,14 @@ pub async fn edit_message(
     }
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
-        build_edit_message_command(request_id, account_key, room_id, event_id, body)
-    {
+    if let Some(command) = build_edit_message_command(
+        request_id,
+        account_key,
+        room_id,
+        event_id,
+        body,
+        mentions.unwrap_or_default(),
+    ) {
         submit_core_command(state.inner(), command).await?;
     }
     update_qa_window_title_from_state(&app, state.inner()).await;

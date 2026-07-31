@@ -1642,7 +1642,7 @@ describe("desktop integration source guards", () => {
 
     expect(selectSpaceStart).toBeGreaterThanOrEqual(0);
     expect(selectSpaceSource).toContain("if (spaceId === null)");
-    expect(selectSpaceSource).toContain("openHomeActivityView()");
+    expect(selectSpaceSource).toContain('openHomeActivityView("home_rail")');
     expect(selectSpaceSource).not.toContain("api.selectSpace(null)");
   });
 

@@ -19,6 +19,7 @@ pub enum DiagnosticLevel {
 pub enum DiagnosticValue {
     Boolean(bool),
     Count(u64),
+    Correlation(u64),
     Milliseconds(u64),
     RequestId { connection_id: u64, sequence: u64 },
     Token(&'static str),
@@ -87,6 +88,13 @@ impl DiagnosticField {
         Self {
             key,
             value: DiagnosticValue::Count(value),
+        }
+    }
+
+    pub fn correlation(key: &'static str, value: u64) -> Self {
+        Self {
+            key,
+            value: DiagnosticValue::Correlation(value),
         }
     }
 
@@ -219,6 +227,7 @@ pub fn format_event(event: &DiagnosticEvent) -> String {
             DiagnosticValue::Count(value) | DiagnosticValue::Milliseconds(value) => {
                 line.push_str(&value.to_string())
             }
+            DiagnosticValue::Correlation(value) => line.push_str(&format!("send-{value}")),
             DiagnosticValue::RequestId {
                 connection_id,
                 sequence,

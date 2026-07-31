@@ -5,11 +5,13 @@ use serde::{Deserialize, Serialize};
 use super::errors::OperationFailureKind;
 use super::profile::AvatarImage;
 
-#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ActivityState {
-    #[default]
-    Closed,
+    Closed {
+        #[serde(default)]
+        last_selected_tab: ActivityTab,
+    },
     Opening {
         request_id: u64,
         tab: ActivityTab,
@@ -22,10 +24,18 @@ pub enum ActivityState {
     },
 }
 
+impl Default for ActivityState {
+    fn default() -> Self {
+        Self::Closed {
+            last_selected_tab: ActivityTab::Recent,
+        }
+    }
+}
+
 impl ActivityState {
     pub fn kind(&self) -> &'static str {
         match self {
-            Self::Closed => "closed",
+            Self::Closed { .. } => "closed",
             Self::Opening { .. } => "opening",
             Self::Open { .. } => "open",
         }
@@ -35,7 +45,10 @@ impl ActivityState {
 impl fmt::Debug for ActivityState {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Closed => formatter.write_str("ActivityState::Closed"),
+            Self::Closed { last_selected_tab } => formatter
+                .debug_struct("ActivityState::Closed")
+                .field("last_selected_tab", last_selected_tab)
+                .finish(),
             Self::Opening { request_id, tab } => formatter
                 .debug_struct("ActivityOpening")
                 .field("request_id", request_id)

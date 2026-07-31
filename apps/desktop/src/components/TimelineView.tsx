@@ -56,6 +56,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -68,7 +69,14 @@ import {
 import katex from "katex";
 
 import { getActiveLocale, t } from "../i18n/messages";
-import { peopleFacingLabel } from "../app/uiShared";
+import {
+  activeMentionQuery,
+  appendMentionTarget,
+  mentionDraftToken,
+  peopleFacingLabel,
+  pruneMentionIntentForDraft,
+  type MentionCandidate
+} from "../app/uiShared";
 import {
   FloatingLayer,
   floatingPlacementStyle,
@@ -111,6 +119,7 @@ import {
   type MatrixPermalinkTarget
 } from "../domain/matrixPermalink";
 import { mediaSourceUrl } from "../domain/mediaUrl";
+import { MentionAutocomplete, MentionIntentPills } from "./composer";
 import { ImeOwnedTextArea, ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import {
   canApplyResolvedComposerAction,
@@ -182,7 +191,8 @@ import type {
   TimelineContinuityState,
   ThreadOpenIntent,
   TimelineThreadRootOrder,
-  UserProfile
+  UserProfile,
+  MentionIntent
 } from "../domain/types";
 import type { TimelineGapId, TimelineLinkRange } from "../domain/coreEvents";
 import type { TimelineForwardDestination } from "../domain/projectionTypes";
@@ -242,7 +252,12 @@ export interface TimelineTransport {
   /** Set typing state for a room. */
   setTyping(roomId: string, isTyping: boolean): Promise<void>;
   /** Edit a timeline event's message body. */
-  editMessage(roomId: string, eventId: string, body: string): Promise<void>;
+  editMessage(
+    roomId: string,
+    eventId: string,
+    body: string,
+    mentions?: import("../domain/types").MentionIntent
+  ): Promise<void>;
   /** Redact a timeline event. */
   redactMessage(roomId: string, eventId: string): Promise<void>;
   /** Pin a timeline event in the room. */
@@ -310,7 +325,12 @@ export interface TimelineRowActionHandlers {
     reactionKey: string,
     reactionEventId: string
   ) => void;
-  onEdit: (roomId: string, eventId: string, body: string) => void;
+  onEdit: (
+    roomId: string,
+    eventId: string,
+    body: string,
+    mentions?: import("../domain/types").MentionIntent
+  ) => void;
   onRedact: (roomId: string, eventId: string) => void;
   onPin: (roomId: string, eventId: string) => void;
   onUnpin: (roomId: string, eventId: string) => void;
@@ -2389,7 +2409,10 @@ export const TimelineView = memo(function TimelineView({
   setTimelineStore,
   listRefCallback,
   onRegisterJumpToLatest,
-  threadAttention = null
+  threadAttention = null,
+  mentionCandidates = [],
+  mentionCandidatesLoading = false,
+  onMentionQueryChange
 }: {
   timelineKey: TimelineKey;
   roomId: string;
@@ -2466,6 +2489,9 @@ export const TimelineView = memo(function TimelineView({
   onRegisterJumpToLatest?: (handler: (() => void) | null) => void;
   /** Thread attention counters for the root row in the currently selected room. */
   threadAttention?: TimelineThreadAttention | null;
+  mentionCandidates?: MentionCandidate[];
+  mentionCandidatesLoading?: boolean;
+  onMentionQueryChange?: (roomId: string, query: string | null) => void;
 }) {
   // Persisted restart anchors are intentionally ignored for restoration:
   // first entry after app startup goes to live edge, while in-session room
@@ -4138,8 +4164,13 @@ export const TimelineView = memo(function TimelineView({
     [transport]
   );
   const onEdit = useCallback(
-    (targetRoomId: string, eventId: string, body: string) => {
-      void transport.editMessage(targetRoomId, eventId, body).catch(() => undefined);
+    (
+      targetRoomId: string,
+      eventId: string,
+      body: string,
+      mentions?: MentionIntent
+    ) => {
+      void transport.editMessage(targetRoomId, eventId, body, mentions).catch(() => undefined);
     },
     [transport]
   );
@@ -5723,6 +5754,9 @@ export const TimelineView = memo(function TimelineView({
                 ignoredUserIds={ignoredUserIds}
                 onOpenContextMenu={onOpenContextMenu}
                 mentionProfileUsers={profileUsers}
+                mentionCandidates={mentionCandidates}
+                mentionCandidatesLoading={mentionCandidatesLoading}
+                onMentionQueryChange={onMentionQueryChange}
                 threadAttention={threadAttention}
                 showThreadSummary={presentationContext !== "thread"}
                 mediaDownload={contentEventId ? mediaDownloads[contentEventId] : undefined}
@@ -5898,6 +5932,9 @@ export function TimelineItemRow({
   profile,
   avatarThumbnails = {},
   mentionProfileUsers = {},
+  mentionCandidates = [],
+  mentionCandidatesLoading = false,
+  onMentionQueryChange,
   receipts = [],
   receiptTotalCount = receipts.length,
   receiptOverflowCount = 0,
@@ -5951,6 +5988,9 @@ export function TimelineItemRow({
   profile?: UserProfile;
   avatarThumbnails?: Record<string, AvatarThumbnailState>;
   mentionProfileUsers?: Record<string, UserProfile>;
+  mentionCandidates?: MentionCandidate[];
+  mentionCandidatesLoading?: boolean;
+  onMentionQueryChange?: (roomId: string, query: string | null) => void;
   receipts?: LiveReadReceipt[];
   receiptTotalCount?: number;
   receiptOverflowCount?: number;
@@ -6001,6 +6041,10 @@ export function TimelineItemRow({
   const [isActionMenuOpen, setActionMenuOpen] = useState(false);
   const [isForwardMenuOpen, setForwardMenuOpen] = useState(false);
   const [actionMenuPlacement, setActionMenuPlacement] = useState<"above" | "below">("above");
+  const editAutocompleteListboxId = useId();
+  const [editActiveMentionIndex, setEditActiveMentionIndex] = useState(0);
+  const [editDismissedMentionKey, setEditDismissedMentionKey] = useState<string | null>(null);
+  const [editMentionIntent, setEditMentionIntent] = useState<MentionIntent>({ targets: [] });
   const [revealedSpoilers, setRevealedSpoilers] = useState<ReadonlySet<string>>(
     () => new Set()
   );
@@ -6017,6 +6061,49 @@ export function TimelineItemRow({
   const captureEditKeyIntent = useComposerKeyIntentSnapshot(editImeComposition);
   const editMacKillRingRef = useRef<string>("");
   const requestedLinkPreviewsRef = useRef<Set<string>>(new Set());
+  const activeEditMention = activeMentionQuery(editDraft);
+  const activeEditMentionKey =
+    activeEditMention === null
+      ? null
+      : `${activeEditMention.start}:${activeEditMention.query.toLowerCase()}`;
+  const editMentionSuggestions =
+    activeEditMention === null || activeEditMentionKey === editDismissedMentionKey
+      ? []
+      : mentionCandidates;
+  const editAutocompleteOpen =
+    isEditing &&
+    activeEditMention !== null &&
+    activeEditMentionKey !== editDismissedMentionKey &&
+    (editMentionSuggestions.length > 0 || mentionCandidatesLoading);
+  const editActiveMentionOption = editAutocompleteOpen
+    ? editMentionSuggestions[Math.min(editActiveMentionIndex, editMentionSuggestions.length - 1)]
+    : undefined;
+  const editActiveMentionOptionId = editActiveMentionOption
+    ? `${editAutocompleteListboxId}-option-${Math.min(
+        editActiveMentionIndex,
+        editMentionSuggestions.length - 1
+      )}`
+    : undefined;
+
+  useEffect(() => {
+    setEditActiveMentionIndex(0);
+  }, [activeEditMentionKey]);
+
+  useEffect(() => {
+    if (isEditing) {
+      onMentionQueryChange?.(roomId, activeEditMention?.query ?? "");
+    } else {
+      onMentionQueryChange?.(roomId, null);
+    }
+  }, [activeEditMentionKey, isEditing, onMentionQueryChange, roomId]);
+
+  useEffect(() => {
+    setEditActiveMentionIndex((current) =>
+      editMentionSuggestions.length === 0
+        ? 0
+        : Math.min(current, editMentionSuggestions.length - 1)
+    );
+  }, [editMentionSuggestions.length]);
 
   const updateEditDraft = useCallback((nextDraft: string) => {
     recordEditLocalValue(nextDraft);
@@ -6115,13 +6202,41 @@ export function TimelineItemRow({
     setActionMenuOpen(false);
     setForwardMenuOpen(false);
     setEditDraft(item.body ?? "");
+    setEditMentionIntent(item.actions?.editable_mentions ?? { targets: [] });
+    setEditDismissedMentionKey(null);
     setEditing(true);
-  }, [eventId, isRedacted, item.body]);
+  }, [eventId, isRedacted, item.actions?.editable_mentions, item.body]);
 
   const closeEditForm = useCallback(() => {
     setEditing(false);
     setEditDraft(item.body ?? "");
+    setEditMentionIntent({ targets: [] });
+    setEditDismissedMentionKey(null);
   }, [item.body]);
+
+  const acceptEditMention = useCallback(
+    (candidate: MentionCandidate) => {
+      if (!activeEditMention) {
+        return;
+      }
+      const displayLabel = peopleFacingLabel(candidate.label);
+      const target =
+        candidate.target.kind === "user"
+          ? { ...candidate.target, display_label: displayLabel }
+          : candidate.target;
+      const token = `${mentionDraftToken(target)} `;
+      updateEditDraft(
+        `${editDraft.slice(0, activeEditMention.start)}${token}${editDraft.slice(activeEditMention.end)}`
+      );
+      setEditMentionIntent((current) => appendMentionTarget(current, target));
+      const cursor = activeEditMention.start + token.length;
+      requestAnimationFrame(() => {
+        editTextareaRef.current?.focus();
+        editTextareaRef.current?.setSelectionRange(cursor, cursor);
+      });
+    },
+    [activeEditMention, editDraft, editTextareaRef, updateEditDraft]
+  );
 
   const submitEdit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -6134,10 +6249,10 @@ export function TimelineItemRow({
       if (!nextBody) {
         return;
       }
-      onEdit(roomId, eventId, nextBody);
+      onEdit(roomId, eventId, nextBody, pruneMentionIntentForDraft(editMentionIntent, nextBody));
       closeEditForm();
     },
-    [closeEditForm, editDraft, editTextareaRef, eventId, onEdit, roomId]
+    [closeEditForm, editDraft, editMentionIntent, editTextareaRef, eventId, onEdit, roomId]
   );
 
   const onEditKeyDown = useCallback(
@@ -6172,6 +6287,24 @@ export function TimelineItemRow({
           return;
         }
       }
+      if (editAutocompleteOpen) {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const direction = event.key === "ArrowDown" ? 1 : -1;
+          setEditActiveMentionIndex((current) =>
+            editMentionSuggestions.length === 0
+              ? 0
+              : (current + direction + editMentionSuggestions.length) % editMentionSuggestions.length
+          );
+          return;
+        }
+        if (event.key === "Tab" && editMentionSuggestions.length > 0) {
+          event.preventDefault();
+          acceptEditMention(editMentionSuggestions[editActiveMentionIndex]!);
+          return;
+        }
+      }
+
       if (!shouldResolveComposerKeyEvent(event)) {
         return;
       }
@@ -6187,7 +6320,7 @@ export function TimelineItemRow({
         end: intent.selectionEnd
       });
       const resolverOptions = {
-        autocomplete_open: false,
+        autocomplete_open: editAutocompleteOpen,
         send_enabled: Boolean(eventId && intent.value.trim())
       };
       if (shouldLetNativeImeHandleComposerKeyEvent(keyEvent)) {
@@ -6205,7 +6338,12 @@ export function TimelineItemRow({
           }
           if (action === "send") {
             if (eventId && intent.value.trim()) {
-              onEdit(roomId, eventId, intent.value.trim());
+              onEdit(
+                roomId,
+                eventId,
+                intent.value.trim(),
+                pruneMentionIntentForDraft(editMentionIntent, intent.value.trim())
+              );
               closeEditForm();
             }
             return;
@@ -6226,11 +6364,35 @@ export function TimelineItemRow({
           if (action === "cancel") {
             closeEditForm();
           }
+          if (action === "acceptAutocomplete") {
+            const candidate = editMentionSuggestions[editActiveMentionIndex];
+            if (candidate) {
+              acceptEditMention(candidate);
+            }
+          }
+          if (action === "closeAutocomplete" && activeEditMentionKey) {
+            setEditDismissedMentionKey(activeEditMentionKey);
+          }
         })
         .catch(() => undefined)
         .finally(intent.releaseResolution);
     },
-    [captureEditKeyIntent, closeEditForm, editImeComposition, eventId, onEdit, resolveComposerKeyAction, roomId, updateEditDraft]
+    [
+      acceptEditMention,
+      activeEditMentionKey,
+      captureEditKeyIntent,
+      closeEditForm,
+      editActiveMentionIndex,
+      editAutocompleteOpen,
+      editImeComposition,
+      editMentionIntent,
+      editMentionSuggestions,
+      eventId,
+      onEdit,
+      resolveComposerKeyAction,
+      roomId,
+      updateEditDraft
+    ]
   );
 
   const submitReaction = useCallback(
@@ -6481,6 +6643,17 @@ export function TimelineItemRow({
     </div>
   ) : isEditing ? (
     <ImeSafeForm className="message-edit-form" onSubmit={submitEdit}>
+      <MentionIntentPills mentionIntent={editMentionIntent} />
+      <MentionAutocomplete
+        open={editAutocompleteOpen}
+        listboxId={editAutocompleteListboxId}
+        activeIndex={editActiveMentionIndex}
+        candidates={editMentionSuggestions}
+        loading={mentionCandidatesLoading}
+        activeOptionId={editActiveMentionOptionId}
+        onAccept={acceptEditMention}
+        onMouseDown={(event) => event.preventDefault()}
+      />
       <ImeOwnedTextArea
         ownership={editImeTextControl}
         aria-label={t("timeline.editBody")}

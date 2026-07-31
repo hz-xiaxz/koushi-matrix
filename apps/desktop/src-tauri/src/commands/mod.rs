@@ -2250,6 +2250,7 @@ pub(crate) fn build_edit_message_command(
     room_id: String,
     event_id: String,
     body: String,
+    mentions: koushi_state::MentionIntent,
 ) -> Option<CoreCommand> {
     if body.trim().is_empty() {
         return None;
@@ -2259,6 +2260,7 @@ pub(crate) fn build_edit_message_command(
         key: build_timeline_key(account_key, room_id),
         event_id,
         body,
+        mentions,
     }))
 }
 
@@ -4913,6 +4915,7 @@ mod tests {
             room_id.clone(),
             "$event".to_owned(),
             edit_body.clone(),
+            koushi_state::MentionIntent::default(),
         )
         .expect("edit_message should build a command")
         {
@@ -4921,6 +4924,7 @@ mod tests {
                 key,
                 event_id,
                 body: route_body,
+                mentions,
             }) => {
                 assert_eq!(request_id, fake_request_id(11));
                 assert_eq!(key.account_key, active_account_key);
@@ -4932,6 +4936,7 @@ mod tests {
                 );
                 assert_eq!(event_id, "$event");
                 assert_eq!(route_body, edit_body);
+                assert_eq!(mentions, koushi_state::MentionIntent::default());
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -6170,6 +6175,7 @@ mod tests {
                 room_id,
                 "$event".to_owned(),
                 "\n\t ".to_owned(),
+                koushi_state::MentionIntent::default(),
             )
             .is_none()
         );
@@ -7703,6 +7709,7 @@ mod tests {
             room_id,
             "$event".to_owned(),
             "sensitive edit body".to_owned(),
+            koushi_state::MentionIntent::default(),
         )
         .expect("edit_message should build a command");
         let upload = build_upload_media_command(

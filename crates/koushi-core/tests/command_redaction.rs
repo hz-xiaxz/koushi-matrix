@@ -88,6 +88,7 @@ fn secret_bearing_commands_redact_debug() {
         key: key.clone(),
         event_id: "$evt".to_owned(),
         body: BODY.to_owned(),
+        mentions: koushi_state::MentionIntent::default(),
     });
     let search = CoreCommand::Search(SearchCommand::Query {
         request_id: fake_request_id(),

@@ -29,6 +29,7 @@ import type {
   AppDomainState,
   AppUiState,
   AttachmentResult,
+  MentionIntent,
   SearchCrawlerFailureKind,
   SidebarModel,
   SyncMode,
@@ -151,6 +152,7 @@ export interface TimelineMessageActions {
   can_permalink: boolean;
   can_view_source: boolean;
   permalink?: string | null;
+  editable_mentions?: MentionIntent | null;
 }
 
 export interface TimelineMessageSource {

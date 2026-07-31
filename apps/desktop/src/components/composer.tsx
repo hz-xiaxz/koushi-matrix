@@ -146,7 +146,6 @@ export const Composer = memo(function Composer({
     activeMention !== null &&
     activeMentionKey !== dismissedMentionKey &&
     (activeMentionSuggestions.length > 0 || mentionCandidatesLoading);
-  const mentionSuggestionSections = mentionSections(activeMentionSuggestions);
   const activeMentionOption = autocompleteOpen
     ? activeMentionSuggestions[Math.min(activeMentionIndex, activeMentionSuggestions.length - 1)]
     : undefined;
@@ -566,36 +565,16 @@ export const Composer = memo(function Composer({
           ))}
         </div>
       ) : null}
-      {autocompleteOpen ? (
-        <div
-          id={autocompleteListboxId}
-          className="composer-autocomplete"
-          role="listbox"
-          aria-label={t("composer.mentionSuggestions")}
-          aria-activedescendant={activeMentionOptionId}
-        >
-          {mentionSuggestionSections.map((section) => (
-            <div className="composer-autocomplete-section" key={section.key} role="presentation">
-              <div className="composer-autocomplete-section-heading">{section.label}</div>
-              {section.candidates.map(({ candidate, index }) => (
-                <MentionOption
-                  active={index === activeMentionIndex}
-                  candidate={candidate}
-                  id={`${autocompleteListboxId}-option-${index}`}
-                  key={candidate.key}
-                  onAccept={acceptMention}
-                  onMouseDown={keepComposerFocus}
-                />
-              ))}
-            </div>
-          ))}
-          {mentionCandidatesLoading ? (
-            <div className="composer-autocomplete-loading" role="status">
-              {t("composer.mentionLoading")}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+      <MentionAutocomplete
+        open={autocompleteOpen}
+        listboxId={autocompleteListboxId}
+        activeIndex={activeMentionIndex}
+        candidates={activeMentionSuggestions}
+        loading={mentionCandidatesLoading}
+        activeOptionId={activeMentionOptionId}
+        onAccept={acceptMention}
+        onMouseDown={keepComposerFocus}
+      />
       <ImeOwnedTextArea
         ownership={imeTextControl}
         aria-label={ariaLabel}
@@ -883,3 +862,70 @@ function composerImeShouldHandleKeyEvent(
 }
 
 export { ThreadComposer };
+
+/** Shared mention popup used by normal, thread, and inline-edit composers. */
+export function MentionAutocomplete({
+  open,
+  listboxId,
+  activeIndex,
+  candidates,
+  loading,
+  activeOptionId,
+  onAccept,
+  onMouseDown
+}: {
+  open: boolean;
+  listboxId: string;
+  activeIndex: number;
+  candidates: MentionCandidate[];
+  loading: boolean;
+  activeOptionId?: string;
+  onAccept: (candidate: MentionCandidate) => void;
+  onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  if (!open) {
+    return null;
+  }
+  return (
+    <div
+      id={listboxId}
+      className="composer-autocomplete"
+      role="listbox"
+      aria-label={t("composer.mentionSuggestions")}
+      aria-activedescendant={activeOptionId}
+    >
+      {mentionSections(candidates).map((section) => (
+        <div className="composer-autocomplete-section" key={section.key} role="presentation">
+          <div className="composer-autocomplete-section-heading">{section.label}</div>
+          {section.candidates.map(({ candidate, index }) => (
+            <MentionOption
+              active={index === activeIndex}
+              candidate={candidate}
+              id={`${listboxId}-option-${index}`}
+              key={candidate.key}
+              onAccept={onAccept}
+              onMouseDown={onMouseDown}
+            />
+          ))}
+        </div>
+      ))}
+      {loading ? (
+        <div className="composer-autocomplete-loading" role="status">
+          {t("composer.mentionLoading")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function MentionIntentPills({ mentionIntent }: { mentionIntent: MentionIntent }) {
+  return mentionIntent.targets.length ? (
+    <div className="composer-mention-pills" aria-label={t("composer.selectedMentions")}>
+      {mentionIntent.targets.map((target) => (
+        <span className="mention-pill" key={mentionTargetKey(target)} dir="auto">
+          {mentionPillLabel(target)}
+        </span>
+      ))}
+    </div>
+  ) : null;
+}

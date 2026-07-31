@@ -7233,6 +7233,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             key: key_a.clone(),
             event_id: event1_id.clone(),
             body: "Phase 5 QA message 1 EDITED".to_owned(),
+            mentions: MentionIntent::default(),
         }))
         .await
         .map_err(|e| format!("submit edit msg1: {e}"))?;
@@ -7696,6 +7697,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             key: key_a_search.clone(),
             event_id: search_event_id.clone(),
             body: EDITED_BODY.to_owned(),
+            mentions: MentionIntent::default(),
         }))
         .await
         .map_err(|e| format!("submit edit search msg: {e}"))?;
@@ -15474,6 +15476,7 @@ async fn run_media_stage(
             key: key_a.clone(),
             event_id: media_event_id.clone(),
             body: MEDIA_CAPTION_EDITED.to_owned(),
+            mentions: MentionIntent::default(),
         }))
         .await
         .map_err(|e| format!("submit media caption edit: {e}"))?;
