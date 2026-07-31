@@ -764,7 +764,7 @@ export function TimelinePane({
   onRedactMessage: (roomId: string, eventId: string) => void;
   onReply: TimelineRowActionHandlers["onReply"];
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
-  onRescheduleScheduledSend: (scheduledId: string, sendAtMs: number) => void;
+  onRescheduleScheduledSend: (scheduledId: string, body: string, sendAtMs: number) => void;
   onResultSelect: (roomId: string, eventId: string) => void;
   onScheduleSend: (sendAtMs: number, body: string) => void;
   onSendText: (body: string) => void;

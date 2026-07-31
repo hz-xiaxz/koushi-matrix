@@ -438,6 +438,7 @@ pub enum AppCommand {
     RescheduleScheduledSend {
         request_id: RequestId,
         scheduled_id: String,
+        body: String,
         send_at_ms: u64,
     },
     OpenThread {
@@ -725,6 +726,7 @@ impl fmt::Debug for AppCommand {
             Self::RescheduleScheduledSend {
                 request_id,
                 scheduled_id,
+                body: _,
                 send_at_ms,
             } => formatter
                 .debug_struct("RescheduleScheduledSend")

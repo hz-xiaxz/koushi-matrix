@@ -3828,9 +3828,9 @@ export function App() {
     }
   }
 
-  async function rescheduleScheduledSend(scheduledId: string, sendAtMs: number) {
+  async function rescheduleScheduledSend(scheduledId: string, body: string, sendAtMs: number) {
     try {
-      setSnapshot(await api.rescheduleScheduledSend(scheduledId, sendAtMs));
+      setSnapshot(await api.rescheduleScheduledSend(scheduledId, body, sendAtMs));
     } catch {
       // Command failures are surfaced through the Rust-owned error/event path.
     }
@@ -5200,8 +5200,8 @@ export function App() {
             onReply={(roomId, eventId) => {
               void setComposerReplyTarget(roomId, eventId);
             }}
-            onRescheduleScheduledSend={(scheduledId, sendAtMs) => {
-              void rescheduleScheduledSend(scheduledId, sendAtMs);
+            onRescheduleScheduledSend={(scheduledId, body, sendAtMs) => {
+              void rescheduleScheduledSend(scheduledId, body, sendAtMs);
             }}
             onScheduleSend={(sendAtMs, body) => {
               void scheduleSend(sendAtMs, body);

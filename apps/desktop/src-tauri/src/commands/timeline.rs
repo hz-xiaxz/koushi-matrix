@@ -1571,13 +1571,14 @@ pub async fn cancel_scheduled_send(
 #[tauri::command]
 pub async fn reschedule_scheduled_send(
     scheduled_id: String,
+    body: String,
     send_at_ms: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let request_id = next_request_id(state.inner()).await;
     if let Some(command) =
-        build_reschedule_scheduled_send_command(request_id, scheduled_id, send_at_ms)
+        build_reschedule_scheduled_send_command(request_id, scheduled_id, body, send_at_ms)
     {
         submit_core_command(state.inner(), command).await?;
     }

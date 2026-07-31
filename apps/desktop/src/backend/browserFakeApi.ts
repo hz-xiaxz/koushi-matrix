@@ -233,7 +233,11 @@ export interface DesktopApi {
   ): Promise<DesktopSnapshot>;
   clearUploadStaging(target: ComposerTarget): Promise<DesktopSnapshot>;
   cancelScheduledSend(scheduledId: string): Promise<DesktopSnapshot>;
-  rescheduleScheduledSend(scheduledId: string, sendAtMs: number): Promise<DesktopSnapshot>;
+  rescheduleScheduledSend(
+    scheduledId: string,
+    body: string,
+    sendAtMs: number
+  ): Promise<DesktopSnapshot>;
   retrySend(roomId: string, transactionId: string): Promise<DesktopSnapshot>;
   cancelSend(roomId: string, transactionId: string): Promise<DesktopSnapshot>;
   sendReaction(roomId: string, eventId: string, reactionKey: string): Promise<DesktopSnapshot>;
@@ -1818,14 +1822,15 @@ class BrowserFakeApi implements DesktopApi {
 
   async rescheduleScheduledSend(
     scheduledId: string,
+    body: string,
     sendAtMs: number
   ): Promise<DesktopSnapshot> {
-    if (!this.canUseSyncedViews() || !Number.isFinite(sendAtMs)) {
+    if (!this.canUseSyncedViews() || !body.trim() || !Number.isFinite(sendAtMs)) {
       return this.getSnapshot();
     }
     this.snapshot.state.ui.timeline.scheduled_sends =
       this.snapshot.state.ui.timeline.scheduled_sends.map((item) =>
-        item.scheduled_id === scheduledId ? { ...item, send_at_ms: sendAtMs } : item
+        item.scheduled_id === scheduledId ? { ...item, body, send_at_ms: sendAtMs } : item
       );
     return this.getSnapshot();
   }

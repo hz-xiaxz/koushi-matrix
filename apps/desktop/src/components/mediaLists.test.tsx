@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MessageArticle, PinnedEventsList } from "./mediaLists";
+import { MessageArticle, PinnedEventsList, ScheduledMessagesList } from "./mediaLists";
 
 afterEach(cleanup);
 
@@ -70,5 +70,35 @@ describe("people-facing media list labels", () => {
     rerender(<MessageArticle {...props} profileUsers={{}} />);
     expect(screen.getByText("Unknown user")).toBeTruthy();
     expect(screen.queryByText(message.sender)).toBeNull();
+  });
+});
+
+describe("scheduled message editing", () => {
+  it("edits the body and time through the shared composer controls", () => {
+    const onReschedule = vi.fn();
+    render(
+      <ScheduledMessagesList
+        capability="localFallback"
+        items={[
+          {
+            scheduled_id: "scheduled-1",
+            room_id: "!room:example.invalid",
+            body: "Original body",
+            send_at_ms: Date.UTC(2030, 0, 1, 12, 0),
+            handle: { kind: "local" }
+          }
+        ]}
+        onCancel={() => undefined}
+        onReschedule={onReschedule}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit scheduled send" }));
+    const body = screen.getByRole("textbox", { name: "Scheduled message" });
+    expect(body).toHaveProperty("value", "Original body");
+    fireEvent.change(body, { target: { value: "Edited **body**" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save scheduled send" }));
+
+    expect(onReschedule).toHaveBeenCalledWith("scheduled-1", "Edited **body**", expect.any(Number));
   });
 });

@@ -373,6 +373,7 @@ pub(crate) fn handle_scheduled_send_dispatch_failed(
 pub(crate) fn handle_scheduled_send_rescheduled(
     state: &mut AppState,
     scheduled_id: String,
+    body: String,
     send_at_ms: u64,
     handle: crate::state::ScheduledSendHandle,
 ) -> Vec<AppEffect> {
@@ -382,7 +383,7 @@ pub(crate) fn handle_scheduled_send_rescheduled(
 
     let Some(item) = state
         .scheduled_sends
-        .reschedule(&scheduled_id, send_at_ms, handle)
+        .reschedule(&scheduled_id, body, send_at_ms, handle)
     else {
         return Vec::new();
     };

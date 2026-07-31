@@ -629,6 +629,7 @@ export type MessageId =
   | "settings.typography"
   | "settings.uiFont"
   | "scheduled.cancel"
+  | "scheduled.bodyInput"
   | "scheduled.edit"
   | "scheduled.localFallback"
   | "scheduled.localFallbackNotice"
@@ -1771,6 +1772,7 @@ const en: Catalog = {
   "settings.typography": "Typography",
   "settings.uiFont": "UI font",
   "scheduled.cancel": "Cancel scheduled send",
+  "scheduled.bodyInput": "Scheduled message",
   "scheduled.edit": "Edit scheduled send",
   "scheduled.localFallback": "Local fallback",
   "scheduled.localFallbackNotice": "Will send only while this app is running.",
@@ -2804,6 +2806,7 @@ const ja: Catalog = {
   "settings.typography": "タイポグラフィ",
   "settings.uiFont": "UIフォント",
   "scheduled.cancel": "予約送信をキャンセル",
+  "scheduled.bodyInput": "予約メッセージ",
   "scheduled.edit": "予約送信を編集",
   "scheduled.localFallback": "ローカルフォールバック",
   "scheduled.localFallbackNotice": "このアプリが起動中のときだけ送信されます。",

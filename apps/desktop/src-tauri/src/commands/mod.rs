@@ -1958,14 +1958,16 @@ pub(crate) fn build_cancel_scheduled_send_command(
 pub(crate) fn build_reschedule_scheduled_send_command(
     request_id: koushi_core::RequestId,
     scheduled_id: String,
+    body: String,
     send_at_ms: u64,
 ) -> Option<CoreCommand> {
-    if scheduled_id.trim().is_empty() {
+    if scheduled_id.trim().is_empty() || body.trim().is_empty() {
         return None;
     }
     Some(CoreCommand::App(AppCommand::RescheduleScheduledSend {
         request_id,
         scheduled_id,
+        body,
         send_at_ms,
     }))
 }
@@ -4542,6 +4544,7 @@ mod tests {
         match build_reschedule_scheduled_send_command(
             fake_request_id(35),
             "scheduled-1".to_owned(),
+            "edited scheduled body".to_owned(),
             1_900_000_060_000,
         )
         .expect("reschedule_scheduled_send should build a command")
@@ -4549,10 +4552,12 @@ mod tests {
             CoreCommand::App(AppCommand::RescheduleScheduledSend {
                 request_id,
                 scheduled_id,
+                body,
                 send_at_ms,
             }) => {
                 assert_eq!(request_id, fake_request_id(35));
                 assert_eq!(scheduled_id, "scheduled-1");
+                assert_eq!(body, "edited scheduled body");
                 assert_eq!(send_at_ms, 1_900_000_060_000);
             }
             other => panic!("unexpected command: {other:?}"),

@@ -483,9 +483,10 @@ class TauriDesktopApi implements DesktopApi {
 
   async rescheduleScheduledSend(
     scheduledId: string,
+    body: string,
     sendAtMs: number
   ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("reschedule_scheduled_send", { scheduledId, sendAtMs });
+    return invoke<DesktopSnapshot>("reschedule_scheduled_send", { scheduledId, body, sendAtMs });
   }
 
   async retrySend(roomId: string, transactionId: string): Promise<DesktopSnapshot> {

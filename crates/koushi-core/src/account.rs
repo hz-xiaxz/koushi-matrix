@@ -3030,6 +3030,7 @@ impl AccountActor {
             Ok(delay_id) => {
                 self.send_actions(vec![AppAction::ScheduledSendRescheduled {
                     scheduled_id,
+                    body,
                     send_at_ms,
                     handle: ScheduledSendHandle::Server { delay_id },
                 }])
@@ -3042,6 +3043,7 @@ impl AccountActor {
                     },
                     AppAction::ScheduledSendRescheduled {
                         scheduled_id,
+                        body,
                         send_at_ms,
                         handle: ScheduledSendHandle::Local,
                     },

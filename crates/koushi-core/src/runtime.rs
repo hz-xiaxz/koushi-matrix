@@ -3339,6 +3339,7 @@ impl AppActor {
                 AppCommand::RescheduleScheduledSend {
                     request_id,
                     scheduled_id,
+                    body,
                     send_at_ms,
                 } => {
                     if let Some(item) = self.state.scheduled_sends.items.get(&scheduled_id).cloned()
@@ -3351,7 +3352,7 @@ impl AppActor {
                                 scheduled_id,
                                 room_id: item.room_id,
                                 thread_root_event_id: item.thread_root_event_id,
-                                body: item.body,
+                                body,
                                 delay_id,
                                 send_at_ms,
                             })
@@ -3369,6 +3370,7 @@ impl AppActor {
                     let effects = self
                         .reduce_app_action(AppAction::ScheduledSendRescheduled {
                             scheduled_id,
+                            body,
                             send_at_ms,
                             handle: ScheduledSendHandle::Local,
                         })

@@ -834,7 +834,7 @@ tokens, paths, or raw errors.
   content when that root is present, including after reschedule/restart.
 - `ScheduledSendCreated` inserts a queued item and advances the matching
   composer's causal revision through the Rust draft store.
-  `ScheduledSendRescheduled` updates the due timestamp and handle;
+  `ScheduledSendRescheduled` updates the message body, due timestamp, and handle;
   `ScheduledSendCancelled` and `ScheduledSendDispatched` remove the item. Room
   pruning, logout, lock, and account switch clear or retain the backing store by
   joined-room account context.

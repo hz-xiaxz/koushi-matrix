@@ -4270,6 +4270,10 @@ mark {
   background: var(--surface);
 }
 
+.composer.is-editor-only {
+  margin: 0;
+}
+
 .composer-drop-overlay {
   position: absolute;
   z-index: 4;

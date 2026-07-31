@@ -31,6 +31,7 @@ import {
   type TimelineRowActionHandlers
 } from "./TimelineView";
 import { ImeSafeForm } from "./ImeTextControl";
+import { Composer } from "./composer";
 import {
   ICON_SIZE,
   formatUploadBytes,
@@ -245,9 +246,10 @@ function ScheduledMessagesList({
   capability: ScheduledSendCapability;
   items: ScheduledSendItem[];
   onCancel: (scheduledId: string) => void;
-  onReschedule: (scheduledId: string, sendAtMs: number) => void;
+  onReschedule: (scheduledId: string, body: string, sendAtMs: number) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBody, setEditBody] = useState("");
   const [editValue, setEditValue] = useState("");
 
   if (items.length === 0) {
@@ -256,6 +258,7 @@ function ScheduledMessagesList({
 
   function openEdit(item: ScheduledSendItem) {
     setEditingId(item.scheduled_id);
+    setEditBody(item.body);
     setEditValue(datetimeLocalValueFromTimestamp(item.send_at_ms));
   }
 
@@ -265,7 +268,10 @@ function ScheduledMessagesList({
     if (sendAtMs === null) {
       return;
     }
-    onReschedule(item.scheduled_id, sendAtMs);
+    if (!editBody.trim()) {
+      return;
+    }
+    onReschedule(item.scheduled_id, editBody, sendAtMs);
     setEditingId(null);
   }
 
@@ -301,6 +307,18 @@ function ScheduledMessagesList({
                   className="scheduled-message-edit"
                   onSubmit={(event) => submitEdit(event, item)}
                 >
+                  <Composer
+                    editorOnly
+                    ariaLabel={t("scheduled.bodyInput")}
+                    composerMode={{ kind: "plain" }}
+                    draftKey={`scheduled:${item.scheduled_id}`}
+                    isSending={false}
+                    roomName={t("scheduled.title")}
+                    value={editBody}
+                    onCancelReply={() => undefined}
+                    onSend={() => undefined}
+                    onValueChange={setEditBody}
+                  />
                   <label className="scheduled-send-field">
                     <span>{t("scheduled.timeInput")}</span>
                     <input
@@ -321,7 +339,9 @@ function ScheduledMessagesList({
                     <button
                       className="timeline-send-bar-action"
                       type="submit"
-                      disabled={scheduledSendTimestampFromInput(editValue) === null}
+                      disabled={
+                        scheduledSendTimestampFromInput(editValue) === null || !editBody.trim()
+                      }
                     >
                       {t("scheduled.save")}
                     </button>
