@@ -622,6 +622,7 @@ export interface TimelineScrollAnchor {
 export interface ProfileState {
   own: OwnProfile;
   users: Record<string, UserProfile>;
+  room_users: Record<string, Record<string, UserProfile>>;
   local_aliases: Record<string, string>;
   local_alias_update: LocalUserAliasUpdateState;
   ignored_user_ids: string[];

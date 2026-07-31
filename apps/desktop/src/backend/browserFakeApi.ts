@@ -2661,9 +2661,17 @@ class BrowserFakeApi implements DesktopApi {
     }
 
     const normalizedSpaceId = spaceId.trim();
+    const current = this.snapshot.state.domain.space_members;
+    if (
+      (current.selected_space_id !== null &&
+        (current.selected_space_id !== normalizedSpaceId || current.generation !== generation)) ||
+      current.operation.kind === "inviting"
+    ) {
+      return this.getSnapshot();
+    }
     const requestId = this.nextRequestId();
     this.snapshot.state.domain.space_members = {
-      ...this.snapshot.state.domain.space_members,
+      ...current,
       selected_space_id: normalizedSpaceId,
       generation,
       operation: {
@@ -4869,6 +4877,7 @@ function defaultProfileState(userId: string | null | undefined): DesktopSnapshot
       avatar: null
     },
     users: {},
+    room_users: {},
     local_aliases: {},
     local_alias_update: { kind: "idle" },
     ignored_user_ids: [],

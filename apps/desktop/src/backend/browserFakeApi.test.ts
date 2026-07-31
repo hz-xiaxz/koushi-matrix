@@ -79,16 +79,64 @@ describe("BrowserFakeApi Space member audit", () => {
   test("loads the requested Space generation and preserves classified sections", async () => {
     const api = createBrowserFakeApi();
 
-    const snapshot = await api.loadSpaceMembers(spaceId, 7);
+    const snapshot = await api.loadSpaceMembers(spaceId, 1);
 
     expect(snapshot.state.domain.space_members).toMatchObject({
       selected_space_id: spaceId,
-      generation: 7,
+      generation: 1,
       operation: { kind: "idle" },
       space_joined: expect.any(Array),
       space_invited: expect.any(Array),
       child_room_only: expect.any(Array)
     });
+  });
+
+  test("ignores a load from the wrong Space without changing the active projection", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+
+    const after = await api.loadSpaceMembers("!space-beta:example.invalid", 1);
+
+    expect(after).toEqual(before);
+  });
+
+  test("ignores a stale or future generation without changing the active projection", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+
+    const stale = await api.loadSpaceMembers(spaceId, 0);
+    const future = await api.loadSpaceMembers(spaceId, 2);
+
+    expect(stale).toEqual(before);
+    expect(future).toEqual(before);
+  });
+
+  test("loads a new Space generation only after the active Space is cleared", async () => {
+    const api = createBrowserFakeApi();
+
+    await api.selectSpace(null);
+    const snapshot = await api.loadSpaceMembers("!space-beta:example.invalid", 99);
+
+    expect(snapshot.state.domain.space_members).toMatchObject({
+      selected_space_id: "!space-beta:example.invalid",
+      generation: 99
+    });
+  });
+
+  test("exposes room-scoped profile cache entries in the snapshot contract", async () => {
+    const api = createBrowserFakeApi();
+    const profile = (await api.getSnapshot()).state.domain.profile;
+
+    expect(profile.room_users).toEqual({});
+  });
+
+  test("does not replace an in-flight invite with a load operation", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
+    const before = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+
+    const after = await api.loadSpaceMembers(spaceId, 1);
+
+    expect(after).toEqual(before);
   });
 
   test("switching Spaces fences and clears the previous member projection", async () => {

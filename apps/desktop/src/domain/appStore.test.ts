@@ -815,6 +815,7 @@ function makeSnapshot(): DesktopSnapshot {
               avatar: null
             }
           },
+          room_users: {},
           local_aliases: {},
           local_alias_update: { kind: "idle" },
           ignored_user_ids: [],

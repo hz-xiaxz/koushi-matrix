@@ -379,6 +379,7 @@ describe("desktop model", () => {
             avatar: profileAvatar
           }
         },
+        room_users: {},
         local_aliases: {},
         local_alias_update: { kind: "idle" },
         ignored_user_ids: [],

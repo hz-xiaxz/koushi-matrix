@@ -121,6 +121,7 @@ describe("planSnapshotAvatarThumbnailRequests", () => {
               avatar: avatar("mxc://matrix.org/own-avatar", { kind: "notRequested" })
             },
             users: memberUsers,
+            room_users: {},
             local_aliases: {},
             local_alias_update: { kind: "idle" },
             ignored_user_ids: [],
@@ -168,6 +169,7 @@ function snapshotWithAvatars(avatars: AvatarImage[]): DesktopSnapshot {
         profile: {
           own: { display_name: null, avatar: ownAvatar ?? null },
           users: {},
+          room_users: {},
           local_aliases: {},
           local_alias_update: { kind: "idle" },
           ignored_user_ids: [],

@@ -236,6 +236,29 @@ Final verification for this milestone:
   - `cargo fmt --all -- --check` and `git diff --check` — passed. Stable
     rustfmt reports the repository's existing nightly-only option warnings.
 
+## Task 3 review-fix milestone — 2026-08-01
+
+- BrowserFake `loadSpaceMembers` now applies the same admission fences as Rust:
+  an active Space requires the exact selected Space and generation, an
+  in-flight invite blocks a load, and an unselected Space may admit a new
+  Space/generation pair. Rejected calls return the unchanged snapshot and do
+  not overwrite `selected_space_id`, `generation`, or the pending operation.
+- Added focused positive and negative BrowserFake tests for matching loads,
+  wrong Space, stale/future generations, loading after Space clear, and load
+  during an invite.
+- Added `ProfileState.room_users` as the exact TS representation of Rust's
+  `BTreeMap<String, BTreeMap<String, UserProfile>>` and updated all typed
+  Desktop test/harness fixtures. The BrowserFake snapshot now includes the
+  serialized field, which is already present in the Rust golden contract.
+- Verification:
+  - TDD RED: the new fence tests reproduced Space/generation overwrites and
+    the missing profile field; the in-flight-load test reproduced loss of the
+    pending invite.
+  - `npx vitest run src/backend/client.test.ts src/backend/browserFakeApi.test.ts`
+    — 2 files, 89 passed.
+  - `npm run typecheck` — passed.
+  - `git diff --check` — passed.
+
 ## Decisions and invariants
 
 - All implementation workers use Luna (`gpt-5.6-luna`) with reasoning effort `max`.
