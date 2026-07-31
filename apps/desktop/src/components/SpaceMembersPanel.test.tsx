@@ -1,16 +1,63 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   SpaceMemberEntry,
-  SpaceMembersState
+  SpaceMembersState,
+  UserProfile
 } from "../domain/types";
 import { SpaceMembersPanel } from "./SpaceMembersPanel";
 
+class MockIntersectionObserver {
+  static instances: MockIntersectionObserver[] = [];
+
+  private readonly callback: IntersectionObserverCallback;
+  private observedElement: Element | null = null;
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+    MockIntersectionObserver.instances.push(this);
+  }
+
+  observe(element: Element): void {
+    this.observedElement = element;
+  }
+
+  unobserve(_element: Element): void {}
+
+  disconnect(): void {}
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+
+  trigger(element = this.observedElement): void {
+    if (!element) {
+      return;
+    }
+    this.callback(
+      [
+        {
+          isIntersecting: true,
+          intersectionRatio: 1,
+          target: element
+        } as IntersectionObserverEntry
+      ],
+      this as unknown as IntersectionObserver
+    );
+  }
+}
+
+beforeEach(() => {
+  MockIntersectionObserver.instances = [];
+  vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+});
+
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 function member(
@@ -57,7 +104,119 @@ function state(overrides: Partial<SpaceMembersState> = {}): SpaceMembersState {
   };
 }
 
+function profile(userId: string, avatar: UserProfile["avatar"]): UserProfile {
+  return {
+    user_id: userId,
+    display_name: "Alice",
+    display_label: "Alice",
+    original_display_label: "Alice",
+    mention_search_terms: ["alice"],
+    avatar
+  };
+}
+
 describe("SpaceMembersPanel", () => {
+  it("closes the Space members panel and renders elevated role badges", () => {
+    const onClose = vi.fn();
+    render(
+      <SpaceMembersPanel
+        state={state({
+          space_joined: [
+            member("@administrator:example.invalid", "Ada", "space_joined", {
+              role: "administrator"
+            }),
+            member("@creator:example.invalid", "Cora", "space_joined", {
+              role: "creator"
+            })
+          ],
+          space_invited: [],
+          child_room_only: []
+        })}
+        canInvite={true}
+        onClose={onClose}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Space members" }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Administrator")).toBeTruthy();
+    expect(screen.getByText("Creator")).toBeTruthy();
+  });
+
+  it("renders a ready cached avatar and keeps deterministic initials after image failure", () => {
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        profileUsers={{
+          "@alice:example.invalid": profile("@alice:example.invalid", {
+            mxc_uri: "mxc://example.invalid/alice-avatar",
+            thumbnail: {
+              kind: "ready",
+              source_url: "asset://alice-avatar",
+              width: null,
+              height: null,
+              mime_type: null
+            }
+          }),
+          "@bob:example.invalid": profile("@bob:example.invalid", {
+            mxc_uri: "mxc://example.invalid/bob-avatar",
+            thumbnail: {
+              kind: "failed",
+              request_id: 7,
+              failureKind: "network"
+            }
+          })
+        }}
+      />
+    );
+
+    const avatar = screen.getByRole("img", { name: "" });
+    const image = avatar.querySelector("img");
+    expect(image?.getAttribute("src")).toBe("asset://alice-avatar");
+    expect(screen.getByText("BO")).toBeTruthy();
+
+    fireEvent.error(image!);
+    expect(screen.getByText("AL")).toBeTruthy();
+  });
+
+  it("requests an unresolved avatar only once after its row becomes visible", () => {
+    const onRequestAvatarThumbnail = vi.fn();
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onRequestAvatarThumbnail={onRequestAvatarThumbnail}
+        profileUsers={{
+          "@alice:example.invalid": profile("@alice:example.invalid", {
+            mxc_uri: "mxc://example.invalid/alice-avatar",
+            thumbnail: { kind: "notRequested" }
+          })
+        }}
+      />
+    );
+
+    expect(onRequestAvatarThumbnail).not.toHaveBeenCalled();
+    const row = screen.getByText("Alice").closest("li");
+    expect(row).not.toBeNull();
+    expect(MockIntersectionObserver.instances).toHaveLength(1);
+
+    MockIntersectionObserver.instances[0]?.trigger(row);
+    MockIntersectionObserver.instances[0]?.trigger(row);
+
+    expect(onRequestAvatarThumbnail).toHaveBeenCalledTimes(1);
+    expect(onRequestAvatarThumbnail).toHaveBeenCalledWith(
+      "mxc://example.invalid/alice-avatar"
+    );
+  });
+
   it("renders the classified sections in Space, pending, then child-room order", () => {
     render(
       <SpaceMembersPanel

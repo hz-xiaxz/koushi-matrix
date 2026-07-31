@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import type { SpaceMemberEntry, SpaceMembersState } from "../domain/types";
+import type { SpaceMemberEntry, SpaceMembersState, UserProfile } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
 import { t } from "../i18n/messages";
-import type { OpenContextMenu } from "../app/uiShared";
+import { ICON_SIZE, type OpenContextMenu } from "../app/uiShared";
 import { ImeTextField } from "./ImeTextControl";
+import { EntityAvatar } from "./Shell";
 
 export type SpaceInviteAvailabilityReason =
   | "available"
@@ -16,6 +18,9 @@ export type SpaceInviteAvailabilityReason =
 export interface SpaceMembersPanelProps {
   state: SpaceMembersState;
   canInvite: boolean;
+  onClose?: () => void;
+  profileUsers?: Record<string, UserProfile>;
+  onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void>;
   childRoomLabels?: ReadonlyMap<string, string>;
   onInviteUser: (userId: string) => void;
   onOpenProfile: (userId: string) => void;
@@ -34,6 +39,17 @@ function memberInitials(entry: SpaceMemberEntry): string {
   const words = entry.display_label.trim().split(/\s+/).filter(Boolean);
   const initials = words.length > 1 ? `${words[0]?.[0] ?? ""}${words[1]?.[0] ?? ""}` : words[0]?.slice(0, 2);
   return (initials || "?").toUpperCase();
+}
+
+function memberRoleLabel(role: SpaceMemberEntry["role"]): string | null {
+  switch (role) {
+    case "creator":
+      return t("room.roleCreator");
+    case "administrator":
+      return t("room.roleAdministrator");
+    default:
+      return null;
+  }
 }
 
 function matchesSearch(entry: SpaceMemberEntry, query: string): boolean {
@@ -95,6 +111,9 @@ function childRoomContext(
 export function SpaceMembersPanel({
   state,
   canInvite,
+  onClose = () => undefined,
+  profileUsers = {},
+  onRequestAvatarThumbnail,
   childRoomLabels = new Map<string, string>(),
   onInviteUser,
   onOpenProfile,
@@ -103,6 +122,7 @@ export function SpaceMembersPanel({
   inviteAvailabilityReason
 }: SpaceMembersPanelProps) {
   const [query, setQuery] = useState("");
+  const panelRef = useRef<HTMLElement | null>(null);
   const sections = useMemo<SpaceMembersSection[]>(
     () => [
       {
@@ -159,7 +179,11 @@ export function SpaceMembersPanel({
   ]);
 
   return (
-    <section className="space-members-panel" aria-labelledby="space-members-title">
+    <section
+      className="space-members-panel"
+      ref={panelRef}
+      aria-labelledby="space-members-title"
+    >
       <header className="space-members-header">
         <h2 id="space-members-title">{t("spaceMembers.title")}</h2>
         <span className="space-members-count" aria-label={t("spaceMembers.joinedCount", {
@@ -167,6 +191,14 @@ export function SpaceMembersPanel({
         })}>
           {state.space_joined.length}
         </span>
+        <button
+          className="icon-button space-members-close"
+          type="button"
+          aria-label={t("action.close", { title: t("spaceMembers.title") })}
+          onClick={onClose}
+        >
+          <X size={ICON_SIZE.control} />
+        </button>
       </header>
 
       <div className="space-members-search" role="search">
@@ -209,82 +241,22 @@ export function SpaceMembersPanel({
             {section.entries.length > 0 ? (
               <ul className="space-members-list" aria-label={section.label}>
                 {section.entries.map((entry) => (
-                  <li
-                    className="space-members-row"
-                    data-user-id={entry.user_id}
+                  <SpaceMemberRow
                     key={entry.user_id}
-                    onContextMenu={(event) => {
-                      if (
-                        section.id !== "child-only" ||
-                        !onOpenContextMenu ||
-                        !state.selected_space_id
-                      ) {
-                        return;
-                      }
-                      onOpenContextMenu(
-                        event,
-                        {
-                          kind: "spaceMember",
-                          spaceId: state.selected_space_id,
-                          userId: entry.user_id,
-                          generation: state.generation
-                        },
-                        contextMenuItems({
-                          kind: "spaceMember",
-                          spaceId: state.selected_space_id,
-                          userId: entry.user_id,
-                          generation: state.generation,
-                          canInvite,
-                          invitePending: entry.invite_pending,
-                          operationPending: hasPendingOperation(state)
-                        })
-                      );
-                    }}
-                  >
-                    <button
-                      className="space-members-row-main"
-                      type="button"
-                      aria-label={t("people.openProfile", { name: entry.display_label })}
-                      onClick={() => onOpenProfile(entry.user_id)}
-                    >
-                      <span className="space-members-avatar" aria-hidden="true">
-                        {memberInitials(entry)}
-                      </span>
-                      <span className="space-members-row-text">
-                        <span className="space-members-name" dir="auto">
-                          {entry.display_label}
-                        </span>
-                        {section.id === "child-only" && entry.child_room_ids.length > 0 ? (
-                          <span className="space-members-meta" dir="auto">
-                            {childRoomContext(entry, childRoomLabels)}
-                          </span>
-                        ) : null}
-                      </span>
-                    </button>
-                    {section.id === "child-only" ? (
-                      <button
-                        className="space-members-invite"
-                        type="button"
-                        aria-label={t("spaceMembers.invite")}
-                        disabled={inviteIsDisabled(state, entry, canInvite)}
-                        onClick={() => {
-                          onDiagnostic?.(
-                            `invite trigger=inline availability_reason=${inviteAvailabilityReasonForEntry(
-                              state,
-                              entry,
-                              canInvite,
-                              inviteAvailabilityReason
-                            )}`
-                          );
-                          onInviteUser(entry.user_id);
-                        }}
-                      >
-                        {entry.invite_pending
-                          ? t("spaceMembers.invitePending")
-                          : t("spaceMembers.invite")}
-                      </button>
-                    ) : null}
-                  </li>
+                    entry={entry}
+                    sectionId={section.id}
+                    state={state}
+                    canInvite={canInvite}
+                    childRoomLabels={childRoomLabels}
+                    profileUsers={profileUsers}
+                    avatarViewportRef={panelRef}
+                    onInviteUser={onInviteUser}
+                    onOpenProfile={onOpenProfile}
+                    onOpenContextMenu={onOpenContextMenu}
+                    onDiagnostic={onDiagnostic}
+                    inviteAvailabilityReason={inviteAvailabilityReason}
+                    onRequestAvatarThumbnail={onRequestAvatarThumbnail}
+                  />
                 ))}
               </ul>
             ) : null}
@@ -298,5 +270,160 @@ export function SpaceMembersPanel({
         </p>
       ) : null}
     </section>
+  );
+}
+
+interface SpaceMemberRowProps {
+  entry: SpaceMemberEntry;
+  sectionId: SpaceMembersSection["id"];
+  state: SpaceMembersState;
+  canInvite: boolean;
+  childRoomLabels: ReadonlyMap<string, string>;
+  profileUsers: Record<string, UserProfile>;
+  avatarViewportRef: RefObject<Element | null>;
+  onInviteUser: (userId: string) => void;
+  onOpenProfile: (userId: string) => void;
+  onOpenContextMenu?: OpenContextMenu;
+  onDiagnostic?: (message: string) => void;
+  inviteAvailabilityReason?: SpaceInviteAvailabilityReason;
+  onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void>;
+}
+
+function SpaceMemberRow({
+  entry,
+  sectionId,
+  state,
+  canInvite,
+  childRoomLabels,
+  profileUsers,
+  avatarViewportRef,
+  onInviteUser,
+  onOpenProfile,
+  onOpenContextMenu,
+  onDiagnostic,
+  inviteAvailabilityReason,
+  onRequestAvatarThumbnail
+}: SpaceMemberRowProps) {
+  const rowRef = useRef<HTMLLIElement>(null);
+  const requestedAvatarUriRef = useRef<string | null>(null);
+  const avatar = profileUsers[entry.user_id]?.avatar ?? null;
+
+  useEffect(() => {
+    if (
+      !onRequestAvatarThumbnail ||
+      !avatar ||
+      avatar.thumbnail.kind !== "notRequested" ||
+      !rowRef.current ||
+      requestedAvatarUriRef.current === avatar.mxc_uri ||
+      typeof IntersectionObserver === "undefined"
+    ) {
+      return;
+    }
+
+    const row = rowRef.current;
+    const mxcUri = avatar.mxc_uri;
+    const avatarViewport = avatarViewportRef.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          requestedAvatarUriRef.current === mxcUri ||
+          !entries.some((entry) => entry.isIntersecting)
+        ) {
+          return;
+        }
+        requestedAvatarUriRef.current = mxcUri;
+        observer.disconnect();
+        void onRequestAvatarThumbnail(mxcUri);
+      },
+      { root: avatarViewport }
+    );
+    observer.observe(row);
+
+    return () => observer.disconnect();
+  }, [avatar?.mxc_uri, avatar?.thumbnail.kind, avatarViewportRef, onRequestAvatarThumbnail]);
+
+  const roleLabel = memberRoleLabel(entry.role);
+
+  return (
+    <li
+      ref={rowRef}
+      className="space-members-row"
+      data-user-id={entry.user_id}
+      onContextMenu={(event) => {
+        if (sectionId !== "child-only" || !onOpenContextMenu || !state.selected_space_id) {
+          return;
+        }
+        onOpenContextMenu(
+          event,
+          {
+            kind: "spaceMember",
+            spaceId: state.selected_space_id,
+            userId: entry.user_id,
+            generation: state.generation
+          },
+          contextMenuItems({
+            kind: "spaceMember",
+            spaceId: state.selected_space_id,
+            userId: entry.user_id,
+            generation: state.generation,
+            canInvite,
+            invitePending: entry.invite_pending,
+            operationPending: hasPendingOperation(state)
+          })
+        );
+      }}
+    >
+      <button
+        className="space-members-row-main"
+        type="button"
+        aria-label={t("people.openProfile", { name: entry.display_label })}
+        onClick={() => onOpenProfile(entry.user_id)}
+      >
+        <span
+          className="space-members-avatar"
+          role={avatar?.thumbnail.kind === "ready" ? "img" : undefined}
+          aria-label={avatar?.thumbnail.kind === "ready" ? "" : undefined}
+        >
+          <EntityAvatar
+            avatar={avatar}
+            className="space-members-avatar-content"
+            colorSeed={entry.user_id}
+            fallback={memberInitials(entry)}
+          />
+        </span>
+        <span className="space-members-row-text">
+          <span className="space-members-name" dir="auto">
+            {entry.display_label}
+            {roleLabel ? <span className="space-members-role">{roleLabel}</span> : null}
+          </span>
+          {sectionId === "child-only" && entry.child_room_ids.length > 0 ? (
+            <span className="space-members-meta" dir="auto">
+              {childRoomContext(entry, childRoomLabels)}
+            </span>
+          ) : null}
+        </span>
+      </button>
+      {sectionId === "child-only" ? (
+        <button
+          className="space-members-invite"
+          type="button"
+          aria-label={t("spaceMembers.invite")}
+          disabled={inviteIsDisabled(state, entry, canInvite)}
+          onClick={() => {
+            onDiagnostic?.(
+              `invite trigger=inline availability_reason=${inviteAvailabilityReasonForEntry(
+                state,
+                entry,
+                canInvite,
+                inviteAvailabilityReason
+              )}`
+            );
+            onInviteUser(entry.user_id);
+          }}
+        >
+          {entry.invite_pending ? t("spaceMembers.invitePending") : t("spaceMembers.invite")}
+        </button>
+      ) : null}
+    </li>
   );
 }

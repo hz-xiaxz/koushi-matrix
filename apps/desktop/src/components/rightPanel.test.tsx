@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type {
   DesktopSnapshot,
@@ -10,9 +10,41 @@ import type {
   RoomSummary,
   SpaceMemberEntry,
   SpaceMembersState,
-  SpaceSummary
+  SpaceSummary,
+  UserProfile
 } from "../domain/types";
 import { ContextualRightPanel } from "./rightPanel";
+
+class MockIntersectionObserver {
+  static callback: IntersectionObserverCallback | null = null;
+
+  constructor(callback: IntersectionObserverCallback) {
+    MockIntersectionObserver.callback = callback;
+  }
+
+  observe(_element: Element): void {}
+
+  unobserve(_element: Element): void {}
+
+  disconnect(): void {}
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+
+  static trigger(element: Element): void {
+    MockIntersectionObserver.callback?.(
+      [
+        {
+          isIntersecting: true,
+          intersectionRatio: 1,
+          target: element
+        } as IntersectionObserverEntry
+      ],
+      {} as IntersectionObserver
+    );
+  }
+}
 
 const room: RoomSummary = {
   room_id: "!room-alpha:example.invalid",
@@ -170,7 +202,13 @@ const defaultProps = {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  MockIntersectionObserver.callback = null;
+  vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 });
 
 function renderPanel(overrides: Partial<RightPanelProps> = {}) {
@@ -178,6 +216,124 @@ function renderPanel(overrides: Partial<RightPanelProps> = {}) {
 }
 
 describe("ContextualRightPanel people composition", () => {
+  test("forwards Space presentation data and the close action", () => {
+    const onClosePanel = vi.fn();
+    const administratorId = "@space-administrator:example.invalid";
+    const presentationSnapshot = {
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          profile: {
+            ignored_user_ids: [],
+            users: {
+              [administratorId]: {
+                user_id: administratorId,
+                display_name: "Space member",
+                display_label: "Space member",
+                original_display_label: "Space member",
+                mention_search_terms: ["space", "member"],
+                avatar: {
+                  mxc_uri: "mxc://example.invalid/space-member-avatar",
+                  thumbnail: {
+                    kind: "ready",
+                    source_url: "asset://space-member-avatar",
+                    width: null,
+                    height: null,
+                    mime_type: null
+                  }
+                }
+              } satisfies UserProfile
+            }
+          },
+          space_members: {
+            ...spaceMembers,
+            space_joined: [
+              spaceMember(administratorId, "Space member", "space_joined", {
+                role: "administrator"
+              }),
+              spaceMember("@space-creator:example.invalid", "Space creator", "space_joined", {
+                role: "creator"
+              })
+            ],
+            child_room_only: []
+          }
+        }
+      }
+    } as unknown as DesktopSnapshot;
+
+    renderPanel({
+      snapshot: presentationSnapshot,
+      peoplePanelScope: { kind: "space", spaceId: space.space_id },
+      onClosePanel
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Space members" }));
+
+    expect(onClosePanel).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Administrator")).toBeTruthy();
+    expect(screen.getByText("Creator")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "" }).querySelector("img")?.getAttribute("src")).toBe(
+      "asset://space-member-avatar"
+    );
+  });
+
+  test("forwards visibility-triggered Space avatar thumbnail requests", () => {
+    const onRequestMemberAvatarThumbnail = vi.fn();
+    const administratorId = "@space-administrator:example.invalid";
+    const requestSnapshot = {
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          profile: {
+            ignored_user_ids: [],
+            users: {
+              [administratorId]: {
+                user_id: administratorId,
+                display_name: "Space member",
+                display_label: "Space member",
+                original_display_label: "Space member",
+                mention_search_terms: ["space", "member"],
+                avatar: {
+                  mxc_uri: "mxc://example.invalid/space-member-avatar",
+                  thumbnail: { kind: "notRequested" }
+                }
+              } satisfies UserProfile
+            }
+          },
+          space_members: {
+            ...spaceMembers,
+            space_joined: [
+              spaceMember(administratorId, "Space member", "space_joined", {
+                role: "administrator"
+              })
+            ],
+            child_room_only: []
+          }
+        }
+      }
+    } as unknown as DesktopSnapshot;
+
+    renderPanel({
+      snapshot: requestSnapshot,
+      peoplePanelScope: { kind: "space", spaceId: space.space_id },
+      onRequestMemberAvatarThumbnail
+    });
+
+    expect(onRequestMemberAvatarThumbnail).not.toHaveBeenCalled();
+    const row = screen.getByText("Space member").closest("li");
+    expect(row).not.toBeNull();
+    MockIntersectionObserver.trigger(row!);
+
+    expect(onRequestMemberAvatarThumbnail).toHaveBeenCalledTimes(1);
+    expect(onRequestMemberAvatarThumbnail).toHaveBeenCalledWith(
+      "mxc://example.invalid/space-member-avatar"
+    );
+  });
+
   test("renders SpaceMembersPanel for a Space scope and forwards Space callbacks", () => {
     const onInviteUserToSpace = vi.fn();
     const onOpenProfile = vi.fn();

@@ -91,6 +91,7 @@ export function ContextualRightPanel({
   onOpenSpaceMembers,
   onOpenContextMenu,
   onDiagnostic,
+  onRequestMemberAvatarThumbnail,
   spaceInviteAvailabilityReason,
   onOpenPeople: _onOpenPeople,
   onOpenProfile,
@@ -527,6 +528,9 @@ export function ContextualRightPanel({
           <SpaceMembersPanel
             state={snapshot.state.domain.space_members}
             canInvite={canInviteToSpace}
+            onClose={onClosePanel}
+            profileUsers={snapshot.state.domain.profile.users}
+            onRequestAvatarThumbnail={onRequestMemberAvatarThumbnail}
             childRoomLabels={childRoomLabels}
             onInviteUser={onInviteUserToSpace}
             onOpenProfile={onOpenProfile ?? (() => undefined)}
