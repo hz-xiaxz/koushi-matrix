@@ -178,23 +178,95 @@ pub(crate) fn handle_background_projection_reconciled(
         || state.space_members.generation != generation
         || projection.space_id != space_id
         || projection.generation != generation
-        || !matches!(
-            state.space_members.operation,
-            SpaceMembersOperationState::Idle | SpaceMembersOperationState::Inviting { .. }
+        || !background_reconciliation_operation_matches(
+            &state.space_members.operation,
+            &space_id,
+            generation,
         )
     {
         return Vec::new();
     }
 
-    let pending = pending_operation(state);
+    let operation = state.space_members.operation.clone();
     let mut effects = super::profile::handle_user_profiles_updated(state, profiles);
-    let authoritative = apply_reconciled_projection_during_invite(state, projection);
-    if pending.is_some() && authoritative {
-        state.space_members.operation = SpaceMembersOperationState::Idle;
+    match operation {
+        SpaceMembersOperationState::Idle => {
+            apply_reconciled_projection_during_invite(state, projection);
+        }
+        SpaceMembersOperationState::Inviting { .. } => {
+            if apply_reconciled_projection_during_invite(state, projection) {
+                state.space_members.operation = SpaceMembersOperationState::Idle;
+            }
+        }
+        SpaceMembersOperationState::Failed {
+            user_id: Some(user_id),
+            ..
+        } => {
+            if apply_failed_invite_background_projection(state, projection, &user_id) {
+                state.space_members.operation = SpaceMembersOperationState::Idle;
+            }
+        }
+        SpaceMembersOperationState::Failed { user_id: None, .. } => {
+            if apply_failed_load_background_projection(state, projection) {
+                state.space_members.operation = SpaceMembersOperationState::Idle;
+            }
+        }
+        SpaceMembersOperationState::Loading { .. } => unreachable!(
+            "background Space member projections are fenced while an explicit load is active"
+        ),
     }
     let _ = request_id;
     effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
     effects
+}
+
+fn apply_failed_invite_background_projection(
+    state: &mut AppState,
+    projection: SpaceMembersProjection,
+    failed_user_id: &str,
+) -> bool {
+    let failed_entry = state
+        .space_members
+        .all_entries()
+        .find(|entry| entry.user_id == failed_user_id)
+        .cloned()
+        .unwrap_or_else(|| fallback_entry(failed_user_id, SpaceMemberMembership::ChildRoomOnly));
+    let mut resolved = resolve_space_members_projection(projection, &state.profile);
+    let authoritative = resolved
+        .space_joined
+        .iter()
+        .chain(resolved.space_invited.iter())
+        .any(|entry| entry.user_id == failed_user_id);
+    if resolved.incomplete_child_room_count > 0 {
+        merge_incomplete_projection(&state.space_members, &mut resolved);
+    }
+    if !authoritative {
+        remove_projection_entry(&mut resolved, failed_user_id);
+        let mut failed_entry = failed_entry;
+        failed_entry.membership = SpaceMemberMembership::ChildRoomOnly;
+        failed_entry.invite_pending = false;
+        resolved.child_room_only.push(failed_entry);
+    }
+    sort_projection(&mut resolved);
+    apply_projection(&mut state.space_members, resolved);
+    if !authoritative {
+        refresh_space_member_display_projection(&mut state.space_members, &state.profile);
+    }
+    authoritative
+}
+
+fn apply_failed_load_background_projection(
+    state: &mut AppState,
+    projection: SpaceMembersProjection,
+) -> bool {
+    let mut resolved = resolve_space_members_projection(projection, &state.profile);
+    let complete = resolved.incomplete_child_room_count == 0;
+    if !complete {
+        merge_incomplete_projection(&state.space_members, &mut resolved);
+    }
+    sort_projection(&mut resolved);
+    apply_projection(&mut state.space_members, resolved);
+    complete
 }
 
 fn apply_reconciled_projection_during_invite(
@@ -418,6 +490,27 @@ fn operation_matches_request(state: &AppState, request_id: u64) -> bool {
                 ..
             } if active_request_id == request_id
     )
+}
+
+fn background_reconciliation_operation_matches(
+    operation: &SpaceMembersOperationState,
+    space_id: &str,
+    generation: u64,
+) -> bool {
+    match operation {
+        SpaceMembersOperationState::Idle => true,
+        SpaceMembersOperationState::Inviting {
+            space_id: operation_space_id,
+            generation: operation_generation,
+            ..
+        }
+        | SpaceMembersOperationState::Failed {
+            space_id: operation_space_id,
+            generation: operation_generation,
+            ..
+        } => operation_space_id == space_id && *operation_generation == generation,
+        SpaceMembersOperationState::Loading { .. } => false,
+    }
 }
 
 fn pending_operation(state: &AppState) -> Option<(u64, String, String, u64)> {

@@ -998,11 +998,16 @@ impl RoomActor {
         space_id: String,
         generation: u64,
     ) {
-        // A new explicit load supersedes any sync-driven demand. The state
-        // action still carries the request/Space/generation fences, while the
-        // actor fence prevents an older detached refresh from installing a
-        // demand for the previous Space.
-        self.clear_space_member_demand();
+        // Keep a same-Space/generation demand installed while this explicit
+        // load is in flight so a failed retry cannot lose sync refreshes. A
+        // different demand still supersedes the previous Space immediately.
+        if should_clear_space_member_demand(
+            self.space_member_demand.as_ref(),
+            &space_id,
+            generation,
+        ) {
+            self.clear_space_member_demand();
+        }
         let Some(session) = self.session.clone() else {
             let kind = OperationFailureKind::Sdk;
             self.reduce_reliable(vec![AppAction::SpaceMembersLoadFailed {
@@ -4074,6 +4079,14 @@ fn space_members_update_affects_demand(
     })
 }
 
+fn should_clear_space_member_demand(
+    demand: Option<&SpaceMemberDemand>,
+    space_id: &str,
+    generation: u64,
+) -> bool {
+    demand.is_some_and(|demand| demand.space_id != space_id || demand.generation != generation)
+}
+
 fn space_members_refresh_is_current(
     result_space_id: &str,
     result_generation: u64,
@@ -4977,6 +4990,37 @@ pub mod tests {
         assert!(!space_members_refresh_is_current(
             "!old-space:example.invalid",
             4,
+            "!space:example.invalid",
+            4,
+        ));
+    }
+
+    #[test]
+    fn space_member_reload_clears_only_a_different_demand() {
+        let demand = SpaceMemberDemand {
+            space_id: "!space:example.invalid".to_owned(),
+            generation: 4,
+            child_room_ids: BTreeSet::new(),
+            demand_generation: 1,
+        };
+
+        assert!(!should_clear_space_member_demand(
+            Some(&demand),
+            "!space:example.invalid",
+            4,
+        ));
+        assert!(should_clear_space_member_demand(
+            Some(&demand),
+            "!other-space:example.invalid",
+            4,
+        ));
+        assert!(should_clear_space_member_demand(
+            Some(&demand),
+            "!space:example.invalid",
+            5,
+        ));
+        assert!(!should_clear_space_member_demand(
+            None,
             "!space:example.invalid",
             4,
         ));

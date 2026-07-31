@@ -213,6 +213,220 @@ fn background_projection_settles_an_invite_when_authoritative_invite_or_join_app
 }
 
 #[test]
+fn failed_invite_background_projection_moves_authoritative_user_and_clears_failure() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 60,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoaded {
+            request_id: 60,
+            projection: projection(2, vec![child_only_entry()]),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteRequested {
+            request_id: 61,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteSettled {
+            request_id: 61,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+            outcome: SpaceMemberInviteOutcome::Failed(OperationFailureKind::Network),
+        },
+    );
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id: 62,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            projection: SpaceMembersProjection {
+                space_joined: vec![space_entry(SpaceMemberMembership::SpaceJoined)],
+                ..projection(2, Vec::new())
+            },
+            profiles: Vec::new(),
+        },
+    );
+
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Idle
+    ));
+    assert_eq!(state.space_members.space_joined.len(), 1);
+    assert!(state.space_members.space_invited.is_empty());
+    assert!(state.space_members.child_room_only.is_empty());
+}
+
+#[test]
+fn failed_invite_background_projection_keeps_failed_child_only_retry_state() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 63,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoaded {
+            request_id: 63,
+            projection: projection(2, vec![child_only_entry()]),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteRequested {
+            request_id: 64,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteSettled {
+            request_id: 64,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+            outcome: SpaceMemberInviteOutcome::Failed(OperationFailureKind::Forbidden),
+        },
+    );
+
+    let mut refreshed_entry = child_only_entry();
+    refreshed_entry.user_id = "@refreshed:example.invalid".to_owned();
+    refreshed_entry.display_label = "Refreshed child".to_owned();
+    refreshed_entry.original_display_label = "Refreshed child".to_owned();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id: 65,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            projection: projection(2, vec![refreshed_entry]),
+            profiles: Vec::new(),
+        },
+    );
+
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Failed {
+            user_id: Some(ref failed_user),
+            ..
+        } if failed_user == USER_ID
+    ));
+    assert_eq!(
+        state
+            .space_members
+            .child_room_only
+            .iter()
+            .map(|entry| entry.user_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![USER_ID, "@refreshed:example.invalid"]
+    );
+}
+
+#[test]
+fn failed_member_load_accepts_complete_background_projection_and_clears_failure() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 66,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadFailed {
+            request_id: 66,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            kind: OperationFailureKind::Sdk,
+        },
+    );
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id: 67,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            projection: projection(2, vec![child_only_entry()]),
+            profiles: Vec::new(),
+        },
+    );
+
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Idle
+    ));
+    assert_eq!(state.space_members.child_room_only.len(), 1);
+}
+
+#[test]
+fn failed_member_load_keeps_failure_for_incomplete_background_projection() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 68,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadFailed {
+            request_id: 68,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            kind: OperationFailureKind::Network,
+        },
+    );
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersBackgroundProjectionReconciled {
+            request_id: 69,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            projection: SpaceMembersProjection {
+                incomplete_child_room_count: 1,
+                complete_child_room_count: 0,
+                ..projection(2, vec![child_only_entry()])
+            },
+            profiles: Vec::new(),
+        },
+    );
+
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Failed { user_id: None, .. }
+    ));
+    assert_eq!(state.space_members.child_room_only.len(), 1);
+}
+
+#[test]
 fn background_projection_preserves_last_known_entries_when_child_scope_is_incomplete() {
     let mut state = ready_state();
     reduce(
