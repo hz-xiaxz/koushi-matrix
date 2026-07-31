@@ -464,6 +464,11 @@ Rules:
    another room update may never arrive to replay it. SyncService response
    identity combines subscription generation with the room event-cache
    observation sequence; one subscription generation spans many responses.
+   Causal projection tags embedded in SDK vector diffs are actor-owned:
+   `run_diff_relay` must remove tags whose actor generation differs from the
+   relay owner before queue diagnostics or mailbox delivery. The actor-side
+   operation correlation fence remains required for current-generation
+   mismatches.
    The SDK serializes process-local response sequence assignment and room
    update publication in one critical section, then advances the retained
    global commit fence only after event-cache handling completes. Legacy

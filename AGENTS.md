@@ -2193,9 +2193,20 @@ the implementation plan is
   persisted gap. Explicit no-update/no-gap closes the intent; stale descriptors
   get one authoritative re-inspection. Relay/render settlement fences must be
   bounded and recover through authoritative resync while retaining queued work.
+  SDK diff projection tags from a superseded timeline actor generation are
+  discarded at the relay boundary before `relay_received=queued`; keep
+  `rejected_operation` for current-actor correlation violations rather than
+  filling it with known-obsolete generation noise.
   A legacy run must carry the SDK response sequence of its first successful
   response and reject retained observations from earlier responses plus
   duplicate per-room commit sequences.
+- In-session room re-entry freezes anchor eligibility against the first
+  `InitialItems` window. A later historical prepend may not turn an initially
+  absent session anchor into a restore target. When user scroll input is still
+  pending and the DOM is actually at bottom, record live-edge even if the event
+  matches a recent programmatic-write signature. The one-shot
+  `timeline.scroll stage=room_reentry_restore` diagnostic is private-data-free:
+  session mode, age bucket, anchor-live verdict, and path only.
 - The focused deterministic gate is
   `cargo test -p koushi-core --lib timeline_actor_waits_for_current_subscription_checkpoint_before_live_edge_repair`.
   The local `timeline_reconnect` stage additionally unsubscribes A, sends 21
