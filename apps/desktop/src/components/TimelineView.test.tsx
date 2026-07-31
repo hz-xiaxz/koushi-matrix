@@ -6128,6 +6128,63 @@ describe("TimelineView", () => {
     });
   });
 
+  it("falls back to the room timeline sender label for reaction previews", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [
+              {
+                ...message("$reacted-without-label", "Reacted message"),
+                reactions: [
+                  {
+                    key: "👍",
+                    count: 1,
+                    reacted_by_me: false,
+                    my_reaction_event_id: null,
+                    sender_preview: [
+                      { user_id: "@xuanzhe:example.invalid", display_label: null }
+                    ]
+                  }
+                ]
+              },
+              {
+                ...message("$sender-label", "Xuanzhe's message"),
+                sender: "@xuanzhe:example.invalid",
+                sender_label: "Xuanzhe Xia"
+              }
+            ]
+          }
+        }
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Xuanzhe Xia reacted with 👍")).toBeTruthy();
+    });
+  });
+
   it("places reactions and read receipts in one status row", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({

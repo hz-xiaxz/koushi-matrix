@@ -2698,6 +2698,26 @@ export const TimelineView = memo(function TimelineView({
     "Thread" in timelineKey.kind ? timelineKey.kind.Thread.root_event_id : null;
   const items = getItems(store, timelineKey);
   const timelineStoreKey = useMemo(() => timelineStoreKeyId(timelineKey), [timelineKeyHash]);
+  // A reaction preview can omit its display label even when the sender is
+  // already represented in this room's timeline. Keep a room-scoped fallback
+  // so the tooltip does not regress to "Unknown user" while profile data
+  // catches up.
+  const reactionSenderLabelsByUserId = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const profile of Object.values(profileUsers)) {
+      const label = profile.display_label?.trim();
+      if (label) {
+        labels[profile.user_id] = label;
+      }
+    }
+    for (const item of items) {
+      const label = item.sender_label?.trim();
+      if (item.sender && label && !labels[item.sender]) {
+        labels[item.sender] = label;
+      }
+    }
+    return labels;
+  }, [items, profileUsers]);
   // The selector returns an array. Memoize it by the separately-owned map so
   // ordinary scroll/measurement renders keep the existing display-row
   // identity; otherwise an empty projection source would churn Task 4's
@@ -5749,6 +5769,7 @@ export const TimelineView = memo(function TimelineView({
                 onOpenMatrixTarget={onOpenMatrixTarget}
                 presence={item.sender ? liveSignals?.presence[item.sender] : undefined}
                 profile={item.sender ? profileUsers[item.sender] : undefined}
+                reactionSenderLabelsByUserId={reactionSenderLabelsByUserId}
                 avatarThumbnails={avatarThumbnails}
                 currentUserId={currentUserId}
                 ignoredUserIds={ignoredUserIds}
@@ -5930,6 +5951,7 @@ export function TimelineItemRow({
   onOpenMatrixTarget,
   presence,
   profile,
+  reactionSenderLabelsByUserId = {},
   avatarThumbnails = {},
   mentionProfileUsers = {},
   mentionCandidates = [],
@@ -5986,6 +6008,7 @@ export function TimelineItemRow({
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
   presence?: PresenceKind;
   profile?: UserProfile;
+  reactionSenderLabelsByUserId?: Readonly<Record<string, string>>;
   avatarThumbnails?: Record<string, AvatarThumbnailState>;
   mentionProfileUsers?: Record<string, UserProfile>;
   mentionCandidates?: MentionCandidate[];
@@ -6916,7 +6939,8 @@ export function TimelineItemRow({
                   const reactionTooltip = formatReactionTooltip(
                     reaction.key,
                     reaction.count,
-                    reaction.sender_preview
+                    reaction.sender_preview,
+                    reactionSenderLabelsByUserId
                   );
                   const pillKey = `${reaction.key}:${reaction.my_reaction_event_id ?? index}`;
                   if (!eventId) {
@@ -7712,13 +7736,14 @@ function receiptAvatarSource(receipt: LiveReadReceipt): string | null {
 function formatReactionTooltip(
   reactionKey: string,
   totalCount: number,
-  senderPreview: readonly ReactionSender[]
+  senderPreview: readonly ReactionSender[],
+  senderLabelsByUserId: Readonly<Record<string, string>> = {}
 ): string | null {
   if (totalCount <= 0) {
     return null;
   }
   const previewLabels = senderPreview.map((sender) =>
-    peopleFacingLabel(sender.display_label)
+    peopleFacingLabel(sender.display_label?.trim() || senderLabelsByUserId[sender.user_id] || null)
   );
   const overflowCount = Math.max(0, totalCount - previewLabels.length);
   const labels =
