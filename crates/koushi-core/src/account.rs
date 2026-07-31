@@ -2054,6 +2054,23 @@ impl AccountActor {
                     if generation != self.trust_generation {
                         continue;
                     }
+                    let settled_stage = match &result {
+                        Ok(koushi_state::CurrentDeviceTrustState::Verified) => {
+                            "trust_recheck_finished_verified"
+                        }
+                        Ok(koushi_state::CurrentDeviceTrustState::Unverified) => {
+                            "trust_recheck_finished_unverified"
+                        }
+                        Ok(koushi_state::CurrentDeviceTrustState::Unknown) => {
+                            "trust_recheck_finished_unknown"
+                        }
+                        Err(_) => "trust_recheck_finished_failed",
+                    };
+                    record_verification_admission_event(verification_admission_event(
+                        settled_stage,
+                        generation,
+                        0,
+                    ));
                     self.trust_recheck_task = None;
                     let replay_after_settlement = self.trust_recheck_pending;
                     self.trust_recheck_pending = false;
@@ -7928,6 +7945,11 @@ impl AccountActor {
     }
 
     fn request_authoritative_trust_recheck(&mut self) {
+        record_verification_admission_event(verification_admission_event(
+            "trust_recheck_requested",
+            self.trust_generation,
+            0,
+        ));
         self.trust_recheck_pending = true;
         self.start_authoritative_trust_recheck_if_idle(false);
     }
@@ -7953,6 +7975,11 @@ impl AccountActor {
         };
         self.trust_recheck_pending = false;
         let generation = self.trust_generation;
+        record_verification_admission_event(verification_admission_event(
+            "trust_recheck_started",
+            generation,
+            0,
+        ));
         let tx = self.self_tx.clone();
         self.trust_recheck_task = Some(executor::spawn(async move {
             let result = session.recheck_current_device_trust().await;
@@ -8530,8 +8557,14 @@ impl AccountActor {
                 .await;
             return;
         }
-        if matches!(self.pending_trust_transition, Some(PendingTrustTransition { generation: pending_generation, decision: TrustLifecycleDecision::Promote, .. }) if pending_generation == generation)
-        {
+        if matches!(
+            self.pending_trust_transition,
+            Some(PendingTrustTransition {
+                generation: pending_generation,
+                decision: TrustLifecycleDecision::Promote,
+                ..
+            }) if pending_generation == generation
+        ) {
             return;
         }
         let (Some(session), Some(key_id)) = (self.session.clone(), self.session_key_id.clone())
@@ -8667,8 +8700,17 @@ impl AccountActor {
             return;
         }
         if !trust_projection_ack_matches(pending, generation, transition_id, ready, locked) {
+            record_verification_admission_event(verification_admission_event(
+                "trust_projection_ack_mismatch",
+                generation,
+                transition_id,
+            ));
+            // An acknowledgement for this exact transition proves that its
+            // projection did not settle the reducer. It is obsolete whether
+            // the next explicit recheck demand arrived just before or just
+            // after this message, so never leave it blocking future queries.
+            self.pending_trust_transition = None;
             if self.trust_recheck_pending {
-                self.pending_trust_transition = None;
                 self.start_authoritative_trust_recheck_if_idle(false);
             }
             return;
@@ -13594,6 +13636,59 @@ mod tests {
         })
         .await
         .expect("a projection mismatch must replay the explicit reducer recheck");
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn projection_mismatch_before_explicit_recheck_does_not_block_later_query() {
+        let (homeserver, query_control) = spawn_counting_quarantine_password_server();
+        let (handle, mut action_rx) = login_gated_actor_at(homeserver).await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await;
+        let (generation, transition_id) = loop {
+            let actions = action_rx.recv().await.expect("account actions");
+            if let [
+                AppAction::AuthoritativeDeviceTrustChanged {
+                    generation,
+                    transition_id,
+                    trust: koushi_state::CurrentDeviceTrustState::Verified,
+                },
+            ] = actions.as_slice()
+            {
+                break (*generation, *transition_id);
+            }
+        };
+
+        handle
+            .send(AccountMessage::TrustProjectionApplied {
+                generation,
+                transition_id,
+                ready: false,
+                locked: false,
+            })
+            .await;
+        let baseline = query_control
+            .count
+            .load(std::sync::atomic::Ordering::SeqCst);
+        handle.send(AccountMessage::CheckCurrentDeviceTrust).await;
+
+        executor::timeout(Duration::from_secs(1), async {
+            while query_control
+                .count
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == baseline
+            {
+                executor::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("a prior projection mismatch must not block a later explicit recheck");
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
 

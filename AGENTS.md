@@ -2263,6 +2263,18 @@ the implementation plan is
   may satisfy the redundant demand. Clear pending demand on provisional-session
   teardown. Focused gates are `cargo test -p koushi-core --lib
   explicit_trust_recheck` plus the initial-promotion regression above.
+- A third #375 ordering appeared after the lossless-demand fix. The AppActor
+  could reduce a Ready projection while its reducer was still gated, deliver a
+  mismatching ack, and only then emit `CheckCurrentDeviceTrust`. The account
+  actor retained the mismatched transition when no demand was pending yet, so
+  that later recheck waited behind an ack that had already happened. An ack for
+  the exact generation/transition that does not reach Ready/Locked always makes
+  that transition obsolete: clear it whether demand arrived before or after
+  the ack, then start any already-pending query. The focused regression is
+  `cargo test -p koushi-core --lib
+  projection_mismatch_before_explicit_recheck_does_not_block_later_query`.
+  Headless login timeouts also include an allowlisted `trust_path` of stage
+  tokens only; read it before rerunning.
 - `complete_new_identity_gate_for_qa` also used to submit
   `ConfirmSessionBootstrapSaved` and return without observing its outcome, so a
   failed confirmation would have been indistinguishable from the stall above —
