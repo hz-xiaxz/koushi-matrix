@@ -80,6 +80,7 @@ import {
   applyTimelineEventWithProjectionResultAndRetention,
   createTimelineStore,
   pruneTimelineStore,
+  timelineStoreInitialItemsDiagnosticMessage,
   threadTimelineStoreDiagnosticMessage,
   timelineStoreKeyId,
   type TimelineStoreState
@@ -1432,6 +1433,7 @@ export function App() {
   const [reportReasonDraft, setReportReasonDraft] = useState("");
   const [timelineStore, setTimelineStore] = useState<TimelineStoreState>(createTimelineStore);
   const threadStoreDiagnosticSignaturesRef = useRef<Map<string, string>>(new Map());
+  const focusedStoreDiagnosticSignaturesRef = useRef<Map<string, string>>(new Map());
   const uiLatencyDiagnostics = useUiLatencyDiagnostics();
   const searchTimer = useRef<number | null>(null);
   const qaSendStarted = useRef(false);
@@ -1641,6 +1643,7 @@ export function App() {
     }
     timelineStoreSessionKeyRef.current = currentTimelineStoreSessionKey;
     threadStoreDiagnosticSignaturesRef.current.clear();
+    focusedStoreDiagnosticSignaturesRef.current.clear();
     setTimelineStore(createTimelineStore());
   }, [currentTimelineStoreSessionKey]);
 
@@ -2195,6 +2198,26 @@ export function App() {
             payload.event,
             retainedTimelineKeyIdsRef.current
           );
+          if (
+            "InitialItems" in payload.event &&
+            "Focused" in payload.event.InitialItems.key.kind
+          ) {
+            const message = timelineStoreInitialItemsDiagnosticMessage(
+              next,
+              applied.store,
+              payload.event.InitialItems,
+              retainedTimelineKeyIdsRef.current
+            );
+            const keyId = timelineStoreKeyId(payload.event.InitialItems.key);
+            if (focusedStoreDiagnosticSignaturesRef.current.get(keyId) !== message) {
+              focusedStoreDiagnosticSignaturesRef.current.set(keyId, message);
+              appendDiagnosticLog({
+                timestampMs: Date.now(),
+                source: "timeline.store",
+                message
+              });
+            }
+          }
           if (
             "ItemsUpdated" in payload.event &&
             "Thread" in payload.event.ItemsUpdated.key.kind

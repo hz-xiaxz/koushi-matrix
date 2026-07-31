@@ -1205,8 +1205,35 @@ export function timelineKeyRoomId(key: TimelineKey): string {
   return key.kind.Focused.room_id;
 }
 
+/**
+ * Canonical semantic identity for a timeline key.
+ *
+ * Timeline keys cross the Rust -> JavaScript wire and are also constructed in
+ * the UI. JSON object field order is not part of their identity, so callers
+ * must not use JSON.stringify(key) directly for equality or Map keys.
+ */
+export function timelineKeyIdentity(key: TimelineKey): string {
+  if ("Room" in key.kind) {
+    return JSON.stringify([key.account_key, "Room", key.kind.Room.room_id]);
+  }
+  if ("Thread" in key.kind) {
+    return JSON.stringify([
+      key.account_key,
+      "Thread",
+      key.kind.Thread.room_id,
+      key.kind.Thread.root_event_id
+    ]);
+  }
+  return JSON.stringify([
+    key.account_key,
+    "Focused",
+    key.kind.Focused.room_id,
+    key.kind.Focused.event_id
+  ]);
+}
+
 export function timelineKeyEquals(a: TimelineKey, b: TimelineKey): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return timelineKeyIdentity(a) === timelineKeyIdentity(b);
 }
 
 export function roomTimelineKey(accountKey: string, roomId: string): TimelineKey {

@@ -2012,6 +2012,162 @@ describe("TimelineView", () => {
     );
   });
 
+  it("emits privacy-safe focused store lookup and event-key mismatch diagnostics", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const onDiagnosticLogEntry = vi.fn();
+    const focusedKey = focusedTimelineKey(
+      "@alice:example.invalid",
+      "!room:example.invalid",
+      "$target:example.invalid"
+    );
+    const otherKey = focusedTimelineKey(
+      "@alice:example.invalid",
+      "!room:example.invalid",
+      "$other:example.invalid"
+    );
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+
+    render(
+      <TimelineView
+        timelineKey={focusedKey}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+        onDiagnosticLogEntry={onDiagnosticLogEntry}
+        timelineStore={createTimelineStore()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(onDiagnosticLogEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "timeline.store",
+          message: expect.stringContaining(
+            "stage=lookup kind=focused"
+          ) as unknown as string
+        })
+      );
+    });
+
+    emit({
+      kind: "Timeline",
+      event: {
+        InitialItems: {
+          request_id: { connection_id: 9, sequence: 1 },
+          key: otherKey,
+          actor_generation: 1,
+          generation: 1,
+          items: []
+        }
+      }
+    });
+
+    await waitFor(() => {
+      expect(onDiagnosticLogEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "timeline.key",
+          message: expect.stringContaining(
+            "stage=event_dropped current_kind=focused event_kind=focused"
+          ) as unknown as string
+        })
+      );
+    });
+    const diagnostics = onDiagnosticLogEntry.mock.calls
+      .map(([entry]) => `${entry.source} ${entry.message}`)
+      .join("\n");
+    expect(diagnostics).toContain("current_key=");
+    expect(diagnostics).toContain("event_key=");
+    expect(diagnostics).not.toContain("@alice:example.invalid");
+    expect(diagnostics).not.toContain("!room:example.invalid");
+    expect(diagnostics).not.toContain("$target:example.invalid");
+    expect(diagnostics).not.toContain("$other:example.invalid");
+  });
+
+  it("centers the focused target instead of restoring the focused window to live edge", async () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      let emit: (payload: CoreEventPayload) => void = () => undefined;
+      const onDiagnosticLogEntry = vi.fn();
+      const focusedKey = focusedTimelineKey(
+        "@alice:example.invalid",
+        "!room:example.invalid",
+        "$focused-target:example.invalid"
+      );
+      const transport = baseTransport({
+        listenCoreEvents(nextListener) {
+          emit = nextListener;
+          return () => undefined;
+        }
+      });
+
+      render(
+        <TimelineView
+          timelineKey={focusedKey}
+          roomId="!room:example.invalid"
+          transport={transport}
+          onReply={vi.fn()}
+          onDiagnosticLogEntry={onDiagnosticLogEntry}
+        />
+      );
+
+      const timeline = screen.getByTestId("timeline-view");
+      Object.defineProperty(timeline, "clientHeight", { value: 400, configurable: true });
+      Object.defineProperty(timeline, "scrollHeight", { value: 1_800, configurable: true });
+      Object.defineProperty(timeline, "scrollTop", {
+        value: 0,
+        writable: true,
+        configurable: true
+      });
+
+      act(() => {
+        emit({
+          kind: "Timeline",
+          event: {
+            InitialItems: {
+              request_id: null,
+              key: focusedKey,
+              generation: 1,
+              items: [
+                message("$focused-older:example.invalid", "Older"),
+                message("$focused-target:example.invalid", "Target"),
+                message("$focused-newer:example.invalid", "Newer")
+              ]
+            }
+          }
+        });
+      });
+
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+      const targetRow = scrollIntoView.mock.instances[0] as HTMLElement | undefined;
+      expect(targetRow?.getAttribute("data-activity-event-id")).toBe(
+        "$focused-target:example.invalid"
+      );
+      expect(onDiagnosticLogEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "timeline.scroll",
+          message: "stage=focused_target_restore path=dom target_present=true"
+        })
+      );
+      expect(
+        onDiagnosticLogEntry.mock.calls.some(
+          ([entry]) =>
+            entry.source === "timeline.scroll" &&
+            entry.message.includes("stage=room_reentry_restore") &&
+            entry.message.includes("path=live_edge")
+        )
+      ).toBe(false);
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it("records a deduplicated committed thread projection", async () => {
     const onDiagnosticLogEntry = vi.fn();
     const threadKey = threadTimelineKey(

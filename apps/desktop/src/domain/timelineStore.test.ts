@@ -42,6 +42,9 @@ import {
   applyTimelineEventWithProjectionResult,
   pruneTimelineStore,
   shouldSuppressAutoBackfill,
+  timelineKeyDiagnosticIdentity,
+  timelineStoreInitialItemsDiagnosticMessage,
+  timelineStoreLookupDiagnosticMessage,
   threadTimelineStoreDiagnosticMessage,
   timelineStoreKeyId,
   type TimelineStoreState
@@ -199,6 +202,84 @@ function itemId(item: TimelineItem): string {
 // ---------------------------------------------------------------------------
 
 describe("timeline store — diff application", () => {
+  test("reads a focused projection through an equivalent key with different wire field order", () => {
+    const uiKey = focusedTimelineKey(
+      ACCOUNT_KEY,
+      "!room:example.invalid",
+      "$target:example.invalid"
+    );
+    const wireKey = {
+      kind: {
+        Focused: {
+          event_id: "$target:example.invalid",
+          room_id: "!room:example.invalid"
+        }
+      },
+      account_key: ACCOUNT_KEY
+    } as TimelineKey;
+    const target = makeMsg("$target:example.invalid", "target");
+
+    const store = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: { connection_id: 7, sequence: 10 },
+        key: wireKey,
+        actor_generation: 4,
+        generation: 2,
+        items: [target]
+      }
+    });
+
+    expect(timelineStoreKeyId(wireKey)).toBe(timelineStoreKeyId(uiKey));
+    expect(getItems(store, uiKey)).toEqual([target]);
+    expect(getKeyState(store, uiKey)?.generation).toBe(2);
+  });
+
+  test("formats privacy-safe focused projection application and lookup diagnostics", () => {
+    const key = focusedTimelineKey(
+      ACCOUNT_KEY,
+      "!room:example.invalid",
+      "$target:example.invalid"
+    );
+    const payload: Extract<TimelineEvent, { InitialItems: unknown }>["InitialItems"] = {
+      request_id: { connection_id: 7, sequence: 10 },
+      key,
+      actor_generation: 4,
+      generation: 2,
+      items: [makeMsg("$target:example.invalid", "private body")]
+    };
+    const before = createTimelineStore();
+    const after = applyTimelineEvent(before, { InitialItems: payload });
+    const retained = new Set([timelineStoreKeyId(key)]);
+
+    const identity = timelineKeyDiagnosticIdentity(key);
+    const application = timelineStoreInitialItemsDiagnosticMessage(
+      before,
+      after,
+      payload,
+      retained
+    );
+    const lookup = timelineStoreLookupDiagnosticMessage(after, key);
+
+    expect(identity).toMatch(
+      /^kind=focused account=[0-9a-f]{8} room=[0-9a-f]{8} target=[0-9a-f]{8}$/
+    );
+    expect(application).toContain("stage=initial_apply kind=focused");
+    expect(application).toContain(
+      "request=7:10 actor=4 generation=2 incoming_items=1 before_items=0 after_items=1"
+    );
+    expect(application).toContain(
+      "key_outcome=created retained=true pruned=0 store_before=0 store_after=1 target_present=true"
+    );
+    expect(lookup).toContain("stage=lookup kind=focused");
+    expect(lookup).toContain(
+      "found=true items=1 actor=4 generation=2 awaiting_resync=false store_keys=1 same_kind_keys=1"
+    );
+    expect(`${identity}\n${application}\n${lookup}`).not.toContain(ACCOUNT_KEY);
+    expect(`${identity}\n${application}\n${lookup}`).not.toContain("!room:example.invalid");
+    expect(`${identity}\n${application}\n${lookup}`).not.toContain("$target:example.invalid");
+    expect(`${identity}\n${application}\n${lookup}`).not.toContain("private body");
+  });
+
   test("acknowledges only the exact InitialItems projection applied to the canonical store", () => {
     const key = focusedTimelineKey(ACCOUNT_KEY, "!room:example.invalid", "$target");
     const requestId = { connection_id: 7, sequence: 11 };
