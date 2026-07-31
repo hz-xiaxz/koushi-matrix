@@ -8,6 +8,7 @@ export interface SpaceMembersPanelProps {
   state: SpaceMembersState;
   canInvite: boolean;
   onInviteUser: (userId: string) => void;
+  onOpenProfile: (userId: string) => void;
 }
 
 interface SpaceMembersSection {
@@ -33,10 +34,25 @@ function matchesSearch(entry: SpaceMemberEntry, query: string): boolean {
     .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
 }
 
+function hasPendingOperation(state: SpaceMembersState): boolean {
+  return state.operation.kind === "loading" || state.operation.kind === "inviting";
+}
+
+function inviteIsDisabled(
+  state: SpaceMembersState,
+  entry: SpaceMemberEntry,
+  canInvite: boolean
+): boolean {
+  const inFlightInviteTarget =
+    state.operation.kind === "inviting" && state.operation.user_id === entry.user_id;
+  return !canInvite || entry.invite_pending || inFlightInviteTarget || hasPendingOperation(state);
+}
+
 export function SpaceMembersPanel({
   state,
   canInvite,
-  onInviteUser
+  onInviteUser,
+  onOpenProfile
 }: SpaceMembersPanelProps) {
   const [query, setQuery] = useState("");
   const sections = useMemo<SpaceMembersSection[]>(
@@ -109,27 +125,34 @@ export function SpaceMembersPanel({
               <ul className="space-members-list" aria-label={section.label}>
                 {section.entries.map((entry) => (
                   <li className="space-members-row" data-user-id={entry.user_id} key={entry.user_id}>
-                    <span className="space-members-avatar" aria-hidden="true">
-                      {memberInitials(entry)}
-                    </span>
-                    <span className="space-members-row-main">
-                      <span className="space-members-name" dir="auto">
-                        {entry.display_label}
+                    <button
+                      className="space-members-row-main"
+                      type="button"
+                      aria-label={t("people.openProfile", { name: entry.display_label })}
+                      onClick={() => onOpenProfile(entry.user_id)}
+                    >
+                      <span className="space-members-avatar" aria-hidden="true">
+                        {memberInitials(entry)}
                       </span>
-                      {entry.membership === "child_room_only" && entry.child_room_ids.length > 0 ? (
-                        <span className="space-members-meta" dir="auto">
-                          {t("spaceMembers.childRoomContext", {
-                            rooms: entry.child_room_ids.join(", ")
-                          })}
+                      <span className="space-members-row-text">
+                        <span className="space-members-name" dir="auto">
+                          {entry.display_label}
                         </span>
-                      ) : null}
-                    </span>
-                    {entry.membership === "child_room_only" ? (
+                        {section.id === "child-only" && entry.child_room_ids.length > 0 ? (
+                          <span className="space-members-meta" dir="auto">
+                            {t("spaceMembers.childRoomContext", {
+                              rooms: entry.child_room_ids.join(", ")
+                            })}
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                    {section.id === "child-only" ? (
                       <button
                         className="space-members-invite"
                         type="button"
                         aria-label={t("spaceMembers.invite")}
-                        disabled={!canInvite || entry.invite_pending}
+                        disabled={inviteIsDisabled(state, entry, canInvite)}
                         onClick={() => onInviteUser(entry.user_id)}
                       >
                         {entry.invite_pending
@@ -145,7 +168,11 @@ export function SpaceMembersPanel({
         ))}
       </div>
 
-      {!hasResults ? <p className="space-members-empty">{t("spaceMembers.noResults")}</p> : null}
+      {!hasResults ? (
+        <p className="space-members-empty" role="status">
+          {t("spaceMembers.noResults")}
+        </p>
+      ) : null}
     </section>
   );
 }

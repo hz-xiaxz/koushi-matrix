@@ -5802,6 +5802,26 @@ mark {
 }
 
 .space-members-row-main {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: start;
+}
+
+.space-members-row-main:hover,
+.space-members-row-main:focus-visible {
+  background: var(--surface-hover);
+}
+
+.space-members-row-text {
   display: grid;
   flex: 1 1 auto;
   gap: 2px;

@@ -286,6 +286,29 @@ Final verification for this milestone:
 This bounded slice intentionally leaves App/right-panel wiring, diagnostics,
 and global context-menu plumbing for the follow-up UI integration task.
 
+## Task 4 dedicated panel follow-up — 2026-08-01
+
+- Strengthened `SpaceMembersPanel` to expose an accessible localized profile
+  row action and call the supplied `onOpenProfile` callback without changing
+  the Rust-owned section classification.
+- Invite controls now honor the state-owned loading/in-flight operation as
+  well as per-entry pending state and the global invite permission; the
+  no-results state is announced through an accessible status region.
+- TDD RED was observed for the four new profile, pending-operation, and
+  empty-state assertions before the component changes; the focused suite then
+  passed GREEN.
+- Verification:
+  - `npx vitest run src/components/SpaceMembersPanel.test.tsx
+    src/i18n/messages.test.ts src/components/PeoplePanel.test.tsx` — 3 files,
+    54 passed.
+  - `npm run typecheck` — passed.
+  - `npm run lint` — passed, including the IME-safe input check.
+  - `git diff --check` — passed.
+
+The remaining integration work is still App/right-panel wiring, diagnostics,
+and global context-menu plumbing; no Room People or network behavior was
+changed in this panel slice.
+
 ## Decisions and invariants
 
 - All implementation workers use Luna (`gpt-5.6-luna`) with reasoning effort `max`.
