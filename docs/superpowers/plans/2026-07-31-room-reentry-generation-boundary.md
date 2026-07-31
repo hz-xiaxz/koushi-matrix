@@ -56,4 +56,3 @@ cargo test -p koushi-core --lib timeline
 - Read `git diff origin/main...HEAD` plus untracked status.
 - Publish one non-draft PR closing #286 and #287; merge with a merge commit
   after CI is green.
-

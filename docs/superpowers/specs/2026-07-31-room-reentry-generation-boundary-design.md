@@ -61,4 +61,3 @@ input and are discarded earlier, so they do not bury genuine fence signals.
   delivered and a current descriptor is delivered once.
 - Focused timeline Core tests, desktop typecheck, and repository gates before
   PR publication.
-
