@@ -62,7 +62,7 @@ use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
-use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::{
     MatrixClientSession, MatrixCommittedRoomTimelineBackend,
     MatrixCommittedRoomTimelineCheckpoint as MatrixRoomSubscriptionCheckpoint,
@@ -76,8 +76,8 @@ use koushi_search::{AttachmentDocument, SensitiveString};
 use koushi_state::{
     ActivityRow, AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState,
     ComposerFormattingOptions, ComposerSendIntent, FormattedMessageDraft, LiveEventReceipts,
-    LiveReadReceipt, MediaTransferProgress, MentionIntent, OperationFailureKind, ReplyQuote,
-    ReplyQuoteState, SlashCommandIntent,
+    LiveReadReceipt, MediaTransferProgress, MentionIntent, MentionTarget, OperationFailureKind,
+    ReplyQuote, ReplyQuoteState, SlashCommandIntent,
     ThreadRootProjectionActivity as ThreadRootProjectionActivityState,
     TimelineContinuityInspection, TimelineGapRepairFailureKind, TimelineMediaDownloadState,
     TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
@@ -2851,6 +2851,9 @@ impl TimelineManagerActor {
                     if !await_submission_admission(admission).await {
                         return Err(TimelineFailureKind::QueueOverflow);
                     }
+                    if let Some(trace) = registration.lifecycle_trace.as_mut() {
+                        trace.stage("preflight_started");
+                    }
                     let _ = preflight_started_tx.send(());
                     // Interactive: the guard never queues, so admission and the local
                     // echo stay immediate. Keep it attached to the send completion
@@ -2858,6 +2861,10 @@ impl TimelineManagerActor {
                     // terminal settles the send.
                     let interactive = account_work.begin_interactive(AccountWorkKind::MessageSend);
                     registration.hold_interactive_guard(interactive);
+                    if let Some(trace) = registration.lifecycle_trace.as_mut() {
+                        trace.stage("send_queue_worker_started");
+                        trace.stage("sdk_enqueue_started");
+                    }
                     enqueue_timeline_send(context, payload).await
                 }
                 .await;
@@ -2868,6 +2875,9 @@ impl TimelineManagerActor {
                             media_queued,
                         } = success;
                         if let Some(media) = media_queued {
+                            if let Some(trace) = registration.lifecycle_trace.as_mut() {
+                                trace.stage("media_upload_queued");
+                            }
                             let _ = event_tx.send(CoreEvent::Timeline(
                                 TimelineEvent::MediaSendQueued {
                                     request_id: media.request_id,
@@ -4497,6 +4507,7 @@ impl TimelineManagerActor {
                 key,
                 event_id,
                 body,
+                mentions,
             } => {
                 self.route_to_actor_or_fail(
                     request_id,
@@ -4505,6 +4516,7 @@ impl TimelineManagerActor {
                         request_id,
                         event_id,
                         body,
+                        mentions,
                     },
                 )
                 .await;
@@ -6448,6 +6460,7 @@ enum TimelineActorMessage {
         request_id: RequestId,
         event_id: String,
         body: String,
+        mentions: MentionIntent,
     },
     Redact {
         request_id: RequestId,
@@ -15940,8 +15953,10 @@ impl TimelineActor {
                 request_id,
                 event_id,
                 body,
+                mentions,
             } => {
-                self.handle_edit_text(request_id, event_id, body).await;
+                self.handle_edit_text(request_id, event_id, body, mentions)
+                    .await;
             }
             TimelineActorMessage::Redact {
                 request_id,
@@ -18415,7 +18430,13 @@ impl TimelineActor {
         .await;
     }
 
-    async fn handle_edit_text(&mut self, request_id: RequestId, event_id: String, body: String) {
+    async fn handle_edit_text(
+        &mut self,
+        request_id: RequestId,
+        event_id: String,
+        body: String,
+        mentions: MentionIntent,
+    ) {
         // Edits go through the SDK Timeline so the Set diff on the original
         // item is produced locally (send-queue local echo) instead of
         // depending on the server echoing the edit back through sync —
@@ -18423,6 +18444,8 @@ impl TimelineActor {
         // review finding). Canon rule 1: relay the SDK.
         let candidates = self.item_ids_for_event(&event_id);
         if candidates.is_empty() {
+            trace_message_edit_lifecycle("opened", "text", 0, 0, None, None);
+            trace_message_edit_lifecycle("settled", "text", 0, 0, None, Some("failed"));
             self.emit_failure(
                 request_id,
                 CoreFailure::TimelineOperationFailed {
@@ -18436,16 +18459,57 @@ impl TimelineActor {
         // is before choosing between a caption edit and a text replacement.
         let items = self.timeline.items().await;
         let mut result = Ok(());
+        let mut diagnostic_target = "text";
+        let mut diagnostic_original_mention_count = 0;
+        let mut diagnostic_final_mention_count = 0;
+        let mut diagnostic_revision_mention_count = 0;
         for item_id in &candidates {
             let target = edit_target_msgtype(&items, item_id);
-            let content = edited_content_for_edit_target(target, &body);
+            diagnostic_target = if target.is_some_and(msgtype_carries_editable_caption) {
+                "media_caption"
+            } else {
+                "text"
+            };
+            let original_mentions = mention_summary_for_message_type(target);
+            diagnostic_original_mention_count =
+                original_mentions.0.len() + usize::from(original_mentions.1);
+            trace_message_edit_lifecycle(
+                "opened",
+                diagnostic_target,
+                diagnostic_original_mention_count,
+                0,
+                None,
+                None,
+            );
+            let content = edited_content_for_edit_target(target, &body, &mentions);
             trace_message_edit_target(target, &content);
+            let (final_mention_count, revision_mention_count) =
+                mention_counts_for_edit(target, &content);
+            diagnostic_final_mention_count = final_mention_count;
+            diagnostic_revision_mention_count = revision_mention_count;
+            trace_message_edit_lifecycle(
+                "submitted",
+                diagnostic_target,
+                diagnostic_original_mention_count,
+                final_mention_count,
+                Some(revision_mention_count),
+                None,
+            );
             result = self.timeline.edit(item_id, content).await;
             match &result {
                 Err(matrix_sdk_ui::timeline::Error::EventNotInTimeline(_)) => continue,
                 _ => break,
             }
         }
+
+        trace_message_edit_lifecycle(
+            "settled",
+            diagnostic_target,
+            diagnostic_original_mention_count,
+            diagnostic_final_mention_count,
+            Some(diagnostic_revision_mention_count),
+            Some(if result.is_ok() { "success" } else { "failed" }),
+        );
 
         if result.is_err() {
             self.emit_failure(
@@ -20191,6 +20255,15 @@ impl TimelineActor {
     async fn handle_send_queue_update(&mut self, update: RoomSendQueueUpdate) {
         match update {
             RoomSendQueueUpdate::NewLocalEvent(echo) => {
+                let sdk_transaction_id = echo.transaction_id.to_string();
+                self.send_completion
+                    .lock()
+                    .expect("send completion coordinator lock must not be poisoned")
+                    .stage_pending_send(
+                        self.key.room_id(),
+                        &sdk_transaction_id,
+                        "local_echo_observed",
+                    );
                 remember_local_echo(&mut self.send_statuses, &mut self.send_handles, &echo);
             }
             RoomSendQueueUpdate::CancelledLocalEvent { transaction_id } => {
@@ -20217,8 +20290,13 @@ impl TimelineActor {
                 );
             }
             RoomSendQueueUpdate::RetryEvent { transaction_id } => {
+                let sdk_transaction_id = transaction_id.to_string();
+                self.send_completion
+                    .lock()
+                    .expect("send completion coordinator lock must not be poisoned")
+                    .stage_pending_send(self.key.room_id(), &sdk_transaction_id, "retry_scheduled");
                 self.send_statuses
-                    .insert(transaction_id.to_string(), TimelineSendState::Sending);
+                    .insert(sdk_transaction_id, TimelineSendState::Sending);
             }
             RoomSendQueueUpdate::SentEvent {
                 transaction_id,
@@ -22890,6 +22968,43 @@ fn original_json_for_event_item(event_item: &EventTimelineItem) -> Option<serde_
         .and_then(|raw| serde_json::from_str(raw.json().get()).ok())
 }
 
+fn mention_intent_from_event_json(raw: &serde_json::Value) -> Option<MentionIntent> {
+    let content = raw.get("content")?;
+    let effective_content = content
+        .get("m.relates_to")
+        .and_then(|relation| {
+            (relation.get("rel_type")?.as_str() == Some("m.replace"))
+                .then(|| relation.get("m.new_content"))
+        })
+        .flatten()
+        .unwrap_or(content);
+    let mentions = effective_content.get("m.mentions")?;
+    let mut targets = mentions
+        .get("user_ids")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|user_id| !user_id.trim().is_empty())
+        .map(|user_id| MentionTarget::User {
+            user_id: user_id.to_owned(),
+            // The renderer replaces this safe fallback with the current room
+            // candidate's display label before opening the editor.
+            display_label: user_id.trim_start_matches('@').to_owned(),
+        })
+        .collect::<Vec<_>>();
+    if mentions
+        .get("room")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        targets.push(MentionTarget::RoomMention {
+            display_label: "room".to_owned(),
+        });
+    }
+    (!targets.is_empty()).then_some(MentionIntent { targets })
+}
+
 fn timeline_item_should_be_hidden(has_renderable_content: bool, is_redacted: bool) -> bool {
     !has_renderable_content && !is_redacted
 }
@@ -23182,13 +23297,15 @@ fn sdk_item_to_timeline_item_with_send_states(
             if let Some(utd) = unable_to_decrypt.as_mut() {
                 utd.can_request_keys = event_item.original_json().is_some();
             }
-            let actions = message_actions_for_timeline_item(
+            let mut actions = message_actions_for_timeline_item(
                 key.room_id(),
                 &id,
                 actionable_body,
                 media.is_some(),
                 is_redacted,
             );
+            actions.editable_mentions = original_json_for_event_item(event_item)
+                .and_then(|raw| mention_intent_from_event_json(&raw));
             let is_hidden = timeline_item_should_be_hidden_for_key(
                 key,
                 has_renderable_content,
@@ -24401,20 +24518,28 @@ fn edit_target_msgtype<'items>(
 /// therefore edit the caption in place; everything else keeps the plain-text
 /// replacement. This decision stays in core because the GUI submits only the new
 /// visible text and never sees the original Matrix content.
-fn edited_content_for_edit_target(msgtype: Option<&MessageType>, body: &str) -> EditedContent {
+fn edited_content_for_edit_target(
+    msgtype: Option<&MessageType>,
+    body: &str,
+    mentions: &MentionIntent,
+) -> EditedContent {
     if msgtype.is_some_and(msgtype_carries_editable_caption) {
         return EditedContent::MediaCaption {
             caption: Some(body.to_owned()),
             formatted_caption: None,
-            mentions: None,
+            mentions: ruma_mentions_from_intent(mentions),
         };
     }
 
-    EditedContent::RoomMessage(
-        matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation::text_plain(
-            body,
-        ),
-    )
+    let mut content = match msgtype {
+        Some(MessageType::Emote(_)) => RoomMessageEventContentWithoutRelation::emote_plain(body),
+        Some(MessageType::Notice(_)) => RoomMessageEventContentWithoutRelation::notice_plain(body),
+        _ => RoomMessageEventContentWithoutRelation::text_plain(body),
+    };
+    if let Some(mentions) = ruma_mentions_from_intent(mentions) {
+        content = content.add_mentions(mentions);
+    }
+    EditedContent::RoomMessage(content)
 }
 
 fn message_edit_target_token(msgtype: Option<&MessageType>) -> &'static str {
@@ -24471,6 +24596,93 @@ fn trace_message_edit_target(msgtype: Option<&MessageType>, content: &EditedCont
             media.is_some_and(|shape| shape.has_caption),
         )),
     );
+}
+
+fn mention_summary_for_message_type(msgtype: Option<&MessageType>) -> (HashSet<String>, bool) {
+    let Some(msgtype) = msgtype else {
+        return (HashSet::new(), false);
+    };
+    let Ok(raw) = serde_json::to_value(msgtype) else {
+        return (HashSet::new(), false);
+    };
+    let Some(mentions) = raw.get("m.mentions") else {
+        return (HashSet::new(), false);
+    };
+    let users = mentions
+        .get("user_ids")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    let room = mentions
+        .get("room")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    (users, room)
+}
+
+fn mention_counts_for_edit(
+    original: Option<&MessageType>,
+    edited: &EditedContent,
+) -> (usize, usize) {
+    let old = mention_summary_for_message_type(original);
+    let next = match edited {
+        EditedContent::RoomMessage(content) => content
+            .mentions
+            .as_ref()
+            .map(|mentions| {
+                (
+                    mentions.user_ids.iter().map(ToString::to_string).collect(),
+                    mentions.room,
+                )
+            })
+            .unwrap_or_default(),
+        EditedContent::MediaCaption { mentions, .. } => mentions
+            .as_ref()
+            .map(|mentions| {
+                (
+                    mentions.user_ids.iter().map(ToString::to_string).collect(),
+                    mentions.room,
+                )
+            })
+            .unwrap_or_default(),
+        EditedContent::PollStart { .. } => (HashSet::new(), false),
+    };
+    let final_count = next.0.len() + usize::from(next.1);
+    let revision_count = next.0.difference(&old.0).count() + usize::from(next.1 && !old.1);
+    (final_count, revision_count)
+}
+
+fn trace_message_edit_lifecycle(
+    stage: &'static str,
+    target: &'static str,
+    original_mention_count: usize,
+    final_mention_count: usize,
+    revision_mention_count: Option<usize>,
+    outcome: Option<&'static str>,
+) {
+    let mut event = DiagnosticEvent::new(DiagnosticLevel::Info, "core.timeline_edit", stage)
+        .field(DiagnosticField::token("target", target))
+        .field(DiagnosticField::count(
+            "original_mention_count",
+            original_mention_count.try_into().unwrap_or(u64::MAX),
+        ))
+        .field(DiagnosticField::count(
+            "final_mention_count",
+            final_mention_count.try_into().unwrap_or(u64::MAX),
+        ));
+    if let Some(count) = revision_mention_count {
+        event = event.field(DiagnosticField::count(
+            "revision_mention_count",
+            count.try_into().unwrap_or(u64::MAX),
+        ));
+    }
+    if let Some(outcome) = outcome {
+        event = event.field(DiagnosticField::token("outcome", outcome));
+    }
+    koushi_diagnostics::record(event);
 }
 
 pub(crate) fn validate_retry_send(
@@ -24742,6 +24954,108 @@ struct SendCompletionCoordinator {
     settled_send_order: VecDeque<SendCorrelationKey>,
 }
 
+static NEXT_SEND_DIAGNOSTIC_CORRELATION: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone)]
+struct SendLifecycleTrace {
+    state: Arc<Mutex<SendLifecycleTraceState>>,
+}
+
+impl SendLifecycleTrace {
+    fn new(key: &TimelineKey, settles_composer: bool) -> Self {
+        let now = Instant::now();
+        Self {
+            state: Arc::new(Mutex::new(SendLifecycleTraceState {
+                correlation: NEXT_SEND_DIAGNOSTIC_CORRELATION.fetch_add(1, Ordering::Relaxed),
+                kind: if !settles_composer {
+                    "media"
+                } else {
+                    match key.kind {
+                        TimelineKind::Thread { .. } => "thread",
+                        TimelineKind::Room { .. } | TimelineKind::Focused { .. } => "text",
+                    }
+                },
+                submitted_at: now,
+                previous_stage_at: now,
+                recorded_once: HashSet::new(),
+            })),
+        }
+    }
+
+    fn stage(&mut self, stage: &'static str) {
+        self.stage_internal(stage, None, None, false);
+    }
+
+    fn stage_once(&mut self, stage: &'static str) {
+        self.stage_internal(stage, None, None, true);
+    }
+
+    fn stage_with_outcome(
+        &mut self,
+        stage: &'static str,
+        outcome: Option<&'static str>,
+        delivery_mode: Option<&'static str>,
+    ) {
+        self.stage_internal(stage, outcome, delivery_mode, false);
+    }
+
+    fn stage_with_outcome_once(
+        &mut self,
+        stage: &'static str,
+        outcome: Option<&'static str>,
+        delivery_mode: Option<&'static str>,
+    ) {
+        self.stage_internal(stage, outcome, delivery_mode, true);
+    }
+
+    fn stage_internal(
+        &mut self,
+        stage: &'static str,
+        outcome: Option<&'static str>,
+        delivery_mode: Option<&'static str>,
+        once: bool,
+    ) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if once && !state.recorded_once.insert(stage) {
+            return;
+        }
+        let now = Instant::now();
+        let mut event = DiagnosticEvent::new(DiagnosticLevel::Info, "core.send", stage)
+            .field(DiagnosticField::correlation(
+                "correlation",
+                state.correlation,
+            ))
+            .field(DiagnosticField::token("send_kind", state.kind))
+            .field(DiagnosticField::token("queue", "room_send_queue"))
+            .field(DiagnosticField::milliseconds(
+                "elapsed_since_submission_ms",
+                now.duration_since(state.submitted_at).as_millis(),
+            ))
+            .field(DiagnosticField::milliseconds(
+                "elapsed_since_previous_ms",
+                now.duration_since(state.previous_stage_at).as_millis(),
+            ));
+        if let Some(outcome) = outcome {
+            event = event.field(DiagnosticField::token("outcome", outcome));
+        }
+        if let Some(delivery_mode) = delivery_mode {
+            event = event.field(DiagnosticField::token("delivery_mode", delivery_mode));
+        }
+        record(event);
+        state.previous_stage_at = now;
+    }
+}
+
+struct SendLifecycleTraceState {
+    correlation: u64,
+    kind: &'static str,
+    submitted_at: Instant,
+    previous_stage_at: Instant,
+    recorded_once: HashSet<&'static str>,
+}
+
 struct CoordinatedPendingSend {
     registration_id: u64,
     active: bool,
@@ -24752,6 +25066,7 @@ struct CoordinatedPendingSend {
     settles_composer: bool,
     failure_reported: bool,
     interactive_guard: Option<InteractiveWorkGuard>,
+    lifecycle_trace: SendLifecycleTrace,
 }
 
 enum SendCompletionObservation {
@@ -24778,6 +25093,7 @@ struct SendCompletionRegistration {
     terminal_ingress: TimelineSendTerminalIngress,
     registration_id: Option<u64>,
     interactive_guard: Option<InteractiveWorkGuard>,
+    lifecycle_trace: Option<SendLifecycleTrace>,
 }
 
 impl SendCompletionRegistration {
@@ -24791,6 +25107,8 @@ impl SendCompletionRegistration {
         request_id: RequestId,
         settles_composer: bool,
     ) -> Self {
+        let mut lifecycle_trace = SendLifecycleTrace::new(&key, settles_composer);
+        lifecycle_trace.stage("accepted");
         let registration_id = {
             let mut coordinator = coordinator
                 .lock()
@@ -24812,6 +25130,7 @@ impl SendCompletionRegistration {
                     settles_composer,
                     failure_reported: false,
                     interactive_guard: None,
+                    lifecycle_trace: lifecycle_trace.clone(),
                 },
             );
             registration_id
@@ -24821,6 +25140,7 @@ impl SendCompletionRegistration {
             terminal_ingress,
             registration_id: Some(registration_id),
             interactive_guard: None,
+            lifecycle_trace: Some(lifecycle_trace),
         }
     }
 
@@ -24840,19 +25160,34 @@ impl SendCompletionRegistration {
 
     fn hold_interactive_guard(&mut self, guard: InteractiveWorkGuard) {
         self.interactive_guard = Some(guard);
+        if let Some(trace) = self.lifecycle_trace.as_mut() {
+            trace.stage("guard_acquired");
+        }
     }
 
     fn bind(&mut self, sdk_transaction_id: String) {
         let Some(registration_id) = self.registration_id.take() else {
             return;
         };
+        self.lifecycle_trace
+            .as_mut()
+            .expect("active send registration must own lifecycle trace")
+            .stage("sdk_enqueue_finished");
+        let lifecycle_trace = self
+            .lifecycle_trace
+            .take()
+            .expect("active send registration must own lifecycle trace");
         let interactive_guard = self.interactive_guard.take();
         let mut coordinator = self
             .coordinator
             .lock()
             .expect("send completion coordinator lock must not be poisoned");
-        let handoffs =
-            coordinator.bind_registration(registration_id, sdk_transaction_id, interactive_guard);
+        let handoffs = coordinator.bind_registration(
+            registration_id,
+            sdk_transaction_id,
+            interactive_guard,
+            lifecycle_trace,
+        );
         for handoff in handoffs {
             let _admission = self.terminal_ingress.admit(handoff);
         }
@@ -24862,6 +25197,11 @@ impl SendCompletionRegistration {
         let Some(registration_id) = self.registration_id.take() else {
             return;
         };
+        if let Some(trace) = self.lifecycle_trace.as_mut() {
+            trace.stage_with_outcome("sdk_enqueue_finished", Some("failed"), None);
+            trace.stage_with_outcome_once("terminal_applied", Some("failed"), None);
+            trace.stage_once("guard_released");
+        }
         let mut coordinator = self
             .coordinator
             .lock()
@@ -24878,6 +25218,10 @@ impl Drop for SendCompletionRegistration {
         let Some(registration_id) = self.registration_id.take() else {
             return;
         };
+        if let Some(trace) = self.lifecycle_trace.as_mut() {
+            trace.stage_with_outcome_once("terminal_applied", Some("abandoned"), None);
+            trace.stage_once("guard_released");
+        }
         let mut coordinator = self
             .coordinator
             .lock()
@@ -24909,6 +25253,15 @@ impl SendCompletionCoordinator {
             })
     }
 
+    fn stage_pending_send(&mut self, room_id: &str, sdk_transaction_id: &str, stage: &'static str) {
+        if let Some(pending) = self.pending_sends.get_mut(&SendCorrelationKey {
+            room_id: room_id.to_owned(),
+            sdk_transaction_id: sdk_transaction_id.to_owned(),
+        }) {
+            pending.lifecycle_trace.stage(stage);
+        }
+    }
+
     fn activate_registration(&mut self, registration_id: u64) -> bool {
         let Some(registration) = self.registrations.get_mut(&registration_id) else {
             return false;
@@ -24921,7 +25274,15 @@ impl SendCompletionCoordinator {
         let room_id = self
             .registrations
             .remove(&registration_id)
-            .map(|registration| registration.key.room_id().to_owned());
+            .map(|mut registration| {
+                registration.lifecycle_trace.stage_with_outcome_once(
+                    "terminal_applied",
+                    Some("cancelled"),
+                    None,
+                );
+                registration.lifecycle_trace.stage_once("guard_released");
+                registration.key.room_id().to_owned()
+            });
         if let Some(room_id) = room_id {
             self.purge_unmatched_for_inactive_room(&room_id);
         }
@@ -24932,7 +25293,13 @@ impl SendCompletionCoordinator {
         registration_id: u64,
         kind: TimelineFailureKind,
     ) -> Option<TimelineSendTerminalHandoff> {
-        let registration = self.registrations.remove(&registration_id)?;
+        let mut registration = self.registrations.remove(&registration_id)?;
+        registration.lifecycle_trace.stage_with_outcome_once(
+            "terminal_applied",
+            Some("failed"),
+            None,
+        );
+        registration.lifecycle_trace.stage_once("guard_released");
         let room_id = registration.key.room_id().to_owned();
         let handoff = (!registration.failure_reported)
             .then(|| timeline_send_failure_handoff(&registration, kind));
@@ -24944,7 +25311,13 @@ impl SendCompletionCoordinator {
         &mut self,
         registration_id: u64,
     ) -> Option<TimelineSendTerminalHandoff> {
-        let registration = self.registrations.remove(&registration_id)?;
+        let mut registration = self.registrations.remove(&registration_id)?;
+        registration.lifecycle_trace.stage_with_outcome_once(
+            "terminal_applied",
+            Some("abandoned"),
+            None,
+        );
+        registration.lifecycle_trace.stage_once("guard_released");
         let room_id = registration.key.room_id().to_owned();
         let handoff = (registration.active && !registration.failure_reported)
             .then(|| timeline_send_observation_loss_handoff(&registration));
@@ -24994,6 +25367,7 @@ impl SendCompletionCoordinator {
         registration_id: u64,
         sdk_transaction_id: String,
         interactive_guard: Option<InteractiveWorkGuard>,
+        lifecycle_trace: SendLifecycleTrace,
     ) -> Vec<TimelineSendTerminalHandoff> {
         let Some(mut registration) = self.registrations.remove(&registration_id) else {
             return Vec::new();
@@ -25003,6 +25377,8 @@ impl SendCompletionCoordinator {
             return Vec::new();
         }
         registration.interactive_guard = interactive_guard;
+        registration.lifecycle_trace = lifecycle_trace;
+        registration.lifecycle_trace.stage_once("terminal_bound");
         let correlation = SendCorrelationKey {
             room_id: registration.key.room_id().to_owned(),
             sdk_transaction_id,
@@ -25024,7 +25400,9 @@ impl SendCompletionCoordinator {
             .unwrap_or_default();
         let mut handoffs = Vec::new();
         for terminal in observed {
-            if let Some(handoff) = self.apply_terminal(&correlation, terminal) {
+            if let Some(handoff) =
+                self.apply_terminal(&correlation, terminal, "retained_before_binding")
+            {
                 handoffs.push(handoff);
             }
         }
@@ -25057,7 +25435,7 @@ impl SendCompletionCoordinator {
         }
         if self.pending_sends.contains_key(&correlation) {
             return self
-                .apply_terminal(&correlation, terminal)
+                .apply_terminal(&correlation, terminal, "immediate")
                 .into_iter()
                 .collect();
         }
@@ -25120,6 +25498,12 @@ impl SendCompletionCoordinator {
                 continue;
             }
             registration.failure_reported = true;
+            registration.lifecycle_trace.stage_with_outcome_once(
+                "terminal_applied",
+                Some("failed"),
+                None,
+            );
+            registration.lifecycle_trace.stage_once("guard_released");
             registration.interactive_guard.take();
             handoffs.push(timeline_send_observation_loss_handoff(registration));
         }
@@ -25130,10 +25514,22 @@ impl SendCompletionCoordinator {
         &mut self,
         correlation: &SendCorrelationKey,
         terminal: ObservedSendTerminal,
+        delivery_mode: &'static str,
     ) -> Option<TimelineSendTerminalHandoff> {
         match terminal {
             ObservedSendTerminal::Sent { event_id } => {
                 let mut pending = self.pending_sends.remove(correlation)?;
+                pending.lifecycle_trace.stage_with_outcome(
+                    "sdk_terminal_observed",
+                    Some("sent"),
+                    Some(delivery_mode),
+                );
+                pending.lifecycle_trace.stage_with_outcome_once(
+                    "terminal_applied",
+                    Some("succeeded"),
+                    Some(delivery_mode),
+                );
+                pending.lifecycle_trace.stage_once("guard_released");
                 let _send_guard = pending.interactive_guard.take();
                 let settles_composer = pending.settles_composer && !pending.failure_reported;
                 self.remember_settled(correlation.clone());
@@ -25155,6 +25551,17 @@ impl SendCompletionCoordinator {
                     return None;
                 }
                 pending.failure_reported = true;
+                pending.lifecycle_trace.stage_with_outcome(
+                    "sdk_terminal_observed",
+                    Some("failed"),
+                    Some(delivery_mode),
+                );
+                pending.lifecycle_trace.stage_with_outcome_once(
+                    "terminal_applied",
+                    Some("failed"),
+                    Some(delivery_mode),
+                );
+                pending.lifecycle_trace.stage_once("guard_released");
                 pending.interactive_guard.take();
                 Some(timeline_send_terminal_handoff(
                     &pending.key,
@@ -25167,6 +25574,17 @@ impl SendCompletionCoordinator {
             }
             ObservedSendTerminal::Cancelled => {
                 let mut pending = self.pending_sends.remove(correlation)?;
+                pending.lifecycle_trace.stage_with_outcome(
+                    "sdk_terminal_observed",
+                    Some("cancelled"),
+                    Some(delivery_mode),
+                );
+                pending.lifecycle_trace.stage_with_outcome_once(
+                    "terminal_applied",
+                    Some("cancelled"),
+                    Some(delivery_mode),
+                );
+                pending.lifecycle_trace.stage_once("guard_released");
                 let _send_guard = pending.interactive_guard.take();
                 let settles_composer = pending.settles_composer && !pending.failure_reported;
                 self.remember_settled(correlation.clone());
@@ -26089,6 +26507,7 @@ mod tests {
             can_permalink: true,
             can_view_source: true,
             permalink: Some("https://example.invalid/#/room/$known-root:test".to_owned()),
+            editable_mentions: None,
         };
         let update = reconcile_replay_known_root_projections_after_navigation_update(
             &registry,
@@ -39513,6 +39932,115 @@ mod tests {
 
     // --- Txn-ID mapping ---
 
+    #[test]
+    fn send_completion_trace_orders_terminal_before_and_after_binding() {
+        let baseline = koushi_diagnostics::snapshot().records.len();
+        let coordinator = SharedSendCompletionCoordinator::default();
+        let (ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
+        let key = room_key();
+
+        for (index, terminal_before_bind) in [true, false].into_iter().enumerate() {
+            let mut registration = SendCompletionRegistration::begin(
+                Arc::clone(&coordinator),
+                ingress.clone(),
+                key.clone(),
+                format!("client-trace-{index}"),
+                None,
+                fake_rid(7400 + index as u64),
+                true,
+            );
+            registration.activate();
+            if terminal_before_bind {
+                apply_send_completion_observation_and_handoff(
+                    &coordinator,
+                    &ingress,
+                    key.room_id(),
+                    SendCompletionObservation::Sent {
+                        sdk_transaction_id: format!("sdk-trace-{index}"),
+                        event_id: format!("$event-trace-{index}:test"),
+                    },
+                );
+            }
+            registration.bind(format!("sdk-trace-{index}"));
+            if !terminal_before_bind {
+                apply_send_completion_observation_and_handoff(
+                    &coordinator,
+                    &ingress,
+                    key.room_id(),
+                    SendCompletionObservation::Sent {
+                        sdk_transaction_id: format!("sdk-trace-{index}"),
+                        event_id: format!("$event-trace-{index}:test"),
+                    },
+                );
+            }
+        }
+
+        let diagnostics = koushi_diagnostics::snapshot();
+        let records = diagnostics.records[baseline..]
+            .iter()
+            .filter(|record| record.event.source == "core.send")
+            .collect::<Vec<_>>();
+        let stages = records
+            .iter()
+            .map(|record| record.event.stage)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            stages,
+            vec![
+                "accepted",
+                "sdk_enqueue_finished",
+                "terminal_bound",
+                "sdk_terminal_observed",
+                "terminal_applied",
+                "guard_released",
+                "accepted",
+                "sdk_enqueue_finished",
+                "terminal_bound",
+                "sdk_terminal_observed",
+                "terminal_applied",
+                "guard_released",
+            ]
+        );
+        let correlations = records
+            .chunks(6)
+            .map(|trace| {
+                trace
+                    .iter()
+                    .flat_map(|record| record.event.fields.iter())
+                    .find(|field| field.key == "correlation")
+                    .map(|field| field.value.clone())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(correlations.len(), 2);
+        assert!(correlations[0].is_some());
+        assert!(correlations[1].is_some());
+        assert_ne!(correlations[0], correlations[1]);
+        for trace in records.chunks(6) {
+            let trace_correlation = trace
+                .iter()
+                .flat_map(|record| record.event.fields.iter())
+                .find(|field| field.key == "correlation")
+                .map(|field| field.value.clone());
+            assert!(trace.iter().all(|record| {
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .find(|field| field.key == "correlation")
+                    .map(|field| field.value.clone())
+                    == trace_correlation
+            }));
+            assert!(trace.iter().all(|record| {
+                record.event.fields.iter().all(|field| {
+                    !matches!(
+                        field.key,
+                        "room_id" | "event_id" | "user_id" | "transaction_id" | "request_id"
+                    )
+                })
+            }));
+        }
+    }
+
     #[tokio::test]
     async fn manager_coordinator_survives_unsubscribe_until_sdk_terminal() {
         let key = room_key();
@@ -40968,7 +41496,11 @@ mod tests {
         // drops the attachment from the edited event (issue #328).
         for msgtype in media_msgtype_fixtures() {
             let target = message_edit_target_token(Some(&msgtype));
-            match edited_content_for_edit_target(Some(&msgtype), "edited caption") {
+            match edited_content_for_edit_target(
+                Some(&msgtype),
+                "edited caption",
+                &MentionIntent::default(),
+            ) {
                 EditedContent::MediaCaption {
                     caption,
                     formatted_caption,
@@ -40990,20 +41522,26 @@ mod tests {
     }
 
     #[test]
-    fn edit_replacement_stays_plain_text_for_non_media() {
+    fn edit_replacement_preserves_non_media_message_kind() {
         for msgtype in non_media_msgtype_fixtures() {
             let target = message_edit_target_token(Some(&msgtype));
-            match edited_content_for_edit_target(Some(&msgtype), "edited body") {
+            match edited_content_for_edit_target(
+                Some(&msgtype),
+                "edited body",
+                &MentionIntent::default(),
+            ) {
                 EditedContent::RoomMessage(content) => match &content.msgtype {
                     MessageType::Text(text) => assert_eq!(text.body, "edited body"),
+                    MessageType::Notice(notice) => assert_eq!(notice.body, "edited body"),
+                    MessageType::Emote(emote) => assert_eq!(emote.body, "edited body"),
                     other => {
                         panic!(
-                            "{target}: text replacement expected, got {:?}",
+                            "{target}: non-media replacement expected, got {:?}",
                             other.msgtype()
                         )
                     }
                 },
-                other => panic!("{target}: text replacement expected, got {other:?}"),
+                other => panic!("{target}: non-media replacement expected, got {other:?}"),
             }
         }
     }
@@ -41014,9 +41552,91 @@ mod tests {
         // m.room.message, keeps the pre-existing text replacement instead of
         // guessing a caption edit the SDK would reject.
         assert!(matches!(
-            edited_content_for_edit_target(None, "edited body"),
+            edited_content_for_edit_target(None, "edited body", &MentionIntent::default()),
             EditedContent::RoomMessage(_)
         ));
+    }
+
+    #[test]
+    fn edit_replacement_carries_final_mentions_and_sdk_filters_revision_mentions() {
+        use matrix_sdk::ruma::events::room::message::ReplacementMetadata;
+
+        let alice = matrix_sdk::ruma::user_id!("@alice:example.org");
+        let bob = matrix_sdk::ruma::user_id!("@bob:example.org");
+        let mentions = MentionIntent {
+            targets: vec![
+                MentionTarget::User {
+                    user_id: alice.to_string(),
+                    display_label: "alice".to_owned(),
+                },
+                MentionTarget::User {
+                    user_id: bob.to_string(),
+                    display_label: "bob".to_owned(),
+                },
+            ],
+        };
+        let target = MessageType::Text(TextMessageEventContent::plain("old"));
+        let edited = match edited_content_for_edit_target(Some(&target), "@alice @bob", &mentions) {
+            EditedContent::RoomMessage(content) => content,
+            other => panic!("text edit must remain a room message: {other:?}"),
+        };
+        let original_mentions = Mentions::with_user_ids([alice.to_owned()]);
+        let replacement = edited.make_replacement(ReplacementMetadata::new(
+            matrix_sdk::ruma::event_id!("$edit:example.org").to_owned(),
+            Some(original_mentions),
+        ));
+        assert_eq!(
+            replacement
+                .mentions
+                .expect("new mention notification set")
+                .user_ids
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![bob.to_owned()]
+        );
+        let Some(matrix_sdk::ruma::events::room::message::Relation::Replacement(replacement)) =
+            replacement.relates_to
+        else {
+            panic!("replacement relation must carry final mentions");
+        };
+        assert_eq!(
+            replacement
+                .new_content
+                .mentions
+                .expect("final mention set")
+                .user_ids
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![alice.to_owned(), bob.to_owned()]
+        );
+
+        let removed = match edited_content_for_edit_target(
+            Some(&target),
+            "no mentions remain",
+            &MentionIntent::default(),
+        ) {
+            EditedContent::RoomMessage(content) => content,
+            other => panic!("removed mentions must stay a room message: {other:?}"),
+        };
+        assert!(removed.mentions.is_none());
+
+        let media = media_msgtype_fixtures().pop().expect("media fixture");
+        let media_edit = edited_content_for_edit_target(Some(&media), "@bob", &mentions);
+        let EditedContent::MediaCaption {
+            mentions: media_mentions,
+            ..
+        } = media_edit
+        else {
+            panic!("media edit must remain a caption edit");
+        };
+        assert_eq!(
+            media_mentions
+                .expect("media final mentions")
+                .user_ids
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![alice.to_owned(), bob.to_owned()]
+        );
     }
 
     #[test]

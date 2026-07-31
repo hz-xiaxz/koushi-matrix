@@ -900,7 +900,7 @@ export type TimelineMediaDownloadState =
   | { kind: "failed"; failure_kind: OperationFailureKind };
 
 export type ActivityState =
-  | { kind: "closed" }
+  | { kind: "closed"; last_selected_tab?: ActivityTab }
   | { kind: "opening"; request_id: number; tab: ActivityTab }
   | {
       kind: "open";

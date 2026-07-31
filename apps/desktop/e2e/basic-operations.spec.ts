@@ -5582,7 +5582,8 @@ test("editing a message invokes edit_message and renders the edited marker", asy
     .toEqual({
       roomId: "!harness-room:example.invalid",
       eventId: "$seed-event:example.invalid",
-      body: "Edited seed message"
+      body: "Edited seed message",
+      mentions: { targets: [] }
     });
 
   await page.evaluate(({ key, roomId }) => {
@@ -5648,7 +5649,8 @@ test("editing a message invokes edit_message and renders the edited marker", asy
     .toEqual({
       roomId: "!harness-room:example.invalid",
       eventId: "$seed-event:example.invalid",
-      body: "Re-edited seed message"
+      body: "Re-edited seed message",
+      mentions: { targets: [] }
     });
 });
 
@@ -7607,7 +7609,8 @@ test("edit composer respects the Rust-owned composer shortcut resolver", async (
     .toEqual({
       roomId: "!harness-room:example.invalid",
       eventId: "$seed-event:example.invalid",
-      body: editedBody
+      body: editedBody,
+      mentions: { targets: [] }
     });
 });
 

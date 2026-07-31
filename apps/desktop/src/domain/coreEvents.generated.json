@@ -739,7 +739,16 @@
               "can_forward": true,
               "can_permalink": true,
               "can_view_source": true,
-              "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1"
+              "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1",
+              "editable_mentions": {
+                "targets": [
+                  {
+                    "kind": "user",
+                    "user_id": "@mention:example.test",
+                    "display_label": "Mention User"
+                  }
+                ]
+              }
             },
             "body": "hello",
             "can_edit": true,
@@ -829,7 +838,16 @@
                   "can_forward": true,
                   "can_permalink": true,
                   "can_view_source": true,
-                  "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1"
+                  "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1",
+                  "editable_mentions": {
+                    "targets": [
+                      {
+                        "kind": "user",
+                        "user_id": "@mention:example.test",
+                        "display_label": "Mention User"
+                      }
+                    ]
+                  }
                 },
                 "body": "hello",
                 "can_edit": true,

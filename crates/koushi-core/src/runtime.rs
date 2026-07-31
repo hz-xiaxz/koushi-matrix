@@ -47,6 +47,41 @@ use crate::event::{
 };
 
 const MAX_ACTIVITY_RESOLUTION_ROOMS: usize = 16;
+pub const ACTIVITY_RECENT_MAX_ROWS: usize = 200;
+
+fn activity_tab_token(tab: ActivityTab) -> &'static str {
+    match tab {
+        ActivityTab::Recent => "recent",
+        ActivityTab::Unread => "unread",
+    }
+}
+
+fn record_activity_transition(
+    stage: &'static str,
+    request_id: RequestId,
+    outcome: &'static str,
+    previous_tab: ActivityTab,
+    selected_tab: ActivityTab,
+) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.activity", stage)
+            .field(DiagnosticField::request_id(
+                "request_id",
+                request_id.connection_id.0,
+                request_id.sequence,
+            ))
+            .field(DiagnosticField::token("outcome", outcome))
+            .field(DiagnosticField::token(
+                "previous_tab",
+                activity_tab_token(previous_tab),
+            ))
+            .field(DiagnosticField::token(
+                "selected_tab",
+                activity_tab_token(selected_tab),
+            )),
+    );
+}
+
 use crate::executor;
 use crate::failure::{CoreFailure, TimelineFailureKind};
 use crate::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
@@ -1484,6 +1519,7 @@ impl ActivityProjection {
         let mut recent = Vec::new();
         let mut unread = Vec::new();
         let mut recent_event_ids = BTreeSet::new();
+        let mut unread_event_ids = BTreeSet::new();
         let mut unread_event_room_ids = BTreeSet::new();
         for row in self.rows_by_event_id.values() {
             if excluded.contains(row.room_id.as_str()) {
@@ -1519,6 +1555,11 @@ impl ActivityProjection {
                 && !self
                     .cleared_event_ids
                     .contains(row.event_id.as_deref().unwrap_or(""));
+            if unread_by_marker {
+                if let Some(event_id) = row.event_id.clone() {
+                    unread_event_ids.insert(event_id);
+                }
+            }
             if !activity_recent_row_visible(mode, row.highlight, room_activity_unread) {
                 continue;
             }
@@ -1709,6 +1750,67 @@ impl ActivityProjection {
 
         sort_activity_rows(&mut recent);
         sort_activity_rows(&mut unread);
+
+        let recent_retained_event_ids = recent
+            .iter()
+            .take(ACTIVITY_RECENT_MAX_ROWS)
+            .filter_map(|row| row.event_id.clone())
+            .collect::<BTreeSet<_>>();
+        let marker_event_ids = state
+            .live_signals
+            .rooms
+            .values()
+            .filter_map(|signals| signals.fully_read_event_id.as_deref())
+            .filter(|event_id| self.rows_by_event_id.contains_key(*event_id))
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        let reconciliation_event_ids = self
+            .cleared_event_ids
+            .intersection(&unread_event_ids)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let stored_before = self.rows_by_event_id.len();
+        let mut retained_event_ids = recent_retained_event_ids.clone();
+        retained_event_ids.extend(unread_event_ids.iter().cloned());
+        retained_event_ids.extend(marker_event_ids.iter().cloned());
+        retained_event_ids.extend(reconciliation_event_ids.iter().cloned());
+        self.rows_by_event_id
+            .retain(|event_id, _| retained_event_ids.contains(event_id));
+        self.cleared_event_ids
+            .retain(|event_id| reconciliation_event_ids.contains(event_id));
+        let evicted = stored_before.saturating_sub(self.rows_by_event_id.len());
+        if evicted > 0 || stored_before > ACTIVITY_RECENT_MAX_ROWS {
+            record(
+                DiagnosticEvent::new(DiagnosticLevel::Debug, "core.activity", "projection_pruned")
+                    .field(DiagnosticField::count("observed", stored_before as u64))
+                    .field(DiagnosticField::count(
+                        "stored_before",
+                        stored_before as u64,
+                    ))
+                    .field(DiagnosticField::count(
+                        "stored_after",
+                        self.rows_by_event_id.len() as u64,
+                    ))
+                    .field(DiagnosticField::count(
+                        "recent_returned",
+                        recent.len().min(ACTIVITY_RECENT_MAX_ROWS) as u64,
+                    ))
+                    .field(DiagnosticField::count(
+                        "unread_returned",
+                        unread.len() as u64,
+                    ))
+                    .field(DiagnosticField::count(
+                        "marker_retained",
+                        marker_event_ids.intersection(&retained_event_ids).count() as u64,
+                    ))
+                    .field(DiagnosticField::count(
+                        "reconciliation_retained",
+                        reconciliation_event_ids.len() as u64,
+                    ))
+                    .field(DiagnosticField::count("evicted", evicted as u64)),
+            );
+        }
+        recent.truncate(ACTIVITY_RECENT_MAX_ROWS);
 
         (
             ActivityStream {
@@ -2318,7 +2420,7 @@ impl AppActor {
         }
         let mut deferred = DeferredReducerSideEffects {
             cancel_activity_resolution: activity_was_open
-                && matches!(self.state.activity, ActivityState::Closed),
+                && matches!(self.state.activity, ActivityState::Closed { .. }),
             ..DeferredReducerSideEffects::default()
         };
         if previous_navigation != self.state.navigation {
@@ -3736,18 +3838,57 @@ impl AppActor {
                     true
                 }
                 AppCommand::OpenActivity { request_id } => {
+                    let previous_tab = match self.state.activity {
+                        ActivityState::Closed { last_selected_tab } => last_selected_tab,
+                        ActivityState::Opening { tab, .. } => {
+                            record_activity_transition(
+                                "open_applied",
+                                request_id,
+                                "already_opening",
+                                tab,
+                                tab,
+                            );
+                            return true;
+                        }
+                        ActivityState::Open { active_tab, .. } => {
+                            record_activity_transition(
+                                "open_applied",
+                                request_id,
+                                "already_open",
+                                active_tab,
+                                active_tab,
+                            );
+                            return true;
+                        }
+                    };
                     let effects = self
                         .reduce_app_action(AppAction::ActivityOpened {
                             request_id: request_id.sequence,
                         })
                         .await;
                     self.handle_app_effects(request_id, effects).await;
+                    let opening_tab = match self.state.activity {
+                        ActivityState::Opening {
+                            request_id: active_request_id,
+                            tab,
+                        } if active_request_id == request_id.sequence => tab,
+                        _ => {
+                            record_activity_transition(
+                                "open_applied",
+                                request_id,
+                                "stale",
+                                previous_tab,
+                                previous_tab,
+                            );
+                            return true;
+                        }
+                    };
                     let (recent, unread, excluded_room_ids) =
                         self.activity_projection.snapshot(&self.state);
                     let snapshot_effects = self
                         .reduce_app_action(AppAction::ActivitySnapshotLoaded {
                             request_id: request_id.sequence,
-                            active_tab: ActivityTab::Recent,
+                            active_tab: opening_tab,
                             recent: recent.clone(),
                             unread: unread.clone(),
                             excluded_room_ids,
@@ -3756,15 +3897,25 @@ impl AppActor {
                     self.handle_app_effects(request_id, snapshot_effects).await;
                     self.start_activity_resolution().await;
                     self.emit(CoreEvent::Activity(ActivityEvent::Opened { request_id }));
-                    let (recent, unread) = match &self.state.activity {
-                        ActivityState::Open { recent, unread, .. } => {
-                            (recent.clone(), unread.clone())
-                        }
-                        _ => (recent, unread),
+                    let (recent, unread, selected_tab) = match &self.state.activity {
+                        ActivityState::Open {
+                            active_tab,
+                            recent,
+                            unread,
+                            ..
+                        } => (recent.clone(), unread.clone(), *active_tab),
+                        _ => (recent, unread, opening_tab),
                     };
+                    record_activity_transition(
+                        "open_applied",
+                        request_id,
+                        "opened",
+                        previous_tab,
+                        selected_tab,
+                    );
                     self.emit(CoreEvent::Activity(ActivityEvent::SnapshotLoaded {
                         request_id,
-                        active_tab: ActivityTab::Recent,
+                        active_tab: selected_tab,
                         recent,
                         unread,
                     }));
@@ -3781,10 +3932,38 @@ impl AppActor {
                     true
                 }
                 AppCommand::SetActivityTab { request_id, tab } => {
+                    let previous_tab = match self.state.activity {
+                        ActivityState::Open { active_tab, .. } => Some(active_tab),
+                        _ => None,
+                    };
                     let effects = self
                         .reduce_app_action(AppAction::ActivityTabSelected { tab })
                         .await;
                     self.handle_app_effects(request_id, effects).await;
+                    if let Some(previous_tab) = previous_tab {
+                        if previous_tab != tab {
+                            record(
+                                DiagnosticEvent::new(
+                                    DiagnosticLevel::Info,
+                                    "core.activity",
+                                    "tab_selected",
+                                )
+                                .field(DiagnosticField::request_id(
+                                    "request_id",
+                                    request_id.connection_id.0,
+                                    request_id.sequence,
+                                ))
+                                .field(DiagnosticField::token(
+                                    "previous_tab",
+                                    activity_tab_token(previous_tab),
+                                ))
+                                .field(DiagnosticField::token(
+                                    "selected_tab",
+                                    activity_tab_token(tab),
+                                )),
+                            );
+                        }
+                    }
                     self.emit(CoreEvent::Activity(ActivityEvent::TabSelected {
                         request_id,
                         tab,
@@ -6352,6 +6531,88 @@ mod tests {
         assert!(
             !recent.rows[0].unread,
             "plain unread message counts should not mark Activity recent rows unread"
+        );
+    }
+
+    #[test]
+    fn activity_projection_bounds_recent_history_to_newest_observed_rows() {
+        let mut state = AppState::default();
+        let mut room = unread_diagnostic_room("!room:example.invalid");
+        room.unread_count = 0;
+        room.notification_count = 0;
+        room.highlight_count = 0;
+        room.marked_unread = false;
+        state.rooms = vec![room];
+
+        let mut projection = ActivityProjection::default();
+        projection.ingest(
+            (0..=ACTIVITY_RECENT_MAX_ROWS)
+                .map(|index| {
+                    ActivityRow::event(
+                        "!room:example.invalid".to_owned(),
+                        format!("$event-{index}:example.invalid"),
+                        Some("@sender:example.invalid".to_owned()),
+                        "Room".to_owned(),
+                        Some("Sender".to_owned()),
+                        Some(format!("body {index}")),
+                        index as u64,
+                        false,
+                        false,
+                    )
+                })
+                .collect(),
+        );
+
+        let (recent, _unread, _excluded_room_ids) = projection.snapshot(&state);
+
+        assert_eq!(recent.rows.len(), ACTIVITY_RECENT_MAX_ROWS);
+        assert_eq!(
+            recent.rows.first().and_then(|row| row.event_id.as_deref()),
+            Some("$event-200:example.invalid")
+        );
+        assert_eq!(
+            recent.rows.last().and_then(|row| row.event_id.as_deref()),
+            Some("$event-1:example.invalid")
+        );
+        assert_eq!(projection.rows_by_event_id.len(), ACTIVITY_RECENT_MAX_ROWS);
+    }
+
+    #[test]
+    fn activity_projection_keeps_old_unread_rows_outside_recent_window() {
+        let mut state = AppState::default();
+        state.rooms = vec![unread_diagnostic_room("!room:example.invalid")];
+
+        let rows = (0..=ACTIVITY_RECENT_MAX_ROWS)
+            .map(|index| {
+                ActivityRow::event(
+                    "!room:example.invalid".to_owned(),
+                    format!("$event-{index}:example.invalid"),
+                    Some("@sender:example.invalid".to_owned()),
+                    "Room".to_owned(),
+                    Some("Sender".to_owned()),
+                    Some(format!("body {index}")),
+                    index as u64,
+                    false,
+                    false,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut projection = ActivityProjection::default();
+        projection.ingest(rows);
+
+        let (recent, unread, _excluded_room_ids) = projection.snapshot(&state);
+
+        assert_eq!(recent.rows.len(), ACTIVITY_RECENT_MAX_ROWS);
+        assert_eq!(unread.rows.len(), ACTIVITY_RECENT_MAX_ROWS + 1);
+        assert!(
+            unread
+                .rows
+                .iter()
+                .any(|row| { row.event_id.as_deref() == Some("$event-0:example.invalid") })
+        );
+        assert_eq!(
+            projection.rows_by_event_id.len(),
+            ACTIVITY_RECENT_MAX_ROWS + 1
         );
     }
 

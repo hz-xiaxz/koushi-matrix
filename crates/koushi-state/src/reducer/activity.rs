@@ -12,19 +12,23 @@ pub(crate) fn handle_activity_opened(state: &mut AppState, request_id: u64) -> V
         return Vec::new();
     }
 
+    let ActivityState::Closed { last_selected_tab } = state.activity else {
+        return Vec::new();
+    };
     state.activity = ActivityState::Opening {
         request_id,
-        tab: ActivityTab::Recent,
+        tab: last_selected_tab,
     };
     vec![AppEffect::EmitUiEvent(UiEvent::ActivityChanged)]
 }
 
 pub(crate) fn handle_activity_closed(state: &mut AppState) -> Vec<AppEffect> {
-    if state.activity == ActivityState::Closed {
-        return Vec::new();
-    }
-
-    state.activity = ActivityState::Closed;
+    let last_selected_tab = match state.activity {
+        ActivityState::Closed { .. } => return Vec::new(),
+        ActivityState::Opening { tab, .. } => tab,
+        ActivityState::Open { active_tab, .. } => active_tab,
+    };
+    state.activity = ActivityState::Closed { last_selected_tab };
     vec![AppEffect::EmitUiEvent(UiEvent::ActivityChanged)]
 }
 

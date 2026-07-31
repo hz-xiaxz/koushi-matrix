@@ -335,7 +335,7 @@ impl Default for AppState {
             directory: DirectoryState::default(),
             room_management: RoomManagementState::default(),
             mention_candidates: MentionCandidatesState::default(),
-            activity: ActivityState::Closed,
+            activity: ActivityState::default(),
             timeline: TimelinePaneState::default(),
             thread: ThreadPaneState::Closed,
             thread_attention: ThreadAttentionState::Closed,

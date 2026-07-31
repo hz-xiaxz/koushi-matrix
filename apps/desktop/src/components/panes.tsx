@@ -710,7 +710,7 @@ export function TimelinePane({
   onComposerDraftChange,
   onComposerMathModeChange,
   onMentionIntentChange,
-  onMentionQueryChange = () => undefined,
+  onMentionQueryChange,
   onEditMessage,
   onOpenContextMenu,
   onOpenThread,
@@ -862,7 +862,7 @@ export function TimelinePane({
   const onMentionIntentChangeStable = useStableEvent(onMentionIntentChange);
   const onMentionQueryChangeStable = useStableEvent((query: string | null) => {
     if (timelineRoomId) {
-      onMentionQueryChange(timelineRoomId, query);
+      onMentionQueryChange?.(timelineRoomId, query);
     }
   });
   const onEditMessageStable = useStableEvent(onEditMessage);
@@ -1025,6 +1025,9 @@ export function TimelinePane({
               codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
               searchQuery={searchQuery}
               mediaDownloads={mediaDownloads}
+              mentionCandidates={mentionCandidates}
+              mentionCandidatesLoading={mentionCandidatesLoading}
+              onMentionQueryChange={onMentionQueryChangeStable}
               continuity={snapshot.state.ui.timeline.continuity ?? { kind: "unknown" }}
               roomScrollAnchor={
                 mainTimelineAnchorEventId

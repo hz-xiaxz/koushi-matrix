@@ -222,6 +222,59 @@ fn activity_open_lifecycle_is_request_correlated_and_sorts_rows_newest_first() {
 }
 
 #[test]
+fn activity_reopen_preserves_selected_tab_and_duplicate_open_is_idempotent() {
+    let mut state = ready_state();
+    reduce(&mut state, AppAction::ActivityOpened { request_id: 10 });
+    reduce(
+        &mut state,
+        AppAction::ActivitySnapshotLoaded {
+            request_id: 10,
+            active_tab: ActivityTab::Recent,
+            recent: stream(Vec::new(), None),
+            unread: stream(Vec::new(), None),
+            excluded_room_ids: Vec::new(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::ActivityTabSelected {
+            tab: ActivityTab::Unread,
+        },
+    );
+    reduce(&mut state, AppAction::ActivityClosed);
+
+    reduce(&mut state, AppAction::ActivityOpened { request_id: 11 });
+    assert_eq!(
+        state.activity,
+        ActivityState::Opening {
+            request_id: 11,
+            tab: ActivityTab::Unread,
+        }
+    );
+
+    reduce(&mut state, AppAction::ActivityOpened { request_id: 12 });
+    assert!(matches!(
+        state.activity,
+        ActivityState::Opening {
+            request_id: 11,
+            tab: ActivityTab::Unread,
+        }
+    ));
+}
+
+#[test]
+fn activity_closed_defaults_legacy_missing_tab_to_recent() {
+    let state: ActivityState = serde_json::from_value(serde_json::json!({ "kind": "closed" }))
+        .expect("legacy closed activity state should deserialize");
+    assert_eq!(
+        state,
+        ActivityState::Closed {
+            last_selected_tab: ActivityTab::Recent
+        }
+    );
+}
+
+#[test]
 fn activity_unread_stream_keeps_stale_unreads_separate_from_recent_bounds() {
     let mut state = ready_state();
     reduce(&mut state, AppAction::ActivityOpened { request_id: 9 });

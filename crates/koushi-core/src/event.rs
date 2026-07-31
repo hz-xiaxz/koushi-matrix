@@ -7,7 +7,7 @@ use koushi_state::{
     ActivityStream, ActivityTab, AppState, AttachmentResult, AvatarImage, AvatarThumbnailState,
     CrossSigningStatus, DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary,
     IdentityResetState, InviteDestinationResult, JapaneseCatalogProfile, KeyBackupStatus,
-    LocalEncryptionHealth, MediaTransferProgress, NativeAttentionDispatchId,
+    LocalEncryptionHealth, MediaTransferProgress, MentionIntent, NativeAttentionDispatchId,
     NativeAttentionSummary, OperationFailureKind, PinnedEvent, PresenceKind, ProfileState,
     ReplyQuote, RoomModerationAction, RoomSettingsSnapshot, RoomTagKind, SessionState,
     SubmissionId, SyncMode, ThreadsListItem, VerificationFlowState,
@@ -1455,6 +1455,10 @@ pub struct TimelineMessageActions {
     pub can_view_source: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permalink: Option<String>,
+    /// Effective mention intent projected from the current event content for
+    /// edit composers. It is action metadata rather than rendered message text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editable_mentions: Option<MentionIntent>,
 }
 
 impl fmt::Debug for TimelineMessageActions {
@@ -1468,6 +1472,13 @@ impl fmt::Debug for TimelineMessageActions {
             .field(
                 "permalink",
                 &self.permalink.as_ref().map(|_| "Permalink(..)"),
+            )
+            .field(
+                "editable_mentions",
+                &self
+                    .editable_mentions
+                    .as_ref()
+                    .map(|mentions| mentions.targets.len()),
             )
             .finish()
     }
@@ -1493,6 +1504,7 @@ pub fn message_actions_for_timeline_item(
         can_permalink: permalink.is_some(),
         can_view_source: !event_id.trim().is_empty(),
         permalink,
+        editable_mentions: None,
     }
 }
 

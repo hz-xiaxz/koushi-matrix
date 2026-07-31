@@ -38,6 +38,7 @@ import {
   type TimelineTransport
 } from "./TimelineView";
 import type { LiveSignalsState, TimelineContinuityState } from "../domain/types";
+import type { MentionCandidate } from "../app/uiShared";
 
 afterEach(() => {
   cleanup();
@@ -391,7 +392,143 @@ describe("TimelineView", () => {
     expect(editMessage).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$edit-deferred",
-      "newer edit input"
+      "newer edit input",
+      { targets: [] }
+    );
+  });
+
+  it("opens shared mention autocomplete in inline edit and submits structured intent", async () => {
+    const editMessage = vi.fn(async () => undefined);
+    const mentionCandidates: MentionCandidate[] = [
+      {
+        key: "@alice:example.invalid",
+        label: "Alice",
+        target: {
+          kind: "user",
+          user_id: "@alice:example.invalid",
+          display_label: "Alice"
+        }
+      }
+    ];
+    const editable = {
+      ...message("$edit-mention", "old body"),
+      can_edit: true,
+      actions: {
+        can_copy: true,
+        can_forward: true,
+        can_permalink: true,
+        can_view_source: true,
+        editable_mentions: {
+          targets: [
+            {
+              kind: "user" as const,
+              user_id: "@alice:example.invalid",
+              display_label: "Alice"
+            }
+          ]
+        }
+      }
+    };
+    const store = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [editable]
+      }
+    });
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({ editMessage })}
+          mentionCandidates={mentionCandidates}
+          onReply={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
+    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "@" } });
+    expect(await screen.findByRole("option", { name: "Alice @alice:example.invalid" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("option", { name: "Alice @alice:example.invalid" }));
+    expect(textarea.value).toBe("@Alice ");
+
+    fireEvent.click(screen.getByRole("button", { name: /save edit/i }));
+    expect(editMessage).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$edit-mention",
+      "@Alice",
+      {
+        targets: [
+          {
+            kind: "user",
+            user_id: "@alice:example.invalid",
+            display_label: "Alice"
+          }
+        ]
+      }
+    );
+  });
+
+  it("keeps an existing mention when its projected label is only an MXID fallback", () => {
+    const editMessage = vi.fn(async () => undefined);
+    const editable = {
+      ...message("$edit-mention-fallback", "hello @Alice"),
+      can_edit: true,
+      actions: {
+        can_copy: true,
+        can_forward: true,
+        can_permalink: true,
+        can_view_source: true,
+        editable_mentions: {
+          targets: [
+            {
+              kind: "user" as const,
+              user_id: "@alice:example.invalid",
+              display_label: "alice:example.invalid"
+            }
+          ]
+        }
+      }
+    };
+    const store = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [editable]
+      }
+    });
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({ editMessage })}
+          onReply={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save edit/i }));
+
+    expect(editMessage).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$edit-mention-fallback",
+      "hello @Alice",
+      {
+        targets: [
+          {
+            kind: "user",
+            user_id: "@alice:example.invalid",
+            display_label: "alice:example.invalid"
+          }
+        ]
+      }
     );
   });
 
@@ -437,7 +574,8 @@ describe("TimelineView", () => {
     expect(editMessage).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$edit-newline",
-      "hello\nworld"
+      "hello\nworld",
+      { targets: [] }
     );
   });
 
@@ -476,7 +614,8 @@ describe("TimelineView", () => {
     expect(editMessage).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$edit-send-snapshot",
-      "intent snapshot"
+      "intent snapshot",
+      { targets: [] }
     );
   });
 

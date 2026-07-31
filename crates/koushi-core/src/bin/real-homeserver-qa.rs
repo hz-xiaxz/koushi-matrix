@@ -849,6 +849,7 @@ async fn run_async_inner(
         key: timeline_key.clone(),
         event_id: event1_id.clone(),
         body: message_plan.edited_body.clone(),
+        mentions: MentionIntent::default(),
     }))
     .await
     .map_err(|e| format!("edit message 1 command submit failed: {e}"))?;

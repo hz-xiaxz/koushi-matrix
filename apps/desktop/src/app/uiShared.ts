@@ -424,8 +424,25 @@ export function mentionPillLabel(target: MentionTarget): string {
   return mentionDraftToken(target);
 }
 
+function mentionDraftTokens(target: MentionTarget): string[] {
+  const tokens = [mentionDraftToken(target)];
+  if (target.kind === "user") {
+    const userId = target.user_id.trim();
+    const localpart = userId.startsWith("@")
+      ? userId.slice(1).split(":", 1)[0]
+      : userId.split(":", 1)[0];
+    if (localpart) {
+      tokens.push(`@${localpart}`);
+    }
+  }
+  return tokens;
+}
+
 export function pruneMentionIntentForDraft(intent: MentionIntent, draft: string): MentionIntent {
-  const targets = intent.targets.filter((target) => draft.includes(mentionDraftToken(target)));
+  const normalizedDraft = draft.toLocaleLowerCase();
+  const targets = intent.targets.filter((target) =>
+    mentionDraftTokens(target).some((token) => normalizedDraft.includes(token.toLocaleLowerCase()))
+  );
   return targets.length === intent.targets.length ? intent : { targets };
 }
 

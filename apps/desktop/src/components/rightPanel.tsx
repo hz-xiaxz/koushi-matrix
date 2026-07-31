@@ -722,6 +722,9 @@ export function ContextualRightPanel({
             codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
             searchQuery={searchQuery}
             mediaDownloads={mediaDownloads}
+            mentionCandidates={threadMentionCandidates}
+            mentionCandidatesLoading={threadMentionCandidatesLoading}
+            onMentionQueryChange={onThreadMentionQueryChange}
             onDiagnosticLogEntry={onTimelineDiagnosticLogEntry}
           />
         ) : browserThreadSnapshot ? (

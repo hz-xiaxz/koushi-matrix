@@ -232,6 +232,8 @@ import {
 } from "./components/Shell";
 import { ContextualRightPanel } from "./components/rightPanel";
 
+type ActivityOpenTrigger = "home_rail" | "activity_sidebar" | "initial_home" | "other";
+
 const api = createDesktopApi();
 const DEFAULT_HOMESERVER = "https://matrix.org";
 const MENU_EVENT_NAME = "koushi-desktop://menu";
@@ -352,8 +354,13 @@ const tauriTimelineTransport: TimelineTransport | null = isTauriRuntime()
       async setTyping(roomId: string, isTyping: boolean) {
         await invoke("set_typing", { roomId, isTyping });
       },
-      async editMessage(roomId: string, eventId: string, body: string) {
-        await invoke("edit_message", { roomId, eventId, body });
+      async editMessage(
+        roomId: string,
+        eventId: string,
+        body: string,
+        mentions: MentionIntent = { targets: [] }
+      ) {
+        await invoke("edit_message", { roomId, eventId, body, mentions });
       },
       async redactMessage(roomId: string, eventId: string) {
         await invoke("redact_message", { roomId, eventId });
@@ -2877,10 +2884,25 @@ export function App() {
     return (await Promise.all(drains)).every(Boolean);
   }
 
-  const openHomeSelection = useCallback(async (selection = homeSelection) => {
+  const openHomeSelection = useCallback(
+    async (selection = homeSelection, trigger: ActivityOpenTrigger = "other") => {
     const transitionStartedAt = Date.now();
     const homeSelectionKind = selection.kind;
     const currentSnapshot = snapshotRef.current;
+    if (selection.kind === "activity") {
+      const activity = currentSnapshot?.state.domain.activity;
+      const previousTab =
+        activity?.kind === "open"
+          ? activity.active_tab
+          : activity?.kind === "opening"
+            ? activity.tab
+            : activity?.last_selected_tab ?? "none";
+      appendDiagnosticLog({
+        timestampMs: transitionStartedAt,
+        source: "activity.transition",
+        message: `stage=open_requested trigger=${trigger} previous_view=${primaryView} previous_lifecycle=${activity?.kind ?? "unknown"} previous_tab=${previousTab}`
+      });
+    }
     appendDiagnosticLog({
       timestampMs: transitionStartedAt,
       source: "home.transition",
@@ -2948,12 +2970,13 @@ export function App() {
       source: "home.transition",
       message: `stage=after_view_apply elapsed_ms_since_start=${viewAppliedAt - transitionStartedAt} view=activity`
     });
-  }, [homeSelection, setSnapshot]);
+    },
+    [appendDiagnosticLog, homeSelection, primaryView, setSnapshot]
+  );
 
   async function selectSpace(spaceId: string | null) {
     if (spaceId === null) {
-      // The workspace-rail Home button always resets to Activity/Recent.
-      await openHomeActivityView();
+      await openHomeActivityView("home_rail");
       return;
     }
     if (!(await drainActiveComposerScopesForNavigation(true, true))) return;
@@ -3045,9 +3068,9 @@ export function App() {
     await setRightPanelModeClosingFocusedContext("profile");
   }
 
-  async function openHomeActivityView() {
+  async function openHomeActivityView(trigger: ActivityOpenTrigger = "activity_sidebar") {
     setHomeSelection({ kind: "activity" });
-    await openHomeSelection({ kind: "activity" });
+    await openHomeSelection({ kind: "activity" }, trigger);
   }
 
   async function openHomeExploreView() {
@@ -3072,7 +3095,7 @@ export function App() {
       return;
     }
     initialHomeSelectionApplied.current = true;
-    void openHomeSelection(homeSelection);
+    void openHomeSelection(homeSelection, "initial_home");
   }, [
     homeSelection,
     openHomeSelection,

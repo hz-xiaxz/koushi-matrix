@@ -84,6 +84,92 @@ async fn known_unread_event_is_event_backed() {
 }
 
 #[tokio::test]
+async fn activity_open_reuses_last_selected_tab_after_close() {
+    let runtime = CoreRuntime::start();
+    let mut conn = runtime.attach();
+    runtime
+        .inject_actions(restore_ready_actions![AppAction::RoomListUpdated {
+            spaces: vec![],
+            rooms: vec![notification_room_summary("!activity:example.test", 1)],
+        }])
+        .await;
+    wait_for_state(&mut conn, |state| {
+        matches!(state.session, SessionState::Ready(_)) && state.rooms.len() == 1
+    })
+    .await;
+
+    let open_request_id = conn.next_request_id();
+    conn.command(CoreCommand::App(AppCommand::OpenActivity {
+        request_id: open_request_id,
+    }))
+    .await
+    .expect("open activity command");
+    wait_for_state(&mut conn, |state| {
+        matches!(
+            state.activity,
+            ActivityState::Open {
+                active_tab: koushi_state::ActivityTab::Recent,
+                ..
+            }
+        )
+    })
+    .await;
+
+    let tab_request_id = conn.next_request_id();
+    conn.command(CoreCommand::App(AppCommand::SetActivityTab {
+        request_id: tab_request_id,
+        tab: koushi_state::ActivityTab::Unread,
+    }))
+    .await
+    .expect("select unread activity tab command");
+    wait_for_state(&mut conn, |state| {
+        matches!(
+            state.activity,
+            ActivityState::Open {
+                active_tab: koushi_state::ActivityTab::Unread,
+                ..
+            }
+        )
+    })
+    .await;
+
+    let close_request_id = conn.next_request_id();
+    conn.command(CoreCommand::App(AppCommand::CloseActivity {
+        request_id: close_request_id,
+    }))
+    .await
+    .expect("close activity command");
+    wait_for_state(&mut conn, |state| {
+        matches!(state.activity, ActivityState::Closed { .. })
+    })
+    .await;
+
+    let reopen_request_id = conn.next_request_id();
+    conn.command(CoreCommand::App(AppCommand::OpenActivity {
+        request_id: reopen_request_id,
+    }))
+    .await
+    .expect("reopen activity command");
+    let reopened = wait_for_state(&mut conn, |state| {
+        matches!(
+            state.activity,
+            ActivityState::Open {
+                active_tab: koushi_state::ActivityTab::Unread,
+                ..
+            }
+        )
+    })
+    .await;
+    assert!(matches!(
+        reopened.activity,
+        ActivityState::Open {
+            active_tab: koushi_state::ActivityTab::Unread,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
 async fn app_command_opens_activity_from_observed_rows_and_mark_read_settles() {
     let runtime = CoreRuntime::start();
     let mut conn = runtime.attach();
