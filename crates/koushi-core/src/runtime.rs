@@ -24,8 +24,9 @@ use koushi_state::{
     FocusedContextState, LoginAttemptId, NavigationState, OperationFailureKind,
     ProfileUpdateRequest, RoomLatestEventSummary, RoomNotificationMode, RoomSummary,
     ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, ScheduledSendStore,
-    SearchScope as AppSearchScope, SessionState, SpaceSummary, SubmissionId, ThreadPaneState,
-    UiEvent, reduce, room_activity_unread_count,
+    SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection, SpaceSummary,
+    SubmissionId, ThreadPaneState, UiEvent, admit_space_member_invite, admit_space_members_load,
+    reduce, room_activity_unread_count,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -83,7 +84,7 @@ fn record_activity_transition(
 }
 
 use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
+use crate::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
 use crate::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 use crate::settings::SettingsStore;
 use crate::state_delta::build_state_delta;
@@ -167,6 +168,31 @@ fn app_loop_trace(arm: &'static str, count: u32, clone_ms: u128, total: std::tim
             .field(DiagnosticField::count("count", count as u64))
             .field(DiagnosticField::milliseconds("clone", clone_ms))
             .field(DiagnosticField::milliseconds("duration", total_ms)),
+    );
+}
+
+fn record_space_member_command_rejection(
+    trigger: &'static str,
+    rejection: SpaceMembersCommandRejection,
+) {
+    let reason = match rejection {
+        SpaceMembersCommandRejection::NoSelectedSpace => "no_selected_space",
+        SpaceMembersCommandRejection::WrongSpace => "wrong_space",
+        SpaceMembersCommandRejection::StaleGeneration => "stale_generation",
+        SpaceMembersCommandRejection::InviteAlreadyInFlight => "invite_already_in_flight",
+        SpaceMembersCommandRejection::LoadBlockedByInvite => "load_blocked_by_invite",
+        SpaceMembersCommandRejection::AlreadyJoined => "already_joined",
+        SpaceMembersCommandRejection::AlreadyInvited => "already_invited",
+        SpaceMembersCommandRejection::NotChildRoomOnly => "not_child_room_only",
+    };
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.space_members_projection",
+            "command_rejected",
+        )
+        .field(DiagnosticField::token("trigger", trigger))
+        .field(DiagnosticField::token("reason", reason)),
     );
 }
 
@@ -4393,6 +4419,97 @@ impl AppActor {
                 false
             }
             CoreCommand::Room(room_command) => {
+                let mut state_changed = false;
+                match &room_command {
+                    crate::command::RoomCommand::LoadSpaceMembers {
+                        request_id,
+                        space_id,
+                        generation,
+                    } => {
+                        if let Err(rejection) = admit_space_members_load(
+                            &self.state.space_members,
+                            space_id,
+                            *generation,
+                        ) {
+                            record_space_member_command_rejection("load", rejection);
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceMembersLoadRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                                generation: *generation,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            record_space_member_command_rejection(
+                                "load",
+                                SpaceMembersCommandRejection::StaleGeneration,
+                            );
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
+                    crate::command::RoomCommand::InviteUserToSpace {
+                        request_id,
+                        space_id,
+                        user_id,
+                        generation,
+                    } => {
+                        if let Err(rejection) = admit_space_member_invite(
+                            &self.state.space_members,
+                            space_id,
+                            user_id,
+                            *generation,
+                        ) {
+                            record_space_member_command_rejection("invite", rejection);
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceMemberInviteRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                                user_id: user_id.clone(),
+                                generation: *generation,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            record_space_member_command_rejection(
+                                "invite",
+                                SpaceMembersCommandRejection::InviteAlreadyInFlight,
+                            );
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
+                    _ => {}
+                }
                 // User-intent lane: for SelectRoom, record the request_id→room_id
                 // correlation BEFORE forwarding so the action loop can emit the
                 // terminal IntentLifecycle outcome. This command path is reliable
@@ -4412,7 +4529,7 @@ impl AppActor {
                     .account_actor
                     .send(crate::account::AccountMessage::RoomCommand(room_command))
                     .await;
-                false
+                state_changed
             }
             CoreCommand::Timeline(timeline_command) => {
                 if let Some((request_id, expected_account)) =
@@ -5787,13 +5904,14 @@ fn default_data_dir() -> PathBuf {
 mod tests {
     use super::*;
     use crate::event::{
-        AccountEvent, ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
+        AccountEvent, RoomEvent, ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem,
+        TimelineItemId,
     };
     use koushi_state::{
         DisplaySettings, LiveEventReceipts, LiveReadReceipt, LocalUserAliasUpdateState, OwnProfile,
         ProfileState, RoomLatestEventSummary, RoomNotificationModeOperation,
-        RoomNotificationSettings, RoomSummary, RoomTags, SessionInfo, SettingsPatch, UserProfile,
-        reduce,
+        RoomNotificationSettings, RoomSummary, RoomTags, SessionInfo, SettingsPatch,
+        SpaceMemberEntry, SpaceMemberMembership, SpaceMembersProjection, UserProfile, reduce,
     };
 
     #[test]
@@ -7207,6 +7325,138 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejected_space_invites_are_fenced_before_room_actor_route() {
+        let runtime = CoreRuntime::start_with_event_capacity(64);
+        let mut connection = runtime.attach();
+        let space_id = "!space-a:example.invalid".to_owned();
+        let duplicate_user_id = "@duplicate:example.invalid".to_owned();
+        let generation = 7;
+
+        runtime
+            .inject_actions(vec![
+                AppAction::AppStarted,
+                AppAction::RestoreSessionSucceeded(SessionInfo {
+                    homeserver: "https://example.invalid".to_owned(),
+                    user_id: "@me:example.invalid".to_owned(),
+                    device_id: "DEVICE".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+                }),
+                AppAction::CurrentDeviceTrustChanged(
+                    koushi_state::CurrentDeviceTrustState::Verified,
+                ),
+                AppAction::SpaceMembersLoadRequested {
+                    request_id: 1,
+                    space_id: space_id.clone(),
+                    generation,
+                },
+                AppAction::SpaceMembersLoaded {
+                    request_id: 1,
+                    projection: SpaceMembersProjection {
+                        space_id: space_id.clone(),
+                        generation,
+                        space_joined: Vec::new(),
+                        space_invited: vec![SpaceMemberEntry {
+                            user_id: duplicate_user_id.clone(),
+                            display_name: None,
+                            display_label: "Unknown user".to_owned(),
+                            original_display_label: "Unknown user".to_owned(),
+                            avatar_url: None,
+                            power_level: None,
+                            role: koushi_state::RoomMemberRole::User,
+                            membership: SpaceMemberMembership::SpaceInvited,
+                            child_room_ids: Vec::new(),
+                            invite_pending: false,
+                        }],
+                        child_room_only: Vec::new(),
+                        child_room_count: 0,
+                        complete_child_room_count: 0,
+                        incomplete_child_room_count: 0,
+                    },
+                },
+            ])
+            .await;
+
+        let expected_state = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let snapshot = connection.snapshot();
+                if snapshot.space_members.selected_space_id.as_deref() == Some(space_id.as_str())
+                    && snapshot.space_members.generation == generation
+                    && snapshot.space_members.space_invited.len() == 1
+                {
+                    break snapshot;
+                }
+                let _ = connection.recv_event().await.expect("runtime event stream");
+            }
+        })
+        .await
+        .expect("injected Space member state should settle");
+
+        let rejected_commands = [
+            (
+                "wrong_space",
+                "!space-b:example.invalid".to_owned(),
+                generation,
+            ),
+            ("stale_generation", space_id.clone(), generation + 1),
+            ("duplicate", space_id.clone(), generation),
+        ];
+        for (reason, target_space_id, target_generation) in rejected_commands {
+            let request_id = connection.next_request_id();
+            connection
+                .command(CoreCommand::Room(
+                    crate::command::RoomCommand::InviteUserToSpace {
+                        request_id,
+                        space_id: target_space_id,
+                        user_id: duplicate_user_id.clone(),
+                        generation: target_generation,
+                    },
+                ))
+                .await
+                .expect("rejected invite command should enter the runtime");
+
+            let failure = tokio::time::timeout(Duration::from_secs(1), async {
+                loop {
+                    match connection.recv_event().await.expect("runtime event stream") {
+                        CoreEvent::OperationFailed {
+                            request_id: failed_request_id,
+                            failure,
+                        } if failed_request_id == request_id => break failure,
+                        CoreEvent::Room(RoomEvent::SpaceMemberInviteSettled { .. }) => {
+                            panic!("{reason} invite reached RoomActor settlement route")
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .expect("rejected invite should emit a correlated failure");
+            assert_eq!(
+                failure,
+                CoreFailure::RoomOperationFailed {
+                    kind: crate::failure::RoomFailureKind::Sdk,
+                }
+            );
+            assert_eq!(connection.snapshot(), expected_state);
+        }
+
+        let no_settlement = tokio::time::timeout(Duration::from_millis(100), async {
+            loop {
+                if let CoreEvent::Room(RoomEvent::SpaceMemberInviteSettled { .. }) =
+                    connection.recv_event().await.expect("runtime event stream")
+                {
+                    return true;
+                }
+            }
+        })
+        .await;
+        assert!(
+            no_settlement.is_err(),
+            "no rejected invite should reach the RoomActor/SDK settlement path"
+        );
+        runtime.shutdown_handle().abort();
+    }
+
+    #[tokio::test]
     async fn projection_rejected_restore_emits_one_correlated_failure_without_routing() {
         let runtime = CoreRuntime::start_with_event_capacity(16);
         let mut connection = runtime.attach();
@@ -7313,6 +7563,7 @@ mod tests {
                 display_name: Some("Me Upstream".to_owned()),
                 avatar: None,
             },
+            room_users: BTreeMap::new(),
             ignored_user_ids: BTreeSet::new(),
             ignored_user_update: koushi_state::IgnoredUserUpdateState::Idle,
             users: BTreeMap::from([

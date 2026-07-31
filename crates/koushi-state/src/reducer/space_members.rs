@@ -23,6 +23,7 @@ pub(crate) fn handle_selected(state: &mut AppState, selected_space_id: Option<St
 
 pub(crate) fn handle_load_requested(
     state: &mut AppState,
+    request_id: u64,
     space_id: String,
     generation: u64,
 ) -> Vec<AppEffect> {
@@ -45,7 +46,7 @@ pub(crate) fn handle_load_requested(
         clear_projection(&mut state.space_members);
     }
     state.space_members.operation = SpaceMembersOperationState::Loading {
-        request_id: None,
+        request_id: Some(request_id),
         space_id,
         generation,
     };
@@ -54,9 +55,10 @@ pub(crate) fn handle_load_requested(
 
 pub(crate) fn handle_loaded(
     state: &mut AppState,
+    request_id: u64,
     projection: SpaceMembersProjection,
 ) -> Vec<AppEffect> {
-    if !is_session_ready(state) || !projection_matches(state, &projection) {
+    if !is_session_ready(state) || !projection_matches(state, request_id, &projection) {
         return Vec::new();
     }
 
@@ -71,7 +73,20 @@ pub(crate) fn handle_loaded(
     });
 
     let mut resolved = resolve_space_members_projection(projection, &state.profile);
-    let mut operation_after_load = SpaceMembersOperationState::Idle;
+    if resolved.incomplete_child_room_count > 0 {
+        merge_incomplete_projection(&state.space_members, &mut resolved);
+    }
+    let mut operation_after_load = pending
+        .clone()
+        .map(
+            |(request_id, space_id, user_id, generation)| SpaceMembersOperationState::Inviting {
+                request_id,
+                space_id,
+                user_id,
+                generation,
+            },
+        )
+        .unwrap_or(SpaceMembersOperationState::Idle);
     if let Some((request_id, space_id, user_id, generation)) = pending {
         if let Some(entry) = resolved
             .space_joined
@@ -89,25 +104,17 @@ pub(crate) fn handle_loaded(
             entry.membership = SpaceMemberMembership::SpaceInvited;
             entry.invite_pending = false;
             operation_after_load = SpaceMembersOperationState::Idle;
-        } else if resolved
-            .child_room_only
-            .iter()
-            .any(|entry| entry.user_id == user_id)
-        {
-            resolved
-                .child_room_only
-                .retain(|entry| entry.user_id != user_id);
-            if let Some(mut entry) = pending_entry {
-                entry.membership = SpaceMemberMembership::SpaceInvited;
-                entry.invite_pending = true;
-                resolved.space_invited.push(entry);
-                operation_after_load = SpaceMembersOperationState::Inviting {
-                    request_id,
-                    space_id,
-                    user_id,
-                    generation,
-                };
-            }
+        } else if let Some(mut entry) = pending_entry {
+            remove_projection_entry(&mut resolved, &user_id);
+            entry.membership = SpaceMemberMembership::SpaceInvited;
+            entry.invite_pending = true;
+            resolved.space_invited.push(entry);
+            operation_after_load = SpaceMembersOperationState::Inviting {
+                request_id,
+                space_id,
+                user_id,
+                generation,
+            };
         }
     }
     sort_projection(&mut resolved);
@@ -116,9 +123,87 @@ pub(crate) fn handle_loaded(
     vec![AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged)]
 }
 
+pub(crate) fn handle_profiles_observed(
+    state: &mut AppState,
+    request_id: u64,
+    profiles: Vec<crate::state::UserProfile>,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state) || !operation_matches_request(state, request_id) {
+        return Vec::new();
+    }
+    super::profile::handle_user_profiles_updated(state, profiles)
+}
+
+pub(crate) fn handle_projection_reconciled(
+    state: &mut AppState,
+    request_id: u64,
+    projection: SpaceMembersProjection,
+    profiles: Vec<crate::state::UserProfile>,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state) || !operation_matches_request(state, request_id) {
+        return Vec::new();
+    }
+    let mut effects = super::profile::handle_user_profiles_updated(state, profiles);
+    if matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Loading {
+            request_id: Some(active_request_id),
+            ..
+        } if active_request_id == request_id
+    ) {
+        effects.extend(handle_loaded(state, request_id, projection));
+    } else if matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Inviting {
+            request_id: active_request_id,
+            ..
+        } if active_request_id == request_id
+    ) {
+        apply_reconciled_projection_during_invite(state, projection);
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    }
+    effects
+}
+
+fn apply_reconciled_projection_during_invite(
+    state: &mut AppState,
+    projection: SpaceMembersProjection,
+) {
+    let pending = pending_operation(state);
+    let pending_entry = pending.as_ref().and_then(|(_, _, user_id, _)| {
+        state
+            .space_members
+            .space_invited
+            .iter()
+            .find(|entry| entry.user_id == *user_id)
+            .cloned()
+    });
+    let mut resolved = resolve_space_members_projection(projection, &state.profile);
+    if resolved.incomplete_child_room_count > 0 {
+        merge_incomplete_projection(&state.space_members, &mut resolved);
+    }
+    if let Some((_, _, user_id, _)) = pending {
+        let authoritative = resolved
+            .space_joined
+            .iter()
+            .chain(resolved.space_invited.iter())
+            .any(|entry| entry.user_id == user_id);
+        if !authoritative {
+            if let Some(mut entry) = pending_entry {
+                remove_projection_entry(&mut resolved, &user_id);
+                entry.membership = SpaceMemberMembership::SpaceInvited;
+                entry.invite_pending = true;
+                resolved.space_invited.push(entry);
+            }
+        }
+    }
+    sort_projection(&mut resolved);
+    apply_projection(&mut state.space_members, resolved);
+}
+
 pub(crate) fn handle_load_failed(
     state: &mut AppState,
-    request_id: Option<u64>,
+    request_id: u64,
     space_id: String,
     generation: u64,
     kind: crate::state::OperationFailureKind,
@@ -128,14 +213,17 @@ pub(crate) fn handle_load_failed(
         || state.space_members.generation != generation
         || !matches!(
             state.space_members.operation,
-            SpaceMembersOperationState::Loading { .. }
+            SpaceMembersOperationState::Loading {
+                request_id: Some(active_request_id),
+                ..
+            } if active_request_id == request_id
         )
     {
         return Vec::new();
     }
 
     state.space_members.operation = SpaceMembersOperationState::Failed {
-        request_id: request_id.unwrap_or_default(),
+        request_id,
         space_id,
         user_id: None,
         generation,
@@ -267,9 +355,34 @@ pub(crate) fn refresh_member_display_projection(state: &mut AppState) -> bool {
     refresh_space_member_display_projection(&mut state.space_members, &state.profile)
 }
 
-fn projection_matches(state: &AppState, projection: &SpaceMembersProjection) -> bool {
+fn projection_matches(
+    state: &AppState,
+    request_id: u64,
+    projection: &SpaceMembersProjection,
+) -> bool {
     state.space_members.generation == projection.generation
         && state.space_members.selected_space_id.as_deref() == Some(projection.space_id.as_str())
+        && matches!(
+            state.space_members.operation,
+            SpaceMembersOperationState::Loading {
+                request_id: Some(active_request_id),
+                ..
+            } if active_request_id == request_id
+        )
+}
+
+fn operation_matches_request(state: &AppState, request_id: u64) -> bool {
+    matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Loading {
+            request_id: Some(active_request_id),
+            ..
+        }
+            | SpaceMembersOperationState::Inviting {
+                request_id: active_request_id,
+                ..
+            } if active_request_id == request_id
+    )
 }
 
 fn pending_operation(state: &AppState) -> Option<(u64, String, String, u64)> {
@@ -291,6 +404,43 @@ fn apply_projection(state: &mut SpaceMembersState, projection: SpaceMembersProje
     state.child_room_count = projection.child_room_count;
     state.complete_child_room_count = projection.complete_child_room_count;
     state.incomplete_child_room_count = projection.incomplete_child_room_count;
+}
+
+fn merge_incomplete_projection(previous: &SpaceMembersState, next: &mut SpaceMembersProjection) {
+    let mut observed_user_ids = next
+        .space_joined
+        .iter()
+        .chain(next.space_invited.iter())
+        .chain(next.child_room_only.iter())
+        .map(|entry| entry.user_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for entry in previous
+        .space_joined
+        .iter()
+        .chain(previous.space_invited.iter())
+        .chain(previous.child_room_only.iter())
+    {
+        if observed_user_ids.insert(entry.user_id.clone()) {
+            match entry.membership {
+                SpaceMemberMembership::SpaceJoined => next.space_joined.push(entry.clone()),
+                SpaceMemberMembership::SpaceInvited => next.space_invited.push(entry.clone()),
+                SpaceMemberMembership::ChildRoomOnly => next.child_room_only.push(entry.clone()),
+            }
+        }
+    }
+}
+
+fn remove_projection_entry(projection: &mut SpaceMembersProjection, user_id: &str) {
+    projection
+        .space_joined
+        .retain(|entry| entry.user_id != user_id);
+    projection
+        .space_invited
+        .retain(|entry| entry.user_id != user_id);
+    projection
+        .child_room_only
+        .retain(|entry| entry.user_id != user_id);
 }
 
 fn sort_projection(projection: &mut SpaceMembersProjection) {

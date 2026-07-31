@@ -460,12 +460,23 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             profile::handle_user_profiles_updated(state, profiles)
         }
         AppAction::SpaceMembersLoadRequested {
+            request_id,
             space_id,
             generation,
-        } => space_members::handle_load_requested(state, space_id, generation),
-        AppAction::SpaceMembersLoaded { projection } => {
-            space_members::handle_loaded(state, projection)
-        }
+        } => space_members::handle_load_requested(state, request_id, space_id, generation),
+        AppAction::SpaceMembersLoaded {
+            request_id,
+            projection,
+        } => space_members::handle_loaded(state, request_id, projection),
+        AppAction::SpaceMembersProfilesObserved {
+            request_id,
+            profiles,
+        } => space_members::handle_profiles_observed(state, request_id, profiles),
+        AppAction::SpaceMembersProjectionReconciled {
+            request_id,
+            projection,
+            profiles,
+        } => space_members::handle_projection_reconciled(state, request_id, projection, profiles),
         AppAction::SpaceMembersLoadFailed {
             request_id,
             space_id,
@@ -1518,6 +1529,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             room_id,
             receipts_by_event,
         } => live_signals::handle_live_room_receipts_updated(state, room_id, receipts_by_event),
+        AppAction::LiveRoomProfilesObserved { room_id, profiles } => {
+            live_signals::handle_live_room_profiles_observed(state, room_id, profiles)
+        }
         AppAction::LiveRoomReceiptsWindowReconciled {
             room_id,
             scoped_event_ids,

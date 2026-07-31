@@ -93,9 +93,10 @@ pub use profile::{
 
 // ── Re-exports: space members ─────────────────────────────────────────────
 pub use space_members::{
-    SpaceMemberEntry, SpaceMemberInviteOutcome, SpaceMemberMembership, SpaceMembersOperationState,
-    SpaceMembersProjection, SpaceMembersState, refresh_space_member_display_projection,
-    resolve_space_members_projection, sort_entries,
+    SpaceMemberEntry, SpaceMemberInviteOutcome, SpaceMemberMembership,
+    SpaceMembersCommandRejection, SpaceMembersOperationState, SpaceMembersProjection,
+    SpaceMembersState, admit_space_member_invite, admit_space_members_load,
+    refresh_space_member_display_projection, resolve_space_members_projection, sort_entries,
 };
 
 // ── Re-exports: room ────────────────────────────────────────────────────────

@@ -12,6 +12,18 @@ pub enum SpaceMemberMembership {
     ChildRoomOnly,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SpaceMembersCommandRejection {
+    NoSelectedSpace,
+    WrongSpace,
+    StaleGeneration,
+    InviteAlreadyInFlight,
+    LoadBlockedByInvite,
+    AlreadyJoined,
+    AlreadyInvited,
+    NotChildRoomOnly,
+}
+
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SpaceMemberEntry {
     pub user_id: String,
@@ -275,9 +287,11 @@ pub fn refresh_space_member_display_projection(
         let resolved = resolve_entry(entry.clone(), profiles);
         if entry.display_label != resolved.display_label
             || entry.original_display_label != resolved.original_display_label
+            || entry.avatar_url != resolved.avatar_url
         {
             entry.display_label = resolved.display_label;
             entry.original_display_label = resolved.original_display_label;
+            entry.avatar_url = resolved.avatar_url;
             changed = true;
         }
     }
@@ -320,7 +334,79 @@ fn resolve_entry(mut entry: SpaceMemberEntry, profiles: &ProfileState) -> SpaceM
         .or(cached)
         .unwrap_or("Unknown user")
         .to_owned();
+    if entry.avatar_url.is_none() {
+        entry.avatar_url = profiles
+            .users
+            .get(&entry.user_id)
+            .and_then(|profile| profile.avatar.as_ref())
+            .map(|avatar| avatar.mxc_uri.clone())
+            .filter(|mxc_uri| !mxc_uri.trim().is_empty());
+    }
     entry
+}
+
+/// Admit a Space-member command against the state snapshot that is about to
+/// be used for an external SDK operation. Callers must perform this check
+/// before reducing an optimistic action or invoking the SDK.
+pub fn admit_space_member_invite(
+    state: &SpaceMembersState,
+    space_id: &str,
+    user_id: &str,
+    generation: u64,
+) -> Result<(), SpaceMembersCommandRejection> {
+    let Some(selected_space_id) = state.selected_space_id.as_deref() else {
+        return Err(SpaceMembersCommandRejection::NoSelectedSpace);
+    };
+    if selected_space_id != space_id {
+        return Err(SpaceMembersCommandRejection::WrongSpace);
+    }
+    if state.generation != generation {
+        return Err(SpaceMembersCommandRejection::StaleGeneration);
+    }
+    if matches!(state.operation, SpaceMembersOperationState::Inviting { .. }) {
+        return Err(SpaceMembersCommandRejection::InviteAlreadyInFlight);
+    }
+    if state
+        .space_joined
+        .iter()
+        .any(|entry| entry.user_id == user_id)
+    {
+        return Err(SpaceMembersCommandRejection::AlreadyJoined);
+    }
+    if state
+        .space_invited
+        .iter()
+        .any(|entry| entry.user_id == user_id)
+    {
+        return Err(SpaceMembersCommandRejection::AlreadyInvited);
+    }
+    if !state
+        .child_room_only
+        .iter()
+        .any(|entry| entry.user_id == user_id)
+    {
+        return Err(SpaceMembersCommandRejection::NotChildRoomOnly);
+    }
+    Ok(())
+}
+
+pub fn admit_space_members_load(
+    state: &SpaceMembersState,
+    space_id: &str,
+    generation: u64,
+) -> Result<(), SpaceMembersCommandRejection> {
+    if let Some(selected_space_id) = state.selected_space_id.as_deref() {
+        if selected_space_id != space_id {
+            return Err(SpaceMembersCommandRejection::WrongSpace);
+        }
+        if state.generation != generation {
+            return Err(SpaceMembersCommandRejection::StaleGeneration);
+        }
+    }
+    if matches!(state.operation, SpaceMembersOperationState::Inviting { .. }) {
+        return Err(SpaceMembersCommandRejection::LoadBlockedByInvite);
+    }
+    Ok(())
 }
 
 pub fn sort_entries(entries: &mut [SpaceMemberEntry]) {

@@ -23,7 +23,7 @@ Plan: `docs/superpowers/plans/2026-07-31-space-members-profile-cache.md`
   local `m.space.child` state events and completeness from
   `Room::are_members_synced()`.
 - Evidence: `cargo test -p koushi-sdk space_member --lib -- --nocapture`
-  (5 passed), `cargo check -p koushi-sdk --lib`,
+  (6 passed), `cargo check -p koushi-sdk --lib`,
   `cargo fmt --all -- --check`, and `git diff --check` all passed.
 
 ## Task 2 evidence
@@ -38,11 +38,11 @@ Plan: `docs/superpowers/plans/2026-07-31-space-members-profile-cache.md`
 - Added the profile precedence resolver: local alias, relevant room, Space room,
   payload, account `ProfileState.users` cache, local homeserver input, then
   `Unknown user`.
-- Space/child load now observes non-empty local member profiles into
-  `ProfileState.users` by reducing `UserProfilesUpdated` before
-  `SpaceMembersLoaded`; live read-receipt projections refresh from that cache.
-  This is covered by the child-profile load-path test and the existing-receipt
-  Seen fallback test.
+- Space/child load and invite reconciliation carry non-empty local member
+  profiles through the request-correlated `SpaceMembersProjectionReconciled`
+  action; live read-receipt projections refresh from the state-owned cache.
+  This is covered by the child-profile load-path test, the authoritative invite
+  reconciliation test, and the existing-receipt Seen fallback test.
 - Added core load/invite commands and actor handlers using the Task 1 local SDK
   projection and existing invite primitive; no per-person network profile
   fan-out or plaintext profile store was introduced.
@@ -55,15 +55,70 @@ Plan: `docs/superpowers/plans/2026-07-31-space-members-profile-cache.md`
   - `cargo fmt --all` — passed (stable rustfmt emitted warnings for unsupported
     nightly-only formatting options).
   - `cargo test -p koushi-state --test space_members_state -- --nocapture` —
-    5 passed.
-  - `cargo test -p koushi-state --test profile_state -- --nocapture` — 26
-    passed.
+    12 passed.
+  - `cargo test -p koushi-state --test profile_state -- --nocapture` —
+    28 passed.
   - `cargo test -p koushi-core space_members --lib -- --nocapture` — 2 passed.
   - `cargo check -p koushi-state` — passed.
   - `cargo check -p koushi-core --lib` — passed; only pre-existing
     `media_preparation` / `read_state` warnings remain.
   - `cargo fmt --all -- --check` — passed.
   - `git diff --check` — passed.
+
+## Task 2 review-fix milestone — 2026-08-01
+
+Completed in this milestone:
+
+- C1: `AppActor` now admits Space-member load/invite commands before routing to
+  `RoomActor`; wrong-space, stale-generation, and duplicate invites are
+  rejected before any SDK side effect. The production-path test
+  `rejected_space_invites_are_fenced_before_room_actor_route` verifies the
+  rejected commands do not produce an invite settlement.
+- C2: load, failure, profile observation, projection reconciliation, and invite
+  settlement actions are request-correlated. Same-generation out-of-order
+  results cannot overwrite a newer request or clobber an active invite.
+- I1: every active-space mutation handled in this scope synchronizes the
+  Space-members generation/clear transition and emits the corresponding state
+  effect, including restored navigation, room-list, directory, selection, and
+  session-clear paths.
+- I2/I4: incomplete child projections and lookup/load failures retain the last
+  valid projection, including an optimistic invite whose target is not yet
+  observed.
+- I3: invite reconciliation applies the authoritative projection and profile
+  observations before the correlated settlement outcome is reduced.
+- Minor fixes: cached room avatars refresh the Space-member row, and legacy
+  AppState/profile fixtures deserialize with the new defaulted fields.
+
+Verification for this milestone:
+
+- `cargo test -p koushi-state --test navigation_state -- --nocapture` — 46
+  passed.
+- `cargo test -p koushi-state --test space_members_state -- --nocapture` — 12
+  passed.
+- `cargo test -p koushi-state --test profile_state -- --nocapture` — 28
+  passed.
+- `cargo test -p koushi-sdk space_member --lib -- --nocapture` — 6 passed.
+- `cargo test -p koushi-core --lib rejected_space_invites_are_fenced_before_room_actor_route -- --nocapture` — 1 passed.
+- `cargo test -p koushi-core space_members --lib -- --nocapture` — 2 passed.
+- `cargo check -p koushi-state`, `cargo check -p koushi-core --lib`, and
+  `cargo check -p koushi-sdk --lib` — passed.
+- `cargo fmt --all -- --check` and `git diff --check` — passed. Stable rustfmt
+  still reports the repository's existing warnings for nightly-only options.
+
+Deferred to the next review milestone:
+
+- I5: the touched core diagnostic records only actual projection-boundary
+  input/observed/unresolved counts and explicitly marks state resolution as
+  deferred. Full source/input/output/cache-hit/miss/stale/duplicate/dedupe
+  accounting remains to be implemented; no fabricated zero counters are used.
+- I6: room-local profile precedence and reducer coverage are in place, but the
+  TimelineActor producer and the full production Seen-profile observation path
+  remain. No network profile fan-out was added.
+- I7: the touched SDK projection and profile-resolution `Debug` implementations
+  are redacted and covered, while a broader raw SDK/profile-debug audit and
+  additional boundary coverage remain.
+- I8: the C1 production routing test is complete; production-path coverage for
+  the remaining load/failure/profile-observation routes remains.
 
 ## Decisions and invariants
 

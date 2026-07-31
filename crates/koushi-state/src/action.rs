@@ -147,17 +147,28 @@ pub enum AppAction {
         profiles: Vec<UserProfile>,
     },
     SpaceMembersLoadRequested {
+        request_id: u64,
         space_id: String,
         generation: u64,
     },
     SpaceMembersLoaded {
+        request_id: u64,
         projection: SpaceMembersProjection,
     },
     SpaceMembersLoadFailed {
-        request_id: Option<u64>,
+        request_id: u64,
         space_id: String,
         generation: u64,
         kind: OperationFailureKind,
+    },
+    SpaceMembersProfilesObserved {
+        request_id: u64,
+        profiles: Vec<UserProfile>,
+    },
+    SpaceMembersProjectionReconciled {
+        request_id: u64,
+        projection: SpaceMembersProjection,
+        profiles: Vec<UserProfile>,
     },
     SpaceMemberInviteRequested {
         request_id: u64,
@@ -1283,6 +1294,10 @@ pub enum AppAction {
         room_id: String,
         scoped_event_ids: Vec<String>,
         receipts_by_event: Vec<LiveEventReceipts>,
+    },
+    LiveRoomProfilesObserved {
+        room_id: String,
+        profiles: Vec<UserProfile>,
     },
     FullyReadMarkerUpdated {
         room_id: String,

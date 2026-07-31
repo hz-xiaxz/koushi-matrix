@@ -932,16 +932,10 @@ impl RoomActor {
         space_id: String,
         generation: u64,
     ) {
-        self.reduce_reliable(vec![AppAction::SpaceMembersLoadRequested {
-            space_id: space_id.clone(),
-            generation,
-        }])
-        .await;
-
         let Some(session) = &self.session else {
             let kind = OperationFailureKind::Sdk;
             self.reduce_reliable(vec![AppAction::SpaceMembersLoadFailed {
-                request_id: Some(request_id.sequence),
+                request_id: request_id.sequence,
                 space_id,
                 generation,
                 kind,
@@ -957,14 +951,11 @@ impl RoomActor {
                 let projection = state_space_members_projection(raw_projection, generation);
                 record_core_space_members_projection("load", generation, &projection, "success");
                 record_core_profile_resolution(&projection);
-                self.reduce_reliable(vec![
-                    AppAction::UserProfilesUpdated {
-                        profiles: profile_updates,
-                    },
-                    AppAction::SpaceMembersLoaded {
-                        projection: projection.clone(),
-                    },
-                ])
+                self.reduce_reliable(vec![AppAction::SpaceMembersProjectionReconciled {
+                    request_id: request_id.sequence,
+                    projection: projection.clone(),
+                    profiles: profile_updates,
+                }])
                 .await;
                 self.emit(CoreEvent::Room(RoomEvent::SpaceMembersLoaded {
                     request_id,
@@ -993,7 +984,7 @@ impl RoomActor {
                     "failed",
                 );
                 self.reduce_reliable(vec![AppAction::SpaceMembersLoadFailed {
-                    request_id: Some(request_id.sequence),
+                    request_id: request_id.sequence,
                     space_id,
                     generation,
                     kind,
@@ -1016,49 +1007,68 @@ impl RoomActor {
         user_id: String,
         generation: u64,
     ) {
-        self.reduce_reliable(vec![AppAction::SpaceMemberInviteRequested {
-            request_id: request_id.sequence,
-            space_id: space_id.clone(),
-            user_id: user_id.clone(),
-            generation,
-        }])
-        .await;
-
-        let outcome = match &self.session {
-            None => SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+        let (outcome, reconciliation) = match &self.session {
+            None => (
+                SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+                None,
+            ),
             Some(session) => {
                 match koushi_sdk::invite_user_to_room(session, &space_id, &user_id).await {
                     Ok(()) => {
-                        reconcile_space_invite_outcome(
+                        let fallback = SpaceMemberInviteOutcome::Invited;
+                        match reconcile_space_invite_outcome(
                             session,
                             &space_id,
                             &user_id,
-                            SpaceMemberInviteOutcome::Invited,
+                            generation,
+                            fallback.clone(),
                         )
                         .await
+                        {
+                            Some(reconciliation) => {
+                                (reconciliation.outcome.clone(), Some(reconciliation))
+                            }
+                            None => (fallback, None),
+                        }
                     }
                     Err(error) => {
                         let failure_kind = operation_failure_kind(classify_room_error(&error));
-                        reconcile_space_invite_outcome(
+                        let fallback = SpaceMemberInviteOutcome::Failed(failure_kind);
+                        match reconcile_space_invite_outcome(
                             session,
                             &space_id,
                             &user_id,
-                            SpaceMemberInviteOutcome::Failed(failure_kind),
+                            generation,
+                            fallback.clone(),
                         )
                         .await
+                        {
+                            Some(reconciliation) => {
+                                (reconciliation.outcome.clone(), Some(reconciliation))
+                            }
+                            None => (fallback, None),
+                        }
                     }
                 }
             }
         };
         record_core_space_members_operation("invite", generation, &outcome);
-        self.reduce_reliable(vec![AppAction::SpaceMemberInviteSettled {
+        let mut actions = Vec::new();
+        if let Some(reconciliation) = reconciliation {
+            actions.push(AppAction::SpaceMembersProjectionReconciled {
+                request_id: request_id.sequence,
+                projection: reconciliation.projection,
+                profiles: reconciliation.profiles,
+            });
+        }
+        actions.push(AppAction::SpaceMemberInviteSettled {
             request_id: request_id.sequence,
             space_id,
             user_id,
             generation,
             outcome: outcome.clone(),
-        }])
-        .await;
+        });
+        self.reduce_reliable(actions).await;
         self.emit(CoreEvent::Room(RoomEvent::SpaceMemberInviteSettled {
             request_id,
             generation,
@@ -3601,6 +3611,7 @@ fn user_profiles_from_space_projection(
         .iter()
         .chain(projection.space_invited.iter())
         .chain(projection.child_room_only.iter())
+        .chain(projection.child_room_profiles.iter())
     {
         let has_display_name = entry
             .display_name
@@ -3645,23 +3656,30 @@ fn user_profiles_from_space_projection(
     profiles.into_values().collect()
 }
 
+struct SpaceInviteReconciliation {
+    projection: SpaceMembersProjection,
+    profiles: Vec<UserProfile>,
+    outcome: SpaceMemberInviteOutcome,
+}
+
 async fn reconcile_space_invite_outcome(
     session: &MatrixClientSession,
     space_id: &str,
     user_id: &str,
+    generation: u64,
     fallback: SpaceMemberInviteOutcome,
-) -> SpaceMemberInviteOutcome {
-    let Ok(projection) = koushi_sdk::matrix_space_members_projection(session, space_id).await
+) -> Option<SpaceInviteReconciliation> {
+    let Ok(raw_projection) = koushi_sdk::matrix_space_members_projection(session, space_id).await
     else {
-        return fallback;
+        return None;
     };
-    if projection
+    let outcome = if raw_projection
         .space_joined
         .iter()
         .any(|entry| entry.user_id == user_id)
     {
         SpaceMemberInviteOutcome::AlreadyJoined
-    } else if projection
+    } else if raw_projection
         .space_invited
         .iter()
         .any(|entry| entry.user_id == user_id)
@@ -3669,7 +3687,14 @@ async fn reconcile_space_invite_outcome(
         SpaceMemberInviteOutcome::AlreadyInvited
     } else {
         fallback
-    }
+    };
+    let profiles = user_profiles_from_space_projection(&raw_projection);
+    let projection = state_space_members_projection(raw_projection, generation);
+    Some(SpaceInviteReconciliation {
+        projection,
+        profiles,
+        outcome,
+    })
 }
 
 fn record_core_space_members_projection(
@@ -3742,42 +3767,47 @@ fn record_core_space_members_operation(
 }
 
 fn record_core_profile_resolution(projection: &SpaceMembersProjection) {
-    let relevant_room_count = projection.child_room_only.len();
-    let space_room_count = projection.space_joined.len() + projection.space_invited.len();
-    let unresolved_count = projection
+    // This milestone records only the inputs visible at the SDK projection
+    // boundary. Full source/input/output/cache accounting belongs to the next
+    // diagnostics milestone and is intentionally marked as deferred below.
+    let input_count = projection
         .space_joined
         .iter()
         .chain(projection.space_invited.iter())
         .chain(projection.child_room_only.iter())
-        .filter(|entry| entry.display_name.is_none())
         .count();
+    let observed_label_count = projection
+        .space_joined
+        .iter()
+        .chain(projection.space_invited.iter())
+        .chain(projection.child_room_only.iter())
+        .filter(|entry| {
+            entry
+                .display_name
+                .as_deref()
+                .is_some_and(|label| !label.trim().is_empty())
+        })
+        .count();
+    let unresolved_count = input_count.saturating_sub(observed_label_count);
     record(
         DiagnosticEvent::new(
             DiagnosticLevel::Debug,
             "core.profile_resolution",
             "space_member_projection",
         )
-        .field(DiagnosticField::count(
-            "relevant_room_count",
-            relevant_room_count as u64,
+        .field(DiagnosticField::token(
+            "resolution_stage",
+            "projection_observation",
         ))
+        .field(DiagnosticField::count("input_count", input_count as u64))
         .field(DiagnosticField::count(
-            "space_room_count",
-            space_room_count as u64,
+            "observed_label_count",
+            observed_label_count as u64,
         ))
-        .field(DiagnosticField::count("payload_count", 0))
-        .field(DiagnosticField::count("global_cache_count", 0))
-        .field(DiagnosticField::count("local_homeserver_count", 0))
         .field(DiagnosticField::count(
             "unresolved_count",
             unresolved_count as u64,
         ))
-        .field(DiagnosticField::count("cache_hit_count", 0))
-        .field(DiagnosticField::count(
-            "cache_miss_count",
-            unresolved_count as u64,
-        ))
-        .field(DiagnosticField::count("cache_stale_hit_count", 0))
         .field(DiagnosticField::boolean("state_resolution_deferred", true)),
     );
 }
@@ -6227,6 +6257,7 @@ pub mod tests {
                 role: MatrixRoomMemberRole::User,
                 child_room_ids: vec!["!child:example.invalid".to_owned()],
             }],
+            child_room_profiles: Vec::new(),
             child_room_count: 1,
             complete_child_room_count: 1,
             incomplete_child_room_count: 0,

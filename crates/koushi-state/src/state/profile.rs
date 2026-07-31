@@ -84,6 +84,10 @@ pub enum AvatarThumbnailFailureKind {
 pub struct ProfileState {
     pub own: OwnProfile,
     pub users: BTreeMap<String, UserProfile>,
+    /// Local-only member observations keyed by relevant room, used for
+    /// people-facing receipt/Seen labels before the account-wide cache.
+    #[serde(default)]
+    pub room_users: BTreeMap<String, BTreeMap<String, UserProfile>>,
     #[serde(default)]
     pub local_aliases: BTreeMap<String, String>,
     #[serde(default)]
@@ -102,6 +106,11 @@ impl fmt::Debug for ProfileState {
             .field("has_own_display_name", &self.own.display_name.is_some())
             .field("has_own_avatar", &self.own.avatar.is_some())
             .field("user_count", &self.users.len())
+            .field("room_profile_room_count", &self.room_users.len())
+            .field(
+                "room_profile_observation_count",
+                &self.room_users.values().map(BTreeMap::len).sum::<usize>(),
+            )
             .field("local_alias_count", &self.local_aliases.len())
             .field("local_alias_update", &self.local_alias_update)
             .field("ignored_user_count", &self.ignored_user_ids.len())
@@ -141,7 +150,7 @@ pub enum ProfileResolutionSource {
     Unresolved,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct ProfileResolutionInput<'a> {
     pub local_alias: Option<&'a str>,
     pub relevant_room_label: Option<&'a str>,
@@ -151,10 +160,40 @@ pub struct ProfileResolutionInput<'a> {
     pub local_homeserver_label: Option<&'a str>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+impl fmt::Debug for ProfileResolutionInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProfileResolutionInput")
+            .field("has_local_alias", &self.local_alias.is_some())
+            .field(
+                "has_relevant_room_label",
+                &self.relevant_room_label.is_some(),
+            )
+            .field("has_space_room_label", &self.space_room_label.is_some())
+            .field("has_payload_label", &self.payload_label.is_some())
+            .field("has_cached_label", &self.cached_label.is_some())
+            .field(
+                "has_local_homeserver_label",
+                &self.local_homeserver_label.is_some(),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub struct ProfileResolution {
     pub label: String,
     pub source: ProfileResolutionSource,
+}
+
+impl fmt::Debug for ProfileResolution {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProfileResolution")
+            .field("has_label", &!self.label.is_empty())
+            .field("source", &self.source)
+            .finish()
+    }
 }
 
 /// Resolve a people-facing label in the same order for Space members and

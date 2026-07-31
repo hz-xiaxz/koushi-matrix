@@ -5517,11 +5517,25 @@ impl fmt::Debug for MatrixLocalUserAliases {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct MatrixUserProfile {
     pub user_id: String,
     pub display_name: Option<String>,
     pub avatar_mxc_uri: Option<String>,
+}
+
+impl fmt::Debug for MatrixUserProfile {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatrixUserProfile")
+            .field("user_id", &"UserId(..)")
+            .field(
+                "display_name",
+                &self.display_name.as_ref().map(|_| "DisplayName(..)"),
+            )
+            .field("has_avatar", &self.avatar_mxc_uri.is_some())
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -5595,18 +5609,38 @@ pub struct MatrixRoomSettingsSnapshot {
 /// This deliberately preserves the distinction between a Space `JOIN`, a
 /// Space `INVITE`, and a child-room-only `JOIN`. Consumers must not infer these
 /// classes from a flattened `ACTIVE` member list.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixSpaceMembersProjection {
     pub space_id: String,
     pub space_joined: Vec<MatrixSpaceMemberEntry>,
     pub space_invited: Vec<MatrixSpaceMemberEntry>,
     pub child_room_only: Vec<MatrixSpaceMemberEntry>,
+    pub child_room_profiles: Vec<MatrixSpaceMemberEntry>,
     pub child_room_count: usize,
     pub complete_child_room_count: usize,
     pub incomplete_child_room_count: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+impl fmt::Debug for MatrixSpaceMembersProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatrixSpaceMembersProjection")
+            .field("space_id", &"RoomId(..)")
+            .field("space_joined_count", &self.space_joined.len())
+            .field("space_invited_count", &self.space_invited.len())
+            .field("child_room_only_count", &self.child_room_only.len())
+            .field("child_room_profile_count", &self.child_room_profiles.len())
+            .field("child_room_count", &self.child_room_count)
+            .field("complete_child_room_count", &self.complete_child_room_count)
+            .field(
+                "incomplete_child_room_count",
+                &self.incomplete_child_room_count,
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixSpaceMemberEntry {
     pub user_id: String,
     pub display_name: Option<String>,
@@ -5614,6 +5648,26 @@ pub struct MatrixSpaceMemberEntry {
     pub power_level: Option<i64>,
     pub role: MatrixRoomMemberRole,
     pub child_room_ids: Vec<String>,
+}
+
+impl fmt::Debug for MatrixSpaceMemberEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatrixSpaceMemberEntry")
+            .field("user_id", &"UserId(..)")
+            .field(
+                "display_name",
+                &self.display_name.as_ref().map(|_| "DisplayName(..)"),
+            )
+            .field(
+                "avatar_url",
+                &self.avatar_url.as_ref().map(|_| "MxcUri(..)"),
+            )
+            .field("power_level", &self.power_level)
+            .field("role", &self.role)
+            .field("child_room_count", &self.child_room_ids.len())
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -7580,12 +7634,47 @@ mod space_member_projection_tests {
             ids(&projection.child_room_only),
             vec![child_only.to_string(), second_only.to_string()]
         );
+        assert!(
+            projection
+                .child_room_profiles
+                .iter()
+                .any(|entry| entry.user_id == both.to_string())
+        );
         assert_eq!(
             projection.child_room_only[0].child_room_ids,
             vec![child_a.to_string(), child_b.to_string()]
         );
         assert_eq!(projection.child_room_count, 2);
         assert_eq!(projection.incomplete_child_room_count, 2);
+    }
+
+    #[test]
+    fn space_member_projection_debug_redacts_identifiers_and_profiles() {
+        let entry = super::MatrixSpaceMemberEntry {
+            user_id: "@private:example.invalid".to_owned(),
+            display_name: Some("Private name".to_owned()),
+            avatar_url: Some("mxc://example.invalid/avatar".to_owned()),
+            power_level: Some(100),
+            role: super::MatrixRoomMemberRole::Administrator,
+            child_room_ids: vec!["!child:example.invalid".to_owned()],
+        };
+        let projection = super::MatrixSpaceMembersProjection {
+            space_id: "!space:example.invalid".to_owned(),
+            space_joined: vec![entry.clone()],
+            space_invited: Vec::new(),
+            child_room_only: Vec::new(),
+            child_room_profiles: vec![entry],
+            child_room_count: 1,
+            complete_child_room_count: 1,
+            incomplete_child_room_count: 0,
+        };
+
+        let debug = format!("{projection:?}");
+        assert!(debug.contains("space_joined_count"));
+        assert!(!debug.contains("@private:example.invalid"));
+        assert!(!debug.contains("Private name"));
+        assert!(!debug.contains("mxc://example.invalid/avatar"));
+        assert!(!debug.contains("!child:example.invalid"));
     }
 }
 
@@ -8871,6 +8960,7 @@ pub async fn matrix_space_members_projection(
         space_joined,
         space_invited,
         child_room_only,
+        child_room_profiles: child_profiles.values().cloned().collect(),
         child_room_count: child_room_ids.len(),
         complete_child_room_count,
         incomplete_child_room_count,

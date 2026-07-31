@@ -37,9 +37,16 @@ pub(crate) fn handle_navigation_loaded(
         return Vec::new();
     }
 
+    let previous_active_space_id = state.navigation.active_space_id.clone();
     state.navigation = normalize_navigation_state(navigation);
+    let space_members_changed = previous_active_space_id != state.navigation.active_space_id
+        && super::space_members::handle_selected(state, state.navigation.active_space_id.clone());
     recompute_room_list_projection(state);
-    vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
+    let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
+    if space_members_changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    }
+    effects
 }
 
 pub(crate) fn handle_timeline_scroll_anchor_updated(
@@ -277,8 +284,13 @@ pub(crate) fn handle_select_room(state: &mut AppState, room_id: String) -> Vec<A
     }
     let mut effects = Vec::new();
     if previous_active_space_id != state.navigation.active_space_id {
+        let space_members_changed =
+            super::space_members::handle_selected(state, state.navigation.active_space_id.clone());
         recompute_room_list_projection(state);
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));
+        if space_members_changed {
+            effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+        }
     }
     close_current_room_search_for_room_change(state, Some(room_id.as_str()), &mut effects);
     if state.navigation.active_room_id.as_deref() == Some(room_id.as_str())

@@ -195,6 +195,7 @@ pub(crate) fn handle_directory_join_succeeded(
     let had_threads_list = state.threads_list != ThreadsListState::Closed;
     state.directory.join = DirectoryJoinState::Idle;
     state.navigation.active_space_id = None;
+    let space_members_changed = super::space_members::handle_selected(state, None);
     state.navigation.active_room_id = Some(room_id.clone());
     state.timeline = TimelinePaneState {
         room_id: Some(room_id.clone()),
@@ -217,6 +218,9 @@ pub(crate) fn handle_directory_join_succeeded(
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::DirectoryChanged)];
     if previous_active_space_id.is_some() {
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));
+    }
+    if space_members_changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
     }
     effects.push(AppEffect::SubscribeTimeline {
         room_id: room_id.clone(),

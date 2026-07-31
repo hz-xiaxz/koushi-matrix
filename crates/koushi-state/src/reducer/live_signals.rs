@@ -5,6 +5,51 @@ use crate::{
 
 use super::{is_session_ready, session_user_id};
 
+pub(crate) fn handle_live_room_profiles_observed(
+    state: &mut AppState,
+    room_id: String,
+    profiles: Vec<crate::state::UserProfile>,
+) -> Vec<AppEffect> {
+    // The reducer boundary is ready for room-local observations. Wiring the
+    // TimelineActor producer is intentionally deferred to the next I6
+    // milestone so this change remains local-only and bounded.
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
+
+    let room_profiles = state.profile.room_users.entry(room_id).or_default();
+    let mut changed = false;
+    for mut profile in profiles {
+        if let Some(existing) = room_profiles.get_mut(&profile.user_id) {
+            if profile.display_name.is_none() {
+                profile.display_name = existing.display_name.clone();
+            }
+            if profile.avatar.is_none() {
+                profile.avatar = existing.avatar.clone();
+            }
+            if existing != &profile {
+                *existing = profile;
+                changed = true;
+            }
+        } else {
+            room_profiles.insert(profile.user_id.clone(), profile);
+            changed = true;
+        }
+    }
+
+    if changed {
+        let own_user_id = session_user_id(state).map(str::to_owned);
+        crate::state::refresh_live_receipt_display_projection(
+            &mut state.live_signals,
+            &state.profile,
+            own_user_id.as_deref(),
+        );
+        vec![AppEffect::EmitUiEvent(UiEvent::LiveSignalsChanged)]
+    } else {
+        Vec::new()
+    }
+}
+
 pub(crate) fn handle_live_room_receipts_updated(
     state: &mut AppState,
     room_id: String,
@@ -15,13 +60,18 @@ pub(crate) fn handle_live_room_receipts_updated(
     }
 
     let own_user_id = session_user_id(state).map(str::to_owned);
+    let relevant_room_profiles = state.profile.room_users.get(&room_id);
     let room = state.live_signals.rooms.entry(room_id).or_default();
     let normalized = crate::state::LiveRoomSignalUpdate {
         receipts_by_event,
         fully_read_event_id: None,
         typing_user_ids: Vec::new(),
     }
-    .into_room_signals_with_profiles(&state.profile, own_user_id.as_deref());
+    .into_room_signals_with_room_profiles(
+        &state.profile,
+        relevant_room_profiles,
+        own_user_id.as_deref(),
+    );
     for (event_id, receipts) in normalized.receipts_by_event {
         room.receipts_by_event.insert(event_id, receipts);
     }
@@ -38,12 +88,17 @@ pub(crate) fn handle_live_room_receipts_window_reconciled(
         return Vec::new();
     }
     let own_user_id = session_user_id(state).map(str::to_owned);
+    let relevant_room_profiles = state.profile.room_users.get(&room_id);
     let normalized = crate::state::LiveRoomSignalUpdate {
         receipts_by_event,
         fully_read_event_id: None,
         typing_user_ids: Vec::new(),
     }
-    .into_room_signals_with_profiles(&state.profile, own_user_id.as_deref());
+    .into_room_signals_with_room_profiles(
+        &state.profile,
+        relevant_room_profiles,
+        own_user_id.as_deref(),
+    );
     let room = state.live_signals.rooms.entry(room_id).or_default();
     for event_id in scoped_event_ids {
         room.receipts_by_event.remove(&event_id);
