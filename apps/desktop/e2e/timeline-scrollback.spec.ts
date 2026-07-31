@@ -22,6 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOM_ID = "!harness-room:example.invalid";
+const OTHER_ROOM_ID = "!other-room:example.invalid";
 const ACCOUNT_KEY = "@harness-user:example.invalid";
 const ITEM_HEIGHT_PX = 48; // pinned by harness.html CSS
 const ANCHOR_PIXEL_TOLERANCE = 2;
@@ -180,6 +181,110 @@ test("initial timeline load and remount start at the live edge", async ({ page }
   const remountedContainer = page.locator("[data-testid=timeline-view]");
   await expect(remountedContainer.locator("[data-item-id]")).toHaveCount(30);
   await expectTimelineScrolledToBottom(remountedContainer);
+});
+
+test("stale session anchor cannot win when a large prepend lands during room re-entry", async ({
+  page
+}) => {
+  await page.goto("/harness.html");
+  await page.waitForSelector("[data-testid=timeline-view]");
+
+  const staleAnchorEventId = "$stale-anchor";
+  await page.evaluate(
+    ({ roomId, otherRoomId, anchorEventId }) => {
+      window.__harness.seedTimelineViewportSessionAnchor(roomId, {
+        event_id: anchorEventId,
+        edge: "bottom",
+        offset_px: 0,
+        updated_at_ms: Date.now() - 10 * 60 * 1_000
+      });
+      window.__harness.showRoom(otherRoomId);
+    },
+    { roomId: ROOM_ID, otherRoomId: OTHER_ROOM_ID, anchorEventId: staleAnchorEventId }
+  );
+  await waitAnimationFrames(page, 2);
+  await page.evaluate((roomId) => {
+    window.__harness.showRoom(roomId);
+    window.__harness.clearDiagnosticLogs();
+  }, ROOM_ID);
+  await waitAnimationFrames(page, 2);
+  await page.evaluate(
+    ({ roomId, anchorEventId }) => {
+      const key = {
+        account_key: "@harness-user:example.invalid",
+        kind: { Room: { room_id: roomId } }
+      };
+      const makeHarnessItem = (eventId: string, body: string) => ({
+        id: { Event: { event_id: eventId } },
+        sender: "@sender:example.invalid",
+        body,
+        timestamp_ms: 1_800_000_000_000,
+        in_reply_to_event_id: null,
+        thread_root: null,
+        thread_summary: null,
+        can_react: false,
+        is_redacted: false,
+        is_hidden: false,
+        can_redact: false,
+        is_edited: false,
+        can_edit: false,
+        reactions: []
+      });
+      const liveItems = Array.from({ length: 40 }, (_, index) =>
+        makeHarnessItem(`$reentry-live-${index}`, `live ${index}`)
+      );
+      const historicalItems = Array.from({ length: 64 }, (_, index) =>
+        makeHarnessItem(
+          index === 0 ? anchorEventId : `$reentry-old-${index}`,
+          `historical ${index}`
+        )
+      );
+
+      window.__harness.pushCoreEvent({
+        kind: "Timeline",
+        event: {
+          InitialItems: { request_id: null, key, generation: 1, items: liveItems }
+        }
+      } as any);
+      window.__harness.pushCoreEvent({
+        kind: "Timeline",
+        event: {
+          ItemsUpdated: {
+            key,
+            generation: 1,
+            batch_id: 1,
+            diffs: historicalItems.map((item) => ({ PushFront: { item } }))
+          }
+        }
+      } as any);
+    },
+    { roomId: ROOM_ID, anchorEventId: staleAnchorEventId }
+  );
+
+  const container = page.locator("[data-testid=timeline-view]");
+  await expect.poll(() => container.locator("[data-item-id]").count()).toBeGreaterThan(0);
+  await expectTimelineScrolledToBottom(container);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__harness
+          .diagnosticLogs()
+          .filter(
+            (entry) =>
+              entry.source === "timeline.scroll" &&
+              entry.message.includes("stage=room_reentry_restore")
+          )
+      )
+    )
+    .toEqual([
+      {
+        source: "timeline.scroll",
+        message:
+          "stage=room_reentry_restore session_mode=anchor anchor_age=stale " +
+          "anchor_is_live=false path=cleared_to_live_edge",
+        timestampMs: expect.any(Number)
+      }
+    ]);
 });
 
 test("initial short load grows to the live edge on later PushBack", async ({ page }) => {

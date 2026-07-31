@@ -579,7 +579,11 @@ stream), and the runtime must relay that model, not fight it.
    timeline. `AppState` snapshots must not embed full timeline item lists;
    re-serializing a timeline on every change does not scale to scroll-back.
    The UI applies diffs and may therefore implement stable scroll anchoring
-   on prepend. Matrix replacement events (`m.replace`) are separate events from
+   on prepend. In-session room re-entry evaluates a remembered anchor against
+   the first committed initial window; a later prepend cannot change an
+   initially absent anchor into a restore target. Actual live-edge state while
+   user input is pending supersedes programmatic-scroll echo classification.
+   Matrix replacement events (`m.replace`) are separate events from
    the original message. The runtime preserves both identities, keeps pending
    edit relationships when an edit is visible before its original event, and
    reprojects the original item and mutates only its affected search document
