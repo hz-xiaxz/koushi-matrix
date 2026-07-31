@@ -13777,6 +13777,40 @@ mod timeline_gap_repair_tracker_tests {
     }
 
     #[test]
+    fn stale_prior_actor_gap_projection_is_not_relayed_repeatedly() {
+        let current_actor_generation = 9;
+        let stale = CausalProjectionId {
+            actor_generation: current_actor_generation - 1,
+            operation: historical_causal_projection_operation(11),
+            projection_batch: 1,
+        };
+        let current = CausalProjectionId {
+            actor_generation: current_actor_generation,
+            operation: historical_causal_projection_operation(12),
+            projection_batch: 1,
+        };
+
+        for _ in 0..3 {
+            assert!(
+                gap_repair_projections_for_actor(
+                    BTreeSet::from([stale]),
+                    current_actor_generation
+                )
+                .is_empty(),
+                "a superseded actor descriptor must not enter another relay batch"
+            );
+        }
+        assert_eq!(
+            gap_repair_projections_for_actor(
+                BTreeSet::from([current]),
+                current_actor_generation
+            ),
+            BTreeSet::from([current]),
+            "the current actor descriptor must retain its causal identity"
+        );
+    }
+
+    #[test]
     fn timeline_gap_repair_tracker_coalesces_and_rejects_stale_completions() {
         let mut tracker = TimelineGapRepairTracker::default();
         let first = tracker.begin_inspection().expect("first inspection");
@@ -14547,6 +14581,13 @@ fn gap_repair_projections_from_sdk_diffs(
             | eyeball_im::VectorDiff::PopBack => {}
         }
     }
+    projections
+}
+
+fn gap_repair_projections_for_actor(
+    projections: BTreeSet<CausalProjectionId>,
+    _actor_generation: u64,
+) -> BTreeSet<CausalProjectionId> {
     projections
 }
 
