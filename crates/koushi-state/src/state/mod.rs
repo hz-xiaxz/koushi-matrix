@@ -29,6 +29,7 @@ mod search;
 mod session;
 mod session_status;
 mod settings;
+mod space_members;
 mod sync;
 mod thread;
 mod timeline;
@@ -83,11 +84,18 @@ pub use settings::{
 // ── Re-exports: profile ─────────────────────────────────────────────────────
 pub use profile::{
     AvatarImage, AvatarThumbnailFailureKind, AvatarThumbnailState, IgnoredUserUpdateState,
-    LocalUserAliasUpdateState, OwnProfile, ProfileState, ProfileUpdateRequest, ProfileUpdateState,
-    UserProfile, is_ignored_user, normalize_local_user_alias,
-    refresh_profile_user_display_projection, refresh_room_settings_member_display_projection,
-    refresh_room_summary_display_projection, resolve_optional_user_display_name,
-    resolve_user_display_name,
+    LocalUserAliasUpdateState, OwnProfile, ProfileResolution, ProfileResolutionInput,
+    ProfileResolutionSource, ProfileState, ProfileUpdateRequest, ProfileUpdateState, UserProfile,
+    is_ignored_user, normalize_local_user_alias, refresh_profile_user_display_projection,
+    refresh_room_settings_member_display_projection, refresh_room_summary_display_projection,
+    resolve_optional_user_display_name, resolve_people_label, resolve_user_display_name,
+};
+
+// ── Re-exports: space members ─────────────────────────────────────────────
+pub use space_members::{
+    SpaceMemberEntry, SpaceMemberInviteOutcome, SpaceMemberMembership, SpaceMembersOperationState,
+    SpaceMembersProjection, SpaceMembersState, refresh_space_member_display_projection,
+    resolve_space_members_projection, sort_entries,
 };
 
 // ── Re-exports: room ────────────────────────────────────────────────────────
@@ -211,7 +219,7 @@ pub use basic_operation::{BasicOperationRequest, BasicOperationState};
 pub use live_signals::{
     LiveEventReceiptSummary, LiveEventReceipts, LiveReadReceipt, LiveRoomSignalUpdate,
     LiveSignalsState, LiveTypingUser, PresenceKind, RoomLiveSignals,
-    refresh_live_typing_user_display_projection,
+    refresh_live_receipt_display_projection, refresh_live_typing_user_display_projection,
 };
 
 // ── Re-exports: mention candidates ──────────────────────────────────────────
@@ -251,6 +259,8 @@ pub struct AppState {
     #[serde(default)]
     pub room_preferences: RoomPreferencesState,
     pub profile: ProfileState,
+    #[serde(default)]
+    pub space_members: SpaceMembersState,
     pub sync: SyncState,
     #[serde(default)]
     pub sync_generation: u64,
@@ -318,6 +328,7 @@ impl Default for AppState {
             link_preview_settings: LinkPreviewSettingsState::default(),
             room_preferences: RoomPreferencesState::default(),
             profile: ProfileState::default(),
+            space_members: SpaceMembersState::default(),
             sync: SyncState::Stopped,
             sync_generation: 0,
             sync_mode: SyncMode::Unsupported,

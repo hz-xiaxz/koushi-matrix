@@ -66,7 +66,7 @@ use koushi_sdk::{
     MatrixRoomListSpace, MatrixRoomMemberRole, MatrixRoomMemberSummary, MatrixRoomModerationAction,
     MatrixRoomOperationError, MatrixRoomPermissionFacts, MatrixRoomPreview,
     MatrixRoomSettingChange, MatrixRoomSettingsSnapshot, MatrixRoomTagKind, MatrixRoomTags,
-    MatrixUserTrustState,
+    MatrixSpaceMemberEntry, MatrixSpaceMembersProjection, MatrixUserTrustState,
 };
 use koushi_state::{
     AppAction, AvatarImage, AvatarThumbnailState, BasicOperationRequest,
@@ -77,7 +77,8 @@ use koushi_state::{
     OperationFailureKind, PinnedEvent, PinnedEventState, RoomHistoryVisibility, RoomJoinRule,
     RoomMemberRole, RoomMemberSummary, RoomMentionPermission, RoomModerationAction,
     RoomNotificationMode, RoomPermissionFacts, RoomSettingChange, RoomSettingsSnapshot,
-    RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SpaceSummary, UserProfile, UserTrustState,
+    RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SpaceMemberEntry, SpaceMemberInviteOutcome,
+    SpaceMemberMembership, SpaceMembersProjection, SpaceSummary, UserProfile, UserTrustState,
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -450,6 +451,23 @@ impl RoomActor {
                 user_id,
             } => {
                 self.handle_invite_user(request_id, room_id, user_id).await;
+            }
+            RoomCommand::LoadSpaceMembers {
+                request_id,
+                space_id,
+                generation,
+            } => {
+                self.handle_load_space_members(request_id, space_id, generation)
+                    .await;
+            }
+            RoomCommand::InviteUserToSpace {
+                request_id,
+                space_id,
+                user_id,
+                generation,
+            } => {
+                self.handle_invite_user_to_space(request_id, space_id, user_id, generation)
+                    .await;
             }
             RoomCommand::InviteTargets {
                 request_id,
@@ -906,6 +924,146 @@ impl RoomActor {
                 self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
             }
         }
+    }
+
+    async fn handle_load_space_members(
+        &self,
+        request_id: RequestId,
+        space_id: String,
+        generation: u64,
+    ) {
+        self.reduce_reliable(vec![AppAction::SpaceMembersLoadRequested {
+            space_id: space_id.clone(),
+            generation,
+        }])
+        .await;
+
+        let Some(session) = &self.session else {
+            let kind = OperationFailureKind::Sdk;
+            self.reduce_reliable(vec![AppAction::SpaceMembersLoadFailed {
+                request_id: Some(request_id.sequence),
+                space_id,
+                generation,
+                kind,
+            }])
+            .await;
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+
+        match koushi_sdk::matrix_space_members_projection(session, &space_id).await {
+            Ok(raw_projection) => {
+                let profile_updates = user_profiles_from_space_projection(&raw_projection);
+                let projection = state_space_members_projection(raw_projection, generation);
+                record_core_space_members_projection("load", generation, &projection, "success");
+                record_core_profile_resolution(&projection);
+                self.reduce_reliable(vec![
+                    AppAction::UserProfilesUpdated {
+                        profiles: profile_updates,
+                    },
+                    AppAction::SpaceMembersLoaded {
+                        projection: projection.clone(),
+                    },
+                ])
+                .await;
+                self.emit(CoreEvent::Room(RoomEvent::SpaceMembersLoaded {
+                    request_id,
+                    generation,
+                    joined_count: projection.space_joined.len(),
+                    invited_count: projection.space_invited.len(),
+                    child_room_only_count: projection.child_room_only.len(),
+                    incomplete_child_room_count: projection.incomplete_child_room_count,
+                }));
+            }
+            Err(error) => {
+                let kind = operation_failure_kind(classify_room_error(&error));
+                record_core_space_members_projection(
+                    "load",
+                    generation,
+                    &SpaceMembersProjection {
+                        space_id: String::new(),
+                        generation,
+                        space_joined: Vec::new(),
+                        space_invited: Vec::new(),
+                        child_room_only: Vec::new(),
+                        child_room_count: 0,
+                        complete_child_room_count: 0,
+                        incomplete_child_room_count: 0,
+                    },
+                    "failed",
+                );
+                self.reduce_reliable(vec![AppAction::SpaceMembersLoadFailed {
+                    request_id: Some(request_id.sequence),
+                    space_id,
+                    generation,
+                    kind,
+                }])
+                .await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::RoomOperationFailed {
+                        kind: classify_room_error(&error),
+                    },
+                );
+            }
+        }
+    }
+
+    async fn handle_invite_user_to_space(
+        &self,
+        request_id: RequestId,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+    ) {
+        self.reduce_reliable(vec![AppAction::SpaceMemberInviteRequested {
+            request_id: request_id.sequence,
+            space_id: space_id.clone(),
+            user_id: user_id.clone(),
+            generation,
+        }])
+        .await;
+
+        let outcome = match &self.session {
+            None => SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+            Some(session) => {
+                match koushi_sdk::invite_user_to_room(session, &space_id, &user_id).await {
+                    Ok(()) => {
+                        reconcile_space_invite_outcome(
+                            session,
+                            &space_id,
+                            &user_id,
+                            SpaceMemberInviteOutcome::Invited,
+                        )
+                        .await
+                    }
+                    Err(error) => {
+                        let failure_kind = operation_failure_kind(classify_room_error(&error));
+                        reconcile_space_invite_outcome(
+                            session,
+                            &space_id,
+                            &user_id,
+                            SpaceMemberInviteOutcome::Failed(failure_kind),
+                        )
+                        .await
+                    }
+                }
+            }
+        };
+        record_core_space_members_operation("invite", generation, &outcome);
+        self.reduce_reliable(vec![AppAction::SpaceMemberInviteSettled {
+            request_id: request_id.sequence,
+            space_id,
+            user_id,
+            generation,
+            outcome: outcome.clone(),
+        }])
+        .await;
+        self.emit(CoreEvent::Room(RoomEvent::SpaceMemberInviteSettled {
+            request_id,
+            generation,
+            outcome,
+        }));
     }
 
     async fn handle_invite_targets(
@@ -3368,6 +3526,262 @@ fn normalize_user_profiles(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec
         .collect()
 }
 
+fn state_space_members_projection(
+    projection: MatrixSpaceMembersProjection,
+    generation: u64,
+) -> SpaceMembersProjection {
+    SpaceMembersProjection {
+        space_id: projection.space_id,
+        generation,
+        space_joined: projection
+            .space_joined
+            .into_iter()
+            .map(|entry| state_space_member_entry(entry, SpaceMemberMembership::SpaceJoined))
+            .collect(),
+        space_invited: projection
+            .space_invited
+            .into_iter()
+            .map(|entry| state_space_member_entry(entry, SpaceMemberMembership::SpaceInvited))
+            .collect(),
+        child_room_only: projection
+            .child_room_only
+            .into_iter()
+            .map(|entry| state_space_member_entry(entry, SpaceMemberMembership::ChildRoomOnly))
+            .collect(),
+        child_room_count: projection.child_room_count,
+        complete_child_room_count: projection.complete_child_room_count,
+        incomplete_child_room_count: projection.incomplete_child_room_count,
+    }
+}
+
+fn state_space_member_entry(
+    entry: MatrixSpaceMemberEntry,
+    membership: SpaceMemberMembership,
+) -> SpaceMemberEntry {
+    let display_name = entry
+        .display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let display_label = display_name
+        .clone()
+        .unwrap_or_else(|| "Unknown user".to_owned());
+    SpaceMemberEntry {
+        user_id: entry.user_id,
+        display_name,
+        display_label: display_label.clone(),
+        original_display_label: display_label,
+        avatar_url: entry.avatar_url,
+        power_level: entry.power_level,
+        role: match entry.role {
+            koushi_sdk::MatrixRoomMemberRole::Creator => koushi_state::RoomMemberRole::Creator,
+            koushi_sdk::MatrixRoomMemberRole::Administrator => {
+                koushi_state::RoomMemberRole::Administrator
+            }
+            koushi_sdk::MatrixRoomMemberRole::Moderator => koushi_state::RoomMemberRole::Moderator,
+            koushi_sdk::MatrixRoomMemberRole::User => koushi_state::RoomMemberRole::User,
+        },
+        membership,
+        child_room_ids: entry.child_room_ids,
+        invite_pending: false,
+    }
+}
+
+/// Feed non-empty room observations into the account-scoped profile cache.
+/// This is deliberately emitted alongside the Space projection, before the
+/// projection action is reduced, so receipt/Seen payloads with no label can
+/// resolve from `ProfileState.users` without requiring Space membership.
+fn user_profiles_from_space_projection(
+    projection: &MatrixSpaceMembersProjection,
+) -> Vec<UserProfile> {
+    let mut profiles = BTreeMap::<String, UserProfile>::new();
+    for entry in projection
+        .space_joined
+        .iter()
+        .chain(projection.space_invited.iter())
+        .chain(projection.child_room_only.iter())
+    {
+        let has_display_name = entry
+            .display_name
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        if !has_display_name && entry.avatar_url.is_none() {
+            continue;
+        }
+        let next = UserProfile {
+            user_id: entry.user_id.clone(),
+            display_name: entry
+                .display_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned),
+            display_label: entry
+                .display_name
+                .clone()
+                .unwrap_or_else(|| "Unknown user".to_owned()),
+            original_display_label: entry
+                .display_name
+                .clone()
+                .unwrap_or_else(|| "Unknown user".to_owned()),
+            mention_search_terms: Vec::new(),
+            avatar: avatar_from_mxc_uri(entry.avatar_url.as_deref()),
+        };
+        profiles
+            .entry(entry.user_id.clone())
+            .and_modify(|existing| {
+                if existing.display_name.is_none() && next.display_name.is_some() {
+                    existing.display_name = next.display_name.clone();
+                    existing.display_label = next.display_label.clone();
+                    existing.original_display_label = next.original_display_label.clone();
+                }
+                if existing.avatar.is_none() && next.avatar.is_some() {
+                    existing.avatar = next.avatar.clone();
+                }
+            })
+            .or_insert(next);
+    }
+    profiles.into_values().collect()
+}
+
+async fn reconcile_space_invite_outcome(
+    session: &MatrixClientSession,
+    space_id: &str,
+    user_id: &str,
+    fallback: SpaceMemberInviteOutcome,
+) -> SpaceMemberInviteOutcome {
+    let Ok(projection) = koushi_sdk::matrix_space_members_projection(session, space_id).await
+    else {
+        return fallback;
+    };
+    if projection
+        .space_joined
+        .iter()
+        .any(|entry| entry.user_id == user_id)
+    {
+        SpaceMemberInviteOutcome::AlreadyJoined
+    } else if projection
+        .space_invited
+        .iter()
+        .any(|entry| entry.user_id == user_id)
+    {
+        SpaceMemberInviteOutcome::AlreadyInvited
+    } else {
+        fallback
+    }
+}
+
+fn record_core_space_members_projection(
+    trigger: &'static str,
+    generation: u64,
+    projection: &SpaceMembersProjection,
+    outcome: &'static str,
+) {
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.space_members_projection",
+            "projection",
+        )
+        .field(DiagnosticField::token("trigger", trigger))
+        .field(DiagnosticField::count("generation", generation))
+        .field(DiagnosticField::count(
+            "space_joined_count",
+            projection.space_joined.len() as u64,
+        ))
+        .field(DiagnosticField::count(
+            "space_invited_count",
+            projection.space_invited.len() as u64,
+        ))
+        .field(DiagnosticField::count(
+            "child_room_only_count",
+            projection.child_room_only.len() as u64,
+        ))
+        .field(DiagnosticField::count(
+            "child_room_count",
+            projection.child_room_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "complete_child_room_count",
+            projection.complete_child_room_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "incomplete_child_room_count",
+            projection.incomplete_child_room_count as u64,
+        ))
+        .field(DiagnosticField::boolean(
+            "incomplete",
+            projection.incomplete_child_room_count > 0,
+        ))
+        .field(DiagnosticField::token("outcome", outcome)),
+    );
+}
+
+fn record_core_space_members_operation(
+    trigger: &'static str,
+    generation: u64,
+    outcome: &SpaceMemberInviteOutcome,
+) {
+    let outcome_token = match outcome {
+        SpaceMemberInviteOutcome::Invited => "invited",
+        SpaceMemberInviteOutcome::AlreadyInvited => "already_invited",
+        SpaceMemberInviteOutcome::AlreadyJoined => "already_joined",
+        SpaceMemberInviteOutcome::Failed(_) => "failed",
+    };
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.space_members_projection",
+            "invite_settled",
+        )
+        .field(DiagnosticField::token("trigger", trigger))
+        .field(DiagnosticField::count("generation", generation))
+        .field(DiagnosticField::token("outcome", outcome_token)),
+    );
+}
+
+fn record_core_profile_resolution(projection: &SpaceMembersProjection) {
+    let relevant_room_count = projection.child_room_only.len();
+    let space_room_count = projection.space_joined.len() + projection.space_invited.len();
+    let unresolved_count = projection
+        .space_joined
+        .iter()
+        .chain(projection.space_invited.iter())
+        .chain(projection.child_room_only.iter())
+        .filter(|entry| entry.display_name.is_none())
+        .count();
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.profile_resolution",
+            "space_member_projection",
+        )
+        .field(DiagnosticField::count(
+            "relevant_room_count",
+            relevant_room_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "space_room_count",
+            space_room_count as u64,
+        ))
+        .field(DiagnosticField::count("payload_count", 0))
+        .field(DiagnosticField::count("global_cache_count", 0))
+        .field(DiagnosticField::count("local_homeserver_count", 0))
+        .field(DiagnosticField::count(
+            "unresolved_count",
+            unresolved_count as u64,
+        ))
+        .field(DiagnosticField::count("cache_hit_count", 0))
+        .field(DiagnosticField::count(
+            "cache_miss_count",
+            unresolved_count as u64,
+        ))
+        .field(DiagnosticField::count("cache_stale_hit_count", 0))
+        .field(DiagnosticField::boolean("state_resolution_deferred", true)),
+    );
+}
+
 fn user_profile_mention_search_terms(user_id: &str, display_name: Option<&str>) -> Vec<String> {
     let mut terms = Vec::new();
     if let Some(display_name) = display_name
@@ -5797,5 +6211,84 @@ pub mod tests {
         let snapshot = MatrixRoomListSnapshot::default();
         assert!(normalize_spaces(&snapshot).is_empty());
         assert!(normalize_rooms(&snapshot).is_empty());
+    }
+
+    #[test]
+    fn space_members_projection_load_path_emits_non_empty_child_profile_observations() {
+        let raw = MatrixSpaceMembersProjection {
+            space_id: "!space:example.invalid".to_owned(),
+            space_joined: Vec::new(),
+            space_invited: Vec::new(),
+            child_room_only: vec![MatrixSpaceMemberEntry {
+                user_id: "@child:example.invalid".to_owned(),
+                display_name: Some("Child room profile".to_owned()),
+                avatar_url: None,
+                power_level: Some(0),
+                role: MatrixRoomMemberRole::User,
+                child_room_ids: vec!["!child:example.invalid".to_owned()],
+            }],
+            child_room_count: 1,
+            complete_child_room_count: 1,
+            incomplete_child_room_count: 0,
+        };
+
+        let profiles = user_profiles_from_space_projection(&raw);
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].user_id, "@child:example.invalid");
+        assert_eq!(
+            profiles[0].display_name.as_deref(),
+            Some("Child room profile")
+        );
+
+        let projection = state_space_members_projection(raw, 4);
+        assert_eq!(
+            projection.child_room_only[0].display_name.as_deref(),
+            Some("Child room profile")
+        );
+    }
+
+    #[test]
+    fn core_space_members_diagnostics_are_private_data_free() {
+        let projection = SpaceMembersProjection {
+            space_id: "!private:example.invalid".to_owned(),
+            generation: 4,
+            space_joined: vec![SpaceMemberEntry {
+                user_id: "@alice:example.invalid".to_owned(),
+                display_name: Some("Alice private".to_owned()),
+                display_label: "Alice private".to_owned(),
+                original_display_label: "Alice private".to_owned(),
+                avatar_url: Some("mxc://example.invalid/avatar".to_owned()),
+                power_level: Some(100),
+                role: RoomMemberRole::Administrator,
+                membership: SpaceMemberMembership::SpaceJoined,
+                child_room_ids: Vec::new(),
+                invite_pending: false,
+            }],
+            space_invited: Vec::new(),
+            child_room_only: Vec::new(),
+            child_room_count: 0,
+            complete_child_room_count: 0,
+            incomplete_child_room_count: 0,
+        };
+        record_core_space_members_projection("load", 4, &projection, "success");
+        record_core_profile_resolution(&projection);
+
+        let snapshot = koushi_diagnostics::snapshot();
+        let encoded = serde_json::to_string(&snapshot).expect("diagnostics serialize");
+        assert!(!encoded.contains("@alice:example.invalid"));
+        assert!(!encoded.contains("Alice private"));
+        assert!(!encoded.contains("mxc://example.invalid/avatar"));
+        assert!(
+            snapshot
+                .records
+                .iter()
+                .any(|record| record.event.source == "core.space_members_projection")
+        );
+        assert!(
+            snapshot
+                .records
+                .iter()
+                .any(|record| record.event.source == "core.profile_resolution")
+        );
     }
 }

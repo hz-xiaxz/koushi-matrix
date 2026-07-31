@@ -188,9 +188,14 @@ pub(crate) fn handle_select_space(
     let previous_room_id = state.navigation.active_room_id.clone();
     state.navigation.active_space_id =
         space_id.filter(|space_id| state.spaces.iter().any(|space| space.space_id == *space_id));
+    let selected_space_id = state.navigation.active_space_id.clone();
+    let space_members_changed = super::space_members::handle_selected(state, selected_space_id);
     recompute_room_list_projection(state);
     if state.navigation.active_space_id.is_none() {
         let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
+        if space_members_changed {
+            effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+        }
         close_current_room_search_for_room_change(state, None, &mut effects);
         if let Some(previous_room_id) = previous_room_id {
             clear_active_room_for_navigation(state, &mut effects, previous_room_id);
@@ -202,6 +207,9 @@ pub(crate) fn handle_select_space(
         None => None,
     };
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
+    if space_members_changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    }
     if target_room_id != state.navigation.active_room_id {
         match target_room_id {
             Some(room_id) => {

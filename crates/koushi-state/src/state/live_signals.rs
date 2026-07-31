@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::profile::{
-    AvatarImage, ProfileState, original_user_display_name, resolve_optional_user_display_name,
-    resolve_user_display_name,
-};
+use super::profile::{AvatarImage, ProfileState, resolve_optional_user_display_name};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LiveSignalsState {
@@ -119,6 +116,29 @@ pub fn refresh_live_typing_user_display_projection(
             }
         }
     }
+    changed || refresh_live_receipt_display_projection(live_signals, profiles, own_user_id)
+}
+
+pub fn refresh_live_receipt_display_projection(
+    live_signals: &mut LiveSignalsState,
+    profiles: &ProfileState,
+    own_user_id: Option<&str>,
+) -> bool {
+    let mut changed = false;
+    for room in live_signals.rooms.values_mut() {
+        for summary in room.receipts_by_event.values_mut() {
+            for receipt in &mut summary.readers {
+                let enriched = enrich_receipt(receipt.clone(), profiles, own_user_id);
+                if receipt.display_name != enriched.display_name
+                    || receipt.original_display_label != enriched.original_display_label
+                    || receipt.avatar != enriched.avatar
+                {
+                    *receipt = enriched;
+                    changed = true;
+                }
+            }
+        }
+    }
     changed
 }
 
@@ -185,21 +205,43 @@ fn enrich_receipt(
         .map(|_| &profiles.own);
     let user_profile = profiles.users.get(&receipt.user_id);
 
-    let receipt_display_name = receipt.display_name.clone();
-    let receipt_original_display_label = receipt.original_display_label.clone();
-    let original_source = if receipt_original_display_label.trim().is_empty() {
-        receipt_display_name.as_deref()
-    } else {
-        Some(receipt_original_display_label.as_str())
-    };
-    let display_label = resolve_user_display_name(
+    let receipt_display_name = receipt
+        .display_name
+        .clone()
+        .filter(|label| label.trim() != "Unknown user");
+    let receipt_original_display_label =
+        (!receipt.original_display_label.trim().eq("Unknown user"))
+            .then(|| receipt.original_display_label.clone());
+    let original_source = receipt_original_display_label
+        .as_deref()
+        .filter(|label| !label.trim().is_empty())
+        .or(receipt_display_name.as_deref());
+    let display_label = resolve_optional_user_display_name(
         profiles,
         &receipt.user_id,
         receipt_display_name.as_deref(),
         own_user_id,
-    );
-    let original_display_label =
-        original_user_display_name(profiles, &receipt.user_id, original_source, own_user_id);
+    )
+    .unwrap_or_else(|| "Unknown user".to_owned());
+    let original_display_label = original_source
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            user_profile
+                .and_then(|profile| profile.display_name.as_deref())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            own_profile
+                .and_then(|profile| profile.display_name.as_deref())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| "Unknown user".to_owned());
     receipt.display_name = Some(display_label);
     receipt.original_display_label = original_display_label;
     if receipt.avatar.is_none() {

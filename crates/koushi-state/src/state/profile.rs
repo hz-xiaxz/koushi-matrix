@@ -130,6 +130,68 @@ pub struct UserProfile {
     pub avatar: Option<AvatarImage>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileResolutionSource {
+    LocalAlias,
+    RelevantRoom,
+    SpaceRoom,
+    Payload,
+    GlobalCache,
+    LocalHomeserver,
+    Unresolved,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProfileResolutionInput<'a> {
+    pub local_alias: Option<&'a str>,
+    pub relevant_room_label: Option<&'a str>,
+    pub space_room_label: Option<&'a str>,
+    pub payload_label: Option<&'a str>,
+    pub cached_label: Option<&'a str>,
+    pub local_homeserver_label: Option<&'a str>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProfileResolution {
+    pub label: String,
+    pub source: ProfileResolutionSource,
+}
+
+/// Resolve a people-facing label in the same order for Space members and
+/// receipt/Seen fallbacks. Room observations are deliberately ahead of the
+/// account cache; aliases always win and an unresolved person gets a stable
+/// localized-surface fallback token rather than an MXID.
+pub fn resolve_people_label(input: ProfileResolutionInput<'_>) -> ProfileResolution {
+    [
+        (ProfileResolutionSource::LocalAlias, input.local_alias),
+        (
+            ProfileResolutionSource::RelevantRoom,
+            input.relevant_room_label,
+        ),
+        (ProfileResolutionSource::SpaceRoom, input.space_room_label),
+        (ProfileResolutionSource::Payload, input.payload_label),
+        (ProfileResolutionSource::GlobalCache, input.cached_label),
+        (
+            ProfileResolutionSource::LocalHomeserver,
+            input.local_homeserver_label,
+        ),
+    ]
+    .into_iter()
+    .find_map(|(source, label)| {
+        label
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .map(|label| ProfileResolution {
+                label: label.to_owned(),
+                source,
+            })
+    })
+    .unwrap_or(ProfileResolution {
+        label: "Unknown user".to_owned(),
+        source: ProfileResolutionSource::Unresolved,
+    })
+}
+
 impl fmt::Debug for UserProfile {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter

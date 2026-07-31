@@ -11,8 +11,9 @@ use koushi_state::{
     NavigationState, ProfileState, QrLoginState, RoomInteractionState, RoomListProjection,
     RoomManagementState, RoomNotificationSettings, RoomPreferencesState, RoomSummary,
     SearchCrawlerState, SearchState, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceSummary, SyncMode, SyncState, ThreadAttentionState,
-    ThreadPaneState, ThreadsListState, TimelinePaneState, compose_sidebar_with_account_facts,
+    SoftLogoutReauthState, SpaceMembersState, SpaceSummary, SyncMode, SyncState,
+    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
+    compose_sidebar_with_account_facts,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +38,7 @@ pub struct StateDeltaChangedSlices {
     pub link_preview_settings: Option<LinkPreviewSettingsState>,
     pub room_preferences: Option<RoomPreferencesState>,
     pub profile: Option<ProfileState>,
+    pub space_members: Option<SpaceMembersState>,
     pub sync: Option<SyncState>,
     pub sync_mode: Option<SyncMode>,
     pub navigation: Option<NavigationState>,
@@ -106,6 +108,7 @@ pub fn build_state_delta(
     changed_slice!(link_preview_settings);
     changed_slice!(room_preferences);
     changed_slice!(profile);
+    changed_slice!(space_members);
     changed_slice!(sync);
     changed_slice!(sync_mode);
     changed_slice!(navigation);
@@ -184,6 +187,7 @@ fn audit_app_state_delta_slices(state: &AppState) {
         link_preview_settings: _,
         room_preferences: _,
         profile: _,
+        space_members: _,
         sync: _,
         sync_generation: _,
         sync_mode: _,

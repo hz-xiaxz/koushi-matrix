@@ -1,9 +1,9 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, AvatarImage, AvatarThumbnailState, InvitePreview,
     LiveEventReceipts, LiveReadReceipt, LocalUserAliasUpdateState, OwnProfile,
-    ProfileUpdateRequest, ProfileUpdateState, RoomSummary, RoomTags, SessionInfo, SessionState,
-    SpaceSummary, UiEvent, UserProfile, reduce, resolve_optional_user_display_name,
-    resolve_user_display_name,
+    ProfileResolutionInput, ProfileResolutionSource, ProfileUpdateRequest, ProfileUpdateState,
+    RoomSummary, RoomTags, SessionInfo, SessionState, SpaceSummary, UiEvent, UserProfile, reduce,
+    resolve_optional_user_display_name, resolve_people_label, resolve_user_display_name,
 };
 use std::collections::BTreeMap;
 
@@ -17,6 +17,48 @@ fn ready_state() -> AppState {
         }),
         ..AppState::default()
     }
+}
+
+#[test]
+fn relevant_room_profile_precedes_global_profile_cache() {
+    let resolved = resolve_people_label(ProfileResolutionInput {
+        local_alias: None,
+        relevant_room_label: Some("Relevant room"),
+        space_room_label: Some("Space room"),
+        payload_label: None,
+        cached_label: Some("Cached"),
+        local_homeserver_label: None,
+    });
+    assert_eq!(resolved.label, "Relevant room");
+    assert_eq!(resolved.source, ProfileResolutionSource::RelevantRoom);
+}
+
+#[test]
+fn global_profile_cache_prevents_unknown_when_payload_label_is_missing() {
+    let resolved = resolve_people_label(ProfileResolutionInput {
+        local_alias: None,
+        relevant_room_label: None,
+        space_room_label: None,
+        payload_label: None,
+        cached_label: Some("Locally cached"),
+        local_homeserver_label: None,
+    });
+    assert_eq!(resolved.label, "Locally cached");
+    assert_eq!(resolved.source, ProfileResolutionSource::GlobalCache);
+}
+
+#[test]
+fn local_alias_precedes_relevant_room_and_payload_labels() {
+    let resolved = resolve_people_label(ProfileResolutionInput {
+        local_alias: Some("Private alias"),
+        relevant_room_label: Some("Room name"),
+        space_room_label: Some("Space name"),
+        payload_label: Some("Payload name"),
+        cached_label: Some("Cached name"),
+        local_homeserver_label: Some("Homeserver name"),
+    });
+    assert_eq!(resolved.label, "Private alias");
+    assert_eq!(resolved.source, ProfileResolutionSource::LocalAlias);
 }
 
 fn avatar(mxc_uri: &str) -> AvatarImage {
@@ -715,6 +757,55 @@ fn local_user_aliases_override_read_receipt_reader_labels() {
         .get("$event:localhost")
         .expect("receipt summary");
     assert_eq!(summary.readers[0].display_name.as_deref(), Some("Bobby"));
+}
+
+#[test]
+fn profile_cache_updates_existing_receipt_after_space_child_observation() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::LiveRoomReceiptsUpdated {
+            room_id: "!child:localhost".to_owned(),
+            receipts_by_event: vec![LiveEventReceipts {
+                event_id: "$seen:localhost".to_owned(),
+                receipts: vec![LiveReadReceipt {
+                    user_id: "@child:localhost".to_owned(),
+                    display_name: None,
+                    original_display_label: String::new(),
+                    avatar: None,
+                    timestamp_ms: Some(1),
+                }],
+            }],
+        },
+    );
+    assert_eq!(
+        state.live_signals.rooms["!child:localhost"].receipts_by_event["$seen:localhost"].readers
+            [0]
+        .display_name
+        .as_deref(),
+        Some("Unknown user")
+    );
+
+    reduce(
+        &mut state,
+        AppAction::UserProfilesUpdated {
+            profiles: vec![UserProfile {
+                user_id: "@child:localhost".to_owned(),
+                display_name: Some("Observed child profile".to_owned()),
+                display_label: String::new(),
+                original_display_label: String::new(),
+                mention_search_terms: Vec::new(),
+                avatar: None,
+            }],
+        },
+    );
+    assert_eq!(
+        state.live_signals.rooms["!child:localhost"].receipts_by_event["$seen:localhost"].readers
+            [0]
+        .display_name
+        .as_deref(),
+        Some("Observed child profile")
+    );
 }
 
 #[test]

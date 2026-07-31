@@ -22,12 +22,12 @@ use crate::state::{
     RoomModerationAction, RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot,
     RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
     ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
-    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceSummary,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
-    SyncLifecycleStatus, SyncMode, TimelineContinuityInspection, TimelineGapRepairFailureKind,
-    TimelineMediaDownloadState, TimelineMediaGalleryItem, TimelineScrollAnchor,
-    TrustOperationFailureKind, UserProfile, VerificationCancelReason, VerificationGateFailureKind,
-    VerificationGateState, VerificationMethod, VerificationTarget,
+    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceMemberInviteOutcome,
+    SpaceMembersProjection, SpaceSummary, StagedUploadCompressionChoice, StagedUploadItem,
+    StagedUploadOutputSelection, SyncLifecycleStatus, SyncMode, TimelineContinuityInspection,
+    TimelineGapRepairFailureKind, TimelineMediaDownloadState, TimelineMediaGalleryItem,
+    TimelineScrollAnchor, TrustOperationFailureKind, UserProfile, VerificationCancelReason,
+    VerificationGateFailureKind, VerificationGateState, VerificationMethod, VerificationTarget,
 };
 
 #[derive(Clone, Eq, PartialEq)]
@@ -145,6 +145,32 @@ pub enum AppAction {
     },
     UserProfilesUpdated {
         profiles: Vec<UserProfile>,
+    },
+    SpaceMembersLoadRequested {
+        space_id: String,
+        generation: u64,
+    },
+    SpaceMembersLoaded {
+        projection: SpaceMembersProjection,
+    },
+    SpaceMembersLoadFailed {
+        request_id: Option<u64>,
+        space_id: String,
+        generation: u64,
+        kind: OperationFailureKind,
+    },
+    SpaceMemberInviteRequested {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+    },
+    SpaceMemberInviteSettled {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        outcome: SpaceMemberInviteOutcome,
     },
     MentionCandidatesDemanded {
         request_id: u64,

@@ -31,6 +31,7 @@ mod search;
 mod session;
 mod session_status;
 mod settings;
+mod space_members;
 mod submission;
 mod sync;
 mod thread;
@@ -458,6 +459,36 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::UserProfilesUpdated { profiles } => {
             profile::handle_user_profiles_updated(state, profiles)
         }
+        AppAction::SpaceMembersLoadRequested {
+            space_id,
+            generation,
+        } => space_members::handle_load_requested(state, space_id, generation),
+        AppAction::SpaceMembersLoaded { projection } => {
+            space_members::handle_loaded(state, projection)
+        }
+        AppAction::SpaceMembersLoadFailed {
+            request_id,
+            space_id,
+            generation,
+            kind,
+        } => space_members::handle_load_failed(state, request_id, space_id, generation, kind),
+        AppAction::SpaceMemberInviteRequested {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+        } => {
+            space_members::handle_invite_requested(state, request_id, space_id, user_id, generation)
+        }
+        AppAction::SpaceMemberInviteSettled {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+            outcome,
+        } => space_members::handle_invite_settled(
+            state, request_id, space_id, user_id, generation, outcome,
+        ),
         AppAction::MentionCandidatesDemanded {
             request_id,
             generation,
@@ -1594,6 +1625,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     let had_room_preferences = !state.room_preferences.rooms.is_empty();
     let had_room_notification_settings = !state.room_notification_settings.is_empty();
     let had_search_crawler = state.search_crawler != Default::default();
+    let had_space_members = state.space_members != Default::default();
 
     state.navigation = NavigationState::default();
     state.link_preview_settings = Default::default();
@@ -1629,6 +1661,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.local_encryption = LocalEncryptionState::Unknown;
     state.native_attention = Default::default();
     state.invite_workflow = Default::default();
+    state.space_members = Default::default();
     state.basic_operation = Default::default();
     state.room_notification_settings.clear();
 
@@ -1709,6 +1742,9 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
             UiEvent::RoomNotificationSettingsChanged,
         ));
     }
+    if had_space_members {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    }
     effects
 }
 
@@ -1776,6 +1812,7 @@ pub(crate) fn profile_changed_effects(
     room_list_changed: bool,
     native_attention_changed: bool,
     live_signals_changed: bool,
+    space_members_changed: bool,
 ) -> Vec<AppEffect> {
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::ProfileChanged)];
     if room_list_changed {
@@ -1789,6 +1826,9 @@ pub(crate) fn profile_changed_effects(
     }
     if live_signals_changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::LiveSignalsChanged));
+    }
+    if space_members_changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
     }
     effects
 }
