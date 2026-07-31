@@ -63,7 +63,6 @@ use std::time::{Duration, Instant};
 
 use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-#[cfg(test)]
 use koushi_sdk::MatrixUserProfile;
 use koushi_sdk::{
     MatrixClientSession, MatrixCommittedRoomTimelineBackend,
@@ -75,7 +74,6 @@ use koushi_sdk::{
     MatrixTimelineGapRepairResult,
 };
 use koushi_search::{AttachmentDocument, SensitiveString};
-#[cfg(test)]
 use koushi_state::UserProfile;
 use koushi_state::{
     ActivityRow, AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState,
@@ -19169,9 +19167,6 @@ impl TimelineActor {
                 for diff in &sdk_diffs {
                     Self::apply_sdk_media_cache_diff(&mut self.media_sources, diff);
                 }
-                if let Some(action) = receipts_action {
-                    let _ = self.action_tx.try_send(vec![action]);
-                }
                 if !activity_rows.is_empty() {
                     let _ = self
                         .action_tx
@@ -19216,6 +19211,24 @@ impl TimelineActor {
         ) else {
             return;
         };
+
+        if let Some(AppAction::LiveRoomReceiptsUpdated {
+            room_id,
+            receipts_by_event,
+        }) = receipts_action
+            && !emit_live_receipt_observation_actions(
+                self.session.as_ref(),
+                &self.action_tx,
+                &self.timeline_actor_generations,
+                &self.key,
+                self.actor_generation,
+                &room_id,
+                receipts_by_event,
+            )
+            .await
+        {
+            return;
+        }
 
         if !self.emit_search_messages_reliable(search_messages).await {
             return;
@@ -23354,7 +23367,6 @@ fn live_event_receipts_from_sdk_items<'a>(
         .collect()
 }
 
-#[cfg(test)]
 fn build_live_receipt_observation_actions(
     room_id: &str,
     receipts_by_event: Vec<LiveEventReceipts>,
@@ -23401,7 +23413,6 @@ fn build_live_receipt_observation_actions(
     actions
 }
 
-#[cfg(test)]
 async fn live_receipt_observation_actions_from_sdk_receipts(
     session: &MatrixClientSession,
     room_id: &str,
@@ -23412,11 +23423,76 @@ async fn live_receipt_observation_actions_from_sdk_receipts(
         .flat_map(|entry| entry.receipts.iter())
         .map(|receipt| receipt.user_id.clone())
         .collect::<Vec<_>>();
-    let profiles = session
+    let requested_user_count = user_ids.iter().collect::<BTreeSet<_>>().len();
+    let (profiles, lookup_outcome) = match session
         .room_member_profiles_no_sync(room_id, &user_ids)
         .await
-        .unwrap_or_default();
+    {
+        Ok(profiles) if profiles.is_empty() => (profiles, "miss"),
+        Ok(profiles) => (profiles, "observed"),
+        Err(_) => (Vec::new(), "failed"),
+    };
+    record_live_receipt_profile_lookup(
+        receipts_by_event
+            .iter()
+            .map(|entry| entry.receipts.len())
+            .sum(),
+        requested_user_count,
+        profiles.len(),
+        lookup_outcome,
+    );
     build_live_receipt_observation_actions(room_id, receipts_by_event, profiles)
+}
+
+async fn emit_live_receipt_observation_actions(
+    session: &MatrixClientSession,
+    action_tx: &mpsc::Sender<Vec<AppAction>>,
+    timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
+    key: &TimelineKey,
+    actor_generation: u64,
+    room_id: &str,
+    receipts_by_event: Vec<LiveEventReceipts>,
+) -> bool {
+    let actions =
+        live_receipt_observation_actions_from_sdk_receipts(session, room_id, receipts_by_event)
+            .await;
+    send_generation_fenced(
+        action_tx,
+        timeline_actor_generations,
+        key,
+        actor_generation,
+        actions,
+    )
+    .await
+}
+
+fn record_live_receipt_profile_lookup(
+    receipt_count: usize,
+    requested_user_count: usize,
+    observed_profile_count: usize,
+    lookup_outcome: &'static str,
+) {
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.read_receipt_profile",
+            "local_lookup",
+        )
+        .field(DiagnosticField::token("lookup_outcome", lookup_outcome))
+        .field(DiagnosticField::count(
+            "receipt_count",
+            receipt_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "requested_user_count",
+            requested_user_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "observed_profile_count",
+            observed_profile_count as u64,
+        ))
+        .field(DiagnosticField::boolean("network_lookup_attempted", false)),
+    );
 }
 
 fn collect_live_event_receipts_from_diff(
@@ -26104,7 +26180,7 @@ mod tests {
     use koushi_diagnostics::DiagnosticValue;
     use koushi_state::{
         AppAction, MentionIntent, MentionTarget, SessionInfo, SessionState, SubmissionId,
-        TimelineMediaKind as GalleryTimelineMediaKind,
+        TimelineMediaKind as GalleryTimelineMediaKind, UserProfile,
     };
     use matrix_sdk::ruma::events::room::message::{
         EmoteMessageEventContent, MessageType, NoticeMessageEventContent, TextMessageEventContent,
@@ -26114,7 +26190,7 @@ mod tests {
     use matrix_sdk_ui::timeline::{
         MembershipChange, ReactionInfo, ReactionStatus, ReactionsByKeyBySender,
     };
-    use tokio::sync::broadcast;
+    use tokio::sync::{broadcast, mpsc};
 
     use super::*;
     use crate::command::{
@@ -37513,6 +37589,380 @@ mod tests {
                 .display_name
                 .as_deref(),
             Some("Relevant room member")
+        );
+    }
+
+    #[tokio::test]
+    async fn production_receipt_diff_delivery_refreshes_unknown_with_room_profile() {
+        use koushi_state::{AppState, reduce};
+        use matrix_sdk::ruma::{event_id, room_id, user_id};
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_test::{ALICE, JoinedRoomBuilder, event_factory::EventFactory};
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let room_id = room_id!("!receipt-production:example.test");
+        let bob = user_id!("@bob:example.test");
+        server.sync_joined_room(&client, room_id).await;
+        server
+            .sync_room(
+                &client,
+                JoinedRoomBuilder::new(room_id).add_state_event(
+                    EventFactory::new()
+                        .room(room_id)
+                        .member(bob)
+                        .display_name("Relevant room member")
+                        .into_raw_sync_state(),
+                ),
+            )
+            .await;
+
+        let session = Arc::new(MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: "http://example.invalid".to_owned(),
+                user_id: ALICE.to_string(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        ));
+        let receipts = vec![LiveEventReceipts {
+            event_id: event_id!("$receipt-production:example.test").to_string(),
+            receipts: vec![LiveReadReceipt {
+                user_id: bob.to_string(),
+                display_name: None,
+                original_display_label: String::new(),
+                avatar: None,
+                timestamp_ms: Some(1),
+            }],
+        }];
+        let mut state = AppState {
+            session: SessionState::Ready(session.info.clone()),
+            ..AppState::default()
+        };
+        reduce(
+            &mut state,
+            AppAction::LiveRoomReceiptsUpdated {
+                room_id: room_id.to_string(),
+                receipts_by_event: receipts.clone(),
+            },
+        );
+        state.profile.users.insert(
+            bob.to_string(),
+            UserProfile {
+                user_id: bob.to_string(),
+                display_name: Some("Global cache".to_owned()),
+                display_label: "Global cache".to_owned(),
+                original_display_label: "Global cache".to_owned(),
+                mention_search_terms: Vec::new(),
+                avatar: None,
+            },
+        );
+        assert_eq!(
+            state.live_signals.rooms[room_id.as_str()].receipts_by_event[&receipts[0].event_id]
+                .readers[0]
+                .display_name
+                .as_deref(),
+            Some("Unknown user"),
+            "the production batch must refresh an already-projected Unknown receipt"
+        );
+
+        let key = TimelineKey::room(AccountKey(ALICE.to_string()), room_id.to_string());
+        let generations = Arc::new(TimelineActorGenerationGate::default());
+        let actor_generation = generations.activate_after_quiescence(&key).await.generation;
+        let (action_tx, mut action_rx) = mpsc::channel(1);
+        assert!(
+            emit_live_receipt_observation_actions(
+                session.as_ref(),
+                &action_tx,
+                &generations,
+                &key,
+                actor_generation,
+                room_id.as_str(),
+                receipts.clone(),
+            )
+            .await
+        );
+        let action_batch = action_rx.recv().await.expect("receipt action batch");
+        assert!(matches!(
+            action_batch.as_slice(),
+            [
+                AppAction::LiveRoomProfilesObserved { profiles, .. },
+                AppAction::UserProfilesUpdated { profiles: cached },
+                AppAction::LiveRoomReceiptsUpdated { .. },
+            ] if profiles.iter().any(|profile| {
+                profile.user_id == bob.as_str()
+                    && profile.display_name.as_deref() == Some("Relevant room member")
+            }) && cached.iter().any(|profile| {
+                profile.user_id == bob.as_str()
+                    && profile.display_name.as_deref() == Some("Relevant room member")
+            })
+        ));
+
+        for action in action_batch {
+            reduce(&mut state, action);
+        }
+        assert_eq!(
+            state.live_signals.rooms[room_id.as_str()].receipts_by_event[&receipts[0].event_id]
+                .readers[0]
+                .display_name
+                .as_deref(),
+            Some("Relevant room member"),
+            "the relevant room profile must beat the global cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn production_receipt_diff_delivery_uses_global_cache_when_local_lookup_misses() {
+        use koushi_state::{AppState, reduce};
+        use matrix_sdk::ruma::{event_id, room_id};
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_test::ALICE;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let room_id = room_id!("!receipt-cache-fallback:example.test");
+        server.sync_joined_room(&client, room_id).await;
+        let session = Arc::new(MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: "http://example.invalid".to_owned(),
+                user_id: ALICE.to_string(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        ));
+        let bob = "@bob:example.test";
+        let receipts = vec![LiveEventReceipts {
+            event_id: event_id!("$receipt-cache-fallback:example.test").to_string(),
+            receipts: vec![LiveReadReceipt {
+                user_id: bob.to_owned(),
+                display_name: None,
+                original_display_label: String::new(),
+                avatar: None,
+                timestamp_ms: Some(2),
+            }],
+        }];
+        let mut state = AppState {
+            session: SessionState::Ready(session.info.clone()),
+            ..AppState::default()
+        };
+        state.profile.users.insert(
+            bob.to_owned(),
+            UserProfile {
+                user_id: bob.to_owned(),
+                display_name: Some("Global cache".to_owned()),
+                display_label: "Global cache".to_owned(),
+                original_display_label: "Global cache".to_owned(),
+                mention_search_terms: Vec::new(),
+                avatar: None,
+            },
+        );
+
+        let key = TimelineKey::room(AccountKey(ALICE.to_string()), room_id.to_string());
+        let generations = Arc::new(TimelineActorGenerationGate::default());
+        let actor_generation = generations.activate_after_quiescence(&key).await.generation;
+        let (action_tx, mut action_rx) = mpsc::channel(1);
+        assert!(
+            emit_live_receipt_observation_actions(
+                session.as_ref(),
+                &action_tx,
+                &generations,
+                &key,
+                actor_generation,
+                room_id.as_str(),
+                receipts.clone(),
+            )
+            .await
+        );
+        let action_batch = action_rx.recv().await.expect("receipt fallback batch");
+        assert!(matches!(
+            action_batch.as_slice(),
+            [AppAction::LiveRoomReceiptsUpdated { .. }]
+        ));
+        for action in action_batch {
+            reduce(&mut state, action);
+        }
+        assert_eq!(
+            state.live_signals.rooms[room_id.as_str()].receipts_by_event[&receipts[0].event_id]
+                .readers[0]
+                .display_name
+                .as_deref(),
+            Some("Global cache")
+        );
+    }
+
+    #[tokio::test]
+    async fn production_receipt_diff_delivery_sends_receipts_when_local_lookup_fails() {
+        use koushi_state::SessionAuthenticationMethod;
+        use matrix_sdk::ruma::event_id;
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_test::ALICE;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let session = Arc::new(MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: "http://example.invalid".to_owned(),
+                user_id: ALICE.to_string(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: SessionAuthenticationMethod::Unknown,
+            },
+        ));
+        let receipts = vec![LiveEventReceipts {
+            event_id: event_id!("$receipt-lookup-failure:example.test").to_string(),
+            receipts: vec![LiveReadReceipt {
+                user_id: "@bob:example.test".to_owned(),
+                display_name: None,
+                original_display_label: String::new(),
+                avatar: None,
+                timestamp_ms: Some(3),
+            }],
+        }];
+        let key = TimelineKey::room(
+            AccountKey(ALICE.to_string()),
+            "!receipt-failure:example.test",
+        );
+        let generations = Arc::new(TimelineActorGenerationGate::default());
+        let actor_generation = generations.activate_after_quiescence(&key).await.generation;
+        let (action_tx, mut action_rx) = mpsc::channel(1);
+        let records_before = koushi_diagnostics::snapshot().records.len();
+        assert!(
+            emit_live_receipt_observation_actions(
+                session.as_ref(),
+                &action_tx,
+                &generations,
+                &key,
+                actor_generation,
+                "not-a-room-id",
+                receipts,
+            )
+            .await
+        );
+        let action_batch = action_rx.recv().await.expect("failed lookup receipt batch");
+        assert!(matches!(
+            action_batch.as_slice(),
+            [AppAction::LiveRoomReceiptsUpdated { .. }]
+        ));
+        assert!(
+            koushi_diagnostics::snapshot()
+                .records
+                .iter()
+                .skip(records_before)
+                .any(|record| {
+                    record.event.source == "core.read_receipt_profile"
+                        && record.event.stage == "local_lookup"
+                        && record.event.fields.iter().any(|field| {
+                            field.key == "lookup_outcome"
+                                && field.value == DiagnosticValue::Token("failed")
+                        })
+                }),
+            "lookup failures must record a sanitized outcome"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_production_receipt_diff_result_is_discarded_after_generation_replacement() {
+        use koushi_state::SessionAuthenticationMethod;
+        use matrix_sdk::ruma::event_id;
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_test::ALICE;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let session = Arc::new(MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: "http://example.invalid".to_owned(),
+                user_id: ALICE.to_string(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: SessionAuthenticationMethod::Unknown,
+            },
+        ));
+        let receipts = vec![LiveEventReceipts {
+            event_id: event_id!("$receipt-stale:example.test").to_string(),
+            receipts: vec![LiveReadReceipt {
+                user_id: "@bob:example.test".to_owned(),
+                display_name: None,
+                original_display_label: String::new(),
+                avatar: None,
+                timestamp_ms: Some(4),
+            }],
+        }];
+        let key = TimelineKey::room(AccountKey(ALICE.to_string()), "!receipt-stale:example.test");
+        let generations = Arc::new(TimelineActorGenerationGate::default());
+        let stale_generation = generations.activate_after_quiescence(&key).await.generation;
+        let (action_tx, mut action_rx) = mpsc::channel(1);
+        action_tx
+            .send(vec![AppAction::TypingUsersUpdated {
+                room_id: "!occupied:example.test".to_owned(),
+                user_ids: Vec::new(),
+            }])
+            .await
+            .expect("fill action channel");
+
+        let delivery = tokio::spawn({
+            let session = Arc::clone(&session);
+            let action_tx = action_tx.clone();
+            let generations = Arc::clone(&generations);
+            let key = key.clone();
+            async move {
+                emit_live_receipt_observation_actions(
+                    session.as_ref(),
+                    &action_tx,
+                    &generations,
+                    &key,
+                    stale_generation,
+                    "not-a-room-id",
+                    receipts,
+                )
+                .await
+            }
+        });
+        tokio::task::yield_now().await;
+        let replacement_generation = generations.activate_after_quiescence(&key).await.generation;
+        assert_ne!(replacement_generation, stale_generation);
+        assert!(matches!(
+            action_rx.recv().await,
+            Some(actions) if matches!(
+                actions.as_slice(),
+                [AppAction::TypingUsersUpdated { room_id, .. }] if room_id == "!occupied:example.test"
+            )
+        ));
+        assert!(!delivery.await.expect("stale delivery task"));
+        assert!(
+            action_rx.try_recv().is_err(),
+            "a stale actor generation must not publish the receipt batch"
+        );
+    }
+
+    #[test]
+    fn production_receipt_diff_path_uses_fenced_ordered_observation_delivery() {
+        let source = include_str!("timeline.rs");
+        let production = source.split("\nmod tests").next().unwrap_or(source);
+        let diff_handler = production
+            .split("async fn handle_diff_batch(")
+            .nth(1)
+            .expect("TimelineActor diff handler exists")
+            .split("/// Detect Room thread replies")
+            .next()
+            .expect("diff handler ends before thread hydration");
+        assert!(
+            diff_handler.contains("emit_live_receipt_observation_actions"),
+            "receipt diffs must use the production profile-observation delivery path"
+        );
+        let delivery = production
+            .split("async fn emit_live_receipt_observation_actions(")
+            .nth(1)
+            .expect("production receipt delivery helper exists");
+        assert!(
+            delivery.contains("send_generation_fenced"),
+            "receipt profile actions must use the actor-generation fence"
+        );
+        assert!(
+            !diff_handler.contains("try_send(vec![action])"),
+            "receipt action batches must not be dropped through try_send"
         );
     }
 

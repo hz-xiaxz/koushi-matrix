@@ -109,9 +109,6 @@ Verification for this milestone:
 
 Deferred to the next review milestone:
 
-- I6: room-local profile precedence and reducer coverage are in place, but the
-  TimelineActor producer and the full production Seen-profile observation path
-  remain. No network profile fan-out was added.
 - I8: the C1 production routing test is complete; production-path coverage for
   the remaining load/failure/profile-observation routes remains.
 
@@ -125,10 +122,30 @@ Deferred to the next review milestone:
 - I7 completed: Debug output for local member snapshots, raw Space projection
   and entries, profiles, live receipts, and profile-resolution input/results
   reports only redacted presence/count/source facts.
-- Timeline receipt profile lookup remains a pure, tested SDK/action-building
-  helper. The exact remaining production task is to call it from TimelineActor
-  receipt-diff handling and deliver profile observations before receipt actions;
-  it is intentionally not wired in this milestone.
+- Timeline receipt profile action construction remains a pure, tested helper;
+  its production TimelineActor receipt-diff delivery is completed in the Task
+  2 receipt-profile milestone below.
+
+## Task 2 receipt-profile production completion — 2026-08-01
+
+- I6 completed: TimelineActor receipt diffs now collect receipt updates and
+  user IDs, perform one local-only `room_member_profiles_no_sync` lookup, and
+  deliver one ordered batch of room observations, account-cache observations,
+  and receipts.
+- Local lookup misses and failures omit only profile actions, preserve receipt
+  delivery through the global cache fallback, and record sanitized count,
+  outcome, and `network_lookup_attempted=false` diagnostics. Raw SDK errors are
+  not retained or logged.
+- Receipt action delivery waits for reducer capacity and rechecks the existing
+  actor-generation fence, so replacement actors cannot apply stale results.
+- Production-path-focused tests cover the normal local profile observation,
+  local lookup miss/failure, stale-generation discard, relevant-room precedence
+  over the global cache, and refresh of an existing `Unknown user` receipt.
+- Verification:
+  - `cargo test -p koushi-core --lib production_receipt_diff -- --nocapture` — 5 passed.
+  - `cargo test -p koushi-core --lib live_receipt_observation -- --nocapture` — 1 passed.
+  - `cargo test -p koushi-core --lib koushi_timeline_builder_projects_sdk_read_receipts -- --nocapture` — 1 passed.
+  - `cargo check -p koushi-state`, `cargo check -p koushi-sdk --lib`, `cargo check -p koushi-core --lib`, `cargo fmt --all -- --check`, and `git diff --check` passed.
 
 Final verification for this milestone:
 
