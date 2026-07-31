@@ -185,7 +185,9 @@ export function SpaceMembersPanel({
 
       {state.operation.kind === "failed" ? (
         <p className="space-members-invite-failure" role="alert">
-          {t("spaceMembers.inviteFailed")}
+          {state.operation.user_id !== null
+            ? t("spaceMembers.inviteFailed")
+            : t("spaceMembers.loadFailed")}
         </p>
       ) : null}
 

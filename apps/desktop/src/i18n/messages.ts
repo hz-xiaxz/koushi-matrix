@@ -995,6 +995,7 @@ export type MessageId =
   | "spaceMembers.invite"
   | "spaceMembers.invitePending"
   | "spaceMembers.inviteFailed"
+  | "spaceMembers.loadFailed"
   | "spaceMembers.syncIncomplete"
   | "spaceMembers.noResults"
   | "threads.empty"
@@ -2164,6 +2165,7 @@ const en: Catalog = {
   "spaceMembers.invite": "Invite to Space",
   "spaceMembers.invitePending": "Invitation pending",
   "spaceMembers.inviteFailed": "Invite failed. Try again.",
+  "spaceMembers.loadFailed": "Member load failed. Try again.",
   "spaceMembers.syncIncomplete": "Some child rooms are still syncing",
   "spaceMembers.noResults": "No space members found",
   "threads.empty": "No threads",
@@ -3218,6 +3220,7 @@ const ja: Catalog = {
   "spaceMembers.invite": "スペースに招待",
   "spaceMembers.invitePending": "招待保留",
   "spaceMembers.inviteFailed": "招待に失敗しました。もう一度お試しください。",
+  "spaceMembers.loadFailed": "メンバーの読み込みに失敗しました。もう一度お試しください。",
   "spaceMembers.syncIncomplete": "一部の子ルームを同期中です",
   "spaceMembers.noResults": "スペースのメンバーが見つかりません",
   "threads.empty": "スレッドがありません",

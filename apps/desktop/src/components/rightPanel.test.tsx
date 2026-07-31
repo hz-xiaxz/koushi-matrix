@@ -227,4 +227,49 @@ describe("ContextualRightPanel people composition", () => {
     expect(screen.queryByText("Child member")).toBeNull();
     expect(screen.getByRole("searchbox", { name: "Search room members" })).toBeTruthy();
   });
+
+  test("uses a child-room count when the only room label is its identifier fallback", () => {
+    const identifierRoomId = "!identifier-only:example.invalid";
+    const identifierRoom: RoomSummary = {
+      ...room,
+      room_id: identifierRoomId,
+      display_name: identifierRoomId,
+      display_label: identifierRoomId,
+      original_display_label: identifierRoomId
+    };
+    const identifierSpace: SpaceSummary = {
+      ...space,
+      child_room_ids: [identifierRoomId]
+    };
+    const identifierSnapshot = {
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          rooms: [identifierRoom],
+          spaces: [identifierSpace],
+          space_members: {
+            ...spaceMembers,
+            child_room_only: [
+              spaceMember("@identifier-child:example.invalid", "Child member", "child_room_only", {
+                child_room_ids: [identifierRoomId]
+              })
+            ],
+            child_room_count: 1
+          }
+        }
+      }
+    } as unknown as DesktopSnapshot;
+
+    renderPanel({
+      snapshot: identifierSnapshot,
+      activeRoom: identifierRoom,
+      activeSpace: identifierSpace,
+      peoplePanelScope: { kind: "space", spaceId: identifierSpace.space_id }
+    });
+
+    expect(screen.getByText("In 1 child rooms")).toBeTruthy();
+    expect(screen.queryByText(identifierRoomId)).toBeNull();
+  });
 });

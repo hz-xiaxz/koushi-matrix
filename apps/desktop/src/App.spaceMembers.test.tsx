@@ -80,6 +80,84 @@ describe("App Space Members integration", () => {
     expect(screen.queryByRole("heading", { name: "Space members", level: 2 })).toBeNull();
   });
 
+  test("automatically loads the active restored Space member projection", async () => {
+    const api = createBrowserFakeApi();
+    const loadSpaceMembers = vi.spyOn(api, "loadSpaceMembers");
+
+    await renderAppWithApi(api);
+
+    await waitFor(() => {
+      expect(loadSpaceMembers).toHaveBeenCalledWith(
+        "!space-alpha:example.invalid",
+        1
+      );
+    });
+  });
+
+  test("does not issue a second Space member request while selection loading is in flight", async () => {
+    const api = createBrowserFakeApi();
+    const first = deferred<DesktopSnapshot>();
+    const second = deferred<DesktopSnapshot>();
+    let betaCalls = 0;
+    const loadSpaceMembers = vi.spyOn(api, "loadSpaceMembers").mockImplementation(
+      (spaceId) => {
+        if (spaceId !== "!space-beta:example.invalid") {
+          return Promise.resolve(api.getSnapshot());
+        }
+        betaCalls += 1;
+        return betaCalls === 1 ? first.promise : second.promise;
+      }
+    );
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Synthetic Lab" }));
+    });
+    await waitFor(() => expect(loadSpaceMembers).toHaveBeenCalledWith(
+      "!space-beta:example.invalid",
+      expect.any(Number)
+    ));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Members,/ }));
+    });
+    await waitFor(() => expect(screen.getByRole("heading", {
+      name: "Space members",
+      level: 2
+    })).toBeTruthy());
+
+    expect(betaCalls).toBe(1);
+
+    const current = await api.getSnapshot();
+    await act(async () => {
+      first.resolve(current);
+      second.resolve(current);
+      await first.promise;
+      await second.promise;
+    });
+  });
+
+  test("retries a failed automatic Space member load when opening the panel", async () => {
+    const api = createBrowserFakeApi();
+    const originalLoadSpaceMembers = api.loadSpaceMembers.bind(api);
+    const loadSpaceMembers = vi.spyOn(api, "loadSpaceMembers");
+    loadSpaceMembers
+      .mockRejectedValueOnce(new Error("synthetic load failure"))
+      .mockImplementation((spaceId, generation) =>
+        originalLoadSpaceMembers(spaceId, generation)
+      );
+
+    await renderAppWithApi(api);
+    await waitFor(() => expect(loadSpaceMembers).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /Members,/ }));
+    });
+    await screen.findByRole("heading", { name: "Space members", level: 2 });
+
+    await waitFor(() => expect(loadSpaceMembers).toHaveBeenCalledTimes(2));
+  });
+
   test("clears the Space People scope on Space and Home navigation", async () => {
     const api = createBrowserFakeApi();
     await renderAppWithApi(api);
@@ -262,6 +340,107 @@ describe("App Space Members integration", () => {
     });
 
     expect(screen.queryByRole("heading", { name: "People", level: 2 })).toBeNull();
+  });
+
+  test("does not apply a late room selection after a newer Home navigation", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const staleResult = structuredClone(await api.getSnapshot());
+    const selectRoom = vi.spyOn(api, "selectRoom").mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
+    });
+    await waitFor(() => expect(selectRoom).toHaveBeenCalledWith(
+      "!room-planning:example.invalid"
+    ));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Home/ }));
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Home/ }).className).toContain(
+      "is-active"
+    ));
+
+    await act(async () => {
+      pending.resolve(staleResult);
+      await pending.promise;
+    });
+
+    expect(screen.getByRole("button", { name: /^Home/ }).className).toContain("is-active");
+  });
+
+  test("does not apply a late room selection after a newer Space navigation", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const staleResult = structuredClone(await api.getSnapshot());
+    const selectRoom = vi.spyOn(api, "selectRoom").mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
+    });
+    await waitFor(() => expect(selectRoom).toHaveBeenCalledWith(
+      "!room-planning:example.invalid"
+    ));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Synthetic Lab" }));
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Synthetic Lab" }).className).toContain(
+      "is-active"
+    ));
+
+    await act(async () => {
+      pending.resolve(staleResult);
+      await pending.promise;
+    });
+
+    expect(screen.getByRole("button", { name: "Synthetic Lab" }).className).toContain(
+      "is-active"
+    );
+  });
+
+  test("does not apply late DM settings or profile scope after a newer room navigation", async () => {
+    const api = createBrowserFakeApi();
+    await api.selectSpace(null);
+    const settingsApi = createBrowserFakeApi();
+    await settingsApi.selectSpace(null);
+    await settingsApi.selectRoom("!dm-member-1:example.invalid");
+    const staleResult = await settingsApi.loadRoomSettings("!dm-member-1:example.invalid");
+    const staleMember = staleResult.state.domain.room_management.settings?.members[0];
+    if (!staleMember) {
+      throw new Error("expected a synthetic DM member");
+    }
+    staleMember.display_label = "Stale DM profile";
+    staleMember.original_display_label = "Stale DM profile";
+    const pending = deferred<DesktopSnapshot>();
+    const loadRoomSettings = vi.spyOn(api, "loadRoomSettings").mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /DMs/ }));
+    });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Member 1" }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("menuitem", { name: "User info" }));
+    });
+    await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledWith(
+      "!dm-member-1:example.invalid"
+    ));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Member 2" }));
+    });
+
+    await act(async () => {
+      pending.resolve(staleResult);
+      await pending.promise;
+    });
+
+    expect(screen.queryByText("Stale DM profile")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Profile", level: 2 })).toBeNull();
   });
 
   test("does not let a superseded Room Info People load replace the newer result", async () => {

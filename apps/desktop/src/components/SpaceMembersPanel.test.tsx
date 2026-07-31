@@ -178,6 +178,29 @@ describe("SpaceMembersPanel", () => {
     expect(onInviteUser).toHaveBeenCalledWith("@carol:example.invalid");
   });
 
+  it("uses member-load failure copy when no invite user is associated", () => {
+    render(
+      <SpaceMembersPanel
+        state={state({
+          operation: {
+            kind: "failed",
+            request_id: 13,
+            space_id: "!space:example.invalid",
+            user_id: null,
+            generation: 4,
+            failureKind: "network"
+          }
+        })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("alert").textContent).toMatch(/member load failed/i);
+    expect(screen.getByRole("alert").textContent).not.toMatch(/invite failed/i);
+  });
+
   it("forwards child-only row context menus with the exact Space target fence", () => {
     const onOpenContextMenu = vi.fn();
     render(

@@ -494,12 +494,15 @@ export function ContextualRightPanel({
       snapshot.state.domain.rooms,
       snapshot.state.domain.spaces
     );
-    const childRoomLabels = new Map<string, string>(
-      snapshot.state.domain.rooms.map((room) => [
-        room.room_id,
-        room.display_label.trim() || room.display_name.trim()
-      ])
-    );
+    const childRoomLabels = new Map<string, string>();
+    for (const room of snapshot.state.domain.rooms) {
+      const label = [room.display_label, room.display_name]
+        .map((value) => value.trim())
+        .find((value) => value.length > 0 && value !== room.room_id);
+      if (label) {
+        childRoomLabels.set(room.room_id, label);
+      }
+    }
     return (
       <aside className="thread-pane" aria-label={t("panel.context")}>
         {mode === "profile" && selectedProfileUserId ? (
