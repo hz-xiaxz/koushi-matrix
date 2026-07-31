@@ -8340,6 +8340,17 @@ async fn matrix_room_settings_snapshot(room: &matrix_sdk::Room) -> MatrixRoomSet
     let power_levels = room.power_levels_or_default().await;
     let own_user_id = room.own_user_id();
     let members = matrix_room_member_summaries(room).await;
+    let is_space = room.is_space();
+    let child_room_count = if is_space {
+        matrix_space_child_room_ids(room).await.len()
+    } else {
+        0
+    };
+    record(people_scope_diagnostic_event(
+        is_space,
+        members.len(),
+        child_room_count,
+    ));
     let can_edit_settings = power_levels.user_can_send_state(
         own_user_id,
         matrix_sdk::ruma::events::StateEventType::RoomName,
@@ -8386,6 +8397,43 @@ async fn matrix_room_settings_snapshot(room: &matrix_sdk::Room) -> MatrixRoomSet
         },
         members,
     }
+}
+
+fn people_scope_diagnostic_event(
+    is_space: bool,
+    direct_member_count: usize,
+    child_room_count: usize,
+) -> DiagnosticEvent {
+    DiagnosticEvent::new(
+        DiagnosticLevel::Debug,
+        "sdk.people_scope",
+        "member_snapshot",
+    )
+    .field(DiagnosticField::token(
+        "scope",
+        if is_space { "space" } else { "room" },
+    ))
+    .field(DiagnosticField::token(
+        "source",
+        if is_space {
+            "direct_space_members"
+        } else {
+            "room_members"
+        },
+    ))
+    .field(DiagnosticField::boolean("aggregated", false))
+    .field(DiagnosticField::count(
+        "direct_member_count",
+        direct_member_count as u64,
+    ))
+    .field(DiagnosticField::count(
+        "child_room_count",
+        child_room_count as u64,
+    ))
+    .field(DiagnosticField::boolean(
+        "child_room_members_included",
+        false,
+    ))
 }
 
 async fn matrix_room_member_summaries(room: &matrix_sdk::Room) -> Vec<MatrixRoomMemberSummary> {
@@ -9737,10 +9785,44 @@ mod tests {
         matrix_conversation_activity_source, matrix_public_room_from_chunk,
         matrix_room_list_room_from_counts, matrix_room_member_role, matrix_room_preview_from_sdk,
         moderate_room_member, newest_conversation_activity, normalized_local_user_aliases,
-        query_public_room_directory, resolve_join_target, room_settings_snapshot_with_change,
-        room_settings_snapshot_with_member_power_level, trace_sdk_conversation_activity,
-        trace_sdk_unread_snapshot, update_room_member_power_level, update_room_setting,
+        people_scope_diagnostic_event, query_public_room_directory, resolve_join_target,
+        room_settings_snapshot_with_change, room_settings_snapshot_with_member_power_level,
+        trace_sdk_conversation_activity, trace_sdk_unread_snapshot, update_room_member_power_level,
+        update_room_setting,
     };
+
+    #[test]
+    fn people_scope_diagnostic_distinguishes_direct_space_members_from_child_room_aggregate() {
+        let event = people_scope_diagnostic_event(true, 7, 3);
+
+        assert_eq!(event.source, "sdk.people_scope");
+        assert_eq!(event.stage, "member_snapshot");
+        let field = |key| {
+            event
+                .fields
+                .iter()
+                .find(|field| field.key == key)
+                .map(|field| &field.value)
+        };
+        assert_eq!(
+            field("source"),
+            Some(&koushi_diagnostics::DiagnosticValue::Token(
+                "direct_space_members"
+            ))
+        );
+        assert_eq!(
+            field("direct_member_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(7))
+        );
+        assert_eq!(
+            field("child_room_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(3))
+        );
+        assert_eq!(
+            field("child_room_members_included"),
+            Some(&koushi_diagnostics::DiagnosticValue::Boolean(false))
+        );
+    }
 
     #[test]
     fn sliding_sync_invite_probe_contract_is_typed_bounded_and_discards_cursor() {

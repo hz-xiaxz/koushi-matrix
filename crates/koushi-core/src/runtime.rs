@@ -177,6 +177,9 @@ fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Ve
         }
         _ => None,
     };
+    if let Some(event) = live_receipt_profile_diagnostic_event(state, &action) {
+        record(event);
+    }
     let effects = reduce(state, action);
     if let Some(input) = room_list_trace {
         unread_trace::trace_room_list_applied(&input, &state.rooms);
@@ -240,6 +243,166 @@ fn record_native_attention_recomputed(effect: &AppEffect) {
                 *active_room_match,
             )),
     );
+}
+
+fn live_receipt_profile_diagnostic_event(
+    state: &AppState,
+    action: &AppAction,
+) -> Option<DiagnosticEvent> {
+    let (room_id, receipts_by_event, update_kind) = match action {
+        AppAction::LiveRoomReceiptsUpdated {
+            room_id,
+            receipts_by_event,
+        } => (room_id, receipts_by_event, "incremental"),
+        AppAction::LiveRoomReceiptsWindowReconciled {
+            room_id,
+            receipts_by_event,
+            ..
+        } => (room_id, receipts_by_event, "window_reconciled"),
+        _ => return None,
+    };
+
+    let receipt_count = receipts_by_event
+        .iter()
+        .map(|entry| entry.receipts.len() as u64)
+        .sum::<u64>();
+    if receipt_count == 0 {
+        return None;
+    }
+
+    let own_user_id = match &state.session {
+        SessionState::Provisional { info, .. }
+        | SessionState::AwaitingVerification { info, .. }
+        | SessionState::Verifying { info, .. }
+        | SessionState::AwaitingBootstrapConfirmation { info, .. }
+        | SessionState::Rejecting { info, .. }
+        | SessionState::Ready(info)
+        | SessionState::Locked(info)
+        | SessionState::SwitchingAccount { info } => Some(info.user_id.as_str()),
+        SessionState::SignedOut
+        | SessionState::Restoring
+        | SessionState::Authenticating { .. }
+        | SessionState::LoggingOut => None,
+    };
+    let room = state.rooms.iter().find(|room| room.room_id == *room_id);
+    let parent_space_count = room.map_or(0, |room| room.parent_space_ids.len() as u64);
+    let mut own_receipt_count = 0_u64;
+    let mut payload_label_count = 0_u64;
+    let mut profile_cache_hit_count = 0_u64;
+    let mut profile_cache_miss_count = 0_u64;
+    let mut profile_display_name_missing_count = 0_u64;
+    let mut friendly_name_unresolved_count = 0_u64;
+
+    for receipt in receipts_by_event
+        .iter()
+        .flat_map(|entry| entry.receipts.iter())
+    {
+        if own_user_id.is_some_and(|own_user_id| own_user_id == receipt.user_id) {
+            own_receipt_count += 1;
+            continue;
+        }
+
+        let has_payload_label = receipt
+            .display_name
+            .as_deref()
+            .is_some_and(|name| !name.trim().is_empty())
+            || !receipt.original_display_label.trim().is_empty();
+        payload_label_count += u64::from(has_payload_label);
+
+        let local_alias_resolves = state
+            .profile
+            .local_aliases
+            .get(&receipt.user_id)
+            .is_some_and(|alias| !alias.trim().is_empty());
+        let profile = state.profile.users.get(&receipt.user_id);
+        let profile_resolves = profile
+            .and_then(|profile| profile.display_name.as_deref())
+            .is_some_and(|name| !name.trim().is_empty());
+        if let Some(profile) = profile {
+            profile_cache_hit_count += 1;
+            if !local_alias_resolves
+                && profile
+                    .display_name
+                    .as_deref()
+                    .is_none_or(|name| name.trim().is_empty())
+            {
+                profile_display_name_missing_count += 1;
+            }
+        } else {
+            profile_cache_miss_count += 1;
+        }
+        if !has_payload_label && !local_alias_resolves && !profile_resolves {
+            friendly_name_unresolved_count += 1;
+        }
+    }
+
+    let unresolved_reason = if friendly_name_unresolved_count == 0 {
+        "none"
+    } else if profile_cache_miss_count > 0 {
+        "profile_cache_miss"
+    } else if profile_display_name_missing_count > 0 {
+        "profile_display_name_missing"
+    } else {
+        "receipt_label_missing"
+    };
+
+    Some(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.read_receipt_profile",
+            "resolution",
+        )
+        .field(DiagnosticField::token("update_kind", update_kind))
+        .field(DiagnosticField::count("receipt_count", receipt_count))
+        .field(DiagnosticField::count(
+            "own_receipt_count",
+            own_receipt_count,
+        ))
+        .field(DiagnosticField::count(
+            "payload_label_count",
+            payload_label_count,
+        ))
+        .field(DiagnosticField::count(
+            "profile_cache_hit_count",
+            profile_cache_hit_count,
+        ))
+        .field(DiagnosticField::count(
+            "profile_cache_miss_count",
+            profile_cache_miss_count,
+        ))
+        .field(DiagnosticField::count(
+            "profile_display_name_missing_count",
+            profile_display_name_missing_count,
+        ))
+        .field(DiagnosticField::count(
+            "friendly_name_unresolved_count",
+            friendly_name_unresolved_count,
+        ))
+        .field(DiagnosticField::boolean(
+            "room_in_space",
+            parent_space_count > 0,
+        ))
+        .field(DiagnosticField::count(
+            "parent_space_count",
+            parent_space_count,
+        ))
+        .field(DiagnosticField::token(
+            "lookup_scope",
+            "global_profile_cache",
+        ))
+        .field(DiagnosticField::boolean(
+            "room_member_lookup_attempted",
+            false,
+        ))
+        .field(DiagnosticField::boolean(
+            "space_member_lookup_attempted",
+            false,
+        ))
+        .field(DiagnosticField::token(
+            "unresolved_reason",
+            unresolved_reason,
+        )),
+    )
 }
 
 fn composer_draft_account_matches(
@@ -5627,9 +5790,10 @@ mod tests {
         AccountEvent, ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
     };
     use koushi_state::{
-        DisplaySettings, LocalUserAliasUpdateState, OwnProfile, ProfileState,
-        RoomLatestEventSummary, RoomNotificationModeOperation, RoomNotificationSettings,
-        RoomSummary, RoomTags, SessionInfo, SettingsPatch, UserProfile, reduce,
+        DisplaySettings, LiveEventReceipts, LiveReadReceipt, LocalUserAliasUpdateState, OwnProfile,
+        ProfileState, RoomLatestEventSummary, RoomNotificationModeOperation,
+        RoomNotificationSettings, RoomSummary, RoomTags, SessionInfo, SettingsPatch, UserProfile,
+        reduce,
     };
 
     #[test]
@@ -6133,6 +6297,69 @@ mod tests {
             is_encrypted: false,
             joined_members: 2,
         }
+    }
+
+    #[test]
+    fn read_receipt_profile_diagnostic_reports_child_room_profile_cache_miss() {
+        let room_id = "!child:example.invalid";
+        let mut state = AppState {
+            session: SessionState::Ready(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@own:example.invalid".to_owned(),
+                device_id: "OWN".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            ..AppState::default()
+        };
+        let mut room = unread_diagnostic_room(room_id);
+        room.parent_space_ids = vec!["!space:example.invalid".to_owned()];
+        state.rooms.push(room);
+
+        let action = AppAction::LiveRoomReceiptsUpdated {
+            room_id: room_id.to_owned(),
+            receipts_by_event: vec![LiveEventReceipts {
+                event_id: "$event".to_owned(),
+                receipts: vec![LiveReadReceipt {
+                    user_id: "@child-only:example.invalid".to_owned(),
+                    display_name: None,
+                    original_display_label: String::new(),
+                    avatar: None,
+                    timestamp_ms: Some(42),
+                }],
+            }],
+        };
+
+        let event = live_receipt_profile_diagnostic_event(&state, &action)
+            .expect("receipt diagnostics should be emitted");
+        assert_eq!(event.source, "core.read_receipt_profile");
+        assert_eq!(event.stage, "resolution");
+        let field = |key| {
+            event
+                .fields
+                .iter()
+                .find(|field| field.key == key)
+                .map(|field| &field.value)
+        };
+        assert_eq!(
+            field("profile_cache_miss_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("room_in_space"),
+            Some(&koushi_diagnostics::DiagnosticValue::Boolean(true))
+        );
+        assert_eq!(
+            field("lookup_scope"),
+            Some(&koushi_diagnostics::DiagnosticValue::Token(
+                "global_profile_cache"
+            ))
+        );
+        assert_eq!(
+            field("unresolved_reason"),
+            Some(&koushi_diagnostics::DiagnosticValue::Token(
+                "profile_cache_miss"
+            ))
+        );
     }
 
     #[test]

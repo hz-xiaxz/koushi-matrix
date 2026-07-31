@@ -18871,6 +18871,21 @@ impl TimelineActor {
                 {
                     return false;
                 }
+                let snapshot = derive_timeline_navigation_snapshot(
+                    &self.navigation_items,
+                    self.fully_read_event_id.as_deref(),
+                    &self.viewport_observation,
+                    self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
+                );
+                record_timeline_unread_consistency(
+                    "thread_receipt_applied",
+                    &self.key,
+                    &self.navigation_items,
+                    self.display_projection.display_items(),
+                    self.last_navigation_snapshot.as_ref(),
+                    &snapshot,
+                    &self.thread_attention,
+                );
                 true
             }
             ReadActorApplyKind::FullyRead => {
@@ -19233,6 +19248,21 @@ impl TimelineActor {
             return;
         }
         if let Some(action) = thread_attention_action {
+            let snapshot = derive_timeline_navigation_snapshot(
+                &self.navigation_items,
+                self.fully_read_event_id.as_deref(),
+                &self.viewport_observation,
+                self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
+            );
+            record_timeline_unread_consistency(
+                "thread_attention_updated",
+                &self.key,
+                &self.navigation_items,
+                self.display_projection.display_items(),
+                self.last_navigation_snapshot.as_ref(),
+                &snapshot,
+                &self.thread_attention,
+            );
             if !self.emit_action_reliable(action).await {
                 return;
             }
@@ -19774,6 +19804,15 @@ impl TimelineActor {
         if self.last_navigation_snapshot.as_ref() == Some(&snapshot) {
             return;
         }
+        record_timeline_unread_consistency(
+            "navigation_updated",
+            &self.key,
+            &self.navigation_items,
+            self.display_projection.display_items(),
+            self.last_navigation_snapshot.as_ref(),
+            &snapshot,
+            &self.thread_attention,
+        );
         self.last_navigation_snapshot = Some(snapshot.clone());
         self.emit(CoreEvent::Timeline(TimelineEvent::NavigationUpdated {
             key: self.key.clone(),
@@ -21536,6 +21575,212 @@ fn derive_timeline_navigation_snapshot(
         .last()
         .and_then(|(_, item)| timeline_item_event_id(item).map(ToOwned::to_owned));
     snapshot
+}
+
+fn timeline_unread_position_token(position: TimelineUnreadPosition) -> &'static str {
+    match position {
+        TimelineUnreadPosition::None => "none",
+        TimelineUnreadPosition::AboveViewport => "above_viewport",
+        TimelineUnreadPosition::InsideViewport => "inside_viewport",
+        TimelineUnreadPosition::BelowViewport => "below_viewport",
+        TimelineUnreadPosition::Unknown => "unknown",
+    }
+}
+
+/// Correlate the Room fully-read marker, canonical unread projection, Thread
+/// receipt, and latest-reply display projection without logging private IDs.
+/// Equality and position booleans preserve the useful causal relationships
+/// while keeping room, event, and user identifiers out of diagnostics.
+fn timeline_unread_consistency_diagnostic_event(
+    stage: &'static str,
+    key: &TimelineKey,
+    canonical_items: &[TimelineItem],
+    display_items: &[TimelineItem],
+    previous_snapshot: Option<&TimelineNavigationSnapshot>,
+    snapshot: &TimelineNavigationSnapshot,
+    thread_attention: &ThreadAttentionTracker,
+) -> DiagnosticEvent {
+    let event_position = |event_id: &str| {
+        canonical_items
+            .iter()
+            .position(|item| timeline_item_event_id(item) == Some(event_id))
+    };
+    let display_position = |event_id: &str| {
+        display_items
+            .iter()
+            .position(|item| timeline_item_event_id(item) == Some(event_id))
+    };
+
+    let fully_read_position = snapshot
+        .read_marker_event_id
+        .as_deref()
+        .and_then(event_position);
+    let first_unread_item = snapshot
+        .first_unread_event_id
+        .as_deref()
+        .and_then(|event_id| event_position(event_id).map(|position| (position, event_id)))
+        .and_then(|(position, event_id)| {
+            canonical_items
+                .get(position)
+                .map(|item| (position, event_id, item))
+        });
+    let first_unread_position = first_unread_item.map(|(position, _, _)| position);
+    let first_unread_event_id = first_unread_item.map(|(_, event_id, _)| event_id);
+    let first_unread_thread_root =
+        first_unread_item.and_then(|(_, _, item)| item.thread_root.as_deref());
+    let thread_receipt_position = thread_attention
+        .receipt_event_id
+        .as_deref()
+        .and_then(event_position);
+    let thread_receipt_item =
+        thread_receipt_position.and_then(|position| canonical_items.get(position));
+    let timeline_thread_root = match &key.kind {
+        TimelineKind::Thread { root_event_id, .. } => Some(root_event_id.as_str()),
+        TimelineKind::Room { .. } | TimelineKind::Focused { .. } => None,
+    };
+
+    let latest_reply_activity_count = display_items
+        .iter()
+        .filter_map(|item| item.thread_summary.as_ref()?.latest_event_id.as_deref())
+        .filter(|event_id| !event_id.trim().is_empty())
+        .count();
+    let display_root_for_first_unread = first_unread_event_id.and_then(|first_unread_event_id| {
+        display_items.iter().find(|item| {
+            item.thread_summary
+                .as_ref()
+                .and_then(|summary| summary.latest_event_id.as_deref())
+                == Some(first_unread_event_id)
+        })
+    });
+    let latest_reply_activity_canonical_count = display_items
+        .iter()
+        .filter_map(|item| item.thread_summary.as_ref()?.latest_event_id.as_deref())
+        .filter(|event_id| event_position(event_id).is_some())
+        .count();
+    let fully_read_changed = previous_snapshot
+        .is_some_and(|previous| previous.read_marker_event_id != snapshot.read_marker_event_id);
+
+    DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "core.timeline_unread_consistency",
+        stage,
+    )
+    .field(DiagnosticField::token(
+        "timeline",
+        timeline_key_trace_kind(key),
+    ))
+    .field(DiagnosticField::count(
+        "canonical_item_count",
+        canonical_items.len().try_into().unwrap_or(u64::MAX),
+    ))
+    .field(DiagnosticField::count(
+        "display_item_count",
+        display_items.len().try_into().unwrap_or(u64::MAX),
+    ))
+    .field(DiagnosticField::boolean(
+        "fully_read_present",
+        snapshot.read_marker_event_id.is_some(),
+    ))
+    .field(DiagnosticField::boolean(
+        "fully_read_changed",
+        fully_read_changed,
+    ))
+    .field(DiagnosticField::boolean(
+        "fully_read_in_canonical",
+        fully_read_position.is_some(),
+    ))
+    .field(DiagnosticField::boolean(
+        "first_unread_present",
+        snapshot.first_unread_event_id.is_some(),
+    ))
+    .field(DiagnosticField::boolean(
+        "first_unread_in_canonical",
+        first_unread_item.is_some(),
+    ))
+    .field(DiagnosticField::boolean(
+        "first_unread_after_fully_read",
+        matches!((fully_read_position, first_unread_position), (Some(read), Some(unread)) if unread > read),
+    ))
+    .field(DiagnosticField::boolean(
+        "first_unread_has_thread_root",
+        first_unread_thread_root.is_some(),
+    ))
+    .field(DiagnosticField::boolean(
+        "first_unread_directly_displayed",
+        first_unread_event_id.is_some_and(|event_id| display_position(event_id).is_some()),
+    ))
+    .field(DiagnosticField::boolean(
+        "display_root_for_first_unread_present",
+        display_root_for_first_unread.is_some(),
+    ))
+    .field(DiagnosticField::boolean(
+        "display_root_matches_thread_root",
+        matches!(
+            (display_root_for_first_unread.and_then(timeline_item_event_id), first_unread_thread_root),
+            (Some(display_root), Some(thread_root)) if display_root == thread_root
+        ),
+    ))
+    .field(DiagnosticField::count(
+        "unread_event_count",
+        snapshot.unread_event_count,
+    ))
+    .field(DiagnosticField::token(
+        "unread_position",
+        timeline_unread_position_token(snapshot.unread_position),
+    ))
+    .field(DiagnosticField::boolean(
+        "thread_receipt_present",
+        thread_attention.receipt_event_id.is_some(),
+    ))
+    .field(DiagnosticField::boolean(
+        "thread_receipt_in_canonical",
+        thread_receipt_position.is_some(),
+    ))
+    .field(DiagnosticField::boolean(
+        "thread_receipt_matches_timeline_root",
+        matches!(
+            (thread_receipt_item.and_then(|item| item.thread_root.as_deref()), timeline_thread_root),
+            (Some(receipt_root), Some(timeline_root)) if receipt_root == timeline_root
+        ),
+    ))
+    .field(DiagnosticField::count(
+        "thread_attention_count",
+        thread_attention.counts.notification_count,
+    ))
+    .field(DiagnosticField::count(
+        "latest_reply_activity_count",
+        latest_reply_activity_count.try_into().unwrap_or(u64::MAX),
+    ))
+    .field(DiagnosticField::count(
+        "latest_reply_activity_canonical_count",
+        latest_reply_activity_canonical_count
+            .try_into()
+            .unwrap_or(u64::MAX),
+    ))
+    .field(DiagnosticField::boolean(
+        "latest_reply_activity_matches_first_unread",
+        display_root_for_first_unread.is_some(),
+    ))
+}
+
+fn record_timeline_unread_consistency(
+    stage: &'static str,
+    key: &TimelineKey,
+    canonical_items: &[TimelineItem],
+    display_items: &[TimelineItem],
+    previous_snapshot: Option<&TimelineNavigationSnapshot>,
+    snapshot: &TimelineNavigationSnapshot,
+    thread_attention: &ThreadAttentionTracker,
+) {
+    koushi_diagnostics::record(timeline_unread_consistency_diagnostic_event(
+        stage,
+        key,
+        canonical_items,
+        display_items,
+        previous_snapshot,
+        snapshot,
+        thread_attention,
+    ));
 }
 
 fn is_own_visible_event(item: &TimelineItem, own_user_id: Option<&str>) -> bool {
@@ -35205,6 +35450,73 @@ mod tests {
         );
         assert_eq!(snapshot.unread_event_count, 1);
         assert_eq!(snapshot.newer_event_count, 0);
+    }
+
+    #[test]
+    fn unread_consistency_diagnostic_correlates_thread_receipt_with_latest_reply_projection() {
+        let key = thread_key();
+        let mut root = timeline_item("$root:test", Some("root"), "@me:test", false);
+        root.thread_summary = Some(ThreadSummaryDto {
+            reply_count: 1,
+            latest_event_id: Some("$reply:test".to_owned()),
+            latest_sender: Some("@alice:test".to_owned()),
+            latest_sender_label: Some("Alice".to_owned()),
+            latest_body_preview: Some("reply".to_owned()),
+            latest_timestamp_ms: Some(2),
+        });
+        let mut reply = timeline_item("$reply:test", Some("reply"), "@alice:test", false);
+        reply.thread_root = Some("$root:test".to_owned());
+        let canonical_items = vec![root.clone(), reply];
+        let snapshot = derive_timeline_navigation_snapshot(
+            &canonical_items,
+            Some("$root:test"),
+            &TimelineViewportObservation::default(),
+            Some("@me:test"),
+        );
+        let thread_attention = ThreadAttentionTracker {
+            receipt_event_id: Some("$reply:test".to_owned()),
+            ..ThreadAttentionTracker::default()
+        };
+
+        let event = timeline_unread_consistency_diagnostic_event(
+            "test",
+            &key,
+            &canonical_items,
+            &[root],
+            None,
+            &snapshot,
+            &thread_attention,
+        );
+        let has_field = |key, expected| {
+            event
+                .fields
+                .iter()
+                .any(|field| field.key == key && field.value == expected)
+        };
+
+        assert_eq!(event.source, "core.timeline_unread_consistency");
+        assert!(has_field("timeline", DiagnosticValue::Token("thread")));
+        assert!(has_field(
+            "first_unread_has_thread_root",
+            DiagnosticValue::Boolean(true)
+        ));
+        assert!(has_field(
+            "thread_receipt_in_canonical",
+            DiagnosticValue::Boolean(true)
+        ));
+        assert!(has_field(
+            "thread_receipt_matches_timeline_root",
+            DiagnosticValue::Boolean(true)
+        ));
+        assert!(has_field(
+            "latest_reply_activity_matches_first_unread",
+            DiagnosticValue::Boolean(true)
+        ));
+        assert!(has_field(
+            "thread_attention_count",
+            DiagnosticValue::Count(0)
+        ));
+        assert!(has_field("unread_event_count", DiagnosticValue::Count(1)));
     }
 
     #[test]
