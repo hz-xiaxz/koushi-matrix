@@ -101,6 +101,7 @@ describe("RoomInfoPanel", () => {
         permissions: {
           can_edit_settings: true,
           can_edit_roles: true,
+          can_invite: true,
           can_kick: true,
           can_ban: true,
           can_unban: true
@@ -173,6 +174,7 @@ describe("RoomInfoPanel", () => {
             permissions: {
               can_edit_settings: true,
               can_edit_roles: true,
+              can_invite: true,
               can_kick: true,
               can_ban: true,
               can_unban: false
@@ -275,6 +277,7 @@ describe("RoomInfoPanel", () => {
             permissions: {
               can_edit_settings: true,
               can_edit_roles: true,
+              can_invite: true,
               can_kick: true,
               can_ban: true,
               can_unban: false

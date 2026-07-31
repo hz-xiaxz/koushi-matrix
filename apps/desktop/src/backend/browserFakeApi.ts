@@ -4734,6 +4734,7 @@ function editableRoomPermissionFacts(): RoomPermissionFacts {
   return {
     can_edit_settings: true,
     can_edit_roles: true,
+    can_invite: true,
     can_kick: true,
     can_ban: true,
     can_unban: true
@@ -4744,6 +4745,7 @@ function readonlyRoomPermissionFacts(): RoomPermissionFacts {
   return {
     can_edit_settings: false,
     can_edit_roles: false,
+    can_invite: false,
     can_kick: false,
     can_ban: false,
     can_unban: false

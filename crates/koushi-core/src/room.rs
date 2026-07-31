@@ -4251,6 +4251,7 @@ fn room_permission_facts_from_sdk(permissions: MatrixRoomPermissionFacts) -> Roo
     RoomPermissionFacts {
         can_edit_settings: permissions.can_edit_settings,
         can_edit_roles: permissions.can_edit_roles,
+        can_invite: permissions.can_invite,
         can_kick: permissions.can_kick,
         can_ban: permissions.can_ban,
         can_unban: permissions.can_unban,
@@ -4691,6 +4692,7 @@ pub mod tests {
             permissions: MatrixRoomPermissionFacts {
                 can_edit_settings: true,
                 can_edit_roles: true,
+                can_invite: true,
                 can_kick: true,
                 can_ban: false,
                 can_unban: false,
@@ -4708,6 +4710,7 @@ pub mod tests {
         let mapped = room_settings_snapshot_from_sdk(settings);
 
         assert!(mapped.permissions.can_edit_roles);
+        assert!(mapped.permissions.can_invite);
         assert_eq!(
             mapped.share_link.as_deref(),
             Some("https://matrix.to/#/%23private%3Aexample.invalid")

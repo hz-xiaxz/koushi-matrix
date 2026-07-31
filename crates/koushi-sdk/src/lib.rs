@@ -5821,6 +5821,7 @@ pub enum MatrixRoomHistoryVisibility {
 pub struct MatrixRoomPermissionFacts {
     pub can_edit_settings: bool,
     pub can_edit_roles: bool,
+    pub can_invite: bool,
     pub can_kick: bool,
     pub can_ban: bool,
     pub can_unban: bool,
@@ -7534,6 +7535,87 @@ mod joined_member_snapshot_tests {
             .expect("already complete refresh should use the cache");
         assert!(cached.complete);
         assert_eq!(cached.members, refreshed.members);
+    }
+}
+
+#[cfg(test)]
+mod room_permission_tests {
+    use matrix_sdk::{ruma::RoomVersionId, test_utils::mocks::MatrixMockServer};
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+    use serde_json::json;
+
+    use super::{MatrixClientSession, SessionInfo, get_room_settings_snapshot};
+
+    async fn session_for(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        let info = SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client
+                .user_id()
+                .expect("mock client has a user id")
+                .to_string(),
+            device_id: client
+                .device_id()
+                .expect("mock client has a device id")
+                .to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        };
+        MatrixClientSession { client, info }
+    }
+
+    #[tokio::test]
+    async fn room_settings_snapshot_uses_invite_power_level_not_role_editability() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let room_id = matrix_sdk::ruma::room_id!("!permission-room:example.org");
+        let client = session.client();
+        let own_user_id = client.user_id().expect("mock user");
+        let power_level_content: matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent = serde_json::from_value(json!({
+            "ban": 50,
+            "events": {},
+            "events_default": 50,
+            "invite": 150,
+            "kick": 50,
+            "redact": 50,
+            "state_default": 50,
+            "users": {},
+            "users_default": 100
+        }))
+        .expect("power levels event");
+        let power_levels = EventFactory::new()
+            .room(room_id)
+            .sender(own_user_id)
+            .event(power_level_content)
+            .state_key("")
+            .into_raw_sync_state();
+
+        server
+            .mock_sync()
+            .ok_and_run(&client, |builder| {
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(room_id)
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(room_id)
+                                .create(own_user_id, RoomVersionId::V1)
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(power_levels),
+                );
+            })
+            .await;
+
+        let room = client.get_room(&room_id).expect("joined permission room");
+        let power_levels = room.power_levels_or_default().await;
+        assert_eq!(power_levels.invite, matrix_sdk::ruma::Int::from(150));
+        assert_eq!(power_levels.users_default, matrix_sdk::ruma::Int::from(100));
+
+        let snapshot = get_room_settings_snapshot(&session, room_id.as_str())
+            .await
+            .expect("room settings snapshot");
+
+        assert!(snapshot.permissions.can_edit_roles);
+        assert!(!snapshot.permissions.can_invite);
     }
 }
 
@@ -9349,6 +9431,7 @@ async fn matrix_room_settings_snapshot(room: &matrix_sdk::Room) -> MatrixRoomSet
                 own_user_id,
                 matrix_sdk::ruma::events::StateEventType::RoomPowerLevels,
             ),
+            can_invite: power_levels.user_can_invite(own_user_id),
             can_kick: power_levels.user_can_kick(own_user_id),
             can_ban: power_levels.user_can_ban(own_user_id),
             can_unban: power_levels.user_can_ban(own_user_id),
@@ -12513,6 +12596,7 @@ mod tests {
             permissions: MatrixRoomPermissionFacts {
                 can_edit_settings: true,
                 can_edit_roles: true,
+                can_invite: true,
                 can_kick: true,
                 can_ban: true,
                 can_unban: false,
@@ -12545,6 +12629,7 @@ mod tests {
         assert!(source.contains(".ban_user("));
         assert!(source.contains(".unban_user("));
         assert!(source.contains(".update_power_levels("));
+        assert!(source.contains(".user_can_invite(own_user_id)"));
     }
 
     #[test]
@@ -12561,6 +12646,7 @@ mod tests {
             permissions: MatrixRoomPermissionFacts {
                 can_edit_settings: true,
                 can_edit_roles: true,
+                can_invite: true,
                 can_kick: true,
                 can_ban: true,
                 can_unban: true,
@@ -12625,6 +12711,7 @@ mod tests {
             permissions: MatrixRoomPermissionFacts {
                 can_edit_settings: true,
                 can_edit_roles: true,
+                can_invite: true,
                 can_kick: true,
                 can_ban: true,
                 can_unban: true,

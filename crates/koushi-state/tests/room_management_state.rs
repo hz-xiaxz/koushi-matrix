@@ -23,6 +23,37 @@ fn ready_state() -> AppState {
     }
 }
 
+#[test]
+fn room_permission_facts_round_trip_invite_permission_with_snake_case() {
+    let facts: RoomPermissionFacts = serde_json::from_value(serde_json::json!({
+        "can_edit_settings": false,
+        "can_edit_roles": false,
+        "can_kick": false,
+        "can_ban": false,
+        "can_unban": false,
+        "can_invite": true,
+    }))
+    .expect("room permission facts");
+
+    assert_eq!(
+        serde_json::to_value(facts).expect("serialize room permission facts")["can_invite"],
+        serde_json::json!(true)
+    );
+
+    let legacy_facts: RoomPermissionFacts = serde_json::from_value(serde_json::json!({
+        "can_edit_settings": false,
+        "can_edit_roles": false,
+        "can_kick": false,
+        "can_ban": false,
+        "can_unban": false,
+    }))
+    .expect("legacy room permission facts");
+    assert_eq!(
+        serde_json::to_value(legacy_facts).expect("serialize legacy room permission facts")["can_invite"],
+        serde_json::json!(false)
+    );
+}
+
 fn editable_settings(room_id: &str) -> RoomSettingsSnapshot {
     RoomSettingsSnapshot {
         room_id: room_id.to_owned(),
@@ -37,6 +68,7 @@ fn editable_settings(room_id: &str) -> RoomSettingsSnapshot {
         permissions: RoomPermissionFacts {
             can_edit_settings: true,
             can_edit_roles: true,
+            can_invite: true,
             can_kick: true,
             can_ban: true,
             can_unban: false,

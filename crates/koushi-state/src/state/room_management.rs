@@ -267,6 +267,8 @@ pub enum RoomHistoryVisibility {
 pub struct RoomPermissionFacts {
     pub can_edit_settings: bool,
     pub can_edit_roles: bool,
+    #[serde(default)]
+    pub can_invite: bool,
     pub can_kick: bool,
     pub can_ban: bool,
     pub can_unban: bool,

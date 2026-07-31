@@ -364,3 +364,25 @@ deferred by scope; no App, Sidebar, backend, or Rust files were changed.
 
 - The branch already contains a committed design spec.
 - Three previously verified diagnostics files may be staged before implementation; preserve them.
+
+## Room invite permission fact — 2026-08-01
+
+- Added the exact `can_invite` room permission fact from Matrix SDK power
+  levels through core/state and the Desktop IPC/TypeScript contract.
+- SDK computes it with `power_levels.user_can_invite(own_user_id)`; it is
+  never inferred from `can_edit_roles`.
+- State deserializes legacy permission objects with `can_invite=false` while
+  serializing the new snake_case key. BrowserFake editable/readonly fixtures
+  expose true/false explicitly; no UI/App production code changed.
+- TDD evidence: red tests reproduced the missing SDK fact, state key,
+  mapping, BrowserFake field, and checked-in golden/IPC contracts before the
+  implementation.
+- Verification:
+  - `cargo test -p koushi-sdk room_permission --lib -- --nocapture` — 1 passed.
+  - `cargo test -p koushi-state --test room_management_state -- --nocapture` — 17 passed.
+  - `cargo test -p koushi-core --lib room_settings -- --nocapture` — 2 passed.
+  - `cargo test -p koushi-state --test invite_workflow_state -- --nocapture` — 4 passed.
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib frontend_app_state_golden -- --nocapture` — 1 passed.
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib core_event_wire_format_matches_checked_in_contract_artifact -- --nocapture` — 1 passed.
+  - Focused Vitest suite — 6 files, 140 passed; `npm run typecheck` passed.
+  - SDK/state/core/Desktop cargo checks, `cargo fmt --all -- --check`, and `git diff --check` passed.

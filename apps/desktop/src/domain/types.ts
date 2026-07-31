@@ -1214,6 +1214,7 @@ export type RoomHistoryVisibility = "worldReadable" | "shared" | "invited" | "jo
 export interface RoomPermissionFacts {
   can_edit_settings: boolean;
   can_edit_roles: boolean;
+  can_invite: boolean;
   can_kick: boolean;
   can_ban: boolean;
   can_unban: boolean;

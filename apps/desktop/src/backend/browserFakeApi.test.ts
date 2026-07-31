@@ -1601,6 +1601,7 @@ describe("BrowserFakeApi settings preview", () => {
           can_edit_roles: true,
           can_kick: true,
           can_ban: true,
+          can_invite: true,
           can_unban: true
         }
       },
@@ -1626,7 +1627,8 @@ describe("BrowserFakeApi settings preview", () => {
     );
     expect(moderated.state.domain.room_management.operation).toEqual({ kind: "idle" });
 
-    await api.loadRoomSettings("!readonly-room:browser.fake");
+    const readonly = await api.loadRoomSettings("!readonly-room:browser.fake");
+    expect(readonly.state.domain.room_management.settings?.permissions.can_invite).toBe(false);
     const guarded = await api.moderateRoomMember(
       "!readonly-room:browser.fake",
       "@target:browser.fake",

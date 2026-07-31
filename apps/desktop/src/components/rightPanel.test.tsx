@@ -58,6 +58,7 @@ const roomManagement: RoomManagementState = {
     permissions: {
       can_edit_settings: true,
       can_edit_roles: true,
+      can_invite: true,
       can_kick: true,
       can_ban: true,
       can_unban: true

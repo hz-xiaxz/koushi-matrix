@@ -1563,6 +1563,7 @@ test("room management panel updates settings, roles, and members from Rust state
               permissions: {
                 can_edit_settings: true,
                 can_edit_roles: true,
+                can_invite: true,
                 can_kick: true,
                 can_ban: false,
                 can_unban: false
@@ -1852,6 +1853,7 @@ test("local aliases dispatch typed account command and render Rust-projected lab
               permissions: {
                 can_edit_settings: true,
                 can_edit_roles: true,
+                can_invite: true,
                 can_kick: true,
                 can_ban: false,
                 can_unban: false
@@ -8060,6 +8062,7 @@ test("room member panel ignores, unignores, and reports a user", async ({ page }
                   permissions: {
                     can_edit_settings: true,
                     can_edit_roles: true,
+                    can_invite: true,
                     can_kick: true,
                     can_ban: false,
                     can_unban: false
