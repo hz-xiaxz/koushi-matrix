@@ -6,7 +6,6 @@ fn search_scope_kind_trace_label(scope: SearchScopeKind) -> &'static str {
     match scope {
         SearchScopeKind::CurrentRoom => "current_room",
         SearchScopeKind::CurrentSpace => "current_space",
-        SearchScopeKind::Dms => "dms",
         SearchScopeKind::AllRooms => "all_rooms",
     }
 }
@@ -15,7 +14,6 @@ fn resolved_search_scope_trace_label(scope: &SearchScope) -> &'static str {
     match scope {
         SearchScope::CurrentRoom { .. } => "current_room",
         SearchScope::CurrentSpace { .. } => "current_space",
-        SearchScope::Dms => "dms",
         SearchScope::AllRooms => "all_rooms",
     }
 }

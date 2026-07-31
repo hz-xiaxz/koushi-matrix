@@ -318,14 +318,6 @@ fn search_room_filter(state: &AppState, scope: &SearchScope) -> SearchRoomFilter
                 .map(|room| room.room_id.clone())
                 .collect(),
         ),
-        SearchScope::Dms => SearchRoomFilter::OnlyRooms(
-            state
-                .rooms
-                .iter()
-                .filter(|room| room.is_dm)
-                .map(|room| room.room_id.clone())
-                .collect(),
-        ),
     }
 }
 

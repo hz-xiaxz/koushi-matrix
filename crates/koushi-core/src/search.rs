@@ -89,7 +89,6 @@ fn state_search_scope(scope: &SearchScope) -> koushi_state::SearchScope {
         SearchScope::CurrentSpace { space_id } => koushi_state::SearchScope::CurrentSpace {
             space_id: space_id.clone(),
         },
-        SearchScope::Dms => koushi_state::SearchScope::Dms,
     }
 }
 
@@ -98,7 +97,6 @@ fn search_scope_trace_label(scope: &SearchScope) -> &'static str {
         SearchScope::AllRooms => "all_rooms",
         SearchScope::CurrentRoom { .. } => "current_room",
         SearchScope::CurrentSpace { .. } => "current_space",
-        SearchScope::Dms => "dms",
     }
 }
 
@@ -1464,7 +1462,6 @@ fn matrix_sdk_search_scope(
         SearchScope::CurrentRoom { room_id } => koushi_sdk::MatrixSearchScope::CurrentRoom {
             room_id: room_id.clone(),
         },
-        SearchScope::Dms => koushi_sdk::MatrixSearchScope::Dms,
         SearchScope::CurrentSpace { .. } => match room_filter {
             SearchRoomFilter::OnlyRooms(room_ids) => koushi_sdk::MatrixSearchScope::RoomSet {
                 room_ids: room_ids.clone(),
@@ -2047,10 +2044,6 @@ mod tests {
             koushi_sdk::MatrixSearchScope::CurrentRoom {
                 room_id: "!room:example.invalid".to_owned(),
             }
-        );
-        assert_eq!(
-            matrix_sdk_search_scope(&SearchScope::Dms, &SearchRoomFilter::AllRooms),
-            koushi_sdk::MatrixSearchScope::Dms
         );
         assert_eq!(
             matrix_sdk_search_scope(

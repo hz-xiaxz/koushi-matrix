@@ -1237,7 +1237,7 @@ export function App() {
     }
   }
   const [searchQuery, setSearchQuery] = useState(() => initialSearchQuery());
-  const [searchScope, setSearchScope] = useState<SearchScopeKind>("allRooms");
+  const [searchScope, setSearchScope] = useState<SearchScopeKind>("currentRoom");
   // #373: the room/DM leave confirmation. React owns only dialog visibility and
   // the in-flight guard; membership and the resulting room list stay Rust-owned.
   const [pendingRoomLeave, setPendingRoomLeave] = useState<{

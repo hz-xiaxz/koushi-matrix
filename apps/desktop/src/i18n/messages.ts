@@ -439,7 +439,6 @@ export type MessageId =
   | "search.searchingFor"
   | "search.tooShort"
   | "search.scopeAll"
-  | "search.scopeDm"
   | "search.scopeRoom"
   | "search.scopeSpace"
   | "sessionStatus.accountManagementFallback"
@@ -966,7 +965,6 @@ export type MessageId =
   | "workspace.resizeRoomList"
   | "workspace.resizeRightPanel"
   | "workspace.search"
-  | "workspace.searchDms"
   | "workspace.searchEverywhere"
   | "workspace.searchInRoom"
   | "workspace.searchPlaceholder"
@@ -1572,8 +1570,7 @@ const en: Catalog = {
   "search.searchingFor": "Searching for \"{query}\"",
   "search.tooShort": "Search term is too short",
   "search.scopeAll": "All",
-  "search.scopeDm": "DM",
-  "search.scopeRoom": "Room",
+  "search.scopeRoom": "Room/DM",
   "search.scopeSpace": "Space",
   "sessionStatus.accountManagementFallback":
     "This homeserver did not advertise a safe external account destination. Open local settings instead.",
@@ -2113,7 +2110,6 @@ const en: Catalog = {
   "workspace.resizeRoomList": "Resize room list",
   "workspace.resizeRightPanel": "Resize right panel",
   "workspace.search": "Search",
-  "workspace.searchDms": "Search direct messages",
   "workspace.searchEverywhere": "Search everywhere",
   "workspace.searchInRoom": "Search in {roomName}",
   "workspace.searchPlaceholder": "Search in {spaceName}",
@@ -2605,8 +2601,7 @@ const ja: Catalog = {
   "search.searchingFor": "\"{query}\" を検索中",
   "search.tooShort": "検索語が短すぎます",
   "search.scopeAll": "すべて",
-  "search.scopeDm": "ダイレクト",
-  "search.scopeRoom": "ルーム",
+  "search.scopeRoom": "ルーム/DM",
   "search.scopeSpace": "スペース",
   "sessionStatus.accountManagementFallback":
     "このホームサーバーは安全な外部アカウント管理先を通知していません。代わりにローカル設定を開きます。",
@@ -3145,7 +3140,6 @@ const ja: Catalog = {
   "workspace.resizeRoomList": "ルームリストの幅を変更",
   "workspace.resizeRightPanel": "右パネルの幅を変更",
   "workspace.search": "検索",
-  "workspace.searchDms": "ダイレクトメッセージを検索",
   "workspace.searchEverywhere": "すべてを検索",
   "workspace.searchInRoom": "{roomName}内を検索",
   "workspace.searchPlaceholder": "{spaceName}内を検索",

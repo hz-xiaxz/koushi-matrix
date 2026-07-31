@@ -1,6 +1,6 @@
 import type { LinkPreview } from "./linkPreview";
 
-export type SearchScopeKind = "currentRoom" | "currentSpace" | "dms" | "allRooms";
+export type SearchScopeKind = "currentRoom" | "currentSpace" | "allRooms";
 
 export interface CreateRoomRequest {
   name: string;

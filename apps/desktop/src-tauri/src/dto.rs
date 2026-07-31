@@ -811,7 +811,6 @@ impl From<SearchState> for FrontendSearchState {
 pub enum SearchScopeKind {
     CurrentRoom,
     CurrentSpace,
-    Dms,
     AllRooms,
 }
 
@@ -826,7 +825,9 @@ impl SearchScopeKind {
                 .map(|room_id| SearchScope::CurrentRoom {
                     room_id: room_id.clone(),
                 })
-                .unwrap_or(SearchScope::AllRooms),
+                .unwrap_or_else(|| SearchScope::CurrentRoom {
+                    room_id: String::new(),
+                }),
             Self::CurrentSpace => state
                 .navigation
                 .active_space_id
@@ -834,8 +835,9 @@ impl SearchScopeKind {
                 .map(|space_id| SearchScope::CurrentSpace {
                     space_id: space_id.clone(),
                 })
-                .unwrap_or(SearchScope::AllRooms),
-            Self::Dms => SearchScope::Dms,
+                .unwrap_or_else(|| SearchScope::CurrentSpace {
+                    space_id: String::new(),
+                }),
             Self::AllRooms => SearchScope::AllRooms,
         }
     }
@@ -846,7 +848,6 @@ impl From<SearchScope> for SearchScopeKind {
         match scope {
             SearchScope::CurrentRoom { .. } => Self::CurrentRoom,
             SearchScope::CurrentSpace { .. } => Self::CurrentSpace,
-            SearchScope::Dms => Self::Dms,
             SearchScope::AllRooms => Self::AllRooms,
         }
     }

@@ -3004,7 +3004,6 @@ pub enum SearchScope {
     AllRooms,
     CurrentRoom { room_id: String },
     CurrentSpace { space_id: String },
-    Dms,
 }
 
 fn search_room_filter_debug(filter: &SearchRoomFilter) -> (&'static str, usize) {

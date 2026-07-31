@@ -5179,7 +5179,6 @@ pub struct MatrixSearchCandidate {
 pub enum MatrixSearchScope {
     AllRooms,
     CurrentRoom { room_id: String },
-    Dms,
     RoomSet { room_ids: Vec<String> },
 }
 
@@ -7864,18 +7863,10 @@ pub async fn search_message_candidates_scoped(
                 })
                 .collect());
         }
-        MatrixSearchScope::AllRooms
-        | MatrixSearchScope::Dms
-        | MatrixSearchScope::RoomSet { .. } => {}
+        MatrixSearchScope::AllRooms | MatrixSearchScope::RoomSet { .. } => {}
     }
 
-    let mut builder = session.client().search_messages(query.to_owned(), limit);
-    if matches!(scope, MatrixSearchScope::Dms) {
-        builder = builder
-            .only_dm_rooms()
-            .await
-            .map_err(|_| MatrixSearchError::Internal)?;
-    }
+    let builder = session.client().search_messages(query.to_owned(), limit);
     let mut iterator = builder.build();
     let Some(candidates) = iterator
         .next()

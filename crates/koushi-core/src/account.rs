@@ -167,7 +167,6 @@ fn state_search_scope(scope: &crate::command::SearchScope) -> koushi_state::Sear
                 space_id: space_id.clone(),
             }
         }
-        crate::command::SearchScope::Dms => koushi_state::SearchScope::Dms,
     }
 }
 

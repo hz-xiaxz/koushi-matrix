@@ -39,7 +39,6 @@ pub enum SearchState {
 pub enum SearchScope {
     CurrentRoom { room_id: String },
     CurrentSpace { space_id: String },
-    Dms,
     AllRooms,
 }
 

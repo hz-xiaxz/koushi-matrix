@@ -5298,7 +5298,6 @@ fn map_core_search_scope_to_state(scope: SearchScope) -> AppSearchScope {
         SearchScope::AllRooms => AppSearchScope::AllRooms,
         SearchScope::CurrentRoom { room_id } => AppSearchScope::CurrentRoom { room_id },
         SearchScope::CurrentSpace { space_id } => AppSearchScope::CurrentSpace { space_id },
-        SearchScope::Dms => AppSearchScope::Dms,
     }
 }
 
@@ -5569,7 +5568,6 @@ fn map_state_search_scope_to_core(scope: AppSearchScope) -> SearchScope {
     match scope {
         AppSearchScope::AllRooms => SearchScope::AllRooms,
         AppSearchScope::CurrentSpace { space_id } => SearchScope::CurrentSpace { space_id },
-        AppSearchScope::Dms => SearchScope::Dms,
         AppSearchScope::CurrentRoom { room_id } => SearchScope::CurrentRoom { room_id },
     }
 }
@@ -6396,14 +6394,14 @@ mod tests {
             .expect("data-dir helper should follow search scope mapper");
 
         assert!(
-            to_state.contains("SearchScope::CurrentSpace")
-                && to_state.contains("SearchScope::Dms")
+            to_state.contains("SearchScope::CurrentRoom")
+                && to_state.contains("SearchScope::CurrentSpace")
                 && to_state.contains("SearchScope::AllRooms"),
-            "core search scopes must preserve current-space, DM, and all-rooms kinds in AppState"
+            "core search scopes must preserve Room/DM, current-space, and all-rooms kinds in AppState"
         );
         assert!(
-            to_core.contains("AppSearchScope::CurrentSpace")
-                && to_core.contains("AppSearchScope::Dms")
+            to_core.contains("AppSearchScope::CurrentRoom")
+                && to_core.contains("AppSearchScope::CurrentSpace")
                 && to_core.contains("AppSearchScope::AllRooms"),
             "submitted AppState search scopes must round-trip through core without collapsing to global"
         );

@@ -3128,11 +3128,14 @@ fn resolve_search_scope_from_active_room(
     match scope {
         SearchScopeKind::CurrentRoom => active_room_id
             .map(|room_id| SearchScope::CurrentRoom { room_id })
-            .unwrap_or(SearchScope::AllRooms),
+            .unwrap_or_else(|| SearchScope::CurrentRoom {
+                room_id: String::new(),
+            }),
         SearchScopeKind::CurrentSpace => active_space_id
             .map(|space_id| SearchScope::CurrentSpace { space_id })
-            .unwrap_or(SearchScope::AllRooms),
-        SearchScopeKind::Dms => SearchScope::Dms,
+            .unwrap_or_else(|| SearchScope::CurrentSpace {
+                space_id: String::new(),
+            }),
         SearchScopeKind::AllRooms => SearchScope::AllRooms,
     }
 }
@@ -3491,12 +3494,11 @@ mod tests {
             "current-space searches must preserve the selected scope kind instead of collapsing to global"
         );
         assert!(
-            resolver.contains("SearchScope::Dms"),
-            "DM searches must preserve the selected scope kind instead of collapsing to global"
+            resolver.contains("SearchScope::CurrentRoom"),
+            "Room/DM searches must preserve the selected conversation instead of collapsing to global"
         );
         assert!(
-            !resolver.contains("CurrentSpace | SearchScopeKind::AllRooms => SearchScope::Global")
-                && !resolver.contains("SearchScopeKind::Dms => SearchScope::Global"),
+            !resolver.contains("unwrap_or(SearchScope::AllRooms)"),
             "non-all search scopes must not silently round-trip as allRooms"
         );
     }
@@ -5503,7 +5505,9 @@ mod tests {
 
         assert_eq!(
             resolve_search_scope_from_active_room(SearchScopeKind::CurrentRoom, None, None),
-            SearchScope::AllRooms
+            SearchScope::CurrentRoom {
+                room_id: String::new()
+            }
         );
         assert_eq!(
             resolve_search_scope_from_active_room(
@@ -5515,15 +5519,6 @@ mod tests {
                 space_id: "!space:example.org".to_owned()
             }
         );
-        assert_eq!(
-            resolve_search_scope_from_active_room(
-                SearchScopeKind::Dms,
-                Some(room_id.clone()),
-                None
-            ),
-            SearchScope::Dms
-        );
-
         match build_close_search_command(fake_request_id(16)) {
             CoreCommand::App(AppCommand::CloseSearch { request_id }) => {
                 assert_eq!(request_id, fake_request_id(16));
