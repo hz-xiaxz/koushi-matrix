@@ -43,7 +43,11 @@ import type {
   RequestId,
   ThreadRootProjectionDto
 } from "./coreEvents";
-import { timelineItemDomId, timelineKeyEquals } from "./coreEvents";
+import {
+  timelineItemDomId,
+  timelineKeyEquals,
+  timelineKeyIdentity
+} from "./coreEvents";
 
 // ---------------------------------------------------------------------------
 // Per-key state
@@ -78,7 +82,7 @@ export interface TimelineKeyState {
 // ---------------------------------------------------------------------------
 
 export interface TimelineStoreState {
-  /** Keyed by JSON.stringify(TimelineKey) for simple equality. */
+  /** Keyed by the canonical semantic TimelineKey identity. */
   keys: Map<string, TimelineKeyState>;
   /** Bounded root snapshots, keyed independently from canonical SDK items. */
   threadRootProjections: Map<string, ThreadRootProjectionDto>;
@@ -87,7 +91,120 @@ export interface TimelineStoreState {
 export const TIMELINE_STORE_INACTIVE_RETAIN_LIMIT = 8;
 
 function keyStr(key: TimelineKey): string {
-  return JSON.stringify(key);
+  return timelineKeyIdentity(key);
+}
+
+function timelineKeyKindDiagnosticLabel(key: TimelineKey): "room" | "thread" | "focused" {
+  if ("Room" in key.kind) {
+    return "room";
+  }
+  if ("Thread" in key.kind) {
+    return "thread";
+  }
+  return "focused";
+}
+
+function stableDiagnosticFingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * Privacy-safe identity shared by the store/application/view diagnostics.
+ * Matrix identifiers and message content are never emitted verbatim.
+ */
+export function timelineKeyDiagnosticIdentity(key: TimelineKey): string {
+  const account = stableDiagnosticFingerprint(key.account_key);
+  if ("Room" in key.kind) {
+    return `kind=room account=${account} room=${stableDiagnosticFingerprint(key.kind.Room.room_id)}`;
+  }
+  if ("Thread" in key.kind) {
+    return `kind=thread account=${account} room=${stableDiagnosticFingerprint(key.kind.Thread.room_id)} target=${stableDiagnosticFingerprint(key.kind.Thread.root_event_id)}`;
+  }
+  return `kind=focused account=${account} room=${stableDiagnosticFingerprint(key.kind.Focused.room_id)} target=${stableDiagnosticFingerprint(key.kind.Focused.event_id)}`;
+}
+
+export function timelineKeyDiagnosticFingerprint(key: TimelineKey): string {
+  return stableDiagnosticFingerprint(timelineKeyIdentity(key));
+}
+
+function canonicalKeyKindLabel(keyId: string): string | null {
+  try {
+    const parsed = JSON.parse(keyId) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length >= 2 &&
+      (parsed[1] === "Room" || parsed[1] === "Thread" || parsed[1] === "Focused")
+    ) {
+      return parsed[1].toLowerCase();
+    }
+  } catch {
+    // A malformed/legacy key is still counted in store_keys below. Diagnostics
+    // deliberately avoid logging the raw value.
+  }
+  return null;
+}
+
+export function timelineStoreInitialItemsDiagnosticMessage(
+  before: TimelineStoreState,
+  after: TimelineStoreState,
+  payload: Extract<TimelineEvent, { InitialItems: unknown }>["InitialItems"],
+  retainedKeyIds: ReadonlySet<string>
+): string {
+  const keyId = keyStr(payload.key);
+  const beforeState = before.keys.get(keyId);
+  const afterState = after.keys.get(keyId);
+  const expectedSizeAfterApply = before.keys.size + (beforeState ? 0 : 1);
+  const pruned = Math.max(0, expectedSizeAfterApply - after.keys.size);
+  const request = payload.request_id
+    ? `${payload.request_id.connection_id}:${payload.request_id.sequence}`
+    : "none";
+  const targetPresent = timelineProjectionEvidence(payload.key, payload.items).targetPresent;
+  return [
+    "stage=initial_apply",
+    timelineKeyDiagnosticIdentity(payload.key),
+    `request=${request}`,
+    `actor=${payload.actor_generation ?? 0}`,
+    `generation=${payload.generation}`,
+    `incoming_items=${payload.items.length}`,
+    `before_items=${beforeState?.items.length ?? 0}`,
+    `after_items=${afterState?.items.length ?? 0}`,
+    `key_outcome=${beforeState ? "replaced" : "created"}`,
+    `retained=${retainedKeyIds.has(keyId)}`,
+    `pruned=${pruned}`,
+    `store_before=${before.keys.size}`,
+    `store_after=${after.keys.size}`,
+    `target_present=${targetPresent}`
+  ].join(" ");
+}
+
+export function timelineStoreLookupDiagnosticMessage(
+  store: TimelineStoreState,
+  key: TimelineKey
+): string {
+  const state = store.keys.get(keyStr(key));
+  const kind = timelineKeyKindDiagnosticLabel(key);
+  let sameKindKeys = 0;
+  for (const keyId of store.keys.keys()) {
+    if (canonicalKeyKindLabel(keyId) === kind) {
+      sameKindKeys += 1;
+    }
+  }
+  return [
+    "stage=lookup",
+    timelineKeyDiagnosticIdentity(key),
+    `found=${state !== undefined}`,
+    `items=${state?.items.length ?? 0}`,
+    `actor=${state?.actorGeneration ?? 0}`,
+    `generation=${state?.generation ?? 0}`,
+    `awaiting_resync=${state?.awaitingResync ?? false}`,
+    `store_keys=${store.keys.size}`,
+    `same_kind_keys=${sameKindKeys}`
+  ].join(" ");
 }
 
 function requestIdsEqual(left: RequestId, right: RequestId): boolean {

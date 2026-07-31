@@ -126,7 +126,8 @@ import {
 } from "../domain/timelineTransportStats";
 import {
   timelineItemDomId,
-  timelineKeyEquals
+  timelineKeyEquals,
+  timelineKeyRoomId
 } from "../domain/coreEvents";
 import {
   applyGlobalResync,
@@ -138,7 +139,9 @@ import {
   getMediaUploadProgress,
   getKeyState,
   getPaginationState,
+  timelineKeyDiagnosticFingerprint,
   timelineProjectionEvidence,
+  timelineStoreLookupDiagnosticMessage,
   timelineStoreKeyId,
   type TimelineStoreState
 } from "../domain/timelineStore";
@@ -536,7 +539,7 @@ export function setTimelineViewportSessionAnchorForTests(
   timelineKey: TimelineKey,
   anchor: TimelineScrollAnchor
 ): void {
-  timelineViewportSessionMemory.set(JSON.stringify(timelineKey), {
+  timelineViewportSessionMemory.set(timelineStoreKeyId(timelineKey), {
     mode: "anchor",
     anchor
   });
@@ -2570,6 +2573,10 @@ export const TimelineView = memo(function TimelineView({
   const anchorAsyncGenerationRef = useRef(0);
   /** Tracks whether the current key already got its first live-edge scroll. */
   const initialLiveEdgeScrollAppliedRef = useRef<string | null>(null);
+  /** Tracks whether the current focused key already centered its target row. */
+  const focusedTargetRestoreAppliedRef = useRef<string | null>(null);
+  /** Deduplicates privacy-safe focused-target restoration diagnostics. */
+  const lastFocusedTargetRestoreDiagnosticRef = useRef<string | null>(null);
   /** Keeps the live edge pinned when measured virtual heights change. */
   const stickToBottomAfterMeasurementRef = useRef(false);
   /** Viewport intent that survives timeline re-renders until user scroll input changes it. */
@@ -2633,6 +2640,7 @@ export const TimelineView = memo(function TimelineView({
     callback: (diagnostics: TimelineDiagnostics) => void;
     signature: string;
   } | null>(null);
+  const lastStoreLookupDiagnosticRef = useRef<string | null>(null);
   const lastThreadCommitDiagnosticRef = useRef<string | null>(null);
   const scrollDiagnosticsRef = useRef<TimelineScrollDiagnostics>(
     createInitialTimelineScrollDiagnostics()
@@ -2643,7 +2651,7 @@ export const TimelineView = memo(function TimelineView({
   profileUsersRef.current = profileUsers;
   const timelineKeyRef = useRef(timelineKey);
   timelineKeyRef.current = timelineKey;
-  const timelineKeyHash = JSON.stringify(timelineKey);
+  const timelineKeyHash = timelineStoreKeyId(timelineKey);
   const timelineKeyHashRef = useRef(timelineKeyHash);
   timelineKeyHashRef.current = timelineKeyHash;
   const sessionRoomScrollAnchorRef = useRef<TimelineScrollAnchor | null>(null);
@@ -2652,6 +2660,8 @@ export const TimelineView = memo(function TimelineView({
   const roomReentryAnchorAgeRef = useRef<TimelineSessionAnchorAgeBucket>("none");
   const roomReentryDiagnosticKeyRef = useRef<string | null>(null);
   const roomTimelineRoomId = "Room" in timelineKey.kind ? timelineKey.kind.Room.room_id : null;
+  const focusedTimelineTargetEventId =
+    "Focused" in timelineKey.kind ? timelineKey.kind.Focused.event_id : null;
   const readSignalRoomId =
     "Room" in timelineKey.kind
       ? timelineKey.kind.Room.room_id
@@ -2682,6 +2692,17 @@ export const TimelineView = memo(function TimelineView({
     },
     [onDiagnosticLogEntry]
   );
+  useEffect(() => {
+    if (!("Focused" in timelineKey.kind)) {
+      return;
+    }
+    const message = timelineStoreLookupDiagnosticMessage(store, timelineKey);
+    if (lastStoreLookupDiagnosticRef.current === message) {
+      return;
+    }
+    lastStoreLookupDiagnosticRef.current = message;
+    emitDiagnosticLog("timeline.store", message);
+  }, [emitDiagnosticLog, store, timelineKey, timelineKeyHash]);
   useEffect(() => {
     if (!("Thread" in timelineKey.kind)) {
       return;
@@ -3245,6 +3266,19 @@ export const TimelineView = memo(function TimelineView({
                                       : event.ResyncRequired.key;
       if (!timelineKeyEquals(eventKey, timelineKeyRef.current)) {
         recordTimelineKeyMismatch();
+        const currentKey = timelineKeyRef.current;
+        emitDiagnosticLog(
+          "timeline.key",
+          [
+            "stage=event_dropped",
+            `current_kind=${timelineKindDiagnosticLabel(currentKey)}`,
+            `event_kind=${timelineKindDiagnosticLabel(eventKey)}`,
+            `current_key=${timelineKeyDiagnosticFingerprint(currentKey)}`,
+            `event_key=${timelineKeyDiagnosticFingerprint(eventKey)}`,
+            `account_match=${currentKey.account_key === eventKey.account_key}`,
+            `room_match=${timelineKeyRoomId(currentKey) === timelineKeyRoomId(eventKey)}`
+          ].join(" ")
+        );
         return;
       }
       emitTimelineEventDiagnosticLog(event, eventKey, emitDiagnosticLog);
@@ -3539,6 +3573,8 @@ export const TimelineView = memo(function TimelineView({
     initialItemsSeenForTimelineKeyRef.current = null;
     lastDiagnosticsEmissionRef.current = null;
     initialLiveEdgeScrollAppliedRef.current = null;
+    focusedTargetRestoreAppliedRef.current = null;
+    lastFocusedTargetRestoreDiagnosticRef.current = null;
     stickToBottomAfterMeasurementRef.current = false;
     resetActiveMeasurementDeferral({ clearMountedIds: true });
     itemHeightByDomIdRef.current = new Map();
@@ -4463,8 +4499,96 @@ export const TimelineView = memo(function TimelineView({
           `path=${path}`
       );
     };
+    const emitFocusedTargetRestoreDecision = (
+      path: "dom" | "virtual_fallback" | "pending",
+      targetPresent: boolean
+    ) => {
+      const signature = `${initialLiveEdgeScrollKey ?? "none"}:${path}:${String(targetPresent)}`;
+      if (lastFocusedTargetRestoreDiagnosticRef.current === signature) {
+        return;
+      }
+      lastFocusedTargetRestoreDiagnosticRef.current = signature;
+      emitDiagnosticLog(
+        "timeline.scroll",
+        `stage=focused_target_restore path=${path} target_present=${String(targetPresent)}`
+      );
+    };
     let roomAnchorRestored = false;
     if (
+      focusedTimelineTargetEventId !== null
+    ) {
+      // A Focused timeline is an event-addressed navigation result, not a
+      // normal room entry. Its target owns the initial viewport even when the
+      // focused window also contains newer events. Treating this key like a
+      // room timeline would immediately move the viewport to the window's
+      // live edge and make older Activity results appear blank.
+      releaseViewportIntent();
+      if (
+        timelineInitialized &&
+        items.length > 0 &&
+        container &&
+        initialLiveEdgeScrollKey !== null &&
+        focusedTargetRestoreAppliedRef.current !== initialLiveEdgeScrollKey
+      ) {
+        jumpViewportControlRef.current = true;
+        viewportIntentRevisionRef.current += 1;
+        const targetRow = findTimelineEventNode(
+          container,
+          "activity",
+          focusedTimelineTargetEventId
+        );
+        if (targetRow) {
+          runWithScrollWriteReason("jumpToEvent", () => {
+            targetRow.scrollIntoView({ block: "center", inline: "nearest" });
+          });
+          focusedTargetRestoreAppliedRef.current = initialLiveEdgeScrollKey;
+          initialLiveEdgeScrollAppliedRef.current = initialLiveEdgeScrollKey;
+          emitFocusedTargetRestoreDecision("dom", true);
+          freeScrollAnchorRef.current = captureFreeScrollAnchor(container);
+        } else {
+          const targetIndex = visibleRows.findIndex(
+            (row) => row.activity_event_id === focusedTimelineTargetEventId
+          );
+          if (targetIndex >= 0 && virtualWindow.virtualized) {
+            const targetTop = timelineHeightModel.offsets[targetIndex] ?? 0;
+            const targetHeight = timelineItemHeightAtIndex(
+              timelineHeightModel,
+              targetIndex
+            );
+            runWithScrollWriteReason("jumpToEvent", () => {
+              container.scrollTop = Math.max(
+                0,
+                viewportMetricsRef.current.listOffsetTop +
+                  targetTop +
+                  targetHeight / 2 -
+                  container.clientHeight / 2
+              );
+            });
+            focusedTargetRestoreAppliedRef.current = initialLiveEdgeScrollKey;
+            initialLiveEdgeScrollAppliedRef.current = initialLiveEdgeScrollKey;
+            emitFocusedTargetRestoreDecision("virtual_fallback", true);
+            scheduleScrollFollowUpFrame(() => {
+              const mountedTarget = findTimelineEventNode(
+                container,
+                "activity",
+                focusedTimelineTargetEventId
+              );
+              if (mountedTarget) {
+                runWithScrollWriteReason("jumpToEvent", () => {
+                  mountedTarget.scrollIntoView({ block: "center", inline: "nearest" });
+                });
+              }
+              freeScrollAnchorRef.current = captureFreeScrollAnchor(container);
+              updateViewportMetrics();
+              reportViewportObservation();
+            });
+          } else {
+            jumpViewportControlRef.current = false;
+            emitFocusedTargetRestoreDecision("pending", targetIndex >= 0);
+          }
+        }
+      }
+    } else if (
       timelineInitialized &&
       items.length > 0 &&
       activeRoomAnchor &&
@@ -4652,12 +4776,14 @@ export const TimelineView = memo(function TimelineView({
     applyViewportIntent,
     generation,
     emitDiagnosticLog,
+    focusedTimelineTargetEventId,
     roomId,
     roomTimelineRoomId,
     initialLiveEdgeScrollKey,
     items,
     navigationSnapshot,
     reportViewportObservation,
+    releaseViewportIntent,
     timelineHeightModel,
     timelineInitialized,
     updateViewportMetrics,
