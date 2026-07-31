@@ -309,6 +309,20 @@ The remaining integration work is still App/right-panel wiring, diagnostics,
 and global context-menu plumbing; no Room People or network behavior was
 changed in this panel slice.
 
+## Task 4 sidebar-entry correction — 2026-08-01
+
+- Tightened the sidebar entry guard to require a real active Space, so an
+  inconsistent navigation snapshot with neither Home nor a Space selected
+  cannot show a Space-only row.
+- Kept joined and child-room-only counts Rust-owned through the existing
+  `Sidebar` props/snapshot fallback, omitted the child-only suffix when it is
+  zero, and retained the accessible label that announces both counts.
+- Added focused coverage for placement immediately before the DMs/Rooms
+  controls, zero-warning formatting, click routing, Space visibility, Home
+  absence, and the no-real-Space guard.
+- App-level Sidebar callback/count wiring remains deferred by scope; the row
+  is ready for that integration without changing Room People classification.
+
 ## Decisions and invariants
 
 - All implementation workers use Luna (`gpt-5.6-luna`) with reasoning effort `max`.

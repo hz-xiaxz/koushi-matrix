@@ -892,7 +892,7 @@ export function Sidebar({
             />
           </>
         ) : null}
-        {!accountHomeActive ? (
+        {activeSpace ? (
           <SpaceMembersNavButton
             childOnlyCount={resolvedSpaceMemberCounts.childOnly}
             joinedCount={resolvedSpaceMemberCounts.joined}
@@ -1201,6 +1201,11 @@ function SpaceMembersNavButton({
   joinedCount: number;
   onClick: () => void;
 }) {
+  const countLabel =
+    childOnlyCount > 0
+      ? t("spaceMembers.navCount", { joined: joinedCount, childOnly: childOnlyCount })
+      : String(joinedCount);
+
   return (
     <button
       className="nav-item space-members-nav"
@@ -1214,7 +1219,7 @@ function SpaceMembersNavButton({
       <Users size={ICON_SIZE.control} aria-hidden="true" />
       <span className="nav-label">{t("spaceMembers.navLabel")}</span>
       <span className={`space-members-nav-count ${childOnlyCount > 0 ? "has-warning" : ""}`}>
-        {t("spaceMembers.navCount", { joined: joinedCount, childOnly: childOnlyCount })}
+        {countLabel}
       </span>
     </button>
   );
