@@ -186,4 +186,48 @@ describe("context menu registry", () => {
       contextMenuItems({ kind: "space" }).map((item) => item.id)
     ).not.toContain("leaveRoom");
   });
+
+  test("Space child-member menus expose Invite to Space only when available", () => {
+    const available = contextMenuItems({
+      kind: "spaceMember",
+      spaceId: "!space:example.invalid",
+      userId: "@child:example.invalid",
+      generation: 4,
+      canInvite: true,
+      invitePending: false,
+      operationPending: false
+    });
+    const permissionDenied = contextMenuItems({
+      kind: "spaceMember",
+      spaceId: "!space:example.invalid",
+      userId: "@child:example.invalid",
+      generation: 4,
+      canInvite: false,
+      invitePending: false,
+      operationPending: false
+    });
+    const pending = contextMenuItems({
+      kind: "spaceMember",
+      spaceId: "!space:example.invalid",
+      userId: "@child:example.invalid",
+      generation: 4,
+      canInvite: true,
+      invitePending: true,
+      operationPending: false
+    });
+    const operationPending = contextMenuItems({
+      kind: "spaceMember",
+      spaceId: "!space:example.invalid",
+      userId: "@child:example.invalid",
+      generation: 4,
+      canInvite: true,
+      invitePending: false,
+      operationPending: true
+    });
+
+    expect(available.map((item) => item.id)).toEqual(["inviteUserToSpace"]);
+    expect(permissionDenied).toEqual([]);
+    expect(pending).toEqual([]);
+    expect(operationPending).toEqual([]);
+  });
 });

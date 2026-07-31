@@ -181,11 +181,13 @@ describe("ContextualRightPanel people composition", () => {
   test("renders SpaceMembersPanel for a Space scope and forwards Space callbacks", () => {
     const onInviteUserToSpace = vi.fn();
     const onOpenProfile = vi.fn();
+    const onOpenContextMenu = vi.fn();
 
     renderPanel({
       peoplePanelScope: { kind: "space", spaceId: space.space_id },
       onInviteUserToSpace,
       onOpenProfile,
+      onOpenContextMenu,
       canInviteToSpace: true
     });
 
@@ -196,9 +198,20 @@ describe("ContextualRightPanel people composition", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open profile for Space member" }));
     fireEvent.click(screen.getByRole("button", { name: "Invite to Space" }));
+    fireEvent.contextMenu(screen.getByText("Child member").closest("li")!);
 
     expect(onOpenProfile).toHaveBeenCalledWith("@space-member:example.invalid");
     expect(onInviteUserToSpace).toHaveBeenCalledWith("@child-member:example.invalid");
+    expect(onOpenContextMenu).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        kind: "spaceMember",
+        spaceId: space.space_id,
+        userId: "@child-member:example.invalid",
+        generation: 1
+      },
+      expect.arrayContaining([expect.objectContaining({ id: "inviteUserToSpace" })])
+    );
   });
 
   test("keeps a Room scope on PeoplePanel and does not classify from Space state", () => {

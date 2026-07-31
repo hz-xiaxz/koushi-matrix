@@ -386,3 +386,36 @@ deferred by scope; no App, Sidebar, backend, or Rust files were changed.
   - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib core_event_wire_format_matches_checked_in_contract_artifact -- --nocapture` — 1 passed.
   - Focused Vitest suite — 6 files, 140 passed; `npm run typecheck` passed.
   - SDK/state/core/Desktop cargo checks, `cargo fmt --all -- --check`, and `git diff --check` passed.
+
+## Task 4 final App/UI integration — 2026-08-01
+
+- TDD RED: the new App/Space Members integration suite initially failed on
+  the missing shared App open/invite path, context-menu forwarding, and
+  diagnostics source; the first run reported 4 files failed, 11 tests failed,
+  and 17 passed.
+- Wired one `openSpaceMembers(trigger)` path to Sidebar and Space Info. It
+  captures the active Space and Rust-owned generation, loads exact Space room
+  settings and members, and fences settings/member results by request,
+  active Space, selected Space, and generation. Sidebar counts come directly
+  from `domain.space_members`; React does not classify members.
+- Added one fenced invite command for inline and child-only context-menu
+  actions. Context targets carry the Space/generation fence, and the exact
+  room `permissions.can_invite` fact gates both controls while Rust-owned
+  loading/invite-pending state gates pending actions. Room People composition
+  remains unchanged.
+- Added private-data-free `ui.space_members_panel` diagnostics for open
+  trigger, section counts, search/result state, invite trigger/availability,
+  and incomplete synchronization; tests assert private IDs, labels, room IDs,
+  avatar URIs, and other sample strings are absent.
+- TDD GREEN and verification:
+  - Focused App/component/domain suite — 4 files, 29 passed, including stale
+    context-target dismissal during Space navigation.
+  - Broader App/Shell/right-panel/Space Members/context/domain/backend-fake/
+    Room People suite — 9 files, 187 passed.
+  - `npm run typecheck` — passed.
+  - `npm run lint` — passed, including the IME-safe input check.
+  - `cargo fmt --all -- --check` — passed; rustfmt emitted only existing
+    stable-channel warnings for nightly-only formatting options.
+  - `git diff --check` — passed.
+
+No backend or Rust implementation changes were needed; no DMG build was run.

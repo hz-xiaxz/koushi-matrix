@@ -1,14 +1,26 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { SpaceMemberEntry, SpaceMembersState } from "../domain/types";
+import { contextMenuItems } from "../domain/contextMenus";
 import { t } from "../i18n/messages";
+import type { OpenContextMenu } from "../app/uiShared";
 import { ImeTextField } from "./ImeTextControl";
+
+export type SpaceInviteAvailabilityReason =
+  | "available"
+  | "settings_unavailable"
+  | "permission_denied"
+  | "operation_pending"
+  | "invite_pending";
 
 export interface SpaceMembersPanelProps {
   state: SpaceMembersState;
   canInvite: boolean;
   onInviteUser: (userId: string) => void;
   onOpenProfile: (userId: string) => void;
+  onOpenContextMenu?: OpenContextMenu;
+  onDiagnostic?: (message: string) => void;
+  inviteAvailabilityReason?: SpaceInviteAvailabilityReason;
 }
 
 interface SpaceMembersSection {
@@ -48,11 +60,32 @@ function inviteIsDisabled(
   return !canInvite || entry.invite_pending || inFlightInviteTarget || hasPendingOperation(state);
 }
 
+function inviteAvailabilityReasonForEntry(
+  state: SpaceMembersState,
+  entry: SpaceMemberEntry,
+  canInvite: boolean,
+  availabilityReason: SpaceInviteAvailabilityReason | undefined
+): SpaceInviteAvailabilityReason {
+  if (!canInvite) {
+    return availabilityReason ?? "permission_denied";
+  }
+  if (entry.invite_pending) {
+    return "invite_pending";
+  }
+  if (hasPendingOperation(state)) {
+    return "operation_pending";
+  }
+  return availabilityReason ?? "available";
+}
+
 export function SpaceMembersPanel({
   state,
   canInvite,
   onInviteUser,
-  onOpenProfile
+  onOpenProfile,
+  onOpenContextMenu,
+  onDiagnostic,
+  inviteAvailabilityReason
 }: SpaceMembersPanelProps) {
   const [query, setQuery] = useState("");
   const sections = useMemo<SpaceMembersSection[]>(
@@ -79,7 +112,36 @@ export function SpaceMembersPanel({
     ...section,
     entries: section.entries.filter((entry) => matchesSearch(entry, query))
   }));
+  const resultCount = filteredSections.reduce((count, section) => count + section.entries.length, 0);
   const hasResults = filteredSections.some((section) => section.entries.length > 0);
+  const panelAvailabilityReason: SpaceInviteAvailabilityReason = !canInvite
+    ? inviteAvailabilityReason ?? "permission_denied"
+    : hasPendingOperation(state)
+      ? "operation_pending"
+      : inviteAvailabilityReason ?? "available";
+
+  useEffect(() => {
+    onDiagnostic?.(
+      [
+        `rendered joined=${state.space_joined.length}`,
+        `invited=${state.space_invited.length}`,
+        `child_only=${state.child_room_only.length}`,
+        `search_active=${Boolean(query.trim())}`,
+        `result_count=${resultCount}`,
+        `availability_reason=${panelAvailabilityReason}`,
+        `incomplete_notice=${state.incomplete_child_room_count > 0}`
+      ].join(" ")
+    );
+  }, [
+    onDiagnostic,
+    panelAvailabilityReason,
+    query,
+    resultCount,
+    state.child_room_only.length,
+    state.incomplete_child_room_count,
+    state.space_invited.length,
+    state.space_joined.length
+  ]);
 
   return (
     <section className="space-members-panel" aria-labelledby="space-members-title">
@@ -124,7 +186,38 @@ export function SpaceMembersPanel({
             {section.entries.length > 0 ? (
               <ul className="space-members-list" aria-label={section.label}>
                 {section.entries.map((entry) => (
-                  <li className="space-members-row" data-user-id={entry.user_id} key={entry.user_id}>
+                  <li
+                    className="space-members-row"
+                    data-user-id={entry.user_id}
+                    key={entry.user_id}
+                    onContextMenu={(event) => {
+                      if (
+                        section.id !== "child-only" ||
+                        !onOpenContextMenu ||
+                        !state.selected_space_id
+                      ) {
+                        return;
+                      }
+                      onOpenContextMenu(
+                        event,
+                        {
+                          kind: "spaceMember",
+                          spaceId: state.selected_space_id,
+                          userId: entry.user_id,
+                          generation: state.generation
+                        },
+                        contextMenuItems({
+                          kind: "spaceMember",
+                          spaceId: state.selected_space_id,
+                          userId: entry.user_id,
+                          generation: state.generation,
+                          canInvite,
+                          invitePending: entry.invite_pending,
+                          operationPending: hasPendingOperation(state)
+                        })
+                      );
+                    }}
+                  >
                     <button
                       className="space-members-row-main"
                       type="button"
@@ -153,7 +246,17 @@ export function SpaceMembersPanel({
                         type="button"
                         aria-label={t("spaceMembers.invite")}
                         disabled={inviteIsDisabled(state, entry, canInvite)}
-                        onClick={() => onInviteUser(entry.user_id)}
+                        onClick={() => {
+                          onDiagnostic?.(
+                            `invite trigger=inline availability_reason=${inviteAvailabilityReasonForEntry(
+                              state,
+                              entry,
+                              canInvite,
+                              inviteAvailabilityReason
+                            )}`
+                          );
+                          onInviteUser(entry.user_id);
+                        }}
                       >
                         {entry.invite_pending
                           ? t("spaceMembers.invitePending")

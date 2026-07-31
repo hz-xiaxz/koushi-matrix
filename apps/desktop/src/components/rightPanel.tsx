@@ -54,10 +54,11 @@ import { SpaceInfoPanel } from "./SpaceInfoPanel";
 import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
 import { PeoplePanel, ProfilePanel } from "./PeoplePanel";
-import { SpaceMembersPanel } from "./SpaceMembersPanel";
+import { SpaceMembersPanel, type SpaceInviteAvailabilityReason } from "./SpaceMembersPanel";
 import { MessageArticle, PinnedEventsList, SearchResults } from "./mediaLists";
 import { ThreadComposer } from "./composer";
 import { UploadStagingDialog } from "./dialogs";
+import type { OpenContextMenu } from "../app/uiShared";
 
 export function ContextualRightPanel({
   activeRoom,
@@ -88,6 +89,9 @@ export function ContextualRightPanel({
   pinnedNavigation = null,
   onRetryPinnedEvent = () => undefined,
   onOpenSpaceMembers,
+  onOpenContextMenu,
+  onDiagnostic,
+  spaceInviteAvailabilityReason,
   onOpenPeople: _onOpenPeople,
   onOpenProfile,
   onBackToPeople,
@@ -201,6 +205,9 @@ export function ContextualRightPanel({
   pinnedNavigation?: PinnedEventNavigation | null;
   onRetryPinnedEvent?: (roomId: string, eventId: string, threadRootEventId: string | null) => void;
   onOpenSpaceMembers?: () => void;
+  onOpenContextMenu?: OpenContextMenu;
+  onDiagnostic?: (message: string) => void;
+  spaceInviteAvailabilityReason?: SpaceInviteAvailabilityReason;
   onOpenPeople?: () => void;
   onOpenProfile?: (userId: string) => void;
   onBackToPeople?: () => void;
@@ -513,6 +520,9 @@ export function ContextualRightPanel({
             canInvite={canInviteToSpace}
             onInviteUser={onInviteUserToSpace}
             onOpenProfile={onOpenProfile ?? (() => undefined)}
+            onOpenContextMenu={onOpenContextMenu}
+            onDiagnostic={onDiagnostic}
+            inviteAvailabilityReason={spaceInviteAvailabilityReason}
           />
         ) : (
           <PeoplePanel

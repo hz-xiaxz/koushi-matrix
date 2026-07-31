@@ -120,6 +120,32 @@ describe("SpaceMembersPanel", () => {
     expect(onInviteUser).toHaveBeenCalledWith("@carol:example.invalid");
   });
 
+  it("forwards child-only row context menus with the exact Space target fence", () => {
+    const onOpenContextMenu = vi.fn();
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onOpenContextMenu={onOpenContextMenu}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByText("Carol").closest("li")!);
+
+    expect(onOpenContextMenu).toHaveBeenCalledTimes(1);
+    expect(onOpenContextMenu.mock.calls[0]?.[1]).toEqual({
+      kind: "spaceMember",
+      spaceId: "!space:example.invalid",
+      userId: "@carol:example.invalid",
+      generation: 4
+    });
+    expect(
+      (onOpenContextMenu.mock.calls[0]?.[2] as Array<{ id: string }>).map((item) => item.id)
+    ).toEqual(["inviteUserToSpace"]);
+  });
+
   it("disables invite actions while pending or when the caller lacks permission", () => {
     const pendingState = state({
       child_room_only: [
@@ -248,5 +274,49 @@ describe("SpaceMembersPanel", () => {
     expect(
       screen.getByRole("button", { name: "Invite to Space" }).hasAttribute("disabled")
     ).toBe(true);
+  });
+
+  it("records only private-data-free UI diagnostic facts", () => {
+    const diagnostics: string[] = [];
+    render(
+      <SpaceMembersPanel
+        state={state({
+          space_joined: [
+            member("@private-user:example.invalid", "Private Person", "space_joined", {
+              avatar_url: "mxc://example.invalid/private-avatar"
+            })
+          ],
+          child_room_only: [
+            member("@private-child:example.invalid", "Private Child", "child_room_only", {
+              child_room_ids: ["!private-room:example.invalid"]
+            })
+          ],
+          incomplete_child_room_count: 1
+        })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onDiagnostic={(message) => diagnostics.push(message)}
+      />
+    );
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Private" } });
+    fireEvent.click(screen.getByRole("button", { name: "Invite to Space" }));
+
+    const joined = diagnostics.join("\n");
+    expect(joined).toContain("rendered");
+    expect(joined).toContain("search");
+    expect(joined).toContain("availability");
+    expect(joined).toContain("incomplete_notice=true");
+    for (const privateValue of [
+      "@private-user:example.invalid",
+      "@private-child:example.invalid",
+      "Private Person",
+      "Private Child",
+      "!private-room:example.invalid",
+      "mxc://example.invalid/private-avatar"
+    ]) {
+      expect(joined).not.toContain(privateValue);
+    }
   });
 });

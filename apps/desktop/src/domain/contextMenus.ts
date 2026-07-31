@@ -1,7 +1,7 @@
 import type { MessageId } from "../i18n/messages";
 import type { RoomTags } from "./types";
 
-export type ContextMenuKind = "message" | "room" | "space" | "account";
+export type ContextMenuKind = "message" | "room" | "space" | "spaceMember" | "account";
 
 export type ContextMenuActionId =
   | "replyToMessage"
@@ -27,6 +27,7 @@ export type ContextMenuActionId =
   | "selectSpace"
   | "openSpaceInfo"
   | "leaveSpace"
+  | "inviteUserToSpace"
   | "openUserSettings"
   | "openKeyboardSettings"
   | "switchAccount";
@@ -57,6 +58,15 @@ export type ContextMenuRequest =
     }
   | {
       kind: "space";
+    }
+  | {
+      kind: "spaceMember";
+      spaceId: string;
+      userId: string;
+      generation: number;
+      canInvite: boolean;
+      invitePending: boolean;
+      operationPending: boolean;
     }
   | {
       kind: "account";
@@ -142,6 +152,10 @@ export function contextMenuItems(request: ContextMenuRequest): ContextMenuItem[]
         { id: "openSpaceInfo", labelMessageId: "context.openSpaceInfo" },
         { id: "leaveSpace", labelMessageId: "context.leaveSpace", destructive: true }
       ];
+    case "spaceMember":
+      return request.canInvite && !request.invitePending && !request.operationPending
+        ? [{ id: "inviteUserToSpace", labelMessageId: "spaceMembers.invite" }]
+        : [];
     case "account":
       return [
         { id: "openUserSettings", labelMessageId: "context.openUserSettings" },

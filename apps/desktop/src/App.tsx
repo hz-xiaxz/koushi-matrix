@@ -233,8 +233,71 @@ import {
   Sidebar
 } from "./components/Shell";
 import { ContextualRightPanel } from "./components/rightPanel";
+import type { SpaceInviteAvailabilityReason } from "./components/SpaceMembersPanel";
 
 type ActivityOpenTrigger = "home_rail" | "activity_sidebar" | "initial_home" | "other";
+type SpaceMembersOpenTrigger = "sidebar" | "space_info";
+type SpaceMemberInviteTrigger = "inline" | "context";
+type SpaceMemberFence = { spaceId: string; generation: number };
+
+function exactRoomSettingsForRoom(
+  snapshot: Pick<DesktopSnapshot, "state"> | null,
+  roomId: string
+) {
+  if (!snapshot) {
+    return null;
+  }
+  const roomManagement = snapshot.state.domain.room_management;
+  return roomManagement.selected_room_id === roomId &&
+    roomManagement.settings?.room_id === roomId
+    ? roomManagement.settings
+    : null;
+}
+
+function spaceMembersFenceForSnapshot(
+  snapshot: Pick<DesktopSnapshot, "state"> | null
+): SpaceMemberFence | null {
+  const spaceId = snapshot?.state.ui.navigation.active_space_id;
+  const members = snapshot?.state.domain.space_members;
+  if (!spaceId || !members || members.selected_space_id !== spaceId) {
+    return null;
+  }
+  return { spaceId, generation: members.generation };
+}
+
+function spaceMembersSnapshotMatches(
+  snapshot: Pick<DesktopSnapshot, "state"> | null,
+  fence: SpaceMemberFence
+): boolean {
+  return (
+    snapshot?.state.ui.navigation.active_space_id === fence.spaceId &&
+    snapshot.state.domain.space_members.selected_space_id === fence.spaceId &&
+    snapshot.state.domain.space_members.generation === fence.generation
+  );
+}
+
+function spaceInviteAvailabilityReasonForSnapshot(
+  snapshot: Pick<DesktopSnapshot, "state"> | null,
+  spaceId: string
+): SpaceInviteAvailabilityReason {
+  if (
+    snapshot?.state.ui.navigation.active_space_id !== spaceId ||
+    snapshot.state.domain.space_members.selected_space_id !== spaceId
+  ) {
+    return "settings_unavailable";
+  }
+  const settings = exactRoomSettingsForRoom(snapshot, spaceId);
+  if (!settings) {
+    return "settings_unavailable";
+  }
+  if (!settings.permissions.can_invite) {
+    return "permission_denied";
+  }
+  const operation = snapshot.state.domain.space_members.operation.kind;
+  return operation === "loading" || operation === "inviting"
+    ? "operation_pending"
+    : "available";
+}
 
 const api = createDesktopApi();
 const DEFAULT_HOMESERVER = "https://matrix.org";
@@ -726,7 +789,7 @@ function qaRenderedDomDiagnostics(): QaDomDiagnostics {
   return {
     screen,
     rootChildren: root?.childElementCount ?? 0,
-    bodyTextLength: document.body.innerText.length
+    bodyTextLength: (document.body.innerText ?? document.body.textContent ?? "").length
   };
 }
 
@@ -1502,6 +1565,9 @@ export function App() {
   const recoverySecretRef = useRef<HTMLInputElement>(null);
   const roomSettingsLoadRef = useRef<string | null>(null);
   const spaceSettingsLoadRef = useRef<string | null>(null);
+  const spaceSettingsRequestRef = useRef(0);
+  const spaceMembersOpenRequestRef = useRef(0);
+  const spaceMembersInviteRequestRef = useRef(0);
   const appTimelineTransport = useMemo<TimelineTransport | null>(() => {
     if (!tauriTimelineTransport) {
       return null;
@@ -1575,6 +1641,13 @@ export function App() {
     appendDiagnosticLog({
       timestampMs: Date.now(),
       source: "panel",
+      message
+    });
+  }, [appendDiagnosticLog]);
+  const appendSpaceMembersDiagnosticLog = useCallback((message: string) => {
+    appendDiagnosticLog({
+      timestampMs: Date.now(),
+      source: "ui.space_members_panel",
       message
     });
   }, [appendDiagnosticLog]);
@@ -2386,7 +2459,18 @@ export function App() {
       return;
     }
     spaceSettingsLoadRef.current = activeSpaceId;
-    void api.loadRoomSettings(activeSpaceId).then(setSnapshot);
+    const requestId = ++spaceSettingsRequestRef.current;
+    void api.loadRoomSettings(activeSpaceId).then((nextSnapshot) => {
+      if (
+        spaceSettingsRequestRef.current !== requestId ||
+        snapshotRef.current?.state.ui.navigation.active_space_id !== activeSpaceId ||
+        nextSnapshot.state.ui.navigation.active_space_id !== activeSpaceId ||
+        !exactRoomSettingsForRoom(nextSnapshot, activeSpaceId)
+      ) {
+        return;
+      }
+      setSnapshot(nextSnapshot);
+    });
   }, [
     rightPanelMode,
     snapshot?.state.ui.navigation.active_space_id,
@@ -2903,6 +2987,9 @@ export function App() {
     const transitionStartedAt = Date.now();
     const homeSelectionKind = selection.kind;
     const currentSnapshot = snapshotRef.current;
+    setContextMenu(null);
+    spaceMembersOpenRequestRef.current += 1;
+    spaceMembersInviteRequestRef.current += 1;
     if (selection.kind === "activity") {
       const activity = currentSnapshot?.state.domain.activity;
       const previousTab =
@@ -2989,6 +3076,9 @@ export function App() {
   );
 
   async function selectSpace(spaceId: string | null) {
+    setContextMenu(null);
+    spaceMembersOpenRequestRef.current += 1;
+    spaceMembersInviteRequestRef.current += 1;
     if (spaceId === null) {
       await openHomeActivityView("home_rail");
       return;
@@ -3004,6 +3094,7 @@ export function App() {
   }
 
   async function selectRoom(roomId: string) {
+    setContextMenu(null);
     const transitionStartedAt = Date.now();
     const selectedRoom = snapshot?.state.domain.rooms.find((room) => room.room_id === roomId);
     const previousActiveRoomId = snapshot?.state.ui.navigation.active_room_id ?? null;
@@ -4663,6 +4754,9 @@ export function App() {
   }
 
   async function setRightPanelModeClosingFocusedContext(nextMode: RightPanelMode) {
+    if (nextMode !== "spaceInfo") {
+      spaceSettingsRequestRef.current += 1;
+    }
     await closeFocusedContextIfHiddenBy(nextMode);
     if (nextMode !== "profile") {
       setSelectedProfileUserId(null);
@@ -4671,6 +4765,107 @@ export function App() {
       setPeoplePanelScope(null);
     }
     setRightPanelMode(nextMode);
+  }
+
+  function spaceMemberRequestStillCurrent(
+    requestId: number,
+    fence: SpaceMemberFence
+  ): boolean {
+    return (
+      spaceMembersOpenRequestRef.current === requestId &&
+      spaceMembersSnapshotMatches(snapshotRef.current, fence)
+    );
+  }
+
+  async function openSpaceMembers(trigger: SpaceMembersOpenTrigger): Promise<void> {
+    const fence = spaceMembersFenceForSnapshot(snapshotRef.current);
+    if (!fence) {
+      return;
+    }
+    const requestId = ++spaceMembersOpenRequestRef.current;
+    spaceSettingsRequestRef.current += 1;
+    spaceSettingsLoadRef.current = null;
+    appendSpaceMembersDiagnosticLog(`open trigger=${trigger}`);
+    setPeoplePanelScope({ kind: "space", spaceId: fence.spaceId });
+    setSelectedProfileUserId(null);
+    await setRightPanelModeClosingFocusedContext("people");
+    if (!spaceMemberRequestStillCurrent(requestId, fence)) {
+      return;
+    }
+
+    try {
+      const settingsSnapshot = await api.loadRoomSettings(fence.spaceId);
+      if (
+        !spaceMemberRequestStillCurrent(requestId, fence) ||
+        !spaceMembersSnapshotMatches(settingsSnapshot, fence)
+      ) {
+        return;
+      }
+      setSnapshot(settingsSnapshot);
+
+      const membersSnapshot = await api.loadSpaceMembers(fence.spaceId, fence.generation);
+      if (
+        !spaceMemberRequestStillCurrent(requestId, fence) ||
+        !spaceMembersSnapshotMatches(membersSnapshot, fence)
+      ) {
+        return;
+      }
+      setSnapshot(membersSnapshot);
+    } catch {
+      if (spaceMemberRequestStillCurrent(requestId, fence)) {
+        appendSpaceMembersDiagnosticLog("load outcome=failed");
+      }
+    }
+  }
+
+  async function inviteUserToSpace(
+    userId: string,
+    trigger: SpaceMemberInviteTrigger,
+    expectedFence: SpaceMemberFence | null = null
+  ): Promise<void> {
+    const currentSnapshot = snapshotRef.current;
+    const fence = expectedFence ?? spaceMembersFenceForSnapshot(currentSnapshot);
+    const settings = fence ? exactRoomSettingsForRoom(currentSnapshot, fence.spaceId) : null;
+    const members = currentSnapshot?.state.domain.space_members;
+    const childOnlyEntry = members?.child_room_only.find((entry) => entry.user_id === userId);
+    const operationPending =
+      members?.operation.kind === "loading" || members?.operation.kind === "inviting";
+    const availabilityReason: SpaceInviteAvailabilityReason =
+      !fence || !spaceMembersSnapshotMatches(currentSnapshot, fence)
+        ? "settings_unavailable"
+        : !settings
+          ? "settings_unavailable"
+          : !settings.permissions.can_invite
+            ? "permission_denied"
+            : operationPending
+              ? "operation_pending"
+              : !childOnlyEntry || childOnlyEntry.invite_pending
+                ? "invite_pending"
+                : "available";
+    appendSpaceMembersDiagnosticLog(
+      `invite trigger=${trigger} availability_reason=${availabilityReason}`
+    );
+    if (
+      !fence ||
+      !spaceMembersSnapshotMatches(currentSnapshot, fence) ||
+      !settings?.permissions.can_invite ||
+      operationPending ||
+      !childOnlyEntry ||
+      childOnlyEntry.invite_pending
+    ) {
+      return;
+    }
+
+    const requestId = ++spaceMembersInviteRequestRef.current;
+    const nextSnapshot = await api.inviteUserToSpace(fence.spaceId, userId, fence.generation);
+    if (
+      spaceMembersInviteRequestRef.current !== requestId ||
+      !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
+      !spaceMembersSnapshotMatches(nextSnapshot, fence)
+    ) {
+      return;
+    }
+    setSnapshot(nextSnapshot);
   }
 
   async function closeFocusedContextPanel() {
@@ -4749,6 +4944,16 @@ export function App() {
     }
 
     const { target } = activeMenu;
+    if (target.kind === "spaceMember") {
+      if (actionId === "inviteUserToSpace") {
+        void inviteUserToSpace(
+          target.userId,
+          "context",
+          { spaceId: target.spaceId, generation: target.generation }
+        );
+      }
+      return;
+    }
     if (target.kind === "message") {
       switch (actionId) {
         case "replyToMessage":
@@ -4963,6 +5168,15 @@ export function App() {
   const activeSpace = snapshot.state.domain.spaces.find(
     (space) => space.space_id === snapshot.state.ui.navigation.active_space_id
   );
+  const activeSpacePeopleScope = peoplePanelScope?.kind === "space" ? peoplePanelScope : null;
+  const canInviteToSpace = Boolean(
+    activeSpace &&
+      activeSpacePeopleScope?.spaceId === activeSpace.space_id &&
+      exactRoomSettingsForRoom(snapshot, activeSpace.space_id)?.permissions.can_invite
+  );
+  const spaceInviteAvailabilityReason: SpaceInviteAvailabilityReason = activeSpacePeopleScope
+    ? spaceInviteAvailabilityReasonForSnapshot(snapshot, activeSpacePeopleScope.spaceId)
+    : "settings_unavailable";
   const homeContextActive = snapshot.sidebar.account_home.is_active && !activeSpace;
   const activeSpaceName = activeSpace
     ? spaceDisplayName(activeSpace.space_id, activeSpace.display_name, spaceLocalOverrides)
@@ -5137,6 +5351,13 @@ export function App() {
           }}
           onOpenSpaceInfo={() => {
             void setRightPanelModeClosingFocusedContext("spaceInfo");
+          }}
+          onOpenSpaceMembers={() => {
+            void openSpaceMembers("sidebar");
+          }}
+          spaceMemberCounts={{
+            joined: snapshot.state.domain.space_members.space_joined.length,
+            childOnly: snapshot.state.domain.space_members.child_room_only.length
           }}
           onJoinRoom={(roomId) => {
             void joinRoom(roomId);
@@ -5382,18 +5603,20 @@ export function App() {
           }}
           pinnedNavigation={pinnedNavigation}
           onRetryPinnedEvent={retryPinnedEvent}
+          onOpenContextMenu={openContextMenu}
           onOpenSpaceMembers={
             activeSpace
-              ? async () => {
-                  spaceSettingsLoadRef.current = null;
-                  const next = await api.loadRoomSettings(activeSpace.space_id);
-                  setSnapshot(next);
-                  setPeoplePanelScope({ kind: "space", spaceId: activeSpace.space_id });
-                  setSelectedProfileUserId(null);
-                  await setRightPanelModeClosingFocusedContext("people");
+              ? () => {
+                  void openSpaceMembers("space_info");
                 }
               : undefined
           }
+          onDiagnostic={appendSpaceMembersDiagnosticLog}
+          onInviteUserToSpace={(userId) => {
+            void inviteUserToSpace(userId, "inline");
+          }}
+          canInviteToSpace={canInviteToSpace}
+          spaceInviteAvailabilityReason={spaceInviteAvailabilityReason}
           onOpenPeople={async () => {
             if (activeRoom) {
               roomSettingsLoadRef.current = null;
