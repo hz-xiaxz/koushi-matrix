@@ -75,6 +75,13 @@ describe("i18n message catalog", () => {
     expect(t("workspace.people", {}, "ja")).toBe("Direct Messages");
   });
 
+  test("Space member audit labels are localized and keep the exact search wording", () => {
+    expect(t("spaceMembers.search")).toBe("Search space members");
+    expect(t("spaceMembers.sectionChildOnly")).toBe("Not in Space");
+    expect(t("spaceMembers.invite", {}, "ja")).toBe("スペースに招待");
+    expect(t("spaceMembers.search", {}, "ja")).toBe("スペースのメンバーを検索");
+  });
+
   test("explains the three-state user trust model in shipped locales", () => {
     expect(t("help.userTrust.title")).toBe("User trust model");
     expect(t("help.userTrust.unverifiedTitle")).toBe("Unverified");

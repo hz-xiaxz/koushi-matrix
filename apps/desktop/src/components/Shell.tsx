@@ -22,7 +22,8 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Settings
+  Settings,
+  Users
 } from "lucide-react";
 import { t } from "../i18n/messages";
 import type {
@@ -750,6 +751,8 @@ export function Sidebar({
   onOpenInvites,
   onOpenThreads = () => undefined,
   onOpenSpaceInfo,
+  onOpenSpaceMembers = () => undefined,
+  spaceMemberCounts,
   onJoinRoom,
   onSelectRoom
 }: {
@@ -765,6 +768,8 @@ export function Sidebar({
   onOpenInvites: () => void;
   onOpenThreads?: () => void;
   onOpenSpaceInfo: () => void;
+  onOpenSpaceMembers?: () => void;
+  spaceMemberCounts?: { joined: number; childOnly: number };
   onJoinRoom?: (roomId: string) => void;
   onSelectRoom: (roomId: string) => void;
 }) {
@@ -797,6 +802,10 @@ export function Sidebar({
     roomCategory === "dms" ? t("workspace.people") : t("workspace.rooms");
   const visibleCategoryKind = roomCategory === "dms" ? "dm" : "room";
   const visibleCategoryId = roomCategory === "dms" ? "people" : "rooms";
+  const resolvedSpaceMemberCounts = spaceMemberCounts ?? {
+    joined: snapshot.state.domain.space_members.space_joined.length,
+    childOnly: snapshot.state.domain.space_members.child_room_only.length
+  };
 
   function selectRoomCategory(category: SidebarRoomCategory) {
     setRoomCategory(category);
@@ -882,6 +891,13 @@ export function Sidebar({
               onClick={onOpenInvites}
             />
           </>
+        ) : null}
+        {!accountHomeActive ? (
+          <SpaceMembersNavButton
+            childOnlyCount={resolvedSpaceMemberCounts.childOnly}
+            joinedCount={resolvedSpaceMemberCounts.joined}
+            onClick={onOpenSpaceMembers}
+          />
         ) : null}
         <RoomListControls
           dmTotal={snapshot.sidebar.global_dms.length}
@@ -1172,6 +1188,34 @@ function NavButton({
     >
       {icon}
       <span className="nav-label">{label}</span>
+    </button>
+  );
+}
+
+function SpaceMembersNavButton({
+  childOnlyCount,
+  joinedCount,
+  onClick
+}: {
+  childOnlyCount: number;
+  joinedCount: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="nav-item space-members-nav"
+      type="button"
+      aria-label={t("spaceMembers.navAccessible", {
+        joined: joinedCount,
+        childOnly: childOnlyCount
+      })}
+      onClick={onClick}
+    >
+      <Users size={ICON_SIZE.control} aria-hidden="true" />
+      <span className="nav-label">{t("spaceMembers.navLabel")}</span>
+      <span className={`space-members-nav-count ${childOnlyCount > 0 ? "has-warning" : ""}`}>
+        {t("spaceMembers.navCount", { joined: joinedCount, childOnly: childOnlyCount })}
+      </span>
     </button>
   );
 }

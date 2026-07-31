@@ -561,6 +561,62 @@ describe("WorkspaceRail", () => {
   });
 });
 
+describe("Space Members navigation", () => {
+  it("shows joined and child-only counts for an active Space and opens on click", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const onOpenSpaceMembers = vi.fn();
+
+    render(
+      <Sidebar
+        activeRoomId={snapshot.state.ui.navigation.active_room_id}
+        activeView="timeline"
+        snapshot={snapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onOpenSpaceMembers={onOpenSpaceMembers}
+        spaceMemberCounts={{ joined: 26, childOnly: 3 }}
+        onSelectRoom={() => undefined}
+      />
+    );
+
+    const members = screen.getByRole("button", { name: /Members/ });
+    expect(members.textContent).toContain("26 · +3");
+    fireEvent.click(members);
+    expect(onOpenSpaceMembers).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show the Space-only Members entry on account Home", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.selectSpace(null);
+
+    render(
+      <Sidebar
+        activeRoomId={snapshot.state.ui.navigation.active_room_id}
+        activeView="timeline"
+        snapshot={snapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onOpenSpaceMembers={() => undefined}
+        spaceMemberCounts={{ joined: 26, childOnly: 3 }}
+        onSelectRoom={() => undefined}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /Members/ })).toBeNull();
+  });
+});
+
 describe("TopBar search placeholder", () => {
   function placeholderFor(
     searchScope: "allRooms" | "currentSpace" | "currentRoom",

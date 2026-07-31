@@ -257,7 +257,34 @@ Final verification for this milestone:
   - `npx vitest run src/backend/client.test.ts src/backend/browserFakeApi.test.ts`
     — 2 files, 89 passed.
   - `npm run typecheck` — passed.
+- `git diff --check` — passed.
+
+## Task 4 first coherent UI slice — 2026-08-01
+
+- Added a standalone `SpaceMembersPanel` that presents the Rust-owned JOIN,
+  INVITE, and child-room-only sections in that order. Search covers display
+  label, original display label, display name, and user ID; child-room-only
+  rows show their contributing room IDs and expose the inline invite callback.
+- Invite buttons are disabled from the state-owned per-entry pending flag or
+  the caller's permission prop. The panel also announces incomplete child-room
+  synchronization and keeps section/classification decisions outside React.
+- Added a Space-only Sidebar Members entry before DMs/Rooms. It is hidden on
+  account Home and displays the joined count plus the `+N` child-room-only
+  warning count. Counts and the open callback are supplied through Sidebar
+  props, with the existing snapshot as the compatibility default.
+- Added English/Japanese labels and focused component/i18n coverage. Room
+  People remains untouched.
+- Verification:
+  - `npx vitest run src/components/SpaceMembersPanel.test.tsx
+    src/components/Shell.test.tsx src/i18n/messages.test.ts` — 3 files, 57
+    passed.
+  - `npx vitest run src/components/PeoplePanel.test.tsx` — 27 passed.
+  - `npm run typecheck` — passed.
+  - `npm run lint` — passed, including the IME-safe input check.
   - `git diff --check` — passed.
+
+This bounded slice intentionally leaves App/right-panel wiring, diagnostics,
+and global context-menu plumbing for the follow-up UI integration task.
 
 ## Decisions and invariants
 
