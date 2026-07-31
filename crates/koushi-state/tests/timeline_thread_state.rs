@@ -2,7 +2,7 @@ use koushi_state::{
     AppAction, AppEffect, AppState, ComposerMode, ComposerState, ComposerSubmissionTarget,
     ComposerSubmissionTerminalOutcome, NavigationState, PendingComposerSendKind, RoomSummary,
     RoomTags, SessionInfo, SessionState, SubmissionId, ThreadAttentionState, ThreadListOrder,
-    ThreadPaneState, ThreadsListItem, TimelinePaneState, UiEvent, reduce,
+    ThreadOpenIntent, ThreadPaneState, ThreadsListItem, TimelinePaneState, UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -1231,6 +1231,7 @@ fn opening_thread_requests_thread_timeline_and_subscription_success_opens_pane()
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
     );
 
@@ -1239,6 +1240,7 @@ fn opening_thread_requests_thread_timeline_and_subscription_success_opens_pane()
         ThreadPaneState::Opening {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         }
     );
     assert_eq!(
@@ -1265,6 +1267,7 @@ fn opening_thread_requests_thread_timeline_and_subscription_success_opens_pane()
         ThreadPaneState::Open {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
             is_subscribed: true,
             composer: ComposerState::default(),
             staged_uploads: Vec::new(),
@@ -1274,6 +1277,116 @@ fn opening_thread_requests_thread_timeline_and_subscription_success_opens_pane()
         effects,
         vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
     );
+}
+
+#[test]
+fn new_thread_draft_intent_is_retained_and_promoted_by_matching_submission() {
+    let mut state = selected_room_state("room-a");
+    reduce(
+        &mut state,
+        AppAction::OpenThread {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::NewThreadDraft,
+        },
+    );
+    assert_eq!(
+        state.thread,
+        ThreadPaneState::Open {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::NewThreadDraft,
+            is_subscribed: false,
+            composer: ComposerState::default(),
+            staged_uploads: Vec::new(),
+        }
+    );
+
+    reduce(
+        &mut state,
+        AppAction::ThreadSubscribed {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+        },
+    );
+    assert_eq!(
+        state.thread,
+        ThreadPaneState::Open {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::NewThreadDraft,
+            is_subscribed: true,
+            composer: ComposerState::default(),
+            staged_uploads: Vec::new(),
+        }
+    );
+
+    let effects = reduce(
+        &mut state,
+        AppAction::ThreadSubmissionAccepted {
+            submission_id: SubmissionId::new("first-thread-reply"),
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            transaction_id: "txn-first-thread-reply".to_owned(),
+            body: "first reply".to_owned(),
+        },
+    );
+
+    assert_eq!(
+        thread_intent(&state),
+        Some(ThreadOpenIntent::ExistingThread)
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
+    );
+}
+
+#[test]
+fn matching_event_backed_activity_promotes_only_the_current_draft() {
+    let mut state =
+        open_thread_state_with_intent("room-a", "$root", ThreadOpenIntent::NewThreadDraft);
+    let previous = state.clone();
+
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::ThreadActivityObserved {
+                room_id: "room-a".to_owned(),
+                root_event_id: "$other-root".to_owned(),
+            },
+        )
+        .is_empty()
+    );
+    assert_eq!(state, previous);
+
+    assert_eq!(
+        reduce(
+            &mut state,
+            AppAction::ThreadActivityObserved {
+                room_id: "room-a".to_owned(),
+                root_event_id: "$root".to_owned(),
+            },
+        ),
+        vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
+    );
+    assert_eq!(
+        thread_intent(&state),
+        Some(ThreadOpenIntent::ExistingThread)
+    );
+
+    let promoted = state.clone();
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::ThreadActivityObserved {
+                room_id: "room-a".to_owned(),
+                root_event_id: "$root".to_owned(),
+            },
+        )
+        .is_empty()
+    );
+    assert_eq!(state, promoted);
 }
 
 #[test]
@@ -1334,12 +1447,21 @@ fn thread_attention_updates_matching_open_thread_only() {
 }
 
 fn open_thread_state(room_id: &str, root_event_id: &str) -> AppState {
+    open_thread_state_with_intent(room_id, root_event_id, ThreadOpenIntent::ExistingThread)
+}
+
+fn open_thread_state_with_intent(
+    room_id: &str,
+    root_event_id: &str,
+    intent: ThreadOpenIntent,
+) -> AppState {
     let mut state = selected_room_state(room_id);
     reduce(
         &mut state,
         AppAction::OpenThread {
             room_id: room_id.to_owned(),
             root_event_id: root_event_id.to_owned(),
+            intent,
         },
     );
     reduce(
@@ -1350,6 +1472,15 @@ fn open_thread_state(room_id: &str, root_event_id: &str) -> AppState {
         },
     );
     state
+}
+
+fn thread_intent(state: &AppState) -> Option<ThreadOpenIntent> {
+    match &state.thread {
+        ThreadPaneState::Opening { intent, .. } | ThreadPaneState::Open { intent, .. } => {
+            Some(*intent)
+        }
+        ThreadPaneState::Closed => None,
+    }
 }
 
 fn open_thread_composer(state: &AppState) -> &ComposerState {
@@ -1419,6 +1550,7 @@ fn thread_composer_draft_is_restored_when_thread_reopens() {
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
     );
     reduce(
@@ -1458,6 +1590,7 @@ fn thread_composer_draft_store_is_cleared_on_reply_and_room_removal() {
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
     );
     reduce(
@@ -1696,6 +1829,7 @@ fn thread_reply_submit_is_ignored_unless_ready_matching_open_and_idle() {
         thread: ThreadPaneState::Open {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
             is_subscribed: true,
             composer: ComposerState::default(),
             staged_uploads: Vec::new(),
@@ -1907,6 +2041,7 @@ fn open_thread_only_affects_active_timeline_room() {
         AppAction::OpenThread {
             room_id: "room-b".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
     );
 
@@ -1922,6 +2057,7 @@ fn thread_subscription_success_must_match_current_opening_thread() {
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
     );
 
@@ -1957,6 +2093,7 @@ fn thread_subscription_failure_exits_matching_opening_thread() {
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
     );
 
@@ -1994,6 +2131,7 @@ fn stale_thread_subscription_failure_is_ignored() {
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
     );
     let opening_state = state.clone();
@@ -2024,6 +2162,7 @@ fn close_thread_only_notifies_when_thread_was_active() {
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
     );
 
@@ -2071,6 +2210,7 @@ fn timeline_and_thread_actions_are_ignored_without_ready_session() {
         thread: ThreadPaneState::Opening {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
         ..AppState::default()
     };
@@ -2104,6 +2244,7 @@ fn timeline_and_thread_actions_are_ignored_without_ready_session() {
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$other".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
         },
         AppAction::ThreadSubscribed {
             room_id: "room-a".to_owned(),

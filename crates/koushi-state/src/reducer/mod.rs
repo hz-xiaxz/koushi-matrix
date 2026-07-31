@@ -1258,7 +1258,8 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::OpenThread {
             room_id,
             root_event_id,
-        } => thread::handle_open_thread(state, room_id, root_event_id),
+            intent,
+        } => thread::handle_open_thread(state, room_id, root_event_id, intent),
         AppAction::ThreadSubscribed {
             room_id,
             root_event_id,
@@ -1268,6 +1269,10 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             root_event_id,
             message,
         } => thread::handle_thread_subscription_failed(state, room_id, root_event_id, message),
+        AppAction::ThreadActivityObserved {
+            room_id,
+            root_event_id,
+        } => thread::handle_thread_activity_observed(state, room_id, root_event_id),
         AppAction::ThreadAttentionUpdated {
             room_id,
             root_event_id,

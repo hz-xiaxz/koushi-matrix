@@ -760,7 +760,7 @@ export function TimelinePane({
   onMentionQueryChange?: (roomId: string, query: string | null) => void;
   onEditMessage: (message: { body: string | null; room_id: string; event_id: string }) => void;
   onOpenContextMenu: OpenContextMenu;
-  onOpenThread: (roomId: string, rootEventId: string) => void;
+  onOpenThread: TimelineRowActionHandlers["onOpenThread"];
   onRedactMessage: (roomId: string, eventId: string) => void;
   onReply: TimelineRowActionHandlers["onReply"];
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];

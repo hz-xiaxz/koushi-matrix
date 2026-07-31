@@ -21,6 +21,7 @@ export type TimelineBackfillDemand =
 
 export type TimelineBackfillBlocker =
   | "not_initialized"
+  | "semantic_ineligible"
   | "awaiting_resync"
   | "suppressed_ui"
   | "projection_unsettled"
@@ -45,6 +46,7 @@ export interface TimelineBackfillSnapshot {
   initialized: boolean;
   awaitingResync: boolean;
   suppressPaginationUi: boolean;
+  automaticBackfillEligible: boolean;
   autoLoadEnabled: boolean;
   paginationState: PaginationState;
   requestInFlight: boolean;
@@ -88,6 +90,7 @@ function blockerForSnapshot(
   snapshot: TimelineBackfillSnapshot
 ): TimelineBackfillBlocker | null {
   if (!snapshot.initialized) return "not_initialized";
+  if (!snapshot.automaticBackfillEligible) return "semantic_ineligible";
   if (snapshot.awaitingResync) return "awaiting_resync";
   if (snapshot.suppressPaginationUi) return "suppressed_ui";
   if (!snapshot.projectionSettled) return "projection_unsettled";

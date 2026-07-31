@@ -117,7 +117,9 @@ use matrix_sdk_ui::timeline::{
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-use crate::account_work::{AccountWorkKind, AccountWorkScheduler, InteractiveWorkGuard};
+use crate::account_work::{
+    AccountWorkKind, AccountWorkPermit, AccountWorkScheduler, InteractiveWorkGuard,
+};
 #[cfg(test)]
 use crate::causal_projection::{CAUSAL_PROJECTION_DOMAIN_BIT, CAUSAL_PROJECTION_SERIAL_MAX};
 use crate::causal_projection::{
@@ -1819,6 +1821,34 @@ fn emit_timeline_events_for_generation(
     };
     emit_timeline_events_with_lease(event_tx, &lease, events);
     true
+}
+
+async fn acquire_pagination_permit_and_emit_paginating(
+    request_id: RequestId,
+    key: TimelineKey,
+    event_tx: broadcast::Sender<CoreEvent>,
+    timeline_actor_generations: Arc<TimelineActorGenerationGate>,
+    actor_generation: u64,
+    account_work: AccountWorkScheduler,
+    direction: PaginationDirection,
+) -> Option<AccountWorkPermit> {
+    let permit = account_work
+        .acquire(AccountWorkKind::ExplicitPagination)
+        .await;
+    emit_timeline_events_for_generation(
+        &event_tx,
+        &timeline_actor_generations,
+        &key,
+        actor_generation,
+        vec![TimelineEvent::PaginationStateChanged {
+            request_id: Some(request_id),
+            key: key.clone(),
+            direction,
+            state: PaginationState::Paginating,
+            prepend_expected: None,
+        }],
+    )
+    .then_some(permit)
 }
 
 /// Emits an already-authorized group atomically with respect to generation
@@ -6088,6 +6118,45 @@ fn matching_thread_reply_event_id<'a>(
         return None;
     }
     Some(event_id)
+}
+
+fn thread_activity_observed_action(key: &TimelineKey, items: &[TimelineItem]) -> Option<AppAction> {
+    let TimelineKind::Thread {
+        room_id,
+        root_event_id,
+    } = &key.kind
+    else {
+        return None;
+    };
+    items
+        .iter()
+        .any(|item| matching_thread_reply_event_id(item, root_event_id).is_some())
+        .then(|| AppAction::ThreadActivityObserved {
+            room_id: room_id.clone(),
+            root_event_id: root_event_id.clone(),
+        })
+}
+
+fn thread_activity_observed_action_for_batch(
+    key: &TimelineKey,
+    items: &[TimelineItem],
+    provenance: &ThreadAttentionBatchProvenance,
+) -> Option<AppAction> {
+    let TimelineKind::Thread {
+        room_id,
+        root_event_id,
+    } = &key.kind
+    else {
+        return None;
+    };
+    items
+        .iter()
+        .filter_map(|item| matching_thread_reply_event_id(item, root_event_id))
+        .any(|event_id| provenance.observation_for(event_id).is_some())
+        .then(|| AppAction::ThreadActivityObserved {
+            room_id: room_id.clone(),
+            root_event_id: root_event_id.clone(),
+        })
 }
 
 fn newest_provable_receipt_event_id(
@@ -15032,6 +15101,11 @@ impl TimelineActor {
                 rows: initial_activity_rows,
             }]);
         }
+        if initial_emitted
+            && let Some(action) = thread_activity_observed_action(&key, &navigation_items)
+        {
+            let _ = action_tx.send(vec![action]).await;
+        }
         if let Some(action) =
             media_gallery_updated_action(&key, initial_media_gallery_items.clone())
         {
@@ -17300,31 +17374,29 @@ impl TimelineActor {
         direction: PaginationDirection,
         event_count: u16,
     ) -> PaginationCompletion {
-        // Emit Paginating.
-        let _ = emit_timeline_events_for_generation(
-            &event_tx,
-            &timeline_actor_generations,
-            &key,
-            actor_generation,
-            vec![TimelineEvent::PaginationStateChanged {
-                request_id: Some(request_id),
-                key: key.clone(),
-                direction,
-                state: PaginationState::Paginating,
-                prepend_expected: None,
-            }],
-        );
-
         let oldest_event_before = if direction == PaginationDirection::Backward {
             oldest_observable_event_id(&timeline).await
         } else {
             None
         };
         let gate_started = Some(std::time::Instant::now());
+        let Some(permit) = acquire_pagination_permit_and_emit_paginating(
+            request_id,
+            key.clone(),
+            event_tx,
+            timeline_actor_generations,
+            actor_generation,
+            account_work,
+            direction,
+        )
+        .await
+        else {
+            return PaginationCompletion {
+                state: PaginationState::Idle,
+                prepend_expected: None,
+            };
+        };
         let result = {
-            let _permit = account_work
-                .acquire(AccountWorkKind::ExplicitPagination)
-                .await;
             let gate_wait = gate_started.map(|t| t.elapsed());
             let gate_ms = gate_wait.map(|duration| duration.as_millis());
             trace_timeline_paginate(
@@ -17361,6 +17433,7 @@ impl TimelineActor {
             startup_trace::trace_paginate(paginate_started, gate_wait, matches!(outcome, Ok(true)));
             outcome
         };
+        drop(permit);
         let prepend_expected = if direction == PaginationDirection::Backward && result.is_ok() {
             let oldest_event_after = oldest_observable_event_id(&timeline).await;
             Some(backward_pagination_changed_oldest_edge(
@@ -19044,9 +19117,19 @@ impl TimelineActor {
             self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
             &thread_attention_provenance,
         );
+        let thread_activity_action = thread_activity_observed_action_for_batch(
+            &self.key,
+            &self.navigation_items,
+            &thread_attention_provenance,
+        );
         self.maybe_fetch_visible_reply_details();
         drop(continuation_lease);
 
+        if let Some(action) = thread_activity_action
+            && !self.emit_action_reliable(action).await
+        {
+            return;
+        }
         if let Some(action) = thread_attention_action {
             if !self.emit_action_reliable(action).await {
                 return;
@@ -25297,6 +25380,119 @@ mod tests {
             Some("current"),
             Some("older")
         ));
+    }
+
+    #[tokio::test]
+    async fn pagination_waits_for_permit_before_publishing_paginating() {
+        let scheduler = AccountWorkScheduler::default();
+        let background = scheduler.acquire(AccountWorkKind::SearchCrawl).await;
+        let key = room_key();
+        let generations = Arc::new(TimelineActorGenerationGate::default());
+        let actor_generation = generations.activate_after_quiescence(&key).await.generation;
+        let (event_tx, mut event_rx) = broadcast::channel(8);
+
+        let admission = tokio::spawn(acquire_pagination_permit_and_emit_paginating(
+            fake_rid(91),
+            key.clone(),
+            event_tx,
+            Arc::clone(&generations),
+            actor_generation,
+            scheduler,
+            PaginationDirection::Backward,
+        ));
+
+        tokio::time::timeout(Duration::from_secs(1), background.cancelled())
+            .await
+            .expect("queued pagination must ask background work to yield");
+        assert!(
+            matches!(
+                event_rx.try_recv(),
+                Err(broadcast::error::TryRecvError::Empty)
+            ),
+            "Paginating must remain unpublished while scheduler admission is pending"
+        );
+
+        drop(background);
+        let permit = tokio::time::timeout(Duration::from_secs(1), admission)
+            .await
+            .expect("pagination admission must finish after the slot is released")
+            .expect("pagination admission task must not panic")
+            .expect("the active actor generation must receive a permit");
+        let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+            .await
+            .expect("Paginating must publish after scheduler admission")
+            .expect("timeline event sender must remain open");
+        assert!(matches!(
+            event,
+            CoreEvent::Timeline(TimelineEvent::PaginationStateChanged {
+                request_id: Some(request_id),
+                key: event_key,
+                direction: PaginationDirection::Backward,
+                state: PaginationState::Paginating,
+                ..
+            }) if request_id == fake_rid(91) && event_key == key
+        ));
+        drop(permit);
+    }
+
+    #[test]
+    fn thread_activity_promotion_requires_a_matching_event_backed_reply() {
+        let key = thread_key();
+        let matching = thread_reply_item("$reply:test", "@b:test", "$root:test");
+        assert_eq!(
+            thread_activity_observed_action(&key, std::slice::from_ref(&matching)),
+            Some(AppAction::ThreadActivityObserved {
+                room_id: "!r:test".to_owned(),
+                root_event_id: "$root:test".to_owned(),
+            })
+        );
+        let live_batch = ThreadAttentionBatchProvenance::from_timeline_items(
+            std::slice::from_ref(&matching),
+            ThreadAttentionObservation::Live,
+        );
+        assert_eq!(
+            thread_activity_observed_action_for_batch(
+                &key,
+                std::slice::from_ref(&matching),
+                &live_batch,
+            ),
+            Some(AppAction::ThreadActivityObserved {
+                room_id: "!r:test".to_owned(),
+                root_event_id: "$root:test".to_owned(),
+            })
+        );
+        assert_eq!(
+            thread_activity_observed_action_for_batch(
+                &key,
+                std::slice::from_ref(&matching),
+                &ThreadAttentionBatchProvenance::default(),
+            ),
+            None
+        );
+
+        let mut local_echo = matching;
+        local_echo.id = TimelineItemId::Transaction {
+            transaction_id: "txn".to_owned(),
+        };
+        assert_eq!(thread_activity_observed_action(&key, &[local_echo]), None);
+        assert_eq!(
+            thread_activity_observed_action(
+                &key,
+                &[thread_reply_item(
+                    "$other:test",
+                    "@b:test",
+                    "$other-root:test",
+                )],
+            ),
+            None
+        );
+        assert_eq!(
+            thread_activity_observed_action(
+                &room_key(),
+                &[thread_reply_item("$reply:test", "@b:test", "$root:test",)]
+            ),
+            None
+        );
     }
 
     fn fake_rid(seq: u64) -> RequestId {
@@ -37245,14 +37441,23 @@ mod tests {
     #[test]
     fn timeline_pagination_uses_the_account_work_scheduler() {
         let source = include_str!("timeline.rs");
-        let pagination_source = source
-            .split("async fn handle_paginate")
+        let admission_source = source
+            .split("async fn acquire_pagination_permit_and_emit_paginating")
             .nth(1)
-            .and_then(|section| section.split("async fn handle_send_text").next())
-            .expect("pagination handler should exist");
-        let acquire_offset = pagination_source
-            .find("AccountWorkKind::ExplicitPagination")
-            .expect("timeline pagination must acquire the named explicit-pagination kind");
+            .and_then(|section| {
+                section
+                    .split("/// Emits an already-authorized group")
+                    .next()
+            })
+            .expect("pagination admission helper should exist");
+        let pagination_source = source
+            .split("async fn paginate_once_for")
+            .nth(1)
+            .and_then(|section| section.split("fn emit_pagination_completion").next())
+            .expect("pagination operation should exist");
+        let admission_offset = pagination_source
+            .find("acquire_pagination_permit_and_emit_paginating")
+            .expect("pagination must use the admission-and-publish boundary");
         let paginate_offset = pagination_source
             .find("paginate_backwards")
             .expect("timeline pagination must still call SDK pagination");
@@ -37262,8 +37467,12 @@ mod tests {
             "Timeline actors must carry the shared account-wide work scheduler handle"
         );
         assert!(
-            acquire_offset < paginate_offset,
-            "timeline pagination must take its scheduler permit before SDK pagination"
+            admission_source.contains("AccountWorkKind::ExplicitPagination"),
+            "pagination admission must acquire the named explicit-pagination kind"
+        );
+        assert!(
+            admission_offset < paginate_offset,
+            "timeline pagination must finish scheduler admission and publish Paginating before SDK pagination"
         );
     }
 

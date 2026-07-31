@@ -1342,6 +1342,7 @@ fn normal_room_commands_are_rejected_in_every_verification_gate_state() {
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "event-a".to_owned(),
+            intent: koushi_state::ThreadOpenIntent::ExistingThread,
         },
         AppAction::SearchSubmitted {
             request_id: 1,
@@ -1750,6 +1751,7 @@ fn account_switch_request_enters_switching_state_and_clears_views() {
         thread: ThreadPaneState::Open {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: koushi_state::ThreadOpenIntent::ExistingThread,
             is_subscribed: true,
             composer: Default::default(),
             staged_uploads: Vec::new(),
@@ -2303,6 +2305,7 @@ fn logout_clears_session_views_and_notifies_ui() {
         thread: ThreadPaneState::Open {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
+            intent: koushi_state::ThreadOpenIntent::ExistingThread,
             is_subscribed: true,
             composer: Default::default(),
             staged_uploads: Vec::new(),

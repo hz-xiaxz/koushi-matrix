@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-07-30.
+Last amended: 2026-07-31.
 
 ## Product Scope
 
@@ -33,6 +33,13 @@ with an Element Desktop/Web-like three-pane desktop UX:
   (`EnforceThread::Threaded(ReplyWithinThread::No)`), so creating a thread rich
   reply stays unreachable from the product UI. Reply and Reply in thread remain
   room-timeline actions.
+- Opening a thread carries a Rust-owned creation intent. A root with a positive
+  projected reply count and every Threads-list entry is an existing thread; a
+  room-timeline root with no known replies is a new-thread draft. Draft panes
+  subscribe for live activity and expose the composer immediately, but they are
+  ineligible for automatic backward history until an accepted local thread send
+  or matching event-backed thread activity promotes them. React renders this
+  state and must not infer thread existence from an empty viewport.
 - A browser-hosted build (Element Web-like deployment of the same core) is a
   potential future target. It is not scheduled, but the architecture must not
   preclude it; see Platform Portability.

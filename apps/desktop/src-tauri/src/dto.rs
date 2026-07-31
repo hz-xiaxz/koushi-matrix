@@ -675,10 +675,12 @@ pub enum FrontendThreadPaneState {
     Opening {
         room_id: String,
         root_event_id: String,
+        intent: koushi_state::ThreadOpenIntent,
     },
     Open {
         room_id: String,
         root_event_id: String,
+        intent: koushi_state::ThreadOpenIntent,
         is_subscribed: bool,
         composer: ComposerState,
         staged_uploads: Vec<StagedUploadItem>,
@@ -692,19 +694,23 @@ impl From<ThreadPaneState> for FrontendThreadPaneState {
             ThreadPaneState::Opening {
                 room_id,
                 root_event_id,
+                intent,
             } => Self::Opening {
                 room_id,
                 root_event_id,
+                intent,
             },
             ThreadPaneState::Open {
                 room_id,
                 root_event_id,
+                intent,
                 is_subscribed,
                 composer,
                 staged_uploads,
             } => Self::Open {
                 room_id,
                 root_event_id,
+                intent,
                 is_subscribed,
                 composer,
                 staged_uploads,
@@ -1687,6 +1693,7 @@ mod tests {
         state.thread = ThreadPaneState::Open {
             room_id: "!room:example.invalid".to_owned(),
             root_event_id: "$root:example.invalid".to_owned(),
+            intent: koushi_state::ThreadOpenIntent::ExistingThread,
             is_subscribed: true,
             composer: ComposerState {
                 draft_revision: ComposerDraftRevision::MAX,
@@ -2058,6 +2065,7 @@ mod tests {
         state.thread = koushi_state::ThreadPaneState::Open {
             room_id: "!room:example.invalid".to_owned(),
             root_event_id: "$thread-root:example.invalid".to_owned(),
+            intent: koushi_state::ThreadOpenIntent::NewThreadDraft,
             is_subscribed: true,
             composer: koushi_state::ComposerState {
                 draft_revision: koushi_state::ComposerDraftRevision::MAX,

@@ -951,8 +951,10 @@ function makeSnapshot(): DesktopSnapshot {
           kind: "open",
           room_id: "!room-alpha:example.invalid",
           root_event_id: "$thread-root:example.invalid",
+          intent: "existingThread",
           is_subscribed: true,
-          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", mode: "Plain" }
+          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", mode: "Plain" },
+          staged_uploads: []
         },
         focused_context: { kind: "closed" },
         files_view: { kind: "closed" },

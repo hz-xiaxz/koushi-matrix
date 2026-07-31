@@ -719,7 +719,11 @@ describe("TimelineView", () => {
     expect(onReply).toHaveBeenCalledWith("!room:example.invalid", "$reply-inline");
     expect(onOpenThread).not.toHaveBeenCalled();
     fireEvent.click(replyInThreadButton);
-    expect(onOpenThread).toHaveBeenCalledWith("!room:example.invalid", "$reply-inline");
+    expect(onOpenThread).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$reply-inline",
+      "newThreadDraft"
+    );
     expect(onReply).toHaveBeenCalledTimes(1);
 
     fireEvent.click(within(row!).getByRole("button", { name: "Message actions" }));
@@ -7253,20 +7257,32 @@ describe("TimelineView", () => {
         timelineKey={threadKey}
         roomId="!room:example.invalid"
         transport={transport}
+        autoLoadOlderMessages
         onReply={vi.fn()}
       />
     );
+    const timeline = screen.getByTestId("timeline-view");
+    Object.defineProperty(timeline, "clientHeight", {
+      value: 600,
+      configurable: true
+    });
+    Object.defineProperty(timeline, "scrollHeight", {
+      value: 0,
+      configurable: true
+    });
 
-    emit({
-      kind: "Timeline",
-      event: {
-        InitialItems: {
-          request_id: null,
-          key: threadKey,
-          generation: 0,
-          items: []
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: threadKey,
+            generation: 0,
+            items: []
+          }
         }
-      }
+      });
     });
 
     await waitFor(() => {
@@ -7332,7 +7348,7 @@ describe("TimelineView", () => {
     expect(document.querySelector("新しい部屋")).toBeNull();
   });
 
-  it("paginates an empty thread timeline once after initial items arrive", async () => {
+  it("keeps a new-thread draft out of backfill and hides stale pagination state", async () => {
     const threadKey = threadTimelineKey(
       "@alice:example.invalid",
       "!room:example.invalid",
@@ -7353,6 +7369,8 @@ describe("TimelineView", () => {
         timelineKey={threadKey}
         roomId="!room:example.invalid"
         transport={transport}
+        autoLoadOlderMessages
+        automaticBackfillEligible={false}
         onReply={vi.fn()}
       />
     );
@@ -7371,10 +7389,55 @@ describe("TimelineView", () => {
       }
     });
 
-    await waitFor(() => {
-      expect(paginateBackwards).toHaveBeenCalledWith(threadKey);
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          PaginationStateChanged: {
+            request_id: null,
+            key: threadKey,
+            direction: "Backward",
+            state: "Paginating"
+          }
+        }
+      });
+      emit({
+        kind: "Timeline",
+        event: {
+          PaginationStateChanged: {
+            request_id: null,
+            key: threadKey,
+            direction: "Backward",
+            state: "Idle"
+          }
+        }
+      });
+      emit({
+        kind: "Timeline",
+        event: {
+          GapPositionsUpdated: {
+            key: threadKey,
+            actor_generation: 1,
+            generation: 2,
+            positions: []
+          }
+        }
+      });
+      emit({
+        kind: "Timeline",
+        event: {
+          GapRepairReleased: {
+            key: threadKey,
+            actor_generation: 1,
+            generation: 3
+          }
+        }
+      });
     });
-    expect(paginateBackwards).toHaveBeenCalledTimes(1);
+
+    await act(async () => Promise.resolve());
+    expect(paginateBackwards).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("timeline-spinner")).toBeNull();
   });
 
   it("keeps an old-root placeholder at latest activity and replaces it without canonical pagination", async () => {
@@ -7942,7 +8005,11 @@ describe("TimelineView", () => {
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: /Open thread, 1 reply/ }));
-    expect(onOpenThread).toHaveBeenCalledWith("!room:example.invalid", "$thread-root:example.invalid");
+    expect(onOpenThread).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$thread-root:example.invalid",
+      "existingThread"
+    );
     fireEvent.contextMenu(rootRow!);
     expect(onOpenContextMenu).toHaveBeenCalledWith(
       expect.anything(),
@@ -9222,7 +9289,8 @@ describe("TimelineView", () => {
     fireEvent.click(newReplies);
     expect(onOpenThread).toHaveBeenCalledWith(
       "!room:example.invalid",
-      "$thread-root:example.invalid"
+      "$thread-root:example.invalid",
+      "existingThread"
     );
   });
 

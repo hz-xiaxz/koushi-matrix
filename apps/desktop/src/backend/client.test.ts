@@ -23,6 +23,23 @@ describe("TauriDesktopApi", () => {
     expect(invoke).toHaveBeenCalledWith("get_diagnostic_snapshot");
   });
 
+  test("opens a thread with the Rust-owned creation intent", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    const api = createDesktopApi();
+    await api.openThread(
+      "!room:example.invalid",
+      "$root:example.invalid",
+      "newThreadDraft"
+    );
+
+    expect(invoke).toHaveBeenCalledWith("open_thread", {
+      roomId: "!room:example.invalid",
+      rootEventId: "$root:example.invalid",
+      intent: "newThreadDraft"
+    });
+  });
+
   test("acknowledges a rendered repair batch with every generation fence", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     const api = createDesktopApi();

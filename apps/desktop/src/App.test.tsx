@@ -1072,8 +1072,10 @@ describe("ContextualRightPanel", () => {
       kind: "open",
       room_id: snapshot.state.domain.rooms[0]?.room_id,
       root_event_id: "$root:example.invalid",
+      intent: "existingThread",
       is_subscribed: true,
-      composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", mode: "Plain" }
+      composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", mode: "Plain" },
+      staged_uploads: []
     };
     snapshot.timeline = [
       {
@@ -1159,6 +1161,7 @@ describe("ContextualRightPanel", () => {
       kind: "open",
       room_id: snapshot.state.domain.rooms[0]?.room_id,
       root_event_id: "$root:example.invalid",
+      intent: "existingThread",
       is_subscribed: true,
       composer: {
         accepted_submission_ids: [],
@@ -1167,7 +1170,8 @@ describe("ContextualRightPanel", () => {
         last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO,
         draft: "Rust-owned draft",
         mode: "Plain"
-      }
+      },
+      staged_uploads: []
     };
 
     const markup = renderToStaticMarkup(
@@ -1216,6 +1220,7 @@ describe("ContextualRightPanel", () => {
       kind: "open",
       room_id: snapshot.state.domain.rooms[0]?.room_id,
       root_event_id: "$root:example.invalid",
+      intent: "existingThread",
       is_subscribed: true,
       composer: {
         accepted_submission_ids: [],
@@ -1224,7 +1229,8 @@ describe("ContextualRightPanel", () => {
         last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO,
         draft: "Draft blocked by pending send",
         mode: "Plain"
-      }
+      },
+      staged_uploads: []
     };
 
     const markup = renderToStaticMarkup(
@@ -1612,7 +1618,9 @@ describe("desktop integration source guards", () => {
     );
     expect(openActivityRowSource).toContain("if (threadRootEventId)");
     expect(openActivityRowSource).toContain("await selectRoom(roomId)");
-    expect(openActivityRowSource).toContain("await openThread(roomId, threadRootEventId)");
+    expect(openActivityRowSource).toContain(
+      'await openThread(roomId, threadRootEventId, "existingThread")'
+    );
     expect(openActivityRowSource).toContain(".openActivityEvent(roomId, eventId)");
     expect(openActivityRowSource).not.toContain(".selectSearchResult(roomId, eventId)");
     expect(openActivityRowSource).toContain('setRightPanelMode("closed")');

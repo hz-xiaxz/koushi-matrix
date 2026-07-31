@@ -3,7 +3,7 @@ use crate::{
     effect::{AppEffect, UiEvent},
     state::{
         AppError, AppState, FocusedContextState, PendingComposerSendKind, ThreadAttentionState,
-        ThreadPaneState, ThreadsListState, sort_threads_list_items,
+        ThreadOpenIntent, ThreadPaneState, ThreadsListState, sort_threads_list_items,
     },
 };
 
@@ -54,6 +54,7 @@ pub(crate) fn handle_thread_submission_accepted(
     let ThreadPaneState::Open {
         room_id: open_room_id,
         root_event_id: open_root_event_id,
+        intent,
         composer,
         ..
     } = &mut state.thread
@@ -77,6 +78,7 @@ pub(crate) fn handle_thread_submission_accepted(
     composer.draft = accepted_composer.draft;
     composer.draft_revision = accepted_revision;
     composer.last_accepted_clear_revision = accepted_composer.last_accepted_clear_revision;
+    *intent = ThreadOpenIntent::ExistingThread;
     vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
 }
 
@@ -242,15 +244,34 @@ pub(crate) fn handle_open_thread(
     state: &mut AppState,
     room_id: String,
     root_event_id: String,
+    intent: ThreadOpenIntent,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) || state.timeline.room_id.as_deref() != Some(room_id.as_str()) {
         return Vec::new();
     }
 
     state.upload_staging.clear_thread_targets_for_room(&room_id);
-    state.thread = ThreadPaneState::Opening {
-        room_id: room_id.clone(),
-        root_event_id: root_event_id.clone(),
+    state.thread = match intent {
+        ThreadOpenIntent::ExistingThread => ThreadPaneState::Opening {
+            room_id: room_id.clone(),
+            root_event_id: root_event_id.clone(),
+            intent,
+        },
+        ThreadOpenIntent::NewThreadDraft => ThreadPaneState::Open {
+            composer: state
+                .composer_drafts
+                .composer_for_thread(&room_id, &root_event_id),
+            staged_uploads: state
+                .upload_staging
+                .items_for_target(&crate::ComposerTarget::Thread {
+                    room_id: room_id.clone(),
+                    root_event_id: root_event_id.clone(),
+                }),
+            room_id: room_id.clone(),
+            root_event_id: root_event_id.clone(),
+            intent,
+            is_subscribed: false,
+        },
     };
     state.thread_attention = ThreadAttentionState::Tracking {
         room_id: room_id.clone(),
@@ -273,17 +294,34 @@ pub(crate) fn handle_thread_subscribed(
     room_id: String,
     root_event_id: String,
 ) -> Vec<AppEffect> {
-    if !is_session_ready(state)
-        || !matches!(
-            &state.thread,
-            ThreadPaneState::Opening {
-                room_id: opening_room_id,
-                root_event_id: opening_root_event_id,
-            } if opening_room_id == &room_id && opening_root_event_id == &root_event_id
-        )
-    {
+    if !is_session_ready(state) {
         return Vec::new();
     }
+    if let ThreadPaneState::Open {
+        room_id: open_room_id,
+        root_event_id: open_root_event_id,
+        is_subscribed,
+        ..
+    } = &mut state.thread
+    {
+        if open_room_id != &room_id || open_root_event_id != &root_event_id || *is_subscribed {
+            return Vec::new();
+        }
+        *is_subscribed = true;
+        return vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)];
+    }
+    let ThreadPaneState::Opening {
+        room_id: opening_room_id,
+        root_event_id: opening_root_event_id,
+        intent,
+    } = &state.thread
+    else {
+        return Vec::new();
+    };
+    if opening_room_id != &room_id || opening_root_event_id != &root_event_id {
+        return Vec::new();
+    }
+    let intent = *intent;
 
     let staged_uploads = state
         .upload_staging
@@ -297,10 +335,53 @@ pub(crate) fn handle_thread_subscribed(
             .composer_for_thread(&room_id, &root_event_id),
         room_id,
         root_event_id,
+        intent,
         is_subscribed: true,
         staged_uploads,
     };
     vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
+}
+
+pub(crate) fn handle_thread_activity_observed(
+    state: &mut AppState,
+    room_id: String,
+    root_event_id: String,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state)
+        || !promote_matching_thread_intent(&mut state.thread, &room_id, &root_event_id)
+    {
+        return Vec::new();
+    }
+    vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
+}
+
+fn promote_matching_thread_intent(
+    thread: &mut ThreadPaneState,
+    room_id: &str,
+    root_event_id: &str,
+) -> bool {
+    let (open_room_id, open_root_event_id, intent) = match thread {
+        ThreadPaneState::Opening {
+            room_id,
+            root_event_id,
+            intent,
+        }
+        | ThreadPaneState::Open {
+            room_id,
+            root_event_id,
+            intent,
+            ..
+        } => (room_id, root_event_id, intent),
+        ThreadPaneState::Closed => return false,
+    };
+    if open_room_id != room_id
+        || open_root_event_id != root_event_id
+        || *intent == ThreadOpenIntent::ExistingThread
+    {
+        return false;
+    }
+    *intent = ThreadOpenIntent::ExistingThread;
+    true
 }
 
 pub(crate) fn handle_thread_subscription_failed(
@@ -309,15 +390,24 @@ pub(crate) fn handle_thread_subscription_failed(
     root_event_id: String,
     _message: String,
 ) -> Vec<AppEffect> {
-    if !is_session_ready(state)
-        || !matches!(
-            &state.thread,
-            ThreadPaneState::Opening {
-                room_id: opening_room_id,
-                root_event_id: opening_root_event_id,
-            } if opening_room_id == &room_id && opening_root_event_id == &root_event_id
-        )
-    {
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
+    let matches_pending_subscription = match &state.thread {
+        ThreadPaneState::Opening {
+            room_id: opening_room_id,
+            root_event_id: opening_root_event_id,
+            ..
+        } => opening_room_id == &room_id && opening_root_event_id == &root_event_id,
+        ThreadPaneState::Open {
+            room_id: open_room_id,
+            root_event_id: open_root_event_id,
+            is_subscribed,
+            ..
+        } => open_room_id == &room_id && open_root_event_id == &root_event_id && !*is_subscribed,
+        ThreadPaneState::Closed => false,
+    };
+    if !matches_pending_subscription {
         return Vec::new();
     }
 

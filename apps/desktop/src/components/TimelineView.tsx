@@ -177,6 +177,7 @@ import type {
   TimelineScrollAnchor,
   TimelineMediaDownloadState,
   TimelineContinuityState,
+  ThreadOpenIntent,
   TimelineThreadRootOrder,
   UserProfile
 } from "../domain/types";
@@ -294,7 +295,11 @@ export type TimelineThreadAttention = {
  */
 export interface TimelineRowActionHandlers {
   onReply: (roomId: string, eventId: string) => void;
-  onOpenThread: (roomId: string, rootEventId: string) => void;
+  onOpenThread: (
+    roomId: string,
+    rootEventId: string,
+    intent: ThreadOpenIntent
+  ) => void;
   onSendReaction: (roomId: string, eventId: string, reactionKey: string) => void;
   onRedactReaction: (
     roomId: string,
@@ -2334,6 +2339,7 @@ export const TimelineView = memo(function TimelineView({
   currentUserId,
   ignoredUserIds = [],
   suppressPaginationUi = false,
+  automaticBackfillEligible = true,
   isAnchored = false,
   onReturnToLive,
   autoLoadOlderMessages = false,
@@ -2370,13 +2376,20 @@ export const TimelineView = memo(function TimelineView({
     event: MouseEvent<HTMLElement>,
     target: {
       kind: "message";
-      message: { sender: string; room_id: string; event_id: string; body: string };
+      message: {
+        sender: string;
+        room_id: string;
+        event_id: string;
+        body: string;
+        reply_count: number;
+      };
     },
     items: ContextMenuItem[]
   ) => void;
   currentUserId?: string;
   ignoredUserIds?: string[];
   suppressPaginationUi?: boolean;
+  automaticBackfillEligible?: boolean;
   // #161: main pane is anchored to a jump-to-date event; the live-edge control
   // returns to the live timeline instead of scrolling within the focused window.
   isAnchored?: boolean;
@@ -2587,7 +2600,6 @@ export const TimelineView = memo(function TimelineView({
   const requestedAvatarMxcsRef = useRef<Set<string>>(new Set());
   const avatarRetryCountsRef = useRef<Map<string, number>>(new Map());
   const initialItemsSeenForTimelineKeyRef = useRef<string | null>(null);
-  const emptyThreadBackfillRequestedRef = useRef(false);
   const lastDiagnosticsEmissionRef = useRef<{
     callback: (diagnostics: TimelineDiagnostics) => void;
     signature: string;
@@ -3466,7 +3478,6 @@ export const TimelineView = memo(function TimelineView({
     requestedAvatarMxcsRef.current = new Set();
     avatarRetryCountsRef.current = new Map();
     initialItemsSeenForTimelineKeyRef.current = null;
-    emptyThreadBackfillRequestedRef.current = false;
     lastDiagnosticsEmissionRef.current = null;
     initialLiveEdgeScrollAppliedRef.current = null;
     stickToBottomAfterMeasurementRef.current = false;
@@ -3976,7 +3987,8 @@ export const TimelineView = memo(function TimelineView({
     return [item.id.Transaction.transaction_id];
   });
   const backwardState = getPaginationState(store, timelineKey, "Backward");
-  const isPaginating = backwardState === "Paginating";
+  const isPaginating =
+    automaticBackfillEligible && backwardState === "Paginating";
   const endReached =
     backwardState === "EndReached" &&
     continuity.kind === "healthy" &&
@@ -4944,6 +4956,7 @@ export const TimelineView = memo(function TimelineView({
         initialized: timelineKeyState !== undefined,
         awaitingResync: timelineKeyState?.awaitingResync ?? false,
         suppressPaginationUi,
+        automaticBackfillEligible,
         autoLoadEnabled: autoLoadOlderMessages && clientHeight > 0,
         paginationState: backwardState,
         requestInFlight: backfillRequestEpochRef.current !== null,
@@ -4999,6 +5012,7 @@ export const TimelineView = memo(function TimelineView({
     },
     [
       autoLoadOlderMessages,
+      automaticBackfillEligible,
       backwardState,
       emitDiagnosticLog,
       items.length,
@@ -5159,45 +5173,6 @@ export const TimelineView = memo(function TimelineView({
     },
     [markUserScrollInput]
   );
-  useEffect(() => {
-    if (!("Thread" in timelineKey.kind)) {
-      return;
-    }
-    if (
-      !timelineInitialized ||
-      items.length > 0 ||
-      suppressPaginationUi ||
-      isPaginating ||
-      endReached ||
-      emptyThreadBackfillRequestedRef.current ||
-      backfillRequestEpochRef.current !== null
-    ) {
-      return;
-    }
-    emptyThreadBackfillRequestedRef.current = true;
-    const container = containerRef.current;
-    requestTimelineBackfill("underfilled", "initial_projection", {
-      scrollTop: Math.round(container?.scrollTop ?? 0),
-      scrollHeight: Math.round(container?.scrollHeight ?? 0),
-      clientHeight: Math.round(container?.clientHeight ?? 0),
-      projectedContentHeight: Math.round(timelineHeightModel.totalHeight),
-      threshold: 0,
-      maxScrollTop: Math.max(
-        0,
-        Math.round((container?.scrollHeight ?? 0) - (container?.clientHeight ?? 0))
-      )
-    });
-  }, [
-    endReached,
-    isPaginating,
-    items.length,
-    requestTimelineBackfill,
-    suppressPaginationUi,
-    timelineKey.kind,
-    timelineKeyHash,
-    timelineInitialized,
-    timelineHeightModel.totalHeight
-  ]);
   const jumpToEvent = useCallback(
     (eventId: string) => {
       releaseViewportIntent();
@@ -5768,7 +5743,13 @@ export function TimelineItemRow({
     event: MouseEvent<HTMLElement>,
     target: {
       kind: "message";
-      message: { sender: string; room_id: string; event_id: string; body: string };
+      message: {
+        sender: string;
+        room_id: string;
+        event_id: string;
+        body: string;
+        reply_count: number;
+      };
     },
     items: ContextMenuItem[]
   ) => void;
@@ -6069,8 +6050,12 @@ export function TimelineItemRow({
     if (!eventId) {
       return;
     }
-    onOpenThread(roomId, eventId);
-  }, [eventId, onOpenThread, roomId]);
+    const intent: ThreadOpenIntent =
+      (item.thread_summary?.reply_count ?? 0) > 0
+        ? "existingThread"
+        : "newThreadDraft";
+    onOpenThread(roomId, eventId, intent);
+  }, [eventId, item.thread_summary?.reply_count, onOpenThread, roomId]);
   const submitRedaction = useCallback(() => {
     if (!eventId) {
       return;
@@ -6353,7 +6338,13 @@ export function TimelineItemRow({
     event.stopPropagation();
     onOpenContextMenu(event, {
       kind: "message",
-      message: { sender: item.sender, room_id: roomId, event_id: eventId, body: item.body ?? "" }
+      message: {
+        sender: item.sender,
+        room_id: roomId,
+        event_id: eventId,
+        body: item.body ?? "",
+        reply_count: item.thread_summary?.reply_count ?? 0
+      }
     }, items);
   }
 

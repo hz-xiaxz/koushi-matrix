@@ -15,6 +15,7 @@ function snapshot(
     initialized: true,
     awaitingResync: false,
     suppressPaginationUi: false,
+    automaticBackfillEligible: true,
     autoLoadEnabled: true,
     paginationState: "Idle",
     requestInFlight: false,
@@ -34,6 +35,53 @@ function snapshot(
 }
 
 describe("evaluateTimelineBackfill", () => {
+  test("blocks every settlement trigger for a new-thread draft", () => {
+    const triggers: TimelineBackfillSnapshot["trigger"][] = [
+      "initial_projection",
+      "layout_settled",
+      "pagination_terminal",
+      "gap_projection_changed",
+      "gap_repair_released",
+      "resync_replayed",
+      "setting_changed",
+      "timeline_reset",
+      "live_edge_settled"
+    ];
+
+    for (const trigger of triggers) {
+      expect(
+        evaluateTimelineBackfill(
+          snapshot({
+            trigger,
+            automaticBackfillEligible: false,
+            projectedContentHeight: 0,
+            scrollHeight: 0,
+            itemCount: 0
+          })
+        ),
+        trigger
+      ).toEqual({
+        kind: "blocked",
+        demand: "underfilled",
+        reason: "semantic_ineligible"
+      });
+    }
+
+    expect(
+      evaluateTimelineBackfill(
+        snapshot({
+          automaticBackfillEligible: false,
+          genuineUserScroll: true,
+          scrollTop: 0
+        })
+      )
+    ).toEqual({
+      kind: "blocked",
+      demand: "explicit_top_scroll",
+      reason: "semantic_ineligible"
+    });
+  });
+
   test("evaluates demand and blockers without event-order state", () => {
     const blockerCases: Array<{
       reason: TimelineBackfillBlocker;

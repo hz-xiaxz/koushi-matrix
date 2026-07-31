@@ -243,6 +243,7 @@ fn active_composer_targets(state: &AppState) -> BTreeSet<ComposerTarget> {
         ThreadPaneState::Opening {
             room_id,
             root_event_id,
+            ..
         }
         | ThreadPaneState::Open {
             room_id,
@@ -3243,6 +3244,7 @@ impl AppActor {
                     request_id,
                     room_id,
                     root_event_id,
+                    intent,
                 } => {
                     let replaced_thread_key =
                         self.unsubscribe_replaced_thread_timeline(&room_id, &root_event_id);
@@ -3250,6 +3252,7 @@ impl AppActor {
                         .reduce_app_action(AppAction::OpenThread {
                             room_id,
                             root_event_id,
+                            intent,
                         })
                         .await;
                     if effects_open_thread_timeline(&effects) {
@@ -4747,6 +4750,7 @@ impl AppActor {
             ThreadPaneState::Opening {
                 room_id,
                 root_event_id,
+                ..
             }
             | ThreadPaneState::Open {
                 room_id,

@@ -15,7 +15,8 @@ import type {
   RoomSettingChange,
   SavedSessionInfo,
   SearchResult,
-  SettingsPatch
+  SettingsPatch,
+  ThreadOpenIntent
 } from "../domain/types";
 import {
   focusedTimelineKey,
@@ -178,7 +179,11 @@ export function ContextualRightPanel({
   savedSessions: SavedSessionInfo[];
   onCloseThread: () => void;
   onClosePanel: () => void;
-  onOpenThread: (roomId: string, rootEventId: string) => void;
+  onOpenThread: (
+    roomId: string,
+    rootEventId: string,
+    intent: ThreadOpenIntent
+  ) => void;
   onOpenFiles: (scope: FilesViewScope) => void;
   onOpenSpaceMembers?: () => void;
   onOpenPeople?: () => void;
@@ -712,6 +717,7 @@ export function ContextualRightPanel({
             pinnedEventIds={threadPinnedEventIds}
             forwardDestinations={forwardDestinationsFromSnapshot(snapshot)}
             onSetLocalUserAlias={onSetLocalUserAlias}
+            automaticBackfillEligible={threadState.intent === "existingThread"}
             autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
             codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
             searchQuery={searchQuery}

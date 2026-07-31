@@ -64,6 +64,7 @@ describe("diagnosticReport", () => {
               kind: "open",
               room_id: "!private-room:example.invalid",
               root_event_id: "$private-event:example.invalid",
+              intent: "existingThread",
               is_subscribed: true,
               composer: {
                 accepted_submission_ids: [],
@@ -72,7 +73,8 @@ describe("diagnosticReport", () => {
                 draft_revision: COMPOSER_DRAFT_REVISION_ZERO,
                 last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO,
                 mode: "Plain"
-              }
+              },
+              staged_uploads: []
             },
             threads_list: {
               kind: "open",
