@@ -54,6 +54,7 @@ import { SpaceInfoPanel } from "./SpaceInfoPanel";
 import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
 import { PeoplePanel, ProfilePanel } from "./PeoplePanel";
+import { SpaceMembersPanel } from "./SpaceMembersPanel";
 import { MessageArticle, PinnedEventsList, SearchResults } from "./mediaLists";
 import { ThreadComposer } from "./composer";
 import { UploadStagingDialog } from "./dialogs";
@@ -98,6 +99,8 @@ export function ContextualRightPanel({
   onResetLocalData,
   onLogout = () => undefined,
   onInviteUser = () => undefined,
+  onInviteUserToSpace = () => undefined,
+  canInviteToSpace = false,
   onModerateMember = () => undefined,
   onSetLocalUserAlias = () => undefined,
   onSetRoomNotificationMode = () => undefined,
@@ -209,6 +212,8 @@ export function ContextualRightPanel({
   onResetLocalData: () => void;
   onLogout?: () => void;
   onInviteUser?: (roomId: string, title: string) => void;
+  onInviteUserToSpace?: (userId: string) => void;
+  canInviteToSpace?: boolean;
   onModerateMember?: (
     roomId: string,
     targetUserId: string,
@@ -501,6 +506,13 @@ export function ContextualRightPanel({
             onSetLocalUserAlias={onSetLocalUserAlias}
             onUnignoreUser={onUnignoreUser}
             onUpdateMemberRole={onUpdateMemberRole}
+          />
+        ) : mode === "people" && peoplePanelScope?.kind === "space" ? (
+          <SpaceMembersPanel
+            state={snapshot.state.domain.space_members}
+            canInvite={canInviteToSpace}
+            onInviteUser={onInviteUserToSpace}
+            onOpenProfile={onOpenProfile ?? (() => undefined)}
           />
         ) : (
           <PeoplePanel

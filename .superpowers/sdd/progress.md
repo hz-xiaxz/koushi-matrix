@@ -323,6 +323,31 @@ changed in this panel slice.
 - App-level Sidebar callback/count wiring remains deferred by scope; the row
   is ready for that integration without changing Room People classification.
 
+## Task 4 right-panel composition — 2026-08-01
+
+- Routed `mode: "people"` with an explicit Space scope to the existing
+  `SpaceMembersPanel`, passing the Rust-owned `domain.space_members` state,
+  optional invite permission/callback props, and the existing profile callback.
+- Kept explicit Room scopes on the existing `PeoplePanel` path with
+  `roomManagement`; profile mode and back behavior remain unchanged.
+- Added focused `rightPanel.test.tsx` coverage for Space-versus-Room panel
+  selection and invite/profile callback forwarding. Row context-menu wiring
+  remains deferred because `SpaceMembersPanel` does not currently expose a
+  context-menu callback.
+- TDD evidence: the Space routing test failed against the pre-change
+  composition, then passed after the minimal RightPanel change.
+- Verification:
+  - `npx vitest run src/components/rightPanel.test.tsx
+    src/components/PeoplePanel.test.tsx
+    src/components/SpaceMembersPanel.test.tsx
+    src/domain/rightPanel.test.ts` — 4 files, 45 passed.
+  - `npm run typecheck` — passed.
+  - `npm run lint` — passed, including the IME-safe input check.
+  - `git diff --check` — passed.
+
+App-level invite permission/command and global context-menu wiring remain
+deferred by scope; no App, Sidebar, backend, or Rust files were changed.
+
 ## Decisions and invariants
 
 - All implementation workers use Luna (`gpt-5.6-luna`) with reasoning effort `max`.
