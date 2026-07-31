@@ -8852,72 +8852,80 @@ fn merge_local_child_member_profile(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SpaceMemberLookupStatus {
+    Observed(usize),
+    Failed,
+    NotAttempted,
+}
+
+impl SpaceMemberLookupStatus {
+    fn outcome_token(self) -> &'static str {
+        match self {
+            Self::Observed(_) => "observed",
+            Self::Failed => "lookup_failed",
+            Self::NotAttempted => "not_attempted",
+        }
+    }
+
+    fn availability_token(self) -> &'static str {
+        match self {
+            Self::Observed(_) => "observed",
+            Self::Failed | Self::NotAttempted => "counts_unavailable",
+        }
+    }
+
+    fn observed_count(self) -> Option<usize> {
+        match self {
+            Self::Observed(count) => Some(count),
+            Self::Failed | Self::NotAttempted => None,
+        }
+    }
+}
+
 fn space_members_scope_diagnostic_event(
-    space_joined_count: usize,
-    space_invited_count: usize,
-    child_room_count: usize,
-    complete_child_room_count: usize,
-    incomplete_child_room_count: usize,
-    space_joined_input_count: usize,
-    space_invited_input_count: usize,
-    child_join_input_count: usize,
-    child_join_union_count: usize,
-    duplicate_child_membership_count: usize,
-    child_room_only_count: usize,
+    space_room_lookup_outcome: &'static str,
+    space_joined_lookup: SpaceMemberLookupStatus,
+    space_invited_lookup: SpaceMemberLookupStatus,
+    child_room_count: Option<usize>,
+    complete_child_room_count: Option<usize>,
+    incomplete_child_room_count: Option<usize>,
+    space_joined_input_count: Option<usize>,
+    space_invited_input_count: Option<usize>,
+    child_join_input_count: Option<usize>,
+    child_join_union_count: Option<usize>,
+    duplicate_child_membership_count: Option<usize>,
+    child_room_only_count: Option<usize>,
     local_lookup_success_count: usize,
     local_lookup_failure_count: usize,
 ) -> DiagnosticEvent {
-    DiagnosticEvent::new(
+    let mut event = DiagnosticEvent::new(
         DiagnosticLevel::Debug,
         "sdk.space_members_scope",
         "projection",
     )
+    .field(DiagnosticField::token(
+        "space_room_lookup_outcome",
+        space_room_lookup_outcome,
+    ))
     .field(DiagnosticField::token("space_join_filter", "join"))
     .field(DiagnosticField::token("space_invite_filter", "invite"))
     .field(DiagnosticField::token("child_room_join_filter", "join"))
-    .field(DiagnosticField::count(
-        "space_joined_count",
-        space_joined_count as u64,
+    .field(DiagnosticField::token(
+        "space_join_lookup_outcome",
+        space_joined_lookup.outcome_token(),
     ))
-    .field(DiagnosticField::count(
-        "space_invited_count",
-        space_invited_count as u64,
+    .field(DiagnosticField::token(
+        "space_invite_lookup_outcome",
+        space_invited_lookup.outcome_token(),
     ))
-    .field(DiagnosticField::count(
-        "space_joined_input_count",
-        space_joined_input_count as u64,
+    .field(DiagnosticField::token(
+        "space_join_count_availability",
+        space_joined_lookup.availability_token(),
     ))
-    .field(DiagnosticField::count(
-        "space_invited_input_count",
-        space_invited_input_count as u64,
-    ))
-    .field(DiagnosticField::count(
-        "child_join_input_count",
-        child_join_input_count as u64,
-    ))
-    .field(DiagnosticField::count(
-        "child_room_count",
-        child_room_count as u64,
-    ))
-    .field(DiagnosticField::count(
-        "complete_child_room_count",
-        complete_child_room_count as u64,
-    ))
-    .field(DiagnosticField::count(
-        "incomplete_child_room_count",
-        incomplete_child_room_count as u64,
-    ))
-    .field(DiagnosticField::count(
-        "child_join_union_count",
-        child_join_union_count as u64,
-    ))
-    .field(DiagnosticField::count(
-        "duplicate_child_membership_count",
-        duplicate_child_membership_count as u64,
-    ))
-    .field(DiagnosticField::count(
-        "child_room_only_count",
-        child_room_only_count as u64,
+    .field(DiagnosticField::token(
+        "space_invite_count_availability",
+        space_invited_lookup.availability_token(),
     ))
     .field(DiagnosticField::count(
         "local_member_store_lookup_success_count",
@@ -8927,23 +8935,113 @@ fn space_members_scope_diagnostic_event(
         "local_member_store_lookup_failure_count",
         local_lookup_failure_count as u64,
     ))
-    .field(DiagnosticField::count(
-        "input_count",
-        (space_joined_input_count + space_invited_input_count + child_join_input_count) as u64,
-    ))
-    .field(DiagnosticField::count(
-        "output_count",
-        (space_joined_count + space_invited_count + child_room_only_count) as u64,
-    ))
-    .field(DiagnosticField::count(
-        "deduplicated_count",
-        duplicate_child_membership_count as u64,
-    ))
-    .field(DiagnosticField::token("freshness_status", "not_tracked"))
-    .field(DiagnosticField::boolean(
-        "network_member_sync_attempted",
-        false,
-    ))
+    .field(DiagnosticField::token(
+        "child_count_availability",
+        if child_room_count.is_some()
+            && complete_child_room_count.is_some()
+            && incomplete_child_room_count.is_some()
+        {
+            "observed"
+        } else {
+            "counts_unavailable"
+        },
+    ));
+
+    if let Some(count) = space_joined_lookup.observed_count() {
+        event = event.field(DiagnosticField::count("space_joined_count", count as u64));
+    }
+    if let Some(count) = space_invited_lookup.observed_count() {
+        event = event.field(DiagnosticField::count("space_invited_count", count as u64));
+    }
+    if let Some(count) = space_joined_input_count {
+        event = event.field(DiagnosticField::count(
+            "space_joined_input_count",
+            count as u64,
+        ));
+    }
+    if let Some(count) = space_invited_input_count {
+        event = event.field(DiagnosticField::count(
+            "space_invited_input_count",
+            count as u64,
+        ));
+    }
+    if let Some(count) = child_join_input_count {
+        event = event.field(DiagnosticField::count(
+            "child_join_input_count",
+            count as u64,
+        ));
+    }
+    if let Some(count) = child_room_count {
+        event = event.field(DiagnosticField::count("child_room_count", count as u64));
+    }
+    if let Some(count) = complete_child_room_count {
+        event = event.field(DiagnosticField::count(
+            "complete_child_room_count",
+            count as u64,
+        ));
+    }
+    if let Some(count) = incomplete_child_room_count {
+        event = event.field(DiagnosticField::count(
+            "incomplete_child_room_count",
+            count as u64,
+        ));
+    }
+    if let Some(count) = child_join_union_count {
+        event = event.field(DiagnosticField::count(
+            "child_join_union_count",
+            count as u64,
+        ));
+    }
+    if let Some(count) = duplicate_child_membership_count {
+        event = event.field(DiagnosticField::count(
+            "duplicate_child_membership_count",
+            count as u64,
+        ));
+        event = event.field(DiagnosticField::count("deduplicated_count", count as u64));
+    } else {
+        event = event.field(DiagnosticField::token(
+            "deduplicated_count",
+            "counts_unavailable",
+        ));
+    }
+    if let Some(count) = child_room_only_count {
+        event = event.field(DiagnosticField::count(
+            "child_room_only_count",
+            count as u64,
+        ));
+    }
+
+    if let (Some(joined), Some(invited), Some(child)) = (
+        space_joined_input_count,
+        space_invited_input_count,
+        child_join_input_count,
+    ) {
+        event = event.field(DiagnosticField::count(
+            "input_count",
+            (joined + invited + child) as u64,
+        ));
+    } else {
+        event = event.field(DiagnosticField::token("input_count", "counts_unavailable"));
+    }
+    if let (Some(joined), Some(invited), Some(child)) = (
+        space_joined_lookup.observed_count(),
+        space_invited_lookup.observed_count(),
+        child_room_only_count,
+    ) {
+        event = event.field(DiagnosticField::count(
+            "output_count",
+            (joined + invited + child) as u64,
+        ));
+    } else {
+        event = event.field(DiagnosticField::token("output_count", "counts_unavailable"));
+    }
+
+    event
+        .field(DiagnosticField::token("freshness_status", "not_tracked"))
+        .field(DiagnosticField::boolean(
+            "network_member_sync_attempted",
+            false,
+        ))
 }
 
 /// Project Space membership from the already available SDK room/store state.
@@ -8960,7 +9058,20 @@ pub async fn matrix_space_members_projection(
         Ok(room) => room,
         Err(error) => {
             record(space_members_scope_diagnostic_event(
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+                "lookup_failed",
+                SpaceMemberLookupStatus::Failed,
+                SpaceMemberLookupStatus::NotAttempted,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                1,
             ));
             return Err(error);
         }
@@ -8977,9 +9088,25 @@ pub async fn matrix_space_members_projection(
             local_lookup_success_count += 1;
             members
         }
-        Err(_) => {
+        Err(error) => {
             local_lookup_failure_count += 1;
-            Vec::new()
+            record(space_members_scope_diagnostic_event(
+                "observed",
+                SpaceMemberLookupStatus::Failed,
+                SpaceMemberLookupStatus::NotAttempted,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                local_lookup_success_count,
+                local_lookup_failure_count,
+            ));
+            return Err(MatrixRoomOperationError::from_sdk_error(error));
         }
     };
     let space_invited_members = match space_room
@@ -8990,9 +9117,25 @@ pub async fn matrix_space_members_projection(
             local_lookup_success_count += 1;
             members
         }
-        Err(_) => {
+        Err(error) => {
             local_lookup_failure_count += 1;
-            Vec::new()
+            record(space_members_scope_diagnostic_event(
+                "observed",
+                SpaceMemberLookupStatus::Observed(space_joined_members.len()),
+                SpaceMemberLookupStatus::Failed,
+                None,
+                None,
+                None,
+                Some(space_joined_members.len()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                local_lookup_success_count,
+                local_lookup_failure_count,
+            ));
+            return Err(MatrixRoomOperationError::from_sdk_error(error));
         }
     };
 
@@ -9100,17 +9243,18 @@ pub async fn matrix_space_members_projection(
         .collect();
 
     record(space_members_scope_diagnostic_event(
-        space_joined.len(),
-        space_invited.len(),
-        child_room_ids.len(),
-        complete_child_room_count,
-        incomplete_child_room_count,
-        space_joined_members.len(),
-        space_invited_members.len(),
-        facts.child_join_input_count,
-        facts.child_join_union_count,
-        facts.duplicate_child_membership_count,
-        child_room_only.len(),
+        "observed",
+        SpaceMemberLookupStatus::Observed(space_joined.len()),
+        SpaceMemberLookupStatus::Observed(space_invited.len()),
+        Some(child_room_ids.len()),
+        Some(complete_child_room_count),
+        Some(incomplete_child_room_count),
+        Some(space_joined_members.len()),
+        Some(space_invited_members.len()),
+        Some(facts.child_join_input_count),
+        Some(facts.child_join_union_count),
+        Some(facts.duplicate_child_membership_count),
+        Some(child_room_only.len()),
         local_lookup_success_count,
         local_lookup_failure_count,
     ));
@@ -10594,9 +10738,9 @@ mod tests {
         MatrixRoomOperationError, MatrixRoomPermissionFacts, MatrixRoomSettingChange,
         MatrixRoomSettingsSnapshot, MatrixRoomTagInfo, MatrixRoomTags, MatrixSearchIndexKey,
         MatrixSearchIndexStoreConfig, SYNC_INVITE_PROBE_TIMEOUT, SdkUnreadTrace, SessionInfo,
-        classify_space_member_ids, create_public_directory_room, create_room_request,
-        get_room_settings_snapshot, has_stale_authoritative_device_signature, join_room_target,
-        matrix_conversation_activity_source, matrix_public_room_from_chunk,
+        SpaceMemberLookupStatus, classify_space_member_ids, create_public_directory_room,
+        create_room_request, get_room_settings_snapshot, has_stale_authoritative_device_signature,
+        join_room_target, matrix_conversation_activity_source, matrix_public_room_from_chunk,
         matrix_room_list_room_from_counts, matrix_room_member_role, matrix_room_preview_from_sdk,
         moderate_room_member, newest_conversation_activity, normalized_local_user_aliases,
         people_scope_diagnostic_event, query_public_room_directory, resolve_join_target,
@@ -10604,6 +10748,8 @@ mod tests {
         space_members_scope_diagnostic_event, trace_sdk_conversation_activity,
         trace_sdk_unread_snapshot, update_room_member_power_level, update_room_setting,
     };
+
+    use koushi_diagnostics::DiagnosticValue;
 
     #[test]
     fn people_scope_diagnostic_distinguishes_direct_space_members_from_child_room_aggregate() {
@@ -11534,8 +11680,79 @@ mod tests {
     }
 
     #[test]
+    fn space_lookup_failures_are_not_coerced_to_empty_observations() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split("pub async fn matrix_space_members_projection")
+            .nth(1)
+            .expect("Space projection helper exists")
+            .split("fn matrix_public_room_from_chunk")
+            .next()
+            .expect("Space projection helper boundary exists");
+        let joined_lookup = body
+            .split("let space_joined_members = match")
+            .nth(1)
+            .expect("Space JOIN lookup exists")
+            .split("let space_invited_members")
+            .next()
+            .expect("Space INVITE lookup follows JOIN lookup");
+        let invited_lookup = body
+            .split("let space_invited_members = match")
+            .nth(1)
+            .expect("Space INVITE lookup exists")
+            .split("let mut space_joined_by_user")
+            .next()
+            .expect("Space member classification follows Space lookups");
+
+        for lookup in [joined_lookup, invited_lookup] {
+            assert!(
+                lookup.contains("Err(error)"),
+                "Space lookup errors must retain their structured error"
+            );
+            assert!(
+                lookup.contains("return Err(MatrixRoomOperationError::from_sdk_error(error))"),
+                "Space lookup errors must abort the projection instead of becoming empty input"
+            );
+        }
+    }
+
+    #[test]
+    fn failed_space_member_counts_are_reported_as_unavailable() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split("fn space_members_scope_diagnostic_event")
+            .nth(1)
+            .expect("Space diagnostics helper exists")
+            .split("/// Project Space membership")
+            .next()
+            .expect("Space diagnostics helper boundary exists");
+
+        assert!(body.contains("space_join_lookup_outcome"));
+        assert!(body.contains("space_invite_lookup_outcome"));
+        assert!(body.contains("counts_unavailable"));
+        assert!(body.contains("space_joined_lookup.observed_count()"));
+        assert!(body.contains("space_invited_lookup.observed_count()"));
+        assert!(body.contains("if let Some(count)"));
+    }
+
+    #[test]
     fn space_members_scope_diagnostic_is_private_data_free() {
-        let event = space_members_scope_diagnostic_event(2, 1, 3, 2, 1, 2, 1, 4, 4, 1, 2, 1, 0);
+        let event = space_members_scope_diagnostic_event(
+            "observed",
+            SpaceMemberLookupStatus::Observed(2),
+            SpaceMemberLookupStatus::Observed(1),
+            Some(3),
+            Some(2),
+            Some(1),
+            Some(2),
+            Some(1),
+            Some(4),
+            Some(4),
+            Some(1),
+            Some(2),
+            1,
+            0,
+        );
 
         assert_eq!(event.source, "sdk.space_members_scope");
         let rendered = format!("{event:?}");
@@ -11551,6 +11768,56 @@ mod tests {
                 !rendered.contains(forbidden),
                 "diagnostic leaked private data: {forbidden}"
             );
+        }
+    }
+
+    #[test]
+    fn failed_space_member_lookup_does_not_report_zero_counts() {
+        let event = space_members_scope_diagnostic_event(
+            "observed",
+            SpaceMemberLookupStatus::Failed,
+            SpaceMemberLookupStatus::NotAttempted,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            1,
+        );
+
+        assert!(event.fields.iter().any(|field| {
+            field.key == "space_join_lookup_outcome"
+                && field.value == DiagnosticValue::Token("lookup_failed")
+        }));
+        assert!(event.fields.iter().any(|field| {
+            field.key == "space_join_count_availability"
+                && field.value == DiagnosticValue::Token("counts_unavailable")
+        }));
+        assert!(event.fields.iter().any(|field| {
+            field.key == "space_invite_lookup_outcome"
+                && field.value == DiagnosticValue::Token("not_attempted")
+        }));
+        for field in &event.fields {
+            if matches!(
+                field.key,
+                "space_joined_count"
+                    | "space_invited_count"
+                    | "child_room_count"
+                    | "child_room_only_count"
+                    | "input_count"
+                    | "output_count"
+            ) {
+                assert_ne!(
+                    field.value,
+                    DiagnosticValue::Count(0),
+                    "unobserved Space counts must not be fabricated as zero"
+                );
+            }
         }
     }
 

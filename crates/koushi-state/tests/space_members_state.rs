@@ -550,6 +550,71 @@ fn incomplete_child_projection_preserves_last_known_and_pending_entries() {
 }
 
 #[test]
+fn space_level_load_failure_preserves_last_valid_projection() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 60,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoaded {
+            request_id: 60,
+            projection: SpaceMembersProjection {
+                space_joined: vec![SpaceMemberEntry {
+                    membership: SpaceMemberMembership::SpaceJoined,
+                    ..child_only_entry()
+                }],
+                space_invited: vec![SpaceMemberEntry {
+                    membership: SpaceMemberMembership::SpaceInvited,
+                    ..child_only_entry()
+                }],
+                child_room_only: Vec::new(),
+                ..projection(2, Vec::new())
+            },
+        },
+    );
+    let previous = state.space_members.clone();
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 61,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadFailed {
+            request_id: 61,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            kind: OperationFailureKind::Sdk,
+        },
+    );
+
+    assert_eq!(state.space_members.space_joined, previous.space_joined);
+    assert_eq!(state.space_members.space_invited, previous.space_invited);
+    assert_eq!(
+        state.space_members.child_room_only,
+        previous.child_room_only
+    );
+    assert_eq!(
+        state.space_members.child_room_count,
+        previous.child_room_count
+    );
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Failed { request_id: 61, .. }
+    ));
+}
+
+#[test]
 fn invite_admission_rejects_wrong_space_and_duplicate_without_side_effect_ticket() {
     let mut state = ready_state();
     state.space_members.selected_space_id = Some(SPACE_ID.to_owned());

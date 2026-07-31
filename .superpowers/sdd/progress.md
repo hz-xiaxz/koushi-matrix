@@ -170,6 +170,38 @@ Final verification for this milestone:
   The sweep was stopped after the bounded wait; all milestone-focused core
   tests passed independently.
 
+## Task 2 final closure fixes — 2026-08-01
+
+- Space-level JOIN and INVITE member lookups now preserve their structured SDK
+  errors. Core records a lookup failure and reduces `SpaceMembersLoadFailed`
+  without constructing an empty projection; state preserves the last valid
+  projection. Child-room lookup failures remain partial/incomplete and retain
+  the existing last-known merge behavior.
+- SDK and core Space diagnostics now use lookup outcome and availability tokens
+  (`lookup_failed`, `not_attempted`, and `counts_unavailable`) and emit numeric
+  member counts only when the corresponding lookup actually observed them.
+- Timeline initial receipt publication and authoritative recovery now use the
+  shared local-only room-profile observation helper and ordered,
+  generation-fenced reliable batches, with profile actions before receipts.
+  Lookup misses/failures still publish receipts for global fallback.
+- Verification:
+  - New SDK lookup/diagnostic tests — 3 passed; SDK `space_member` focused
+    regressions — 9 passed.
+  - New core Space failure tests — 2 passed; core `space_member` regressions —
+    4 passed.
+  - New state preservation test — 1 passed; full `space_members_state` suite —
+    13 passed.
+  - New timeline initial/recovery guard tests — 2 passed; receipt-diff
+    production regressions, including lookup miss/failure and stale generation
+    — 5 passed; receipt-observation regressions — 2 passed.
+  - `cargo check -p koushi-sdk --lib`, `cargo check -p koushi-state`, and
+    `cargo check -p koushi-core --lib` — passed. Core reports only existing
+    unused/dead-code warnings.
+  - `cargo fmt --all -- --check` and `git diff --check` — passed. Stable
+    rustfmt reports the repository's existing nightly-only option warnings.
+- Scope remained limited to SDK/core/state diagnostics and timeline behavior;
+  no Desktop/Tauri/room People changes or network profile lookup were added.
+
 ## Decisions and invariants
 
 - All implementation workers use Luna (`gpt-5.6-luna`) with reasoning effort `max`.

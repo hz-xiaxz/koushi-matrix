@@ -15198,24 +15198,31 @@ impl TimelineActor {
                     typing_rx,
                 )));
 
-                let mut actions = Vec::new();
                 let room_id = room_id_str.clone();
-                if !initial_receipts.is_empty() {
-                    actions.push(AppAction::LiveRoomReceiptsUpdated {
-                        room_id: room_id.clone(),
-                        receipts_by_event: initial_receipts,
-                    });
+                if initial_emitted && !initial_receipts.is_empty() {
+                    let _ = emit_receipt_observation_actions(
+                        session.as_ref(),
+                        &action_tx,
+                        &timeline_actor_generations,
+                        &key,
+                        actor_generation,
+                        &room_id,
+                        initial_receipts,
+                        ReceiptObservationTarget::Live,
+                    )
+                    .await;
                 }
-                actions.push(AppAction::FullyReadMarkerUpdated {
-                    room_id,
-                    event_id: {
-                        initial_fully_read_event_id = room
-                            .fully_read_event_id()
-                            .map(|event_id| event_id.to_string());
-                        initial_fully_read_event_id.clone()
-                    },
-                });
-                let _ = action_tx.try_send(actions);
+                let _ = action_tx
+                    .send(vec![AppAction::FullyReadMarkerUpdated {
+                        room_id,
+                        event_id: {
+                            initial_fully_read_event_id = room
+                                .fully_read_event_id()
+                                .map(|event_id| event_id.to_string());
+                            initial_fully_read_event_id.clone()
+                        },
+                    }])
+                    .await;
             }
         }
 
@@ -19915,13 +19922,14 @@ impl TimelineActor {
             .collect::<std::collections::BTreeSet<_>>();
         let reconciliation =
             authoritative_window_reconciliation(old_window_event_ids, &new_window_event_ids);
-        let receipts_action = timeline_room_id(&self.key).map(|room_id| {
-            authoritative_receipts_action(
-                &room_id,
-                &reconciliation,
-                live_event_receipts_from_sdk_items(items.iter()),
-            )
-        });
+        let receipt_observation =
+            timeline_room_id(&self.key).map(|room_id| ReceiptObservationRequest {
+                room_id,
+                receipts_by_event: live_event_receipts_from_sdk_items(items.iter()),
+                target: ReceiptObservationTarget::Authoritative {
+                    scoped_event_ids: reconciliation.scoped_event_ids.clone(),
+                },
+            });
         let mut search_messages = Vec::new();
         if self.search_index_tx.is_some() {
             search_messages.extend(authoritative_search_removals(&reconciliation));
@@ -19933,7 +19941,7 @@ impl TimelineActor {
         }
         PreparedAuthoritativeSnapshotReconciliation {
             replacement_media_sources,
-            receipts_action,
+            receipt_observation,
             search_messages,
         }
     }
@@ -20533,7 +20541,7 @@ impl TimelineActor {
             .collect::<std::collections::BTreeSet<_>>();
         let PreparedAuthoritativeSnapshotReconciliation {
             replacement_media_sources,
-            receipts_action,
+            receipt_observation,
             search_messages,
         } = self
             .prepare_authoritative_snapshot_reconciliation(&old_window_event_ids, &current_items);
@@ -20597,10 +20605,20 @@ impl TimelineActor {
         ) {
             return;
         }
-        if let Some(action) = receipts_action {
-            if !self.emit_action_reliable(action).await {
-                return;
-            }
+        if let Some(receipt_observation) = receipt_observation
+            && !emit_receipt_observation_actions(
+                self.session.as_ref(),
+                &self.action_tx,
+                &self.timeline_actor_generations,
+                &self.key,
+                self.actor_generation,
+                &receipt_observation.room_id,
+                receipt_observation.receipts_by_event,
+                receipt_observation.target,
+            )
+            .await
+        {
+            return;
         }
         if !self.emit_search_messages_reliable(search_messages).await {
             return;
@@ -20991,9 +21009,15 @@ struct AuthoritativeWindowReconciliation {
     removed_event_ids: Vec<String>,
 }
 
+struct ReceiptObservationRequest {
+    room_id: String,
+    receipts_by_event: Vec<LiveEventReceipts>,
+    target: ReceiptObservationTarget,
+}
+
 struct PreparedAuthoritativeSnapshotReconciliation {
     replacement_media_sources: HashMap<String, PrivateMediaEntry>,
-    receipts_action: Option<AppAction>,
+    receipt_observation: Option<ReceiptObservationRequest>,
     search_messages: Vec<SearchIndexMessage>,
 }
 
@@ -23367,10 +23391,17 @@ fn live_event_receipts_from_sdk_items<'a>(
         .collect()
 }
 
-fn build_live_receipt_observation_actions(
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ReceiptObservationTarget {
+    Live,
+    Authoritative { scoped_event_ids: Vec<String> },
+}
+
+fn build_receipt_observation_actions(
     room_id: &str,
     receipts_by_event: Vec<LiveEventReceipts>,
     profiles: Vec<MatrixUserProfile>,
+    target: ReceiptObservationTarget,
 ) -> Vec<AppAction> {
     let profile_actions = profiles
         .into_iter()
@@ -23406,17 +23437,54 @@ fn build_live_receipt_observation_actions(
             profiles: profile_actions,
         });
     }
-    actions.push(AppAction::LiveRoomReceiptsUpdated {
-        room_id: room_id.to_owned(),
-        receipts_by_event,
+    actions.push(match target {
+        ReceiptObservationTarget::Live => AppAction::LiveRoomReceiptsUpdated {
+            room_id: room_id.to_owned(),
+            receipts_by_event,
+        },
+        ReceiptObservationTarget::Authoritative { scoped_event_ids } => {
+            AppAction::LiveRoomReceiptsWindowReconciled {
+                room_id: room_id.to_owned(),
+                scoped_event_ids,
+                receipts_by_event,
+            }
+        }
     });
     actions
+}
+
+fn build_live_receipt_observation_actions(
+    room_id: &str,
+    receipts_by_event: Vec<LiveEventReceipts>,
+    profiles: Vec<MatrixUserProfile>,
+) -> Vec<AppAction> {
+    build_receipt_observation_actions(
+        room_id,
+        receipts_by_event,
+        profiles,
+        ReceiptObservationTarget::Live,
+    )
 }
 
 async fn live_receipt_observation_actions_from_sdk_receipts(
     session: &MatrixClientSession,
     room_id: &str,
     receipts_by_event: Vec<LiveEventReceipts>,
+) -> Vec<AppAction> {
+    receipt_observation_actions_from_sdk_receipts(
+        session,
+        room_id,
+        receipts_by_event,
+        ReceiptObservationTarget::Live,
+    )
+    .await
+}
+
+async fn receipt_observation_actions_from_sdk_receipts(
+    session: &MatrixClientSession,
+    room_id: &str,
+    receipts_by_event: Vec<LiveEventReceipts>,
+    target: ReceiptObservationTarget,
 ) -> Vec<AppAction> {
     let user_ids = receipts_by_event
         .iter()
@@ -23441,7 +23509,30 @@ async fn live_receipt_observation_actions_from_sdk_receipts(
         profiles.len(),
         lookup_outcome,
     );
-    build_live_receipt_observation_actions(room_id, receipts_by_event, profiles)
+    build_receipt_observation_actions(room_id, receipts_by_event, profiles, target)
+}
+
+async fn emit_receipt_observation_actions(
+    session: &MatrixClientSession,
+    action_tx: &mpsc::Sender<Vec<AppAction>>,
+    timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
+    key: &TimelineKey,
+    actor_generation: u64,
+    room_id: &str,
+    receipts_by_event: Vec<LiveEventReceipts>,
+    target: ReceiptObservationTarget,
+) -> bool {
+    let actions =
+        receipt_observation_actions_from_sdk_receipts(session, room_id, receipts_by_event, target)
+            .await;
+    send_generation_fenced(
+        action_tx,
+        timeline_actor_generations,
+        key,
+        actor_generation,
+        actions,
+    )
+    .await
 }
 
 async fn emit_live_receipt_observation_actions(
@@ -23453,15 +23544,15 @@ async fn emit_live_receipt_observation_actions(
     room_id: &str,
     receipts_by_event: Vec<LiveEventReceipts>,
 ) -> bool {
-    let actions =
-        live_receipt_observation_actions_from_sdk_receipts(session, room_id, receipts_by_event)
-            .await;
-    send_generation_fenced(
+    emit_receipt_observation_actions(
+        session,
         action_tx,
         timeline_actor_generations,
         key,
         actor_generation,
-        actions,
+        room_id,
+        receipts_by_event,
+        ReceiptObservationTarget::Live,
     )
     .await
 }
@@ -37953,7 +38044,7 @@ mod tests {
             "receipt diffs must use the production profile-observation delivery path"
         );
         let delivery = production
-            .split("async fn emit_live_receipt_observation_actions(")
+            .split("async fn emit_receipt_observation_actions(")
             .nth(1)
             .expect("production receipt delivery helper exists");
         assert!(
@@ -37963,6 +38054,52 @@ mod tests {
         assert!(
             !diff_handler.contains("try_send(vec![action])"),
             "receipt action batches must not be dropped through try_send"
+        );
+    }
+
+    #[test]
+    fn initial_receipts_use_the_ordered_local_profile_observation_batch() {
+        let source = include_str!("timeline.rs");
+        let startup = source
+            .split("let initial_receipts = live_event_receipts_from_sdk_items")
+            .nth(1)
+            .expect("initial receipt projection exists")
+            .split("let thread_attention = ThreadAttentionTracker::hydrate")
+            .next()
+            .expect("initial receipt publication precedes thread attention hydration");
+
+        assert!(
+            startup.contains("emit_receipt_observation_actions"),
+            "initial receipts must use local profile observation and generation fencing"
+        );
+        assert!(
+            !startup.contains("LiveRoomReceiptsUpdated {"),
+            "initial receipts must not bypass the ordered profile/receipt batch"
+        );
+        assert!(
+            !startup.contains("try_send(actions)"),
+            "initial receipt publication must be reliable"
+        );
+    }
+
+    #[test]
+    fn authoritative_recovery_receipts_use_the_same_ordered_observation_batch() {
+        let source = include_str!("timeline.rs");
+        let recovery = source
+            .split("async fn handle_relay_overflow")
+            .nth(1)
+            .expect("authoritative recovery handler exists")
+            .split("// ---------------------------------------------------------------------------\n// Relay task")
+            .next()
+            .expect("authoritative recovery handler boundary exists");
+
+        assert!(
+            recovery.contains("emit_receipt_observation_actions"),
+            "authoritative recovery must use local profile observation and generation fencing"
+        );
+        assert!(
+            !recovery.contains("if let Some(action) = receipts_action"),
+            "authoritative recovery must not publish an unobserved receipt action directly"
         );
     }
 

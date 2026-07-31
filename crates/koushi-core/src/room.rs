@@ -975,21 +975,7 @@ impl RoomActor {
             }
             Err(error) => {
                 let kind = operation_failure_kind(classify_room_error(&error));
-                record_core_space_members_projection(
-                    "load",
-                    generation,
-                    &SpaceMembersProjection {
-                        space_id: String::new(),
-                        generation,
-                        space_joined: Vec::new(),
-                        space_invited: Vec::new(),
-                        child_room_only: Vec::new(),
-                        child_room_count: 0,
-                        complete_child_room_count: 0,
-                        incomplete_child_room_count: 0,
-                    },
-                    "failed",
-                );
+                record_core_space_members_load_failure("load", generation);
                 self.reduce_reliable(vec![AppAction::SpaceMembersLoadFailed {
                     request_id: request_id.sequence,
                     space_id,
@@ -3831,6 +3817,34 @@ fn record_core_space_members_projection_with_metrics(
     record(event.field(DiagnosticField::token("freshness_status", "not_tracked")));
 }
 
+fn record_core_space_members_load_failure(trigger: &'static str, generation: u64) {
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.space_members_projection",
+            "projection",
+        )
+        .field(DiagnosticField::token("trigger", trigger))
+        .field(DiagnosticField::count("generation", generation))
+        .field(DiagnosticField::token("outcome", "lookup_failed"))
+        .field(DiagnosticField::token(
+            "space_joined_count_availability",
+            "counts_unavailable",
+        ))
+        .field(DiagnosticField::token(
+            "space_invited_count_availability",
+            "counts_unavailable",
+        ))
+        .field(DiagnosticField::token(
+            "child_count_availability",
+            "counts_unavailable",
+        ))
+        .field(DiagnosticField::token("input_count", "counts_unavailable"))
+        .field(DiagnosticField::token("output_count", "counts_unavailable"))
+        .field(DiagnosticField::token("freshness_status", "not_tracked")),
+    );
+}
+
 fn record_core_space_members_operation(
     trigger: &'static str,
     generation: u64,
@@ -6394,6 +6408,67 @@ pub mod tests {
             projection.child_room_only[0].display_name.as_deref(),
             Some("Child room profile")
         );
+    }
+
+    #[test]
+    fn space_member_load_failure_does_not_construct_an_empty_projection() {
+        let source = include_str!("room.rs");
+        let failure_path = source
+            .split("async fn handle_load_space_members")
+            .nth(1)
+            .expect("Space load error branch exists")
+            .split("async fn handle_invite_user_to_space")
+            .next()
+            .expect("Space load handler boundary exists")
+            .split("Err(error) =>")
+            .nth(1)
+            .expect("Space load error branch exists")
+            .split("self.reduce_reliable")
+            .next()
+            .expect("Space load failure must reduce a structured failure action");
+
+        assert!(
+            !failure_path.contains("SpaceMembersProjection {"),
+            "a failed Space lookup must not be represented by an empty projection"
+        );
+        assert!(
+            failure_path.contains("record_core_space_members_load_failure"),
+            "core failure diagnostics must preserve unavailable-count semantics"
+        );
+    }
+
+    #[test]
+    fn failed_space_member_diagnostics_do_not_fabricate_member_counts() {
+        let before = koushi_diagnostics::snapshot().records.len();
+        record_core_space_members_load_failure("load", 7);
+        let record = koushi_diagnostics::snapshot()
+            .records
+            .into_iter()
+            .skip(before)
+            .find(|record| record.event.source == "core.space_members_projection")
+            .expect("Space load failure diagnostic");
+
+        assert!(record.event.fields.iter().any(|field| {
+            field.key == "outcome"
+                && field.value == koushi_diagnostics::DiagnosticValue::Token("lookup_failed")
+        }));
+        for field in &record.event.fields {
+            if matches!(
+                field.key,
+                "space_joined_count"
+                    | "space_invited_count"
+                    | "child_room_count"
+                    | "child_room_only_count"
+                    | "input_count"
+                    | "output_count"
+            ) {
+                assert_ne!(
+                    field.value,
+                    koushi_diagnostics::DiagnosticValue::Count(0),
+                    "failed Space diagnostics must not report member counts as zero"
+                );
+            }
+        }
     }
 
     #[test]
