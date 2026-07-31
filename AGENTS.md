@@ -2231,23 +2231,27 @@ the implementation plan is
   so `LoggedIn` stays held in the actor's pending-ready events. Read this token
   first instead of re-running; before it existed the message was identical for
   every hypothesis and diagnosing it took a full CI round trip.
-- **`AppEffect::CheckCurrentDeviceTrust` is dropped by the production runtime.**
-  It is handled only by the fixture backend (`koushi-backend/src/lib.rs`); in
-  `koushi-core/src/runtime.rs` it sits in the ignored-effect catch-all arm of
-  both effect lanes. So when the reducer enters `RecheckingTrust` and asks for a
-  trust recheck, nothing performs it — promotion happens only if an ambient SDK
-  trust observer independently fires `CurrentDeviceTrustChanged`. That is the
-  intermittency, and it is a **product** gap, not a QA-harness one: a real
-  session can strand in `RecheckingTrust` after bootstrap.
-- Routing that effect to the actor is NOT a safe one-line fix. A candidate that
-  added `AccountMessage::CheckCurrentDeviceTrust` calling
-  `request_authoritative_trust_recheck()` made the conduit `media` lane green
-  3/3 but broke
+- #375 now routes `AppEffect::CheckCurrentDeviceTrust` through both production
+  effect lanes and performs an authoritative own-user `/keys/query`. The first
+  candidate was not a safe one-line fix: re-emitting the SDK subscriber's
+  current value made the conduit `media` lane green 3/3 but broke
   `runtime::tests::authoritative_trust_runs_through_app_actor_ack_and_restarts_real_children`
   ("session transition timed out during initial promotion"): re-emitting the SDK
   subscriber's current value can feed `Unknown` into promotion at the wrong
-  moment. The recheck has to settle on a real trust value and respect
-  `trust_generation`. Do not ship a promotion change with that test red.
+  moment. The shipped recheck settles on a real trust value, respects
+  `trust_generation`, and releases the vendored SDK Olm read guard before
+  network I/O. Do not ship a promotion change with that test red.
+- A second #375 race was reproduced by restricting the local `media` scenario
+  to two CPUs: `taskset -c 0,1 ... --scenario=media ...` reliably ended in
+  `phase=rechecking_trust`. `AccountActor` coalesced an explicit reducer recheck
+  while a trust query or projection ack was active, but did not retain demand.
+  Recheck coalescing is therefore lossless: keep at most one query in flight,
+  remember one pending demand, replay it after query settlement, and if a
+  projection ack does not match the reducer's current state, discard that
+  obsolete transition and run the pending query. A matching Ready/Locked ack
+  may satisfy the redundant demand. Clear pending demand on provisional-session
+  teardown. Focused gates are `cargo test -p koushi-core --lib
+  explicit_trust_recheck` plus the initial-promotion regression above.
 - `complete_new_identity_gate_for_qa` also used to submit
   `ConfirmSessionBootstrapSaved` and return without observing its outcome, so a
   failed confirmation would have been indistinguishable from the stall above —

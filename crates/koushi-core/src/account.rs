@@ -1489,6 +1489,9 @@ pub struct AccountActor {
     trust_generation: u64,
     trust_observer: Option<crate::executor::JoinHandle<()>>,
     trust_recheck_task: Option<crate::executor::JoinHandle<()>>,
+    /// One losslessly coalesced reducer demand that arrived while an
+    /// authoritative query or its projection acknowledgement was unsettled.
+    trust_recheck_pending: bool,
     current_session_status_task: Option<crate::executor::JoinHandle<()>>,
     current_session_status_request: Option<u64>,
     verification_method_discovery_task: Option<OwnedVerificationMethodDiscoveryTask>,
@@ -1680,6 +1683,7 @@ impl AccountActor {
             trust_generation: 0,
             trust_observer: None,
             trust_recheck_task: None,
+            trust_recheck_pending: false,
             current_session_status_task: None,
             current_session_status_request: None,
             verification_method_discovery_task: None,
@@ -2051,8 +2055,10 @@ impl AccountActor {
                         continue;
                     }
                     self.trust_recheck_task = None;
+                    let replay_after_settlement = self.trust_recheck_pending;
+                    self.trust_recheck_pending = false;
                     let trust = match result {
-                        Ok(trust) => trust,
+                        Ok(trust) => Some(trust),
                         Err(_)
                             if self.session_promoted
                                 || matches!(
@@ -2064,11 +2070,17 @@ impl AccountActor {
                                     }) if pending_generation == generation
                                 ) =>
                         {
-                            continue;
+                            None
                         }
-                        Err(_) => koushi_state::CurrentDeviceTrustState::Unknown,
+                        Err(_) => Some(koushi_state::CurrentDeviceTrustState::Unknown),
                     };
-                    self.handle_current_device_trust(generation, trust).await;
+                    if let Some(trust) = trust {
+                        self.handle_current_device_trust(generation, trust).await;
+                    }
+                    if replay_after_settlement {
+                        self.trust_recheck_pending = true;
+                        self.start_authoritative_trust_recheck_if_idle(true);
+                    }
                 }
                 AccountMessage::FirstRestrictedSyncFinished {
                     generation,
@@ -7916,18 +7928,30 @@ impl AccountActor {
     }
 
     fn request_authoritative_trust_recheck(&mut self) {
+        self.trust_recheck_pending = true;
+        self.start_authoritative_trust_recheck_if_idle(false);
+    }
+
+    fn start_authoritative_trust_recheck_if_idle(&mut self, allow_pending_projection: bool) {
+        // A replay after an in-flight query already represents a later reducer
+        // demand, so it may start before the first result's projection settles.
+        // Ordinary requests wait: a matching projection can satisfy redundant
+        // demand, while a mismatched acknowledgement explicitly releases it.
         if self.trust_recheck_task.is_some()
-            || matches!(
-                self.pending_trust_transition,
-                Some(PendingTrustTransition { generation, .. })
-                    if generation == self.trust_generation
-            )
+            || (!allow_pending_projection
+                && matches!(
+                    self.pending_trust_transition,
+                    Some(PendingTrustTransition { generation, .. })
+                        if generation == self.trust_generation
+                ))
         {
             return;
         }
         let Some(session) = self.session.clone() else {
+            self.trust_recheck_pending = false;
             return;
         };
+        self.trust_recheck_pending = false;
         let generation = self.trust_generation;
         let tx = self.self_tx.clone();
         self.trust_recheck_task = Some(executor::spawn(async move {
@@ -8379,6 +8403,7 @@ impl AccountActor {
 
     async fn stop_provisional_runtime(&mut self) {
         self.trust_generation = self.trust_generation.wrapping_add(1);
+        self.trust_recheck_pending = false;
         self.pending_device_cleanup = None;
         self.cancel_pending_trust_promotion().await;
         if let Some(task) = self.trust_observer.take() {
@@ -8638,13 +8663,19 @@ impl AccountActor {
         let Some(pending) = self.pending_trust_transition.as_ref() else {
             return;
         };
-        if generation != self.trust_generation
-            || !trust_projection_ack_matches(pending, generation, transition_id, ready, locked)
-        {
+        if generation != self.trust_generation {
+            return;
+        }
+        if !trust_projection_ack_matches(pending, generation, transition_id, ready, locked) {
+            if self.trust_recheck_pending {
+                self.pending_trust_transition = None;
+                self.start_authoritative_trust_recheck_if_idle(false);
+            }
             return;
         }
         let decision = pending.decision;
         self.pending_trust_transition = None;
+        self.trust_recheck_pending = false;
         if decision == TrustLifecycleDecision::Lock {
             self.record_lifecycle_probe("lock_projection_ack");
             self.stop_restricted_sync().await;
@@ -12924,7 +12955,12 @@ mod tests {
     }
 
     async fn login_gated_actor() -> (AccountActorHandle, mpsc::Receiver<Vec<AppAction>>) {
-        let homeserver = spawn_quarantine_password_server();
+        login_gated_actor_at(spawn_quarantine_password_server()).await
+    }
+
+    async fn login_gated_actor_at(
+        homeserver: String,
+    ) -> (AccountActorHandle, mpsc::Receiver<Vec<AppAction>>) {
         let cred_dir = tempdir().expect("tempdir").keep();
         let data_dir = tempdir().expect("tempdir").keep();
         let (handle, mut action_rx, _event_rx) = spawn_actor_with_dirs(&cred_dir, &data_dir);
@@ -13505,6 +13541,103 @@ mod tests {
             );
         }
         assert_eq!(runtime, (true, false, false, true));
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn explicit_trust_recheck_is_not_dropped_behind_pending_projection() {
+        let (homeserver, query_control) = spawn_counting_quarantine_password_server();
+        let (handle, mut action_rx) = login_gated_actor_at(homeserver).await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await;
+        let (generation, transition_id) = loop {
+            let actions = action_rx.recv().await.expect("account actions");
+            if let [
+                AppAction::AuthoritativeDeviceTrustChanged {
+                    generation,
+                    transition_id,
+                    trust: koushi_state::CurrentDeviceTrustState::Verified,
+                },
+            ] = actions.as_slice()
+            {
+                break (*generation, *transition_id);
+            }
+        };
+
+        let baseline = query_control
+            .count
+            .load(std::sync::atomic::Ordering::SeqCst);
+        handle.send(AccountMessage::CheckCurrentDeviceTrust).await;
+        handle
+            .send(AccountMessage::TrustProjectionApplied {
+                generation,
+                transition_id,
+                ready: false,
+                locked: false,
+            })
+            .await;
+
+        executor::timeout(Duration::from_secs(1), async {
+            while query_control
+                .count
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == baseline
+            {
+                executor::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("a projection mismatch must replay the explicit reducer recheck");
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn explicit_trust_recheck_arriving_in_flight_is_replayed_after_settlement() {
+        let (homeserver, query_control) = spawn_counting_quarantine_password_server();
+        let (handle, mut action_rx) = login_gated_actor_at(homeserver).await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+        query_control
+            .hold
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let baseline = query_control
+            .count
+            .load(std::sync::atomic::Ordering::SeqCst);
+
+        handle.send(AccountMessage::CheckCurrentDeviceTrust).await;
+        executor::timeout(Duration::from_secs(1), async {
+            while query_control
+                .count
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == baseline
+            {
+                executor::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("first authoritative query must start");
+
+        handle.send(AccountMessage::CheckCurrentDeviceTrust).await;
+        query_control
+            .hold
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+
+        executor::timeout(Duration::from_secs(1), async {
+            while query_control
+                .count
+                .load(std::sync::atomic::Ordering::SeqCst)
+                < baseline + 2
+            {
+                executor::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("an in-flight reducer recheck demand must replay after the first query settles");
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
 
@@ -14250,6 +14383,23 @@ mod tests {
         spawn_named_quarantine_password_server("@fixture-user:example.invalid", "FIXTUREDEVICE")
     }
 
+    #[derive(Default)]
+    struct KeyQueryControl {
+        count: std::sync::atomic::AtomicUsize,
+        hold: std::sync::atomic::AtomicBool,
+    }
+
+    fn spawn_counting_quarantine_password_server() -> (String, std::sync::Arc<KeyQueryControl>) {
+        let control = std::sync::Arc::new(KeyQueryControl::default());
+        let homeserver = spawn_named_quarantine_password_server_with_controls(
+            "@fixture-user:example.invalid",
+            "FIXTUREDEVICE",
+            None,
+            Some(std::sync::Arc::clone(&control)),
+        );
+        (homeserver, control)
+    }
+
     fn spawn_controllable_quarantine_password_server()
     -> (String, std::sync::Arc<std::sync::atomic::AtomicBool>) {
         let offline = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -14272,6 +14422,15 @@ mod tests {
         user_id: &'static str,
         device_id: &'static str,
         offline: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    ) -> String {
+        spawn_named_quarantine_password_server_with_controls(user_id, device_id, offline, None)
+    }
+
+    fn spawn_named_quarantine_password_server_with_controls(
+        user_id: &'static str,
+        device_id: &'static str,
+        offline: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        key_query_control: Option<std::sync::Arc<KeyQueryControl>>,
     ) -> String {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -14309,6 +14468,16 @@ mod tests {
                     format!(
                         r#"{{"access_token":"fixture-token","device_id":"{device_id}","user_id":"{user_id}"}}"#
                     )
+                } else if text.contains("/_matrix/client/") && text.contains("/keys/query") {
+                    if let Some(control) = key_query_control.as_ref() {
+                        control
+                            .count
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        while control.hold.load(std::sync::atomic::Ordering::SeqCst) {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                    r#"{"device_keys":{},"failures":{}}"#.to_owned()
                 } else if text.contains("/_matrix/client/") && text.contains("/sync") {
                     std::thread::sleep(Duration::from_millis(20));
                     r#"{"next_batch":"batch","device_lists":{"changed":[],"left":[]},"rooms":{"invite":{},"join":{},"leave":{},"knock":{}},"to_device":{"events":[]},"presence":{"events":[]},"account_data":{"events":[]},"device_one_time_keys_count":{}}"#.to_owned()
@@ -15483,6 +15652,7 @@ mod tests {
             trust_generation: 0,
             trust_observer: None,
             trust_recheck_task: None,
+            trust_recheck_pending: false,
             current_session_status_task: None,
             current_session_status_request: None,
             verification_method_discovery_task: None,
