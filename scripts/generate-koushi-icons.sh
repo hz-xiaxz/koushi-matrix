@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Generate raster icon assets from apps/desktop/src-tauri/icons/icon.svg.
+# Generate shared raster assets and a macOS-specific ICNS asset.
 # Requires: ImageMagick (convert) and a POSIX shell.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SRC="${PROJECT_ROOT}/assets/branding/koushi-photon.svg"
+MACOS_SRC="${PROJECT_ROOT}/assets/branding/koushi-photon-macos.svg"
 OUT_DIR="${PROJECT_ROOT}/apps/desktop/src-tauri/icons"
+MACOS_ICON_DIR="$(mktemp -d)"
+trap 'rm -rf -- "${MACOS_ICON_DIR}"' EXIT
 
 if ! command -v convert >/dev/null 2>&1; then
   echo "Error: ImageMagick convert is required." >&2
@@ -15,6 +18,11 @@ fi
 
 if [[ ! -f "${SRC}" ]]; then
   echo "Error: source SVG not found: ${SRC}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${MACOS_SRC}" ]]; then
+  echo "Error: macOS source SVG not found: ${MACOS_SRC}" >&2
   exit 1
 fi
 
@@ -45,14 +53,21 @@ convert -background none "${SRC}" -resize 256x256 \
   \( -clone 0 -resize 128x128 \) \
   "${OUT_DIR}/icon.ico"
 
-# macOS ICNS: pack PNGs into a simple ICNS container. This script uses a small
-# Python helper so the assets remain reproducible without macOS-only tools.
+# macOS ICNS: render the full-bleed source separately so the shared transparent
+# raster assets retain their existing cross-platform appearance.
+convert -background none "${MACOS_SRC}" -resize 32x32 "${MACOS_ICON_DIR}/32x32.png"
+convert -background none "${MACOS_SRC}" -resize 128x128 "${MACOS_ICON_DIR}/128x128.png"
+convert -background none "${MACOS_SRC}" -resize 256x256 "${MACOS_ICON_DIR}/128x128@2x.png"
+convert -background none "${MACOS_SRC}" -resize 512x512 "${MACOS_ICON_DIR}/icon.png"
+
+# Pack PNGs into a simple ICNS container. This script uses a small Python helper
+# so the assets remain reproducible without macOS-only tools.
 python3 "${SCRIPT_DIR}/lib/generate-icns.py" \
   "${OUT_DIR}/icon.icns" \
-  "${OUT_DIR}/32x32.png" \
-  "${OUT_DIR}/128x128.png" \
-  "${OUT_DIR}/128x128@2x.png" \
-  "${OUT_DIR}/icon.png"
+  "${MACOS_ICON_DIR}/32x32.png" \
+  "${MACOS_ICON_DIR}/128x128.png" \
+  "${MACOS_ICON_DIR}/128x128@2x.png" \
+  "${MACOS_ICON_DIR}/icon.png"
 
 echo "Done. Assets in ${OUT_DIR}:"
 ls -la "${OUT_DIR}"
