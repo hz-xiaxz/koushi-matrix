@@ -342,8 +342,12 @@ describe("App Space Members integration", () => {
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();
 
-    const cancelButton = screen.getByRole("button", { name: "Cancel invitation" });
-    await waitFor(() => expect(cancelButton).toHaveProperty("disabled", true));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Cancel invitation" })).toHaveProperty(
+        "disabled",
+        true
+      );
+    });
     expect(cancelSpaceInvite).not.toHaveBeenCalled();
   });
 
