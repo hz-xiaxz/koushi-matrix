@@ -8650,16 +8650,21 @@ test("link preview card renders from Rust-owned DTO and hides on close", async (
 
 test("encrypted room suppresses link previews and shows privacy notice", async ({ page }) => {
   await gotoReadyShell(page);
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     const snapshot = window.__harness.currentSnapshot();
-    snapshot.state.domain.rooms[0] = {
-      ...snapshot.state.domain.rooms[0],
-      is_encrypted: true
-    };
-    window.__harness.setSnapshot(snapshot);
-    window.__harness.setCommandResponse("load_room_settings", () =>
-      window.__harness.currentSnapshot()
-    );
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          rooms: snapshot.state.domain.rooms.map((room, index) =>
+            index === 0 ? { ...room, is_encrypted: true } : room
+          )
+        }
+      }
+    });
+    await window.__harness.pushStateChanged();
   });
 
   await page.getByRole("button", { name: t("room.roomInfo") }).click();
