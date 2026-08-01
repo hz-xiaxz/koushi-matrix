@@ -419,3 +419,41 @@ deferred by scope; no App, Sidebar, backend, or Rust files were changed.
   - `git diff --check` — passed.
 
 No backend or Rust implementation changes were needed; no DMG build was run.
+
+## Space Members panel completion follow-up — 2026-08-01
+
+- Task 1 complete (`73707f48..b7223caa`): added the Space Members close
+  control, visibility-driven cached avatars, and localized creator/admin
+  badges. Focused tests passed 22/22; typecheck and lint passed.
+- Independent Task 1 review: spec compliant, task quality approved, no
+  Critical/Important/Minor findings.
+- Task 2 complete (`b7223caa..256e13d4`): added SDK/State/Core/Tauri/TS
+  pending-Space-invite cancellation, current-INVITE validation before kick,
+  exact request/Space/user/generation fences, fresh projection reconciliation,
+  and production-parity browser fake outcomes.
+- Task 2 review initially found the missing public `cancellingInvite` type /
+  pending gates and fake parity gaps. Follow-up commit `256e13d4` fixed both
+  and strengthened the exact-user settlement test. Re-review approved with no
+  remaining Critical/Important/Minor findings.
+- Task 3 complete (`256e13d4..840a3703`): added invited-only inline
+  cancellation, exact `can_kick` gating, localized pending/failure copy,
+  retryable failure behavior, token-only diagnostics, and independent App
+  request fencing.
+- Task 3 review found a same-Space room-navigation invalidation race and a
+  retry-test gap. Follow-up commit `840a3703` invalidated cancellation requests
+  on navigation and added late fulfillment/rejection plus retry regressions.
+  Re-review approved with no remaining Critical/Important/Minor findings.
+- Whole-branch review then found retry and closed-actor edge cases. Commits
+  `fe453c11` and `147f9348` added exact failed-cancel retry admission,
+  active-navigation fencing, post-await browser-fake fencing, bounded avatar
+  retry/deduplication, and correlated rollback when AccountActor or RoomActor
+  forwarding is closed. The child-room singular copy and upstream handoff were
+  corrected at the same time.
+- Final independent whole-branch review: no Critical, Important, or Minor
+  findings; ready to merge.
+- Final local verification passed: `cargo fmt --all -- --check`, focused State,
+  SDK, Core, Tauri contract/golden tests, all desktop Vitest tests (67 files,
+  1,203 tests), TypeScript typecheck, frontend lint, combined Cargo check, and
+  `git diff --check`.
+- One pre-existing unrelated State reducer test still reproduces its known
+  equality failure: `live_signal_actions_update_rust_owned_state`.
