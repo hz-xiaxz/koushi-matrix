@@ -1077,6 +1077,58 @@ describe("TimelineView", () => {
     expect(quote?.textContent).toContain("Earlier thread event");
   });
 
+  it("preserves formatted Markdown structure inside a reply quote", () => {
+    const formattedQuote = {
+      event_id: "$formatted-root:example.invalid",
+      sender: "@bob:example.invalid",
+      sender_label: "Bob",
+      body_preview: "fallback preview",
+      formatted: {
+        html: '<p>Opening</p><ul><li>one</li><li>two</li></ul><p><a href="https://example.com">link</a></p><pre><code class="language-rust">fn main() {}</code></pre>',
+        plain_text: "Openingonetwolinkfn main() {}",
+        code_blocks: [{ language: "rust", body: "fn main() {}" }]
+      },
+      state: "ready"
+    } as unknown as NonNullable<TimelineItem["reply_quote"]>;
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [
+          {
+            ...message("$formatted-reply", "Reply with a formatted quote"),
+            in_reply_to_event_id: "$formatted-root:example.invalid",
+            reply_quote: formattedQuote
+          }
+        ]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+          onOpenThread={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const row = screen.getByText("Reply with a formatted quote").closest("article");
+    expect(row).not.toBeNull();
+    const quote = row!.querySelector<HTMLElement>(".reply-quote");
+    expect(quote?.querySelector("ul")).not.toBeNull();
+    expect(quote?.querySelectorAll("li")).toHaveLength(2);
+    expect(quote?.querySelector('a[href="https://example.com/"]')).not.toBeNull();
+    expect(quote?.querySelector(".message-code-block-pre code")?.textContent).toBe(
+      "fn main() {}"
+    );
+    expect(quote?.textContent).not.toContain("fallback preview");
+  });
+
   it("does not expose reply actions for redacted, hidden, or bodyless rows", () => {
     const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
       InitialItems: {

@@ -120,8 +120,8 @@ pub use invite_workflow::{
 
 // ── Re-exports: room_interactions ──────────────────────────────────────────
 pub use room_interactions::{
-    PinOp, PinOperationState, PinnedEvent, PinnedEventState, ReplyQuote, ReplyQuoteState,
-    RoomInteractionState,
+    PinOp, PinOperationState, PinnedEvent, PinnedEventState, ReplyQuote, ReplyQuoteCodeBlock,
+    ReplyQuoteFormattedBody, ReplyQuoteState, RoomInteractionState,
 };
 
 // ── Re-exports: navigation ──────────────────────────────────────────────────

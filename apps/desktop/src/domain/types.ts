@@ -956,7 +956,19 @@ export interface ReplyQuote {
   sender: string | null;
   sender_label?: string | null;
   body_preview: string | null;
+  formatted?: ReplyQuoteFormattedBody | null;
   state: ReplyQuoteState;
+}
+
+export interface ReplyQuoteCodeBlock {
+  language: string | null;
+  body: string;
+}
+
+export interface ReplyQuoteFormattedBody {
+  html: string;
+  plain_text: string;
+  code_blocks: ReplyQuoteCodeBlock[];
 }
 
 export type ReplyQuoteState = "ready" | "redacted" | "missing" | "unsupported";

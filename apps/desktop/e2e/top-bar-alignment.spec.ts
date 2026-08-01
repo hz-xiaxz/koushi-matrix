@@ -72,3 +72,71 @@ test("every top-bar control shares one vertical center line", async ({ page }) =
   // but a larger drift would mean the two coordinate systems have diverged.
   expect(Math.abs(values[0]! - barCenter)).toBeLessThanOrEqual(0.5);
 });
+
+test("search scope selector fits Room/DM in English and Japanese", async ({ page }) => {
+  await gotoReadyShell(page);
+
+  const measureScope = async () =>
+    page.evaluate(() => {
+      const select = document.querySelector<HTMLSelectElement>(".scope-select");
+      if (!select) {
+        return null;
+      }
+      const label = [...select.options].find((option) => option.value === "currentRoom")?.text ?? "";
+      const style = getComputedStyle(select);
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) {
+        return null;
+      }
+      context.font = style.font;
+      const textWidth = context.measureText(label).width;
+      const rect = select.getBoundingClientRect();
+      const titlebar = document.querySelector<HTMLElement>(".titlebar")!;
+      return {
+        label,
+        width: rect.width,
+        requiredWidth: Math.ceil(textWidth + 48),
+        titlebarRight: titlebar.getBoundingClientRect().right,
+        selectRight: rect.right,
+        titlebarOverflow: titlebar.scrollWidth - titlebar.clientWidth,
+        viewportWidth: window.innerWidth
+      };
+    });
+
+  const english = await measureScope();
+  expect(english).not.toBeNull();
+  expect(english!.label).toBe("Room/DM");
+  expect(english!.width).toBeGreaterThanOrEqual(english!.requiredWidth);
+  expect(english!.selectRight).toBeLessThanOrEqual(english!.titlebarRight);
+  expect(english!.titlebarOverflow).toBeLessThanOrEqual(1);
+
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          locale_profile: {
+            ...snapshot.state.domain.locale_profile,
+            lang: "ja",
+            catalog_locale: "ja",
+            pseudo_locale: "none"
+          }
+        }
+      }
+    });
+    window.__harness.pushStateChanged();
+  });
+
+  await expect(page.locator(".scope-select option[value=currentRoom]")).toHaveText("ルーム/DM");
+  const japanese = await measureScope();
+  expect(japanese).not.toBeNull();
+  expect(japanese!.label).toBe("ルーム/DM");
+  expect(japanese!.width).toBeGreaterThanOrEqual(japanese!.requiredWidth);
+  expect(japanese!.selectRight).toBeLessThanOrEqual(japanese!.titlebarRight);
+  expect(japanese!.titlebarOverflow).toBeLessThanOrEqual(1);
+  expect(japanese!.selectRight).toBeLessThanOrEqual(japanese!.viewportWidth);
+});

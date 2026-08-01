@@ -175,7 +175,7 @@ describe("styles.css token system", () => {
   test("titlebar reserves visible room for Matrix connection status", () => {
     const titlebarBlock = selectorBlock(".titlebar");
     expect(titlebarBlock).toContain(
-      "grid-template-columns: minmax(220px, 1fr) 88px minmax(132px, max-content);"
+      "grid-template-columns: minmax(220px, 1fr) var(--search-scope-column) minmax(132px, max-content);"
     );
     expect(titlebarBlock).not.toContain(" 84px;");
     expect(css).not.toContain(".history");

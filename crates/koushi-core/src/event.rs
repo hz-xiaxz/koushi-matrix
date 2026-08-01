@@ -2678,6 +2678,11 @@ mod tests {
                 sender: Some("@bob:example.invalid".to_owned()),
                 sender_label: None,
                 body_preview: Some("quoted body".to_owned()),
+                formatted: Some(koushi_state::ReplyQuoteFormattedBody {
+                    html: "<p>quoted <strong>body</strong></p>".to_owned(),
+                    plain_text: "quoted body".to_owned(),
+                    code_blocks: Vec::new(),
+                }),
                 state: koushi_state::ReplyQuoteState::Ready,
             }),
             thread_root: None,
@@ -2706,6 +2711,11 @@ mod tests {
                 "sender": "@bob:example.invalid",
                 "sender_label": null,
                 "body_preview": "quoted body",
+                "formatted": {
+                    "html": "<p>quoted <strong>body</strong></p>",
+                    "plain_text": "quoted body",
+                    "code_blocks": []
+                },
                 "state": "ready"
             })
         );

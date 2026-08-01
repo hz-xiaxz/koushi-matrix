@@ -43,6 +43,7 @@
   --rail-item: #e9ecf1;
   --sidebar: #fafbfc;
   --surface: #ffffff;
+  --surface-raised: #ffffff;
   --surface-hover: #f2f4f6;
   --selected: #e9ecf0;
   --text: #171b21;
@@ -54,6 +55,7 @@
   --danger: #e5484d;
   --success: #1a9e6c;
   --warning: #c98a1b;
+  --shadow-lg: 0 18px 40px rgb(23 27 33 / 18%);
   --avatar-contrast: #ffffff;
   --avatar-1: #2d6fef;
   --avatar-2: #0c7d72;
@@ -94,6 +96,7 @@
   --workspace-badge-border-width: 2px;
   --workspace-mention-dot-size: 9px;
   --macos-traffic-light-inline-space: 96px;
+  --search-scope-column: 130px;
   --nav-badge-size: 18px;
   --nav-badge-padding-inline: 5px;
   --nav-badge-font-size: 11px;
@@ -220,6 +223,7 @@
     --rail-item: #23262b;
     --sidebar: #191c20;
     --surface: #1e2126;
+    --surface-raised: #292d34;
     --surface-hover: #26292f;
     --selected: #2a2e34;
     --text: #e6ecf5;
@@ -231,6 +235,7 @@
     --danger: #f2575c;
     --success: #34b988;
     --warning: #e0a53a;
+    --shadow-lg: 0 18px 40px rgb(0 0 0 / 42%);
     --avatar-contrast: #101214;
     --avatar-1: #5c8df6;
     --avatar-2: #35b1a2;
@@ -253,6 +258,7 @@
   --rail-item: #23262b;
   --sidebar: #191c20;
   --surface: #1e2126;
+  --surface-raised: #292d34;
   --surface-hover: #26292f;
   --selected: #2a2e34;
   --text: #e6ecf5;
@@ -264,6 +270,7 @@
   --danger: #f2575c;
   --success: #34b988;
   --warning: #e0a53a;
+  --shadow-lg: 0 18px 40px rgb(0 0 0 / 42%);
   --avatar-contrast: #101214;
   --avatar-1: #5c8df6;
   --avatar-2: #35b1a2;
@@ -578,7 +585,7 @@ button:disabled {
 .titlebar {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 88px minmax(132px, max-content);
+  grid-template-columns: minmax(220px, 1fr) var(--search-scope-column) minmax(132px, max-content);
   align-items: center;
   gap: 12px;
   padding: 0 14px;
@@ -684,7 +691,7 @@ button:disabled {
 
 .scope-select {
   height: 30px;
-  min-width: 82px;
+  min-width: var(--search-scope-column);
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--text);
@@ -3488,11 +3495,27 @@ button:disabled {
 
 .reply-quote-body {
   min-width: 0;
+  max-block-size: min(240px, 30vh);
+  overflow: auto;
   overflow-wrap: anywhere;
   color: var(--text);
   font-family: var(--font-message);
   font-size: 13px;
   line-height: 1.35;
+}
+
+.reply-quote-body > p:first-child,
+.reply-quote-body > ul:first-child,
+.reply-quote-body > ol:first-child,
+.reply-quote-body > pre:first-child {
+  margin-block-start: 0;
+}
+
+.reply-quote-body > p:last-child,
+.reply-quote-body > ul:last-child,
+.reply-quote-body > ol:last-child,
+.reply-quote-body > pre:last-child {
+  margin-block-end: 0;
 }
 
 .message-edit-form {
