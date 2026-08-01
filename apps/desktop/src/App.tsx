@@ -3103,6 +3103,7 @@ export function App() {
     spaceSettingsLoadRef.current = null;
     spaceMembersOpenRequestRef.current += 1;
     spaceMembersInviteRequestRef.current += 1;
+    spaceMembersCancelRequestRef.current += 1;
     setPeoplePanelScope(null);
     setSelectedProfileUserId(null);
     setRightPanelMode((mode) =>

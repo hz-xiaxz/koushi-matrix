@@ -425,6 +425,116 @@ describe("App Space Members integration", () => {
     expect(screen.queryByText("Invited Member")).toBeNull();
   });
 
+  test("does not apply or log a late cancellation completion after same-Space room navigation", async () => {
+    const api = createBrowserFakeApi();
+    const initial = await api.getSnapshot();
+    const staleResult = structuredClone(initial);
+    staleResult.state.domain.space_members.space_invited = [];
+    const pending = deferred<DesktopSnapshot>();
+    const cancelSpaceInvite = vi
+      .spyOn(api, "cancelSpaceInvite")
+      .mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+    });
+    await waitFor(() => expect(cancelSpaceInvite).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "planning-room" }).className).toContain(
+        "is-active"
+      );
+    });
+
+    await act(async () => {
+      pending.resolve(staleResult);
+      await pending.promise;
+    });
+
+    expect(screen.getByRole("button", { name: "planning-room" }).className).toContain(
+      "is-active"
+    );
+    await openSpaceMembersFromSidebar();
+    expect(screen.getByText("Invited Member")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Open diagnostics" }));
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Diagnostics" });
+    expect(dialog.textContent).not.toContain("cancel outcome=");
+  });
+
+  test("does not apply or log a late cancellation rejection after same-Space room navigation", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const cancelSpaceInvite = vi
+      .spyOn(api, "cancelSpaceInvite")
+      .mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+    });
+    await waitFor(() => expect(cancelSpaceInvite).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "planning-room" }).className).toContain(
+        "is-active"
+      );
+    });
+
+    await act(async () => {
+      pending.reject(new Error("stale cancellation rejection"));
+      await pending.promise.catch(() => undefined);
+    });
+
+    await openSpaceMembersFromSidebar();
+    expect(screen.getByText("Invited Member")).toBeTruthy();
+    expect(screen.queryByText("Could not cancel the invitation. Try again.")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Open diagnostics" }));
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Diagnostics" });
+    expect(dialog.textContent).not.toContain("cancel outcome=");
+  });
+
+  test("retries an invitation cancellation after a failed attempt", async () => {
+    const api = createBrowserFakeApi();
+    const cancelSpaceInvite = vi
+      .spyOn(api, "cancelSpaceInvite")
+      .mockRejectedValueOnce(new Error("first cancellation failure"));
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+    });
+    await waitFor(() => expect(cancelSpaceInvite).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Could not cancel the invitation. Try again."
+    );
+    expect(screen.getByText("Invited Member")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+    });
+    await waitFor(() => expect(cancelSpaceInvite).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText("Invited Member")).toBeNull());
+  });
+
   test("uses the same shared invite command from the child-only context menu", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
     const inviteUserToSpace = vi.spyOn(api, "inviteUserToSpace");
