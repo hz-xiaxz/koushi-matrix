@@ -294,7 +294,7 @@ function spaceInviteAvailabilityReasonForSnapshot(
     return "permission_denied";
   }
   const operation = snapshot.state.domain.space_members.operation.kind;
-  return operation === "loading" || operation === "inviting"
+  return operation === "loading" || operation === "inviting" || operation === "cancellingInvite"
     ? "operation_pending"
     : "available";
 }
@@ -4969,7 +4969,9 @@ export function App() {
     const members = currentSnapshot?.state.domain.space_members;
     const childOnlyEntry = members?.child_room_only.find((entry) => entry.user_id === userId);
     const operationPending =
-      members?.operation.kind === "loading" || members?.operation.kind === "inviting";
+      members?.operation.kind === "loading" ||
+      members?.operation.kind === "inviting" ||
+      members?.operation.kind === "cancellingInvite";
     const availabilityReason: SpaceInviteAvailabilityReason =
       !fence || !spaceMembersSnapshotMatches(currentSnapshot, fence)
         ? "settings_unavailable"

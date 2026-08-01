@@ -277,6 +277,46 @@ describe("BrowserFakeApi Space member audit", () => {
     expect(snapshot.state.domain.space_members.operation).toEqual({ kind: "idle" });
   });
 
+  test("rejects cancellation admission for a target absent from the invited projection", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+
+    const rejected = await api.cancelSpaceInvite(
+      spaceId,
+      "@missing:example.invalid",
+      1
+    );
+
+    expect(rejected).toEqual(before);
+    expect(rejected.state.domain.space_members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("reconciles a locally invited target that is already joined on the server", async () => {
+    const api = createBrowserFakeApi({
+      spaceMemberInviteCancellationOutcome: "notInvited"
+    });
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    const members = snapshot.state.domain.space_members;
+    const joinedEntry = members.space_joined.find(
+      (entry) => entry.user_id === "@invited:example.invalid"
+    );
+
+    expect(members.space_invited.map((entry) => entry.user_id)).not.toContain(
+      "@invited:example.invalid"
+    );
+    expect(joinedEntry).toMatchObject({
+      user_id: "@invited:example.invalid",
+      membership: "space_joined",
+      invite_pending: false
+    });
+    expect(members.operation).toEqual({ kind: "idle" });
+  });
+
   test("retains the invited fake member when cancellation transport rejects", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteCancellationOutcome: "failure" });
 
@@ -299,7 +339,7 @@ describe("BrowserFakeApi Space member audit", () => {
     });
   });
 
-  test("ignores a stale Space generation for fake cancellation", async () => {
+  test("rejects stale-generation cancellation admission without changing state", async () => {
     const api = createBrowserFakeApi();
     const before = await api.getSnapshot();
 

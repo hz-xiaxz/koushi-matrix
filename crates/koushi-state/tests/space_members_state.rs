@@ -129,17 +129,28 @@ fn invited_cancellation_is_fenced_and_settles_to_idle_after_removing_the_invite(
     assert_eq!(state.space_members.space_invited.len(), 1);
 
     let before_stale = state.clone();
-    for (request_id, space_id, generation) in [
-        (71, SPACE_ID.to_owned(), 2),
-        (72, "!other-space:example.invalid".to_owned(), 2),
-        (72, SPACE_ID.to_owned(), 1),
+    for (request_id, space_id, user_id, generation) in [
+        (71, SPACE_ID.to_owned(), USER_ID.to_owned(), 2),
+        (
+            72,
+            "!other-space:example.invalid".to_owned(),
+            USER_ID.to_owned(),
+            2,
+        ),
+        (
+            72,
+            SPACE_ID.to_owned(),
+            "@other-user:example.invalid".to_owned(),
+            2,
+        ),
+        (72, SPACE_ID.to_owned(), USER_ID.to_owned(), 1),
     ] {
         reduce(
             &mut state,
             AppAction::SpaceMemberInviteCancellationSettled {
                 request_id,
                 space_id,
-                user_id: USER_ID.to_owned(),
+                user_id,
                 generation,
                 outcome: SpaceMemberInviteOutcome::Cancelled,
             },

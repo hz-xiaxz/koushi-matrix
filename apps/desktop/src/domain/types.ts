@@ -729,6 +729,13 @@ export type SpaceMembersOperationState =
       generation: number;
     }
   | {
+      kind: "cancellingInvite";
+      request_id: number;
+      space_id: string;
+      user_id: string;
+      generation: number;
+    }
+  | {
       kind: "failed";
       request_id: number;
       space_id: string;

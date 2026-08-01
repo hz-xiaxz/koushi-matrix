@@ -289,6 +289,24 @@ describe("App Space Members integration", () => {
     expect(screen.queryByRole("list", { name: "Not in Space" })).toBeNull();
   });
 
+  test("treats a pending Space invite cancellation as an operation-pending invite state", async () => {
+    const api = createBrowserFakeApi({
+      spaceMemberInviteCancellationOutcome: "pending"
+    });
+    await api.cancelSpaceInvite(
+      "!space-alpha:example.invalid",
+      "@invited:example.invalid",
+      1
+    );
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    expect(
+      screen.getByRole("button", { name: "Invite to Space" }).hasAttribute("disabled")
+    ).toBe(true);
+  });
+
   test("uses the same shared invite command from the child-only context menu", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
     const inviteUserToSpace = vi.spyOn(api, "inviteUserToSpace");

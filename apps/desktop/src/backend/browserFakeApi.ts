@@ -86,20 +86,6 @@ import type {
   ComposerDraftScope
 } from "../domain/composerDraftLifecycle";
 
-type BrowserFakeSpaceMembersOperationState =
-  | SpaceMembersState["operation"]
-  | {
-      kind: "cancellingInvite";
-      request_id: number;
-      space_id: string;
-      user_id: string;
-      generation: number;
-    };
-
-type BrowserFakeSpaceMembersState = Omit<SpaceMembersState, "operation"> & {
-  operation: BrowserFakeSpaceMembersOperationState;
-};
-
 export interface DesktopApi {
   getSnapshot(): Promise<DesktopSnapshot>;
   getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot>;
@@ -430,7 +416,11 @@ export interface BrowserFakeApiOptions {
   restoreSession?: boolean;
   session?: "ready" | "signedOut" | "needsRecovery" | "locked";
   spaceMemberInviteOutcome?: "pending" | "success" | "failure";
-  spaceMemberInviteCancellationOutcome?: "pending" | "success" | "failure";
+  spaceMemberInviteCancellationOutcome?:
+    | "pending"
+    | "success"
+    | "failure"
+    | "notInvited";
 }
 
 export function createBrowserFakeApi(options: BrowserFakeApiOptions = {}): DesktopApi {
@@ -2686,7 +2676,7 @@ class BrowserFakeApi implements DesktopApi {
     }
 
     const normalizedSpaceId = spaceId.trim();
-    const current = this.snapshot.state.domain.space_members as BrowserFakeSpaceMembersState;
+    const current = this.snapshot.state.domain.space_members;
     if (
       (current.selected_space_id !== null &&
         (current.selected_space_id !== normalizedSpaceId || current.generation !== generation)) ||
@@ -2728,7 +2718,7 @@ class BrowserFakeApi implements DesktopApi {
 
     const normalizedSpaceId = spaceId.trim();
     const normalizedUserId = userId.trim();
-    const current = this.snapshot.state.domain.space_members as BrowserFakeSpaceMembersState;
+    const current = this.snapshot.state.domain.space_members;
     const childOnly = current.child_room_only.find(
       (entry) => entry.user_id === normalizedUserId
     );
@@ -2815,13 +2805,20 @@ class BrowserFakeApi implements DesktopApi {
 
     const normalizedSpaceId = spaceId.trim();
     const normalizedUserId = userId.trim();
-    const current = this.snapshot.state.domain.space_members as BrowserFakeSpaceMembersState;
+    const current = this.snapshot.state.domain.space_members;
     if (
       current.selected_space_id !== normalizedSpaceId ||
-      current.generation !== generation ||
-      current.operation.kind !== "idle" ||
-      !current.space_invited.some((entry) => entry.user_id === normalizedUserId)
+      current.generation !== generation
     ) {
+      return this.getSnapshot();
+    }
+    if (current.operation.kind !== "idle") {
+      return this.getSnapshot();
+    }
+    const invitedEntry = current.space_invited.find(
+      (entry) => entry.user_id === normalizedUserId
+    );
+    if (!invitedEntry) {
       return this.getSnapshot();
     }
 
@@ -2835,13 +2832,13 @@ class BrowserFakeApi implements DesktopApi {
         user_id: normalizedUserId,
         generation
       }
-    } as unknown as SpaceMembersState;
+    };
 
     if (this.spaceMemberInviteCancellationOutcome === "pending") {
       return this.getSnapshot();
     }
 
-    const active = this.snapshot.state.domain.space_members as unknown as BrowserFakeSpaceMembersState;
+    const active = this.snapshot.state.domain.space_members;
     if (this.spaceMemberInviteCancellationOutcome === "success") {
       this.snapshot.state.domain.space_members = {
         ...active,
@@ -2849,7 +2846,23 @@ class BrowserFakeApi implements DesktopApi {
           (entry) => entry.user_id !== normalizedUserId
         ),
         operation: { kind: "idle" }
-      } as unknown as SpaceMembersState;
+      };
+    } else if (this.spaceMemberInviteCancellationOutcome === "notInvited") {
+      this.snapshot.state.domain.space_members = {
+        ...active,
+        space_invited: active.space_invited.filter(
+          (entry) => entry.user_id !== normalizedUserId
+        ),
+        space_joined: [
+          ...active.space_joined,
+          {
+            ...invitedEntry,
+            membership: "space_joined" as const,
+            invite_pending: false
+          }
+        ].sort(compareSpaceMemberEntries),
+        operation: { kind: "idle" }
+      };
     } else {
       this.snapshot.state.domain.space_members = {
         ...active,
@@ -2861,7 +2874,7 @@ class BrowserFakeApi implements DesktopApi {
           generation,
           failureKind: "sdk"
         }
-      } as unknown as SpaceMembersState;
+      };
     }
 
     return this.getSnapshot();

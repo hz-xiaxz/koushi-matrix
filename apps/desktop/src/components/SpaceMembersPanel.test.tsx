@@ -486,6 +486,34 @@ describe("SpaceMembersPanel", () => {
     ).toBe(true);
   });
 
+  it("treats a Rust-owned invite cancellation as a pending operation", () => {
+    const pendingOperation: SpaceMembersState["operation"] = {
+      kind: "cancellingInvite",
+      request_id: 10,
+      space_id: "!space:example.invalid",
+      user_id: "@bob:example.invalid",
+      generation: 4
+    };
+    const diagnostics: string[] = [];
+
+    render(
+      <SpaceMembersPanel
+        state={state({ operation: pendingOperation })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onDiagnostic={(message) => diagnostics.push(message)}
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Invite to Space" }).hasAttribute("disabled")
+    ).toBe(true);
+    expect(diagnostics.some((message) => message.includes("availability_reason=operation_pending"))).toBe(
+      true
+    );
+  });
+
   it("disables the in-flight invite target from state even without an entry flag", () => {
     const invitingState = state({
       operation: {

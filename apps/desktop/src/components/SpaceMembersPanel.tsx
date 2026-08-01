@@ -64,7 +64,11 @@ function matchesSearch(entry: SpaceMemberEntry, query: string): boolean {
 }
 
 function hasPendingOperation(state: SpaceMembersState): boolean {
-  return state.operation.kind === "loading" || state.operation.kind === "inviting";
+  return (
+    state.operation.kind === "loading" ||
+    state.operation.kind === "inviting" ||
+    state.operation.kind === "cancellingInvite"
+  );
 }
 
 function inviteIsDisabled(
