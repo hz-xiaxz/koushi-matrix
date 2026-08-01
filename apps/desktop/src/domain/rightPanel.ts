@@ -21,6 +21,7 @@ export type RightPanelContextMenuTarget =
   | { kind: "message"; roomId: string; eventId: string }
   | { kind: "room"; roomId: string }
   | { kind: "space"; spaceId: string }
+  | { kind: "spaceMember"; spaceId: string; userId: string; generation: number }
   | { kind: "account" };
 
 export interface RightPanelIntent {

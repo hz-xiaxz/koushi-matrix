@@ -52,6 +52,374 @@ function receipt(
   };
 }
 
+describe("BrowserFakeApi Space member audit", () => {
+  const spaceId = "!space-alpha:example.invalid";
+  const childOnlyUserId = "@child-only:example.invalid";
+
+  test("starts with joined, invited, child-only, and incomplete fixtures", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.getSnapshot();
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.selected_space_id).toBe(spaceId);
+    expect(members.space_joined.map((entry) => entry.user_id)).toContain(
+      "@joined:example.invalid"
+    );
+    expect(members.space_invited.map((entry) => entry.user_id)).toContain(
+      "@invited:example.invalid"
+    );
+    expect(members.child_room_only.map((entry) => entry.user_id)).toContain(
+      childOnlyUserId
+    );
+    expect(members.child_room_count).toBe(2);
+    expect(members.complete_child_room_count).toBe(1);
+    expect(members.incomplete_child_room_count).toBe(1);
+  });
+
+  test("loads the requested Space generation and preserves classified sections", async () => {
+    const api = createBrowserFakeApi();
+
+    const snapshot = await api.loadSpaceMembers(spaceId, 1);
+
+    expect(snapshot.state.domain.space_members).toMatchObject({
+      selected_space_id: spaceId,
+      generation: 1,
+      operation: { kind: "idle" },
+      space_joined: expect.any(Array),
+      space_invited: expect.any(Array),
+      child_room_only: expect.any(Array)
+    });
+  });
+
+  test("ignores a load from the wrong Space without changing the active projection", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+
+    const after = await api.loadSpaceMembers("!space-beta:example.invalid", 1);
+
+    expect(after).toEqual(before);
+  });
+
+  test("ignores a stale or future generation without changing the active projection", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+
+    const stale = await api.loadSpaceMembers(spaceId, 0);
+    const future = await api.loadSpaceMembers(spaceId, 2);
+
+    expect(stale).toEqual(before);
+    expect(future).toEqual(before);
+  });
+
+  test("loads only the active Space and permits its initial load when selection is unset", async () => {
+    const api = createBrowserFakeApi();
+    const initial = await api.getSnapshot();
+    const mutable = api as unknown as { snapshot: DesktopSnapshot };
+    mutable.snapshot.state.domain.space_members = {
+      ...initial.state.domain.space_members,
+      selected_space_id: null,
+      operation: { kind: "idle" }
+    };
+
+    const rejected = await api.loadSpaceMembers("!space-beta:example.invalid", 99);
+    expect(rejected.state.domain.space_members.selected_space_id).toBeNull();
+
+    const snapshot = await api.loadSpaceMembers(spaceId, 99);
+
+    expect(snapshot.state.domain.space_members).toMatchObject({
+      selected_space_id: spaceId,
+      generation: 99
+    });
+  });
+
+  test("does not let a late load completion clear a newer member operation", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
+    const initial = await api.getSnapshot();
+    const childOnly = initial.state.domain.space_members.child_room_only[0];
+    expect(childOnly).toBeDefined();
+
+    const staleLoad = api.loadSpaceMembers(spaceId, 1);
+    void api.selectSpace(null);
+    void api.selectSpace(spaceId);
+
+    const mutable = api as unknown as { snapshot: DesktopSnapshot };
+    const currentMembers = mutable.snapshot.state.domain.space_members;
+    mutable.snapshot.state.domain.space_members = {
+      ...currentMembers,
+      child_room_only: [childOnly!],
+      operation: { kind: "idle" }
+    };
+    const newerInvite = api.inviteUserToSpace(spaceId, childOnly!.user_id, currentMembers.generation);
+
+    const snapshot = await staleLoad;
+    await newerInvite;
+
+    expect(snapshot.state.domain.space_members.operation).toMatchObject({
+      kind: "inviting",
+      space_id: spaceId,
+      user_id: childOnly!.user_id,
+      generation: currentMembers.generation
+    });
+  });
+
+  test("exposes room-scoped profile cache entries in the snapshot contract", async () => {
+    const api = createBrowserFakeApi();
+    const profile = (await api.getSnapshot()).state.domain.profile;
+
+    expect(profile.room_users).toEqual({});
+  });
+
+  test("does not replace an in-flight invite with a load operation", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
+    const before = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+
+    const after = await api.loadSpaceMembers(spaceId, 1);
+
+    expect(after).toEqual(before);
+  });
+
+  test("switching Spaces fences and clears the previous member projection", async () => {
+    const api = createBrowserFakeApi();
+
+    const snapshot = await api.selectSpace("!space-beta:example.invalid");
+
+    expect(snapshot.state.domain.space_members).toMatchObject({
+      selected_space_id: "!space-beta:example.invalid",
+      generation: 2,
+      space_joined: [],
+      space_invited: [],
+      child_room_only: [],
+      operation: { kind: "idle" }
+    });
+  });
+
+  test("keeps an invite in the pending operation state when settlement is deferred", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
+
+    const snapshot = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.child_room_only.map((entry) => entry.user_id)).not.toContain(
+      childOnlyUserId
+    );
+    expect(members.space_invited).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          user_id: childOnlyUserId,
+          invite_pending: true,
+          membership: "space_invited"
+        })
+      ])
+    );
+    expect(members.operation).toMatchObject({
+      kind: "inviting",
+      space_id: spaceId,
+      user_id: childOnlyUserId,
+      generation: 1
+    });
+  });
+
+  test("settles a successful fake invite as a non-pending Space invitation", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "success" });
+
+    const snapshot = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.space_invited).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          user_id: childOnlyUserId,
+          invite_pending: false,
+          membership: "space_invited"
+        })
+      ])
+    );
+    expect(members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("returns a failed fake invite to the child-only section", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "failure" });
+
+    const snapshot = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.child_room_only.map((entry) => entry.user_id)).toContain(
+      childOnlyUserId
+    );
+    expect(members.space_invited.map((entry) => entry.user_id)).not.toContain(
+      childOnlyUserId
+    );
+    expect(members.operation).toMatchObject({
+      kind: "failed",
+      space_id: spaceId,
+      user_id: childOnlyUserId,
+      generation: 1,
+      failureKind: "sdk"
+    });
+  });
+
+  test("cancels an invited fake Space member and settles idle", async () => {
+    const api = createBrowserFakeApi();
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.space_invited.map((entry) => entry.user_id)).not.toContain(
+      "@invited:example.invalid"
+    );
+    expect(members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("keeps the fake cancellation operation fenced while settlement is pending", async () => {
+    const api = createBrowserFakeApi({
+      spaceMemberInviteCancellationOutcome: "pending"
+    });
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+
+    expect(snapshot.state.domain.space_members.operation).toMatchObject({
+      kind: "cancellingInvite",
+      space_id: spaceId,
+      user_id: "@invited:example.invalid",
+      generation: 1
+    });
+    expect(snapshot.state.domain.space_members.space_invited).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          user_id: "@invited:example.invalid",
+          membership: "space_invited"
+        })
+      ])
+    );
+  });
+
+  test("does not cancel a joined or non-invited fake Space member", async () => {
+    const api = createBrowserFakeApi();
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@joined:example.invalid",
+      1
+    );
+
+    expect(snapshot.state.domain.space_members.space_joined.map((entry) => entry.user_id)).toContain(
+      "@joined:example.invalid"
+    );
+    expect(snapshot.state.domain.space_members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("rejects cancellation admission for a target absent from the invited projection", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+
+    const rejected = await api.cancelSpaceInvite(
+      spaceId,
+      "@missing:example.invalid",
+      1
+    );
+
+    expect(rejected).toEqual(before);
+    expect(rejected.state.domain.space_members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("reconciles a locally invited target that is already joined on the server", async () => {
+    const api = createBrowserFakeApi({
+      spaceMemberInviteCancellationOutcome: "notInvited"
+    });
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    const members = snapshot.state.domain.space_members;
+    const joinedEntry = members.space_joined.find(
+      (entry) => entry.user_id === "@invited:example.invalid"
+    );
+
+    expect(members.space_invited.map((entry) => entry.user_id)).not.toContain(
+      "@invited:example.invalid"
+    );
+    expect(joinedEntry).toMatchObject({
+      user_id: "@invited:example.invalid",
+      membership: "space_joined",
+      invite_pending: false
+    });
+    expect(members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("retains the invited fake member when cancellation transport rejects", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteCancellationOutcome: "failure" });
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.space_invited.map((entry) => entry.user_id)).toContain(
+      "@invited:example.invalid"
+    );
+    expect(members.operation).toMatchObject({
+      kind: "failed",
+      space_id: spaceId,
+      user_id: "@invited:example.invalid",
+      generation: 1,
+      failureKind: "sdk"
+    });
+  });
+
+  test("retries a failed cancellation through the fake transport for the exact context", async () => {
+    const api = createBrowserFakeApi({
+      spaceMemberInviteCancellationOutcomes: ["failure", "success"]
+    });
+
+    const failed = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    expect(failed.state.domain.space_members.operation).toMatchObject({
+      kind: "failed",
+      space_id: spaceId,
+      user_id: "@invited:example.invalid",
+      generation: 1
+    });
+
+    const retried = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    expect(retried.state.domain.space_members.space_invited.map((entry) => entry.user_id)).not.toContain(
+      "@invited:example.invalid"
+    );
+    expect(retried.state.domain.space_members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("rejects stale-generation cancellation admission without changing state", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+
+    const stale = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      0
+    );
+
+    expect(stale).toEqual(before);
+  });
+});
+
 describe("BrowserFakeApi settings preview", () => {
   test("verification retries clear the completed attempt failure", async () => {
     for (const method of ["existingDeviceSas", "recoveryKey"] as const) {
@@ -1433,6 +1801,7 @@ describe("BrowserFakeApi settings preview", () => {
           can_edit_roles: true,
           can_kick: true,
           can_ban: true,
+          can_invite: true,
           can_unban: true
         }
       },
@@ -1458,7 +1827,8 @@ describe("BrowserFakeApi settings preview", () => {
     );
     expect(moderated.state.domain.room_management.operation).toEqual({ kind: "idle" });
 
-    await api.loadRoomSettings("!readonly-room:browser.fake");
+    const readonly = await api.loadRoomSettings("!readonly-room:browser.fake");
+    expect(readonly.state.domain.room_management.settings?.permissions.can_invite).toBe(false);
     const guarded = await api.moderateRoomMember(
       "!readonly-room:browser.fake",
       "@target:browser.fake",

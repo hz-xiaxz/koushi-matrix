@@ -38,11 +38,13 @@ pub(crate) fn handle_own_profile_updated(
         &state.profile,
         own_user_id.as_deref(),
     );
+    let space_members_changed = super::space_members::refresh_member_display_projection(state);
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
         live_signals_changed,
+        space_members_changed,
     )
 }
 
@@ -67,7 +69,24 @@ pub(crate) fn handle_user_profiles_updated(
     for profile in profiles_map.values_mut() {
         super::avatar::preserve_avatar_thumbnail(&known, &mut profile.avatar);
     }
-    state.profile.users.extend(profiles_map);
+    for (user_id, mut profile) in profiles_map {
+        if let Some(existing) = state.profile.users.get_mut(&user_id) {
+            if profile
+                .display_name
+                .as_deref()
+                .is_none_or(|display_name| display_name.trim().is_empty())
+            {
+                profile.display_name = existing.display_name.clone();
+            }
+            if profile.avatar.is_none() {
+                profile.avatar = existing.avatar.clone();
+            }
+            existing.display_name = profile.display_name;
+            existing.avatar = profile.avatar;
+        } else {
+            state.profile.users.insert(user_id, profile);
+        }
+    }
     crate::state::refresh_profile_user_display_projection(
         &mut state.profile,
         own_user_id.as_deref(),
@@ -83,11 +102,13 @@ pub(crate) fn handle_user_profiles_updated(
         &state.profile,
         own_user_id.as_deref(),
     );
+    let space_members_changed = super::space_members::refresh_member_display_projection(state);
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
         live_signals_changed,
+        space_members_changed,
     )
 }
 
@@ -123,11 +144,13 @@ pub(crate) fn handle_local_user_aliases_loaded(
         &state.profile,
         own_user_id.as_deref(),
     );
+    let space_members_changed = super::space_members::refresh_member_display_projection(state);
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
         live_signals_changed,
+        space_members_changed,
     )
 }
 
@@ -164,11 +187,13 @@ pub(crate) fn handle_local_user_alias_update_requested(
         &state.profile,
         own_user_id.as_deref(),
     );
+    let space_members_changed = super::space_members::refresh_member_display_projection(state);
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
         live_signals_changed,
+        space_members_changed,
     )
 }
 
@@ -363,11 +388,13 @@ pub(crate) fn handle_profile_update_succeeded(
         &state.profile,
         own_user_id.as_deref(),
     );
+    let space_members_changed = super::space_members::refresh_member_display_projection(state);
     profile_changed_effects(
         room_members_changed,
         room_list_changed,
         native_attention_changed,
         live_signals_changed,
+        space_members_changed,
     )
 }
 

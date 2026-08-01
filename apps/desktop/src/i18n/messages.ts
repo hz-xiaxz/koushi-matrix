@@ -981,6 +981,27 @@ export type MessageId =
   | "workspace.threads"
   | "workspace.userSettings"
   | "workspace.workspaces"
+  | "spaceMembers.title"
+  | "spaceMembers.search"
+  | "spaceMembers.navLabel"
+  | "spaceMembers.navCount"
+  | "spaceMembers.navAccessible"
+  | "spaceMembers.joinedCount"
+  | "spaceMembers.sectionJoined"
+  | "spaceMembers.sectionInvited"
+  | "spaceMembers.sectionChildOnly"
+  | "spaceMembers.childRoomContext"
+  | "spaceMembers.childRoomCountOne"
+  | "spaceMembers.childRoomCount"
+  | "spaceMembers.invite"
+  | "spaceMembers.invitePending"
+  | "spaceMembers.inviteFailed"
+  | "spaceMembers.cancelInvite"
+  | "spaceMembers.cancelInvitePending"
+  | "spaceMembers.cancelInviteFailed"
+  | "spaceMembers.loadFailed"
+  | "spaceMembers.syncIncomplete"
+  | "spaceMembers.noResults"
   | "threads.empty"
   | "threads.error"
   | "threads.loading"
@@ -2134,6 +2155,27 @@ const en: Catalog = {
   "workspace.threads": "Threads",
   "workspace.userSettings": "User settings",
   "workspace.workspaces": "Workspaces",
+  "spaceMembers.title": "Space members",
+  "spaceMembers.search": "Search space members",
+  "spaceMembers.navLabel": "Members",
+  "spaceMembers.navCount": "{joined} · +{childOnly}",
+  "spaceMembers.navAccessible": "Members, {joined} joined, {childOnly} only in child rooms",
+  "spaceMembers.joinedCount": "{count} joined members",
+  "spaceMembers.sectionJoined": "Space members",
+  "spaceMembers.sectionInvited": "Invitation pending",
+  "spaceMembers.sectionChildOnly": "Not in Space",
+  "spaceMembers.childRoomContext": "In child rooms: {rooms}",
+  "spaceMembers.childRoomCountOne": "In {count} child room",
+  "spaceMembers.childRoomCount": "In {count} child rooms",
+  "spaceMembers.invite": "Invite to Space",
+  "spaceMembers.invitePending": "Invitation pending",
+  "spaceMembers.inviteFailed": "Invite failed. Try again.",
+  "spaceMembers.cancelInvite": "Cancel invitation",
+  "spaceMembers.cancelInvitePending": "Cancelling…",
+  "spaceMembers.cancelInviteFailed": "Could not cancel the invitation. Try again.",
+  "spaceMembers.loadFailed": "Member load failed. Try again.",
+  "spaceMembers.syncIncomplete": "Some child rooms are still syncing",
+  "spaceMembers.noResults": "No space members found",
   "threads.empty": "No threads",
   "threads.error": "Could not load threads",
   "threads.loading": "Loading threads…",
@@ -3172,6 +3214,27 @@ const ja: Catalog = {
   "workspace.threads": "スレッド",
   "workspace.userSettings": "ユーザー設定",
   "workspace.workspaces": "ワークスペース",
+  "spaceMembers.title": "スペースのメンバー",
+  "spaceMembers.search": "スペースのメンバーを検索",
+  "spaceMembers.navLabel": "メンバー",
+  "spaceMembers.navCount": "参加 {joined} 人 · +{childOnly}",
+  "spaceMembers.navAccessible": "メンバー、参加 {joined} 人、子ルームのみ {childOnly} 人",
+  "spaceMembers.joinedCount": "参加メンバー {count} 人",
+  "spaceMembers.sectionJoined": "スペースのメンバー",
+  "spaceMembers.sectionInvited": "招待保留",
+  "spaceMembers.sectionChildOnly": "スペース未参加",
+  "spaceMembers.childRoomContext": "参加中の子ルーム: {rooms}",
+  "spaceMembers.childRoomCountOne": "参加中の子ルーム {count} 個",
+  "spaceMembers.childRoomCount": "参加中の子ルーム {count} 個",
+  "spaceMembers.invite": "スペースに招待",
+  "spaceMembers.invitePending": "招待保留",
+  "spaceMembers.inviteFailed": "招待に失敗しました。もう一度お試しください。",
+  "spaceMembers.cancelInvite": "招待を取り消す",
+  "spaceMembers.cancelInvitePending": "取消中…",
+  "spaceMembers.cancelInviteFailed": "招待を取り消せませんでした。もう一度お試しください。",
+  "spaceMembers.loadFailed": "メンバーの読み込みに失敗しました。もう一度お試しください。",
+  "spaceMembers.syncIncomplete": "一部の子ルームを同期中です",
+  "spaceMembers.noResults": "スペースのメンバーが見つかりません",
   "threads.empty": "スレッドがありません",
   "threads.error": "スレッドを読み込めませんでした",
   "threads.loading": "スレッドを読み込み中…",

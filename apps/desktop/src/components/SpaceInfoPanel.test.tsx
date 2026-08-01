@@ -153,6 +153,7 @@ describe("SpaceInfoPanel", () => {
             permissions: {
               can_edit_settings: false,
               can_edit_roles: false,
+              can_invite: false,
               can_kick: false,
               can_ban: false,
               can_unban: false

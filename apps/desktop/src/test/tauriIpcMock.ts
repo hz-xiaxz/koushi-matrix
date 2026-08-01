@@ -212,6 +212,7 @@ function defaultSnapshotResponse() {
       profile: {
         own: { display_name: null, avatar: null },
         users: {},
+        room_users: {},
         local_aliases: {},
         local_alias_update: { kind: "idle" },
         ignored_user_ids: [],

@@ -84,6 +84,10 @@ pub enum AvatarThumbnailFailureKind {
 pub struct ProfileState {
     pub own: OwnProfile,
     pub users: BTreeMap<String, UserProfile>,
+    /// Local-only member observations keyed by relevant room, used for
+    /// people-facing receipt/Seen labels before the account-wide cache.
+    #[serde(default)]
+    pub room_users: BTreeMap<String, BTreeMap<String, UserProfile>>,
     #[serde(default)]
     pub local_aliases: BTreeMap<String, String>,
     #[serde(default)]
@@ -102,6 +106,11 @@ impl fmt::Debug for ProfileState {
             .field("has_own_display_name", &self.own.display_name.is_some())
             .field("has_own_avatar", &self.own.avatar.is_some())
             .field("user_count", &self.users.len())
+            .field("room_profile_room_count", &self.room_users.len())
+            .field(
+                "room_profile_observation_count",
+                &self.room_users.values().map(BTreeMap::len).sum::<usize>(),
+            )
             .field("local_alias_count", &self.local_aliases.len())
             .field("local_alias_update", &self.local_alias_update)
             .field("ignored_user_count", &self.ignored_user_ids.len())
@@ -128,6 +137,98 @@ pub struct UserProfile {
     #[serde(default)]
     pub mention_search_terms: Vec<String>,
     pub avatar: Option<AvatarImage>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileResolutionSource {
+    LocalAlias,
+    RelevantRoom,
+    SpaceRoom,
+    Payload,
+    GlobalCache,
+    LocalHomeserver,
+    Unresolved,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct ProfileResolutionInput<'a> {
+    pub local_alias: Option<&'a str>,
+    pub relevant_room_label: Option<&'a str>,
+    pub space_room_label: Option<&'a str>,
+    pub payload_label: Option<&'a str>,
+    pub cached_label: Option<&'a str>,
+    pub local_homeserver_label: Option<&'a str>,
+}
+
+impl fmt::Debug for ProfileResolutionInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProfileResolutionInput")
+            .field("has_local_alias", &self.local_alias.is_some())
+            .field(
+                "has_relevant_room_label",
+                &self.relevant_room_label.is_some(),
+            )
+            .field("has_space_room_label", &self.space_room_label.is_some())
+            .field("has_payload_label", &self.payload_label.is_some())
+            .field("has_cached_label", &self.cached_label.is_some())
+            .field(
+                "has_local_homeserver_label",
+                &self.local_homeserver_label.is_some(),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct ProfileResolution {
+    pub label: String,
+    pub source: ProfileResolutionSource,
+}
+
+impl fmt::Debug for ProfileResolution {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProfileResolution")
+            .field("has_label", &!self.label.is_empty())
+            .field("source", &self.source)
+            .finish()
+    }
+}
+
+/// Resolve a people-facing label in the same order for Space members and
+/// receipt/Seen fallbacks. Room observations are deliberately ahead of the
+/// account cache; aliases always win and an unresolved person gets a stable
+/// localized-surface fallback token rather than an MXID.
+pub fn resolve_people_label(input: ProfileResolutionInput<'_>) -> ProfileResolution {
+    [
+        (ProfileResolutionSource::LocalAlias, input.local_alias),
+        (
+            ProfileResolutionSource::RelevantRoom,
+            input.relevant_room_label,
+        ),
+        (ProfileResolutionSource::SpaceRoom, input.space_room_label),
+        (ProfileResolutionSource::Payload, input.payload_label),
+        (ProfileResolutionSource::GlobalCache, input.cached_label),
+        (
+            ProfileResolutionSource::LocalHomeserver,
+            input.local_homeserver_label,
+        ),
+    ]
+    .into_iter()
+    .find_map(|(source, label)| {
+        label
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .map(|label| ProfileResolution {
+                label: label.to_owned(),
+                source,
+            })
+    })
+    .unwrap_or(ProfileResolution {
+        label: "Unknown user".to_owned(),
+        source: ProfileResolutionSource::Unresolved,
+    })
 }
 
 impl fmt::Debug for UserProfile {

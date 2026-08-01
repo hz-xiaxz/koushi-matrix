@@ -14,6 +14,46 @@ export interface AvatarThumbnailRequestPlan {
   retryCounts: Map<string, number>;
 }
 
+/**
+ * Request a thumbnail discovered by a visible member row through App-owned
+ * request state. Member rows are mounted and unmounted as filters change, so
+ * their local observer guard cannot prevent a second concurrent request.
+ */
+export function requestAvatarThumbnailWithDedupe(
+  mxcUri: string,
+  requestedMxcUris: ReadonlySet<string>,
+  memberRequestedMxcUris: Set<string>,
+  retryCounts: Map<string, number>,
+  request: ((mxcUri: string) => Promise<void>) | undefined,
+  maxAttempts = MAX_AVATAR_THUMBNAIL_ATTEMPTS
+): Promise<void> {
+  const normalizedMxcUri = mxcUri.trim();
+  if (
+    !normalizedMxcUri ||
+    !request ||
+    requestedMxcUris.has(normalizedMxcUri) ||
+    memberRequestedMxcUris.has(normalizedMxcUri)
+  ) {
+    return Promise.resolve();
+  }
+
+  const attempts = retryCounts.get(normalizedMxcUri) ?? 0;
+  if (attempts >= maxAttempts) {
+    return Promise.resolve();
+  }
+
+  memberRequestedMxcUris.add(normalizedMxcUri);
+  retryCounts.set(normalizedMxcUri, attempts + 1);
+  try {
+    return Promise.resolve(request(normalizedMxcUri)).catch(() => {
+      memberRequestedMxcUris.delete(normalizedMxcUri);
+    });
+  } catch {
+    memberRequestedMxcUris.delete(normalizedMxcUri);
+    return Promise.resolve();
+  }
+}
+
 interface AvatarThumbnailRequestCandidate {
   mxcUri: string;
   thumbnail: AvatarThumbnailState;

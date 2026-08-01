@@ -149,6 +149,7 @@ pub enum UiEvent {
     ProfileChanged,
     SyncModeChanged,
     RoomListChanged,
+    SpaceMembersChanged,
     TimelineChanged { room_id: String },
     ThreadChanged,
     ThreadsListChanged,

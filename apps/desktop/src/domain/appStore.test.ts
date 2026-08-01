@@ -815,11 +815,23 @@ function makeSnapshot(): DesktopSnapshot {
               avatar: null
             }
           },
+          room_users: {},
           local_aliases: {},
           local_alias_update: { kind: "idle" },
           ignored_user_ids: [],
           ignored_user_update: { kind: "idle" },
           update: { kind: "idle" }
+        },
+        space_members: {
+          selected_space_id: null,
+          generation: 0,
+          space_joined: [],
+          space_invited: [],
+          child_room_only: [],
+          child_room_count: 0,
+          complete_child_room_count: 0,
+          incomplete_child_room_count: 0,
+          operation: { kind: "idle" }
         },
         sync: "running",
         sync_mode: { kind: "unsupported" },

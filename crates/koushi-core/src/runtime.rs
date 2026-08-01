@@ -22,10 +22,13 @@ use koushi_state::{
     ActivityRowKind, ActivityState, ActivityStream, ActivityTab, AppAction, AppEffect, AppState,
     ComposerDraftProtection, ComposerDraftRevision, ComposerDraftStore, ComposerTarget,
     FocusedContextState, LoginAttemptId, NavigationState, OperationFailureKind,
-    ProfileUpdateRequest, RoomLatestEventSummary, RoomNotificationMode, RoomSummary,
-    ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, ScheduledSendStore,
-    SearchScope as AppSearchScope, SessionState, SpaceSummary, SubmissionId, ThreadPaneState,
-    UiEvent, reduce, room_activity_unread_count,
+    ProfileResolutionInput, ProfileResolutionSource, ProfileUpdateRequest, RoomLatestEventSummary,
+    RoomNotificationMode, RoomSummary, ScheduledSendCapability, ScheduledSendHandle,
+    ScheduledSendItem, ScheduledSendStore, SearchScope as AppSearchScope, SessionState,
+    SpaceMemberEntry, SpaceMemberMembership, SpaceMembersCommandRejection, SpaceSummary,
+    SubmissionId, ThreadPaneState, UiEvent, UserProfile, admit_space_member_cancellation,
+    admit_space_member_invite, admit_space_members_load, reduce, resolve_people_label,
+    room_activity_unread_count,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -83,7 +86,7 @@ fn record_activity_transition(
 }
 
 use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
+use crate::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
 use crate::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 use crate::settings::SettingsStore;
 use crate::state_delta::build_state_delta;
@@ -170,6 +173,398 @@ fn app_loop_trace(arm: &'static str, count: u32, clone_ms: u128, total: std::tim
     );
 }
 
+fn record_space_member_command_rejection(
+    trigger: &'static str,
+    rejection: SpaceMembersCommandRejection,
+) {
+    let reason = match rejection {
+        SpaceMembersCommandRejection::NoSelectedSpace => "no_selected_space",
+        SpaceMembersCommandRejection::WrongSpace => "wrong_space",
+        SpaceMembersCommandRejection::StaleGeneration => "stale_generation",
+        SpaceMembersCommandRejection::InviteAlreadyInFlight => "invite_already_in_flight",
+        SpaceMembersCommandRejection::CancellationAlreadyInFlight => {
+            "cancellation_already_in_flight"
+        }
+        SpaceMembersCommandRejection::LoadBlockedByInvite => "load_blocked_by_invite",
+        SpaceMembersCommandRejection::AlreadyJoined => "already_joined",
+        SpaceMembersCommandRejection::AlreadyInvited => "already_invited",
+        SpaceMembersCommandRejection::NotInvited => "not_invited",
+        SpaceMembersCommandRejection::NotChildRoomOnly => "not_child_room_only",
+    };
+    let outcome = match rejection {
+        SpaceMembersCommandRejection::StaleGeneration => "stale_generation",
+        SpaceMembersCommandRejection::InviteAlreadyInFlight
+        | SpaceMembersCommandRejection::CancellationAlreadyInFlight
+        | SpaceMembersCommandRejection::AlreadyJoined
+        | SpaceMembersCommandRejection::AlreadyInvited => "duplicate",
+        SpaceMembersCommandRejection::NoSelectedSpace
+        | SpaceMembersCommandRejection::WrongSpace
+        | SpaceMembersCommandRejection::LoadBlockedByInvite
+        | SpaceMembersCommandRejection::NotInvited
+        | SpaceMembersCommandRejection::NotChildRoomOnly => "rejected",
+    };
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.space_members_projection",
+            "command_rejected",
+        )
+        .field(DiagnosticField::token("trigger", trigger))
+        .field(DiagnosticField::token("reason", reason))
+        .field(DiagnosticField::token("outcome", outcome))
+        .field(DiagnosticField::count("rejection_count", 1)),
+    );
+}
+
+pub(crate) fn space_member_forward_failure_action(
+    command: &crate::command::RoomCommand,
+) -> Option<(RequestId, AppAction)> {
+    match command {
+        crate::command::RoomCommand::LoadSpaceMembers {
+            request_id,
+            space_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceMembersLoadFailed {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                generation: *generation,
+                kind: OperationFailureKind::Sdk,
+            },
+        )),
+        crate::command::RoomCommand::InviteUserToSpace {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceMemberInviteSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                user_id: user_id.clone(),
+                generation: *generation,
+                outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+            },
+        )),
+        crate::command::RoomCommand::CancelSpaceInvite {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceMemberInviteCancellationSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                user_id: user_id.clone(),
+                generation: *generation,
+                outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+            },
+        )),
+        _ => None,
+    }
+}
+
+#[derive(Default)]
+struct ProfileResolutionDiagnosticCounts {
+    input_count: u64,
+    output_count: u64,
+    local_alias_count: u64,
+    relevant_room_count: u64,
+    space_room_count: u64,
+    payload_count: u64,
+    global_cache_count: u64,
+    local_homeserver_count: u64,
+    unresolved_count: u64,
+    cache_hit_count: u64,
+    cache_miss_count: u64,
+}
+
+impl ProfileResolutionDiagnosticCounts {
+    fn observe(&mut self, input: ProfileResolutionInput<'_>) {
+        self.input_count += 1;
+        let cache_available = input.cached_label.is_some_and(has_profile_label);
+        if cache_available {
+            self.cache_hit_count += 1;
+        } else {
+            self.cache_miss_count += 1;
+        }
+
+        let resolution = resolve_people_label(input);
+        self.output_count += 1;
+        match resolution.source {
+            ProfileResolutionSource::LocalAlias => self.local_alias_count += 1,
+            ProfileResolutionSource::RelevantRoom => self.relevant_room_count += 1,
+            ProfileResolutionSource::SpaceRoom => self.space_room_count += 1,
+            ProfileResolutionSource::Payload => self.payload_count += 1,
+            ProfileResolutionSource::GlobalCache => self.global_cache_count += 1,
+            ProfileResolutionSource::LocalHomeserver => self.local_homeserver_count += 1,
+            ProfileResolutionSource::Unresolved => self.unresolved_count += 1,
+        }
+    }
+
+    fn event(self, trigger: &'static str) -> DiagnosticEvent {
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.profile_resolution",
+            "resolution",
+        )
+        .field(DiagnosticField::token("trigger", trigger))
+        .field(DiagnosticField::count("input_count", self.input_count))
+        .field(DiagnosticField::count("output_count", self.output_count))
+        .field(DiagnosticField::count(
+            "local_alias_count",
+            self.local_alias_count,
+        ))
+        .field(DiagnosticField::count(
+            "relevant_room_count",
+            self.relevant_room_count,
+        ))
+        .field(DiagnosticField::count(
+            "space_room_count",
+            self.space_room_count,
+        ))
+        .field(DiagnosticField::count("payload_count", self.payload_count))
+        .field(DiagnosticField::count(
+            "global_cache_count",
+            self.global_cache_count,
+        ))
+        .field(DiagnosticField::count(
+            "local_homeserver_count",
+            self.local_homeserver_count,
+        ))
+        .field(DiagnosticField::count(
+            "unresolved_count",
+            self.unresolved_count,
+        ))
+        .field(DiagnosticField::count(
+            "cache_hit_count",
+            self.cache_hit_count,
+        ))
+        .field(DiagnosticField::count(
+            "cache_miss_count",
+            self.cache_miss_count,
+        ))
+        .field(DiagnosticField::token(
+            "cache_stale_hit_status",
+            "not_tracked",
+        ))
+        .field(DiagnosticField::token(
+            "cache_freshness_status",
+            "not_tracked",
+        ))
+    }
+}
+
+fn has_profile_label(label: &str) -> bool {
+    let label = label.trim();
+    !label.is_empty() && label != "Unknown user"
+}
+
+fn profile_display_label(profile: &UserProfile) -> Option<&str> {
+    profile
+        .display_name
+        .as_deref()
+        .filter(|label| has_profile_label(label))
+}
+
+fn session_user_id(state: &AppState) -> Option<&str> {
+    match &state.session {
+        SessionState::Provisional { info, .. }
+        | SessionState::AwaitingVerification { info, .. }
+        | SessionState::Verifying { info, .. }
+        | SessionState::AwaitingBootstrapConfirmation { info, .. }
+        | SessionState::Rejecting { info, .. }
+        | SessionState::Ready(info)
+        | SessionState::Locked(info)
+        | SessionState::SwitchingAccount { info } => Some(info.user_id.as_str()),
+        SessionState::SignedOut
+        | SessionState::Restoring
+        | SessionState::Authenticating { .. }
+        | SessionState::LoggingOut => None,
+    }
+}
+
+fn relevant_room_profile_label<'a>(
+    state: &'a AppState,
+    room_id: &str,
+    user_id: &str,
+) -> Option<&'a str> {
+    state
+        .profile
+        .room_users
+        .get(room_id)
+        .and_then(|profiles| profiles.get(user_id))
+        .and_then(profile_display_label)
+}
+
+fn space_room_profile_label<'a>(
+    state: &'a AppState,
+    room_id: &str,
+    user_id: &str,
+) -> Option<&'a str> {
+    let room = state.rooms.iter().find(|room| room.room_id == room_id)?;
+    room.parent_space_ids.iter().find_map(|space_id| {
+        state
+            .profile
+            .room_users
+            .get(space_id)
+            .and_then(|profiles| profiles.get(user_id))
+            .and_then(profile_display_label)
+    })
+}
+
+fn local_homeserver_profile_label<'a>(state: &'a AppState, user_id: &str) -> Option<&'a str> {
+    (session_user_id(state) == Some(user_id))
+        .then(|| state.profile.own.display_name.as_deref())
+        .flatten()
+        .filter(|label| has_profile_label(label))
+}
+
+fn observe_receipt_profile_resolution(
+    state: &AppState,
+    room_id: &str,
+    receipt: &koushi_state::LiveReadReceipt,
+    counts: &mut ProfileResolutionDiagnosticCounts,
+) {
+    let cached_label = state
+        .profile
+        .users
+        .get(&receipt.user_id)
+        .and_then(profile_display_label);
+    let payload_label = receipt
+        .display_name
+        .as_deref()
+        .filter(|label| has_profile_label(label))
+        .or_else(|| {
+            has_profile_label(&receipt.original_display_label)
+                .then_some(receipt.original_display_label.as_str())
+        });
+    counts.observe(ProfileResolutionInput {
+        local_alias: state
+            .profile
+            .local_aliases
+            .get(&receipt.user_id)
+            .map(String::as_str)
+            .filter(|label| has_profile_label(label)),
+        relevant_room_label: relevant_room_profile_label(state, room_id, &receipt.user_id),
+        space_room_label: space_room_profile_label(state, room_id, &receipt.user_id),
+        payload_label,
+        cached_label,
+        local_homeserver_label: local_homeserver_profile_label(state, &receipt.user_id),
+    });
+}
+
+fn observe_space_member_profile_resolution(
+    state: &AppState,
+    entry: &SpaceMemberEntry,
+    observed_profiles: &[UserProfile],
+    counts: &mut ProfileResolutionDiagnosticCounts,
+) {
+    let cached_label = observed_profiles
+        .iter()
+        .find(|profile| profile.user_id == entry.user_id)
+        .and_then(profile_display_label)
+        .or_else(|| {
+            state
+                .profile
+                .users
+                .get(&entry.user_id)
+                .and_then(profile_display_label)
+        });
+    let (relevant_room_label, space_room_label) = match entry.membership {
+        SpaceMemberMembership::ChildRoomOnly => (
+            entry
+                .display_name
+                .as_deref()
+                .filter(|label| has_profile_label(label)),
+            None,
+        ),
+        SpaceMemberMembership::SpaceJoined | SpaceMemberMembership::SpaceInvited => (
+            None,
+            entry
+                .display_name
+                .as_deref()
+                .filter(|label| has_profile_label(label)),
+        ),
+    };
+    counts.observe(ProfileResolutionInput {
+        local_alias: state
+            .profile
+            .local_aliases
+            .get(&entry.user_id)
+            .map(String::as_str)
+            .filter(|label| has_profile_label(label)),
+        relevant_room_label,
+        space_room_label,
+        payload_label: None,
+        cached_label,
+        local_homeserver_label: local_homeserver_profile_label(state, &entry.user_id),
+    });
+}
+
+fn profile_resolution_diagnostic_event(
+    state: &AppState,
+    action: &AppAction,
+) -> Option<DiagnosticEvent> {
+    let mut counts = ProfileResolutionDiagnosticCounts::default();
+    let trigger = match action {
+        AppAction::LiveRoomReceiptsUpdated {
+            room_id,
+            receipts_by_event,
+        }
+        | AppAction::LiveRoomReceiptsWindowReconciled {
+            room_id,
+            receipts_by_event,
+            ..
+        } => {
+            for receipt in receipts_by_event
+                .iter()
+                .flat_map(|entry| entry.receipts.iter())
+            {
+                observe_receipt_profile_resolution(state, room_id, receipt, &mut counts);
+            }
+            "live_receipt"
+        }
+        AppAction::SpaceMembersLoaded { projection, .. } => {
+            for entry in projection
+                .space_joined
+                .iter()
+                .chain(projection.space_invited.iter())
+                .chain(projection.child_room_only.iter())
+            {
+                observe_space_member_profile_resolution(state, entry, &[], &mut counts);
+            }
+            "space_member_projection"
+        }
+        AppAction::SpaceMembersProjectionReconciled {
+            projection,
+            profiles,
+            ..
+        }
+        | AppAction::SpaceMembersBackgroundProjectionReconciled {
+            projection,
+            profiles,
+            ..
+        } => {
+            for entry in projection
+                .space_joined
+                .iter()
+                .chain(projection.space_invited.iter())
+                .chain(projection.child_room_only.iter())
+            {
+                observe_space_member_profile_resolution(state, entry, profiles, &mut counts);
+            }
+            "space_member_projection"
+        }
+        _ => return None,
+    };
+
+    (counts.input_count > 0).then(|| counts.event(trigger))
+}
+
 fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
     let room_list_trace = match &action {
         AppAction::RoomListUpdated { rooms, .. } => {
@@ -177,6 +572,12 @@ fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Ve
         }
         _ => None,
     };
+    if let Some(event) = live_receipt_profile_diagnostic_event(state, &action) {
+        record(event);
+    }
+    if let Some(event) = profile_resolution_diagnostic_event(state, &action) {
+        record(event);
+    }
     let effects = reduce(state, action);
     if let Some(input) = room_list_trace {
         unread_trace::trace_room_list_applied(&input, &state.rooms);
@@ -240,6 +641,166 @@ fn record_native_attention_recomputed(effect: &AppEffect) {
                 *active_room_match,
             )),
     );
+}
+
+fn live_receipt_profile_diagnostic_event(
+    state: &AppState,
+    action: &AppAction,
+) -> Option<DiagnosticEvent> {
+    let (room_id, receipts_by_event, update_kind) = match action {
+        AppAction::LiveRoomReceiptsUpdated {
+            room_id,
+            receipts_by_event,
+        } => (room_id, receipts_by_event, "incremental"),
+        AppAction::LiveRoomReceiptsWindowReconciled {
+            room_id,
+            receipts_by_event,
+            ..
+        } => (room_id, receipts_by_event, "window_reconciled"),
+        _ => return None,
+    };
+
+    let receipt_count = receipts_by_event
+        .iter()
+        .map(|entry| entry.receipts.len() as u64)
+        .sum::<u64>();
+    if receipt_count == 0 {
+        return None;
+    }
+
+    let own_user_id = match &state.session {
+        SessionState::Provisional { info, .. }
+        | SessionState::AwaitingVerification { info, .. }
+        | SessionState::Verifying { info, .. }
+        | SessionState::AwaitingBootstrapConfirmation { info, .. }
+        | SessionState::Rejecting { info, .. }
+        | SessionState::Ready(info)
+        | SessionState::Locked(info)
+        | SessionState::SwitchingAccount { info } => Some(info.user_id.as_str()),
+        SessionState::SignedOut
+        | SessionState::Restoring
+        | SessionState::Authenticating { .. }
+        | SessionState::LoggingOut => None,
+    };
+    let room = state.rooms.iter().find(|room| room.room_id == *room_id);
+    let parent_space_count = room.map_or(0, |room| room.parent_space_ids.len() as u64);
+    let mut own_receipt_count = 0_u64;
+    let mut payload_label_count = 0_u64;
+    let mut profile_cache_hit_count = 0_u64;
+    let mut profile_cache_miss_count = 0_u64;
+    let mut profile_display_name_missing_count = 0_u64;
+    let mut friendly_name_unresolved_count = 0_u64;
+
+    for receipt in receipts_by_event
+        .iter()
+        .flat_map(|entry| entry.receipts.iter())
+    {
+        if own_user_id.is_some_and(|own_user_id| own_user_id == receipt.user_id) {
+            own_receipt_count += 1;
+            continue;
+        }
+
+        let has_payload_label = receipt
+            .display_name
+            .as_deref()
+            .is_some_and(|name| !name.trim().is_empty())
+            || !receipt.original_display_label.trim().is_empty();
+        payload_label_count += u64::from(has_payload_label);
+
+        let local_alias_resolves = state
+            .profile
+            .local_aliases
+            .get(&receipt.user_id)
+            .is_some_and(|alias| !alias.trim().is_empty());
+        let profile = state.profile.users.get(&receipt.user_id);
+        let profile_resolves = profile
+            .and_then(|profile| profile.display_name.as_deref())
+            .is_some_and(|name| !name.trim().is_empty());
+        if let Some(profile) = profile {
+            profile_cache_hit_count += 1;
+            if !local_alias_resolves
+                && profile
+                    .display_name
+                    .as_deref()
+                    .is_none_or(|name| name.trim().is_empty())
+            {
+                profile_display_name_missing_count += 1;
+            }
+        } else {
+            profile_cache_miss_count += 1;
+        }
+        if !has_payload_label && !local_alias_resolves && !profile_resolves {
+            friendly_name_unresolved_count += 1;
+        }
+    }
+
+    let unresolved_reason = if friendly_name_unresolved_count == 0 {
+        "none"
+    } else if profile_cache_miss_count > 0 {
+        "profile_cache_miss"
+    } else if profile_display_name_missing_count > 0 {
+        "profile_display_name_missing"
+    } else {
+        "receipt_label_missing"
+    };
+
+    Some(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.read_receipt_profile",
+            "resolution",
+        )
+        .field(DiagnosticField::token("update_kind", update_kind))
+        .field(DiagnosticField::count("receipt_count", receipt_count))
+        .field(DiagnosticField::count(
+            "own_receipt_count",
+            own_receipt_count,
+        ))
+        .field(DiagnosticField::count(
+            "payload_label_count",
+            payload_label_count,
+        ))
+        .field(DiagnosticField::count(
+            "profile_cache_hit_count",
+            profile_cache_hit_count,
+        ))
+        .field(DiagnosticField::count(
+            "profile_cache_miss_count",
+            profile_cache_miss_count,
+        ))
+        .field(DiagnosticField::count(
+            "profile_display_name_missing_count",
+            profile_display_name_missing_count,
+        ))
+        .field(DiagnosticField::count(
+            "friendly_name_unresolved_count",
+            friendly_name_unresolved_count,
+        ))
+        .field(DiagnosticField::boolean(
+            "room_in_space",
+            parent_space_count > 0,
+        ))
+        .field(DiagnosticField::count(
+            "parent_space_count",
+            parent_space_count,
+        ))
+        .field(DiagnosticField::token(
+            "lookup_scope",
+            "global_profile_cache",
+        ))
+        .field(DiagnosticField::boolean(
+            "room_member_lookup_attempted",
+            false,
+        ))
+        .field(DiagnosticField::boolean(
+            "space_member_lookup_attempted",
+            false,
+        ))
+        .field(DiagnosticField::token(
+            "unresolved_reason",
+            unresolved_reason,
+        )),
+    )
 }
 
 fn composer_draft_account_matches(
@@ -4230,6 +4791,140 @@ impl AppActor {
                 false
             }
             CoreCommand::Room(room_command) => {
+                let mut state_changed = false;
+                match &room_command {
+                    crate::command::RoomCommand::LoadSpaceMembers {
+                        request_id,
+                        space_id,
+                        generation,
+                    } => {
+                        if let Err(rejection) =
+                            admit_space_members_load(&self.state, space_id, *generation)
+                        {
+                            record_space_member_command_rejection("load", rejection);
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceMembersLoadRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                                generation: *generation,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            record_space_member_command_rejection(
+                                "load",
+                                SpaceMembersCommandRejection::StaleGeneration,
+                            );
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
+                    crate::command::RoomCommand::InviteUserToSpace {
+                        request_id,
+                        space_id,
+                        user_id,
+                        generation,
+                    } => {
+                        if let Err(rejection) = admit_space_member_invite(
+                            &self.state.space_members,
+                            space_id,
+                            user_id,
+                            *generation,
+                        ) {
+                            record_space_member_command_rejection("invite", rejection);
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceMemberInviteRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                                user_id: user_id.clone(),
+                                generation: *generation,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            record_space_member_command_rejection(
+                                "invite",
+                                SpaceMembersCommandRejection::InviteAlreadyInFlight,
+                            );
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
+                    crate::command::RoomCommand::CancelSpaceInvite {
+                        request_id,
+                        space_id,
+                        user_id,
+                        generation,
+                    } => {
+                        if let Err(rejection) = admit_space_member_cancellation(
+                            &self.state.space_members,
+                            space_id,
+                            user_id,
+                            *generation,
+                        ) {
+                            record_space_member_command_rejection("cancel", rejection);
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceMemberInviteCancellationRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                                user_id: user_id.clone(),
+                                generation: *generation,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            record_space_member_command_rejection(
+                                "cancel",
+                                SpaceMembersCommandRejection::CancellationAlreadyInFlight,
+                            );
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
+                    _ => {}
+                }
                 // User-intent lane: for SelectRoom, record the request_id→room_id
                 // correlation BEFORE forwarding so the action loop can emit the
                 // terminal IntentLifecycle outcome. This command path is reliable
@@ -4244,12 +4939,26 @@ impl AppActor {
                         .or_default()
                         .push_back(request_id);
                 }
+                let forward_failure = space_member_forward_failure_action(&room_command);
                 // Route to AccountActor (which forwards to RoomActor).
-                let _ = self
+                let forwarded = self
                     .account_actor
                     .send(crate::account::AccountMessage::RoomCommand(room_command))
                     .await;
-                false
+                if !forwarded {
+                    if let Some((request_id, failure_action)) = forward_failure {
+                        let effects = self.reduce_app_action(failure_action).await;
+                        self.handle_ui_event_effects(&effects).await;
+                        self.emit(CoreEvent::OperationFailed {
+                            request_id,
+                            failure: CoreFailure::RoomOperationFailed {
+                                kind: RoomFailureKind::Sdk,
+                            },
+                        });
+                        state_changed = true;
+                    }
+                }
+                state_changed
             }
             CoreCommand::Timeline(timeline_command) => {
                 if let Some((request_id, expected_account)) =
@@ -5624,13 +6333,295 @@ fn default_data_dir() -> PathBuf {
 mod tests {
     use super::*;
     use crate::event::{
-        AccountEvent, ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
+        AccountEvent, RoomEvent, ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem,
+        TimelineItemId,
     };
     use koushi_state::{
-        DisplaySettings, LocalUserAliasUpdateState, OwnProfile, ProfileState,
-        RoomLatestEventSummary, RoomNotificationModeOperation, RoomNotificationSettings,
-        RoomSummary, RoomTags, SessionInfo, SettingsPatch, UserProfile, reduce,
+        DisplaySettings, LiveEventReceipts, LiveReadReceipt, LocalUserAliasUpdateState, OwnProfile,
+        ProfileState, RoomLatestEventSummary, RoomNotificationModeOperation,
+        RoomNotificationSettings, RoomSummary, RoomTags, SessionInfo, SettingsPatch,
+        SpaceMemberEntry, SpaceMemberMembership, SpaceMembersProjection, UserProfile, reduce,
     };
+
+    fn closed_forward_space_member_entry(
+        user_id: &str,
+        membership: SpaceMemberMembership,
+    ) -> SpaceMemberEntry {
+        SpaceMemberEntry {
+            user_id: user_id.to_owned(),
+            display_name: Some("Closed forward test user".to_owned()),
+            display_label: "Closed forward test user".to_owned(),
+            original_display_label: "Closed forward test user".to_owned(),
+            avatar_url: None,
+            power_level: Some(0),
+            role: koushi_state::RoomMemberRole::User,
+            membership,
+            child_room_ids: Vec::new(),
+            invite_pending: false,
+        }
+    }
+
+    fn closed_forward_space_member_fixture(
+        space_id: &str,
+        generation: u64,
+        user_id: &str,
+        membership: SpaceMemberMembership,
+    ) -> Vec<AppAction> {
+        let entry = closed_forward_space_member_entry(user_id, membership);
+        let (space_joined, space_invited, child_room_only) = match membership {
+            SpaceMemberMembership::SpaceJoined => (vec![entry], Vec::new(), Vec::new()),
+            SpaceMemberMembership::SpaceInvited => (Vec::new(), vec![entry], Vec::new()),
+            SpaceMemberMembership::ChildRoomOnly => (Vec::new(), Vec::new(), vec![entry]),
+        };
+        vec![
+            AppAction::AppStarted,
+            AppAction::RestoreSessionSucceeded(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@closed-forward-self:example.invalid".to_owned(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            AppAction::CurrentDeviceTrustChanged(koushi_state::CurrentDeviceTrustState::Verified),
+            AppAction::NavigationLoaded {
+                navigation: NavigationState {
+                    active_space_id: Some(space_id.to_owned()),
+                    ..NavigationState::default()
+                },
+            },
+            AppAction::SpaceMembersLoadRequested {
+                request_id: 1,
+                space_id: space_id.to_owned(),
+                generation,
+            },
+            AppAction::SpaceMembersLoaded {
+                request_id: 1,
+                projection: SpaceMembersProjection {
+                    space_id: space_id.to_owned(),
+                    generation,
+                    space_joined,
+                    space_invited,
+                    child_room_only,
+                    child_room_count: 0,
+                    complete_child_room_count: 0,
+                    incomplete_child_room_count: 0,
+                },
+            },
+        ]
+    }
+
+    async fn wait_for_runtime_snapshot(
+        connection: &mut CoreConnection,
+        predicate: impl Fn(&AppState) -> bool,
+    ) -> AppState {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let snapshot = connection.snapshot();
+                if predicate(&snapshot) {
+                    return snapshot;
+                }
+                let _ = connection
+                    .recv_event()
+                    .await
+                    .expect("runtime event stream should remain open");
+            }
+        })
+        .await
+        .expect("runtime state should reach the expected operation boundary")
+    }
+
+    async fn close_account_actor_for_runtime_test(runtime: &CoreRuntime) {
+        let (acknowledged_tx, acknowledged_rx) = oneshot::channel();
+        assert!(
+            runtime
+                .account_actor_test_handle
+                .send(AccountMessage::ShutdownWithAck {
+                    acknowledged: acknowledged_tx,
+                })
+                .await
+        );
+        acknowledged_rx
+            .await
+            .expect("AccountActor closed-channel test acknowledgement");
+    }
+
+    async fn run_closed_space_member_forwarding_case(
+        membership: SpaceMemberMembership,
+        command: impl FnOnce(RequestId) -> crate::command::RoomCommand,
+    ) -> (AppState, CoreFailure, u64) {
+        let runtime = CoreRuntime::start_with_event_capacity(64);
+        let mut connection = runtime.attach();
+        let space_id = "!closed-forward-space:example.invalid";
+        let user_id = "@closed-forward-user:example.invalid";
+        let generation = 9;
+
+        runtime
+            .inject_actions(closed_forward_space_member_fixture(
+                space_id, generation, user_id, membership,
+            ))
+            .await;
+        wait_for_runtime_snapshot(&mut connection, |snapshot| {
+            snapshot.space_members.selected_space_id.as_deref() == Some(space_id)
+                && snapshot.space_members.generation == generation
+                && matches!(
+                    snapshot.space_members.operation,
+                    koushi_state::SpaceMembersOperationState::Idle
+                )
+        })
+        .await;
+
+        close_account_actor_for_runtime_test(&runtime).await;
+        let request_id = connection.next_request_id();
+        connection
+            .command(CoreCommand::Room(command(request_id)))
+            .await
+            .expect("closed-channel command should enter AppActor");
+
+        let failure = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match connection
+                    .recv_event()
+                    .await
+                    .expect("runtime event stream should remain open")
+                {
+                    CoreEvent::OperationFailed {
+                        request_id: failed_request_id,
+                        failure,
+                    } if failed_request_id == request_id => break failure,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("closed actor forwarding should emit a correlated failure");
+        let final_state = wait_for_runtime_snapshot(&mut connection, |snapshot| {
+            matches!(
+                snapshot.space_members.operation,
+                koushi_state::SpaceMembersOperationState::Failed {
+                    request_id: failed_request_id,
+                    ..
+                } if failed_request_id == request_id.sequence
+            )
+        })
+        .await;
+
+        let debug = format!("{:?}", final_state.space_members);
+        let diagnostics = serde_json::to_string(&koushi_diagnostics::snapshot())
+            .expect("diagnostics should serialize");
+        for private_value in [space_id, user_id] {
+            assert!(!debug.contains(private_value), "{debug}");
+            assert!(!diagnostics.contains(private_value), "{diagnostics}");
+        }
+
+        runtime.shutdown_handle().abort();
+        runtime.media_lifecycle.abort();
+        (final_state, failure, request_id.sequence)
+    }
+
+    #[tokio::test]
+    async fn closed_account_forwarding_rolls_back_space_member_load() {
+        let (state, failure, request_id) = run_closed_space_member_forwarding_case(
+            SpaceMemberMembership::SpaceJoined,
+            |request_id| crate::command::RoomCommand::LoadSpaceMembers {
+                request_id,
+                space_id: "!closed-forward-space:example.invalid".to_owned(),
+                generation: 9,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            failure,
+            CoreFailure::RoomOperationFailed {
+                kind: RoomFailureKind::Sdk
+            }
+        );
+        assert!(matches!(
+            state.space_members.operation,
+            koushi_state::SpaceMembersOperationState::Failed {
+                request_id: failed_request_id,
+                user_id: None,
+                kind: OperationFailureKind::Sdk,
+                ..
+            } if failed_request_id == request_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn closed_account_forwarding_rolls_back_optimistic_space_invite() {
+        let (state, failure, request_id) = run_closed_space_member_forwarding_case(
+            SpaceMemberMembership::ChildRoomOnly,
+            |request_id| crate::command::RoomCommand::InviteUserToSpace {
+                request_id,
+                space_id: "!closed-forward-space:example.invalid".to_owned(),
+                user_id: "@closed-forward-user:example.invalid".to_owned(),
+                generation: 9,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            failure,
+            CoreFailure::RoomOperationFailed {
+                kind: RoomFailureKind::Sdk
+            }
+        );
+        assert!(
+            state
+                .space_members
+                .child_room_only
+                .iter()
+                .any(|entry| entry.user_id == "@closed-forward-user:example.invalid")
+        );
+        assert!(state.space_members.space_invited.is_empty());
+        assert!(matches!(
+            state.space_members.operation,
+            koushi_state::SpaceMembersOperationState::Failed {
+                request_id: failed_request_id,
+                user_id: Some(ref failed_user_id),
+                kind: OperationFailureKind::Sdk,
+                ..
+            } if failed_request_id == request_id
+                && failed_user_id == "@closed-forward-user:example.invalid"
+        ));
+    }
+
+    #[tokio::test]
+    async fn closed_account_forwarding_retains_invited_row_for_cancellation_retry() {
+        let (state, failure, request_id) = run_closed_space_member_forwarding_case(
+            SpaceMemberMembership::SpaceInvited,
+            |request_id| crate::command::RoomCommand::CancelSpaceInvite {
+                request_id,
+                space_id: "!closed-forward-space:example.invalid".to_owned(),
+                user_id: "@closed-forward-user:example.invalid".to_owned(),
+                generation: 9,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            failure,
+            CoreFailure::RoomOperationFailed {
+                kind: RoomFailureKind::Sdk
+            }
+        );
+        assert!(
+            state
+                .space_members
+                .space_invited
+                .iter()
+                .any(|entry| entry.user_id == "@closed-forward-user:example.invalid")
+        );
+        assert!(matches!(
+            state.space_members.operation,
+            koushi_state::SpaceMembersOperationState::Failed {
+                request_id: failed_request_id,
+                user_id: Some(ref failed_user_id),
+                kind: OperationFailureKind::Sdk,
+                ..
+            } if failed_request_id == request_id
+                && failed_user_id == "@closed-forward-user:example.invalid"
+        ));
+    }
 
     #[test]
     fn standalone_composer_command_permit_outlives_activation_lease() {
@@ -6132,6 +7123,195 @@ mod tests {
             dm_space_ids: Vec::new(),
             is_encrypted: false,
             joined_members: 2,
+        }
+    }
+
+    #[test]
+    fn read_receipt_profile_diagnostic_reports_child_room_profile_cache_miss() {
+        let room_id = "!child:example.invalid";
+        let mut state = AppState {
+            session: SessionState::Ready(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@own:example.invalid".to_owned(),
+                device_id: "OWN".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            ..AppState::default()
+        };
+        let mut room = unread_diagnostic_room(room_id);
+        room.parent_space_ids = vec!["!space:example.invalid".to_owned()];
+        state.rooms.push(room);
+
+        let action = AppAction::LiveRoomReceiptsUpdated {
+            room_id: room_id.to_owned(),
+            receipts_by_event: vec![LiveEventReceipts {
+                event_id: "$event".to_owned(),
+                receipts: vec![LiveReadReceipt {
+                    user_id: "@child-only:example.invalid".to_owned(),
+                    display_name: None,
+                    original_display_label: String::new(),
+                    avatar: None,
+                    timestamp_ms: Some(42),
+                }],
+            }],
+        };
+
+        let event = live_receipt_profile_diagnostic_event(&state, &action)
+            .expect("receipt diagnostics should be emitted");
+        assert_eq!(event.source, "core.read_receipt_profile");
+        assert_eq!(event.stage, "resolution");
+        let field = |key| {
+            event
+                .fields
+                .iter()
+                .find(|field| field.key == key)
+                .map(|field| &field.value)
+        };
+        assert_eq!(
+            field("profile_cache_miss_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("room_in_space"),
+            Some(&koushi_diagnostics::DiagnosticValue::Boolean(true))
+        );
+        assert_eq!(
+            field("lookup_scope"),
+            Some(&koushi_diagnostics::DiagnosticValue::Token(
+                "global_profile_cache"
+            ))
+        );
+        assert_eq!(
+            field("unresolved_reason"),
+            Some(&koushi_diagnostics::DiagnosticValue::Token(
+                "profile_cache_miss"
+            ))
+        );
+    }
+
+    #[test]
+    fn profile_resolution_diagnostic_counts_actual_resolution_sources() {
+        let room_id = "!resolution-room:example.invalid";
+        let mut state = AppState {
+            session: SessionState::Ready(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@own:example.invalid".to_owned(),
+                device_id: "OWN".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            ..AppState::default()
+        };
+        let profile = |user_id: &str, display_name: &str| UserProfile {
+            user_id: user_id.to_owned(),
+            display_name: Some(display_name.to_owned()),
+            display_label: String::new(),
+            original_display_label: String::new(),
+            mention_search_terms: Vec::new(),
+            avatar: None,
+        };
+        state.profile.local_aliases.insert(
+            "@alias:example.invalid".to_owned(),
+            "Private alias".to_owned(),
+        );
+        state.profile.users.insert(
+            "@cached:example.invalid".to_owned(),
+            profile("@cached:example.invalid", "Cached label"),
+        );
+        state
+            .profile
+            .room_users
+            .entry(room_id.to_owned())
+            .or_default()
+            .insert(
+                "@room:example.invalid".to_owned(),
+                profile("@room:example.invalid", "Room label"),
+            );
+
+        let receipt = |user_id: &str, display_name: Option<&str>| LiveReadReceipt {
+            user_id: user_id.to_owned(),
+            display_name: display_name.map(ToOwned::to_owned),
+            original_display_label: String::new(),
+            avatar: None,
+            timestamp_ms: Some(42),
+        };
+        let action = AppAction::LiveRoomReceiptsUpdated {
+            room_id: room_id.to_owned(),
+            receipts_by_event: vec![
+                LiveEventReceipts {
+                    event_id: "$alias-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@alias:example.invalid", None)],
+                },
+                LiveEventReceipts {
+                    event_id: "$room-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@room:example.invalid", None)],
+                },
+                LiveEventReceipts {
+                    event_id: "$payload-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@payload:example.invalid", Some("Payload label"))],
+                },
+                LiveEventReceipts {
+                    event_id: "$cache-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@cached:example.invalid", None)],
+                },
+                LiveEventReceipts {
+                    event_id: "$unknown-event:example.invalid".to_owned(),
+                    receipts: vec![receipt("@unknown:example.invalid", None)],
+                },
+            ],
+        };
+
+        let event = profile_resolution_diagnostic_event(&state, &action)
+            .expect("profile resolution diagnostics should be emitted");
+        let field = |key| {
+            event
+                .fields
+                .iter()
+                .find(|field| field.key == key)
+                .map(|field| &field.value)
+        };
+        assert_eq!(
+            field("input_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(5))
+        );
+        assert_eq!(
+            field("output_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(5))
+        );
+        assert_eq!(
+            field("local_alias_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("relevant_room_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("payload_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("global_cache_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("unresolved_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(1))
+        );
+        assert_eq!(
+            field("cache_stale_hit_status"),
+            Some(&koushi_diagnostics::DiagnosticValue::Token("not_tracked"))
+        );
+
+        let encoded = serde_json::to_string(&event).expect("diagnostic should serialize");
+        for forbidden in [
+            "@alias:example.invalid",
+            "Private alias",
+            "mxc://example.invalid/avatar",
+        ] {
+            assert!(
+                !encoded.contains(forbidden),
+                "diagnostic leaked {forbidden}"
+            );
         }
     }
 
@@ -6980,6 +8160,138 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejected_space_invites_are_fenced_before_room_actor_route() {
+        let runtime = CoreRuntime::start_with_event_capacity(64);
+        let mut connection = runtime.attach();
+        let space_id = "!space-a:example.invalid".to_owned();
+        let duplicate_user_id = "@duplicate:example.invalid".to_owned();
+        let generation = 7;
+
+        runtime
+            .inject_actions(vec![
+                AppAction::AppStarted,
+                AppAction::RestoreSessionSucceeded(SessionInfo {
+                    homeserver: "https://example.invalid".to_owned(),
+                    user_id: "@me:example.invalid".to_owned(),
+                    device_id: "DEVICE".to_owned(),
+                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+                }),
+                AppAction::CurrentDeviceTrustChanged(
+                    koushi_state::CurrentDeviceTrustState::Verified,
+                ),
+                AppAction::SpaceMembersLoadRequested {
+                    request_id: 1,
+                    space_id: space_id.clone(),
+                    generation,
+                },
+                AppAction::SpaceMembersLoaded {
+                    request_id: 1,
+                    projection: SpaceMembersProjection {
+                        space_id: space_id.clone(),
+                        generation,
+                        space_joined: Vec::new(),
+                        space_invited: vec![SpaceMemberEntry {
+                            user_id: duplicate_user_id.clone(),
+                            display_name: None,
+                            display_label: "Unknown user".to_owned(),
+                            original_display_label: "Unknown user".to_owned(),
+                            avatar_url: None,
+                            power_level: None,
+                            role: koushi_state::RoomMemberRole::User,
+                            membership: SpaceMemberMembership::SpaceInvited,
+                            child_room_ids: Vec::new(),
+                            invite_pending: false,
+                        }],
+                        child_room_only: Vec::new(),
+                        child_room_count: 0,
+                        complete_child_room_count: 0,
+                        incomplete_child_room_count: 0,
+                    },
+                },
+            ])
+            .await;
+
+        let expected_state = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let snapshot = connection.snapshot();
+                if snapshot.space_members.selected_space_id.as_deref() == Some(space_id.as_str())
+                    && snapshot.space_members.generation == generation
+                    && snapshot.space_members.space_invited.len() == 1
+                {
+                    break snapshot;
+                }
+                let _ = connection.recv_event().await.expect("runtime event stream");
+            }
+        })
+        .await
+        .expect("injected Space member state should settle");
+
+        let rejected_commands = [
+            (
+                "wrong_space",
+                "!space-b:example.invalid".to_owned(),
+                generation,
+            ),
+            ("stale_generation", space_id.clone(), generation + 1),
+            ("duplicate", space_id.clone(), generation),
+        ];
+        for (reason, target_space_id, target_generation) in rejected_commands {
+            let request_id = connection.next_request_id();
+            connection
+                .command(CoreCommand::Room(
+                    crate::command::RoomCommand::InviteUserToSpace {
+                        request_id,
+                        space_id: target_space_id,
+                        user_id: duplicate_user_id.clone(),
+                        generation: target_generation,
+                    },
+                ))
+                .await
+                .expect("rejected invite command should enter the runtime");
+
+            let failure = tokio::time::timeout(Duration::from_secs(1), async {
+                loop {
+                    match connection.recv_event().await.expect("runtime event stream") {
+                        CoreEvent::OperationFailed {
+                            request_id: failed_request_id,
+                            failure,
+                        } if failed_request_id == request_id => break failure,
+                        CoreEvent::Room(RoomEvent::SpaceMemberInviteSettled { .. }) => {
+                            panic!("{reason} invite reached RoomActor settlement route")
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .expect("rejected invite should emit a correlated failure");
+            assert_eq!(
+                failure,
+                CoreFailure::RoomOperationFailed {
+                    kind: crate::failure::RoomFailureKind::Sdk,
+                }
+            );
+            assert_eq!(connection.snapshot(), expected_state);
+        }
+
+        let no_settlement = tokio::time::timeout(Duration::from_millis(100), async {
+            loop {
+                if let CoreEvent::Room(RoomEvent::SpaceMemberInviteSettled { .. }) =
+                    connection.recv_event().await.expect("runtime event stream")
+                {
+                    return true;
+                }
+            }
+        })
+        .await;
+        assert!(
+            no_settlement.is_err(),
+            "no rejected invite should reach the RoomActor/SDK settlement path"
+        );
+        runtime.shutdown_handle().abort();
+    }
+
+    #[tokio::test]
     async fn projection_rejected_restore_emits_one_correlated_failure_without_routing() {
         let runtime = CoreRuntime::start_with_event_capacity(16);
         let mut connection = runtime.attach();
@@ -7086,6 +8398,7 @@ mod tests {
                 display_name: Some("Me Upstream".to_owned()),
                 avatar: None,
             },
+            room_users: BTreeMap::new(),
             ignored_user_ids: BTreeSet::new(),
             ignored_user_update: koushi_state::IgnoredUserUpdateState::Idle,
             users: BTreeMap::from([

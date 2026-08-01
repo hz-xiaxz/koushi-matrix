@@ -10,7 +10,7 @@ use koushi_state::{
     LocalEncryptionHealth, MediaTransferProgress, MentionIntent, NativeAttentionDispatchId,
     NativeAttentionSummary, OperationFailureKind, PinnedEvent, PresenceKind, ProfileState,
     ReplyQuote, RoomModerationAction, RoomSettingsSnapshot, RoomTagKind, SessionState,
-    SubmissionId, SyncMode, ThreadsListItem, VerificationFlowState,
+    SpaceMemberInviteOutcome, SubmissionId, SyncMode, ThreadsListItem, VerificationFlowState,
     resolve_optional_user_display_name, resolve_user_display_name,
 };
 use serde::{Deserialize, Serialize};
@@ -637,6 +637,24 @@ pub enum RoomEvent {
         room_id: String,
         user_id: String,
     },
+    SpaceMembersLoaded {
+        request_id: RequestId,
+        generation: u64,
+        joined_count: usize,
+        invited_count: usize,
+        child_room_only_count: usize,
+        incomplete_child_room_count: usize,
+    },
+    SpaceMemberInviteSettled {
+        request_id: RequestId,
+        generation: u64,
+        outcome: SpaceMemberInviteOutcome,
+    },
+    SpaceMemberInviteCancellationSettled {
+        request_id: RequestId,
+        generation: u64,
+        outcome: SpaceMemberInviteOutcome,
+    },
     InviteBatchCompleted {
         request_id: RequestId,
         room_id: String,
@@ -762,6 +780,42 @@ impl fmt::Debug for RoomEvent {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("user_id", &"UserId(..)")
+                .finish(),
+            Self::SpaceMembersLoaded {
+                request_id,
+                generation,
+                joined_count,
+                invited_count,
+                child_room_only_count,
+                incomplete_child_room_count,
+            } => formatter
+                .debug_struct("SpaceMembersLoaded")
+                .field("request_id", request_id)
+                .field("generation", generation)
+                .field("joined_count", joined_count)
+                .field("invited_count", invited_count)
+                .field("child_room_only_count", child_room_only_count)
+                .field("incomplete_child_room_count", incomplete_child_room_count)
+                .finish(),
+            Self::SpaceMemberInviteSettled {
+                request_id,
+                generation,
+                outcome,
+            } => formatter
+                .debug_struct("SpaceMemberInviteSettled")
+                .field("request_id", request_id)
+                .field("generation", generation)
+                .field("outcome", outcome)
+                .finish(),
+            Self::SpaceMemberInviteCancellationSettled {
+                request_id,
+                generation,
+                outcome,
+            } => formatter
+                .debug_struct("SpaceMemberInviteCancellationSettled")
+                .field("request_id", request_id)
+                .field("generation", generation)
+                .field("outcome", outcome)
                 .finish(),
             Self::InviteBatchCompleted {
                 request_id,
@@ -2121,6 +2175,9 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
         | RoomEvent::RoomCreated { .. }
         | RoomEvent::SpaceCreated { .. }
         | RoomEvent::SpaceChildSet { .. }
+        | RoomEvent::SpaceMembersLoaded { .. }
+        | RoomEvent::SpaceMemberInviteSettled { .. }
+        | RoomEvent::SpaceMemberInviteCancellationSettled { .. }
         | RoomEvent::RoomJoined { .. }
         | RoomEvent::RoomLeft { .. }
         | RoomEvent::RoomForgotten { .. }
@@ -3123,6 +3180,19 @@ mod tests {
             !debug.contains("@private-target:example.invalid"),
             "{debug}"
         );
+    }
+
+    #[test]
+    fn space_invite_cancellation_event_debug_redacts_request_details() {
+        let event = RoomEvent::SpaceMemberInviteCancellationSettled {
+            request_id: fake_rid(45),
+            generation: 4,
+            outcome: SpaceMemberInviteOutcome::Cancelled,
+        };
+        let debug = format!("{event:?}");
+        assert!(debug.contains("SpaceMemberInviteCancellationSettled"));
+        assert!(!debug.contains("@private-target:example.invalid"));
+        assert!(!debug.contains("!private-space:example.invalid"));
     }
 
     #[test]

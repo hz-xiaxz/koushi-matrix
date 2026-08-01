@@ -48,6 +48,7 @@ export type ContextMenuTarget =
     }
   | { kind: "room"; roomId: string; dmUserId?: string | null }
   | { kind: "space"; spaceId: string }
+  | { kind: "spaceMember"; spaceId: string; userId: string; generation: number }
   | { kind: "account" };
 
 export type OpenContextMenu = (

@@ -22,12 +22,12 @@ use crate::state::{
     RoomModerationAction, RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot,
     RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
     ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
-    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceSummary,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
-    SyncLifecycleStatus, SyncMode, TimelineContinuityInspection, TimelineGapRepairFailureKind,
-    TimelineMediaDownloadState, TimelineMediaGalleryItem, TimelineScrollAnchor,
-    TrustOperationFailureKind, UserProfile, VerificationCancelReason, VerificationGateFailureKind,
-    VerificationGateState, VerificationMethod, VerificationTarget,
+    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceMemberInviteOutcome,
+    SpaceMembersProjection, SpaceSummary, StagedUploadCompressionChoice, StagedUploadItem,
+    StagedUploadOutputSelection, SyncLifecycleStatus, SyncMode, TimelineContinuityInspection,
+    TimelineGapRepairFailureKind, TimelineMediaDownloadState, TimelineMediaGalleryItem,
+    TimelineScrollAnchor, TrustOperationFailureKind, UserProfile, VerificationCancelReason,
+    VerificationGateFailureKind, VerificationGateState, VerificationMethod, VerificationTarget,
 };
 
 #[derive(Clone, Eq, PartialEq)]
@@ -145,6 +145,66 @@ pub enum AppAction {
     },
     UserProfilesUpdated {
         profiles: Vec<UserProfile>,
+    },
+    SpaceMembersLoadRequested {
+        request_id: u64,
+        space_id: String,
+        generation: u64,
+    },
+    SpaceMembersLoaded {
+        request_id: u64,
+        projection: SpaceMembersProjection,
+    },
+    SpaceMembersLoadFailed {
+        request_id: u64,
+        space_id: String,
+        generation: u64,
+        kind: OperationFailureKind,
+    },
+    SpaceMembersProfilesObserved {
+        request_id: u64,
+        profiles: Vec<UserProfile>,
+    },
+    SpaceMembersProjectionReconciled {
+        request_id: u64,
+        projection: SpaceMembersProjection,
+        profiles: Vec<UserProfile>,
+    },
+    /// A sync-driven local projection refresh. Unlike the initial load path,
+    /// this is accepted while the projection is idle or an invite is pending,
+    /// but only for the selected Space and its current generation.
+    SpaceMembersBackgroundProjectionReconciled {
+        request_id: u64,
+        space_id: String,
+        generation: u64,
+        projection: SpaceMembersProjection,
+        profiles: Vec<UserProfile>,
+    },
+    SpaceMemberInviteRequested {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+    },
+    SpaceMemberInviteSettled {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        outcome: SpaceMemberInviteOutcome,
+    },
+    SpaceMemberInviteCancellationRequested {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+    },
+    SpaceMemberInviteCancellationSettled {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        outcome: SpaceMemberInviteOutcome,
     },
     MentionCandidatesDemanded {
         request_id: u64,
@@ -1257,6 +1317,10 @@ pub enum AppAction {
         room_id: String,
         scoped_event_ids: Vec<String>,
         receipts_by_event: Vec<LiveEventReceipts>,
+    },
+    LiveRoomProfilesObserved {
+        room_id: String,
+        profiles: Vec<UserProfile>,
     },
     FullyReadMarkerUpdated {
         room_id: String,

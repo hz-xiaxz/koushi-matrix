@@ -68,6 +68,7 @@ export interface AppDomainState {
   locale_profile: LocaleDisplayProfile;
   typography_profile: TypographyDisplayProfile;
   profile: ProfileState;
+  space_members: SpaceMembersState;
   sync: SyncState;
   sync_mode: SyncMode;
   spaces: SpaceSummary[];
@@ -621,6 +622,7 @@ export interface TimelineScrollAnchor {
 export interface ProfileState {
   own: OwnProfile;
   users: Record<string, UserProfile>;
+  room_users: Record<string, Record<string, UserProfile>>;
   local_aliases: Record<string, string>;
   local_alias_update: LocalUserAliasUpdateState;
   ignored_user_ids: string[];
@@ -680,6 +682,81 @@ export interface SpaceSummary {
   avatar: AvatarImage | null;
   child_room_ids: string[];
 }
+
+export interface SpaceMembersState {
+  selected_space_id: string | null;
+  generation: number;
+  space_joined: SpaceMemberEntry[];
+  space_invited: SpaceMemberEntry[];
+  child_room_only: SpaceMemberEntry[];
+  child_room_count: number;
+  complete_child_room_count: number;
+  incomplete_child_room_count: number;
+  operation: SpaceMembersOperationState;
+}
+
+export type SpaceInviteAvailabilityReason =
+  | "available"
+  | "settings_unavailable"
+  | "permission_denied"
+  | "operation_pending"
+  | "invite_pending";
+
+export type SpaceInviteCancellationAvailabilityReason =
+  | "available"
+  | "settings_unavailable"
+  | "permission_denied"
+  | "operation_pending"
+  | "invite_unavailable";
+
+export interface SpaceMemberEntry {
+  user_id: string;
+  display_name: string | null;
+  display_label: string;
+  original_display_label: string;
+  avatar_url: string | null;
+  power_level: number | null;
+  role: RoomMemberRole;
+  membership: SpaceMemberMembership;
+  child_room_ids: string[];
+  invite_pending: boolean;
+}
+
+export type SpaceMemberMembership =
+  | "space_joined"
+  | "space_invited"
+  | "child_room_only";
+
+export type SpaceMembersOperationState =
+  | { kind: "idle" }
+  | {
+      kind: "loading";
+      request_id: number | null;
+      space_id: string;
+      generation: number;
+    }
+  | {
+      kind: "inviting";
+      request_id: number;
+      space_id: string;
+      user_id: string;
+      generation: number;
+    }
+  | {
+      kind: "cancellingInvite";
+      request_id: number;
+      space_id: string;
+      user_id: string;
+      generation: number;
+    }
+  | {
+      kind: "failed";
+      request_id: number;
+      space_id: string;
+      user_id: string | null;
+      generation: number;
+      failureKind: OperationFailureKind;
+    };
 
 export type RoomTagKind = "favourite" | "lowPriority";
 
@@ -1158,6 +1235,7 @@ export type RoomHistoryVisibility = "worldReadable" | "shared" | "invited" | "jo
 export interface RoomPermissionFacts {
   can_edit_settings: boolean;
   can_edit_roles: boolean;
+  can_invite: boolean;
   can_kick: boolean;
   can_ban: boolean;
   can_unban: boolean;

@@ -1027,6 +1027,7 @@ fn selecting_space_filters_rooms_and_keeps_dms_global() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged),
             AppEffect::SubscribeTimeline {
                 room_id: "room-a".to_owned(),
             },
@@ -1238,6 +1239,7 @@ fn selecting_space_restores_last_non_dm_room_for_that_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged),
             AppEffect::SubscribeTimeline {
                 room_id: "room-b".to_owned(),
             },
@@ -1873,6 +1875,7 @@ fn selecting_non_dm_room_moves_scope_to_containing_space_or_home() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+            AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged),
             AppEffect::SubscribeTimeline {
                 room_id: "room-a".to_owned(),
             },

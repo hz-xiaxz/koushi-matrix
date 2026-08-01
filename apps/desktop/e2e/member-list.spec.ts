@@ -1,13 +1,14 @@
 /**
  * Headless spec: member-list entry points (#81).
  *
- * Proves that People/Profile entry points preserve their Room/Space context,
- * request the Rust-owned member snapshot, and dispatch typed member commands.
+ * Proves that People/Profile entry points preserve their Room context and that
+ * the dedicated Space Members panel requests and renders Rust-owned membership
+ * classifications before dispatching typed audit actions.
  *
  * Entry points under test:
  *  1. Room: room-header People action → People panel opens.
  *  2. Room: Room info "People" entry → People panel opens.
- *  3. Space: Space info "Members" entry → Space-scoped People panel opens.
+ *  3. Space: Space info "Members" entry → dedicated Space Members panel opens.
  */
 
 import { expect, test, type Page } from "@playwright/test";
@@ -107,13 +108,29 @@ async function openRoomPeopleFromHeader(page: Page): Promise<void> {
   await expectPeoplePanelMembers(page);
 }
 
-async function openSpacePeopleFromSpaceInfo(page: Page): Promise<void> {
+async function expectSpaceMembersPanel(page: Page): Promise<void> {
+  const panel = contextPanel(page);
+  await expect(
+    panel.getByRole("heading", { name: t("spaceMembers.title"), level: 2 })
+  ).toBeVisible();
+  await expect(panel.getByRole("list", { name: t("spaceMembers.sectionJoined") })).toContainText(
+    HARNESS_MEMBERS[0].label
+  );
+  await expect(panel.getByRole("list", { name: t("spaceMembers.sectionInvited") })).toContainText(
+    HARNESS_MEMBERS[1].label
+  );
+  await expect(
+    panel.getByRole("list", { name: t("spaceMembers.sectionChildOnly") })
+  ).toContainText(HARNESS_MEMBERS[2].label);
+}
+
+async function openSpaceMembersFromSpaceInfo(page: Page): Promise<void> {
   await activateSpace(page);
   await page.getByRole("button", { name: t("workspace.spaceInfoSettings") }).click();
   const panel = contextPanel(page);
   await expect(panel.getByText(t("panel.spaceInfo"), { exact: true })).toBeVisible();
   await panel.getByRole("button", { name: t("room.members"), exact: true }).click();
-  await expectPeoplePanelMembers(page);
+  await expectSpaceMembersPanel(page);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -220,12 +237,12 @@ test("space info-settings button opens the Space info panel", async ({ page }) =
   await expect(page.getByText(t("panel.spaceInfo"), { exact: true })).toBeVisible();
 });
 
-test("Space info 'Members' entry opens Space-scoped People panel", async ({
+test("Space info 'Members' entry opens the dedicated Space Members panel", async ({
   page
 }) => {
   await gotoReadyShell(page);
-  await activateSpace(page);
   await clearInvocations(page);
+  await activateSpace(page);
 
   await page.getByRole("button", { name: t("workspace.spaceInfoSettings") }).click();
   const spaceInfoPanel = contextPanel(page);
@@ -238,37 +255,83 @@ test("Space info 'Members' entry opens Space-scoped People panel", async ({
   await expect(membersEntry).toBeEnabled();
   await membersEntry.click();
 
-  // load_room_settings should have been dispatched for the harness space
+  // Both the permission snapshot and the classified membership projection are
+  // Rust-owned and must be requested for this exact Space.
   await expect
     .poll(() => invocationCount(page, "load_room_settings"))
     .toBeGreaterThanOrEqual(1);
   const args = await firstInvocationArgs<{ roomId: string }>(page, "load_room_settings");
   expect(args.roomId).toBe(HARNESS_SPACE_ID);
-  await expectPeoplePanelMembers(page);
+  await expect.poll(() => invocationCount(page, "load_space_members")).toBeGreaterThanOrEqual(1);
+  const membersArgs = await firstInvocationArgs<{ spaceId: string; generation: number }>(
+    page,
+    "load_space_members"
+  );
+  expect(membersArgs).toEqual({ spaceId: HARNESS_SPACE_ID, generation: 2 });
+  await expectSpaceMembersPanel(page);
 });
 
-test("Space-scoped People panel rows can start DMs for any listed member", async ({ page }) => {
+test("Space Members can invite a child-room-only user to the Space", async ({ page }) => {
   await gotoReadyShell(page);
 
-  await openSpacePeopleFromSpaceInfo(page);
+  await openSpaceMembersFromSpaceInfo(page);
   await clearInvocations(page);
 
-  const memberList = contextPanel(page).getByRole("list", { name: t("room.members") });
-  await memberList
-    .getByRole("button", {
-      name: t("room.messageMember", { name: HARNESS_MEMBERS[2].label })
-    })
-    .click();
+  const childOnlyList = contextPanel(page).getByRole("list", {
+    name: t("spaceMembers.sectionChildOnly")
+  });
+  await childOnlyList.getByRole("button", { name: t("spaceMembers.invite") }).click();
 
-  await expect.poll(() => invocationCount(page, "start_direct_message")).toBe(1);
-  const args = await firstInvocationArgs<{ userId: string }>(page, "start_direct_message");
-  expect(args.userId).toBe(HARNESS_MEMBERS[2].userId);
+  await expect.poll(() => invocationCount(page, "invite_user_to_space")).toBe(1);
+  const args = await firstInvocationArgs<{
+    spaceId: string;
+    userId: string;
+    generation: number;
+  }>(page, "invite_user_to_space");
+  expect(args).toEqual({
+    spaceId: HARNESS_SPACE_ID,
+    userId: HARNESS_MEMBERS[2].userId,
+    generation: 2
+  });
+  await expect(
+    contextPanel(page)
+      .getByRole("list", { name: t("spaceMembers.sectionInvited") })
+      .getByText(HARNESS_MEMBERS[2].label, { exact: true })
+  ).toBeVisible();
+  await expect(childOnlyList.getByText(HARNESS_MEMBERS[2].label, { exact: true })).toHaveCount(0);
 });
 
-test("Space People Profile preserves the Space member context", async ({ page }) => {
+test("Space Members can cancel a pending Space invitation", async ({ page }) => {
   await gotoReadyShell(page);
 
-  await openSpacePeopleFromSpaceInfo(page);
+  await openSpaceMembersFromSpaceInfo(page);
+  await clearInvocations(page);
+
+  const invitedList = contextPanel(page).getByRole("list", {
+    name: t("spaceMembers.sectionInvited")
+  });
+  await invitedList.getByRole("button", { name: t("spaceMembers.cancelInvite") }).click();
+
+  await expect.poll(() => invocationCount(page, "cancel_space_invite")).toBe(1);
+  const args = await firstInvocationArgs<{
+    spaceId: string;
+    userId: string;
+    generation: number;
+  }>(page, "cancel_space_invite");
+  expect(args).toEqual({
+    spaceId: HARNESS_SPACE_ID,
+    userId: HARNESS_MEMBERS[1].userId,
+    generation: 2
+  });
+  await expect(
+    contextPanel(page).getByText(HARNESS_MEMBERS[1].label, { exact: true })
+  ).toHaveCount(0);
+});
+
+test("Space Members Profile preserves the Space member context", async ({ page }) => {
+  await gotoReadyShell(page);
+
+  await openSpaceMembersFromSpaceInfo(page);
   const panel = contextPanel(page);
   await panel
     .getByRole("button", {

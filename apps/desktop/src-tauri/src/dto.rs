@@ -23,7 +23,7 @@ use koushi_state::{
     RoomInteractionState, RoomListProjection, RoomManagementState, RoomNotificationSettings,
     RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchMatchField, SearchMatchKind,
     SearchResult, SearchScope, SearchState, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceSummary, StagedUploadItem, SyncMode, SyncState,
+    SoftLogoutReauthState, SpaceMembersState, SpaceSummary, StagedUploadItem, SyncMode, SyncState,
     ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     TypographyDisplayProfile, VerificationGateRejectReason, VerificationGateState,
     VerificationMethod, native_attention_capabilities_for_platform, resolve_locale_display_profile,
@@ -140,6 +140,8 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<ProfileState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_members: Option<SpaceMembersState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sync: Option<FrontendSyncState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync_mode: Option<SyncMode>,
@@ -199,6 +201,7 @@ impl FrontendDomainStateChangedSlices {
             && self.locale_profile.is_none()
             && self.typography_profile.is_none()
             && self.profile.is_none()
+            && self.space_members.is_none()
             && self.sync.is_none()
             && self.sync_mode.is_none()
             && self.spaces.is_none()
@@ -288,6 +291,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         domain.link_preview_settings = changed.link_preview_settings;
         domain.room_preferences = changed.room_preferences;
         domain.profile = changed.profile;
+        domain.space_members = changed.space_members;
         domain.sync = changed.sync.map(Into::into);
         domain.sync_mode = changed.sync_mode;
         domain.spaces = changed.spaces;
@@ -375,6 +379,7 @@ pub struct FrontendDomainState {
     pub locale_profile: LocaleDisplayProfile,
     pub typography_profile: TypographyDisplayProfile,
     pub profile: ProfileState,
+    pub space_members: SpaceMembersState,
     pub sync: FrontendSyncState,
     pub sync_mode: SyncMode,
     pub spaces: Vec<SpaceSummary>,
@@ -444,6 +449,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             locale_profile,
             typography_profile,
             profile: state.profile,
+            space_members: state.space_members,
             sync: state.sync.into(),
             sync_mode: state.sync_mode,
             spaces: state.spaces,
@@ -919,7 +925,10 @@ impl From<SearchMatchKind> for FrontendSearchMatchKind {
 mod tests {
     use serde_json::json;
 
-    use super::{FrontendDesktopSnapshot, FrontendSyncState, frontend_display_platform};
+    use super::{
+        FrontendDesktopSnapshot, FrontendDesktopSnapshotDelta, FrontendSyncState,
+        frontend_display_platform,
+    };
     use koushi_state::{
         AppState, AvatarImage, AvatarThumbnailState, EmojiPreference, FontPreference,
         InvitePreview, LocaleSettings, OwnProfile, RoomSummary, RoomTags, SessionInfo,
@@ -952,6 +961,10 @@ mod tests {
             json!("https://matrix.org")
         );
         assert_eq!(value["state"]["domain"]["sync"], json!("running"));
+        assert_eq!(
+            value["state"]["domain"]["space_members"]["generation"],
+            json!(0)
+        );
         // invites must be present even when empty; React must not synthesize
         // invite state outside the Rust-owned state machine.
         assert_eq!(value["state"]["domain"]["invites"], json!([]));
@@ -1235,6 +1248,28 @@ mod tests {
             json!([])
         );
         assert_eq!(value["state"]["ui"]["timeline"]["media_gallery"], json!([]));
+    }
+
+    #[test]
+    fn space_member_state_delta_crosses_the_frontend_boundary() {
+        let previous = booted_app_state();
+        let mut next = previous.clone();
+        next.space_members.selected_space_id = Some("!space:example.invalid".to_owned());
+        next.space_members.generation = 4;
+
+        let delta = koushi_core::build_state_delta(9, &previous, &next)
+            .expect("Space member changes should produce a state delta");
+        let value = serde_json::to_value(FrontendDesktopSnapshotDelta::from(delta))
+            .expect("Space member delta should serialize");
+
+        assert_eq!(
+            value["changed"]["state"]["domain"]["space_members"]["generation"],
+            json!(4)
+        );
+        assert_eq!(
+            value["changed"]["state"]["domain"]["space_members"]["selected_space_id"],
+            json!("!space:example.invalid")
+        );
     }
 
     #[test]
@@ -1928,6 +1963,7 @@ mod tests {
                 permissions: RoomPermissionFacts {
                     can_edit_settings: true,
                     can_edit_roles: true,
+                    can_invite: true,
                     can_kick: true,
                     can_ban: true,
                     can_unban: true,

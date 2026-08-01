@@ -54,9 +54,15 @@ import { SpaceInfoPanel } from "./SpaceInfoPanel";
 import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
 import { PeoplePanel, ProfilePanel } from "./PeoplePanel";
+import {
+  SpaceMembersPanel,
+  type SpaceInviteAvailabilityReason,
+  type SpaceInviteCancellationAvailabilityReason
+} from "./SpaceMembersPanel";
 import { MessageArticle, PinnedEventsList, SearchResults } from "./mediaLists";
 import { ThreadComposer } from "./composer";
 import { UploadStagingDialog } from "./dialogs";
+import type { OpenContextMenu } from "../app/uiShared";
 
 export function ContextualRightPanel({
   activeRoom,
@@ -87,6 +93,14 @@ export function ContextualRightPanel({
   pinnedNavigation = null,
   onRetryPinnedEvent = () => undefined,
   onOpenSpaceMembers,
+  onOpenContextMenu,
+  onDiagnostic,
+  onRequestMemberAvatarThumbnail,
+  spaceInviteAvailabilityReason,
+  onCancelInvite,
+  canCancelInvite = false,
+  cancelAvailabilityReason,
+  cancelInviteFailure = false,
   onOpenPeople: _onOpenPeople,
   onOpenProfile,
   onBackToPeople,
@@ -98,6 +112,8 @@ export function ContextualRightPanel({
   onResetLocalData,
   onLogout = () => undefined,
   onInviteUser = () => undefined,
+  onInviteUserToSpace = () => undefined,
+  canInviteToSpace = false,
   onModerateMember = () => undefined,
   onSetLocalUserAlias = () => undefined,
   onSetRoomNotificationMode = () => undefined,
@@ -198,6 +214,13 @@ export function ContextualRightPanel({
   pinnedNavigation?: PinnedEventNavigation | null;
   onRetryPinnedEvent?: (roomId: string, eventId: string, threadRootEventId: string | null) => void;
   onOpenSpaceMembers?: () => void;
+  onOpenContextMenu?: OpenContextMenu;
+  onDiagnostic?: (message: string) => void;
+  spaceInviteAvailabilityReason?: SpaceInviteAvailabilityReason;
+  onCancelInvite?: (userId: string) => void;
+  canCancelInvite?: boolean;
+  cancelAvailabilityReason?: SpaceInviteCancellationAvailabilityReason;
+  cancelInviteFailure?: boolean;
   onOpenPeople?: () => void;
   onOpenProfile?: (userId: string) => void;
   onBackToPeople?: () => void;
@@ -209,6 +232,8 @@ export function ContextualRightPanel({
   onResetLocalData: () => void;
   onLogout?: () => void;
   onInviteUser?: (roomId: string, title: string) => void;
+  onInviteUserToSpace?: (userId: string) => void;
+  canInviteToSpace?: boolean;
   onModerateMember?: (
     roomId: string,
     targetUserId: string,
@@ -482,6 +507,15 @@ export function ContextualRightPanel({
       snapshot.state.domain.rooms,
       snapshot.state.domain.spaces
     );
+    const childRoomLabels = new Map<string, string>();
+    for (const room of snapshot.state.domain.rooms) {
+      const label = [room.display_label, room.display_name]
+        .map((value) => value.trim())
+        .find((value) => value.length > 0 && value !== room.room_id);
+      if (label) {
+        childRoomLabels.set(room.room_id, label);
+      }
+    }
     return (
       <aside className="thread-pane" aria-label={t("panel.context")}>
         {mode === "profile" && selectedProfileUserId ? (
@@ -501,6 +535,24 @@ export function ContextualRightPanel({
             onSetLocalUserAlias={onSetLocalUserAlias}
             onUnignoreUser={onUnignoreUser}
             onUpdateMemberRole={onUpdateMemberRole}
+          />
+        ) : mode === "people" && peoplePanelScope?.kind === "space" ? (
+          <SpaceMembersPanel
+            state={snapshot.state.domain.space_members}
+            canInvite={canInviteToSpace}
+            onClose={onClosePanel}
+            profileUsers={snapshot.state.domain.profile.users}
+            onRequestAvatarThumbnail={onRequestMemberAvatarThumbnail}
+            childRoomLabels={childRoomLabels}
+            onInviteUser={onInviteUserToSpace}
+            onCancelInvite={onCancelInvite}
+            canCancelInvite={canCancelInvite}
+            onOpenProfile={onOpenProfile ?? (() => undefined)}
+            onOpenContextMenu={onOpenContextMenu}
+            onDiagnostic={onDiagnostic}
+            inviteAvailabilityReason={spaceInviteAvailabilityReason}
+            cancelAvailabilityReason={cancelAvailabilityReason}
+            cancelInviteFailure={cancelInviteFailure}
           />
         ) : (
           <PeoplePanel

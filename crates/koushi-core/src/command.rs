@@ -158,6 +158,9 @@ impl CoreCommand {
                 | RoomCommand::CreateSpace { request_id, .. }
                 | RoomCommand::SetSpaceChild { request_id, .. }
                 | RoomCommand::InviteUser { request_id, .. }
+                | RoomCommand::LoadSpaceMembers { request_id, .. }
+                | RoomCommand::InviteUserToSpace { request_id, .. }
+                | RoomCommand::CancelSpaceInvite { request_id, .. }
                 | RoomCommand::InviteTargets { request_id, .. }
                 | RoomCommand::AcceptInvite { request_id, .. }
                 | RoomCommand::DeclineInvite { request_id, .. }
@@ -1855,6 +1858,23 @@ pub enum RoomCommand {
         room_id: String,
         user_id: String,
     },
+    LoadSpaceMembers {
+        request_id: RequestId,
+        space_id: String,
+        generation: u64,
+    },
+    InviteUserToSpace {
+        request_id: RequestId,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+    },
+    CancelSpaceInvite {
+        request_id: RequestId,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+    },
     InviteTargets {
         request_id: RequestId,
         room_id: String,
@@ -2047,6 +2067,38 @@ impl fmt::Debug for RoomCommand {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("user_id", &"UserId(..)")
+                .finish(),
+            Self::LoadSpaceMembers {
+                request_id,
+                generation,
+                ..
+            } => formatter
+                .debug_struct("LoadSpaceMembers")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("generation", generation)
+                .finish(),
+            Self::InviteUserToSpace {
+                request_id,
+                generation,
+                ..
+            } => formatter
+                .debug_struct("InviteUserToSpace")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("user_id", &"UserId(..)")
+                .field("generation", generation)
+                .finish(),
+            Self::CancelSpaceInvite {
+                request_id,
+                generation,
+                ..
+            } => formatter
+                .debug_struct("CancelSpaceInvite")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("user_id", &"UserId(..)")
+                .field("generation", generation)
                 .finish(),
             Self::InviteTargets {
                 request_id,

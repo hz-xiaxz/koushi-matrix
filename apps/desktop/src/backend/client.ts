@@ -657,6 +657,10 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("load_room_settings", { roomId });
   }
 
+  async loadSpaceMembers(spaceId: string, generation: number): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("load_space_members", { spaceId, generation });
+  }
+
   async queryMentionCandidates(
     roomId: string,
     surface: MentionSurface,
@@ -959,6 +963,30 @@ class TauriDesktopApi implements DesktopApi {
 
   async inviteUser(roomId: string, userId: string): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("invite_user", { roomId, userId });
+  }
+
+  async inviteUserToSpace(
+    spaceId: string,
+    userId: string,
+    generation: number
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("invite_user_to_space", {
+      spaceId,
+      userId,
+      generation
+    });
+  }
+
+  async cancelSpaceInvite(
+    spaceId: string,
+    userId: string,
+    generation: number
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("cancel_space_invite", {
+      spaceId,
+      userId,
+      generation
+    });
   }
 
   async openInviteWorkflow(roomId: string): Promise<DesktopSnapshot> {

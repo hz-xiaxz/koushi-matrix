@@ -104,6 +104,9 @@ pub(crate) fn handle_room_list_updated(
         })
     {
         state.navigation.active_space_id = None;
+        if super::space_members::handle_selected(state, None) {
+            effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+        }
     }
 
     if let Some(active_room_id) = state.navigation.active_room_id.clone() {

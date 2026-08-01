@@ -25,26 +25,27 @@ import { emit } from "@tauri-apps/api/event";
 
 import type { CoreEventPayload, TimelineItem } from "../domain/coreEvents";
 import { roomTimelineKey } from "../domain/coreEvents";
-import type {
-  ActivityTab,
-  ComposerTarget,
-  ComposerKeyEvent,
-  ComposerResolverOptions,
-  ComposerResolvedAction,
-  ComposerMode,
-  ComposerSurface,
-  DesktopSnapshot,
-  E2eeTrustState,
-  LocaleDisplayProfile,
-  LocaleSettings,
-  RoomNotificationMode,
-  RoomNotificationSettings,
-  StageUploadBytesRequestItem,
-  SettingsPatch,
-  StagedUploadItem,
-  StagedUploadOutputSelection,
-  StagedUploadCompressionChoice,
-  UploadStagingRequestItem
+import {
+  SNAPSHOT_SCHEMA_VERSION,
+  type ActivityTab,
+  type ComposerTarget,
+  type ComposerKeyEvent,
+  type ComposerResolverOptions,
+  type ComposerResolvedAction,
+  type ComposerMode,
+  type ComposerSurface,
+  type DesktopSnapshot,
+  type E2eeTrustState,
+  type LocaleDisplayProfile,
+  type LocaleSettings,
+  type RoomNotificationMode,
+  type RoomNotificationSettings,
+  type StageUploadBytesRequestItem,
+  type SettingsPatch,
+  type StagedUploadItem,
+  type StagedUploadOutputSelection,
+  type StagedUploadCompressionChoice,
+  type UploadStagingRequestItem
 } from "../domain/types";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
 import { computeBrowserRoomListProjection } from "../backend/roomListProjection";
@@ -171,7 +172,8 @@ function readySnapshot(
           room_preferences: { rooms: {} },
           locale_profile: defaultLocaleDisplayProfile(),
           typography_profile: defaultTypographyDisplayProfile(),
-          profile: { own: { display_name: "Harness User", avatar: null }, users: {}, local_aliases: {}, local_alias_update: { kind: "idle" }, ignored_user_ids: [], ignored_user_update: { kind: "idle" }, update: { kind: "idle" } },
+          profile: { own: { display_name: "Harness User", avatar: null }, users: {}, room_users: {}, local_aliases: {}, local_alias_update: { kind: "idle" }, ignored_user_ids: [], ignored_user_update: { kind: "idle" }, update: { kind: "idle" } },
+          space_members: { selected_space_id: activeSpaceId, generation: 1, space_joined: [], space_invited: [], child_room_only: [], child_room_count: 0, complete_child_room_count: 0, incomplete_child_room_count: 0, operation: { kind: "idle" } },
           sync: "running",
           sync_mode: { kind: "unsupported" },
           spaces, rooms, invites: [],
@@ -869,7 +871,7 @@ function isDesktopSnapshotLike(value: unknown): value is DesktopSnapshot {
     };
   };
   return Boolean(
-    candidate.state?.schema_version === 2 &&
+    candidate.state?.schema_version === SNAPSHOT_SCHEMA_VERSION &&
       candidate.sidebar &&
       candidate.state?.ui &&
       Array.isArray(candidate.state.domain?.rooms) &&
@@ -981,7 +983,21 @@ mock.setCommandResponse("select_space", ({ spaceId }: { spaceId: string | null }
       ...currentSnapshot.state,
       domain: {
         ...currentSnapshot.state.domain,
-        activity: { kind: "closed" }
+        activity: { kind: "closed" },
+        space_members:
+          currentSnapshot.state.domain.space_members.selected_space_id === nextSpaceId
+            ? currentSnapshot.state.domain.space_members
+            : {
+                selected_space_id: nextSpaceId,
+                generation: currentSnapshot.state.domain.space_members.generation + 1,
+                space_joined: [],
+                space_invited: [],
+                child_room_only: [],
+                child_room_count: 0,
+                complete_child_room_count: 0,
+                incomplete_child_room_count: 0,
+                operation: { kind: "idle" }
+              }
       },
       ui: {
         ...currentSnapshot.state.ui,
@@ -2398,6 +2414,7 @@ mock.setCommandResponse("load_room_settings", ({ roomId }: { roomId: string }) =
           permissions: {
             can_edit_settings: true,
             can_edit_roles: true,
+            can_invite: true,
             can_kick: true,
             can_ban: true,
             can_unban: true
@@ -2438,6 +2455,126 @@ mock.setCommandResponse("load_room_settings", ({ roomId }: { roomId: string }) =
     }
   };
   return setCurrentSnapshot(next);
+});
+mock.setCommandResponse(
+  "load_space_members",
+  ({ spaceId, generation }: { spaceId: string; generation: number }) => {
+    if (spaceId !== SPACE_ID || currentSnapshot.state.ui.navigation.active_space_id !== spaceId) {
+      return currentSnapshot;
+    }
+    return setCurrentSnapshot({
+      ...currentSnapshot,
+      state: {
+        ...currentSnapshot.state,
+        domain: {
+          ...currentSnapshot.state.domain,
+          space_members: {
+            selected_space_id: spaceId,
+            generation,
+            space_joined: [
+              {
+                user_id: "@harness-ada:example.invalid",
+                display_name: "Harness Ada",
+                display_label: "Harness Ada",
+                original_display_label: "Harness Ada",
+                avatar_url: null,
+                power_level: 100,
+                role: "administrator",
+                membership: "space_joined",
+                child_room_ids: [],
+                invite_pending: false
+              }
+            ],
+            space_invited: [
+              {
+                user_id: "@harness-grace:example.invalid",
+                display_name: "Harness Grace",
+                display_label: "Harness Grace",
+                original_display_label: "Harness Grace",
+                avatar_url: null,
+                power_level: null,
+                role: "user",
+                membership: "space_invited",
+                child_room_ids: [],
+                invite_pending: true
+              }
+            ],
+            child_room_only: [
+              {
+                user_id: "@harness-linus:example.invalid",
+                display_name: "Harness Linus",
+                display_label: "Harness Linus",
+                original_display_label: "Harness Linus",
+                avatar_url: null,
+                power_level: 0,
+                role: "user",
+                membership: "child_room_only",
+                child_room_ids: [ROOM_ID],
+                invite_pending: false
+              }
+            ],
+            child_room_count: 1,
+            complete_child_room_count: 1,
+            incomplete_child_room_count: 0,
+            operation: { kind: "idle" }
+          }
+        }
+      }
+    });
+  }
+);
+mock.setCommandResponse("invite_user_to_space", ({ userId }: { userId: string }) => {
+  const members = currentSnapshot.state.domain.space_members;
+  const candidate = members.child_room_only.find((member) => member.user_id === userId);
+  if (!candidate) {
+    return currentSnapshot;
+  }
+  return setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      domain: {
+        ...currentSnapshot.state.domain,
+        space_members: {
+          ...members,
+          space_invited: [
+            ...members.space_invited,
+            { ...candidate, membership: "space_invited", invite_pending: true }
+          ],
+          child_room_only: members.child_room_only.filter((member) => member.user_id !== userId),
+          operation: { kind: "idle" }
+        }
+      }
+    }
+  });
+});
+mock.setCommandResponse("cancel_space_invite", ({ userId }: { userId: string }) => {
+  const members = currentSnapshot.state.domain.space_members;
+  const candidate = members.space_invited.find((member) => member.user_id === userId);
+  if (!candidate) {
+    return currentSnapshot;
+  }
+  return setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      domain: {
+        ...currentSnapshot.state.domain,
+        space_members: {
+          ...members,
+          space_invited: members.space_invited.filter((member) => member.user_id !== userId),
+          child_room_only:
+            candidate.child_room_ids.length > 0
+              ? [
+                  ...members.child_room_only,
+                  { ...candidate, membership: "child_room_only", invite_pending: false }
+                ]
+              : members.child_room_only,
+          operation: { kind: "idle" }
+        }
+      }
+    }
+  });
 });
 mock.setCommandResponse("start_room_crawl", ({ roomId }: { roomId: string }) => {
   return setCurrentSnapshot({
