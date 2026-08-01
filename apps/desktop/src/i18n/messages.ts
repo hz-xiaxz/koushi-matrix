@@ -991,6 +991,7 @@ export type MessageId =
   | "spaceMembers.sectionInvited"
   | "spaceMembers.sectionChildOnly"
   | "spaceMembers.childRoomContext"
+  | "spaceMembers.childRoomCountOne"
   | "spaceMembers.childRoomCount"
   | "spaceMembers.invite"
   | "spaceMembers.invitePending"
@@ -2164,6 +2165,7 @@ const en: Catalog = {
   "spaceMembers.sectionInvited": "Invitation pending",
   "spaceMembers.sectionChildOnly": "Not in Space",
   "spaceMembers.childRoomContext": "In child rooms: {rooms}",
+  "spaceMembers.childRoomCountOne": "In {count} child room",
   "spaceMembers.childRoomCount": "In {count} child rooms",
   "spaceMembers.invite": "Invite to Space",
   "spaceMembers.invitePending": "Invitation pending",
@@ -3222,6 +3224,7 @@ const ja: Catalog = {
   "spaceMembers.sectionInvited": "招待保留",
   "spaceMembers.sectionChildOnly": "スペース未参加",
   "spaceMembers.childRoomContext": "参加中の子ルーム: {rooms}",
+  "spaceMembers.childRoomCountOne": "参加中の子ルーム {count} 個",
   "spaceMembers.childRoomCount": "参加中の子ルーム {count} 個",
   "spaceMembers.invite": "スペースに招待",
   "spaceMembers.invitePending": "招待保留",

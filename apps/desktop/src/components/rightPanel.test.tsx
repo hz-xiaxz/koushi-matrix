@@ -447,7 +447,7 @@ describe("ContextualRightPanel people composition", () => {
       peoplePanelScope: { kind: "space", spaceId: identifierSpace.space_id }
     });
 
-    expect(screen.getByText("In 1 child rooms")).toBeTruthy();
+    expect(screen.getByText("In 1 child room")).toBeTruthy();
     expect(screen.queryByText(identifierRoomId)).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ import type {
   SpaceMembersState,
   UserProfile
 } from "../domain/types";
+import { avatarThumbnailFailureIsRetryable } from "../domain/avatarThumbnails";
 import { contextMenuItems } from "../domain/contextMenus";
 import { t } from "../i18n/messages";
 import { ICON_SIZE, type OpenContextMenu } from "../app/uiShared";
@@ -143,7 +144,12 @@ function childRoomContext(
   if (entry.child_room_ids.length <= 2 && labels.length === entry.child_room_ids.length) {
     return t("spaceMembers.childRoomContext", { rooms: labels.join(", ") });
   }
-  return t("spaceMembers.childRoomCount", { count: entry.child_room_ids.length });
+  return t(
+    entry.child_room_ids.length === 1
+      ? "spaceMembers.childRoomCountOne"
+      : "spaceMembers.childRoomCount",
+    { count: entry.child_room_ids.length }
+  );
 }
 
 export function SpaceMembersPanel({
@@ -360,13 +366,55 @@ function SpaceMemberRow({
 }: SpaceMemberRowProps) {
   const rowRef = useRef<HTMLLIElement>(null);
   const requestedAvatarUriRef = useRef<string | null>(null);
+  const previousAvatarStateRef = useRef<{
+    mxcUri: string | null;
+    kind: string | null;
+    requestId: number | null;
+    failureKind: string | null;
+  }>({
+    mxcUri: null,
+    kind: null,
+    requestId: null,
+    failureKind: null
+  });
   const avatar = profileUsers[entry.user_id]?.avatar ?? null;
+  const avatarThumbnailKind = avatar?.thumbnail.kind ?? null;
+  const avatarThumbnailRequestId =
+    avatar?.thumbnail.kind === "loading" || avatar?.thumbnail.kind === "failed"
+      ? avatar.thumbnail.request_id
+      : null;
+  const avatarThumbnailFailureKind =
+    avatar?.thumbnail.kind === "failed" ? avatar.thumbnail.failureKind : null;
+  const retryableAvatarFailure = avatar
+    ? avatarThumbnailFailureIsRetryable(avatar.thumbnail)
+    : false;
 
   useEffect(() => {
+    const currentAvatarState = {
+      mxcUri: avatar?.mxc_uri ?? null,
+      kind: avatarThumbnailKind,
+      requestId: avatarThumbnailRequestId,
+      failureKind: avatarThumbnailFailureKind
+    };
+    const previousAvatarState = previousAvatarStateRef.current;
+    const avatarStateChanged =
+      previousAvatarState.mxcUri !== currentAvatarState.mxcUri ||
+      previousAvatarState.kind !== currentAvatarState.kind ||
+      previousAvatarState.requestId !== currentAvatarState.requestId ||
+      previousAvatarState.failureKind !== currentAvatarState.failureKind;
+    previousAvatarStateRef.current = currentAvatarState;
+
+    const canRequestAvatar =
+      avatarThumbnailKind === "notRequested" ||
+      (avatarThumbnailKind === "failed" && retryableAvatarFailure);
+    if (avatarStateChanged && canRequestAvatar) {
+      requestedAvatarUriRef.current = null;
+    }
+
     if (
       !onRequestAvatarThumbnail ||
       !avatar ||
-      avatar.thumbnail.kind !== "notRequested" ||
+      !canRequestAvatar ||
       !rowRef.current ||
       requestedAvatarUriRef.current === avatar.mxc_uri ||
       typeof IntersectionObserver === "undefined"
@@ -394,7 +442,15 @@ function SpaceMemberRow({
     observer.observe(row);
 
     return () => observer.disconnect();
-  }, [avatar?.mxc_uri, avatar?.thumbnail.kind, avatarViewportRef, onRequestAvatarThumbnail]);
+  }, [
+    avatar?.mxc_uri,
+    avatarThumbnailFailureKind,
+    avatarThumbnailKind,
+    avatarThumbnailRequestId,
+    avatarViewportRef,
+    onRequestAvatarThumbnail,
+    retryableAvatarFailure
+  ]);
 
   const roleLabel = memberRoleLabel(entry.role);
 

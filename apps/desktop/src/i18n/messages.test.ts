@@ -82,6 +82,15 @@ describe("i18n message catalog", () => {
     expect(t("spaceMembers.search", {}, "ja")).toBe("スペースのメンバーを検索");
   });
 
+  test("keeps the Japanese child-room count fallback natural for one and many", () => {
+    expect(t("spaceMembers.childRoomCount", { count: 1 }, "ja")).toBe(
+      "参加中の子ルーム 1 個"
+    );
+    expect(t("spaceMembers.childRoomCount", { count: 3 }, "ja")).toBe(
+      "参加中の子ルーム 3 個"
+    );
+  });
+
   test("localizes Space invite cancellation controls and failure copy", () => {
     expect(t("spaceMembers.cancelInvite")).toBe("Cancel invitation");
     expect(t("spaceMembers.cancelInvitePending")).toBe("Cancelling…");

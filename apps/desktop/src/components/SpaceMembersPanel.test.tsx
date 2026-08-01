@@ -35,7 +35,7 @@ class MockIntersectionObserver {
   }
 
   trigger(element = this.observedElement): void {
-    if (!element) {
+    if (!element || this.observedElement !== element) {
       return;
     }
     this.callback(
@@ -405,6 +405,122 @@ describe("SpaceMembersPanel", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it("retries one visible failed avatar after a production-shaped loading transition", () => {
+    const requestedMxcUris = new Set<string>();
+    const memberRequestedMxcUris = new Set<string>();
+    const retryCounts = new Map<string, number>();
+    const request = vi.fn<(mxcUri: string) => Promise<void>>().mockResolvedValue(undefined);
+    const requestMemberAvatar = (mxcUri: string) =>
+      requestAvatarThumbnailWithDedupe(
+        mxcUri,
+        requestedMxcUris,
+        memberRequestedMxcUris,
+        retryCounts,
+        request
+      );
+    const aliceMxcUri = "mxc://example.invalid/alice-avatar";
+    const bobMxcUri = "mxc://example.invalid/bob-avatar";
+    const profileUsers = (aliceThumbnail: NonNullable<UserProfile["avatar"]>["thumbnail"]) => ({
+      "@alice:example.invalid": profile("@alice:example.invalid", {
+        mxc_uri: aliceMxcUri,
+        thumbnail: aliceThumbnail
+      }),
+      "@bob:example.invalid": profile("@bob:example.invalid", {
+        mxc_uri: bobMxcUri,
+        thumbnail: { kind: "notRequested" }
+      })
+    });
+    const appReconcilesMemberAvatarSnapshot = (avatar: UserProfile["avatar"]) => {
+      if (avatar && (avatar.thumbnail.kind === "ready" || avatar.thumbnail.kind === "failed")) {
+        memberRequestedMxcUris.delete(avatar.mxc_uri);
+      }
+    };
+
+    const { rerender } = render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onRequestAvatarThumbnail={requestMemberAvatar}
+        profileUsers={profileUsers({ kind: "notRequested" })}
+      />
+    );
+
+    MockIntersectionObserver.instances[0]?.trigger(screen.getByText("Alice").closest("li"));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenLastCalledWith(aliceMxcUri);
+
+    rerender(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onRequestAvatarThumbnail={requestMemberAvatar}
+        profileUsers={profileUsers({
+          kind: "loading",
+          request_id: 1
+        })}
+      />
+    );
+    rerender(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onRequestAvatarThumbnail={requestMemberAvatar}
+        profileUsers={profileUsers({
+          kind: "failed",
+          request_id: 1,
+          failureKind: "network"
+        })}
+      />
+    );
+    appReconcilesMemberAvatarSnapshot(profileUsers({
+      kind: "failed",
+      request_id: 1,
+      failureKind: "network"
+    })["@alice:example.invalid"].avatar);
+
+    const search = screen.getByRole("searchbox", { name: "Search space members" });
+    fireEvent.change(search, { target: { value: "nobody" } });
+    fireEvent.change(search, { target: { value: "Alice" } });
+    const visibleAliceRow = screen.getByText("Alice").closest("li");
+    MockIntersectionObserver.instances.forEach((observer) => observer.trigger(visibleAliceRow));
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenLastCalledWith(aliceMxcUri);
+    expect(request.mock.calls.flat()).not.toContain(bobMxcUri);
+  });
+
+  it("does not observe non-retryable failed member avatars", () => {
+    const request = vi.fn<(mxcUri: string) => Promise<void>>().mockResolvedValue(undefined);
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onRequestAvatarThumbnail={request}
+        profileUsers={{
+          "@alice:example.invalid": profile("@alice:example.invalid", {
+            mxc_uri: "mxc://example.invalid/alice-avatar",
+            thumbnail: {
+              kind: "failed",
+              request_id: 1,
+              failureKind: "forbidden"
+            }
+          })
+        }}
+      />
+    );
+
+    expect(MockIntersectionObserver.instances).toHaveLength(0);
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("renders the classified sections in Space, pending, then child-room order", () => {
     render(
       <SpaceMembersPanel
@@ -496,6 +612,26 @@ describe("SpaceMembersPanel", () => {
 
     expect(screen.getByText("In 3 child rooms")).toBeTruthy();
     expect(screen.queryByText(/!room-(alpha|beta|gamma):example\.invalid/)).toBeNull();
+  });
+
+  it("uses a singular English fallback for one child room", () => {
+    render(
+      <SpaceMembersPanel
+        state={state({
+          child_room_only: [
+            member("@carol:example.invalid", "Carol", "child_room_only", {
+              child_room_ids: ["!room-alpha:example.invalid"]
+            })
+          ],
+          child_room_count: 1
+        })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("In 1 child room")).toBeTruthy();
   });
 
   it("announces invite failure and keeps the child-only row retryable", () => {

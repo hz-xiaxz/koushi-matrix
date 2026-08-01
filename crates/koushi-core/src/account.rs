@@ -69,8 +69,8 @@ use crate::event::{
 };
 use crate::executor;
 use crate::failure::{
-    CoreFailure, LoginFailureKind, ProfileFailureKind, RecoveryFailureKind, SyncFailureKind,
-    TimelineFailureKind,
+    CoreFailure, LoginFailureKind, ProfileFailureKind, RecoveryFailureKind, RoomFailureKind,
+    SyncFailureKind, TimelineFailureKind,
 };
 use crate::ids::{
     AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey,
@@ -2541,9 +2541,19 @@ impl AccountActor {
     /// SyncStarted).
     async fn route_room_command(&self, command: RoomCommand) {
         trace_room_route("send", &command);
+        let forward_failure = crate::runtime::space_member_forward_failure_action(&command);
         let sent = self.room_actor.send(RoomMessage::Command(command)).await;
         if !sent {
             trace_room_route_closed();
+            if let Some((request_id, failure_action)) = forward_failure {
+                let _ = self.send_actions(vec![failure_action]).await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::RoomOperationFailed {
+                        kind: RoomFailureKind::Sdk,
+                    },
+                );
+            }
         }
     }
 

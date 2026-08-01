@@ -216,6 +216,57 @@ fn record_space_member_command_rejection(
     );
 }
 
+pub(crate) fn space_member_forward_failure_action(
+    command: &crate::command::RoomCommand,
+) -> Option<(RequestId, AppAction)> {
+    match command {
+        crate::command::RoomCommand::LoadSpaceMembers {
+            request_id,
+            space_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceMembersLoadFailed {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                generation: *generation,
+                kind: OperationFailureKind::Sdk,
+            },
+        )),
+        crate::command::RoomCommand::InviteUserToSpace {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceMemberInviteSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                user_id: user_id.clone(),
+                generation: *generation,
+                outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+            },
+        )),
+        crate::command::RoomCommand::CancelSpaceInvite {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceMemberInviteCancellationSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                user_id: user_id.clone(),
+                generation: *generation,
+                outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+            },
+        )),
+        _ => None,
+    }
+}
+
 #[derive(Default)]
 struct ProfileResolutionDiagnosticCounts {
     input_count: u64,
@@ -4888,11 +4939,25 @@ impl AppActor {
                         .or_default()
                         .push_back(request_id);
                 }
+                let forward_failure = space_member_forward_failure_action(&room_command);
                 // Route to AccountActor (which forwards to RoomActor).
-                let _ = self
+                let forwarded = self
                     .account_actor
                     .send(crate::account::AccountMessage::RoomCommand(room_command))
                     .await;
+                if !forwarded {
+                    if let Some((request_id, failure_action)) = forward_failure {
+                        let effects = self.reduce_app_action(failure_action).await;
+                        self.handle_ui_event_effects(&effects).await;
+                        self.emit(CoreEvent::OperationFailed {
+                            request_id,
+                            failure: CoreFailure::RoomOperationFailed {
+                                kind: RoomFailureKind::Sdk,
+                            },
+                        });
+                        state_changed = true;
+                    }
+                }
                 state_changed
             }
             CoreCommand::Timeline(timeline_command) => {
@@ -6277,6 +6342,286 @@ mod tests {
         RoomNotificationSettings, RoomSummary, RoomTags, SessionInfo, SettingsPatch,
         SpaceMemberEntry, SpaceMemberMembership, SpaceMembersProjection, UserProfile, reduce,
     };
+
+    fn closed_forward_space_member_entry(
+        user_id: &str,
+        membership: SpaceMemberMembership,
+    ) -> SpaceMemberEntry {
+        SpaceMemberEntry {
+            user_id: user_id.to_owned(),
+            display_name: Some("Closed forward test user".to_owned()),
+            display_label: "Closed forward test user".to_owned(),
+            original_display_label: "Closed forward test user".to_owned(),
+            avatar_url: None,
+            power_level: Some(0),
+            role: koushi_state::RoomMemberRole::User,
+            membership,
+            child_room_ids: Vec::new(),
+            invite_pending: false,
+        }
+    }
+
+    fn closed_forward_space_member_fixture(
+        space_id: &str,
+        generation: u64,
+        user_id: &str,
+        membership: SpaceMemberMembership,
+    ) -> Vec<AppAction> {
+        let entry = closed_forward_space_member_entry(user_id, membership);
+        let (space_joined, space_invited, child_room_only) = match membership {
+            SpaceMemberMembership::SpaceJoined => (vec![entry], Vec::new(), Vec::new()),
+            SpaceMemberMembership::SpaceInvited => (Vec::new(), vec![entry], Vec::new()),
+            SpaceMemberMembership::ChildRoomOnly => (Vec::new(), Vec::new(), vec![entry]),
+        };
+        vec![
+            AppAction::AppStarted,
+            AppAction::RestoreSessionSucceeded(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@closed-forward-self:example.invalid".to_owned(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            AppAction::CurrentDeviceTrustChanged(koushi_state::CurrentDeviceTrustState::Verified),
+            AppAction::NavigationLoaded {
+                navigation: NavigationState {
+                    active_space_id: Some(space_id.to_owned()),
+                    ..NavigationState::default()
+                },
+            },
+            AppAction::SpaceMembersLoadRequested {
+                request_id: 1,
+                space_id: space_id.to_owned(),
+                generation,
+            },
+            AppAction::SpaceMembersLoaded {
+                request_id: 1,
+                projection: SpaceMembersProjection {
+                    space_id: space_id.to_owned(),
+                    generation,
+                    space_joined,
+                    space_invited,
+                    child_room_only,
+                    child_room_count: 0,
+                    complete_child_room_count: 0,
+                    incomplete_child_room_count: 0,
+                },
+            },
+        ]
+    }
+
+    async fn wait_for_runtime_snapshot(
+        connection: &mut CoreConnection,
+        predicate: impl Fn(&AppState) -> bool,
+    ) -> AppState {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let snapshot = connection.snapshot();
+                if predicate(&snapshot) {
+                    return snapshot;
+                }
+                let _ = connection
+                    .recv_event()
+                    .await
+                    .expect("runtime event stream should remain open");
+            }
+        })
+        .await
+        .expect("runtime state should reach the expected operation boundary")
+    }
+
+    async fn close_account_actor_for_runtime_test(runtime: &CoreRuntime) {
+        let (acknowledged_tx, acknowledged_rx) = oneshot::channel();
+        assert!(
+            runtime
+                .account_actor_test_handle
+                .send(AccountMessage::ShutdownWithAck {
+                    acknowledged: acknowledged_tx,
+                })
+                .await
+        );
+        acknowledged_rx
+            .await
+            .expect("AccountActor closed-channel test acknowledgement");
+    }
+
+    async fn run_closed_space_member_forwarding_case(
+        membership: SpaceMemberMembership,
+        command: impl FnOnce(RequestId) -> crate::command::RoomCommand,
+    ) -> (AppState, CoreFailure, u64) {
+        let runtime = CoreRuntime::start_with_event_capacity(64);
+        let mut connection = runtime.attach();
+        let space_id = "!closed-forward-space:example.invalid";
+        let user_id = "@closed-forward-user:example.invalid";
+        let generation = 9;
+
+        runtime
+            .inject_actions(closed_forward_space_member_fixture(
+                space_id, generation, user_id, membership,
+            ))
+            .await;
+        wait_for_runtime_snapshot(&mut connection, |snapshot| {
+            snapshot.space_members.selected_space_id.as_deref() == Some(space_id)
+                && snapshot.space_members.generation == generation
+                && matches!(
+                    snapshot.space_members.operation,
+                    koushi_state::SpaceMembersOperationState::Idle
+                )
+        })
+        .await;
+
+        close_account_actor_for_runtime_test(&runtime).await;
+        let request_id = connection.next_request_id();
+        connection
+            .command(CoreCommand::Room(command(request_id)))
+            .await
+            .expect("closed-channel command should enter AppActor");
+
+        let failure = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match connection
+                    .recv_event()
+                    .await
+                    .expect("runtime event stream should remain open")
+                {
+                    CoreEvent::OperationFailed {
+                        request_id: failed_request_id,
+                        failure,
+                    } if failed_request_id == request_id => break failure,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("closed actor forwarding should emit a correlated failure");
+        let final_state = wait_for_runtime_snapshot(&mut connection, |snapshot| {
+            matches!(
+                snapshot.space_members.operation,
+                koushi_state::SpaceMembersOperationState::Failed {
+                    request_id: failed_request_id,
+                    ..
+                } if failed_request_id == request_id.sequence
+            )
+        })
+        .await;
+
+        let debug = format!("{:?}", final_state.space_members);
+        let diagnostics = serde_json::to_string(&koushi_diagnostics::snapshot())
+            .expect("diagnostics should serialize");
+        for private_value in [space_id, user_id] {
+            assert!(!debug.contains(private_value), "{debug}");
+            assert!(!diagnostics.contains(private_value), "{diagnostics}");
+        }
+
+        runtime.shutdown_handle().abort();
+        runtime.media_lifecycle.abort();
+        (final_state, failure, request_id.sequence)
+    }
+
+    #[tokio::test]
+    async fn closed_account_forwarding_rolls_back_space_member_load() {
+        let (state, failure, request_id) = run_closed_space_member_forwarding_case(
+            SpaceMemberMembership::SpaceJoined,
+            |request_id| crate::command::RoomCommand::LoadSpaceMembers {
+                request_id,
+                space_id: "!closed-forward-space:example.invalid".to_owned(),
+                generation: 9,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            failure,
+            CoreFailure::RoomOperationFailed {
+                kind: RoomFailureKind::Sdk
+            }
+        );
+        assert!(matches!(
+            state.space_members.operation,
+            koushi_state::SpaceMembersOperationState::Failed {
+                request_id: failed_request_id,
+                user_id: None,
+                kind: OperationFailureKind::Sdk,
+                ..
+            } if failed_request_id == request_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn closed_account_forwarding_rolls_back_optimistic_space_invite() {
+        let (state, failure, request_id) = run_closed_space_member_forwarding_case(
+            SpaceMemberMembership::ChildRoomOnly,
+            |request_id| crate::command::RoomCommand::InviteUserToSpace {
+                request_id,
+                space_id: "!closed-forward-space:example.invalid".to_owned(),
+                user_id: "@closed-forward-user:example.invalid".to_owned(),
+                generation: 9,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            failure,
+            CoreFailure::RoomOperationFailed {
+                kind: RoomFailureKind::Sdk
+            }
+        );
+        assert!(
+            state
+                .space_members
+                .child_room_only
+                .iter()
+                .any(|entry| entry.user_id == "@closed-forward-user:example.invalid")
+        );
+        assert!(state.space_members.space_invited.is_empty());
+        assert!(matches!(
+            state.space_members.operation,
+            koushi_state::SpaceMembersOperationState::Failed {
+                request_id: failed_request_id,
+                user_id: Some(ref failed_user_id),
+                kind: OperationFailureKind::Sdk,
+                ..
+            } if failed_request_id == request_id
+                && failed_user_id == "@closed-forward-user:example.invalid"
+        ));
+    }
+
+    #[tokio::test]
+    async fn closed_account_forwarding_retains_invited_row_for_cancellation_retry() {
+        let (state, failure, request_id) = run_closed_space_member_forwarding_case(
+            SpaceMemberMembership::SpaceInvited,
+            |request_id| crate::command::RoomCommand::CancelSpaceInvite {
+                request_id,
+                space_id: "!closed-forward-space:example.invalid".to_owned(),
+                user_id: "@closed-forward-user:example.invalid".to_owned(),
+                generation: 9,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            failure,
+            CoreFailure::RoomOperationFailed {
+                kind: RoomFailureKind::Sdk
+            }
+        );
+        assert!(
+            state
+                .space_members
+                .space_invited
+                .iter()
+                .any(|entry| entry.user_id == "@closed-forward-user:example.invalid")
+        );
+        assert!(matches!(
+            state.space_members.operation,
+            koushi_state::SpaceMembersOperationState::Failed {
+                request_id: failed_request_id,
+                user_id: Some(ref failed_user_id),
+                kind: OperationFailureKind::Sdk,
+                ..
+            } if failed_request_id == request_id
+                && failed_user_id == "@closed-forward-user:example.invalid"
+        ));
+    }
 
     #[test]
     fn standalone_composer_command_permit_outlives_activation_lease() {
