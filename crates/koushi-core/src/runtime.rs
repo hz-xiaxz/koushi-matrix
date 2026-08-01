@@ -4747,11 +4747,9 @@ impl AppActor {
                         space_id,
                         generation,
                     } => {
-                        if let Err(rejection) = admit_space_members_load(
-                            &self.state.space_members,
-                            space_id,
-                            *generation,
-                        ) {
+                        if let Err(rejection) =
+                            admit_space_members_load(&self.state, space_id, *generation)
+                        {
                             record_space_member_command_rejection("load", rejection);
                             self.emit(CoreEvent::OperationFailed {
                                 request_id: *request_id,

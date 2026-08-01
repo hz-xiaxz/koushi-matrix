@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ProfileState, RoomMemberRole, errors::OperationFailureKind};
+use super::{AppState, ProfileState, RoomMemberRole, errors::OperationFailureKind};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -430,7 +430,20 @@ pub fn admit_space_member_cancellation(
     if state.generation != generation {
         return Err(SpaceMembersCommandRejection::StaleGeneration);
     }
-    if !matches!(state.operation, SpaceMembersOperationState::Idle) {
+    let cancellation_context_is_retryable =
+        matches!(&state.operation, SpaceMembersOperationState::Idle)
+            || matches!(
+                &state.operation,
+                SpaceMembersOperationState::Failed {
+                    space_id: failed_space_id,
+                    user_id: Some(failed_user_id),
+                    generation: failed_generation,
+                    ..
+                } if failed_space_id == space_id
+                    && failed_user_id == user_id
+                    && *failed_generation == generation
+            );
+    if !cancellation_context_is_retryable {
         return Err(SpaceMembersCommandRejection::CancellationAlreadyInFlight);
     }
     if !state
@@ -444,20 +457,27 @@ pub fn admit_space_member_cancellation(
 }
 
 pub fn admit_space_members_load(
-    state: &SpaceMembersState,
+    state: &AppState,
     space_id: &str,
     generation: u64,
 ) -> Result<(), SpaceMembersCommandRejection> {
-    if let Some(selected_space_id) = state.selected_space_id.as_deref() {
+    let Some(active_space_id) = state.navigation.active_space_id.as_deref() else {
+        return Err(SpaceMembersCommandRejection::NoSelectedSpace);
+    };
+    if active_space_id != space_id {
+        return Err(SpaceMembersCommandRejection::WrongSpace);
+    }
+
+    if let Some(selected_space_id) = state.space_members.selected_space_id.as_deref() {
         if selected_space_id != space_id {
             return Err(SpaceMembersCommandRejection::WrongSpace);
         }
-        if state.generation != generation {
+        if state.space_members.generation != generation {
             return Err(SpaceMembersCommandRejection::StaleGeneration);
         }
     }
     if matches!(
-        state.operation,
+        state.space_members.operation,
         SpaceMembersOperationState::Inviting { .. }
             | SpaceMembersOperationState::CancellingInvite { .. }
     ) {

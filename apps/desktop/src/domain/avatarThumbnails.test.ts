@@ -1,12 +1,52 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   MAX_AVATAR_THUMBNAIL_ATTEMPTS,
-  planSnapshotAvatarThumbnailRequests
+  planSnapshotAvatarThumbnailRequests,
+  requestAvatarThumbnailWithDedupe
 } from "./avatarThumbnails";
 import type { AvatarImage, DesktopSnapshot, UserProfile } from "./types";
 
 describe("planSnapshotAvatarThumbnailRequests", () => {
+  test("deduplicates a visible member request and retries after rejection", async () => {
+    const requestedMxcUris = new Set<string>();
+    const memberRequestedMxcUris = new Set<string>();
+    const retryCounts = new Map<string, number>();
+    let rejectFirst: ((reason?: unknown) => void) | undefined;
+    const request = vi
+      .fn<(mxcUri: string) => Promise<void>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectFirst = reject;
+          })
+      )
+      .mockResolvedValue(undefined);
+
+    const requestMemberAvatar = () =>
+      requestAvatarThumbnailWithDedupe(
+        "mxc://matrix.org/member-avatar",
+        requestedMxcUris,
+        memberRequestedMxcUris,
+        retryCounts,
+        request
+      );
+
+    const first = requestMemberAvatar();
+    const duplicate = requestMemberAvatar();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(memberRequestedMxcUris.has("mxc://matrix.org/member-avatar")).toBe(true);
+
+    rejectFirst?.(new Error("temporary thumbnail failure"));
+    await first;
+    await duplicate;
+    expect(memberRequestedMxcUris.has("mxc://matrix.org/member-avatar")).toBe(false);
+    expect(retryCounts.get("mxc://matrix.org/member-avatar")).toBe(1);
+
+    await requestMemberAvatar();
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
   test("requests not-yet-downloaded snapshot avatars", () => {
     const plan = planSnapshotAvatarThumbnailRequests(
       snapshotWithAvatars([avatar("mxc://matrix.org/profile", { kind: "notRequested" })]),

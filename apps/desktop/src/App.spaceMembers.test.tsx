@@ -511,10 +511,10 @@ describe("App Space Members integration", () => {
   });
 
   test("retries an invitation cancellation after a failed attempt", async () => {
-    const api = createBrowserFakeApi();
-    const cancelSpaceInvite = vi
-      .spyOn(api, "cancelSpaceInvite")
-      .mockRejectedValueOnce(new Error("first cancellation failure"));
+    const api = createBrowserFakeApi({
+      spaceMemberInviteCancellationOutcomes: ["failure", "success"]
+    });
+    const cancelSpaceInvite = vi.spyOn(api, "cancelSpaceInvite");
 
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();

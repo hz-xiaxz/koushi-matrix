@@ -421,6 +421,9 @@ export interface BrowserFakeApiOptions {
     | "success"
     | "failure"
     | "notInvited";
+  spaceMemberInviteCancellationOutcomes?: Array<
+    NonNullable<BrowserFakeApiOptions["spaceMemberInviteCancellationOutcome"]>
+  >;
 }
 
 export function createBrowserFakeApi(options: BrowserFakeApiOptions = {}): DesktopApi {
@@ -434,6 +437,9 @@ class BrowserFakeApi implements DesktopApi {
   >;
   private readonly spaceMemberInviteCancellationOutcome: NonNullable<
     BrowserFakeApiOptions["spaceMemberInviteCancellationOutcome"]
+  >;
+  private readonly spaceMemberInviteCancellationOutcomes: Array<
+    NonNullable<BrowserFakeApiOptions["spaceMemberInviteCancellationOutcome"]>
   >;
   private requestSequence = 1_000;
   private composerRendererGeneration = 0n;
@@ -576,6 +582,9 @@ class BrowserFakeApi implements DesktopApi {
     this.spaceMemberInviteOutcome = options.spaceMemberInviteOutcome ?? "success";
     this.spaceMemberInviteCancellationOutcome =
       options.spaceMemberInviteCancellationOutcome ?? "success";
+    this.spaceMemberInviteCancellationOutcomes = [
+      ...(options.spaceMemberInviteCancellationOutcomes ?? [])
+    ];
     this.snapshot = createInitialSnapshot(initialSession(options));
   }
 
@@ -2676,6 +2685,9 @@ class BrowserFakeApi implements DesktopApi {
     }
 
     const normalizedSpaceId = spaceId.trim();
+    if (this.snapshot.state.ui.navigation.active_space_id !== normalizedSpaceId) {
+      return this.getSnapshot();
+    }
     const current = this.snapshot.state.domain.space_members;
     if (
       (current.selected_space_id !== null &&
@@ -2700,8 +2712,20 @@ class BrowserFakeApi implements DesktopApi {
 
     await Promise.resolve();
 
+    const active = this.snapshot.state.domain.space_members;
+    if (
+      this.snapshot.state.ui.navigation.active_space_id !== normalizedSpaceId ||
+      active.selected_space_id !== normalizedSpaceId ||
+      active.generation !== generation ||
+      active.operation.kind !== "loading" ||
+      active.operation.request_id !== requestId ||
+      active.operation.space_id !== normalizedSpaceId ||
+      active.operation.generation !== generation
+    ) {
+      return this.getSnapshot();
+    }
     this.snapshot.state.domain.space_members = {
-      ...this.snapshot.state.domain.space_members,
+      ...active,
       operation: { kind: "idle" }
     };
     return this.getSnapshot();
@@ -2812,7 +2836,13 @@ class BrowserFakeApi implements DesktopApi {
     ) {
       return this.getSnapshot();
     }
-    if (current.operation.kind !== "idle") {
+    const cancellationContextIsRetryable =
+      current.operation.kind === "idle" ||
+      (current.operation.kind === "failed" &&
+        current.operation.space_id === normalizedSpaceId &&
+        current.operation.user_id === normalizedUserId &&
+        current.operation.generation === generation);
+    if (!cancellationContextIsRetryable) {
       return this.getSnapshot();
     }
     const invitedEntry = current.space_invited.find(
@@ -2834,12 +2864,15 @@ class BrowserFakeApi implements DesktopApi {
       }
     };
 
-    if (this.spaceMemberInviteCancellationOutcome === "pending") {
+    const cancellationOutcome =
+      this.spaceMemberInviteCancellationOutcomes.shift() ??
+      this.spaceMemberInviteCancellationOutcome;
+    if (cancellationOutcome === "pending") {
       return this.getSnapshot();
     }
 
     const active = this.snapshot.state.domain.space_members;
-    if (this.spaceMemberInviteCancellationOutcome === "success") {
+    if (cancellationOutcome === "success") {
       this.snapshot.state.domain.space_members = {
         ...active,
         space_invited: active.space_invited.filter(
@@ -2847,7 +2880,7 @@ class BrowserFakeApi implements DesktopApi {
         ),
         operation: { kind: "idle" }
       };
-    } else if (this.spaceMemberInviteCancellationOutcome === "notInvited") {
+    } else if (cancellationOutcome === "notInvited") {
       this.snapshot.state.domain.space_members = {
         ...active,
         space_invited: active.space_invited.filter(

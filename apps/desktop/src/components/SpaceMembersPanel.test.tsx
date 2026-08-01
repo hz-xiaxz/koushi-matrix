@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -8,6 +8,7 @@ import type {
   SpaceMembersState,
   UserProfile
 } from "../domain/types";
+import { requestAvatarThumbnailWithDedupe } from "../domain/avatarThumbnails";
 import { SpaceMembersPanel } from "./SpaceMembersPanel";
 
 class MockIntersectionObserver {
@@ -341,6 +342,67 @@ describe("SpaceMembersPanel", () => {
     expect(onRequestAvatarThumbnail).toHaveBeenCalledWith(
       "mxc://example.invalid/alice-avatar"
     );
+  });
+
+  it("deduplicates member avatar requests across filter remounts and retries rejection", async () => {
+    const requestedMxcUris = new Set<string>();
+    const memberRequestedMxcUris = new Set<string>();
+    const retryCounts = new Map<string, number>();
+    let rejectFirst: ((reason?: unknown) => void) | undefined;
+    const request = vi
+      .fn<(mxcUri: string) => Promise<void>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectFirst = reject;
+          })
+      )
+      .mockResolvedValue(undefined);
+    const onRequestAvatarThumbnail = (mxcUri: string) =>
+      requestAvatarThumbnailWithDedupe(
+        mxcUri,
+        requestedMxcUris,
+        memberRequestedMxcUris,
+        retryCounts,
+        request
+      );
+
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onRequestAvatarThumbnail={onRequestAvatarThumbnail}
+        profileUsers={{
+          "@alice:example.invalid": profile("@alice:example.invalid", {
+            mxc_uri: "mxc://example.invalid/alice-avatar",
+            thumbnail: { kind: "notRequested" }
+          })
+        }}
+      />
+    );
+
+    const search = screen.getByRole("searchbox", { name: "Search space members" });
+    const firstRow = screen.getByText("Alice").closest("li");
+    MockIntersectionObserver.instances[0]?.trigger(firstRow);
+    expect(request).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(search, { target: { value: "nobody" } });
+    fireEvent.change(search, { target: { value: "Alice" } });
+    const remountedRow = screen.getByText("Alice").closest("li");
+    MockIntersectionObserver.instances.at(-1)?.trigger(remountedRow);
+    expect(request).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rejectFirst?.(new Error("temporary thumbnail failure"));
+      await Promise.resolve();
+    });
+    fireEvent.change(search, { target: { value: "nobody" } });
+    fireEvent.change(search, { target: { value: "Alice" } });
+    MockIntersectionObserver.instances.at(-1)?.trigger(screen.getByText("Alice").closest("li"));
+
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it("renders the classified sections in Space, pending, then child-room order", () => {

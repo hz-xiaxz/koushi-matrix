@@ -513,13 +513,24 @@ pub(crate) fn handle_cancellation_requested(
     user_id: String,
     generation: u64,
 ) -> Vec<AppEffect> {
+    let cancellation_context_is_retryable = matches!(
+        &state.space_members.operation,
+        SpaceMembersOperationState::Idle
+    ) || matches!(
+        &state.space_members.operation,
+        SpaceMembersOperationState::Failed {
+            space_id: failed_space_id,
+            user_id: Some(failed_user_id),
+            generation: failed_generation,
+            ..
+        } if failed_space_id == &space_id
+            && failed_user_id == &user_id
+            && *failed_generation == generation
+    );
     if !is_session_ready(state)
         || state.space_members.selected_space_id.as_deref() != Some(space_id.as_str())
         || state.space_members.generation != generation
-        || !matches!(
-            state.space_members.operation,
-            SpaceMembersOperationState::Idle
-        )
+        || !cancellation_context_is_retryable
         || !state
             .space_members
             .space_invited

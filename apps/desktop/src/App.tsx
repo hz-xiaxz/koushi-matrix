@@ -148,7 +148,8 @@ import {
 } from "./domain/qaSendSmoke";
 import {
   AVATAR_THUMBNAIL_DOWNLOADS_ENABLED,
-  planSnapshotAvatarThumbnailRequests
+  planSnapshotAvatarThumbnailRequests,
+  requestAvatarThumbnailWithDedupe
 } from "./domain/avatarThumbnails";
 import type {
   ActivityMarkReadTarget,
@@ -1557,6 +1558,8 @@ export function App() {
   const initialHomeSelectionApplied = useRef(false);
   const requestedAvatarMxcsRef = useRef<Set<string>>(new Set());
   const avatarRetryCountsRef = useRef<Map<string, number>>(new Map());
+  const requestedMemberAvatarMxcsRef = useRef<Set<string>>(new Set());
+  const memberAvatarRetryCountsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const refreshOverrides = () => setSpaceLocalOverrides(readSpaceLocalOverrides());
@@ -1871,12 +1874,27 @@ export function App() {
     if (!snapshot || !tauriTimelineTransport?.downloadAvatarThumbnail) {
       requestedAvatarMxcsRef.current.clear();
       avatarRetryCountsRef.current.clear();
+      requestedMemberAvatarMxcsRef.current.clear();
+      memberAvatarRetryCountsRef.current.clear();
       return;
     }
     // #116 perf gate: avatar downloads are disabled by default to prevent the
     // AccountActor command flood that froze room selection.
     if (!AVATAR_THUMBNAIL_DOWNLOADS_ENABLED) {
       return;
+    }
+
+    for (const profile of Object.values(snapshot.state.domain.profile.users)) {
+      const avatar = profile.avatar;
+      if (!avatar || !requestedMemberAvatarMxcsRef.current.has(avatar.mxc_uri)) {
+        continue;
+      }
+      if (avatar.thumbnail.kind === "ready") {
+        requestedMemberAvatarMxcsRef.current.delete(avatar.mxc_uri);
+        memberAvatarRetryCountsRef.current.delete(avatar.mxc_uri);
+      } else if (avatar.thumbnail.kind === "failed") {
+        requestedMemberAvatarMxcsRef.current.delete(avatar.mxc_uri);
+      }
     }
 
     const plan = planSnapshotAvatarThumbnailRequests(
@@ -1888,11 +1906,27 @@ export function App() {
     avatarRetryCountsRef.current = plan.retryCounts;
 
     for (const mxcUri of plan.requestMxcUris) {
+      if (requestedMemberAvatarMxcsRef.current.has(mxcUri)) {
+        continue;
+      }
       void tauriTimelineTransport.downloadAvatarThumbnail(mxcUri).catch(() => {
         requestedAvatarMxcsRef.current.delete(mxcUri);
       });
     }
   }, [snapshot]);
+
+  const requestMemberAvatarThumbnail = useCallback((mxcUri: string): Promise<void> => {
+    if (!AVATAR_THUMBNAIL_DOWNLOADS_ENABLED || !tauriTimelineTransport?.downloadAvatarThumbnail) {
+      return Promise.resolve();
+    }
+    return requestAvatarThumbnailWithDedupe(
+      mxcUri,
+      requestedAvatarMxcsRef.current,
+      requestedMemberAvatarMxcsRef.current,
+      memberAvatarRetryCountsRef.current,
+      tauriTimelineTransport.downloadAvatarThumbnail
+    );
+  }, []);
 
   function handleShortcutAction(shortcutId: string): boolean {
     switch (shortcutId) {
@@ -5966,7 +6000,7 @@ export function App() {
           }}
           onRequestMemberAvatarThumbnail={
             AVATAR_THUMBNAIL_DOWNLOADS_ENABLED
-              ? tauriTimelineTransport?.downloadAvatarThumbnail
+              ? requestMemberAvatarThumbnail
               : undefined
           }
           onSetRoomNotificationMode={(roomId, mode) => {

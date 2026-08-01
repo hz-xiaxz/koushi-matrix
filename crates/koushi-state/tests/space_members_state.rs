@@ -2,7 +2,7 @@ use koushi_state::{
     AppAction, AppState, OperationFailureKind, SessionInfo, SessionState, SpaceMemberEntry,
     SpaceMemberInviteOutcome, SpaceMemberMembership, SpaceMembersOperationState,
     SpaceMembersProjection, UserProfile, admit_space_member_cancellation,
-    admit_space_member_invite, reduce,
+    admit_space_member_invite, admit_space_members_load, reduce,
 };
 
 const SPACE_ID: &str = "!space:example.invalid";
@@ -251,6 +251,126 @@ fn cancellation_transport_failure_retains_the_invited_entry() {
             kind: OperationFailureKind::Sdk,
         } if space_id == SPACE_ID && user_id == USER_ID
     ));
+}
+
+#[test]
+fn failed_cancellation_can_retry_only_for_the_exact_invited_context() {
+    let mut state = state_with_settled_invite();
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationRequested {
+            request_id: 74,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationSettled {
+            request_id: 74,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+            outcome: SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+        },
+    );
+
+    assert!(admit_space_member_cancellation(&state.space_members, SPACE_ID, USER_ID, 2).is_ok());
+    for (space_id, user_id, generation) in [
+        ("!other-space:example.invalid", USER_ID, 2),
+        (SPACE_ID, "@other-user:example.invalid", 2),
+        (SPACE_ID, USER_ID, 1),
+    ] {
+        assert!(
+            admit_space_member_cancellation(&state.space_members, space_id, user_id, generation)
+                .is_err()
+        );
+    }
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationRequested {
+            request_id: 75,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::CancellingInvite {
+            request_id: 75,
+            ref space_id,
+            ref user_id,
+            generation: 2,
+        } if space_id == SPACE_ID && user_id == USER_ID
+    ));
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationSettled {
+            request_id: 75,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+            outcome: SpaceMemberInviteOutcome::Cancelled,
+        },
+    );
+    assert!(state.space_members.space_invited.is_empty());
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Idle
+    ));
+
+    let mut load_failure = state_with_settled_invite();
+    load_failure.space_members.operation = SpaceMembersOperationState::Failed {
+        request_id: 76,
+        space_id: SPACE_ID.to_owned(),
+        user_id: None,
+        generation: 2,
+        kind: OperationFailureKind::Network,
+    };
+    assert!(
+        admit_space_member_cancellation(&load_failure.space_members, SPACE_ID, USER_ID, 2).is_err()
+    );
+
+    let mut invite_failure = state_with_settled_invite();
+    invite_failure.space_members.space_invited.clear();
+    invite_failure
+        .space_members
+        .child_room_only
+        .push(child_only_entry());
+    invite_failure.space_members.operation = SpaceMembersOperationState::Failed {
+        request_id: 77,
+        space_id: SPACE_ID.to_owned(),
+        user_id: Some(USER_ID.to_owned()),
+        generation: 2,
+        kind: OperationFailureKind::Sdk,
+    };
+    assert!(
+        admit_space_member_cancellation(&invite_failure.space_members, SPACE_ID, USER_ID, 2)
+            .is_err()
+    );
+}
+
+#[test]
+fn load_admission_requires_the_active_navigation_space_when_selection_is_unset() {
+    let mut state = ready_state();
+    assert!(state.space_members.selected_space_id.is_none());
+    state.navigation.active_space_id = Some(SPACE_ID.to_owned());
+
+    assert!(admit_space_members_load(&state, SPACE_ID, 1).is_ok());
+    assert_eq!(
+        admit_space_members_load(&state, "!other-space:example.invalid", 1),
+        Err(koushi_state::SpaceMembersCommandRejection::WrongSpace)
+    );
+
+    state.navigation.active_space_id = None;
+    assert_eq!(
+        admit_space_members_load(&state, SPACE_ID, 1),
+        Err(koushi_state::SpaceMembersCommandRejection::NoSelectedSpace)
+    );
 }
 
 #[test]

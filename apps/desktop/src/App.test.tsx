@@ -1795,7 +1795,7 @@ describe("desktop integration source guards", () => {
     const panelPropsSource = source.slice(renderStart, renderEnd);
 
     expect(panelPropsSource).toMatch(
-      /onRequestMemberAvatarThumbnail=\{\s*AVATAR_THUMBNAIL_DOWNLOADS_ENABLED\s*\?\s*tauriTimelineTransport\?\.downloadAvatarThumbnail\s*:\s*undefined\s*\}/
+      /onRequestMemberAvatarThumbnail=\{\s*AVATAR_THUMBNAIL_DOWNLOADS_ENABLED\s*\?\s*requestMemberAvatarThumbnail\s*:\s*undefined\s*\}/
     );
   });
 

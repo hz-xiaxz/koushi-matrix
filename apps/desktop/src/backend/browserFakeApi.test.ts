@@ -111,15 +111,54 @@ describe("BrowserFakeApi Space member audit", () => {
     expect(future).toEqual(before);
   });
 
-  test("loads a new Space generation only after the active Space is cleared", async () => {
+  test("loads only the active Space and permits its initial load when selection is unset", async () => {
     const api = createBrowserFakeApi();
+    const initial = await api.getSnapshot();
+    const mutable = api as unknown as { snapshot: DesktopSnapshot };
+    mutable.snapshot.state.domain.space_members = {
+      ...initial.state.domain.space_members,
+      selected_space_id: null,
+      operation: { kind: "idle" }
+    };
 
-    await api.selectSpace(null);
-    const snapshot = await api.loadSpaceMembers("!space-beta:example.invalid", 99);
+    const rejected = await api.loadSpaceMembers("!space-beta:example.invalid", 99);
+    expect(rejected.state.domain.space_members.selected_space_id).toBeNull();
+
+    const snapshot = await api.loadSpaceMembers(spaceId, 99);
 
     expect(snapshot.state.domain.space_members).toMatchObject({
-      selected_space_id: "!space-beta:example.invalid",
+      selected_space_id: spaceId,
       generation: 99
+    });
+  });
+
+  test("does not let a late load completion clear a newer member operation", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
+    const initial = await api.getSnapshot();
+    const childOnly = initial.state.domain.space_members.child_room_only[0];
+    expect(childOnly).toBeDefined();
+
+    const staleLoad = api.loadSpaceMembers(spaceId, 1);
+    void api.selectSpace(null);
+    void api.selectSpace(spaceId);
+
+    const mutable = api as unknown as { snapshot: DesktopSnapshot };
+    const currentMembers = mutable.snapshot.state.domain.space_members;
+    mutable.snapshot.state.domain.space_members = {
+      ...currentMembers,
+      child_room_only: [childOnly!],
+      operation: { kind: "idle" }
+    };
+    const newerInvite = api.inviteUserToSpace(spaceId, childOnly!.user_id, currentMembers.generation);
+
+    const snapshot = await staleLoad;
+    await newerInvite;
+
+    expect(snapshot.state.domain.space_members.operation).toMatchObject({
+      kind: "inviting",
+      space_id: spaceId,
+      user_id: childOnly!.user_id,
+      generation: currentMembers.generation
     });
   });
 
@@ -337,6 +376,34 @@ describe("BrowserFakeApi Space member audit", () => {
       generation: 1,
       failureKind: "sdk"
     });
+  });
+
+  test("retries a failed cancellation through the fake transport for the exact context", async () => {
+    const api = createBrowserFakeApi({
+      spaceMemberInviteCancellationOutcomes: ["failure", "success"]
+    });
+
+    const failed = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    expect(failed.state.domain.space_members.operation).toMatchObject({
+      kind: "failed",
+      space_id: spaceId,
+      user_id: "@invited:example.invalid",
+      generation: 1
+    });
+
+    const retried = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    expect(retried.state.domain.space_members.space_invited.map((entry) => entry.user_id)).not.toContain(
+      "@invited:example.invalid"
+    );
+    expect(retried.state.domain.space_members.operation).toEqual({ kind: "idle" });
   });
 
   test("rejects stale-generation cancellation admission without changing state", async () => {
