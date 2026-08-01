@@ -695,18 +695,19 @@ describe("App Space Members integration", () => {
 
   test("does not let a superseded Room Info People load replace the newer result", async () => {
     const api = createBrowserFakeApi();
-    const initial = await api.getSnapshot();
+    await api.selectSpace(null);
+    await api.selectRoom("!room-alpha:example.invalid");
     const settingsApi = createBrowserFakeApi();
+    await settingsApi.selectSpace(null);
+    await settingsApi.selectRoom("!room-alpha:example.invalid");
     const settingsSnapshot = await settingsApi.loadRoomSettings("!room-alpha:example.invalid");
     const first = deferred<DesktopSnapshot>();
-    const firstResult = structuredClone(initial);
-    const secondResult = structuredClone(initial);
-    firstResult.state.domain.room_management = structuredClone(
-      settingsSnapshot.state.domain.room_management
-    );
-    secondResult.state.domain.room_management = structuredClone(
-      settingsSnapshot.state.domain.room_management
-    );
+    const second = deferred<DesktopSnapshot>();
+    const firstResult = structuredClone(settingsSnapshot);
+    const secondResult = structuredClone(settingsSnapshot);
+    const resultGeneration = (settingsSnapshot.state_generation ?? 0) + 1;
+    firstResult.state_generation = resultGeneration;
+    secondResult.state_generation = resultGeneration;
     const firstMember = firstResult.state.domain.room_management.settings?.members[0];
     const secondMember = secondResult.state.domain.room_management.settings?.members[0];
     if (firstMember && secondMember) {
@@ -738,9 +739,11 @@ describe("App Space Members integration", () => {
     });
     await screen.findByRole("textbox", { name: "Room name" });
     loadRoomSettings.mockReset();
-    loadRoomSettings
-      .mockReturnValueOnce(first.promise)
-      .mockResolvedValueOnce(secondResult);
+    let supersessionCallCount = 0;
+    loadRoomSettings.mockImplementation(() => {
+      supersessionCallCount += 1;
+      return supersessionCallCount === 1 ? first.promise : second.promise;
+    });
 
     const peopleButton = screen
       .getAllByRole("button", { name: "People" })
@@ -748,11 +751,27 @@ describe("App Space Members integration", () => {
     expect(peopleButton).toBeTruthy();
     await act(async () => {
       fireEvent.click(peopleButton!);
-      fireEvent.click(peopleButton!);
     });
-    await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      fireEvent.click(
+        screen
+          .getAllByRole("button", { name: "People" })
+          .find((button) => button.classList.contains("icon-button"))!
+      );
+    });
+    await waitFor(() => expect(loadRoomSettings.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+    await act(async () => {
+      second.resolve(secondResult);
+      await second.promise;
+    });
     await screen.findByRole("heading", { name: "People", level: 2 });
-    await screen.findByText("Second result");
+    await waitFor(() => {
+      expect(screen.getByRole("list", { name: "Members" }).textContent).toContain(
+        "Second result"
+      );
+    });
 
     await act(async () => {
       first.resolve(firstResult);

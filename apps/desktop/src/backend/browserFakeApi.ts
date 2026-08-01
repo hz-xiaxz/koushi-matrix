@@ -4580,6 +4580,7 @@ function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): Desk
   const active_room_id = "!room-alpha:example.invalid";
   const sidebar = composeBrowserFakeSidebar(active_space_id, spaces, rooms, {}, invites.length);
   const snapshot: DesktopSnapshot = {
+    state_generation: 0,
     state: {
       schema_version: 3,
       domain: {
