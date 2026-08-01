@@ -343,7 +343,7 @@ describe("App Space Members integration", () => {
     await openSpaceMembersFromSidebar();
 
     const cancelButton = screen.getByRole("button", { name: "Cancel invitation" });
-    expect(cancelButton).toHaveProperty("disabled", true);
+    await waitFor(() => expect(cancelButton).toHaveProperty("disabled", true));
     expect(cancelSpaceInvite).not.toHaveBeenCalled();
   });
 
