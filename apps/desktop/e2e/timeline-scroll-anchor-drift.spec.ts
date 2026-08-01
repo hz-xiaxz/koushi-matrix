@@ -220,6 +220,7 @@ test("virtualized free-scroll viewport accepts small user wheel movement", async
   await gotoReadyApp(page);
   await seedTimeline(page, 720);
   await placeAnchorInViewport(page, 220);
+  await waitAnimationFrames(page, 8);
 
   const timeline = page.locator("[data-testid=timeline-view]");
   await timeline.hover();
@@ -237,6 +238,7 @@ test("virtualized free-scroll viewport accepts small user wheel movement toward 
   await gotoReadyApp(page);
   await seedTimeline(page, 720);
   await placeAnchorInViewport(page, 220);
+  await waitAnimationFrames(page, 8);
 
   const timeline = page.locator("[data-testid=timeline-view]");
   await timeline.hover();

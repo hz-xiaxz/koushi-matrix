@@ -2620,8 +2620,8 @@ export function App() {
   }, [
     appendSpaceMembersDiagnosticLog,
     ensureSpaceMembersLoaded,
-    snapshot?.state.domain.space_members.generation,
-    snapshot?.state.domain.space_members.selected_space_id,
+    snapshot?.state.domain.space_members?.generation,
+    snapshot?.state.domain.space_members?.selected_space_id,
     snapshot?.state.ui.navigation.active_space_id
   ]);
 

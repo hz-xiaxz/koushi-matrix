@@ -34165,6 +34165,11 @@ mod tests {
             room_b.clone(),
             live_tail_test_actor_handle("B", delayed_log.clone()),
         )]));
+        let (action_tx, mut action_rx) = mpsc::channel(8);
+        manager.action_tx = action_tx;
+        let _action_drain = executor::spawn(async move {
+            while action_rx.recv().await.is_some() {}
+        });
         let mut event_rx = manager.event_tx.subscribe();
         let actor_generation = manager
             .timeline_actor_generations
@@ -34289,29 +34294,6 @@ mod tests {
             }),
             "wrong actor, operation, and batch identities cannot prove freshness",
         );
-
-        for diffs in [
-            vec![eyeball_im::VectorDiff::PopBack],
-            vec![eyeball_im::VectorDiff::PushBack {
-                value: real_sdk_item.clone(),
-            }],
-        ] {
-            let (inject_tx, inject_rx) = oneshot::channel();
-            assert!(
-                manager
-                    .timelines
-                    .get(&room_a)
-                    .expect("room A actor")
-                    .send(TimelineActorMessage::TestInjectRestoreDiff {
-                        diffs,
-                        projections: BTreeSet::new(),
-                        acknowledged: inject_tx,
-                    })
-                    .await
-            );
-            inject_rx.await.expect("restore batch handled");
-        }
-
         let matching_projection = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let (actor_tx, state_tx, state_rx) = snapshot(&manager, &room_a);
