@@ -747,14 +747,17 @@ describe("App Space Members integration", () => {
     });
     await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledTimes(2));
     await screen.findByRole("heading", { name: "People", level: 2 });
+    await screen.findByText("Second result");
 
     await act(async () => {
       first.resolve(firstResult);
       await first.promise;
     });
 
-    expect(screen.getByText("Second result")).toBeTruthy();
-    expect(screen.queryByText("First result")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByText("Second result")).toBeTruthy();
+      expect(screen.queryByText("First result")).toBeNull();
+    });
   });
 
   test("dismisses a stale Space-member context target during navigation", async () => {
