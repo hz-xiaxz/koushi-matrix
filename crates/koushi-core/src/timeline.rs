@@ -79,7 +79,7 @@ use koushi_state::{
     ActivityRow, AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState,
     ComposerFormattingOptions, ComposerSendIntent, FormattedMessageDraft, LiveEventReceipts,
     LiveReadReceipt, MediaTransferProgress, MentionIntent, MentionTarget, OperationFailureKind,
-    ReplyQuote, ReplyQuoteState, SlashCommandIntent,
+    ReplyQuote, ReplyQuoteCodeBlock, ReplyQuoteFormattedBody, ReplyQuoteState, SlashCommandIntent,
     ThreadRootProjectionActivity as ThreadRootProjectionActivityState,
     TimelineContinuityInspection, TimelineGapRepairFailureKind, TimelineMediaDownloadState,
     TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
@@ -23943,6 +23943,7 @@ fn reply_quote_from_details(details: &InReplyToDetails) -> ReplyQuote {
                 sender: None,
                 sender_label: None,
                 body_preview: None,
+                formatted: None,
                 state: ReplyQuoteState::Missing,
             }
         }
@@ -23960,33 +23961,70 @@ fn reply_quote_from_embedded_event(
             sender,
             sender_label: None,
             body_preview: None,
+            formatted: None,
             state: ReplyQuoteState::Redacted,
         };
     }
 
-    let body_preview = event.content.as_message().and_then(|msg| {
-        let projection = message_projection_from_msgtype(msg.msgtype(), msg.body());
-        reply_quote_preview_from_message_projection(projection)
-    });
-    let state = if body_preview.is_some() {
+    let projection = event
+        .content
+        .as_message()
+        .map(|msg| message_projection_from_msgtype(msg.msgtype(), msg.body()));
+    reply_quote_from_message_projection(&details.event_id.to_string(), sender, projection)
+}
+
+fn reply_quote_from_message_projection(
+    event_id: &str,
+    sender: Option<String>,
+    projection: Option<MessageProjection>,
+) -> ReplyQuote {
+    let body_preview = projection
+        .as_ref()
+        .and_then(reply_quote_preview_from_message_projection);
+    let formatted = projection
+        .as_ref()
+        .and_then(|projection| projection.formatted.as_ref())
+        .map(reply_quote_formatted_body_from_timeline);
+    let state = if body_preview.is_some() || formatted.is_some() {
         ReplyQuoteState::Ready
     } else {
         ReplyQuoteState::Unsupported
     };
 
     ReplyQuote {
-        event_id: details.event_id.to_string(),
+        event_id: event_id.to_owned(),
         sender,
         sender_label: None,
         body_preview,
+        formatted,
         state,
     }
 }
 
-fn reply_quote_preview_from_message_projection(projection: MessageProjection) -> Option<String> {
-    let source = projection
-        .body
-        .or_else(|| projection.media.map(|media| media.filename))?;
+fn reply_quote_formatted_body_from_timeline(
+    formatted: &crate::event::TimelineFormattedBody,
+) -> ReplyQuoteFormattedBody {
+    ReplyQuoteFormattedBody {
+        html: formatted.html.clone(),
+        plain_text: formatted.plain_text.clone(),
+        code_blocks: formatted
+            .code_blocks
+            .iter()
+            .map(|block| ReplyQuoteCodeBlock {
+                language: block.language.clone(),
+                body: block.body.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn reply_quote_preview_from_message_projection(projection: &MessageProjection) -> Option<String> {
+    let source = projection.body.as_deref().or_else(|| {
+        projection
+            .media
+            .as_ref()
+            .map(|media| media.filename.as_str())
+    })?;
     collapsed_preview(&source, REPLY_QUOTE_PREVIEW_MAX_CHARS)
 }
 
@@ -31565,6 +31603,7 @@ mod tests {
             sender: None,
             sender_label: None,
             body_preview: None,
+            formatted: None,
             state: ReplyQuoteState::Missing,
         });
         let first_visible =
@@ -31575,6 +31614,7 @@ mod tests {
             sender: None,
             sender_label: None,
             body_preview: None,
+            formatted: None,
             state: ReplyQuoteState::Missing,
         });
         let mut ready = timeline_item("$ready:test", Some("ready"), "@alice:test", false);
@@ -31583,6 +31623,7 @@ mod tests {
             sender: Some("@bob:test".to_owned()),
             sender_label: None,
             body_preview: Some("loaded".to_owned()),
+            formatted: None,
             state: ReplyQuoteState::Ready,
         });
         let mut already_requested = timeline_item(
@@ -31596,6 +31637,7 @@ mod tests {
             sender: None,
             sender_label: None,
             body_preview: None,
+            formatted: None,
             state: ReplyQuoteState::Missing,
         });
         let mut after = timeline_item("$after:test", Some("after"), "@alice:test", false);
@@ -31604,6 +31646,7 @@ mod tests {
             sender: None,
             sender_label: None,
             body_preview: None,
+            formatted: None,
             state: ReplyQuoteState::Missing,
         });
 
@@ -36237,6 +36280,29 @@ mod tests {
         assert!(formatted.html.contains("<ul><li>one</li></ul>"));
         assert!(formatted.html.contains("data-mx-spoiler=\"reason\""));
         assert!(formatted.html.contains(">secret<"));
+    }
+
+    #[test]
+    fn reply_quote_projection_retains_sanitized_formatted_body() {
+        let msgtype = MessageType::Text(TextMessageEventContent::html(
+            "plain fallback",
+            r#"<ul><li>one</li><li>two</li></ul><script>bad()</script><pre><code class="language-rust">fn main() {}</code></pre>"#,
+        ));
+
+        let projection = message_projection_from_msgtype(&msgtype, "plain fallback");
+        let quote = reply_quote_from_message_projection(
+            "$root:example.invalid",
+            Some("@bob:example.invalid".to_owned()),
+            Some(projection),
+        );
+
+        assert_eq!(quote.state, ReplyQuoteState::Ready);
+        let formatted = quote.formatted.expect("formatted quote body");
+        assert!(formatted.html.contains("<ul><li>one</li><li>two</li></ul>"));
+        assert!(!formatted.html.contains("<script"));
+        assert_eq!(formatted.code_blocks.len(), 1);
+        assert_eq!(formatted.code_blocks[0].language.as_deref(), Some("rust"));
+        assert_eq!(formatted.code_blocks[0].body, "fn main() {}");
     }
 
     #[test]

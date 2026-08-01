@@ -218,3 +218,32 @@ test("session popover dismisses accessibly and falls back to local account setti
   await page.locator(".top-search").click();
   await expect(dialog).toBeHidden();
 });
+
+test("session popover has an opaque theme-aware surface and elevation", async ({ page }) => {
+  await gotoReadyShell(page);
+  await seedReadyStatus(page, null);
+
+  const trigger = page.getByRole("button", { name: "Open session status" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Current session" });
+  await expect(dialog).toBeVisible();
+
+  for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((nextTheme) => {
+      document.documentElement.dataset.theme = nextTheme;
+    }, theme);
+
+    const styles = await dialog.evaluate((element) => {
+      const computed = getComputedStyle(element);
+      return {
+        backgroundColor: computed.backgroundColor,
+        boxShadow: computed.boxShadow
+      };
+    });
+
+    expect(styles.backgroundColor, `${theme} popover should be opaque`).not.toMatch(
+      /transparent|rgba\([^)]*,\s*0\)/
+    );
+    expect(styles.boxShadow, `${theme} popover should have elevation`).not.toBe("none");
+  }
+});

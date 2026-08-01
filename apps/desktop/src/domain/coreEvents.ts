@@ -650,6 +650,7 @@ export interface ReplyQuote {
   sender: string | null;
   sender_label?: string | null;
   body_preview: string | null;
+  formatted?: TimelineFormattedBody | null;
   state: ReplyQuoteState;
 }
 

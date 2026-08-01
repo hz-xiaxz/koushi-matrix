@@ -1405,6 +1405,16 @@
             "reply_quote": {
               "body_preview": "quoted preview",
               "event_id": "$root1",
+              "formatted": {
+                "code_blocks": [
+                  {
+                    "body": "fn main() {}",
+                    "language": "rust"
+                  }
+                ],
+                "html": "<p>quoted <strong>preview</strong></p><pre><code class=\"language-rust\">fn main() {}</code></pre>",
+                "plain_text": "quoted previewfn main() {}"
+              },
               "sender": "@other:example.test",
               "sender_label": null,
               "state": "ready"

@@ -2378,11 +2378,11 @@ mod tests {
             IdentityResetState, JapaneseCatalogProfile, LocalEncryptionHealth,
             MediaTransferProgress, MentionIntent, MentionTarget, NativeAttentionCapabilities,
             NativeAttentionCapability, NativeAttentionSummary, OwnIdentityVerification,
-            PresenceKind, ReplyQuote, ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule,
-            RoomMemberRole, RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot,
-            RoomTagKind, SasEmoji, SearchCrawlerFailureKind, SearchCrawlerRoomState,
-            SessionAuthenticationMethod, SubmissionId, SyncMode, UserTrustState,
-            VerificationFlowState, VerificationTarget,
+            PresenceKind, ReplyQuote, ReplyQuoteCodeBlock, ReplyQuoteFormattedBody,
+            ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule, RoomMemberRole,
+            RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot, RoomTagKind, SasEmoji,
+            SearchCrawlerFailureKind, SearchCrawlerRoomState, SessionAuthenticationMethod,
+            SubmissionId, SyncMode, UserTrustState, VerificationFlowState, VerificationTarget,
         };
         use serde_json::json;
 
@@ -2574,6 +2574,14 @@ mod tests {
                 sender: Some("@other:example.test".to_owned()),
                 sender_label: None,
                 body_preview: Some("quoted preview".to_owned()),
+                formatted: Some(ReplyQuoteFormattedBody {
+                    html: "<p>quoted <strong>preview</strong></p><pre><code class=\"language-rust\">fn main() {}</code></pre>".to_owned(),
+                    plain_text: "quoted previewfn main() {}".to_owned(),
+                    code_blocks: vec![ReplyQuoteCodeBlock {
+                        language: Some("rust".to_owned()),
+                        body: "fn main() {}".to_owned(),
+                    }],
+                }),
                 state: ReplyQuoteState::Ready,
             }),
             thread_root: None,
@@ -2869,6 +2877,16 @@ mod tests {
                 "sender": "@other:example.test",
                 "sender_label": null,
                 "body_preview": "quoted preview",
+                "formatted": {
+                    "html": "<p>quoted <strong>preview</strong></p><pre><code class=\"language-rust\">fn main() {}</code></pre>",
+                    "plain_text": "quoted previewfn main() {}",
+                    "code_blocks": [
+                        {
+                            "language": "rust",
+                            "body": "fn main() {}"
+                        }
+                    ]
+                },
                 "state": "ready"
             })
         );

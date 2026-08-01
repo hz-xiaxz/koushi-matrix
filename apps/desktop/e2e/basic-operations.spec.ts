@@ -4442,6 +4442,11 @@ test("reply quote block renders from Rust-owned timeline item data", async ({ pa
         sender: "@quoted-user:example.invalid",
         sender_label: "Quoted User",
         body_preview: "Quoted source from Rust state",
+        formatted: {
+          html: '<ul><li>First item</li><li>Second item</li></ul><p><a href="https://example.invalid/quote">quoted link</a></p><pre><code class="language-rust">fn main() {}</code></pre>',
+          plain_text: "First itemSecond itemquoted linkfn main() {}",
+          code_blocks: [{ language: "rust", body: "fn main() {}" }]
+        },
         state: "ready"
       },
       thread_root: null,
@@ -4460,7 +4465,12 @@ test("reply quote block renders from Rust-owned timeline item data", async ({ pa
   await expect(row.locator(".reply-quote")).toBeVisible();
   await expect(row.getByText("Quoted User", { exact: true })).toBeVisible();
   await expect(row).not.toContainText("@quoted-user:example.invalid");
-  await expect(row.getByText("Quoted source from Rust state", { exact: true })).toBeVisible();
+  await expect(row.locator(".reply-quote ul li")).toHaveCount(2);
+  await expect(row.locator('.reply-quote a[href="https://example.invalid/quote"]')).toBeVisible();
+  await expect(row.locator(".reply-quote .message-code-block-pre code")).toHaveText(
+    "fn main() {}"
+  );
+  await expect(row).not.toContainText("Quoted source from Rust state");
   await expect(row).not.toContainText("$root:example.invalid");
 });
 

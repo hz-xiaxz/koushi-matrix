@@ -34,12 +34,51 @@ pub enum PinnedEventState {
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReplyQuoteCodeBlock {
+    pub language: Option<String>,
+    pub body: String,
+}
+
+impl fmt::Debug for ReplyQuoteCodeBlock {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReplyQuoteCodeBlock")
+            .field(
+                "language",
+                &self.language.as_ref().map(|_| "CodeBlockLanguage(..)"),
+            )
+            .field("body", &"CodeBlockBody(..)")
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReplyQuoteFormattedBody {
+    pub html: String,
+    pub plain_text: String,
+    pub code_blocks: Vec<ReplyQuoteCodeBlock>,
+}
+
+impl fmt::Debug for ReplyQuoteFormattedBody {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReplyQuoteFormattedBody")
+            .field("html", &"FormattedHtml(..)")
+            .field("plain_text", &"FormattedPlainText(..)")
+            .field("code_blocks", &self.code_blocks.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ReplyQuote {
     pub event_id: String,
     pub sender: Option<String>,
     #[serde(default)]
     pub sender_label: Option<String>,
     pub body_preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formatted: Option<ReplyQuoteFormattedBody>,
     pub state: ReplyQuoteState,
 }
 
@@ -56,6 +95,13 @@ impl fmt::Debug for ReplyQuote {
             .field(
                 "body_preview",
                 &self.body_preview.as_ref().map(|_| "BodyPreview(..)"),
+            )
+            .field(
+                "formatted",
+                &self
+                    .formatted
+                    .as_ref()
+                    .map(|_| "ReplyQuoteFormattedBody(..)"),
             )
             .field("state", &self.state)
             .finish()

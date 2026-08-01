@@ -6696,7 +6696,17 @@ export function TimelineItemRow({
           {peopleFacingLabel(item.reply_quote.sender_label)}
         </div>
         <div className="reply-quote-body" dir="auto">
-          {replyQuoteBody(item.reply_quote)}
+          {item.reply_quote.formatted
+            ? renderFormattedBody(
+                item.reply_quote.formatted,
+                [],
+                codeBlockWrap,
+                onCopyText,
+                "",
+                spoilerState,
+                onOpenMatrixTarget
+              )
+            : replyQuoteBody(item.reply_quote)}
         </div>
       </div>
     ) : null;

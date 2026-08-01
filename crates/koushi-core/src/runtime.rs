@@ -8494,6 +8494,7 @@ mod tests {
                     sender: Some("@bob:example.invalid".to_owned()),
                     sender_label: None,
                     body_preview: Some("quoted".to_owned()),
+                    formatted: None,
                     state: koushi_state::ReplyQuoteState::Ready,
                 }),
                 thread_root: None,
