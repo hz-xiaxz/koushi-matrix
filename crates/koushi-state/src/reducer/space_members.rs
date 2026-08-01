@@ -143,6 +143,31 @@ pub(crate) fn handle_projection_reconciled(
     if !is_session_ready(state) || !operation_matches_request(state, request_id) {
         return Vec::new();
     }
+    if matches!(
+        &state.space_members.operation,
+        SpaceMembersOperationState::CancellingInvite {
+            request_id: active_request_id,
+            space_id: active_space_id,
+            generation: active_generation,
+            ..
+        } if *active_request_id == request_id
+            && active_space_id == &projection.space_id
+            && *active_generation == projection.generation
+            && state.space_members.selected_space_id.as_deref()
+                == Some(projection.space_id.as_str())
+            && state.space_members.generation == projection.generation
+    ) {
+        let mut effects = super::profile::handle_user_profiles_updated(state, profiles);
+        apply_reconciled_projection_during_cancellation(state, projection);
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+        return effects;
+    }
+    if matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::CancellingInvite { .. }
+    ) {
+        return Vec::new();
+    }
     let mut effects = super::profile::handle_user_profiles_updated(state, profiles);
     if matches!(
         state.space_members.operation,
@@ -197,6 +222,9 @@ pub(crate) fn handle_background_projection_reconciled(
             if apply_reconciled_projection_during_invite(state, projection) {
                 state.space_members.operation = SpaceMembersOperationState::Idle;
             }
+        }
+        SpaceMembersOperationState::CancellingInvite { .. } => {
+            apply_reconciled_projection_during_cancellation(state, projection);
         }
         SpaceMembersOperationState::Failed {
             user_id: Some(user_id),
@@ -306,6 +334,18 @@ fn apply_reconciled_projection_during_invite(
     sort_projection(&mut resolved);
     apply_projection(&mut state.space_members, resolved);
     authoritative
+}
+
+fn apply_reconciled_projection_during_cancellation(
+    state: &mut AppState,
+    projection: SpaceMembersProjection,
+) {
+    let mut resolved = resolve_space_members_projection(projection, &state.profile);
+    if resolved.incomplete_child_room_count > 0 {
+        merge_incomplete_projection(&state.space_members, &mut resolved);
+    }
+    sort_projection(&mut resolved);
+    apply_projection(&mut state.space_members, resolved);
 }
 
 pub(crate) fn handle_load_failed(
@@ -454,6 +494,138 @@ pub(crate) fn handle_invite_settled(
                 kind,
             };
         }
+        SpaceMemberInviteOutcome::Cancelled | SpaceMemberInviteOutcome::NotInvited => {
+            let mut entry = entry;
+            entry.membership = SpaceMemberMembership::SpaceInvited;
+            entry.invite_pending = false;
+            state.space_members.space_invited.push(entry);
+            sort_entries(&mut state.space_members.space_invited);
+            state.space_members.operation = SpaceMembersOperationState::Idle;
+        }
+    }
+    vec![AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged)]
+}
+
+pub(crate) fn handle_cancellation_requested(
+    state: &mut AppState,
+    request_id: u64,
+    space_id: String,
+    user_id: String,
+    generation: u64,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state)
+        || state.space_members.selected_space_id.as_deref() != Some(space_id.as_str())
+        || state.space_members.generation != generation
+        || !matches!(
+            state.space_members.operation,
+            SpaceMembersOperationState::Idle
+        )
+        || !state
+            .space_members
+            .space_invited
+            .iter()
+            .any(|entry| entry.user_id == user_id)
+    {
+        return Vec::new();
+    }
+
+    state.space_members.operation = SpaceMembersOperationState::CancellingInvite {
+        request_id,
+        space_id,
+        user_id,
+        generation,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged)]
+}
+
+pub(crate) fn handle_cancellation_settled(
+    state: &mut AppState,
+    request_id: u64,
+    space_id: String,
+    user_id: String,
+    generation: u64,
+    outcome: SpaceMemberInviteOutcome,
+) -> Vec<AppEffect> {
+    let matches_operation = matches!(
+        &state.space_members.operation,
+        SpaceMembersOperationState::CancellingInvite {
+            request_id: active_request_id,
+            space_id: active_space_id,
+            user_id: active_user_id,
+            generation: active_generation,
+        } if *active_request_id == request_id
+            && active_space_id == &space_id
+            && active_user_id == &user_id
+            && *active_generation == generation
+    );
+    if !is_session_ready(state)
+        || !matches_operation
+        || state.space_members.selected_space_id.as_deref() != Some(space_id.as_str())
+        || state.space_members.generation != generation
+    {
+        return Vec::new();
+    }
+
+    match outcome {
+        SpaceMemberInviteOutcome::Cancelled => {
+            state
+                .space_members
+                .space_invited
+                .retain(|entry| entry.user_id != user_id);
+            state.space_members.operation = SpaceMembersOperationState::Idle;
+        }
+        SpaceMemberInviteOutcome::NotInvited => {
+            state.space_members.operation = SpaceMembersOperationState::Idle;
+        }
+        SpaceMemberInviteOutcome::Failed(kind) => {
+            if !state
+                .space_members
+                .space_invited
+                .iter()
+                .any(|entry| entry.user_id == user_id)
+                && !state
+                    .space_members
+                    .space_joined
+                    .iter()
+                    .any(|entry| entry.user_id == user_id)
+            {
+                let mut entry = state
+                    .space_members
+                    .child_room_only
+                    .iter()
+                    .find(|entry| entry.user_id == user_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        fallback_entry(&user_id, SpaceMemberMembership::SpaceInvited)
+                    });
+                state
+                    .space_members
+                    .child_room_only
+                    .retain(|entry| entry.user_id != user_id);
+                entry.membership = SpaceMemberMembership::SpaceInvited;
+                entry.invite_pending = false;
+                state.space_members.space_invited.push(entry);
+                sort_entries(&mut state.space_members.space_invited);
+            }
+            state.space_members.operation = SpaceMembersOperationState::Failed {
+                request_id,
+                space_id,
+                user_id: Some(user_id),
+                generation,
+                kind,
+            };
+        }
+        SpaceMemberInviteOutcome::Invited
+        | SpaceMemberInviteOutcome::AlreadyInvited
+        | SpaceMemberInviteOutcome::AlreadyJoined => {
+            state.space_members.operation = SpaceMembersOperationState::Failed {
+                request_id,
+                space_id,
+                user_id: Some(user_id),
+                generation,
+                kind: crate::state::OperationFailureKind::Sdk,
+            };
+        }
     }
     vec![AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged)]
 }
@@ -488,6 +660,10 @@ fn operation_matches_request(state: &AppState, request_id: u64) -> bool {
             | SpaceMembersOperationState::Inviting {
                 request_id: active_request_id,
                 ..
+            }
+            | SpaceMembersOperationState::CancellingInvite {
+                request_id: active_request_id,
+                ..
             } if active_request_id == request_id
     )
 }
@@ -500,6 +676,11 @@ fn background_reconciliation_operation_matches(
     match operation {
         SpaceMembersOperationState::Idle => true,
         SpaceMembersOperationState::Inviting {
+            space_id: operation_space_id,
+            generation: operation_generation,
+            ..
+        }
+        | SpaceMembersOperationState::CancellingInvite {
             space_id: operation_space_id,
             generation: operation_generation,
             ..

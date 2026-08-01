@@ -1,7 +1,8 @@
 use koushi_state::{
     AppAction, AppState, OperationFailureKind, SessionInfo, SessionState, SpaceMemberEntry,
     SpaceMemberInviteOutcome, SpaceMemberMembership, SpaceMembersOperationState,
-    SpaceMembersProjection, UserProfile, admit_space_member_invite, reduce,
+    SpaceMembersProjection, UserProfile, admit_space_member_cancellation,
+    admit_space_member_invite, reduce,
 };
 
 const SPACE_ID: &str = "!space:example.invalid";
@@ -54,6 +55,191 @@ fn space_entry(membership: SpaceMemberMembership) -> SpaceMemberEntry {
         invite_pending: false,
         ..child_only_entry()
     }
+}
+
+fn state_with_settled_invite() -> AppState {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoadRequested {
+            request_id: 70,
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersLoaded {
+            request_id: 70,
+            projection: projection(2, vec![child_only_entry()]),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteRequested {
+            request_id: 71,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteSettled {
+            request_id: 71,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+            outcome: SpaceMemberInviteOutcome::Invited,
+        },
+    );
+    state
+}
+
+#[test]
+fn cancellation_admission_requires_the_current_invited_entry() {
+    let mut state = state_with_settled_invite();
+    assert!(admit_space_member_cancellation(&state.space_members, SPACE_ID, USER_ID, 2).is_ok());
+
+    state.space_members.space_invited.clear();
+    assert!(admit_space_member_cancellation(&state.space_members, SPACE_ID, USER_ID, 2).is_err());
+}
+
+#[test]
+fn invited_cancellation_is_fenced_and_settles_to_idle_after_removing_the_invite() {
+    let mut state = state_with_settled_invite();
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationRequested {
+            request_id: 72,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::CancellingInvite {
+            request_id: 72,
+            ref space_id,
+            ref user_id,
+            generation: 2,
+        } if space_id == SPACE_ID && user_id == USER_ID
+    ));
+    assert_eq!(state.space_members.space_invited.len(), 1);
+
+    let before_stale = state.clone();
+    for (request_id, space_id, generation) in [
+        (71, SPACE_ID.to_owned(), 2),
+        (72, "!other-space:example.invalid".to_owned(), 2),
+        (72, SPACE_ID.to_owned(), 1),
+    ] {
+        reduce(
+            &mut state,
+            AppAction::SpaceMemberInviteCancellationSettled {
+                request_id,
+                space_id,
+                user_id: USER_ID.to_owned(),
+                generation,
+                outcome: SpaceMemberInviteOutcome::Cancelled,
+            },
+        );
+        assert_eq!(state, before_stale);
+    }
+
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationSettled {
+            request_id: 72,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+            outcome: SpaceMemberInviteOutcome::Cancelled,
+        },
+    );
+    assert!(state.space_members.space_invited.is_empty());
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Idle
+    ));
+}
+
+#[test]
+fn not_invited_cancellation_reconciles_a_joined_projection_without_removing_it() {
+    let mut state = state_with_settled_invite();
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationRequested {
+            request_id: 73,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMembersProjectionReconciled {
+            request_id: 73,
+            projection: SpaceMembersProjection {
+                space_joined: vec![space_entry(SpaceMemberMembership::SpaceJoined)],
+                ..projection(2, Vec::new())
+            },
+            profiles: Vec::new(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationSettled {
+            request_id: 73,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+            outcome: SpaceMemberInviteOutcome::NotInvited,
+        },
+    );
+
+    assert_eq!(state.space_members.space_joined[0].user_id, USER_ID);
+    assert!(state.space_members.space_invited.is_empty());
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Idle
+    ));
+}
+
+#[test]
+fn cancellation_transport_failure_retains_the_invited_entry() {
+    let mut state = state_with_settled_invite();
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationRequested {
+            request_id: 74,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::SpaceMemberInviteCancellationSettled {
+            request_id: 74,
+            space_id: SPACE_ID.to_owned(),
+            user_id: USER_ID.to_owned(),
+            generation: 2,
+            outcome: SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+        },
+    );
+
+    assert_eq!(state.space_members.space_invited[0].user_id, USER_ID);
+    assert!(matches!(
+        state.space_members.operation,
+        SpaceMembersOperationState::Failed {
+            request_id: 74,
+            ref space_id,
+            user_id: Some(ref user_id),
+            generation: 2,
+            kind: OperationFailureKind::Sdk,
+        } if space_id == SPACE_ID && user_id == USER_ID
+    ));
 }
 
 #[test]

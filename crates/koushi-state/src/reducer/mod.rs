@@ -509,6 +509,23 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         } => space_members::handle_invite_settled(
             state, request_id, space_id, user_id, generation, outcome,
         ),
+        AppAction::SpaceMemberInviteCancellationRequested {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+        } => space_members::handle_cancellation_requested(
+            state, request_id, space_id, user_id, generation,
+        ),
+        AppAction::SpaceMemberInviteCancellationSettled {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+            outcome,
+        } => space_members::handle_cancellation_settled(
+            state, request_id, space_id, user_id, generation, outcome,
+        ),
         AppAction::MentionCandidatesDemanded {
             request_id,
             generation,

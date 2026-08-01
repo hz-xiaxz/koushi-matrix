@@ -977,6 +977,18 @@ class TauriDesktopApi implements DesktopApi {
     });
   }
 
+  async cancelSpaceInvite(
+    spaceId: string,
+    userId: string,
+    generation: number
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("cancel_space_invite", {
+      spaceId,
+      userId,
+      generation
+    });
+  }
+
   async openInviteWorkflow(roomId: string): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("open_invite_workflow", { roomId });
   }

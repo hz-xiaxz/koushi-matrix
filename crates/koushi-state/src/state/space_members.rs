@@ -18,9 +18,11 @@ pub enum SpaceMembersCommandRejection {
     WrongSpace,
     StaleGeneration,
     InviteAlreadyInFlight,
+    CancellationAlreadyInFlight,
     LoadBlockedByInvite,
     AlreadyJoined,
     AlreadyInvited,
+    NotInvited,
     NotChildRoomOnly,
 }
 
@@ -103,6 +105,8 @@ pub enum SpaceMemberInviteOutcome {
     Invited,
     AlreadyInvited,
     AlreadyJoined,
+    Cancelled,
+    NotInvited,
     Failed(OperationFailureKind),
 }
 
@@ -117,6 +121,12 @@ pub enum SpaceMembersOperationState {
         generation: u64,
     },
     Inviting {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+    },
+    CancellingInvite {
         request_id: u64,
         space_id: String,
         user_id: String,
@@ -158,6 +168,17 @@ impl fmt::Debug for SpaceMembersOperationState {
                 ..
             } => formatter
                 .debug_struct("Inviting")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("user_id", &"UserId(..)")
+                .field("generation", generation)
+                .finish(),
+            Self::CancellingInvite {
+                request_id,
+                generation,
+                ..
+            } => formatter
+                .debug_struct("CancellingInvite")
                 .field("request_id", request_id)
                 .field("space_id", &"RoomId(..)")
                 .field("user_id", &"UserId(..)")
@@ -363,7 +384,11 @@ pub fn admit_space_member_invite(
     if state.generation != generation {
         return Err(SpaceMembersCommandRejection::StaleGeneration);
     }
-    if matches!(state.operation, SpaceMembersOperationState::Inviting { .. }) {
+    if matches!(
+        state.operation,
+        SpaceMembersOperationState::Inviting { .. }
+            | SpaceMembersOperationState::CancellingInvite { .. }
+    ) {
         return Err(SpaceMembersCommandRejection::InviteAlreadyInFlight);
     }
     if state
@@ -390,6 +415,34 @@ pub fn admit_space_member_invite(
     Ok(())
 }
 
+pub fn admit_space_member_cancellation(
+    state: &SpaceMembersState,
+    space_id: &str,
+    user_id: &str,
+    generation: u64,
+) -> Result<(), SpaceMembersCommandRejection> {
+    let Some(selected_space_id) = state.selected_space_id.as_deref() else {
+        return Err(SpaceMembersCommandRejection::NoSelectedSpace);
+    };
+    if selected_space_id != space_id {
+        return Err(SpaceMembersCommandRejection::WrongSpace);
+    }
+    if state.generation != generation {
+        return Err(SpaceMembersCommandRejection::StaleGeneration);
+    }
+    if !matches!(state.operation, SpaceMembersOperationState::Idle) {
+        return Err(SpaceMembersCommandRejection::CancellationAlreadyInFlight);
+    }
+    if !state
+        .space_invited
+        .iter()
+        .any(|entry| entry.user_id == user_id)
+    {
+        return Err(SpaceMembersCommandRejection::NotInvited);
+    }
+    Ok(())
+}
+
 pub fn admit_space_members_load(
     state: &SpaceMembersState,
     space_id: &str,
@@ -403,7 +456,11 @@ pub fn admit_space_members_load(
             return Err(SpaceMembersCommandRejection::StaleGeneration);
         }
     }
-    if matches!(state.operation, SpaceMembersOperationState::Inviting { .. }) {
+    if matches!(
+        state.operation,
+        SpaceMembersOperationState::Inviting { .. }
+            | SpaceMembersOperationState::CancellingInvite { .. }
+    ) {
         return Err(SpaceMembersCommandRejection::LoadBlockedByInvite);
     }
     Ok(())

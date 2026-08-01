@@ -86,6 +86,20 @@ import type {
   ComposerDraftScope
 } from "../domain/composerDraftLifecycle";
 
+type BrowserFakeSpaceMembersOperationState =
+  | SpaceMembersState["operation"]
+  | {
+      kind: "cancellingInvite";
+      request_id: number;
+      space_id: string;
+      user_id: string;
+      generation: number;
+    };
+
+type BrowserFakeSpaceMembersState = Omit<SpaceMembersState, "operation"> & {
+  operation: BrowserFakeSpaceMembersOperationState;
+};
+
 export interface DesktopApi {
   getSnapshot(): Promise<DesktopSnapshot>;
   getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot>;
@@ -348,6 +362,11 @@ export interface DesktopApi {
     userId: string,
     generation: number
   ): Promise<DesktopSnapshot>;
+  cancelSpaceInvite(
+    spaceId: string,
+    userId: string,
+    generation: number
+  ): Promise<DesktopSnapshot>;
   queryMentionCandidates(
     roomId: string,
     surface: MentionSurface,
@@ -411,6 +430,7 @@ export interface BrowserFakeApiOptions {
   restoreSession?: boolean;
   session?: "ready" | "signedOut" | "needsRecovery" | "locked";
   spaceMemberInviteOutcome?: "pending" | "success" | "failure";
+  spaceMemberInviteCancellationOutcome?: "pending" | "success" | "failure";
 }
 
 export function createBrowserFakeApi(options: BrowserFakeApiOptions = {}): DesktopApi {
@@ -421,6 +441,9 @@ class BrowserFakeApi implements DesktopApi {
   private snapshot: DesktopSnapshot;
   private readonly spaceMemberInviteOutcome: NonNullable<
     BrowserFakeApiOptions["spaceMemberInviteOutcome"]
+  >;
+  private readonly spaceMemberInviteCancellationOutcome: NonNullable<
+    BrowserFakeApiOptions["spaceMemberInviteCancellationOutcome"]
   >;
   private requestSequence = 1_000;
   private composerRendererGeneration = 0n;
@@ -561,6 +584,8 @@ class BrowserFakeApi implements DesktopApi {
 
   constructor(options: BrowserFakeApiOptions) {
     this.spaceMemberInviteOutcome = options.spaceMemberInviteOutcome ?? "success";
+    this.spaceMemberInviteCancellationOutcome =
+      options.spaceMemberInviteCancellationOutcome ?? "success";
     this.snapshot = createInitialSnapshot(initialSession(options));
   }
 
@@ -2661,11 +2686,12 @@ class BrowserFakeApi implements DesktopApi {
     }
 
     const normalizedSpaceId = spaceId.trim();
-    const current = this.snapshot.state.domain.space_members;
+    const current = this.snapshot.state.domain.space_members as BrowserFakeSpaceMembersState;
     if (
       (current.selected_space_id !== null &&
         (current.selected_space_id !== normalizedSpaceId || current.generation !== generation)) ||
-      current.operation.kind === "inviting"
+      current.operation.kind === "inviting" ||
+      current.operation.kind === "cancellingInvite"
     ) {
       return this.getSnapshot();
     }
@@ -2702,7 +2728,7 @@ class BrowserFakeApi implements DesktopApi {
 
     const normalizedSpaceId = spaceId.trim();
     const normalizedUserId = userId.trim();
-    const current = this.snapshot.state.domain.space_members;
+    const current = this.snapshot.state.domain.space_members as BrowserFakeSpaceMembersState;
     const childOnly = current.child_room_only.find(
       (entry) => entry.user_id === normalizedUserId
     );
@@ -2710,7 +2736,8 @@ class BrowserFakeApi implements DesktopApi {
       current.selected_space_id !== normalizedSpaceId ||
       current.generation !== generation ||
       !childOnly ||
-      current.operation.kind === "inviting"
+      current.operation.kind === "inviting" ||
+      current.operation.kind === "cancellingInvite"
     ) {
       return this.getSnapshot();
     }
@@ -2772,6 +2799,69 @@ class BrowserFakeApi implements DesktopApi {
           failureKind: "sdk"
         }
       };
+    }
+
+    return this.getSnapshot();
+  }
+
+  async cancelSpaceInvite(
+    spaceId: string,
+    userId: string,
+    generation: number
+  ): Promise<DesktopSnapshot> {
+    if (!this.canUseSyncedViews() || !spaceId.trim() || !userId.trim()) {
+      return this.getSnapshot();
+    }
+
+    const normalizedSpaceId = spaceId.trim();
+    const normalizedUserId = userId.trim();
+    const current = this.snapshot.state.domain.space_members as BrowserFakeSpaceMembersState;
+    if (
+      current.selected_space_id !== normalizedSpaceId ||
+      current.generation !== generation ||
+      current.operation.kind !== "idle" ||
+      !current.space_invited.some((entry) => entry.user_id === normalizedUserId)
+    ) {
+      return this.getSnapshot();
+    }
+
+    const requestId = this.nextRequestId();
+    this.snapshot.state.domain.space_members = {
+      ...current,
+      operation: {
+        kind: "cancellingInvite",
+        request_id: requestId,
+        space_id: normalizedSpaceId,
+        user_id: normalizedUserId,
+        generation
+      }
+    } as unknown as SpaceMembersState;
+
+    if (this.spaceMemberInviteCancellationOutcome === "pending") {
+      return this.getSnapshot();
+    }
+
+    const active = this.snapshot.state.domain.space_members as unknown as BrowserFakeSpaceMembersState;
+    if (this.spaceMemberInviteCancellationOutcome === "success") {
+      this.snapshot.state.domain.space_members = {
+        ...active,
+        space_invited: active.space_invited.filter(
+          (entry) => entry.user_id !== normalizedUserId
+        ),
+        operation: { kind: "idle" }
+      } as unknown as SpaceMembersState;
+    } else {
+      this.snapshot.state.domain.space_members = {
+        ...active,
+        operation: {
+          kind: "failed",
+          request_id: requestId,
+          space_id: normalizedSpaceId,
+          user_id: normalizedUserId,
+          generation,
+          failureKind: "sdk"
+        }
+      } as unknown as SpaceMembersState;
     }
 
     return this.getSnapshot();

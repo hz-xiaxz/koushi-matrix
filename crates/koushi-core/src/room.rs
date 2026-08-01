@@ -535,6 +535,15 @@ impl RoomActor {
                 self.handle_invite_user_to_space(request_id, space_id, user_id, generation)
                     .await;
             }
+            RoomCommand::CancelSpaceInvite {
+                request_id,
+                space_id,
+                user_id,
+                generation,
+            } => {
+                self.handle_cancel_space_invite(request_id, space_id, user_id, generation)
+                    .await;
+            }
             RoomCommand::InviteTargets {
                 request_id,
                 room_id,
@@ -1279,6 +1288,62 @@ impl RoomActor {
             generation,
             outcome,
         }));
+    }
+
+    async fn handle_cancel_space_invite(
+        &self,
+        request_id: RequestId,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+    ) {
+        let (outcome, reconciliation) = match &self.session {
+            None => (
+                SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+                None,
+            ),
+            Some(session) => {
+                let outcome =
+                    match koushi_sdk::cancel_space_invite(session, &space_id, &user_id).await {
+                        Ok(koushi_sdk::MatrixSpaceInviteCancellationOutcome::Cancelled) => {
+                            SpaceMemberInviteOutcome::Cancelled
+                        }
+                        Ok(koushi_sdk::MatrixSpaceInviteCancellationOutcome::NotInvited) => {
+                            SpaceMemberInviteOutcome::NotInvited
+                        }
+                        Err(error) => SpaceMemberInviteOutcome::Failed(operation_failure_kind(
+                            classify_room_error(&error),
+                        )),
+                    };
+                let reconciliation =
+                    reconcile_space_invite_cancellation(session, &space_id, generation).await;
+                (outcome, reconciliation)
+            }
+        };
+        record_core_space_members_operation("cancel", generation, &outcome);
+        let mut actions = Vec::new();
+        if let Some(reconciliation) = reconciliation {
+            actions.push(AppAction::SpaceMembersProjectionReconciled {
+                request_id: request_id.sequence,
+                projection: reconciliation.projection,
+                profiles: reconciliation.profiles,
+            });
+        }
+        actions.push(AppAction::SpaceMemberInviteCancellationSettled {
+            request_id: request_id.sequence,
+            space_id,
+            user_id,
+            generation,
+            outcome: outcome.clone(),
+        });
+        self.reduce_reliable(actions).await;
+        self.emit(CoreEvent::Room(
+            RoomEvent::SpaceMemberInviteCancellationSettled {
+                request_id,
+                generation,
+                outcome,
+            },
+        ));
     }
 
     async fn handle_invite_targets(
@@ -3904,6 +3969,11 @@ struct SpaceInviteReconciliation {
     outcome: SpaceMemberInviteOutcome,
 }
 
+struct SpaceInviteProjectionReconciliation {
+    projection: SpaceMembersProjection,
+    profiles: Vec<UserProfile>,
+}
+
 async fn reconcile_space_invite_outcome(
     session: &MatrixClientSession,
     space_id: &str,
@@ -3936,6 +4006,23 @@ async fn reconcile_space_invite_outcome(
         projection,
         profiles,
         outcome,
+    })
+}
+
+async fn reconcile_space_invite_cancellation(
+    session: &MatrixClientSession,
+    space_id: &str,
+    generation: u64,
+) -> Option<SpaceInviteProjectionReconciliation> {
+    let Ok(raw_projection) = koushi_sdk::matrix_space_members_projection(session, space_id).await
+    else {
+        return None;
+    };
+    let profiles = user_profiles_from_space_projection(&raw_projection);
+    let projection = state_space_members_projection(raw_projection, generation);
+    Some(SpaceInviteProjectionReconciliation {
+        projection,
+        profiles,
     })
 }
 
@@ -4186,6 +4273,8 @@ fn record_core_space_members_operation(
         SpaceMemberInviteOutcome::Invited => "invited",
         SpaceMemberInviteOutcome::AlreadyInvited => "already_invited",
         SpaceMemberInviteOutcome::AlreadyJoined => "already_joined",
+        SpaceMemberInviteOutcome::Cancelled => "cancelled",
+        SpaceMemberInviteOutcome::NotInvited => "not_invited",
         SpaceMemberInviteOutcome::Failed(_) => "failed",
     };
     record(
@@ -6927,6 +7016,38 @@ pub mod tests {
         assert!(failure_path.contains("record_core_space_members_load_failure"));
         assert!(!failure_path.contains("SpaceMembersBackgroundProjectionReconciled"));
         assert!(!failure_path.contains("SpaceMembersLoadFailed"));
+    }
+
+    #[test]
+    fn cancel_space_invite_reconciles_a_fresh_projection_before_settling() {
+        let source = include_str!("room.rs");
+        let handler = source
+            .split("async fn handle_cancel_space_invite")
+            .nth(1)
+            .expect("Space invite cancellation handler exists")
+            .split("async fn handle_invite_targets")
+            .next()
+            .expect("Space invite cancellation handler boundary exists");
+        let sdk_call = handler
+            .find("koushi_sdk::cancel_space_invite")
+            .expect("core must call the SDK cancellation helper");
+        let reconcile = handler
+            .find("reconcile_space_invite_cancellation")
+            .expect("core must request a fresh Space projection");
+        let settlement = handler
+            .find("SpaceMemberInviteCancellationSettled")
+            .expect("core must settle the cancellation action");
+        assert!(sdk_call < reconcile);
+        assert!(reconcile < settlement);
+
+        let reconciliation = source
+            .split("async fn reconcile_space_invite_cancellation")
+            .nth(1)
+            .expect("cancellation reconciliation helper exists")
+            .split("fn record_core_space_members_projection")
+            .next()
+            .expect("cancellation reconciliation helper boundary exists");
+        assert!(reconciliation.contains("koushi_sdk::matrix_space_members_projection"));
     }
 
     #[test]

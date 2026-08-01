@@ -26,8 +26,9 @@ use koushi_state::{
     RoomNotificationMode, RoomSummary, ScheduledSendCapability, ScheduledSendHandle,
     ScheduledSendItem, ScheduledSendStore, SearchScope as AppSearchScope, SessionState,
     SpaceMemberEntry, SpaceMemberMembership, SpaceMembersCommandRejection, SpaceSummary,
-    SubmissionId, ThreadPaneState, UiEvent, UserProfile, admit_space_member_invite,
-    admit_space_members_load, reduce, resolve_people_label, room_activity_unread_count,
+    SubmissionId, ThreadPaneState, UiEvent, UserProfile, admit_space_member_cancellation,
+    admit_space_member_invite, admit_space_members_load, reduce, resolve_people_label,
+    room_activity_unread_count,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -181,19 +182,25 @@ fn record_space_member_command_rejection(
         SpaceMembersCommandRejection::WrongSpace => "wrong_space",
         SpaceMembersCommandRejection::StaleGeneration => "stale_generation",
         SpaceMembersCommandRejection::InviteAlreadyInFlight => "invite_already_in_flight",
+        SpaceMembersCommandRejection::CancellationAlreadyInFlight => {
+            "cancellation_already_in_flight"
+        }
         SpaceMembersCommandRejection::LoadBlockedByInvite => "load_blocked_by_invite",
         SpaceMembersCommandRejection::AlreadyJoined => "already_joined",
         SpaceMembersCommandRejection::AlreadyInvited => "already_invited",
+        SpaceMembersCommandRejection::NotInvited => "not_invited",
         SpaceMembersCommandRejection::NotChildRoomOnly => "not_child_room_only",
     };
     let outcome = match rejection {
         SpaceMembersCommandRejection::StaleGeneration => "stale_generation",
         SpaceMembersCommandRejection::InviteAlreadyInFlight
+        | SpaceMembersCommandRejection::CancellationAlreadyInFlight
         | SpaceMembersCommandRejection::AlreadyJoined
         | SpaceMembersCommandRejection::AlreadyInvited => "duplicate",
         SpaceMembersCommandRejection::NoSelectedSpace
         | SpaceMembersCommandRejection::WrongSpace
         | SpaceMembersCommandRejection::LoadBlockedByInvite
+        | SpaceMembersCommandRejection::NotInvited
         | SpaceMembersCommandRejection::NotChildRoomOnly => "rejected",
     };
     record(
@@ -4810,6 +4817,51 @@ impl AppActor {
                             record_space_member_command_rejection(
                                 "invite",
                                 SpaceMembersCommandRejection::InviteAlreadyInFlight,
+                            );
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
+                    crate::command::RoomCommand::CancelSpaceInvite {
+                        request_id,
+                        space_id,
+                        user_id,
+                        generation,
+                    } => {
+                        if let Err(rejection) = admit_space_member_cancellation(
+                            &self.state.space_members,
+                            space_id,
+                            user_id,
+                            *generation,
+                        ) {
+                            record_space_member_command_rejection("cancel", rejection);
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceMemberInviteCancellationRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                                user_id: user_id.clone(),
+                                generation: *generation,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            record_space_member_command_rejection(
+                                "cancel",
+                                SpaceMembersCommandRejection::CancellationAlreadyInFlight,
                             );
                             self.emit(CoreEvent::OperationFailed {
                                 request_id: *request_id,

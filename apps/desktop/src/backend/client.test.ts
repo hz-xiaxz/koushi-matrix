@@ -476,6 +476,14 @@ describe("TauriDesktopApi", () => {
       userId: "@target:example.invalid",
       generation: 4
     });
+
+    await api.cancelSpaceInvite("!space:example.invalid", "@target:example.invalid", 4);
+
+    expect(invoke).toHaveBeenCalledWith("cancel_space_invite", {
+      spaceId: "!space:example.invalid",
+      userId: "@target:example.invalid",
+      generation: 4
+    });
   });
 
   test("passes activity actions to Rust-owned activity commands", async () => {

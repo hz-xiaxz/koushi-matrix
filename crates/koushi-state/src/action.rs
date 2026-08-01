@@ -193,6 +193,19 @@ pub enum AppAction {
         generation: u64,
         outcome: SpaceMemberInviteOutcome,
     },
+    SpaceMemberInviteCancellationRequested {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+    },
+    SpaceMemberInviteCancellationSettled {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        outcome: SpaceMemberInviteOutcome,
+    },
     MentionCandidatesDemanded {
         request_id: u64,
         generation: u64,

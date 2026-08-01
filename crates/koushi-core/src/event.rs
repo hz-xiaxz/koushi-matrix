@@ -650,6 +650,11 @@ pub enum RoomEvent {
         generation: u64,
         outcome: SpaceMemberInviteOutcome,
     },
+    SpaceMemberInviteCancellationSettled {
+        request_id: RequestId,
+        generation: u64,
+        outcome: SpaceMemberInviteOutcome,
+    },
     InviteBatchCompleted {
         request_id: RequestId,
         room_id: String,
@@ -798,6 +803,16 @@ impl fmt::Debug for RoomEvent {
                 outcome,
             } => formatter
                 .debug_struct("SpaceMemberInviteSettled")
+                .field("request_id", request_id)
+                .field("generation", generation)
+                .field("outcome", outcome)
+                .finish(),
+            Self::SpaceMemberInviteCancellationSettled {
+                request_id,
+                generation,
+                outcome,
+            } => formatter
+                .debug_struct("SpaceMemberInviteCancellationSettled")
                 .field("request_id", request_id)
                 .field("generation", generation)
                 .field("outcome", outcome)
@@ -2162,6 +2177,7 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
         | RoomEvent::SpaceChildSet { .. }
         | RoomEvent::SpaceMembersLoaded { .. }
         | RoomEvent::SpaceMemberInviteSettled { .. }
+        | RoomEvent::SpaceMemberInviteCancellationSettled { .. }
         | RoomEvent::RoomJoined { .. }
         | RoomEvent::RoomLeft { .. }
         | RoomEvent::RoomForgotten { .. }
@@ -3164,6 +3180,19 @@ mod tests {
             !debug.contains("@private-target:example.invalid"),
             "{debug}"
         );
+    }
+
+    #[test]
+    fn space_invite_cancellation_event_debug_redacts_request_details() {
+        let event = RoomEvent::SpaceMemberInviteCancellationSettled {
+            request_id: fake_rid(45),
+            generation: 4,
+            outcome: SpaceMemberInviteOutcome::Cancelled,
+        };
+        let debug = format!("{event:?}");
+        assert!(debug.contains("SpaceMemberInviteCancellationSettled"));
+        assert!(!debug.contains("@private-target:example.invalid"));
+        assert!(!debug.contains("!private-space:example.invalid"));
     }
 
     #[test]

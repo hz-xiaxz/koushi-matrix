@@ -218,6 +218,99 @@ describe("BrowserFakeApi Space member audit", () => {
       failureKind: "sdk"
     });
   });
+
+  test("cancels an invited fake Space member and settles idle", async () => {
+    const api = createBrowserFakeApi();
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.space_invited.map((entry) => entry.user_id)).not.toContain(
+      "@invited:example.invalid"
+    );
+    expect(members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("keeps the fake cancellation operation fenced while settlement is pending", async () => {
+    const api = createBrowserFakeApi({
+      spaceMemberInviteCancellationOutcome: "pending"
+    });
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+
+    expect(snapshot.state.domain.space_members.operation).toMatchObject({
+      kind: "cancellingInvite",
+      space_id: spaceId,
+      user_id: "@invited:example.invalid",
+      generation: 1
+    });
+    expect(snapshot.state.domain.space_members.space_invited).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          user_id: "@invited:example.invalid",
+          membership: "space_invited"
+        })
+      ])
+    );
+  });
+
+  test("does not cancel a joined or non-invited fake Space member", async () => {
+    const api = createBrowserFakeApi();
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@joined:example.invalid",
+      1
+    );
+
+    expect(snapshot.state.domain.space_members.space_joined.map((entry) => entry.user_id)).toContain(
+      "@joined:example.invalid"
+    );
+    expect(snapshot.state.domain.space_members.operation).toEqual({ kind: "idle" });
+  });
+
+  test("retains the invited fake member when cancellation transport rejects", async () => {
+    const api = createBrowserFakeApi({ spaceMemberInviteCancellationOutcome: "failure" });
+
+    const snapshot = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      1
+    );
+    const members = snapshot.state.domain.space_members;
+
+    expect(members.space_invited.map((entry) => entry.user_id)).toContain(
+      "@invited:example.invalid"
+    );
+    expect(members.operation).toMatchObject({
+      kind: "failed",
+      space_id: spaceId,
+      user_id: "@invited:example.invalid",
+      generation: 1,
+      failureKind: "sdk"
+    });
+  });
+
+  test("ignores a stale Space generation for fake cancellation", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+
+    const stale = await api.cancelSpaceInvite(
+      spaceId,
+      "@invited:example.invalid",
+      0
+    );
+
+    expect(stale).toEqual(before);
+  });
 });
 
 describe("BrowserFakeApi settings preview", () => {

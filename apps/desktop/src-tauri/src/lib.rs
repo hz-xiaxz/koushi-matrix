@@ -1422,6 +1422,7 @@ pub fn run() {
             commands::room::start_direct_message,
             commands::room::invite_user,
             commands::room::invite_user_to_space,
+            commands::room::cancel_space_invite,
             commands::room::open_invite_workflow,
             commands::room::close_invite_workflow,
             commands::room::search_invite_targets,

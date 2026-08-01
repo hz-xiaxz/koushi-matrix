@@ -5153,6 +5153,12 @@ pub enum MatrixRoomOperationFailureKind {
     Sdk,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixSpaceInviteCancellationOutcome {
+    Cancelled,
+    NotInvited,
+}
+
 impl fmt::Display for MatrixRoomOperationFailureKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let label = match self {
@@ -7313,6 +7319,30 @@ pub async fn invite_user_to_room(
     room.invite_user_by_id(&user_id)
         .await
         .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
+pub async fn cancel_space_invite(
+    session: &MatrixClientSession,
+    space_id: &str,
+    user_id: &str,
+) -> Result<MatrixSpaceInviteCancellationOutcome, MatrixRoomOperationError> {
+    let room = matrix_room(session, space_id)?;
+    let user_id = matrix_sdk::ruma::UserId::parse(user_id)
+        .map_err(|_| MatrixRoomOperationError::InvalidUserId)?;
+    let invited_members = room
+        .members_no_sync(matrix_sdk::RoomMemberships::INVITE)
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    if !invited_members
+        .iter()
+        .any(|member| member.user_id().as_str() == user_id.as_str())
+    {
+        return Ok(MatrixSpaceInviteCancellationOutcome::NotInvited);
+    }
+    room.kick_user(&user_id, None)
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    Ok(MatrixSpaceInviteCancellationOutcome::Cancelled)
 }
 
 pub async fn room_has_active_member_no_sync(
@@ -11771,6 +11801,33 @@ mod tests {
         assert!(!body.contains("RoomMemberships::ACTIVE"));
         assert!(body.contains("members_no_sync(matrix_sdk::RoomMemberships::JOIN)"));
         assert!(body.contains("members_no_sync(matrix_sdk::RoomMemberships::INVITE)"));
+    }
+
+    #[test]
+    fn cancel_space_invite_validates_invite_membership_before_kicking() {
+        let _cancelled = super::MatrixSpaceInviteCancellationOutcome::Cancelled;
+        let _not_invited = super::MatrixSpaceInviteCancellationOutcome::NotInvited;
+        let source = include_str!("lib.rs");
+        let body = source
+            .split("pub async fn cancel_space_invite")
+            .nth(1)
+            .expect("Space invite cancellation helper exists")
+            .split("pub async fn room_has_active_member_no_sync")
+            .next()
+            .expect("Space invite cancellation helper boundary exists");
+        let invite_lookup = body
+            .find("members_no_sync(matrix_sdk::RoomMemberships::INVITE)")
+            .expect("cancellation must load current INVITE membership");
+        let not_invited = body
+            .find("MatrixSpaceInviteCancellationOutcome::NotInvited")
+            .expect("cancellation must have a no-op NotInvited outcome");
+        let kick = body
+            .find(".kick_user(")
+            .expect("cancellation must use the Matrix kick transport");
+
+        assert!(invite_lookup < not_invited);
+        assert!(not_invited < kick);
+        assert!(body.contains("MatrixSpaceInviteCancellationOutcome::Cancelled"));
     }
 
     #[test]

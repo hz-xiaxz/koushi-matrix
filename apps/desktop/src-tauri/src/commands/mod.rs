@@ -1193,6 +1193,21 @@ pub(crate) fn space_member_invite_settled_event_matches(
     )
 }
 
+pub(crate) fn space_member_invite_cancellation_settled_event_matches(
+    event: &RoomEvent,
+    expected_request_id: RequestId,
+    expected_generation: u64,
+) -> bool {
+    matches!(
+        event,
+        RoomEvent::SpaceMemberInviteCancellationSettled {
+            request_id,
+            generation,
+            ..
+        } if *request_id == expected_request_id && *generation == expected_generation
+    )
+}
+
 async fn wait_for_direct_message_started<S: SelectEventSource + ?Sized>(
     event_conn: &mut S,
     operation_request_id: RequestId,
@@ -2887,6 +2902,20 @@ pub(crate) fn build_invite_user_to_space_command(
     generation: u64,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::InviteUserToSpace {
+        request_id,
+        space_id,
+        user_id,
+        generation,
+    })
+}
+
+pub(crate) fn build_cancel_space_invite_command(
+    request_id: koushi_core::RequestId,
+    space_id: String,
+    user_id: String,
+    generation: u64,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::CancelSpaceInvite {
         request_id,
         space_id,
         user_id,
@@ -7669,6 +7698,7 @@ mod tests {
     #[test]
     fn load_space_members_and_invite_user_to_space_build_exact_commands_and_wait_for_events() {
         let source = commands_source();
+        let lib_source = include_str!("../lib.rs");
 
         for (fn_name, matcher_token) in [
             (
@@ -7678,6 +7708,10 @@ mod tests {
             (
                 "pub async fn invite_user_to_space",
                 "space_member_invite_settled_event_matches",
+            ),
+            (
+                "pub async fn cancel_space_invite",
+                "space_member_invite_cancellation_settled_event_matches",
             ),
         ] {
             let fn_offset = source
@@ -7697,6 +7731,7 @@ mod tests {
             );
             assert!(command_source.contains("current_snapshot"));
         }
+        assert!(lib_source.contains("commands::room::cancel_space_invite"));
 
         match super::build_load_space_members_command(
             fake_request_id(301),
@@ -7710,6 +7745,26 @@ mod tests {
             }) => {
                 assert_eq!(request_id, fake_request_id(301));
                 assert_eq!(space_id, "!space:example.org");
+                assert_eq!(generation, 4);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        match super::build_cancel_space_invite_command(
+            fake_request_id(305),
+            "!space:example.org".to_owned(),
+            "@child:example.org".to_owned(),
+            4,
+        ) {
+            CoreCommand::Room(RoomCommand::CancelSpaceInvite {
+                request_id,
+                space_id,
+                user_id,
+                generation,
+            }) => {
+                assert_eq!(request_id, fake_request_id(305));
+                assert_eq!(space_id, "!space:example.org");
+                assert_eq!(user_id, "@child:example.org");
                 assert_eq!(generation, 4);
             }
             other => panic!("unexpected command: {other:?}"),
@@ -7785,6 +7840,31 @@ mod tests {
             fake_request_id(304),
             4,
         ));
+
+        let wrong_cancel = koushi_core::RoomEvent::SpaceMemberInviteCancellationSettled {
+            request_id: fake_request_id(305),
+            generation: 3,
+            outcome: koushi_state::SpaceMemberInviteOutcome::Cancelled,
+        };
+        let matching_cancel = koushi_core::RoomEvent::SpaceMemberInviteCancellationSettled {
+            request_id: fake_request_id(305),
+            generation: 4,
+            outcome: koushi_state::SpaceMemberInviteOutcome::Cancelled,
+        };
+        assert!(
+            !super::space_member_invite_cancellation_settled_event_matches(
+                &wrong_cancel,
+                fake_request_id(305),
+                4,
+            )
+        );
+        assert!(
+            super::space_member_invite_cancellation_settled_event_matches(
+                &matching_cancel,
+                fake_request_id(305),
+                4,
+            )
+        );
     }
 
     #[test]
