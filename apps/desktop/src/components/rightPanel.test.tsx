@@ -372,6 +372,28 @@ describe("ContextualRightPanel people composition", () => {
     );
   });
 
+  test("forwards the inline Space invite cancellation callback and gate", () => {
+    const invitedUserId = "@invited-member:example.invalid";
+    const onCancelInvite = vi.fn();
+    const cancellationSnapshot = structuredClone(snapshot);
+    cancellationSnapshot.state.domain.space_members = {
+      ...spaceMembers,
+      space_invited: [spaceMember(invitedUserId, "Invited member", "space_invited")]
+    };
+
+    renderPanel({
+      snapshot: cancellationSnapshot,
+      peoplePanelScope: { kind: "space", spaceId: space.space_id },
+      onCancelInvite,
+      canCancelInvite: true,
+      cancelAvailabilityReason: "available"
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+
+    expect(onCancelInvite).toHaveBeenCalledWith(invitedUserId);
+  });
+
   test("keeps a Room scope on PeoplePanel and does not classify from Space state", () => {
     renderPanel({
       peoplePanelScope: { kind: "room", roomId: room.room_id }

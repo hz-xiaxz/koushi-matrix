@@ -305,6 +305,124 @@ describe("App Space Members integration", () => {
     expect(
       screen.getByRole("button", { name: "Invite to Space" }).hasAttribute("disabled")
     ).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Cancelling…" }).hasAttribute("disabled")
+    ).toBe(true);
+  });
+
+  test("cancels an invited member through the exact Space and generation", async () => {
+    const api = createBrowserFakeApi();
+    const cancelSpaceInvite = vi.spyOn(api, "cancelSpaceInvite");
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+    });
+
+    await waitFor(() => {
+      expect(cancelSpaceInvite).toHaveBeenCalledWith(
+        "!space-alpha:example.invalid",
+        "@invited:example.invalid",
+        1
+      );
+    });
+    await waitFor(() => expect(screen.queryByText("Invited Member")).toBeNull());
+  });
+
+  test("disables cancellation when the exact Space settings deny kick", async () => {
+    const api = createBrowserFakeApi();
+    const roomSettings = await api.loadRoomSettings("!space-alpha:example.invalid");
+    roomSettings.state.domain.room_management.settings!.permissions.can_kick = false;
+    vi.spyOn(api, "loadRoomSettings").mockResolvedValue(roomSettings);
+    vi.spyOn(api, "loadSpaceMembers").mockResolvedValue(roomSettings);
+    const cancelSpaceInvite = vi.spyOn(api, "cancelSpaceInvite");
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    const cancelButton = screen.getByRole("button", { name: "Cancel invitation" });
+    expect(cancelButton).toHaveProperty("disabled", true);
+    expect(cancelSpaceInvite).not.toHaveBeenCalled();
+  });
+
+  test("shows localized cancellation failure and records only fixed diagnostics", async () => {
+    const api = createBrowserFakeApi();
+    vi.spyOn(api, "cancelSpaceInvite").mockRejectedValueOnce(
+      new Error("raw transport details")
+    );
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Could not cancel the invitation. Try again."
+      );
+    });
+    expect(screen.getByText("Invited Member")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Open diagnostics" }));
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Diagnostics" });
+    expect(dialog.textContent).toContain("cancel trigger=inline availability_reason=available");
+    expect(dialog.textContent).toContain("cancel outcome=transport_rejected");
+    for (const privateValue of [
+      "raw transport details",
+      "@invited:example.invalid",
+      "Invited Member",
+      "mxc://",
+      "https://"
+    ]) {
+      expect(dialog.textContent).not.toContain(privateValue);
+    }
+  });
+
+  test("does not apply a late cancellation completion after Space navigation", async () => {
+    const api = createBrowserFakeApi();
+    const initial = await api.getSnapshot();
+    const staleResult = structuredClone(initial);
+    staleResult.state.domain.space_members.space_invited = [];
+    const pending = deferred<DesktopSnapshot>();
+    const cancelSpaceInvite = vi
+      .spyOn(api, "cancelSpaceInvite")
+      .mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+    });
+    await waitFor(() => {
+      expect(cancelSpaceInvite).toHaveBeenCalledWith(
+        "!space-alpha:example.invalid",
+        "@invited:example.invalid",
+        1
+      );
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Synthetic Lab" }));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Synthetic Lab" }).className).toContain(
+        "is-active"
+      );
+    });
+
+    await act(async () => {
+      pending.resolve(staleResult);
+      await pending.promise;
+    });
+
+    expect(screen.queryByText("Invited Member")).toBeNull();
   });
 
   test("uses the same shared invite command from the child-only context menu", async () => {

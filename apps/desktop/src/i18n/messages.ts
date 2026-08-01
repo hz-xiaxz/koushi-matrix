@@ -995,6 +995,9 @@ export type MessageId =
   | "spaceMembers.invite"
   | "spaceMembers.invitePending"
   | "spaceMembers.inviteFailed"
+  | "spaceMembers.cancelInvite"
+  | "spaceMembers.cancelInvitePending"
+  | "spaceMembers.cancelInviteFailed"
   | "spaceMembers.loadFailed"
   | "spaceMembers.syncIncomplete"
   | "spaceMembers.noResults"
@@ -2165,6 +2168,9 @@ const en: Catalog = {
   "spaceMembers.invite": "Invite to Space",
   "spaceMembers.invitePending": "Invitation pending",
   "spaceMembers.inviteFailed": "Invite failed. Try again.",
+  "spaceMembers.cancelInvite": "Cancel invitation",
+  "spaceMembers.cancelInvitePending": "Cancelling…",
+  "spaceMembers.cancelInviteFailed": "Could not cancel the invitation. Try again.",
   "spaceMembers.loadFailed": "Member load failed. Try again.",
   "spaceMembers.syncIncomplete": "Some child rooms are still syncing",
   "spaceMembers.noResults": "No space members found",
@@ -3220,6 +3226,9 @@ const ja: Catalog = {
   "spaceMembers.invite": "スペースに招待",
   "spaceMembers.invitePending": "招待保留",
   "spaceMembers.inviteFailed": "招待に失敗しました。もう一度お試しください。",
+  "spaceMembers.cancelInvite": "招待を取り消す",
+  "spaceMembers.cancelInvitePending": "取消中…",
+  "spaceMembers.cancelInviteFailed": "招待を取り消せませんでした。もう一度お試しください。",
   "spaceMembers.loadFailed": "メンバーの読み込みに失敗しました。もう一度お試しください。",
   "spaceMembers.syncIncomplete": "一部の子ルームを同期中です",
   "spaceMembers.noResults": "スペースのメンバーが見つかりません",

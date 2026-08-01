@@ -116,6 +116,132 @@ function profile(userId: string, avatar: UserProfile["avatar"]): UserProfile {
 }
 
 describe("SpaceMembersPanel", () => {
+  it("renders cancellation only for invited rows and forwards the invited user", () => {
+    const onCancelInvite = vi.fn();
+    const diagnostics: string[] = [];
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        canCancelInvite={true}
+        cancelAvailabilityReason="available"
+        onCancelInvite={onCancelInvite}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onDiagnostic={(message) => diagnostics.push(message)}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Cancel invitation" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Cancel invitation" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+
+    expect(onCancelInvite).toHaveBeenCalledWith("@bob:example.invalid");
+    expect(diagnostics).toContain("cancel trigger=inline availability_reason=available");
+    expect(diagnostics.join("\n")).not.toMatch(/@bob|Bob|mxc:|https?:/);
+  });
+
+  it("disables cancellation without kick permission or while a member operation is pending", () => {
+    const onCancelInvite = vi.fn();
+    const { rerender } = render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        canCancelInvite={false}
+        cancelAvailabilityReason="permission_denied"
+        onCancelInvite={onCancelInvite}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Cancel invitation" })).toHaveProperty(
+      "disabled",
+      true
+    );
+
+    rerender(
+      <SpaceMembersPanel
+        state={state({
+          operation: {
+            kind: "loading",
+            request_id: 12,
+            space_id: "!space:example.invalid",
+            generation: 4
+          }
+        })}
+        canInvite={true}
+        canCancelInvite={true}
+        cancelAvailabilityReason="operation_pending"
+        onCancelInvite={onCancelInvite}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Cancel invitation" })).toHaveProperty(
+      "disabled",
+      true
+    );
+    expect(onCancelInvite).not.toHaveBeenCalled();
+  });
+
+  it("keeps the invited row visible and labels its own cancellation as pending", () => {
+    render(
+      <SpaceMembersPanel
+        state={state({
+          operation: {
+            kind: "cancellingInvite",
+            request_id: 13,
+            space_id: "!space:example.invalid",
+            user_id: "@bob:example.invalid",
+            generation: 4
+          }
+        })}
+        canInvite={true}
+        canCancelInvite={true}
+        cancelAvailabilityReason="operation_pending"
+        onCancelInvite={vi.fn()}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Bob")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancelling…" })).toHaveProperty(
+      "disabled",
+      true
+    );
+  });
+
+  it("reports a localized cancellation failure while retaining the invited row", () => {
+    render(
+      <SpaceMembersPanel
+        state={state({
+          operation: {
+            kind: "failed",
+            request_id: 14,
+            space_id: "!space:example.invalid",
+            user_id: "@bob:example.invalid",
+            generation: 4,
+            failureKind: "network"
+          }
+        })}
+        canInvite={true}
+        canCancelInvite={true}
+        onCancelInvite={vi.fn()}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Could not cancel the invitation. Try again."
+    );
+    expect(screen.getByText("Bob")).toBeTruthy();
+  });
+
   it("closes the Space members panel and renders elevated role badges", () => {
     const onClose = vi.fn();
     render(

@@ -233,11 +233,15 @@ import {
   Sidebar
 } from "./components/Shell";
 import { ContextualRightPanel } from "./components/rightPanel";
-import type { SpaceInviteAvailabilityReason } from "./components/SpaceMembersPanel";
+import type {
+  SpaceInviteAvailabilityReason,
+  SpaceInviteCancellationAvailabilityReason
+} from "./components/SpaceMembersPanel";
 
 type ActivityOpenTrigger = "home_rail" | "activity_sidebar" | "initial_home" | "other";
 type SpaceMembersOpenTrigger = "sidebar" | "space_info";
 type SpaceMemberInviteTrigger = "inline" | "context";
+type SpaceMemberCancelTrigger = "inline";
 type SpaceMemberFence = { spaceId: string; generation: number };
 
 function exactRoomSettingsForRoom(
@@ -291,6 +295,29 @@ function spaceInviteAvailabilityReasonForSnapshot(
     return "settings_unavailable";
   }
   if (!settings.permissions.can_invite) {
+    return "permission_denied";
+  }
+  const operation = snapshot.state.domain.space_members.operation.kind;
+  return operation === "loading" || operation === "inviting" || operation === "cancellingInvite"
+    ? "operation_pending"
+    : "available";
+}
+
+function spaceInviteCancellationAvailabilityReasonForSnapshot(
+  snapshot: Pick<DesktopSnapshot, "state"> | null,
+  spaceId: string
+): SpaceInviteCancellationAvailabilityReason {
+  if (
+    snapshot?.state.ui.navigation.active_space_id !== spaceId ||
+    snapshot.state.domain.space_members.selected_space_id !== spaceId
+  ) {
+    return "settings_unavailable";
+  }
+  const settings = exactRoomSettingsForRoom(snapshot, spaceId);
+  if (!settings) {
+    return "settings_unavailable";
+  }
+  if (!settings.permissions.can_kick) {
     return "permission_denied";
   }
   const operation = snapshot.state.domain.space_members.operation.kind;
@@ -1464,6 +1491,8 @@ export function App() {
     useState<QaTimelineDiagnostics>(INITIAL_TIMELINE_DIAGNOSTICS);
   const timelineDiagnosticsRef = useRef<QaTimelineDiagnostics>(INITIAL_TIMELINE_DIAGNOSTICS);
   const [diagnosticLogEntries, setDiagnosticLogEntries] = useState<DiagnosticLogEntry[]>([]);
+  const [spaceMembersCancelFailure, setSpaceMembersCancelFailure] =
+    useState<SpaceMemberFence | null>(null);
   const [savedSessions, setSavedSessions] = useState<SavedSessionInfo[]>([]);
   const [contextMenu, setContextMenu] = useState<ActiveContextMenu | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -1571,6 +1600,7 @@ export function App() {
   const spaceNavigationRequestRef = useRef(0);
   const spaceMembersOpenRequestRef = useRef(0);
   const spaceMembersInviteRequestRef = useRef(0);
+  const spaceMembersCancelRequestRef = useRef(0);
   const spaceMembersLoadInFlightRef = useRef<Map<string, Promise<DesktopSnapshot | null>>>(
     new Map()
   );
@@ -5019,6 +5049,82 @@ export function App() {
     }
   }
 
+  async function cancelSpaceInvite(
+    userId: string,
+    trigger: SpaceMemberCancelTrigger,
+    expectedFence: SpaceMemberFence | null = null
+  ): Promise<void> {
+    const currentSnapshot = snapshotRef.current;
+    const fence = expectedFence ?? spaceMembersFenceForSnapshot(currentSnapshot);
+    const settings = fence ? exactRoomSettingsForRoom(currentSnapshot, fence.spaceId) : null;
+    const members = currentSnapshot?.state.domain.space_members;
+    const invitedEntry = members?.space_invited.find((entry) => entry.user_id === userId);
+    const operationPending =
+      members?.operation.kind === "loading" ||
+      members?.operation.kind === "inviting" ||
+      members?.operation.kind === "cancellingInvite";
+    const availabilityReason: SpaceInviteCancellationAvailabilityReason =
+      !fence || !spaceMembersSnapshotMatches(currentSnapshot, fence)
+        ? "settings_unavailable"
+        : !settings
+          ? "settings_unavailable"
+          : !settings.permissions.can_kick
+            ? "permission_denied"
+            : operationPending
+              ? "operation_pending"
+              : !invitedEntry
+                ? "invite_unavailable"
+                : "available";
+    appendSpaceMembersDiagnosticLog(
+      `cancel trigger=${trigger} availability_reason=${availabilityReason}`
+    );
+    if (
+      !fence ||
+      !spaceMembersSnapshotMatches(currentSnapshot, fence) ||
+      !settings?.permissions.can_kick ||
+      operationPending ||
+      !invitedEntry
+    ) {
+      return;
+    }
+
+    const requestId = ++spaceMembersCancelRequestRef.current;
+    setSpaceMembersCancelFailure(null);
+    try {
+      const nextSnapshot = await api.cancelSpaceInvite(fence.spaceId, userId, fence.generation);
+      if (
+        spaceMembersCancelRequestRef.current !== requestId ||
+        !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
+        !spaceMembersSnapshotMatches(nextSnapshot, fence)
+      ) {
+        return;
+      }
+      const nextOperation = nextSnapshot.state.domain.space_members.operation;
+      const cancellationFailed =
+        nextOperation.kind === "failed" &&
+        nextOperation.space_id === fence.spaceId &&
+        nextOperation.user_id === userId &&
+        nextOperation.generation === fence.generation;
+      setSpaceMembersCancelFailure(cancellationFailed ? fence : null);
+      setSnapshot(nextSnapshot);
+      appendSpaceMembersDiagnosticLog(
+        `cancel outcome=${cancellationFailed
+          ? "failed"
+          : nextOperation.kind === "cancellingInvite"
+            ? "pending"
+            : "settled"}`
+      );
+    } catch {
+      if (
+        spaceMembersCancelRequestRef.current === requestId &&
+        spaceMembersSnapshotMatches(snapshotRef.current, fence)
+      ) {
+        setSpaceMembersCancelFailure(fence);
+        appendSpaceMembersDiagnosticLog("cancel outcome=transport_rejected");
+      }
+    }
+  }
+
   async function closeFocusedContextPanel() {
     if (rightPanelMode === "files") {
       await closeFilesViewPanel();
@@ -5328,6 +5434,18 @@ export function App() {
   const spaceInviteAvailabilityReason: SpaceInviteAvailabilityReason = activeSpacePeopleScope
     ? spaceInviteAvailabilityReasonForSnapshot(snapshot, activeSpacePeopleScope.spaceId)
     : "settings_unavailable";
+  const canCancelInvite = Boolean(
+    activeSpace &&
+      activeSpacePeopleScope?.spaceId === activeSpace.space_id &&
+      exactRoomSettingsForRoom(snapshot, activeSpace.space_id)?.permissions.can_kick
+  );
+  const cancelAvailabilityReason: SpaceInviteCancellationAvailabilityReason = activeSpacePeopleScope
+    ? spaceInviteCancellationAvailabilityReasonForSnapshot(snapshot, activeSpacePeopleScope.spaceId)
+    : "settings_unavailable";
+  const cancelInviteFailure = Boolean(
+    spaceMembersCancelFailure &&
+      spaceMembersSnapshotMatches(snapshot, spaceMembersCancelFailure)
+  );
   const homeContextActive = snapshot.sidebar.account_home.is_active && !activeSpace;
   const activeSpaceName = activeSpace
     ? spaceDisplayName(activeSpace.space_id, activeSpace.display_name, spaceLocalOverrides)
@@ -5779,6 +5897,12 @@ export function App() {
           }}
           canInviteToSpace={canInviteToSpace}
           spaceInviteAvailabilityReason={spaceInviteAvailabilityReason}
+          onCancelInvite={(userId) => {
+            void cancelSpaceInvite(userId, "inline");
+          }}
+          canCancelInvite={canCancelInvite}
+          cancelAvailabilityReason={cancelAvailabilityReason}
+          cancelInviteFailure={cancelInviteFailure}
           onOpenPeople={async () => {
             const roomId = snapshotRef.current?.state.ui.navigation.active_room_id;
             const navigationRequestId = roomNavigationRequestRef.current;

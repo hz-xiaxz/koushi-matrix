@@ -5881,7 +5881,8 @@ mark {
   font-size: 12px;
 }
 
-.space-members-invite {
+.space-members-invite,
+.space-members-cancel {
   flex: 0 0 auto;
   padding: 5px 8px;
   border: 1px solid var(--line);
@@ -5892,7 +5893,8 @@ mark {
   font-weight: 650;
 }
 
-.space-members-invite:disabled {
+.space-members-invite:disabled,
+.space-members-cancel:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }

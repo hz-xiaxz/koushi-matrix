@@ -1,19 +1,23 @@
 import { X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import type { SpaceMemberEntry, SpaceMembersState, UserProfile } from "../domain/types";
+import type {
+  SpaceInviteAvailabilityReason,
+  SpaceInviteCancellationAvailabilityReason,
+  SpaceMemberEntry,
+  SpaceMembersState,
+  UserProfile
+} from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
 import { t } from "../i18n/messages";
 import { ICON_SIZE, type OpenContextMenu } from "../app/uiShared";
 import { ImeTextField } from "./ImeTextControl";
 import { EntityAvatar } from "./Shell";
 
-export type SpaceInviteAvailabilityReason =
-  | "available"
-  | "settings_unavailable"
-  | "permission_denied"
-  | "operation_pending"
-  | "invite_pending";
+export type {
+  SpaceInviteAvailabilityReason,
+  SpaceInviteCancellationAvailabilityReason
+} from "../domain/types";
 
 export interface SpaceMembersPanelProps {
   state: SpaceMembersState;
@@ -23,10 +27,14 @@ export interface SpaceMembersPanelProps {
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void>;
   childRoomLabels?: ReadonlyMap<string, string>;
   onInviteUser: (userId: string) => void;
+  onCancelInvite?: (userId: string) => void;
   onOpenProfile: (userId: string) => void;
   onOpenContextMenu?: OpenContextMenu;
   onDiagnostic?: (message: string) => void;
   inviteAvailabilityReason?: SpaceInviteAvailabilityReason;
+  canCancelInvite?: boolean;
+  cancelAvailabilityReason?: SpaceInviteCancellationAvailabilityReason;
+  cancelInviteFailure?: boolean;
 }
 
 interface SpaceMembersSection {
@@ -99,6 +107,32 @@ function inviteAvailabilityReasonForEntry(
   return availabilityReason ?? "available";
 }
 
+function cancelIsDisabled(state: SpaceMembersState, canCancelInvite: boolean): boolean {
+  return !canCancelInvite || hasPendingOperation(state);
+}
+
+function cancelAvailabilityReasonForEntry(
+  state: SpaceMembersState,
+  canCancelInvite: boolean,
+  availabilityReason: SpaceInviteCancellationAvailabilityReason | undefined
+): SpaceInviteCancellationAvailabilityReason {
+  if (!canCancelInvite) {
+    return availabilityReason ?? "permission_denied";
+  }
+  if (hasPendingOperation(state)) {
+    return "operation_pending";
+  }
+  return availabilityReason ?? "available";
+}
+
+function cancellationFailureIsVisible(state: SpaceMembersState): boolean {
+  const operation = state.operation;
+  if (operation.kind !== "failed" || operation.user_id === null) {
+    return false;
+  }
+  return state.space_invited.some((entry) => entry.user_id === operation.user_id);
+}
+
 function childRoomContext(
   entry: SpaceMemberEntry,
   childRoomLabels: ReadonlyMap<string, string>
@@ -120,10 +154,14 @@ export function SpaceMembersPanel({
   onRequestAvatarThumbnail,
   childRoomLabels = new Map<string, string>(),
   onInviteUser,
+  onCancelInvite = () => undefined,
   onOpenProfile,
   onOpenContextMenu,
   onDiagnostic,
-  inviteAvailabilityReason
+  inviteAvailabilityReason,
+  canCancelInvite = false,
+  cancelAvailabilityReason,
+  cancelInviteFailure = false
 }: SpaceMembersPanelProps) {
   const [query, setQuery] = useState("");
   const panelRef = useRef<HTMLElement | null>(null);
@@ -158,6 +196,7 @@ export function SpaceMembersPanel({
     : hasPendingOperation(state)
       ? "operation_pending"
       : inviteAvailabilityReason ?? "available";
+  const failedOperation = state.operation.kind === "failed" ? state.operation : null;
 
   useEffect(() => {
     onDiagnostic?.(
@@ -219,11 +258,13 @@ export function SpaceMembersPanel({
         />
       </div>
 
-      {state.operation.kind === "failed" ? (
+      {failedOperation !== null || cancelInviteFailure ? (
         <p className="space-members-invite-failure" role="alert">
-          {state.operation.user_id !== null
-            ? t("spaceMembers.inviteFailed")
-            : t("spaceMembers.loadFailed")}
+          {cancelInviteFailure || cancellationFailureIsVisible(state)
+            ? t("spaceMembers.cancelInviteFailed")
+            : failedOperation !== null && failedOperation.user_id !== null
+              ? t("spaceMembers.inviteFailed")
+              : t("spaceMembers.loadFailed")}
         </p>
       ) : null}
 
@@ -251,6 +292,7 @@ export function SpaceMembersPanel({
                     sectionId={section.id}
                     state={state}
                     canInvite={canInvite}
+                    canCancelInvite={canCancelInvite}
                     childRoomLabels={childRoomLabels}
                     profileUsers={profileUsers}
                     avatarViewportRef={panelRef}
@@ -259,6 +301,8 @@ export function SpaceMembersPanel({
                     onOpenContextMenu={onOpenContextMenu}
                     onDiagnostic={onDiagnostic}
                     inviteAvailabilityReason={inviteAvailabilityReason}
+                    cancelAvailabilityReason={cancelAvailabilityReason}
+                    onCancelInvite={onCancelInvite}
                     onRequestAvatarThumbnail={onRequestAvatarThumbnail}
                   />
                 ))}
@@ -282,6 +326,7 @@ interface SpaceMemberRowProps {
   sectionId: SpaceMembersSection["id"];
   state: SpaceMembersState;
   canInvite: boolean;
+  canCancelInvite: boolean;
   childRoomLabels: ReadonlyMap<string, string>;
   profileUsers: Record<string, UserProfile>;
   avatarViewportRef: RefObject<Element | null>;
@@ -290,6 +335,8 @@ interface SpaceMemberRowProps {
   onOpenContextMenu?: OpenContextMenu;
   onDiagnostic?: (message: string) => void;
   inviteAvailabilityReason?: SpaceInviteAvailabilityReason;
+  cancelAvailabilityReason?: SpaceInviteCancellationAvailabilityReason;
+  onCancelInvite: (userId: string) => void;
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void>;
 }
 
@@ -298,6 +345,7 @@ function SpaceMemberRow({
   sectionId,
   state,
   canInvite,
+  canCancelInvite,
   childRoomLabels,
   profileUsers,
   avatarViewportRef,
@@ -306,6 +354,8 @@ function SpaceMemberRow({
   onOpenContextMenu,
   onDiagnostic,
   inviteAvailabilityReason,
+  cancelAvailabilityReason,
+  onCancelInvite,
   onRequestAvatarThumbnail
 }: SpaceMemberRowProps) {
   const rowRef = useRef<HTMLLIElement>(null);
@@ -426,6 +476,33 @@ function SpaceMemberRow({
           }}
         >
           {entry.invite_pending ? t("spaceMembers.invitePending") : t("spaceMembers.invite")}
+        </button>
+      ) : sectionId === "invited" ? (
+        <button
+          className="space-members-cancel"
+          type="button"
+          aria-label={
+            state.operation.kind === "cancellingInvite" &&
+            state.operation.user_id === entry.user_id
+              ? t("spaceMembers.cancelInvitePending")
+              : t("spaceMembers.cancelInvite")
+          }
+          disabled={cancelIsDisabled(state, canCancelInvite)}
+          onClick={() => {
+            onDiagnostic?.(
+              `cancel trigger=inline availability_reason=${cancelAvailabilityReasonForEntry(
+                state,
+                canCancelInvite,
+                cancelAvailabilityReason
+              )}`
+            );
+            onCancelInvite(entry.user_id);
+          }}
+        >
+          {state.operation.kind === "cancellingInvite" &&
+          state.operation.user_id === entry.user_id
+            ? t("spaceMembers.cancelInvitePending")
+            : t("spaceMembers.cancelInvite")}
         </button>
       ) : null}
     </li>

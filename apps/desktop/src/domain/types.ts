@@ -695,6 +695,20 @@ export interface SpaceMembersState {
   operation: SpaceMembersOperationState;
 }
 
+export type SpaceInviteAvailabilityReason =
+  | "available"
+  | "settings_unavailable"
+  | "permission_denied"
+  | "operation_pending"
+  | "invite_pending";
+
+export type SpaceInviteCancellationAvailabilityReason =
+  | "available"
+  | "settings_unavailable"
+  | "permission_denied"
+  | "operation_pending"
+  | "invite_unavailable";
+
 export interface SpaceMemberEntry {
   user_id: string;
   display_name: string | null;

@@ -54,7 +54,11 @@ import { SpaceInfoPanel } from "./SpaceInfoPanel";
 import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
 import { PeoplePanel, ProfilePanel } from "./PeoplePanel";
-import { SpaceMembersPanel, type SpaceInviteAvailabilityReason } from "./SpaceMembersPanel";
+import {
+  SpaceMembersPanel,
+  type SpaceInviteAvailabilityReason,
+  type SpaceInviteCancellationAvailabilityReason
+} from "./SpaceMembersPanel";
 import { MessageArticle, PinnedEventsList, SearchResults } from "./mediaLists";
 import { ThreadComposer } from "./composer";
 import { UploadStagingDialog } from "./dialogs";
@@ -93,6 +97,10 @@ export function ContextualRightPanel({
   onDiagnostic,
   onRequestMemberAvatarThumbnail,
   spaceInviteAvailabilityReason,
+  onCancelInvite,
+  canCancelInvite = false,
+  cancelAvailabilityReason,
+  cancelInviteFailure = false,
   onOpenPeople: _onOpenPeople,
   onOpenProfile,
   onBackToPeople,
@@ -209,6 +217,10 @@ export function ContextualRightPanel({
   onOpenContextMenu?: OpenContextMenu;
   onDiagnostic?: (message: string) => void;
   spaceInviteAvailabilityReason?: SpaceInviteAvailabilityReason;
+  onCancelInvite?: (userId: string) => void;
+  canCancelInvite?: boolean;
+  cancelAvailabilityReason?: SpaceInviteCancellationAvailabilityReason;
+  cancelInviteFailure?: boolean;
   onOpenPeople?: () => void;
   onOpenProfile?: (userId: string) => void;
   onBackToPeople?: () => void;
@@ -533,10 +545,14 @@ export function ContextualRightPanel({
             onRequestAvatarThumbnail={onRequestMemberAvatarThumbnail}
             childRoomLabels={childRoomLabels}
             onInviteUser={onInviteUserToSpace}
+            onCancelInvite={onCancelInvite}
+            canCancelInvite={canCancelInvite}
             onOpenProfile={onOpenProfile ?? (() => undefined)}
             onOpenContextMenu={onOpenContextMenu}
             onDiagnostic={onDiagnostic}
             inviteAvailabilityReason={spaceInviteAvailabilityReason}
+            cancelAvailabilityReason={cancelAvailabilityReason}
+            cancelInviteFailure={cancelInviteFailure}
           />
         ) : (
           <PeoplePanel

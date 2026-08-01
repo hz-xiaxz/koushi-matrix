@@ -82,6 +82,19 @@ describe("i18n message catalog", () => {
     expect(t("spaceMembers.search", {}, "ja")).toBe("スペースのメンバーを検索");
   });
 
+  test("localizes Space invite cancellation controls and failure copy", () => {
+    expect(t("spaceMembers.cancelInvite")).toBe("Cancel invitation");
+    expect(t("spaceMembers.cancelInvitePending")).toBe("Cancelling…");
+    expect(t("spaceMembers.cancelInviteFailed")).toBe(
+      "Could not cancel the invitation. Try again."
+    );
+    expect(t("spaceMembers.cancelInvite", {}, "ja")).toBe("招待を取り消す");
+    expect(t("spaceMembers.cancelInvitePending", {}, "ja")).toBe("取消中…");
+    expect(t("spaceMembers.cancelInviteFailed", {}, "ja")).toBe(
+      "招待を取り消せませんでした。もう一度お試しください。"
+    );
+  });
+
   test("explains the three-state user trust model in shipped locales", () => {
     expect(t("help.userTrust.title")).toBe("User trust model");
     expect(t("help.userTrust.unverifiedTitle")).toBe("Unverified");
