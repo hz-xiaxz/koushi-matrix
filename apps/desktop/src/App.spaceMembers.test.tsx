@@ -732,6 +732,7 @@ describe("App Space Members integration", () => {
     await waitFor(() => {
       expect(loadRoomSettings).toHaveBeenCalledWith("!room-alpha:example.invalid");
     });
+    await screen.findByRole("textbox", { name: "Room name" });
     loadRoomSettings.mockReset();
     loadRoomSettings
       .mockReturnValueOnce(first.promise)
