@@ -2617,8 +2617,8 @@ mod tests {
                     LiveEventReceiptSummary {
                         readers: vec![LiveReadReceipt {
                             user_id: "@bob:example.invalid".to_owned(),
-                            display_name: Some("@bob:example.invalid".to_owned()),
-                            original_display_label: "@bob:example.invalid".to_owned(),
+                            display_name: Some("Unknown user".to_owned()),
+                            original_display_label: "Unknown user".to_owned(),
                             avatar: None,
                             timestamp_ms: Some(1_234),
                         }],
