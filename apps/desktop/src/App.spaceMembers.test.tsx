@@ -336,6 +336,14 @@ describe("App Space Members integration", () => {
     const roomSettings = await api.loadRoomSettings("!space-alpha:example.invalid");
     roomSettings.state.domain.room_management.settings!.permissions.can_kick = false;
     vi.spyOn(api, "loadRoomSettings").mockResolvedValue(roomSettings);
+    const originalLoadSpaceMembers = api.loadSpaceMembers.bind(api);
+    vi.spyOn(api, "loadSpaceMembers").mockImplementation(async (spaceId, generation) => {
+      const membersSnapshot = await originalLoadSpaceMembers(spaceId, generation);
+      membersSnapshot.state.domain.room_management = structuredClone(
+        roomSettings.state.domain.room_management
+      );
+      return membersSnapshot;
+    });
     const cancelSpaceInvite = vi.spyOn(api, "cancelSpaceInvite");
 
     await renderAppWithApi(api);
