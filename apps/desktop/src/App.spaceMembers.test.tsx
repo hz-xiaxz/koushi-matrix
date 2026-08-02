@@ -336,7 +336,6 @@ describe("App Space Members integration", () => {
     const roomSettings = await api.loadRoomSettings("!space-alpha:example.invalid");
     roomSettings.state.domain.room_management.settings!.permissions.can_kick = false;
     vi.spyOn(api, "loadRoomSettings").mockResolvedValue(roomSettings);
-    vi.spyOn(api, "loadSpaceMembers").mockResolvedValue(roomSettings);
     const cancelSpaceInvite = vi.spyOn(api, "cancelSpaceInvite");
 
     await renderAppWithApi(api);
