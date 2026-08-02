@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StagedUploadItem } from "../domain/types";
+import { t } from "../i18n/messages";
 import { CreateEntityDialog, InviteTargetsDialog, UploadStagingDialog } from "./dialogs";
 import type { InviteWorkflowState } from "../domain/types";
 
@@ -185,7 +186,7 @@ describe("InviteTargetsDialog history policy", () => {
       <InviteTargetsDialog
         isBusy={false}
         query="alice"
-        title="Invite people"
+        title={t("dialog.invitePeopleTitle")}
         workflow={workflow()}
         onCancel={vi.fn()}
         onOpenRecovery={onOpenRecovery}
