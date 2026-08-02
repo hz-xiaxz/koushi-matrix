@@ -944,6 +944,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::InviteTargetQueryChanged { room_id, query } => {
             invite_workflow::handle_invite_target_query_changed(state, room_id, query)
         }
+        AppAction::InviteScopeSelected { room_id, scope } => {
+            invite_workflow::handle_invite_scope_selected(state, room_id, scope)
+        }
         AppAction::InviteTargetSelected { room_id, user_id } => {
             invite_workflow::handle_invite_target_selected(state, room_id, user_id)
         }

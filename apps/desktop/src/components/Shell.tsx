@@ -828,41 +828,45 @@ export function Sidebar({
   return (
     <aside className="sidebar" aria-label={t("workspace.rooms")}>
       <div className="workspace-header">
-        <div className="workspace-name" dir="auto">
-          {activeSpaceName}
+        <div className="workspace-header-title">
+          <div className="workspace-name" dir="auto">
+            {activeSpaceName}
+          </div>
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("workspace.newDm")}
-          onClick={onNewDm}
-        >
-          <MessageCircle size={ICON_SIZE.control} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("threads.title")}
-          onClick={onOpenThreads}
-        >
-          <MessageSquare size={ICON_SIZE.control} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("workspace.spaceInfoSettings")}
-          onClick={onOpenSpaceInfo}
-        >
-          <Settings size={ICON_SIZE.control} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("action.createRoom")}
-          onClick={onCreateRoom}
-        >
-          <Edit3 size={ICON_SIZE.control} />
-        </button>
+        <div className="workspace-header-actions no-wrap">
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={t("workspace.newDm")}
+            onClick={onNewDm}
+          >
+            <MessageCircle size={ICON_SIZE.control} />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={t("threads.title")}
+            onClick={onOpenThreads}
+          >
+            <MessageSquare size={ICON_SIZE.control} />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={t("workspace.spaceInfoSettings")}
+            onClick={onOpenSpaceInfo}
+          >
+            <Settings size={ICON_SIZE.control} />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={t("action.createRoom")}
+            onClick={onCreateRoom}
+          >
+            <Edit3 size={ICON_SIZE.control} />
+          </button>
+        </div>
       </div>
       <div className="sidebar-scroll">
         {/* #330: Activity, Explore, and Invites are account-global, so they live

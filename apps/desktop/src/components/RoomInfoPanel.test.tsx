@@ -88,6 +88,92 @@ afterEach(() => {
 });
 
 describe("RoomInfoPanel", () => {
+  test("saves join rule and history visibility independently", () => {
+    const onUpdateRoomSetting = vi.fn();
+    render(
+      <RoomInfoPanel
+        room={baseRoom}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        roomManagement={{
+          selected_room_id: baseRoom.room_id,
+          settings: {
+            room_id: baseRoom.room_id,
+            name: "Alpha Room",
+            topic: null,
+            avatar_url: null,
+            join_rule: "invite",
+            history_visibility: "shared",
+            permissions: {
+              can_edit_settings: true,
+              can_edit_roles: true,
+              can_invite: true,
+              can_kick: true,
+              can_ban: true,
+              can_unban: true
+            },
+            members: []
+          },
+          operation: { kind: "idle" }
+        }}
+        onUpdateRoomSetting={onUpdateRoomSetting}
+      />
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Join rule" }), {
+      target: { value: "public" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save join rule" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "History visibility" }), {
+      target: { value: "invited" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save history visibility" }));
+
+    expect(onUpdateRoomSetting).toHaveBeenNthCalledWith(1, baseRoom.room_id, {
+      joinRule: "public"
+    });
+    expect(onUpdateRoomSetting).toHaveBeenNthCalledWith(2, baseRoom.room_id, {
+      historyVisibility: "invited"
+    });
+  });
+
+  test("shows current access and history while disabling edits without permission", () => {
+    render(
+      <RoomInfoPanel
+        room={baseRoom}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        roomManagement={{
+          selected_room_id: baseRoom.room_id,
+          settings: {
+            room_id: baseRoom.room_id,
+            name: "Alpha Room",
+            topic: null,
+            avatar_url: null,
+            join_rule: "invite",
+            history_visibility: "joined",
+            permissions: {
+              can_edit_settings: false,
+              can_edit_roles: false,
+              can_invite: false,
+              can_kick: false,
+              can_ban: false,
+              can_unban: false
+            },
+            members: []
+          },
+          operation: { kind: "idle" }
+        }}
+      />
+    );
+
+    expect(screen.getByRole("combobox", { name: "Join rule" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByRole("combobox", { name: "History visibility" }).hasAttribute("disabled")
+    ).toBe(true);
+    expect(screen.getAllByText("Since join").length).toBeGreaterThan(0);
+  });
+
   test("keeps a room-name composition across equivalent Rust settings snapshots", () => {
     const management = () => ({
       selected_room_id: baseRoom.room_id,

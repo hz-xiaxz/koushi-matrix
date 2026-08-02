@@ -181,6 +181,8 @@ function readySnapshot(
             query: { room_id: null, query: "", candidates: [], explicit_user_id: null },
             selected_targets: [],
             scope_plan: null,
+            selected_scope: null,
+            history_policy: null,
             operation: { kind: "idle" }
           },
           room_notification_settings: {}, room_interactions: {},

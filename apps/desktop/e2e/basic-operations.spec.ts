@@ -853,17 +853,28 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
           ]
         : [],
       scope_plan: null,
+      selected_scope: { kind: "roomOnly" },
+      history_policy: {
+        current_visibility: "joined",
+        encrypted: false,
+        can_edit: true,
+        readiness: "ready"
+      },
       operation: { kind: "idle" }
     });
     window.__harness.setCommandResponse("open_invite_workflow", ({ roomId }) => {
       const snapshot = window.__harness.currentSnapshot();
+      const previousWorkflow = snapshot.state.domain.invite_workflow;
       const next = {
         ...snapshot,
         state: {
           ...snapshot.state,
           domain: {
             ...snapshot.state.domain,
-            invite_workflow: inviteWorkflowFor()
+            invite_workflow: inviteWorkflowFor({
+              query: previousWorkflow?.query.query ?? "",
+              selected: (previousWorkflow?.selected_targets.length ?? 0) > 0
+            })
           }
         }
       };
@@ -927,6 +938,20 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
   await page.getByRole("button", { name: "Invite people" }).click();
   const inviteUserInput = page.getByRole("textbox", { name: "Name, alias, or Matrix ID" });
   await inviteUserInput.fill("@invitee:example.invalid");
+  const inviteHistoryPanel = page.getByRole("region", { name: t("dialog.inviteHistory") });
+  const inviteHistoryHeading = inviteHistoryPanel.getByRole("heading", {
+    name: t("dialog.inviteHistory")
+  });
+  await expect(inviteHistoryHeading).toBeVisible();
+  await expect(inviteHistoryPanel.getByText("Current", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Open Room info" }).click();
+  await expect(page.getByRole("button", { name: "Return to invite" })).toBeVisible();
+  await page.getByRole("button", { name: "Return to invite" }).click();
+  const returnedInviteHistoryHeading = page
+    .getByRole("region", { name: t("dialog.inviteHistory") })
+    .getByRole("heading", { name: t("dialog.inviteHistory") });
+  await expect(returnedInviteHistoryHeading).toBeVisible();
+  await expect(inviteUserInput).toHaveValue("@invitee:example.invalid");
   await page.getByRole("button", { name: /Invitee.*@invitee:example\.invalid/ }).click();
   await page.getByRole("button", { name: "Send invite" }).click();
 
@@ -1691,6 +1716,30 @@ test("room management panel updates settings, roles, and members from Rust state
 
   await expect(currentAvatarRow.getByText("mxc://example.invalid/managed-avatar")).toBeVisible();
   await expect(currentAvatarRow.getByText("No avatar")).toHaveCount(0);
+
+  const historyVisibilitySelect = page.getByRole("combobox", { name: "History visibility" });
+  await historyVisibilitySelect.selectOption("joined");
+  await page.getByRole("button", { name: "Save history visibility" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("update_room_setting").at(-1)?.args)
+    )
+    .toEqual({
+      roomId: HARNESS_ROOM_ID,
+      change: { historyVisibility: "joined" }
+    });
+
+  const joinRuleSelect = page.getByRole("combobox", { name: "Join rule" });
+  await joinRuleSelect.selectOption("public");
+  await page.getByRole("button", { name: "Save join rule" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("update_room_setting").at(-1)?.args)
+    )
+    .toEqual({
+      roomId: HARNESS_ROOM_ID,
+      change: { joinRule: "public" }
+    });
 
   await page
     .getByLabel("Context panel")

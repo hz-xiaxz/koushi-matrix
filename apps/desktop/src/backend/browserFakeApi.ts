@@ -38,6 +38,7 @@ import type {
   RoomNotificationMode,
   RoomNotificationSettings,
   InviteTargetCandidate,
+  InviteHistoryPolicy,
   InviteScopeSelection,
   InviteWorkflowState,
   InvitePreview,
@@ -45,6 +46,7 @@ import type {
   RoomSummary,
   RoomSettingChange,
   RoomSettingsSnapshot,
+  RoomHistoryVisibility,
   RoomTagKind,
   RoomTags,
   SavedSessionInfo,
@@ -381,6 +383,7 @@ export interface DesktopApi {
   openInviteWorkflow(roomId: string): Promise<DesktopSnapshot>;
   closeInviteWorkflow(): Promise<DesktopSnapshot>;
   searchInviteTargets(roomId: string, query: string): Promise<DesktopSnapshot>;
+  setInviteScope(roomId: string, scope: InviteScopeSelection): Promise<DesktopSnapshot>;
   selectInviteTarget(roomId: string, userId: string): Promise<DesktopSnapshot>;
   removeInviteTarget(userId: string): Promise<DesktopSnapshot>;
   inviteTargets(
@@ -3349,13 +3352,21 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
     const workflow = this.snapshot.state.domain.invite_workflow ?? defaultInviteWorkflowState();
+    const scopePlan = buildFakeInviteScopePlan(this.snapshot, roomId);
+    const selectedScope = workflow.selected_scope && scopePlan?.options.some(
+      (option) => inviteScopeKey(option.scope) === inviteScopeKey(workflow.selected_scope!)
+    )
+      ? workflow.selected_scope
+      : scopePlan?.default_scope ?? null;
     this.snapshot.state.domain.invite_workflow = {
       ...workflow,
       query: {
         ...workflow.query,
         room_id: roomId
       },
-      scope_plan: buildFakeInviteScopePlan(this.snapshot, roomId)
+      scope_plan: scopePlan,
+      selected_scope: selectedScope,
+      history_policy: buildFakeInviteHistoryPolicy(this.snapshot, roomId)
     };
     return this.getSnapshot();
   }
@@ -3370,11 +3381,36 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
     const workflow = this.snapshot.state.domain.invite_workflow ?? defaultInviteWorkflowState();
+    const scopePlan = buildFakeInviteScopePlan(this.snapshot, roomId);
+    const selectedScope = workflow.selected_scope && scopePlan?.options.some(
+      (option) => inviteScopeKey(option.scope) === inviteScopeKey(workflow.selected_scope!)
+    )
+      ? workflow.selected_scope
+      : scopePlan?.default_scope ?? null;
     this.snapshot.state.domain.invite_workflow = {
       ...workflow,
       query: buildFakeInviteTargetQuery(this.snapshot, roomId, query),
-      scope_plan: buildFakeInviteScopePlan(this.snapshot, roomId)
+      scope_plan: scopePlan,
+      selected_scope: selectedScope,
+      history_policy: buildFakeInviteHistoryPolicy(this.snapshot, roomId)
     };
+    return this.getSnapshot();
+  }
+
+  async setInviteScope(roomId: string, scope: InviteScopeSelection): Promise<DesktopSnapshot> {
+    if (!this.canUseSyncedViews() || !roomId.trim()) {
+      return this.getSnapshot();
+    }
+    const workflow = this.snapshot.state.domain.invite_workflow ?? defaultInviteWorkflowState();
+    const valid = workflow.scope_plan?.options.some(
+      (option) => inviteScopeKey(option.scope) === inviteScopeKey(scope)
+    );
+    if (workflow.query.room_id === roomId && valid) {
+      this.snapshot.state.domain.invite_workflow = {
+        ...workflow,
+        selected_scope: scope
+      };
+    }
     return this.getSnapshot();
   }
 
@@ -5027,6 +5063,35 @@ function defaultProfileState(userId: string | null | undefined): DesktopSnapshot
 
 const INVITE_ALREADY_IN_SPACE_MESSAGE = "既にスペースにいます";
 
+function buildFakeInviteHistoryPolicy(
+  snapshot: DesktopSnapshot,
+  roomId: string
+): InviteHistoryPolicy {
+  const room = snapshot.state.domain.rooms.find((entry) => entry.room_id === roomId);
+  const settings = snapshot.state.domain.room_management.settings?.room_id === roomId
+    ? snapshot.state.domain.room_management.settings
+    : null;
+  const recoveryRequired =
+    Boolean(room?.is_encrypted) &&
+    [
+      "needsRecovery",
+      "awaitingVerification",
+      "verifying",
+      "awaitingBootstrapConfirmation",
+      "locked"
+    ].includes(snapshot.state.domain.session.kind);
+  return {
+    current_visibility: settings?.history_visibility ?? ("joined" as RoomHistoryVisibility),
+    encrypted: Boolean(room?.is_encrypted),
+    can_edit: Boolean(settings?.permissions.can_edit_settings),
+    readiness: recoveryRequired ? "recoveryRequired" : "ready"
+  };
+}
+
+function inviteScopeKey(scope: InviteScopeSelection): string {
+  return scope.kind === "roomOnly" ? "roomOnly" : `parent:${scope.space_id}`;
+}
+
 function defaultInviteWorkflowState(): InviteWorkflowState {
   return {
     query: {
@@ -5037,6 +5102,8 @@ function defaultInviteWorkflowState(): InviteWorkflowState {
     },
     selected_targets: [],
     scope_plan: null,
+    selected_scope: null,
+    history_policy: null,
     operation: { kind: "idle" }
   };
 }

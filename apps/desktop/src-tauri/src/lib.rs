@@ -1426,6 +1426,7 @@ pub fn run() {
             commands::room::open_invite_workflow,
             commands::room::close_invite_workflow,
             commands::room::search_invite_targets,
+            commands::room::set_invite_scope,
             commands::room::select_invite_target,
             commands::room::remove_invite_target,
             commands::room::invite_targets,

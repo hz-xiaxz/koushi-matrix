@@ -674,15 +674,13 @@ const DEFAULT_INVITE_WORKFLOW: InviteWorkflowState = {
   },
   selected_targets: [],
   scope_plan: null,
+  selected_scope: null,
+  history_policy: null,
   operation: { kind: "idle" }
 };
 
-function inviteScopeKey(scope: InviteScopeSelection): string {
-  return scope.kind === "roomOnly" ? "roomOnly" : `parent:${scope.space_id}`;
-}
-
 function inviteScopeFromWorkflow(workflow: InviteWorkflowState): InviteScopeSelection {
-  return workflow.scope_plan?.default_scope ?? DEFAULT_INVITE_SCOPE;
+  return workflow.selected_scope ?? workflow.scope_plan?.default_scope ?? DEFAULT_INVITE_SCOPE;
 }
 
 function threadsListScopeFromKey(key: string): ThreadsListScope {
@@ -1533,9 +1531,8 @@ export function App() {
     useState<SpaceLocalOverrides>(readSpaceLocalOverrides);
   const [newDmDraftUserId, setNewDmDraftUserId] = useState("");
   const [inviteUserDialog, setInviteUserDialog] = useState<InviteUserDialogState>(null);
+  const [inviteUserDialogVisible, setInviteUserDialogVisible] = useState(false);
   const [inviteUserDraftQuery, setInviteUserDraftQuery] = useState("");
-  const [inviteScopeSelection, setInviteScopeSelection] =
-    useState<InviteScopeSelection>(DEFAULT_INVITE_SCOPE);
   // React-local ephemeral state only: which create dialog is open and the
   // unsent name draft. The pending op status comes from the snapshot
   // (basic_operation); the created room/space identity comes from the API.
@@ -3615,11 +3612,12 @@ export function App() {
 
   async function openInviteUserDialog(roomId: string, title: string) {
     setInviteUserDraftQuery("");
-    setInviteScopeSelection(DEFAULT_INVITE_SCOPE);
     setInviteUserDialog({ roomId, title });
+    setInviteUserDialogVisible(true);
+    const settingsSnapshot = await api.loadRoomSettings(roomId);
+    setSnapshot(settingsSnapshot);
     const nextSnapshot = await api.openInviteWorkflow(roomId);
-    const workflow = nextSnapshot.state.domain.invite_workflow ?? DEFAULT_INVITE_WORKFLOW;
-    setInviteScopeSelection(inviteScopeFromWorkflow(workflow));
+    setInviteUserDraftQuery(nextSnapshot.state.domain.invite_workflow?.query.query ?? "");
     setSnapshot(nextSnapshot);
   }
 
@@ -3628,9 +3626,40 @@ export function App() {
       latestTextOperationQueueRef.current.invalidate(`invite:${inviteUserDialog.roomId}`);
     }
     setInviteUserDialog(null);
+    setInviteUserDialogVisible(false);
     setInviteUserDraftQuery("");
-    setInviteScopeSelection(DEFAULT_INVITE_SCOPE);
     setSnapshot(await api.closeInviteWorkflow());
+  }
+
+  async function openRoomInfoFromInvite() {
+    if (!inviteUserDialog) {
+      return;
+    }
+    setInviteUserDialogVisible(false);
+    await setRightPanelModeClosingFocusedContext("roomInfo");
+  }
+
+  async function openRecoveryFromInvite() {
+    if (!inviteUserDialog) {
+      return;
+    }
+    setInviteUserDialogVisible(false);
+    await setRightPanelModeClosingFocusedContext("recovery");
+  }
+
+  async function returnToInviteUserDialog() {
+    const dialog = inviteUserDialog;
+    if (!dialog) {
+      return;
+    }
+    const settingsSnapshot = await api.loadRoomSettings(dialog.roomId);
+    setSnapshot(settingsSnapshot);
+    const nextSnapshot = await api.openInviteWorkflow(dialog.roomId);
+    const workflow = nextSnapshot.state.domain.invite_workflow ?? DEFAULT_INVITE_WORKFLOW;
+    setInviteUserDraftQuery(workflow.query.query);
+    setInviteUserDialogVisible(true);
+    setSnapshot(nextSnapshot);
+    await setRightPanelModeClosingFocusedContext("closed");
   }
 
   async function updateInviteUserQuery(value: string) {
@@ -3645,16 +3674,15 @@ export function App() {
     );
     if (result.kind === "superseded") return;
     const nextSnapshot = result.value;
-    const workflow = nextSnapshot.state.domain.invite_workflow ?? DEFAULT_INVITE_WORKFLOW;
-    if (
-      workflow.scope_plan &&
-      !workflow.scope_plan.options.some(
-        (option) => inviteScopeKey(option.scope) === inviteScopeKey(inviteScopeSelection)
-      )
-    ) {
-      setInviteScopeSelection(inviteScopeFromWorkflow(workflow));
-    }
     setSnapshot(nextSnapshot);
+  }
+
+  async function selectInviteScope(scope: InviteScopeSelection) {
+    const dialog = inviteUserDialog;
+    if (!dialog) {
+      return;
+    }
+    setSnapshot(await api.setInviteScope(dialog.roomId, scope));
   }
 
   async function selectInviteTarget(userId: string) {
@@ -3755,7 +3783,8 @@ export function App() {
     }
     setIsBusy(true);
     try {
-      const nextSnapshot = await api.inviteTargets(dialog.roomId, userIds, inviteScopeSelection);
+      const scope = workflow.selected_scope ?? inviteScopeFromWorkflow(workflow);
+      const nextSnapshot = await api.inviteTargets(dialog.roomId, userIds, scope);
       setSnapshot(nextSnapshot);
       const operation = nextSnapshot.state.domain.invite_workflow?.operation;
       const hasNotice = operation?.kind === "completed" && operation.notice;
@@ -5992,6 +6021,9 @@ export function App() {
             void logout();
           }}
           onInviteUser={openInviteUserDialog}
+          onReturnToInvite={() => {
+            void returnToInviteUserDialog();
+          }}
           onModerateMember={(roomId, targetUserId, action, reason) => {
             void moderateRoomMember(roomId, targetUserId, action, reason);
           }}
@@ -6230,15 +6262,17 @@ export function App() {
           onValueChange={setNewDmDraftUserId}
         />
       ) : null}
-      {inviteUserDialog ? (
+      {inviteUserDialog && inviteUserDialogVisible ? (
         <InviteTargetsDialog
           isBusy={isBusy}
           query={inviteUserDraftQuery}
-          scope={inviteScopeSelection}
           title={inviteUserDialog.title}
           workflow={snapshot?.state.domain.invite_workflow ?? DEFAULT_INVITE_WORKFLOW}
           onCancel={() => {
             void closeInviteUserDialog();
+          }}
+          onOpenRecovery={() => {
+            void openRecoveryFromInvite();
           }}
           onQueryChange={(value) => {
             void updateInviteUserQuery(value);
@@ -6246,7 +6280,12 @@ export function App() {
           onRemoveTarget={(userId) => {
             void removeInviteTarget(userId);
           }}
-          onScopeChange={setInviteScopeSelection}
+          onOpenRoomInfo={() => {
+            void openRoomInfoFromInvite();
+          }}
+          onScopeChange={(scope) => {
+            void selectInviteScope(scope);
+          }}
           onSelectCandidate={(userId) => {
             void selectInviteTarget(userId);
           }}

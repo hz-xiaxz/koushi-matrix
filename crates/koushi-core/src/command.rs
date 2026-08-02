@@ -65,6 +65,7 @@ impl CoreCommand {
                 | AppCommand::OpenInviteWorkflow { request_id, .. }
                 | AppCommand::CloseInviteWorkflow { request_id }
                 | AppCommand::SearchInviteTargets { request_id, .. }
+                | AppCommand::SetInviteScope { request_id, .. }
                 | AppCommand::SelectInviteTarget { request_id, .. }
                 | AppCommand::RemoveInviteTarget { request_id, .. }
                 | AppCommand::UpdateSettings { request_id, .. }
@@ -526,6 +527,11 @@ pub enum AppCommand {
         room_id: String,
         query: String,
     },
+    SetInviteScope {
+        request_id: RequestId,
+        room_id: String,
+        scope: InviteScopeSelection,
+    },
     SelectInviteTarget {
         request_id: RequestId,
         room_id: String,
@@ -855,6 +861,14 @@ impl fmt::Debug for AppCommand {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("query_len", &query.len())
+                .finish(),
+            Self::SetInviteScope {
+                request_id, scope, ..
+            } => formatter
+                .debug_struct("SetInviteScope")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .field("scope", scope)
                 .finish(),
             Self::SelectInviteTarget { request_id, .. } => formatter
                 .debug_struct("SelectInviteTarget")

@@ -111,10 +111,11 @@ pub use room::{
 // ── Re-exports: invite_workflow ─────────────────────────────────────────────
 pub use invite_workflow::{
     INVITE_ALREADY_IN_SPACE_MESSAGE, InviteDestination, InviteDestinationKind,
-    InviteDestinationResult, InviteDestinationResultKind, InviteOperationState, InviteScopeOption,
-    InviteScopePlan, InviteScopeSelection, InviteSelectedTarget, InviteTargetCandidate,
-    InviteTargetCandidateSource, InviteTargetCandidateStatus, InviteTargetQueryState,
-    InviteWorkflowState, build_invite_scope_plan, build_invite_target_query_state,
+    InviteDestinationResult, InviteDestinationResultKind, InviteHistoryPolicy,
+    InviteHistoryReadiness, InviteOperationState, InviteScopeOption, InviteScopePlan,
+    InviteScopeSelection, InviteSelectedTarget, InviteTargetCandidate, InviteTargetCandidateSource,
+    InviteTargetCandidateStatus, InviteTargetQueryState, InviteWorkflowState,
+    build_invite_history_policy, build_invite_scope_plan, build_invite_target_query_state,
     invite_notice_from_results, selected_target_from_query,
 };
 

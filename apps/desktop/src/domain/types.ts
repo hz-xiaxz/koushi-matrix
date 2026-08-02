@@ -821,7 +821,18 @@ export interface InviteWorkflowState {
   query: InviteTargetQueryState;
   selected_targets: InviteSelectedTarget[];
   scope_plan: InviteScopePlan | null;
+  selected_scope: InviteScopeSelection | null;
+  history_policy: InviteHistoryPolicy | null;
   operation: InviteOperationState;
+}
+
+export type InviteHistoryReadiness = "ready" | "recoveryRequired";
+
+export interface InviteHistoryPolicy {
+  current_visibility: RoomHistoryVisibility;
+  encrypted: boolean;
+  can_edit: boolean;
+  readiness: InviteHistoryReadiness;
 }
 
 export interface InviteTargetQueryState {

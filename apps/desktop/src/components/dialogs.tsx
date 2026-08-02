@@ -458,10 +458,11 @@ export function UserIdDialog({
 export function InviteTargetsDialog({
   isBusy,
   query,
-  scope,
   title,
   workflow,
   onCancel,
+  onOpenRecovery,
+  onOpenRoomInfo,
   onQueryChange,
   onRemoveTarget,
   onScopeChange,
@@ -470,10 +471,11 @@ export function InviteTargetsDialog({
 }: {
   isBusy: boolean;
   query: string;
-  scope: InviteScopeSelection;
   title: string;
   workflow: InviteWorkflowState;
   onCancel: () => void;
+  onOpenRecovery?: () => void;
+  onOpenRoomInfo?: () => void;
   onQueryChange: (value: string) => void;
   onRemoveTarget: (userId: string) => void;
   onScopeChange: (scope: InviteScopeSelection) => void;
@@ -482,6 +484,11 @@ export function InviteTargetsDialog({
 }) {
   const isPending = workflow.operation.kind === "pending";
   const canSubmit = workflow.selected_targets.length > 0 && !isBusy && !isPending;
+  const historyPolicy = workflow.history_policy;
+  const currentHistoryVisibility = historyPolicy?.current_visibility ?? "joined";
+  const selectedScope = workflow.selected_scope ?? workflow.scope_plan?.default_scope ?? {
+    kind: "roomOnly" as const
+  };
 
   function onDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
@@ -567,10 +574,58 @@ export function InviteTargetsDialog({
             </button>
           ) : null}
         </div>
+        <section className="invite-history-policy" aria-label={t("dialog.inviteHistory")}>
+          <h3>{t("dialog.inviteHistory")}</h3>
+          <p className="profile-settings-hint">{t("dialog.inviteHistoryCurrent")}</p>
+          <div className="invite-history-options" role="list">
+            {(["shared", "invited", "joined"] as const).map((visibility) => (
+              <div
+                className="invite-history-option"
+                data-current={currentHistoryVisibility === visibility ? "true" : "false"}
+                key={visibility}
+                role="listitem"
+              >
+                <strong>{inviteHistoryVisibilityLabel(visibility)}</strong>
+                {currentHistoryVisibility === visibility ? (
+                  <span>{t("dialog.inviteHistoryCurrentBadge")}</span>
+                ) : null}
+                <small>{inviteHistoryVisibilityDescription(visibility)}</small>
+              </div>
+            ))}
+          </div>
+          {currentHistoryVisibility === "worldReadable" ? (
+            <p className="settings-notice" role="note">
+              {t("dialog.inviteHistoryWorldReadableWarning")}
+            </p>
+          ) : null}
+          {historyPolicy?.encrypted && currentHistoryVisibility === "shared" ? (
+            <p className="settings-notice" role="note">
+              {t("dialog.inviteHistoryEncryptedShared")}
+            </p>
+          ) : null}
+          <p className="settings-notice" role="note">
+            {t("dialog.inviteHistoryNonRetroactive")}
+          </p>
+          {historyPolicy?.readiness === "recoveryRequired" ? (
+            <div className="settings-notice" role="alert">
+              <span>{t("dialog.inviteHistoryRecovery")}</span>
+              {onOpenRecovery ? (
+                <button className="inline-link-button" type="button" onClick={onOpenRecovery}>
+                  {t("settings.openRecovery")}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {onOpenRoomInfo ? (
+            <button className="inline-link-button" type="button" onClick={onOpenRoomInfo}>
+              {t("dialog.openRoomInfo")}
+            </button>
+          ) : null}
+        </section>
         {workflow.scope_plan ? (
           <div className="invite-scope-options" aria-label={t("dialog.inviteScope")}>
             {workflow.scope_plan.options.map((option) => {
-              const checked = inviteScopeKey(option.scope) === inviteScopeKey(scope);
+              const checked = inviteScopeKey(option.scope) === inviteScopeKey(selectedScope);
               return (
                 <label className="invite-scope-option" key={inviteScopeKey(option.scope)}>
                   <input
@@ -600,6 +655,30 @@ export function InviteTargetsDialog({
 
 function inviteScopeKey(scope: InviteScopeSelection): string {
   return scope.kind === "roomOnly" ? "roomOnly" : `parent:${scope.space_id}`;
+}
+
+function inviteHistoryVisibilityLabel(visibility: "shared" | "invited" | "joined"): string {
+  switch (visibility) {
+    case "shared":
+      return t("room.historyShared");
+    case "invited":
+      return t("room.historyInvited");
+    case "joined":
+      return t("room.historyJoined");
+  }
+}
+
+function inviteHistoryVisibilityDescription(
+  visibility: "shared" | "invited" | "joined"
+): string {
+  switch (visibility) {
+    case "shared":
+      return t("room.historySharedDescription");
+    case "invited":
+      return t("room.historyInvitedDescription");
+    case "joined":
+      return t("room.historyJoinedDescription");
+  }
 }
 
 // ===== ReportReasonDialog =====

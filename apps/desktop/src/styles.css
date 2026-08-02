@@ -1201,12 +1201,31 @@ button:disabled {
 
 .workspace-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
   gap: 8px;
-  align-items: center;
-  height: 62px;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 62px;
   padding: 0 16px;
   border-bottom: 1px solid var(--line);
+}
+
+.workspace-header-title {
+  min-width: 0;
+  align-self: end;
+}
+
+.workspace-header-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.workspace-header-actions.no-wrap {
+  flex-wrap: nowrap;
 }
 
 .workspace-name {
@@ -5248,9 +5267,62 @@ mark {
 }
 
 .invite-target-candidates,
-.invite-scope-options {
+.invite-scope-options,
+.invite-history-options {
   display: grid;
   gap: 6px;
+}
+
+.invite-history-policy {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 86%, var(--brand-soft));
+}
+
+.invite-history-policy h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.invite-history-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.invite-history-option[data-current="true"] {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.invite-history-option small {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.inline-link-button {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  color: var(--brand);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.inline-link-button:hover {
+  text-decoration: underline;
 }
 
 .invite-target-candidates {
@@ -7123,6 +7195,12 @@ kbd {
   display: grid;
   gap: 8px;
   min-width: 0;
+}
+
+.room-access-history .settings-notice {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
 }
 
 .room-management-status {
