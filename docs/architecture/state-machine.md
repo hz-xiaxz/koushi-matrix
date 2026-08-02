@@ -293,6 +293,47 @@ The visible room list is a Rust-owned projection (`AppState.room_list`). React
 renders `active_filter`, `sort`, and `items` and must not recompute filter
 membership, section order, or activity sort.
 
+### Room-list bootstrap readiness
+
+Room-list membership has a separate Rust-owned readiness contract from the sync
+lifecycle. A backend can report that its service task is running before it has
+proved connectivity or delivered a complete room snapshot, so `SyncState::Running`
+is not evidence that an empty room list is authoritative.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Uninitialized
+    Uninitialized --> Loading: RoomListBootstrapStarted(generation, source)
+    Loading --> Loading: RoomListSnapshotProvisional(current generation)
+    Loading --> Ready: RoomListSnapshotAuthoritative(current generation)
+    Loading --> Failed: RoomListBootstrapFailed(current generation)
+    Ready --> Loading: RoomListBootstrapStarted(new generation)
+    Ready --> Ready: RoomListSnapshotAuthoritative(current generation)
+    Ready --> Failed: RoomListBootstrapFailed(current generation)
+    Failed --> Loading: RoomListBootstrapStarted(new generation)
+```
+
+- `RoomListReadiness` carries `Uninitialized`, `Loading`, `Ready`, or `Failed`,
+  plus a coarse `RoomListSource` (`Cache`, `SyncService`, or `Legacy`) and a
+  monotonically increasing backend generation. It contains no Matrix IDs or
+  raw SDK errors.
+- Bootstrap start changes readiness to `Loading` and retains the last usable
+  room/space/invite snapshot. A non-empty provisional cache or observer snapshot
+  may remain visible while loading, but an unproven empty snapshot does not
+  replace it.
+- Only an authoritative snapshot from the current generation changes readiness
+  to `Ready`. That snapshot may legitimately contain zero rooms and replaces the
+  retained snapshot. A current-generation failure changes readiness to `Failed`
+  while retaining the last usable snapshot for recovery.
+- Provisional, authoritative, and failure actions from an older generation are
+  ignored. This fences a retired SyncService observer when the runtime falls
+  back to legacy sync or starts a replacement backend.
+- `RoomListUpdated` remains the compatibility path for already-authoritative
+  room operations and tests; backend bootstrap projection uses the guarded
+  readiness actions above.
+- Search-crawler admission is guarded by `RoomListReadiness::Ready`; sync
+  running alone must not enqueue a room crawl.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Rooms

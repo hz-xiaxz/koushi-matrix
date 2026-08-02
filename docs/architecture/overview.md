@@ -272,7 +272,13 @@ An in-process actor system in `koushi-core`:
   `RoomSummary.tags` by the same Rust-owned room-list normalization path, and
   sidebar unread/mention affordances consume Rust-owned unread/highlight counts
   from `SidebarModel`. React must not derive favourite, low-priority, unread,
-  or mention membership from local UI state.
+  or mention membership from local UI state. Room-list bootstrap readiness is
+  separate from `SyncState::Running`: the actor retains the last usable
+  snapshot while a current backend is unproven/loading, holds an unproven
+  empty SyncService Reset, accepts an authoritative zero only after the current
+  backend generation proves connectivity, and ignores delayed projections from
+  retired observers. Legacy first-response proof and SyncService-to-legacy
+  fallback use the same generation-fenced contract.
 - `TimelineManager` (per account session) — timeline actor routing plus the
   session-scoped outbound-send lifecycle. It directly polls supervised SDK
   enqueue futures, the sole client-global SDK send-queue terminal observer, and the
