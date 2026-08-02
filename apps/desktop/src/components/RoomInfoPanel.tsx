@@ -1,4 +1,6 @@
 import {
+  AlertTriangle,
+  ArrowLeft,
   Bell,
   ChevronRight,
   Copy,
@@ -18,6 +20,7 @@ import { t } from "../i18n/messages";
 import { ImeSafeForm, ImeTextArea, ImeTextField } from "./ImeTextControl";
 import type {
   RoomHistoryVisibility,
+  InviteHistoryPolicy,
   RoomJoinRule,
   RoomManagementState,
   RoomNotificationMode,
@@ -43,7 +46,10 @@ export function RoomInfoPanel({
   onUpdateRoomSetting,
   onSetRoomUrlPreviewOverride,
   onOpenPeople,
-  onRepairRoomTimeline
+  onRepairRoomTimeline,
+  inviteHistoryPolicy,
+  onOpenRecovery,
+  onReturnToInvite
 }: {
   room: RoomSummary | null;
   roomManagement?: RoomManagementState;
@@ -59,6 +65,9 @@ export function RoomInfoPanel({
   onSetRoomUrlPreviewOverride?: (roomId: string, enabled: boolean) => void;
   onOpenPeople?: () => void;
   onRepairRoomTimeline?: (roomId: string) => void | Promise<void>;
+  inviteHistoryPolicy?: InviteHistoryPolicy | null;
+  onOpenRecovery?: () => void;
+  onReturnToInvite?: () => void;
 }) {
   const roomId = room?.room_id ?? "";
   const roomName = room?.display_label ?? "";
@@ -78,6 +87,12 @@ export function RoomInfoPanel({
   const operation = managementForRoom?.operation ?? { kind: "idle" as const };
   const settingsPending = operation.kind === "pending" && operation.operation === "settings";
   const permissions = settings?.permissions ?? null;
+  const historyPolicy = inviteHistoryPolicy ?? {
+    current_visibility: settings?.history_visibility ?? "joined",
+    encrypted: isEncrypted,
+    can_edit: Boolean(settings?.permissions.can_edit_settings),
+    readiness: "ready" as const
+  };
   const [nameDraft, setNameDraft] = useState(settings?.name ?? roomName);
   const [topicDraft, setTopicDraft] = useState(settings?.topic ?? "");
   const [avatarDraft, setAvatarDraft] = useState(settings?.avatar_url ?? "");
@@ -311,6 +326,133 @@ export function RoomInfoPanel({
         </div>
       </section>
 
+      <section className="settings-section room-access-history" aria-label={t("room.accessAndHistory")}>
+        <h3>{t("room.accessAndHistory")}</h3>
+        <p className="profile-settings-hint">{t("room.accessAndHistoryHint")}</p>
+        {settings ? (
+          <div className="room-management-grid">
+            <div className="settings-detail-list">
+              <DetailRow label={t("room.joinRule")} value={roomJoinRuleLabel(settings.join_rule)} />
+              <DetailRow
+                label={t("room.historyVisibility")}
+                value={roomHistoryVisibilityLabel(settings.history_visibility)}
+              />
+            </div>
+            <ImeSafeForm
+              className="room-management-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (canEditSettings) {
+                  onUpdateRoomSetting?.(room.room_id, { joinRule: joinRuleDraft });
+                }
+              }}
+            >
+              <label className="profile-settings-field">
+                <span>{t("room.joinRule")}</span>
+                <select
+                  value={joinRuleDraft}
+                  aria-label={t("room.joinRule")}
+                  disabled={!canEditSettings}
+                  onChange={(event) => setJoinRuleDraft(event.currentTarget.value as RoomJoinRule)}
+                >
+                  {(["public", "invite", "knock", "restricted", "private"] as const).map(
+                    (rule) => (
+                      <option key={rule} value={rule}>
+                        {roomJoinRuleLabel(rule)}
+                      </option>
+                    )
+                  )}
+                </select>
+              </label>
+              <button
+                className="profile-settings-action"
+                type="submit"
+                disabled={!canEditSettings || joinRuleDraft === settings.join_rule}
+              >
+                {t("room.saveJoinRule")}
+              </button>
+            </ImeSafeForm>
+            <ImeSafeForm
+              className="room-management-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (canEditSettings) {
+                  onUpdateRoomSetting?.(room.room_id, {
+                    historyVisibility: historyVisibilityDraft
+                  });
+                }
+              }}
+            >
+              <label className="profile-settings-field">
+                <span>{t("room.historyVisibility")}</span>
+                <select
+                  value={historyVisibilityDraft}
+                  aria-label={t("room.historyVisibility")}
+                  disabled={!canEditSettings}
+                  onChange={(event) =>
+                    setHistoryVisibilityDraft(event.currentTarget.value as RoomHistoryVisibility)
+                  }
+                >
+                  {(["worldReadable", "shared", "invited", "joined"] as const).map(
+                    (visibility) => (
+                      <option key={visibility} value={visibility}>
+                        {roomHistoryVisibilityLabel(visibility)}
+                      </option>
+                    )
+                  )}
+                </select>
+              </label>
+              <button
+                className="profile-settings-action"
+                type="submit"
+                disabled={!canEditSettings || historyVisibilityDraft === settings.history_visibility}
+              >
+                {t("room.saveHistoryVisibility")}
+              </button>
+            </ImeSafeForm>
+            <p className="profile-settings-hint">
+              {roomHistoryVisibilityDescription(historyVisibilityDraft)}
+            </p>
+            {historyVisibilityDraft === "worldReadable" ? (
+              <p className="settings-notice" role="note">
+                <AlertTriangle size={15} aria-hidden="true" />
+                {t("room.historyWorldReadableWarning")}
+              </p>
+            ) : null}
+            {isEncrypted && historyVisibilityDraft === "shared" ? (
+              <p className="settings-notice" role="note">
+                <KeyRound size={15} aria-hidden="true" />
+                {t("room.historySharedEncryptedHint")}
+              </p>
+            ) : null}
+            <p className="settings-notice" role="note">
+              {t("room.historyNonRetroactive")}
+            </p>
+            {historyPolicy.readiness === "recoveryRequired" ? (
+              <div className="settings-notice" role="alert">
+                <AlertTriangle size={15} aria-hidden="true" />
+                <span>{t("room.historyRecoveryRequired")}</span>
+                {onOpenRecovery ? (
+                  <button className="inline-link-button" type="button" onClick={onOpenRecovery}>
+                    {t("settings.openRecovery")}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {onReturnToInvite ? (
+              <button className="profile-settings-action" type="button" onClick={onReturnToInvite}>
+                <ArrowLeft size={15} aria-hidden="true" />
+                {t("room.returnToInvite")}
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="settings-detail-row">
+            <span>{t("room.settingsLoading")}</span>
+          </div>
+        )}
+      </section>
+
       <section className="settings-section" aria-label={t("room.management")}>
         <h3>{t("room.management")}</h3>
         {settings ? (
@@ -323,11 +465,6 @@ export function RoomInfoPanel({
               <DetailRow
                 label={t("room.currentAvatar")}
                 value={settings.avatar_url?.trim() || t("room.noAvatar")}
-              />
-              <DetailRow label={t("room.joinRule")} value={roomJoinRuleLabel(settings.join_rule)} />
-              <DetailRow
-                label={t("room.historyVisibility")}
-                value={roomHistoryVisibilityLabel(settings.history_visibility)}
               />
             </div>
             <ImeSafeForm
@@ -415,70 +552,6 @@ export function RoomInfoPanel({
                 disabled={!canEditSettings || topicDraft.trim() === (settings.topic ?? "")}
               >
                 {t("room.saveTopic")}
-              </button>
-            </ImeSafeForm>
-            <ImeSafeForm
-              className="room-management-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (canEditSettings) {
-                  onUpdateRoomSetting?.(room.room_id, { joinRule: joinRuleDraft });
-                  onUpdateRoomSetting?.(room.room_id, {
-                    historyVisibility: historyVisibilityDraft
-                  });
-                }
-              }}
-            >
-              <label className="profile-settings-field">
-                <span>{t("room.joinRule")}</span>
-                <select
-                  value={joinRuleDraft}
-                  aria-label={t("room.joinRule")}
-                  disabled={!canEditSettings}
-                  onChange={(event) =>
-                    setJoinRuleDraft(event.currentTarget.value as RoomJoinRule)
-                  }
-                >
-                  {(["public", "invite", "knock", "restricted", "private"] as const).map(
-                    (rule) => (
-                      <option key={rule} value={rule}>
-                        {roomJoinRuleLabel(rule)}
-                      </option>
-                    )
-                  )}
-                </select>
-              </label>
-              <label className="profile-settings-field">
-                <span>{t("room.historyVisibility")}</span>
-                <select
-                  value={historyVisibilityDraft}
-                  aria-label={t("room.historyVisibility")}
-                  disabled={!canEditSettings}
-                  onChange={(event) =>
-                    setHistoryVisibilityDraft(
-                      event.currentTarget.value as RoomHistoryVisibility
-                    )
-                  }
-                >
-                  {(["worldReadable", "shared", "invited", "joined"] as const).map(
-                    (visibility) => (
-                      <option key={visibility} value={visibility}>
-                        {roomHistoryVisibilityLabel(visibility)}
-                      </option>
-                    )
-                  )}
-                </select>
-              </label>
-              <button
-                className="profile-settings-action"
-                type="submit"
-                disabled={
-                  !canEditSettings ||
-                  (joinRuleDraft === settings.join_rule &&
-                    historyVisibilityDraft === settings.history_visibility)
-                }
-              >
-                {t("room.saveAccess")}
               </button>
             </ImeSafeForm>
             {operation.kind === "failed" ? (
@@ -607,6 +680,19 @@ function roomHistoryVisibilityLabel(visibility: RoomHistoryVisibility): string {
       return t("room.historyInvited");
     case "joined":
       return t("room.historyJoined");
+  }
+}
+
+function roomHistoryVisibilityDescription(visibility: RoomHistoryVisibility): string {
+  switch (visibility) {
+    case "worldReadable":
+      return t("room.historyWorldReadableDescription");
+    case "shared":
+      return t("room.historySharedDescription");
+    case "invited":
+      return t("room.historyInvitedDescription");
+    case "joined":
+      return t("room.historyJoinedDescription");
   }
 }
 

@@ -6567,6 +6567,7 @@ fn desktop_client_builder_defaults(
             backup_download_strategy: BackupDownloadStrategy::AfterDecryptionFailure,
             ..Default::default()
         })
+        .with_enable_share_history_on_invite(true)
         .with_threading_support(matrix_sdk::ThreadingSupport::Enabled {
             with_subscriptions: true,
         })
@@ -11429,7 +11430,7 @@ mod tests {
     }
 
     #[test]
-    fn client_builder_defaults_enable_thread_subscriptions() {
+    fn desktop_client_builder_defaults_enable_thread_subscriptions_and_share_history() {
         let source = include_str!("lib.rs");
         let defaults_body = source
             .split("fn desktop_client_builder_defaults")
@@ -11442,6 +11443,7 @@ mod tests {
         assert!(defaults_body.contains("with_threading_support"));
         assert!(defaults_body.contains("ThreadingSupport::Enabled"));
         assert!(defaults_body.contains("with_subscriptions: true"));
+        assert!(defaults_body.contains("with_enable_share_history_on_invite(true)"));
     }
 
     #[test]

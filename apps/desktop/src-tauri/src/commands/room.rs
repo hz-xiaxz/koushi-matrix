@@ -43,6 +43,21 @@ pub async fn search_invite_targets(
 }
 
 #[tauri::command]
+pub async fn set_invite_scope(
+    room_id: String,
+    scope: InviteScopeSelection,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        build_set_invite_scope_command(request_id, room_id, scope),
+    )
+    .await?;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn select_invite_target(
     room_id: String,
     user_id: String,

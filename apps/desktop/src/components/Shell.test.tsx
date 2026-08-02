@@ -121,6 +121,35 @@ describe("EntityAvatar", () => {
 });
 
 describe("Sidebar", () => {
+  it("keeps the Space title and complete action group in separate rows", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+
+    render(
+      <Sidebar
+        activeRoomId={snapshot.state.ui.navigation.active_room_id}
+        activeView="timeline"
+        snapshot={snapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onSelectRoom={() => undefined}
+      />
+    );
+
+    const header = document.querySelector<HTMLElement>(".workspace-header");
+    const titleRow = header?.querySelector<HTMLElement>(".workspace-header-title");
+    const actionRow = header?.querySelector<HTMLElement>(".workspace-header-actions");
+    expect(titleRow?.textContent).toContain("Synthetic Workspace");
+    expect(actionRow?.querySelectorAll("button")).toHaveLength(4);
+    expect(titleRow?.contains(actionRow!)).toBe(false);
+    expect(actionRow?.classList.contains("no-wrap")).toBe(true);
+  });
+
   it("renders Home as Activity, Explore, Invites, all Rooms, and Direct Messages", async () => {
     const api = createBrowserFakeApi();
     const snapshot = await api.selectSpace(null);

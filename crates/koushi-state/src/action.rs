@@ -852,6 +852,10 @@ pub enum AppAction {
         room_id: String,
         query: String,
     },
+    InviteScopeSelected {
+        room_id: String,
+        scope: InviteScopeSelection,
+    },
     InviteTargetSelected {
         room_id: String,
         user_id: String,

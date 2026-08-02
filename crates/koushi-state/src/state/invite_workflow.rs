@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AppState, AvatarImage, OperationFailureKind, RoomManagementState, RoomMemberSummary,
-    SpaceSummary, UserProfile,
+    AppState, AvatarImage, OperationFailureKind, RoomHistoryVisibility, RoomManagementState,
+    RoomMemberSummary, SessionState, SpaceSummary, UserProfile,
 };
 
 pub const INVITE_ALREADY_IN_SPACE_MESSAGE: &str = "既にスペースにいます";
@@ -17,7 +17,68 @@ pub struct InviteWorkflowState {
     #[serde(default)]
     pub scope_plan: Option<InviteScopePlan>,
     #[serde(default)]
+    pub selected_scope: Option<InviteScopeSelection>,
+    #[serde(default)]
+    pub history_policy: Option<InviteHistoryPolicy>,
+    #[serde(default)]
     pub operation: InviteOperationState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InviteHistoryReadiness {
+    Ready,
+    RecoveryRequired,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct InviteHistoryPolicy {
+    pub current_visibility: RoomHistoryVisibility,
+    pub encrypted: bool,
+    pub can_edit: bool,
+    pub readiness: InviteHistoryReadiness,
+}
+
+pub fn build_invite_history_policy(state: &AppState, room_id: &str) -> InviteHistoryPolicy {
+    let encrypted = state
+        .rooms
+        .iter()
+        .find(|room| room.room_id == room_id)
+        .map(|room| room.is_encrypted)
+        .unwrap_or(false);
+    let settings = state
+        .room_management
+        .settings
+        .as_ref()
+        .filter(|settings| settings.room_id == room_id);
+    let current_visibility = settings
+        .map(|settings| settings.history_visibility)
+        .unwrap_or(RoomHistoryVisibility::Joined);
+    let can_edit = settings
+        .map(|settings| settings.permissions.can_edit_settings)
+        .unwrap_or(false);
+    let readiness = if encrypted && session_needs_recovery(&state.session) {
+        InviteHistoryReadiness::RecoveryRequired
+    } else {
+        InviteHistoryReadiness::Ready
+    };
+
+    InviteHistoryPolicy {
+        current_visibility,
+        encrypted,
+        can_edit,
+        readiness,
+    }
+}
+
+fn session_needs_recovery(session: &SessionState) -> bool {
+    matches!(
+        session,
+        SessionState::AwaitingVerification { .. }
+            | SessionState::Verifying { .. }
+            | SessionState::AwaitingBootstrapConfirmation { .. }
+            | SessionState::Locked(..)
+    )
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

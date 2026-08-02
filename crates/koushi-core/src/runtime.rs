@@ -4352,6 +4352,17 @@ impl AppActor {
                     self.handle_app_effects(request_id, effects).await;
                     true
                 }
+                AppCommand::SetInviteScope {
+                    request_id,
+                    room_id,
+                    scope,
+                } => {
+                    let effects = self
+                        .reduce_app_action(AppAction::InviteScopeSelected { room_id, scope })
+                        .await;
+                    self.handle_app_effects(request_id, effects).await;
+                    true
+                }
                 AppCommand::SelectInviteTarget {
                     request_id,
                     room_id,

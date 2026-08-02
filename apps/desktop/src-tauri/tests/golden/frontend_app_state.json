@@ -242,6 +242,7 @@
         }
       },
       "invite_workflow": {
+        "history_policy": null,
         "operation": {
           "kind": "idle"
         },
@@ -252,6 +253,7 @@
           "room_id": null
         },
         "scope_plan": null,
+        "selected_scope": null,
         "selected_targets": []
       },
       "invites": [

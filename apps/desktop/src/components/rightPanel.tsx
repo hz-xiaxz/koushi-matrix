@@ -112,6 +112,7 @@ export function ContextualRightPanel({
   onResetLocalData,
   onLogout = () => undefined,
   onInviteUser = () => undefined,
+  onReturnToInvite = () => undefined,
   onInviteUserToSpace = () => undefined,
   canInviteToSpace = false,
   onModerateMember = () => undefined,
@@ -232,6 +233,7 @@ export function ContextualRightPanel({
   onResetLocalData: () => void;
   onLogout?: () => void;
   onInviteUser?: (roomId: string, title: string) => void;
+  onReturnToInvite?: () => void;
   onInviteUserToSpace?: (userId: string) => void;
   canInviteToSpace?: boolean;
   onModerateMember?: (
@@ -487,6 +489,21 @@ export function ContextualRightPanel({
           onSetRoomNotificationMode={onSetRoomNotificationMode}
           onReshareRoomKey={onReshareRoomKey}
           onUpdateRoomSetting={onUpdateRoomSetting}
+          inviteHistoryPolicy={
+            snapshot.state.domain.invite_workflow?.query.room_id === activeRoom?.room_id
+              ? snapshot.state.domain.invite_workflow?.history_policy ?? null
+              : null
+          }
+          onOpenRecovery={
+            snapshot.state.domain.invite_workflow?.query.room_id === activeRoom?.room_id
+              ? onOpenRecovery
+              : undefined
+          }
+          onReturnToInvite={
+            snapshot.state.domain.invite_workflow?.query.room_id === activeRoom?.room_id
+              ? onReturnToInvite
+              : undefined
+          }
           onSetRoomUrlPreviewOverride={(roomId, enabled) => {
             void onSetRoomUrlPreviewOverride(roomId, enabled);
           }}

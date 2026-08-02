@@ -2,16 +2,30 @@ use crate::{
     effect::AppEffect,
     state::{
         AppState, InviteDestinationResult, InviteOperationState, InviteScopeSelection,
-        InviteWorkflowState, OperationFailureKind, build_invite_scope_plan,
-        build_invite_target_query_state, invite_notice_from_results, selected_target_from_query,
+        InviteWorkflowState, OperationFailureKind, build_invite_history_policy,
+        build_invite_scope_plan, build_invite_target_query_state, invite_notice_from_results,
+        selected_target_from_query,
     },
 };
+
+fn refresh_invite_projection(state: &mut AppState, room_id: &str) {
+    let plan = build_invite_scope_plan(state, room_id.to_owned());
+    let selected_scope = state
+        .invite_workflow
+        .selected_scope
+        .clone()
+        .filter(|scope| plan.options.iter().any(|option| option.scope == *scope))
+        .or_else(|| Some(plan.default_scope.clone()));
+    state.invite_workflow.scope_plan = Some(plan);
+    state.invite_workflow.selected_scope = selected_scope;
+    state.invite_workflow.history_policy = Some(build_invite_history_policy(state, room_id));
+}
 
 pub(crate) fn handle_invite_workflow_opened(
     state: &mut AppState,
     room_id: String,
 ) -> Vec<AppEffect> {
-    state.invite_workflow.scope_plan = Some(build_invite_scope_plan(state, room_id.clone()));
+    refresh_invite_projection(state, &room_id);
     state.invite_workflow.query.room_id = Some(room_id);
     Vec::new()
 }
@@ -26,8 +40,25 @@ pub(crate) fn handle_invite_target_query_changed(
     room_id: String,
     query: String,
 ) -> Vec<AppEffect> {
-    state.invite_workflow.scope_plan = Some(build_invite_scope_plan(state, room_id.clone()));
+    refresh_invite_projection(state, &room_id);
     state.invite_workflow.query = build_invite_target_query_state(state, room_id, query);
+    Vec::new()
+}
+
+pub(crate) fn handle_invite_scope_selected(
+    state: &mut AppState,
+    room_id: String,
+    scope: InviteScopeSelection,
+) -> Vec<AppEffect> {
+    if state.invite_workflow.query.room_id.as_deref() != Some(room_id.as_str()) {
+        return Vec::new();
+    }
+    let Some(plan) = state.invite_workflow.scope_plan.as_ref() else {
+        return Vec::new();
+    };
+    if plan.options.iter().any(|option| option.scope == scope) {
+        state.invite_workflow.selected_scope = Some(scope);
+    }
     Vec::new()
 }
 

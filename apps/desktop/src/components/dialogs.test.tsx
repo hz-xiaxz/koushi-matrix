@@ -4,7 +4,9 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StagedUploadItem } from "../domain/types";
-import { CreateEntityDialog, UploadStagingDialog } from "./dialogs";
+import { t } from "../i18n/messages";
+import { CreateEntityDialog, InviteTargetsDialog, UploadStagingDialog } from "./dialogs";
+import type { InviteWorkflowState } from "../domain/types";
 
 afterEach(cleanup);
 
@@ -147,6 +149,64 @@ describe("dialog IME submit handling", () => {
     fireEvent.submit(container.querySelector("form")!);
 
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe("InviteTargetsDialog history policy", () => {
+  function workflow(): InviteWorkflowState {
+    return {
+      query: {
+        room_id: "!room:example.invalid",
+        query: "alice",
+        candidates: [],
+        explicit_user_id: null
+      },
+      selected_targets: [],
+      scope_plan: {
+        room_id: "!room:example.invalid",
+        destination_kind: "room",
+        default_scope: { kind: "roomOnly" },
+        options: [{ scope: { kind: "roomOnly" }, label: "Room only", detail: null }]
+      },
+      selected_scope: { kind: "roomOnly" },
+      history_policy: {
+        current_visibility: "shared",
+        encrypted: true,
+        can_edit: true,
+        readiness: "recoveryRequired"
+      },
+      operation: { kind: "idle" }
+    };
+  }
+
+  it("explains all normal history choices and exposes Room Info and Recovery", () => {
+    const onOpenRoomInfo = vi.fn();
+    const onOpenRecovery = vi.fn();
+    render(
+      <InviteTargetsDialog
+        isBusy={false}
+        query="alice"
+        title={t("dialog.invitePeopleTitle")}
+        workflow={workflow()}
+        onCancel={vi.fn()}
+        onOpenRecovery={onOpenRecovery}
+        onOpenRoomInfo={onOpenRoomInfo}
+        onQueryChange={vi.fn()}
+        onRemoveTarget={vi.fn()}
+        onScopeChange={vi.fn()}
+        onSelectCandidate={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Shared history")).toBeTruthy();
+    expect(screen.getByText("Since invite")).toBeTruthy();
+    expect(screen.getByText("Since join")).toBeTruthy();
+    expect(screen.getByText("Current")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Room Info" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open recovery" }));
+    expect(onOpenRoomInfo).toHaveBeenCalledTimes(1);
+    expect(onOpenRecovery).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -2951,6 +2951,18 @@ pub(crate) fn build_search_invite_targets_command(
     })
 }
 
+pub(crate) fn build_set_invite_scope_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+    scope: InviteScopeSelection,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::SetInviteScope {
+        request_id,
+        room_id,
+        scope,
+    })
+}
+
 pub(crate) fn build_select_invite_target_command(
     request_id: koushi_core::RequestId,
     room_id: String,

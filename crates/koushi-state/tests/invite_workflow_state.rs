@@ -1,9 +1,10 @@
 use koushi_state::{
     AppAction, AppState, INVITE_ALREADY_IN_SPACE_MESSAGE, InviteDestination,
-    InviteDestinationResult, InviteDestinationResultKind, InviteOperationState,
-    InviteScopeSelection, InviteTargetCandidateStatus, RoomHistoryVisibility, RoomJoinRule,
-    RoomManagementOperationState, RoomMemberRole, RoomMemberSummary, RoomPermissionFacts,
-    RoomSettingsSnapshot, RoomSummary, RoomTags, SpaceSummary, UserProfile, reduce,
+    InviteDestinationResult, InviteDestinationResultKind, InviteHistoryReadiness,
+    InviteOperationState, InviteScopeSelection, InviteTargetCandidateStatus, RoomHistoryVisibility,
+    RoomJoinRule, RoomManagementOperationState, RoomMemberRole, RoomMemberSummary,
+    RoomPermissionFacts, RoomSettingsSnapshot, RoomSummary, RoomTags, SessionInfo, SessionState,
+    SpaceSummary, UserProfile, reduce,
 };
 
 fn room(room_id: &str, display_name: &str, parent_space_ids: Vec<String>) -> RoomSummary {
@@ -209,6 +210,102 @@ fn invite_scope_plan_prefers_active_parent_space_for_room_invites() {
             .iter()
             .any(|option| option.scope == InviteScopeSelection::RoomOnly)
     );
+}
+
+#[test]
+fn invite_workflow_projects_history_policy_and_preserves_scope_and_draft() {
+    let mut state = AppState::default();
+    state.navigation.active_space_id = Some("!space:example.org".to_owned());
+    state.spaces.push(SpaceSummary {
+        space_id: "!space:example.org".to_owned(),
+        display_name: "Project Space".to_owned(),
+        avatar: None,
+        child_room_ids: vec!["!room:example.org".to_owned()],
+    });
+    state.rooms.push(room(
+        "!room:example.org",
+        "Encrypted room",
+        vec!["!space:example.org".to_owned()],
+    ));
+    state.rooms[0].is_encrypted = true;
+    let mut settings = room_settings("!room:example.org", Vec::new());
+    settings.history_visibility = RoomHistoryVisibility::Invited;
+    settings.permissions.can_edit_settings = true;
+    state.room_management.selected_room_id = Some("!room:example.org".to_owned());
+    state.room_management.settings = Some(settings);
+    state.session = SessionState::Locked(SessionInfo {
+        homeserver: "https://example.org".to_owned(),
+        user_id: "@alice:example.org".to_owned(),
+        device_id: "DEVICE".to_owned(),
+        authentication_method: Default::default(),
+    });
+
+    reduce(
+        &mut state,
+        AppAction::InviteWorkflowOpened {
+            room_id: "!room:example.org".to_owned(),
+        },
+    );
+
+    let policy = state
+        .invite_workflow
+        .history_policy
+        .as_ref()
+        .expect("opening invite should project history policy");
+    assert_eq!(policy.current_visibility, RoomHistoryVisibility::Invited);
+    assert!(policy.encrypted);
+    assert!(policy.can_edit);
+    assert_eq!(policy.readiness, InviteHistoryReadiness::RecoveryRequired);
+
+    reduce(
+        &mut state,
+        AppAction::InviteScopeSelected {
+            room_id: "!room:example.org".to_owned(),
+            scope: InviteScopeSelection::RoomOnly,
+        },
+    );
+    state.invite_workflow.query.query = "alice".to_owned();
+
+    reduce(
+        &mut state,
+        AppAction::InviteWorkflowOpened {
+            room_id: "!room:example.org".to_owned(),
+        },
+    );
+
+    assert_eq!(
+        state.invite_workflow.selected_scope,
+        Some(InviteScopeSelection::RoomOnly)
+    );
+    assert_eq!(state.invite_workflow.query.query, "alice");
+}
+
+#[test]
+fn invite_workflow_rejects_scope_not_in_current_plan() {
+    let mut state = AppState::default();
+    state
+        .rooms
+        .push(room("!room:example.org", "Room", Vec::new()));
+
+    reduce(
+        &mut state,
+        AppAction::InviteWorkflowOpened {
+            room_id: "!room:example.org".to_owned(),
+        },
+    );
+    let default_scope = state.invite_workflow.selected_scope.clone();
+
+    reduce(
+        &mut state,
+        AppAction::InviteScopeSelected {
+            room_id: "!room:example.org".to_owned(),
+            scope: InviteScopeSelection::ParentSpaceAndRoom {
+                space_id: "!not-a-parent:example.org".to_owned(),
+            },
+        },
+    );
+
+    assert_eq!(state.invite_workflow.selected_scope, default_scope);
 }
 
 #[test]

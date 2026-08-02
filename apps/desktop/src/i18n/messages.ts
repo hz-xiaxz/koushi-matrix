@@ -167,11 +167,19 @@ export type MessageId =
   | "dialog.createSpaceTitle"
   | "dialog.encryptedRoom"
   | "dialog.inviteCandidates"
+  | "dialog.inviteHistory"
+  | "dialog.inviteHistoryCurrent"
+  | "dialog.inviteHistoryCurrentBadge"
+  | "dialog.inviteHistoryEncryptedShared"
+  | "dialog.inviteHistoryNonRetroactive"
+  | "dialog.inviteHistoryRecovery"
+  | "dialog.inviteHistoryWorldReadableWarning"
   | "dialog.inviteInvalidMatrixId"
   | "dialog.invitePeopleTitle"
   | "dialog.inviteScope"
   | "dialog.inviteSearch"
   | "dialog.inviteSelectedTargets"
+  | "dialog.openRoomInfo"
   | "dialog.matrixUserId"
   | "dialog.newDmTitle"
   | "dialog.privateRoom"
@@ -323,6 +331,8 @@ export type MessageId =
   | "room.ban"
   | "room.banMember"
   | "room.avatarUrl"
+  | "room.accessAndHistory"
+  | "room.accessAndHistoryHint"
   | "room.currentAvatar"
   | "room.currentTopic"
   | "room.copyShareLink"
@@ -338,6 +348,14 @@ export type MessageId =
   | "room.historyJoined"
   | "room.historyShared"
   | "room.historyVisibility"
+  | "room.historyInvitedDescription"
+  | "room.historyJoinedDescription"
+  | "room.historySharedDescription"
+  | "room.historySharedEncryptedHint"
+  | "room.historyNonRetroactive"
+  | "room.historyRecoveryRequired"
+  | "room.historyWorldReadableDescription"
+  | "room.historyWorldReadableWarning"
   | "room.historyWorldReadable"
   | "room.joinRule"
   | "room.joinRuleInvite"
@@ -396,6 +414,8 @@ export type MessageId =
   | "room.reshareRoomKeysSuccess"
   | "room.reshareRoomKeysError"
   | "room.saveAccess"
+  | "room.saveHistoryVisibility"
+  | "room.saveJoinRule"
   | "room.saveAvatar"
   | "room.saveName"
   | "room.saveTopic"
@@ -406,6 +426,7 @@ export type MessageId =
   | "room.summary"
   | "room.tabs"
   | "room.rightPanelToggle"
+  | "room.returnToInvite"
   | "room.timeline"
   | "room.topic"
   | "room.type"
@@ -1321,11 +1342,20 @@ const en: Catalog = {
   "dialog.createSpaceTitle": "Create space",
   "dialog.encryptedRoom": "Encrypted room",
   "dialog.inviteCandidates": "Invite candidates",
+  "dialog.inviteHistory": "History visibility for invitees",
+  "dialog.inviteHistoryCurrent": "Current room setting. Change it in Room Info before sending the invite.",
+  "dialog.inviteHistoryCurrentBadge": "Current",
+  "dialog.inviteHistoryEncryptedShared": "Encrypted shared history may require sharing past room keys with invitees.",
+  "dialog.inviteHistoryNonRetroactive": "This is not retroactive, and already shared events or keys cannot be revoked.",
+  "dialog.inviteHistoryRecovery": "Recovery is incomplete; the invite can still proceed, but encrypted history sharing may be limited.",
+  "dialog.inviteHistoryWorldReadableWarning":
+    "Current advanced setting: non-members may read this room's history.",
   "dialog.inviteInvalidMatrixId": "Invalid Matrix ID",
   "dialog.invitePeopleTitle": "Invite people to {name}",
   "dialog.inviteScope": "Invite scope",
   "dialog.inviteSearch": "Name, alias, or Matrix ID",
   "dialog.inviteSelectedTargets": "Selected invite targets",
+  "dialog.openRoomInfo": "Open Room Info",
   "dialog.matrixUserId": "Matrix user ID",
   "dialog.newDmTitle": "New DM",
   "dialog.privateRoom": "Private room",
@@ -1486,6 +1516,8 @@ const en: Catalog = {
   "room.copyShareLink": "Copy room link",
   "room.members": "Members",
   "room.directMessage": "Direct message",
+  "room.accessAndHistory": "Access and history",
+  "room.accessAndHistoryHint": "Join rules decide who may enter; history visibility decides what they can see. These settings are independent.",
   "room.dmList": "DM list",
   "room.editRoles": "Edit roles",
   "room.editSettings": "Edit settings",
@@ -1496,6 +1528,14 @@ const en: Catalog = {
   "room.historyJoined": "Since join",
   "room.historyShared": "Shared history",
   "room.historyVisibility": "History visibility",
+  "room.historyInvitedDescription": "People can see messages sent after they are invited.",
+  "room.historyJoinedDescription": "People can see messages sent after they join.",
+  "room.historySharedDescription": "People can see the room history that is shared with members.",
+  "room.historySharedEncryptedHint": "In an encrypted room, inviting can share past room keys so eligible invitees can decrypt the shared history.",
+  "room.historyNonRetroactive": "Changing this does not rewrite the past or revoke events and keys already shared.",
+  "room.historyRecoveryRequired": "Device recovery is incomplete. Inviting can continue, but encrypted history sharing may be limited.",
+  "room.historyWorldReadableDescription": "Anyone who can discover the room may read its history, including people who are not members.",
+  "room.historyWorldReadableWarning": "Advanced setting: non-members may read the room history.",
   "room.historyWorldReadable": "World readable",
   "room.invitePeople": "Invite people",
   "room.joinRule": "Join rule",
@@ -1555,6 +1595,8 @@ const en: Catalog = {
   "room.reshareRoomKeysSuccess": "Room keys were resent.",
   "room.reshareRoomKeysError": "Could not reshare room keys.",
   "room.saveAccess": "Save access",
+  "room.saveHistoryVisibility": "Save history visibility",
+  "room.saveJoinRule": "Save join rule",
   "room.saveAvatar": "Save avatar",
   "room.saveName": "Save room name",
   "room.saveTopic": "Save topic",
@@ -1565,6 +1607,7 @@ const en: Catalog = {
   "room.summary": "Room summary",
   "room.tabs": "Room tabs",
   "room.rightPanelToggle": "Toggle right panel",
+  "room.returnToInvite": "Return to invite",
   "room.timeline": "Timeline",
   "room.topic": "Room topic",
   "room.type": "Type",
@@ -2381,11 +2424,20 @@ const ja: Catalog = {
   "dialog.createSpaceTitle": "スペースを作成",
   "dialog.encryptedRoom": "暗号化ルーム",
   "dialog.inviteCandidates": "招待候補",
+  "dialog.inviteHistory": "招待先に見える履歴",
+  "dialog.inviteHistoryCurrent": "現在のルーム設定です。招待を送る前にRoom Infoから変更できます。",
+  "dialog.inviteHistoryCurrentBadge": "現在",
+  "dialog.inviteHistoryEncryptedShared": "暗号化された共有履歴では、招待先へ過去のルーム鍵を共有する必要がある場合があります。",
+  "dialog.inviteHistoryNonRetroactive": "この設定は過去に遡らず、すでに共有されたイベントや鍵を取り消すこともできません。",
+  "dialog.inviteHistoryRecovery": "復旧が完了していません。招待は続行できますが、暗号化履歴の共有が制限される場合があります。",
+  "dialog.inviteHistoryWorldReadableWarning":
+    "現在の高度な設定: メンバーでない人もこのルームの履歴を閲覧できます。",
   "dialog.inviteInvalidMatrixId": "Matrix IDが正しくありません",
   "dialog.invitePeopleTitle": "{name}に招待",
   "dialog.inviteScope": "招待範囲",
   "dialog.inviteSearch": "名前、別名、Matrix ID",
   "dialog.inviteSelectedTargets": "選択中の招待先",
+  "dialog.openRoomInfo": "Room Infoを開く",
   "dialog.matrixUserId": "MatrixユーザーID",
   "dialog.newDmTitle": "新しいDM",
   "dialog.privateRoom": "非公開ルーム",
@@ -2546,6 +2598,8 @@ const ja: Catalog = {
   "room.copyShareLink": "ルームリンクをコピー",
   "room.members": "メンバー",
   "room.directMessage": "ダイレクトメッセージ",
+  "room.accessAndHistory": "アクセスと履歴",
+  "room.accessAndHistoryHint": "参加ルールは入室できる人を、履歴の表示範囲は見える内容を決めます。両者は独立しています。",
   "room.dmList": "DM一覧",
   "room.editRoles": "ロールを編集",
   "room.editSettings": "設定を編集",
@@ -2556,6 +2610,14 @@ const ja: Catalog = {
   "room.historyJoined": "参加以降",
   "room.historyShared": "共有履歴",
   "room.historyVisibility": "履歴の表示範囲",
+  "room.historyInvitedDescription": "招待された後に送信されたメッセージを閲覧できます。",
+  "room.historyJoinedDescription": "参加した後に送信されたメッセージを閲覧できます。",
+  "room.historySharedDescription": "メンバーに共有されたルーム履歴を閲覧できます。",
+  "room.historySharedEncryptedHint": "暗号化ルームでは、共有履歴を復号できるよう、対象となる招待者へ過去のルーム鍵を共有する場合があります。",
+  "room.historyNonRetroactive": "この設定を変更しても過去は書き換わらず、すでに共有されたイベントや鍵を取り消すこともできません。",
+  "room.historyRecoveryRequired": "デバイスの復旧が完了していません。招待は続行できますが、暗号化履歴の共有が制限される場合があります。",
+  "room.historyWorldReadableDescription": "ルームを発見できる人は、メンバーでなくても履歴を閲覧できます。",
+  "room.historyWorldReadableWarning": "高度な設定: メンバーでない人もルーム履歴を閲覧できます。",
   "room.historyWorldReadable": "誰でも閲覧可",
   "room.invitePeople": "メンバーを招待",
   "room.joinRule": "参加ルール",
@@ -2615,6 +2677,8 @@ const ja: Catalog = {
   "room.reshareRoomKeysSuccess": "ルーム鍵を再送しました。",
   "room.reshareRoomKeysError": "ルーム鍵を再共有できませんでした。",
   "room.saveAccess": "アクセス設定を保存",
+  "room.saveHistoryVisibility": "履歴の表示範囲を保存",
+  "room.saveJoinRule": "参加ルールを保存",
   "room.saveAvatar": "アバターを保存",
   "room.saveName": "ルーム名を保存",
   "room.saveTopic": "トピックを保存",
@@ -2625,6 +2689,7 @@ const ja: Catalog = {
   "room.summary": "ルーム概要",
   "room.tabs": "ルームタブ",
   "room.rightPanelToggle": "右パネルを切り替え",
+  "room.returnToInvite": "招待に戻る",
   "room.timeline": "タイムライン",
   "room.topic": "ルームトピック",
   "room.type": "種類",

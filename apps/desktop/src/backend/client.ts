@@ -1001,6 +1001,10 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("search_invite_targets", { roomId, query });
   }
 
+  async setInviteScope(roomId: string, scope: InviteScopeSelection): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("set_invite_scope", { roomId, scope });
+  }
+
   async selectInviteTarget(roomId: string, userId: string): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("select_invite_target", { roomId, userId });
   }
