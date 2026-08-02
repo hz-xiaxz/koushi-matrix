@@ -414,6 +414,7 @@ describe("desktop model", () => {
     const roomList: DesktopSnapshot["state"]["ui"]["room_list"] = {
       active_filter: { kind: "rooms" },
       sort: { kind: "activity" },
+      readiness: { kind: "ready", source: "cache", generation: 0 },
       items: null
     };
 
@@ -449,6 +450,7 @@ describe("desktop model", () => {
     const roomList: DesktopSnapshot["state"]["ui"]["room_list"] = {
       active_filter: { kind: "rooms" },
       sort: { kind: "activity" },
+      readiness: { kind: "ready", source: "cache", generation: 0 },
       items: [
         { room_id: "!dm-fav:example.invalid", kind: "room" },
         { room_id: "!fav:example.invalid", kind: "room" },
@@ -667,6 +669,7 @@ describe("desktop model", () => {
     const roomList: DesktopSnapshot["state"]["ui"]["room_list"] = {
       active_filter: { kind: "rooms" },
       sort: { kind: "activity" },
+      readiness: { kind: "ready", source: "cache", generation: 0 },
       items: [{ room_id: "!plain:example.invalid", kind: "room" }]
     };
 
@@ -684,6 +687,7 @@ describe("desktop model", () => {
     const roomList: DesktopSnapshot["state"]["ui"]["room_list"] = {
       active_filter: { kind: "invites" },
       sort: { kind: "activity" },
+      readiness: { kind: "ready", source: "cache", generation: 0 },
       items: [{ room_id: "!invite:example.invalid", kind: "invite" }]
     };
 
@@ -723,6 +727,7 @@ describe("desktop model", () => {
     const roomList: DesktopSnapshot["state"]["ui"]["room_list"] = {
       active_filter: { kind: "rooms" },
       sort: { kind: "activity" },
+      readiness: { kind: "ready", source: "cache", generation: 0 },
       items: null
     };
 
@@ -760,6 +765,7 @@ describe("desktop model", () => {
     const roomList: DesktopSnapshot["state"]["ui"]["room_list"] = {
       active_filter: { kind: "rooms" },
       sort: { kind: "activity" },
+      readiness: { kind: "ready", source: "cache", generation: 0 },
       items: null
     };
 

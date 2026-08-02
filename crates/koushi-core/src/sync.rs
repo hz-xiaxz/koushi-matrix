@@ -48,7 +48,7 @@ use std::time::Duration;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::{MatrixClientSession, MatrixSlidingSyncInviteListSupport};
-use koushi_state::{AppAction, SyncLifecycleStatus, SyncMode};
+use koushi_state::{AppAction, RoomListSource, SyncLifecycleStatus, SyncMode};
 use matrix_sdk_base::{StateStoreDataKey, StateStoreDataValue};
 use tokio::sync::{broadcast, mpsc};
 
@@ -619,6 +619,8 @@ impl SyncActor {
                     self.timeline_tx.clone(),
                     None,
                     Some(committed_from_response_sequence),
+                    RoomListSource::Legacy,
+                    legacy_run_generation,
                 )
                 .await;
                 self.emit(CoreEvent::Sync(SyncEvent::Running));
@@ -682,12 +684,22 @@ impl SyncActor {
         // relays (live RoomListService on SyncService, base-client updates on
         // legacy). Send from a notifier task so shutdown is not blocked by
         // mailbox backpressure and the one-shot handoff is not silently dropped.
-        notify_room_sync_stopped(self.room_tx.clone());
         let ended_backend = self.active_backend;
         let request_id = self.active_start_request_id;
         let outcome_label = sync_task_outcome_trace_label(&outcome);
         let (request_connection_id, request_sequence, request_id_present) =
             request_id_trace_parts(request_id);
+        let ended_room_list_source = match ended_backend {
+            ActiveBackend::SyncService => RoomListSource::SyncService,
+            ActiveBackend::LegacySync => RoomListSource::Legacy,
+            ActiveBackend::None => RoomListSource::Cache,
+        };
+        let ended_backend_generation = self.active_run_generation();
+        notify_room_backend_stopped(
+            self.room_tx.clone(),
+            ended_room_list_source,
+            ended_backend_generation,
+        );
         self.cleanup_ended_backend().await;
         match outcome {
             SyncTaskOutcome::Stopped => {
@@ -1273,11 +1285,15 @@ async fn notify_dependents_sync_started(
     timeline_tx: mpsc::Sender<crate::timeline::TimelineMessage>,
     room_list_service: Option<Arc<matrix_sdk_ui::room_list_service::RoomListService>>,
     legacy_committed_from_response_sequence: Option<u64>,
+    source: RoomListSource,
+    backend_generation: u64,
 ) {
     let _ = room_tx
         .send(RoomMessage::SyncStarted {
             session,
             room_list_service: room_list_service.clone(),
+            source,
+            backend_generation,
         })
         .await;
     // Same handoff to the timeline manager: timeline subscriptions must be
@@ -1295,6 +1311,21 @@ async fn notify_dependents_sync_started(
 fn notify_room_sync_stopped(room_tx: mpsc::Sender<RoomMessage>) {
     executor::spawn(async move {
         let _ = room_tx.send(RoomMessage::SyncStopped).await;
+    });
+}
+
+fn notify_room_backend_stopped(
+    room_tx: mpsc::Sender<RoomMessage>,
+    source: RoomListSource,
+    backend_generation: u64,
+) {
+    executor::spawn(async move {
+        let _ = room_tx
+            .send(RoomMessage::BackendSyncStopped {
+                source,
+                backend_generation,
+            })
+            .await;
     });
 }
 
@@ -1358,6 +1389,12 @@ async fn observe_sync_service_states(
                             state_label,
                             status.connectivity_proven
                         );
+                        let _ = room_tx
+                            .send(RoomMessage::RoomListBootstrapProven {
+                                source: RoomListSource::SyncService,
+                                backend_generation: sync_service_run_generation,
+                            })
+                            .await;
                     }
                     _ => {
                         trace_sync!(
@@ -1410,6 +1447,8 @@ async fn observe_sync_service_states(
                             timeline_tx.clone(),
                             Some(room_list_service.clone()),
                             None,
+                            RoomListSource::SyncService,
+                            sync_service_run_generation,
                         )
                         .await;
                         let _ = control_tx
@@ -1454,8 +1493,16 @@ async fn observe_sync_service_states(
                             timeline_tx.clone(),
                             Some(room_list_service.clone()),
                             None,
+                            RoomListSource::SyncService,
+                            sync_service_run_generation,
                         )
                         .await;
+                        let _ = room_tx
+                            .send(RoomMessage::RoomListBootstrapProven {
+                                source: RoomListSource::SyncService,
+                                backend_generation: sync_service_run_generation,
+                            })
+                            .await;
                         let _ = control_tx
                             .send(SyncActorControl::BackendRecovered {
                                 backend: ActiveBackend::SyncService,

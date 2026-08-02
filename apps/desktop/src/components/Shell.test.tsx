@@ -121,6 +121,60 @@ describe("EntityAvatar", () => {
 });
 
 describe("Sidebar", () => {
+  it("shows bootstrap loading without presenting an authoritative zero room list", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.selectSpace(null);
+    snapshot.state.ui.room_list.readiness = {
+      kind: "loading",
+      source: "syncService",
+      generation: 7
+    };
+    snapshot.sidebar.space_rooms = [];
+    snapshot.sidebar.global_dms = [];
+    const view = render(
+      <Sidebar
+        activeRoomId={snapshot.state.ui.navigation.active_room_id}
+        activeView="timeline"
+        snapshot={snapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onSelectRoom={() => undefined}
+      />
+    );
+
+    expect(screen.getByRole("status").textContent).toBe("Loading rooms…");
+    expect(screen.queryByRole("group", { name: "Room list category" })).toBeNull();
+
+    snapshot.state.ui.room_list.readiness = {
+      kind: "ready",
+      source: "syncService",
+      generation: 7
+    };
+    view.rerender(
+      <Sidebar
+        activeRoomId={snapshot.state.ui.navigation.active_room_id}
+        activeView="timeline"
+        snapshot={snapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onSelectRoom={() => undefined}
+      />
+    );
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("group", { name: "Room list category" })).toBeTruthy();
+  });
+
   it("keeps the Space title and complete action group in separate rows", async () => {
     const api = createBrowserFakeApi();
     const snapshot = await api.selectSpace("!space-alpha:example.invalid");

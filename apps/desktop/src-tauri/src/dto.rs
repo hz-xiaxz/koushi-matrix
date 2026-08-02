@@ -1896,6 +1896,10 @@ mod tests {
             is_encrypted: true,
             joined_members: 4,
         });
+        state.room_list.readiness = koushi_state::RoomListReadiness::Ready {
+            source: koushi_state::RoomListSource::SyncService,
+            generation: 9,
+        };
 
         // invites
         state.invites.push(InvitePreview {

@@ -4,8 +4,9 @@ use crate::{
     effect::{AppEffect, UiEvent},
     state::{
         AppError, AppState, OperationFailureKind, PinOp, PinOperationState, PinnedEvent,
-        RoomListFilter, RoomSummary, RoomTagInfo, RoomTagKind, SpaceSummary, ThreadAttentionState,
-        ThreadPaneState, ThreadsListState, TimelinePaneState,
+        RoomListFailureKind, RoomListFilter, RoomListReadiness, RoomListSource, RoomSummary,
+        RoomTagInfo, RoomTagKind, SpaceSummary, ThreadAttentionState, ThreadPaneState,
+        ThreadsListState, TimelinePaneState,
     },
 };
 
@@ -27,6 +28,21 @@ pub(crate) fn handle_room_list_updated(
     state: &mut AppState,
     spaces: Vec<crate::state::SpaceSummary>,
     rooms: Vec<crate::state::RoomSummary>,
+) -> Vec<AppEffect> {
+    if matches!(state.room_list.readiness, RoomListReadiness::Uninitialized) {
+        state.room_list.readiness = RoomListReadiness::Ready {
+            source: RoomListSource::Cache,
+            generation: 0,
+        };
+    }
+    handle_room_list_updated_with_crawler(state, spaces, rooms, true)
+}
+
+fn handle_room_list_updated_with_crawler(
+    state: &mut AppState,
+    spaces: Vec<crate::state::SpaceSummary>,
+    rooms: Vec<crate::state::RoomSummary>,
+    admit_crawler: bool,
 ) -> Vec<AppEffect> {
     if !has_session_projection_context(state) {
         return Vec::new();
@@ -78,7 +94,7 @@ pub(crate) fn handle_room_list_updated(
     // Notify the search crawler of all current joined rooms on every
     // RoomListUpdate so it can idempotently start/resume any missing
     // crawls. The actor is responsible for deduplication.
-    {
+    if admit_crawler {
         use crate::state::SearchCrawlerSpeed;
         let crawler_settings = &state.settings.values.search_crawler;
         if crawler_settings.speed != SearchCrawlerSpeed::Paused {
@@ -190,6 +206,143 @@ pub(crate) fn handle_room_list_updated(
 
     recompute_room_list_projection(state);
     effects
+}
+
+pub(crate) fn handle_room_list_bootstrap_started(
+    state: &mut AppState,
+    generation: u64,
+    source: RoomListSource,
+) -> Vec<AppEffect> {
+    if !has_session_projection_context(state)
+        || generation <= room_list_generation(&state.room_list.readiness)
+    {
+        return Vec::new();
+    }
+    state.room_list.readiness = RoomListReadiness::Loading { source, generation };
+    recompute_room_list_projection(state);
+    vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
+}
+
+pub(crate) fn handle_room_list_snapshot_provisional(
+    state: &mut AppState,
+    generation: u64,
+    source: RoomListSource,
+    spaces: Vec<crate::state::SpaceSummary>,
+    rooms: Vec<crate::state::RoomSummary>,
+    invites: Vec<crate::state::InvitePreview>,
+) -> Vec<AppEffect> {
+    if !room_list_provisional_matches_current(&state.room_list.readiness, generation, source)
+        || (spaces.is_empty() && rooms.is_empty() && invites.is_empty())
+    {
+        return Vec::new();
+    }
+    state.invites = invites;
+    let (spaces, rooms) = if rooms.is_empty() {
+        // A provisional invite/space-only observation is not proof that the
+        // joined-room projection is empty. Keep the cached joined rooms until
+        // an authoritative snapshot settles that question.
+        (state.spaces.clone(), state.rooms.clone())
+    } else {
+        (spaces, rooms)
+    };
+    let effects = handle_room_list_updated_with_crawler(state, spaces, rooms, false);
+    if state.room_list.active_filter == RoomListFilter::Invites {
+        recompute_room_list_projection(state);
+    }
+    effects
+}
+
+pub(crate) fn handle_room_list_snapshot_authoritative(
+    state: &mut AppState,
+    generation: u64,
+    source: RoomListSource,
+    spaces: Vec<crate::state::SpaceSummary>,
+    rooms: Vec<crate::state::RoomSummary>,
+    invites: Vec<crate::state::InvitePreview>,
+) -> Vec<AppEffect> {
+    if !room_list_authoritative_matches_current(&state.room_list.readiness, generation, source) {
+        return Vec::new();
+    }
+    state.room_list.readiness = RoomListReadiness::Ready { source, generation };
+    state.invites = invites;
+    let effects = handle_room_list_updated_with_crawler(state, spaces, rooms, true);
+    if state.room_list.active_filter == RoomListFilter::Invites {
+        recompute_room_list_projection(state);
+    }
+    effects
+}
+
+pub(crate) fn handle_room_list_bootstrap_failed(
+    state: &mut AppState,
+    generation: u64,
+    source: RoomListSource,
+    kind: RoomListFailureKind,
+) -> Vec<AppEffect> {
+    if !matches!(
+        state.room_list.readiness,
+        RoomListReadiness::Loading {
+            source: current_source,
+            generation: current_generation,
+        } if current_generation == generation && current_source == source
+    ) {
+        return Vec::new();
+    }
+    state.room_list.readiness = RoomListReadiness::Failed {
+        source,
+        generation,
+        kind,
+    };
+    recompute_room_list_projection(state);
+    vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
+}
+
+fn room_list_generation(readiness: &RoomListReadiness) -> u64 {
+    match readiness {
+        RoomListReadiness::Uninitialized => 0,
+        RoomListReadiness::Loading { generation, .. }
+        | RoomListReadiness::Ready { generation, .. }
+        | RoomListReadiness::Failed { generation, .. } => *generation,
+    }
+}
+
+fn room_list_provisional_matches_current(
+    readiness: &RoomListReadiness,
+    generation: u64,
+    source: RoomListSource,
+) -> bool {
+    matches!(
+        readiness,
+        RoomListReadiness::Uninitialized
+            if source == RoomListSource::Cache && generation == 0
+    ) || matches!(
+        readiness,
+        RoomListReadiness::Loading {
+            source: current_source,
+            generation: current_generation,
+        }
+        | RoomListReadiness::Ready {
+            source: current_source,
+            generation: current_generation,
+        } if *current_generation == generation && *current_source == source
+    )
+}
+
+fn room_list_authoritative_matches_current(
+    readiness: &RoomListReadiness,
+    generation: u64,
+    source: RoomListSource,
+) -> bool {
+    matches!(
+        readiness,
+        RoomListReadiness::Loading {
+            source: current_source,
+            generation: current_generation,
+        }
+        | RoomListReadiness::Ready {
+            source: current_source,
+            generation: current_generation,
+        } if *current_generation == generation && *current_source == source
+    )
 }
 
 fn room_list_has_attention_increase(previous_rooms: &[RoomSummary], rooms: &[RoomSummary]) -> bool {

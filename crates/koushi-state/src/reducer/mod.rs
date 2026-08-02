@@ -55,6 +55,7 @@ pub(crate) fn visible_invites_for_ignored_users(
 }
 
 pub(crate) fn recompute_room_list_projection(state: &mut AppState) {
+    let readiness = state.room_list.readiness;
     let visible_invites =
         visible_invites_for_ignored_users(&state.invites, &state.profile.ignored_user_ids);
     state.room_list = compute_room_list_projection(
@@ -65,6 +66,7 @@ pub(crate) fn recompute_room_list_projection(state: &mut AppState) {
         &state.rooms,
         &visible_invites,
     );
+    state.room_list.readiness = readiness;
 }
 
 pub(crate) fn clear_stale_verification_flow(state: &mut AppState) -> bool {
@@ -622,6 +624,33 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::RoomListUpdated { spaces, rooms } => {
             room::handle_room_list_updated(state, spaces, rooms)
         }
+        AppAction::RoomListBootstrapStarted {
+            generation,
+            source,
+        } => room::handle_room_list_bootstrap_started(state, generation, source),
+        AppAction::RoomListSnapshotProvisional {
+            generation,
+            source,
+            spaces,
+            rooms,
+            invites,
+        } => room::handle_room_list_snapshot_provisional(
+            state, generation, source, spaces, rooms, invites,
+        ),
+        AppAction::RoomListSnapshotAuthoritative {
+            generation,
+            source,
+            spaces,
+            rooms,
+            invites,
+        } => room::handle_room_list_snapshot_authoritative(
+            state, generation, source, spaces, rooms, invites,
+        ),
+        AppAction::RoomListBootstrapFailed {
+            generation,
+            source,
+            kind,
+        } => room::handle_room_list_bootstrap_failed(state, generation, source, kind),
         AppAction::RoomListFilterSelected { filter } => {
             room::handle_room_list_filter_selected(state, filter)
         }
@@ -1676,6 +1705,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.spaces.clear();
     state.rooms.clear();
     state.invites.clear();
+    state.room_list = Default::default();
     state.room_interactions.clear();
     state.composer_drafts = Default::default();
     state.scheduled_sends = Default::default();
@@ -2382,6 +2412,237 @@ mod tests {
             is_encrypted: false,
             joined_members: 0,
         }
+    }
+
+    #[test]
+    fn room_list_bootstrap_does_not_publish_unproven_empty_snapshot() {
+        let mut state = ready_state();
+        state.rooms = vec![test_room("!cached:example.invalid", None)];
+        let cached_rooms = state.rooms.clone();
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: cached_rooms,
+            },
+        );
+        let cached_projection = state.room_list.clone();
+
+        reduce(
+            &mut state,
+            AppAction::RoomListBootstrapStarted {
+                generation: 7,
+                source: crate::state::RoomListSource::SyncService,
+            },
+        );
+        let effects = reduce(
+            &mut state,
+            AppAction::RoomListSnapshotProvisional {
+                generation: 7,
+                source: crate::state::RoomListSource::SyncService,
+                spaces: Vec::new(),
+                rooms: Vec::new(),
+                invites: Vec::new(),
+            },
+        );
+
+        assert!(effects.is_empty());
+        assert_eq!(state.rooms, vec![test_room("!cached:example.invalid", None)]);
+        assert_eq!(state.room_list.items, cached_projection.items);
+        assert!(matches!(
+            state.room_list.readiness,
+            crate::state::RoomListReadiness::Loading { generation: 7, .. }
+        ));
+    }
+
+    #[test]
+    fn room_list_bootstrap_does_not_clear_cached_rooms_for_invite_only_provisional_snapshot() {
+        let mut state = ready_state();
+        state.rooms = vec![test_room("!cached:example.invalid", None)];
+        let cached_rooms = state.rooms.clone();
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: cached_rooms,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::RoomListBootstrapStarted {
+                generation: 8,
+                source: crate::state::RoomListSource::SyncService,
+            },
+        );
+
+        reduce(
+            &mut state,
+            AppAction::RoomListSnapshotProvisional {
+                generation: 8,
+                source: crate::state::RoomListSource::SyncService,
+                spaces: Vec::new(),
+                rooms: Vec::new(),
+                invites: vec![crate::state::InvitePreview {
+                    room_id: "!invite:example.invalid".to_owned(),
+                    display_name: "Invite".to_owned(),
+                    avatar: None,
+                    topic: None,
+                    inviter_display_name: None,
+                    inviter_user_id: None,
+                    is_dm: false,
+                }],
+            },
+        );
+
+        assert_eq!(state.rooms[0].room_id, "!cached:example.invalid");
+        assert_eq!(state.invites[0].room_id, "!invite:example.invalid");
+    }
+
+    #[test]
+    fn room_list_bootstrap_accepts_current_authoritative_zero_and_retains_failed_cache() {
+        let mut state = ready_state();
+        state.rooms = vec![test_room("!cached:example.invalid", None)];
+        let cached_rooms = state.rooms.clone();
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: cached_rooms,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::RoomListBootstrapStarted {
+                generation: 11,
+                source: crate::state::RoomListSource::Legacy,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::RoomListSnapshotAuthoritative {
+                generation: 11,
+                source: crate::state::RoomListSource::Legacy,
+                spaces: Vec::new(),
+                rooms: Vec::new(),
+                invites: Vec::new(),
+            },
+        );
+        assert!(state.rooms.is_empty());
+        assert!(matches!(
+            state.room_list.readiness,
+            crate::state::RoomListReadiness::Ready { generation: 11, .. }
+        ));
+
+        state.rooms = vec![test_room("!cached-again:example.invalid", None)];
+        let cached_rooms = state.rooms.clone();
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: cached_rooms,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::RoomListBootstrapStarted {
+                generation: 12,
+                source: crate::state::RoomListSource::SyncService,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::RoomListBootstrapFailed {
+                generation: 12,
+                source: crate::state::RoomListSource::SyncService,
+                kind: crate::state::RoomListFailureKind::Connectivity,
+            },
+        );
+        assert_eq!(
+            state.rooms,
+            vec![test_room("!cached-again:example.invalid", None)]
+        );
+        assert!(matches!(
+            state.room_list.readiness,
+            crate::state::RoomListReadiness::Failed { generation: 12, .. }
+        ));
+    }
+
+    #[test]
+    fn room_list_bootstrap_ignores_retired_generation() {
+        let mut state = ready_state();
+        reduce(
+            &mut state,
+            AppAction::RoomListBootstrapStarted {
+                generation: 3,
+                source: crate::state::RoomListSource::SyncService,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::RoomListSnapshotAuthoritative {
+                generation: 3,
+                source: crate::state::RoomListSource::SyncService,
+                spaces: Vec::new(),
+                rooms: vec![test_room("!current:example.invalid", None)],
+                invites: Vec::new(),
+            },
+        );
+        let current_projection = state.room_list.clone();
+
+        reduce(
+            &mut state,
+            AppAction::RoomListSnapshotAuthoritative {
+                generation: 2,
+                source: crate::state::RoomListSource::Legacy,
+                spaces: Vec::new(),
+                rooms: vec![test_room("!stale:example.invalid", None)],
+                invites: Vec::new(),
+            },
+        );
+
+        assert_eq!(state.rooms[0].room_id, "!current:example.invalid");
+        assert_eq!(state.room_list, current_projection);
+    }
+
+    #[test]
+    fn search_crawler_is_admitted_only_after_authoritative_room_list_readiness() {
+        let mut state = ready_state();
+        reduce(
+            &mut state,
+            AppAction::RoomListBootstrapStarted {
+                generation: 21,
+                source: crate::state::RoomListSource::SyncService,
+            },
+        );
+        let provisional_effects = reduce(
+            &mut state,
+            AppAction::RoomListSnapshotProvisional {
+                generation: 21,
+                source: crate::state::RoomListSource::SyncService,
+                spaces: Vec::new(),
+                rooms: vec![test_room("!provisional:example.invalid", None)],
+                invites: Vec::new(),
+            },
+        );
+        assert!(!provisional_effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::NotifySearchCrawlerRoomsAvailable { .. }
+        )));
+
+        let authoritative_effects = reduce(
+            &mut state,
+            AppAction::RoomListSnapshotAuthoritative {
+                generation: 21,
+                source: crate::state::RoomListSource::SyncService,
+                spaces: Vec::new(),
+                rooms: vec![test_room("!authoritative:example.invalid", None)],
+                invites: Vec::new(),
+            },
+        );
+        assert!(authoritative_effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::NotifySearchCrawlerRoomsAvailable { .. }
+        )));
     }
 
     fn latest_event(event_id: &str, timestamp_ms: u64) -> RoomLatestEventSummary {

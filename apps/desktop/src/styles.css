@@ -1365,6 +1365,13 @@ button:disabled {
   margin-bottom: 6px;
 }
 
+.room-list-status {
+  margin: 10px 4px 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .room-list-category {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

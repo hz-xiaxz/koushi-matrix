@@ -4222,6 +4222,7 @@ class BrowserFakeApi implements DesktopApi {
     this.snapshot.state.domain.rooms = [];
     this.snapshot.state.domain.invites = [];
     this.snapshot.state.ui.room_list = {
+      readiness: { kind: "uninitialized" },
       active_filter: { kind: "rooms" },
       sort: { kind: "activity" },
       items: []

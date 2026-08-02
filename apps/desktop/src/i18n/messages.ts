@@ -448,6 +448,8 @@ export type MessageId =
   | "roomList.sortLabel"
   | "roomList.sortActive"
   | "roomList.sortName"
+  | "roomList.loading"
+  | "roomList.failed"
   | "room.markAsRead"
   | "room.markAsUnread"
   | "search.indexingPending"
@@ -1630,6 +1632,8 @@ const en: Catalog = {
   "roomList.sortLabel": "Sort",
   "roomList.sortActive": "Active",
   "roomList.sortName": "Name",
+  "roomList.loading": "Loading rooms…",
+  "roomList.failed": "Rooms could not be loaded",
   "room.markAsRead": "Mark as read",
   "room.markAsUnread": "Mark as unread",
   "search.indexingPending": "Indexing message history. More matches may appear shortly.",
@@ -2712,6 +2716,8 @@ const ja: Catalog = {
   "roomList.sortLabel": "並び順",
   "roomList.sortActive": "アクティブ",
   "roomList.sortName": "名前",
+  "roomList.loading": "ルームを読み込み中…",
+  "roomList.failed": "ルームを読み込めませんでした",
   "room.markAsRead": "既読にする",
   "room.markAsUnread": "未読にする",
   "search.indexingPending": "メッセージ履歴をインデックス中です。まもなく追加の一致が表示される場合があります。",
