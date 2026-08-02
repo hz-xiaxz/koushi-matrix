@@ -54,6 +54,7 @@ export function computeBrowserRoomListProjection(
   });
 
   return {
+    readiness: { kind: "ready", source: "cache", generation: 0 },
     active_filter: activeFilter,
     sort,
     items

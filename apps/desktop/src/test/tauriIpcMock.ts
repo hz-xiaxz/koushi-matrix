@@ -234,6 +234,7 @@ function defaultSnapshotResponse() {
         operation: { kind: "idle" }
       },
       room_list: {
+        readiness: { kind: "ready", source: "cache", generation: 0 },
         active_filter: { kind: "rooms" },
         sort: { kind: "activity" },
         items: [

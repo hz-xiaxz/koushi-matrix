@@ -567,7 +567,9 @@ fn profile_resolution_diagnostic_event(
 
 fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
     let room_list_trace = match &action {
-        AppAction::RoomListUpdated { rooms, .. } => {
+        AppAction::RoomListUpdated { rooms, .. }
+        | AppAction::RoomListSnapshotProvisional { rooms, .. }
+        | AppAction::RoomListSnapshotAuthoritative { rooms, .. } => {
             Some(unread_trace::capture_room_list_applied(rooms))
         }
         _ => None,

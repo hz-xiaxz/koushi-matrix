@@ -780,6 +780,12 @@ export function Sidebar({
     snapshot.state.domain.rooms,
     snapshot.state.domain.invites
   );
+  const roomListReadiness = snapshot.state.ui.room_list.readiness;
+  const roomListReady = roomListReadiness.kind === "ready";
+  const hasProvisionalRoomList =
+    snapshot.sidebar.space_rooms.length > 0 ||
+    snapshot.sidebar.global_dms.length > 0 ||
+    sections.notJoined.length > 0;
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(
     readCollapsedSections
   );
@@ -903,18 +909,25 @@ export function Sidebar({
             onClick={onOpenSpaceMembers}
           />
         ) : null}
-        <RoomListControls
-          dmTotal={snapshot.sidebar.global_dms.length}
-          dmUnread={snapshot.sidebar.dm_unread_count}
-          dmHighlights={snapshot.sidebar.dm_highlight_count}
-          roomTotal={snapshot.sidebar.space_rooms.length}
-          roomUnread={snapshot.sidebar.space_unread_count}
-          roomHighlights={snapshot.sidebar.space_highlight_count}
-          selectedCategory={roomCategory}
-          selectedSort={roomSort}
-          onSelectCategory={selectRoomCategory}
-          onSelectSort={selectRoomSort}
-        />
+        {!roomListReady ? (
+          <div className="room-list-status" role="status">
+            {roomListReadiness.kind === "failed" ? t("roomList.failed") : t("roomList.loading")}
+          </div>
+        ) : null}
+        {roomListReady || hasProvisionalRoomList ? (
+          <RoomListControls
+            dmTotal={snapshot.sidebar.global_dms.length}
+            dmUnread={snapshot.sidebar.dm_unread_count}
+            dmHighlights={snapshot.sidebar.dm_highlight_count}
+            roomTotal={snapshot.sidebar.space_rooms.length}
+            roomUnread={snapshot.sidebar.space_unread_count}
+            roomHighlights={snapshot.sidebar.space_highlight_count}
+            selectedCategory={roomCategory}
+            selectedSort={roomSort}
+            onSelectCategory={selectRoomCategory}
+            onSelectSort={selectRoomSort}
+          />
+        ) : null}
         {visibleNotJoinedRooms.length > 0 ? (
           <RoomSection
             activeRoomId={activeRoomId}

@@ -61,9 +61,49 @@ pub use crate::state::settings::RoomListSort;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoomListProjection {
+    #[serde(default)]
+    pub readiness: RoomListReadiness,
     pub active_filter: RoomListFilter,
     pub sort: RoomListSort,
     pub items: Vec<RoomListProjectionItem>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RoomListSource {
+    #[default]
+    Cache,
+    SyncService,
+    Legacy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RoomListFailureKind {
+    Connectivity,
+    Service,
+    Stopped,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RoomListReadiness {
+    #[default]
+    Uninitialized,
+    Loading {
+        source: RoomListSource,
+        generation: u64,
+    },
+    Ready {
+        source: RoomListSource,
+        generation: u64,
+    },
+    Failed {
+        source: RoomListSource,
+        generation: u64,
+        #[serde(rename = "failureKind")]
+        kind: RoomListFailureKind,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -193,6 +233,7 @@ pub fn compute_room_list_projection(
     }
 
     RoomListProjection {
+        readiness: RoomListReadiness::default(),
         active_filter,
         sort,
         items,

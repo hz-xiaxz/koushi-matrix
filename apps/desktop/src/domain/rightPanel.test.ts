@@ -325,7 +325,12 @@ function snapshotForPanelMode(
       },
       ui: {
         navigation: { active_space_id: null, active_room_id: null },
-        room_list: { active_filter: { kind: "rooms" }, sort: { kind: "activity" }, items: [] },
+        room_list: {
+          readiness: { kind: "ready", source: "cache", generation: 0 },
+          active_filter: { kind: "rooms" },
+          sort: { kind: "activity" },
+          items: []
+        },
         timeline: {
           room_id: null,
           is_subscribed: false,

@@ -569,7 +569,23 @@ export type RoomListFilter =
   | { kind: "favourites" }
   | { kind: "invites" };
 
+export type RoomListSource = "cache" | "syncService" | "legacy";
+
+export type RoomListFailureKind = "connectivity" | "service" | "stopped";
+
+export type RoomListReadiness =
+  | { kind: "uninitialized" }
+  | { kind: "loading"; source: RoomListSource; generation: number }
+  | { kind: "ready"; source: RoomListSource; generation: number }
+  | {
+      kind: "failed";
+      source: RoomListSource;
+      generation: number;
+      failureKind: RoomListFailureKind;
+    };
+
 export interface RoomListProjection {
+  readiness: RoomListReadiness;
   active_filter: RoomListFilter;
   sort: RoomListSort;
   items: RoomListProjectionItem[] | null;

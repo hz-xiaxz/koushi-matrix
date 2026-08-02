@@ -742,6 +742,11 @@
           "kind": "rooms"
         },
         "items": [],
+        "readiness": {
+          "generation": 9,
+          "kind": "ready",
+          "source": "syncService"
+        },
         "sort": {
           "kind": "activity"
         }

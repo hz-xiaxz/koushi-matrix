@@ -89,4 +89,3 @@ Tests are added before the implementation:
    and stable room selection after authoritative replacement.
 4. Existing timeline continuity, sync fallback, DTO golden, CoreEvent, IME,
    lint, typecheck, build, and full CI checks remain green.
-

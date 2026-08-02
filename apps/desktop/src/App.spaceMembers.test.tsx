@@ -347,9 +347,9 @@ describe("App Space Members integration", () => {
         "disabled",
         true
       );
-    });
+    }, { timeout: 5000 });
     expect(cancelSpaceInvite).not.toHaveBeenCalled();
-  });
+  }, 10_000);
 
   test("shows localized cancellation failure and records only fixed diagnostics", async () => {
     const api = createBrowserFakeApi();

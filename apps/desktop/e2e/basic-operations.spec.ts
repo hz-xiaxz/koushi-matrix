@@ -7811,6 +7811,7 @@ test("room context menu mark unread dispatches Rust-owned commands", async ({ pa
         ui: {
           ...snapshot.state.ui,
           room_list: {
+            readiness: { kind: "ready", source: "cache", generation: 0 },
             active_filter: { kind: "rooms" },
             sort: { kind: "activity" },
             items: [

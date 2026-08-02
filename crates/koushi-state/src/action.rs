@@ -18,7 +18,8 @@ use crate::state::{
     MentionCandidatesFailureKind, MentionSurface, NativeAttentionDispatchId,
     NativeAttentionSoundOutcome, NativeAttentionState, NavigationState, OperationFailureKind,
     OwnProfile, PinnedEvent, PresenceKind, ProfileUpdateRequest, RecoveryKeyDeliveryState,
-    RecoveryMethod, RoomListFilter, RoomListProjection, RoomMentionPermission,
+    RecoveryMethod, RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListSource,
+    RoomMentionPermission,
     RoomModerationAction, RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot,
     RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
     ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
@@ -573,6 +574,29 @@ pub enum AppAction {
     RoomListUpdated {
         spaces: Vec<SpaceSummary>,
         rooms: Vec<RoomSummary>,
+    },
+    RoomListBootstrapStarted {
+        generation: u64,
+        source: RoomListSource,
+    },
+    RoomListSnapshotProvisional {
+        generation: u64,
+        source: RoomListSource,
+        spaces: Vec<SpaceSummary>,
+        rooms: Vec<RoomSummary>,
+        invites: Vec<crate::state::InvitePreview>,
+    },
+    RoomListSnapshotAuthoritative {
+        generation: u64,
+        source: RoomListSource,
+        spaces: Vec<SpaceSummary>,
+        rooms: Vec<RoomSummary>,
+        invites: Vec<crate::state::InvitePreview>,
+    },
+    RoomListBootstrapFailed {
+        generation: u64,
+        source: RoomListSource,
+        kind: RoomListFailureKind,
     },
     RoomListFilterSelected {
         filter: RoomListFilter,
