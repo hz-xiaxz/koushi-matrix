@@ -413,7 +413,7 @@ test("SAS actions stay flow-correlated through mismatch and cancellation", async
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
     const emojis = ["🐶", "🐱", "🦁", "🐎", "🦄", "🐷", "🐘"].map((symbol, index) => ({ symbol, description: `emoji-${index}` }));
-    window.__harness.setSnapshot({ ...snapshot, state: { ...snapshot.state, domain: { ...snapshot.state.domain, session: { ...snapshot.state.domain.session, kind: "verifying", flow_id: 81, method: "existingDeviceSas", sas_emojis: emojis } } } });
+    window.__harness.setSnapshot({ ...snapshot, state: { ...snapshot.state, domain: { ...snapshot.state.domain, session: { ...snapshot.state.domain.session, kind: "verifying", flow_id: 81, method: "existingDeviceSas", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity", failureKind: null }, sas_emojis: emojis } } } });
     window.__harness.pushStateChanged();
   });
   await page.getByRole("button", { name: "They do not match" }).click();
