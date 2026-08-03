@@ -123,8 +123,15 @@ or SDK boundary without logging private Matrix payloads.
   `all_rooms_request_matches_element_x_26_07_28`, which drives the real first
   `RoomListService` request through `MatrixMockServer`/wiremock and asserts the
   serialized URL, query, connection ID, list, required state, filter, timeline,
-  and extension contract. No request-builder production change was necessary,
-  and this test-only guard does not justify a wholesale SDK rebase or upgrade.
+  and extension contract. For durable TDD RED evidence, the real request-capture
+  test was first run with an intentionally wrong sentinel endpoint expectation
+  using
+  `cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28`;
+  the single test failed on the endpoint mismatch with exit `101`. After the
+  expectation was changed to the authoritative Element X endpoint, the same
+  command passed `1/1` with exit `0`. No request-builder production change was
+  necessary, and this test-only guard does not justify a wholesale SDK rebase
+  or upgrade.
 
 - Non-blocking own-user identity query (2026-07-30, issue #375):
   `Encryption::request_user_identity` clones the current `OlmMachine` and
