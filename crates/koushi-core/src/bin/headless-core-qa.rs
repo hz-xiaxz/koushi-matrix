@@ -6700,7 +6700,9 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
     let sync_backend_a =
         wait_for_sync_started_and_running(&mut conn_a, sync_start_id, "sync start A").await?;
     println!("sync_backend_a={sync_backend_a:?}");
-    assert_expected_backend(config.expect_sync_backend, sync_backend_a, "sync start A")?;
+    if !scenario.should_run_stage(QaStage::InvitesDm) {
+        assert_expected_backend(config.expect_sync_backend, sync_backend_a, "sync start A")?;
+    }
 
     println!("sync_a=running");
     println!("login_sync=ok");
@@ -18672,6 +18674,23 @@ mod tests {
     #[test]
     fn invites_dm_backend_mismatch_follows_projection_proof() {
         let source = include_str!("headless-core-qa.rs");
+        let run_async = source
+            .split("async fn run_async")
+            .nth(1)
+            .expect("run_async should exist");
+        let primary_sync_route = run_async
+            .split("let sync_backend_a =")
+            .nth(1)
+            .expect("run_async should observe the primary backend")
+            .split("if scenario == QaScenario::TimelineStress")
+            .next()
+            .expect("timeline stress should follow primary sync startup");
+        assert!(
+            primary_sync_route.contains(
+                "if !scenario.should_run_stage(QaStage::InvitesDm) {\n        assert_expected_backend("
+            ),
+            "the primary route must suppress its pre-stage mismatch assertion for invitation-bearing scenarios"
+        );
         let shared_secondary_route = source
             .split(
                 "let mut normal_secondary = if should_run_normal_secondary_participant(scenario)",
