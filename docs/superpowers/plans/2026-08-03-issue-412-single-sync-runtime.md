@@ -22,7 +22,7 @@
 - [ ] Assert no test sends authenticated invite-only probes and no result uses server fingerprinting.
 - [ ] Run `cargo test -p koushi-sdk --test sliding_sync_discovery`; confirm RED because the typed discovery API does not exist.
 - [ ] Implement the four-state discovery type and one unauthenticated `/versions` query in the new module. Keep raw response bodies and URLs out of `Debug` and errors.
-- [ ] Route password-login discovery through this API and delete the invitation-list behavior probe tests from `password_login.rs` only after replacements are green.
+- [ ] Keep password-login fixtures capability-ready for this API. Route password login, OIDC, and restore through the single shared `AccountActor` admission gate in Task 3; do not add an SDK-local login probe. Keep the authenticated invitation-list probe tests until the production probe itself is removed in Task 6.
 - [ ] Run `cargo test -p koushi-sdk --test sliding_sync_discovery` and `cargo test -p koushi-sdk --test password_login`; confirm exit code 0.
 - [ ] Commit with message `feat: add typed sliding sync discovery`.
 

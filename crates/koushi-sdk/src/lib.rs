@@ -540,6 +540,13 @@ use thiserror::Error;
 use url::Url;
 use zeroize::Zeroizing;
 
+mod sliding_sync_discovery;
+
+pub use sliding_sync_discovery::{
+    DiscoveryResponseFailureKind, DiscoverySource, DiscoveryTransportFailureKind, HttpStatusClass,
+    SlidingSyncDiscoveryResult, discover_sliding_sync_support,
+};
+
 const LOGIN_DISCOVERY_PATH: &str = "_matrix/client/v3/login";
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const RESTRICTED_VERIFICATION_SYNC_SERVER_TIMEOUT: Duration = Duration::from_secs(3);

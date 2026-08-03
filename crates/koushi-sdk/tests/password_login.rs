@@ -14,7 +14,19 @@ use std::{
     thread,
 };
 
-const MATRIX_VERSIONS_RESPONSE: &str = r#"{"versions":["r0.6.0","v1.1","v1.2","v1.3","v1.4","v1.5","v1.6","v1.7"],"unstable_features":{}}"#;
+// Password-login fixtures advertise the capability that Task 3's shared AccountActor
+// admission gate will inspect. Discovery is deliberately not performed inside the SDK login.
+const MATRIX_VERSIONS_RESPONSE: &str = r#"{"versions":["r0.6.0","v1.1","v1.2","v1.3","v1.4","v1.5","v1.6","v1.7"],"unstable_features":{"org.matrix.simplified_msc3575":true}}"#;
+
+#[test]
+fn password_login_versions_fixture_is_capability_ready_for_task_3_shared_gate() {
+    let response: serde_json::Value =
+        serde_json::from_str(MATRIX_VERSIONS_RESPONSE).expect("versions fixture JSON");
+    assert_eq!(
+        response["unstable_features"]["org.matrix.simplified_msc3575"],
+        true
+    );
+}
 
 #[test]
 fn room_list_smoke_report_counts_without_private_names() {
