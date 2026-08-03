@@ -101,6 +101,73 @@ trusted_servers = []
 `;
 }
 
+/**
+ * @typedef {"intrinsic" | "synapse_experimental_feature" | "unsupported"}
+ *   SimplifiedSlidingSyncConfiguration
+ */
+
+/**
+ * @typedef {object} SimplifiedSlidingSyncCapability
+ * @property {"org.matrix.simplified_msc3575"} unstableFeature
+ * @property {boolean} enabled
+ * @property {SimplifiedSlidingSyncConfiguration} configuration
+ */
+
+/**
+ * @typedef {object} HomeserverFixtureCapabilities
+ * @property {SimplifiedSlidingSyncCapability} simplifiedSlidingSync
+ */
+
+/**
+ * @param {"conduit" | "tuwunel" | "synapse"} serverKind
+ * @param {{ slidingSyncEnabled?: boolean }} [options]
+ * @returns {HomeserverFixtureCapabilities}
+ */
+export function homeserverFixtureCapabilities(
+  serverKind,
+  { slidingSyncEnabled = true } = {}
+) {
+  /** @type {SimplifiedSlidingSyncConfiguration} */
+  let configuration;
+  let enabled;
+  if (serverKind === "tuwunel") {
+    configuration = "intrinsic";
+    enabled = true;
+  } else if (serverKind === "synapse") {
+    configuration = "synapse_experimental_feature";
+    enabled = slidingSyncEnabled;
+  } else if (serverKind === "conduit") {
+    configuration = "unsupported";
+    enabled = false;
+  } else {
+    throw new Error(`unknown local homeserver kind: ${serverKind}`);
+  }
+
+  return {
+    simplifiedSlidingSync: {
+      unstableFeature: "org.matrix.simplified_msc3575",
+      enabled,
+      configuration
+    }
+  };
+}
+
+export function selectedServers(value) {
+  if (value === "both") {
+    return ["tuwunel", "synapse"];
+  }
+  if (value === "all") {
+    return ["conduit", "tuwunel", "synapse"];
+  }
+  if (value === "conduit" || value === "tuwunel" || value === "synapse") {
+    return [value];
+  }
+  if (value === "matrixorg") {
+    return ["synapse"];
+  }
+  throw new Error("--server must be conduit, tuwunel, synapse, matrixorg, both, or all");
+}
+
 export function startHomeserver(serverKind, configPath, logPath, options = {}) {
   const log = createWriteStream(logPath, { flags: "a" });
   const child = startHomeserverProcess(serverKind, configPath, options);
@@ -131,7 +198,10 @@ function startHomeserverProcess(serverKind, configPath, options) {
   throw new Error(`unknown local homeserver kind: ${serverKind}`);
 }
 
-function startSynapseHomeserver(configPath, { serverName, port, dataDir }) {
+function startSynapseHomeserver(
+  configPath,
+  { serverName, port, dataDir, slidingSyncEnabled = true }
+) {
   if (!serverName || !port || !dataDir) {
     throw new Error("Synapse local QA requires serverName, port, and dataDir");
   }
@@ -141,16 +211,9 @@ function startSynapseHomeserver(configPath, { serverName, port, dataDir }) {
   mkdirSync(dataDir, { recursive: true });
   const entrypointPath = resolve(runDir, "synapse-local-qa-start.sh");
   const dockerfilePath = resolve(runDir, "Dockerfile.synapse-local-qa");
-  writeFileSync(entrypointPath, synapseEntrypoint(), { mode: 0o770 });
+  writeFileSync(entrypointPath, synapseEntrypoint({ slidingSyncEnabled }), { mode: 0o770 });
   chmodSync(entrypointPath, 0o770);
-  writeFileSync(
-    dockerfilePath,
-    `FROM docker.io/matrixdotorg/synapse:v1.151.0
-COPY synapse-local-qa-start.sh /synapse-local-qa-start.sh
-RUN chmod 770 /synapse-local-qa-start.sh
-ENTRYPOINT ["/synapse-local-qa-start.sh"]
-`
-  );
+  writeFileSync(dockerfilePath, synapseDockerfile());
 
   const imageTag = `koushi-synapse-local-qa:${process.pid}-${Date.now()}`;
   const build = spawnSync(
@@ -200,7 +263,15 @@ ENTRYPOINT ["/synapse-local-qa-start.sh"]
   return child;
 }
 
-function synapseEntrypoint() {
+export function synapseDockerfile() {
+  return `FROM docker.io/matrixdotorg/synapse:v1.157.0
+COPY synapse-local-qa-start.sh /synapse-local-qa-start.sh
+RUN chmod 770 /synapse-local-qa-start.sh
+ENTRYPOINT ["/synapse-local-qa-start.sh"]
+`;
+}
+
+export function synapseEntrypoint({ slidingSyncEnabled = true } = {}) {
   return `#!/bin/bash
 set -euo pipefail
 export SYNAPSE_SERVER_NAME="\${SYNAPSE_SERVER_NAME:-localhost}"
@@ -257,6 +328,7 @@ rc_invites:
     burst_count: 1000
 experimental_features:
   msc3266_enabled: true
+  msc3575_enabled: ${slidingSyncEnabled}
 YAML
 fi
 /start.py run

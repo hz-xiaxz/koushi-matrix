@@ -18,8 +18,10 @@ import {
   checkInstalledHomeserver,
   conduitConfig,
   freePort,
+  homeserverFixtureCapabilities,
   minimalEnvironment,
   registerUser,
+  selectedServers,
   startHomeserver,
   stopProcess,
   tuwunelConfig,
@@ -208,6 +210,7 @@ async function run() {
 
 async function runForServer(serverKind, scenario) {
   checkInstalledHomeserver(serverKind);
+  const fixtureCapabilities = homeserverFixtureCapabilities(serverKind);
 
   const fixture = fixtureRunOption ? loadQaFixture(fixtureRunOption, serverKind) : null;
   const port = await freePort();
@@ -237,7 +240,8 @@ async function runForServer(serverKind, scenario) {
   const serverProcess = startHomeserver(serverKind, configPath, logPath, {
     serverName,
     port,
-    dataDir
+    dataDir,
+    slidingSyncEnabled: fixtureCapabilities.simplifiedSlidingSync.enabled
   });
   try {
     await waitForHomeserver(homeserver, serverProcess, timeoutMs, logPath);
@@ -598,22 +602,6 @@ function copyFixtureDataDir(fixture, dataDir) {
   });
 }
 
-function selectedServers(value) {
-  if (value === "both") {
-    return ["conduit", "tuwunel"];
-  }
-  if (value === "all") {
-    return ["conduit", "tuwunel", "synapse"];
-  }
-  if (value === "conduit" || value === "tuwunel" || value === "synapse") {
-    return [value];
-  }
-  if (value === "matrixorg") {
-    return ["synapse"];
-  }
-  throw new Error("--server must be conduit, tuwunel, synapse, matrixorg, both, or all");
-}
-
 function expectedSyncBackendForLeg(forceLegacyBackend) {
   return forceLegacyBackend ? "LegacySync" : undefined;
 }
@@ -695,6 +683,8 @@ function printUsage() {
     "Usage: desktop-headless-local-qa.mjs --run [--server=conduit|tuwunel|synapse|matrixorg|both|all] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_legacy_fallback|timeline_legacy_persisted_gap|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--core-backend=probed|legacy|both] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
   );
   console.log("Starts a disposable local homeserver and runs non-GUI Matrix SDK QA.");
+  console.log("  --server=both  Runs the positive Sliding Sync fixtures: Tuwunel and Synapse.");
+  console.log("  --server=conduit  Temporarily runs legacy scenarios against Conduit.");
   console.log("  --server=synapse/matrixorg  Runs local Synapse in Docker.");
   console.log("  --core  Also run the headless-core-qa binary (Phase 2+ core runtime QA).");
   console.log("  --core-backend  Select core backend leg. E2EE scenarios default to probed.");
