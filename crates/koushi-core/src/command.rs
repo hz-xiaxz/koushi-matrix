@@ -151,8 +151,9 @@ impl CoreCommand {
             Self::Sync(command) => match command {
                 SyncCommand::Start { request_id }
                 | SyncCommand::Stop { request_id }
-                | SyncCommand::Restart { request_id }
-                | SyncCommand::SyncOnce { request_id } => *request_id,
+                | SyncCommand::Restart { request_id } => *request_id,
+                #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+                SyncCommand::SyncOnce { request_id } => *request_id,
             },
             Self::Room(command) => match command {
                 RoomCommand::CreateRoom { request_id, .. }
@@ -1789,10 +1790,19 @@ impl fmt::Debug for AccountCommand {
 
 #[derive(Debug)]
 pub enum SyncCommand {
-    Start { request_id: RequestId },
-    Stop { request_id: RequestId },
-    Restart { request_id: RequestId },
-    SyncOnce { request_id: RequestId },
+    Start {
+        request_id: RequestId,
+    },
+    Stop {
+        request_id: RequestId,
+    },
+    Restart {
+        request_id: RequestId,
+    },
+    #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+    SyncOnce {
+        request_id: RequestId,
+    },
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]

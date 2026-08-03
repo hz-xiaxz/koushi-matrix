@@ -1377,6 +1377,27 @@ impl CoreRuntime {
             .await
     }
 
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn inspect_sync_owners_for_testing(&self) -> (bool, bool, bool) {
+        let (response, receiver) = oneshot::channel();
+        assert!(
+            self.account_actor_test_handle
+                .send(AccountMessage::InspectSyncOwners { response })
+                .await
+        );
+        receiver.await.expect("sync owner inspection response")
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn set_current_device_trust_for_testing(
+        &self,
+        trust: koushi_state::CurrentDeviceTrustState,
+    ) -> bool {
+        self.account_actor_test_handle
+            .send(AccountMessage::SetCurrentDeviceTrustForTesting { trust })
+            .await
+    }
+
     pub fn shutdown_handle(&self) -> &executor::JoinHandle<()> {
         &self.actor
     }
@@ -10289,7 +10310,7 @@ mod tests {
             tokens.push(probe_rx.recv().await.expect("stop token"));
         }
         assert_eq!(tokens[0], "lock_projection_ack");
-        assert!(!tokens.contains(&"restricted_sync_terminated"));
+        assert!(!tokens.contains(&"provisional_encryption_sync_terminated"));
         assert!(tokens.contains(&"stop_sync_actor"));
         assert!(tokens.contains(&"stop_timeline_manager"));
         assert!(tokens.contains(&"clear_room_session"));

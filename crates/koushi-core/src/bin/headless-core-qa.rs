@@ -8504,7 +8504,7 @@ fn gate_session_phase(session: &SessionState) -> &'static str {
 
 fn trust_admission_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticSnapshot) -> String {
     const ALLOWED_STAGES: &[&str] = &[
-        "restricted_catch_up_started",
+        "provisional_encryption_sync_started",
         "trust_recheck_requested",
         "trust_recheck_started",
         "trust_recheck_finished_verified",
@@ -8512,8 +8512,8 @@ fn trust_admission_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticS
         "trust_recheck_finished_unknown",
         "trust_recheck_finished_failed",
         "trust_persisted",
-        "restricted_catch_up_stopped",
-        "restricted_catch_up_skipped",
+        "provisional_encryption_sync_stopped",
+        "provisional_encryption_sync_skipped",
         "ready_projection_dispatched",
         "trust_projection_reduced_ready",
         "trust_projection_reduced_locked",

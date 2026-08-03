@@ -13,7 +13,7 @@
 //! until the password exchange completes. First login runs on a storeless
 //! client that never syncs or initializes encryption; immediately after login
 //! the session is restored into the per-account encrypted store without being
-//! entered into the active credential index. Only a restricted verification
+//! entered into the active credential index. Only a provisional encryption
 //! sync may run until authoritative device trust promotes the session; normal
 //! sync and persistence start after that promotion. The
 //! fail-closed local-encryption rule applies to the store creation step: if it
@@ -33,7 +33,7 @@ use std::{
     future::Future,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -69,9 +69,11 @@ use crate::event::{
     EventCacheSubscribeStatus, LiveSignalsEvent, LocalEncryptionEvent,
 };
 use crate::executor;
+#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+use crate::failure::SyncFailureKind;
 use crate::failure::{
     CoreFailure, LoginFailureKind, ProfileFailureKind, RecoveryFailureKind, RoomFailureKind,
-    SyncFailureKind, TimelineFailureKind,
+    TimelineFailureKind,
 };
 use crate::ids::{
     AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey,
@@ -603,14 +605,14 @@ pub enum AccountMessage {
             koushi_sdk::CurrentDeviceTrustRecheckError,
         >,
     },
-    FirstRestrictedSyncFinished {
+    FirstProvisionalEncryptionSyncFinished {
         generation: u64,
         succeeded: bool,
     },
-    RestrictedSyncSucceeded {
+    ProvisionalEncryptionSyncSucceeded {
         generation: u64,
     },
-    RestrictedSyncFailed {
+    ProvisionalEncryptionSyncFailed {
         generation: u64,
     },
     VerificationMethodsDiscovered {
@@ -658,9 +660,13 @@ pub enum AccountMessage {
     InspectPendingDeviceCleanup {
         response: oneshot::Sender<bool>,
     },
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-hooks"))]
     InspectSyncOwners {
         response: oneshot::Sender<(bool, bool, bool)>,
+    },
+    #[cfg(any(test, feature = "test-hooks"))]
+    SetCurrentDeviceTrustForTesting {
+        trust: koushi_state::CurrentDeviceTrustState,
     },
     #[cfg(test)]
     ConfigureSyntheticRecoveryTask {
@@ -670,6 +676,10 @@ pub enum AccountMessage {
     #[cfg(test)]
     ConfigureRecoveryDownload {
         completion: oneshot::Receiver<bool>,
+    },
+    #[cfg(test)]
+    ConfigureRecoveryResult {
+        completion: oneshot::Receiver<Result<(), koushi_sdk::E2eeRecoveryError>>,
     },
     #[cfg(test)]
     InspectRecoveryTask {
@@ -1518,33 +1528,26 @@ where
     result
 }
 
-fn should_report_restricted_sync_failure(failure_reported: &mut bool, succeeded: bool) -> bool {
-    if succeeded {
-        *failure_reported = false;
-        false
-    } else if *failure_reported {
-        false
-    } else {
-        *failure_reported = true;
-        true
-    }
+#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+fn is_manual_sync_once(command: &SyncCommand) -> bool {
+    matches!(command, SyncCommand::SyncOnce { .. })
 }
 
-fn restricted_sync_blocks_sync_once(restricted_sync_active: bool, command: &SyncCommand) -> bool {
-    restricted_sync_active && matches!(command, SyncCommand::SyncOnce { .. })
-}
-
-fn begin_restricted_sync_cursor_attempt(restricted_sync_active: bool) -> bool {
-    !restricted_sync_active
+fn begin_provisional_encryption_sync_cursor_attempt(
+    provisional_encryption_sync_active: bool,
+) -> bool {
+    !provisional_encryption_sync_active
 }
 
 fn recovery_sync_should_resume(
     recovery_generation: u64,
     active_generation: u64,
     session_promoted: bool,
-    restricted_sync_active: bool,
+    provisional_encryption_sync_active: bool,
 ) -> bool {
-    recovery_generation == active_generation && !session_promoted && !restricted_sync_active
+    recovery_generation == active_generation
+        && !session_promoted
+        && !provisional_encryption_sync_active
 }
 
 #[cfg(feature = "qa-bin")]
@@ -1702,7 +1705,8 @@ pub struct AccountActor {
     recovery_task: Option<PendingRecoveryTask>,
     pending_recovery_completion: Option<PendingRecoveryCompletion>,
     recovery_trust_settlement_task: Option<crate::executor::JoinHandle<()>>,
-    restricted_sync: Option<crate::executor::JoinHandle<()>>,
+    provisional_encryption_sync: Option<crate::executor::JoinHandle<()>>,
+    encryption_sync_permit: koushi_sdk::EncryptionSyncPermitOwner,
     pending_ready_events: Vec<CoreEvent>,
     pending_trust_transition: Option<PendingTrustTransition>,
     next_trust_transition_id: u64,
@@ -1717,6 +1721,9 @@ pub struct AccountActor {
     trust_observation_is_synthetic: bool,
     #[cfg(test)]
     recovery_download_override: std::sync::Mutex<Option<oneshot::Receiver<bool>>>,
+    #[cfg(test)]
+    recovery_result_override:
+        std::sync::Mutex<Option<oneshot::Receiver<Result<(), koushi_sdk::E2eeRecoveryError>>>>,
     #[cfg(test)]
     close_store_results: std::collections::VecDeque<bool>,
     #[cfg(test)]
@@ -1903,7 +1910,8 @@ impl AccountActor {
             recovery_task: None,
             pending_recovery_completion: None,
             recovery_trust_settlement_task: None,
-            restricted_sync: None,
+            provisional_encryption_sync: None,
+            encryption_sync_permit: koushi_sdk::new_encryption_sync_permit_owner(),
             pending_ready_events: Vec::new(),
             pending_trust_transition: None,
             next_trust_transition_id: 0,
@@ -1918,6 +1926,8 @@ impl AccountActor {
             trust_observation_is_synthetic: false,
             #[cfg(test)]
             recovery_download_override: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            recovery_result_override: std::sync::Mutex::new(None),
             #[cfg(test)]
             close_store_results: std::collections::VecDeque::new(),
             #[cfg(test)]
@@ -2366,11 +2376,11 @@ impl AccountActor {
                         self.start_authoritative_trust_recheck_if_idle(true);
                     }
                 }
-                AccountMessage::FirstRestrictedSyncFinished {
+                AccountMessage::FirstProvisionalEncryptionSyncFinished {
                     generation,
                     succeeded,
                 } => {
-                    if first_restricted_sync_is_current(
+                    if first_provisional_encryption_sync_is_current(
                         generation,
                         self.trust_generation,
                         self.session.is_some(),
@@ -2386,12 +2396,12 @@ impl AccountActor {
                         }
                     }
                 }
-                AccountMessage::RestrictedSyncSucceeded { generation } => {
+                AccountMessage::ProvisionalEncryptionSyncSucceeded { generation } => {
                     let own_flow_id = self
                         .own_user_verification
                         .as_ref()
                         .map(|(flow_id, _)| *flow_id);
-                    if let Some(flow_id) = active_own_user_sas_flow_for_restricted_sync(
+                    if let Some(flow_id) = active_own_user_sas_flow_for_provisional_encryption_sync(
                         generation,
                         self.trust_generation,
                         self.session.is_some(),
@@ -2399,7 +2409,7 @@ impl AccountActor {
                         own_flow_id,
                     ) {
                         record_sas_verification_event(sas_verification_event(
-                            "restricted_sync_succeeded",
+                            "provisional_encryption_sync_succeeded",
                             flow_id,
                         ));
                     }
@@ -2415,12 +2425,12 @@ impl AccountActor {
                         self.recheck_own_user_sas_after_sync().await;
                     }
                 }
-                AccountMessage::RestrictedSyncFailed { generation } => {
+                AccountMessage::ProvisionalEncryptionSyncFailed { generation } => {
                     let own_flow_id = self
                         .own_user_verification
                         .as_ref()
                         .map(|(flow_id, _)| *flow_id);
-                    if let Some(flow_id) = active_own_user_sas_flow_for_restricted_sync(
+                    if let Some(flow_id) = active_own_user_sas_flow_for_provisional_encryption_sync(
                         generation,
                         self.trust_generation,
                         self.session.is_some(),
@@ -2428,7 +2438,7 @@ impl AccountActor {
                         own_flow_id,
                     ) {
                         record_sas_verification_event(sas_verification_event(
-                            "restricted_sync_failed",
+                            "provisional_encryption_sync_failed",
                             flow_id,
                         ));
                     }
@@ -2593,13 +2603,18 @@ impl AccountActor {
                 AccountMessage::InspectPendingDeviceCleanup { response } => {
                     let _ = response.send(self.pending_device_cleanup.is_some());
                 }
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::InspectSyncOwners { response } => {
                     let _ = response.send((
-                        self.restricted_sync.is_some(),
+                        self.provisional_encryption_sync.is_some(),
                         false,
                         self.sync_actor.is_some(),
                     ));
+                }
+                #[cfg(any(test, feature = "test-hooks"))]
+                AccountMessage::SetCurrentDeviceTrustForTesting { trust } => {
+                    self.handle_current_device_trust(self.trust_generation, trust)
+                        .await;
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSyntheticRecoveryTask { flow_id, pending } => {
@@ -2622,6 +2637,13 @@ impl AccountActor {
                         .recovery_download_override
                         .lock()
                         .expect("recovery download lock") = Some(completion);
+                }
+                #[cfg(test)]
+                AccountMessage::ConfigureRecoveryResult { completion } => {
+                    *self
+                        .recovery_result_override
+                        .lock()
+                        .expect("recovery result lock") = Some(completion);
                 }
                 #[cfg(test)]
                 AccountMessage::InspectRecoveryTask { response } => {
@@ -3643,6 +3665,7 @@ impl AccountActor {
             SyncCommand::Start { request_id } => ("start", *request_id),
             SyncCommand::Stop { request_id } => ("stop", *request_id),
             SyncCommand::Restart { request_id } => ("restart", *request_id),
+            #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
             SyncCommand::SyncOnce { request_id } => ("sync_once", *request_id),
         };
         trace_restore!(
@@ -3669,7 +3692,11 @@ impl AccountActor {
             }
         );
 
-        if restricted_sync_blocks_sync_once(self.restricted_sync.is_some(), &command) {
+        // Manual classic `/sync` is no longer a production command path. Keep
+        // the typed rejection until the command variant itself is removed with
+        // the remaining legacy backend contract.
+        #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+        if is_manual_sync_once(&command) {
             self.emit_failure(
                 request_id,
                 CoreFailure::SyncFailed {
@@ -3872,6 +3899,7 @@ impl AccountActor {
             self.room_actor.tx.clone(),
             self.timeline_manager.sender(),
             self.sync_generation.clone(),
+            self.encryption_sync_permit.clone(),
         );
         self.sync_actor = Some(handle);
         trace_restore_simple("spawn_sync_actor", "done");
@@ -4615,7 +4643,7 @@ impl AccountActor {
         self.record_sas_waiting_for(flow_id, SasVerificationWaitState::SasStart);
         match run_own_user_sas_start(
             flow_id,
-            "restricted_sync",
+            "provisional_encryption_sync",
             koushi_sdk::start_own_user_sas_verification(&handle),
         )
         .await
@@ -8275,16 +8303,33 @@ impl AccountActor {
         self.pending_recovery_completion = None;
         let generation = self.trust_generation;
         let flow_id = request_id.sequence;
-        let restricted_sync_was_active = self.restricted_sync.is_some();
-        self.stop_restricted_sync().await;
+        let provisional_encryption_sync_was_active = self.provisional_encryption_sync.is_some();
+        self.stop_provisional_encryption_sync().await;
         record_recovery_verification_event(
-            recovery_verification_event("restricted_sync_paused", flow_id).field(
-                DiagnosticField::boolean("was_active", restricted_sync_was_active),
+            recovery_verification_event("provisional_encryption_sync_paused", flow_id).field(
+                DiagnosticField::boolean("was_active", provisional_encryption_sync_was_active),
             ),
         );
         record_recovery_verification_event(recovery_verification_event("submitted", flow_id));
         let tx = self.self_tx.clone();
+        #[cfg(test)]
+        let recovery_result_override = self
+            .recovery_result_override
+            .lock()
+            .expect("recovery result lock")
+            .take();
         let task = crate::executor::spawn(async move {
+            #[cfg(test)]
+            let result = if let Some(completion) = recovery_result_override {
+                completion.await.unwrap_or_else(|_| {
+                    Err(koushi_sdk::E2eeRecoveryError::Runtime(
+                        "synthetic recovery result channel closed".to_owned(),
+                    ))
+                })
+            } else {
+                koushi_sdk::recover_e2ee(&session, &request).await
+            };
+            #[cfg(not(test))]
             let result = koushi_sdk::recover_e2ee(&session, &request).await;
             drop(request);
             let _ = tx
@@ -8353,7 +8398,7 @@ impl AccountActor {
                         )),
                 );
                 if trust_after_recovery != koushi_state::CurrentDeviceTrustState::Verified {
-                    self.resume_restricted_sync_after_recovery(
+                    self.resume_provisional_encryption_sync_after_recovery(
                         session.clone(),
                         generation,
                         flow_id,
@@ -8402,7 +8447,11 @@ impl AccountActor {
                     .await;
             }
             Err(error) => {
-                self.resume_restricted_sync_after_recovery(session.clone(), generation, flow_id);
+                self.resume_provisional_encryption_sync_after_recovery(
+                    session.clone(),
+                    generation,
+                    flow_id,
+                );
                 self.pending_recovery_completion = None;
                 let kind = classify_recovery_error(&error);
                 record_recovery_verification_event(
@@ -8424,7 +8473,7 @@ impl AccountActor {
         }
     }
 
-    fn resume_restricted_sync_after_recovery(
+    fn resume_provisional_encryption_sync_after_recovery(
         &mut self,
         session: Arc<MatrixClientSession>,
         generation: u64,
@@ -8434,15 +8483,15 @@ impl AccountActor {
             generation,
             self.trust_generation,
             self.session_promoted,
-            self.restricted_sync.is_some(),
+            self.provisional_encryption_sync.is_some(),
         );
         record_recovery_verification_event(
-            recovery_verification_event("restricted_sync_resume_decided", flow_id)
+            recovery_verification_event("provisional_encryption_sync_resume_decided", flow_id)
                 .field(DiagnosticField::boolean("will_resume", should_resume)),
         );
         if should_resume {
             let transition_id = self.next_trust_transition_id();
-            self.start_restricted_sync(session, generation, transition_id);
+            self.start_provisional_encryption_sync(session, generation, transition_id);
         }
     }
 
@@ -9156,79 +9205,89 @@ impl AccountActor {
             .await;
     }
 
-    fn start_restricted_sync(
+    fn start_provisional_encryption_sync(
         &mut self,
         session: Arc<MatrixClientSession>,
         generation: u64,
         transition_id: u64,
     ) {
-        if !begin_restricted_sync_cursor_attempt(self.restricted_sync.is_some()) {
+        if !begin_provisional_encryption_sync_cursor_attempt(
+            self.provisional_encryption_sync.is_some(),
+        ) {
             return;
         }
         record_verification_admission_event(verification_admission_event(
-            "restricted_catch_up_started",
+            "provisional_encryption_sync_started",
             generation,
             transition_id,
         ));
         #[cfg(any(test, feature = "test-hooks"))]
         if self.trust_observation_is_synthetic {
             let _ = session;
-            self.restricted_sync = Some(executor::spawn(std::future::pending()));
+            self.provisional_encryption_sync = Some(executor::spawn(std::future::pending()));
             return;
         }
         let tx = self.self_tx.clone();
-        self.restricted_sync = Some(executor::spawn(async move {
-            let first_sync = executor::timeout(
-                Duration::from_secs(15),
-                koushi_sdk::restricted_verification_sync_once_with_token(&session, None),
-            )
-            .await;
-            let mut token = match first_sync {
-                Ok(Ok(token)) => Some(token),
-                _ => None,
-            };
-            let succeeded = token.is_some();
-            if tx
-                .send(AccountMessage::FirstRestrictedSyncFinished {
-                    generation,
-                    succeeded,
-                })
-                .await
-                .is_err()
-                || !succeeded
-            {
-                return;
-            }
-            let mut failure_reported = false;
+        let encryption_sync_permit = self.encryption_sync_permit.clone();
+        self.provisional_encryption_sync = Some(executor::spawn(async move {
+            let first_response_seen = Arc::new(AtomicBool::new(false));
+            let failure_reported = Arc::new(AtomicBool::new(false));
             loop {
-                match koushi_sdk::restricted_verification_sync_once_with_token(
+                let callback_tx = tx.clone();
+                let callback_first_response_seen = first_response_seen.clone();
+                let callback_failure_reported = failure_reported.clone();
+                let sync = koushi_sdk::provisional_encryption_sync_loop(
                     &session,
-                    token.clone(),
-                )
-                .await
-                {
-                    Ok(next_token) => {
-                        should_report_restricted_sync_failure(&mut failure_reported, true);
-                        token = Some(next_token);
-                        if tx
-                            .send(AccountMessage::RestrictedSyncSucceeded { generation })
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    Err(_) => {
-                        if should_report_restricted_sync_failure(&mut failure_reported, false) {
-                            if tx
-                                .send(AccountMessage::RestrictedSyncFailed { generation })
-                                .await
-                                .is_err()
-                            {
-                                break;
+                    encryption_sync_permit.clone(),
+                    move || {
+                        let callback_tx = callback_tx.clone();
+                        let first = !callback_first_response_seen.swap(true, Ordering::AcqRel);
+                        callback_failure_reported.store(false, Ordering::Release);
+                        async move {
+                            let message = if first {
+                                AccountMessage::FirstProvisionalEncryptionSyncFinished {
+                                    generation,
+                                    succeeded: true,
+                                }
+                            } else {
+                                AccountMessage::ProvisionalEncryptionSyncSucceeded { generation }
+                            };
+                            if callback_tx.send(message).await.is_ok() {
+                                koushi_sdk::MatrixSyncLoopControl::Continue
+                            } else {
+                                koushi_sdk::MatrixSyncLoopControl::Stop
                             }
                         }
+                    },
+                );
+                let result = if first_response_seen.load(Ordering::Acquire) {
+                    sync.await
+                } else {
+                    match executor::timeout(Duration::from_secs(15), sync).await {
+                        Ok(result) => result,
+                        Err(_) => Err(koushi_sdk::ProvisionalEncryptionSyncError::Sdk),
                     }
+                };
+
+                if result.is_ok() {
+                    break;
+                }
+                if !first_response_seen.load(Ordering::Acquire) {
+                    let _ = tx
+                        .send(AccountMessage::FirstProvisionalEncryptionSyncFinished {
+                            generation,
+                            succeeded: false,
+                        })
+                        .await;
+                    break;
+                }
+                if !failure_reported.swap(true, Ordering::AcqRel)
+                    && tx
+                        .send(AccountMessage::ProvisionalEncryptionSyncFailed { generation })
+                        .await
+                        .is_err()
+                {
+                    break;
                 }
                 executor::sleep(Duration::from_millis(250)).await;
             }
@@ -9259,18 +9318,18 @@ impl AccountActor {
             ));
         }
         self.verification_method_discovery_failed = false;
-        self.stop_restricted_sync().await;
+        self.stop_provisional_encryption_sync().await;
         #[cfg(any(test, feature = "test-hooks"))]
         {
             self.trust_observation_is_synthetic = false;
         }
     }
 
-    async fn stop_restricted_sync(&mut self) {
-        if let Some(task) = self.restricted_sync.take() {
+    async fn stop_provisional_encryption_sync(&mut self) {
+        if let Some(task) = self.provisional_encryption_sync.take() {
             task.abort();
             let _ = task.await;
-            self.record_lifecycle_probe("restricted_sync_terminated");
+            self.record_lifecycle_probe("provisional_encryption_sync_terminated");
         }
     }
 
@@ -9335,10 +9394,10 @@ impl AccountActor {
                     trust,
                 }])
                 .await;
-                if self.restricted_sync.is_none()
+                if self.provisional_encryption_sync.is_none()
                     && let Some(session) = self.session.clone()
                 {
-                    self.start_restricted_sync(session, generation, transition_id);
+                    self.start_provisional_encryption_sync(session, generation, transition_id);
                 }
                 return;
             }
@@ -9397,13 +9456,13 @@ impl AccountActor {
             transition_id,
             decision: TrustLifecycleDecision::Promote,
         });
-        let restricted_was_active = self.restricted_sync.is_some();
-        self.stop_restricted_sync().await;
+        let restricted_was_active = self.provisional_encryption_sync.is_some();
+        self.stop_provisional_encryption_sync().await;
         record_verification_admission_event(verification_admission_event(
             if restricted_was_active {
-                "restricted_catch_up_stopped"
+                "provisional_encryption_sync_stopped"
             } else {
-                "restricted_catch_up_skipped"
+                "provisional_encryption_sync_skipped"
             },
             generation,
             transition_id,
@@ -9527,7 +9586,7 @@ impl AccountActor {
         self.trust_recheck_pending = false;
         if decision == TrustLifecycleDecision::Lock {
             self.record_lifecycle_probe("lock_projection_ack");
-            self.stop_restricted_sync().await;
+            self.stop_provisional_encryption_sync().await;
             self.stop_normal_runtime_children().await;
             self.session_promoted = false;
             return;
@@ -9537,7 +9596,7 @@ impl AccountActor {
             return;
         };
         debug_assert!(
-            self.restricted_sync.is_none(),
+            self.provisional_encryption_sync.is_none(),
             "normal sync cannot start before restricted sync ownership is released"
         );
         self.start_incoming_verification_observer(session.clone())
@@ -10414,7 +10473,7 @@ fn recovery_result_is_current(
         && request_id == current_request_id
 }
 
-fn first_restricted_sync_is_current(
+fn first_provisional_encryption_sync_is_current(
     generation: u64,
     current_generation: u64,
     has_session: bool,
@@ -10438,7 +10497,7 @@ fn own_user_sas_recheck_is_current(
         && !has_sas
 }
 
-fn active_own_user_sas_flow_for_restricted_sync(
+fn active_own_user_sas_flow_for_provisional_encryption_sync(
     generation: u64,
     current_generation: u64,
     has_session: bool,
@@ -11868,13 +11927,13 @@ mod tests {
     }
 
     #[test]
-    fn restricted_sync_attempt_starts_only_without_an_active_owner() {
-        assert!(begin_restricted_sync_cursor_attempt(false));
-        assert!(!begin_restricted_sync_cursor_attempt(true));
+    fn provisional_encryption_sync_attempt_starts_only_without_an_active_owner() {
+        assert!(begin_provisional_encryption_sync_cursor_attempt(false));
+        assert!(!begin_provisional_encryption_sync_cursor_attempt(true));
     }
 
     #[test]
-    fn recovery_resumes_restricted_sync_only_for_the_current_gated_session() {
+    fn recovery_resumes_provisional_encryption_sync_only_for_the_current_gated_session() {
         assert!(recovery_sync_should_resume(4, 4, false, false));
         assert!(!recovery_sync_should_resume(3, 4, false, false));
         assert!(!recovery_sync_should_resume(4, 4, true, false));
@@ -11882,11 +11941,19 @@ mod tests {
     }
 
     #[test]
-    fn first_restricted_sync_ack_rejects_stale_torn_down_and_promoted_sessions() {
-        assert!(first_restricted_sync_is_current(4, 4, true, false));
-        assert!(!first_restricted_sync_is_current(3, 4, true, false));
-        assert!(!first_restricted_sync_is_current(4, 4, false, false));
-        assert!(!first_restricted_sync_is_current(4, 4, true, true));
+    fn first_provisional_encryption_sync_ack_rejects_stale_torn_down_and_promoted_sessions() {
+        assert!(first_provisional_encryption_sync_is_current(
+            4, 4, true, false
+        ));
+        assert!(!first_provisional_encryption_sync_is_current(
+            3, 4, true, false
+        ));
+        assert!(!first_provisional_encryption_sync_is_current(
+            4, 4, false, false
+        ));
+        assert!(!first_provisional_encryption_sync_is_current(
+            4, 4, true, true
+        ));
         assert_eq!(unknown_verification_gate().methods, Vec::new());
         assert_eq!(
             unknown_verification_gate().account_kind,
@@ -11895,7 +11962,7 @@ mod tests {
     }
 
     #[test]
-    fn restricted_sync_rechecks_only_current_unstarted_own_user_flow() {
+    fn provisional_encryption_sync_rechecks_only_current_unstarted_own_user_flow() {
         assert!(own_user_sas_recheck_is_current(
             4, 4, true, false, true, false
         ));
@@ -11917,25 +11984,25 @@ mod tests {
     }
 
     #[test]
-    fn restricted_sync_diagnostics_require_current_own_user_flow() {
+    fn provisional_encryption_sync_diagnostics_require_current_own_user_flow() {
         assert_eq!(
-            active_own_user_sas_flow_for_restricted_sync(4, 4, true, false, Some(73)),
+            active_own_user_sas_flow_for_provisional_encryption_sync(4, 4, true, false, Some(73)),
             Some(73)
         );
         assert_eq!(
-            active_own_user_sas_flow_for_restricted_sync(3, 4, true, false, Some(73)),
+            active_own_user_sas_flow_for_provisional_encryption_sync(3, 4, true, false, Some(73)),
             None
         );
         assert_eq!(
-            active_own_user_sas_flow_for_restricted_sync(4, 4, false, false, Some(73)),
+            active_own_user_sas_flow_for_provisional_encryption_sync(4, 4, false, false, Some(73)),
             None
         );
         assert_eq!(
-            active_own_user_sas_flow_for_restricted_sync(4, 4, true, true, Some(73)),
+            active_own_user_sas_flow_for_provisional_encryption_sync(4, 4, true, true, Some(73)),
             None
         );
         assert_eq!(
-            active_own_user_sas_flow_for_restricted_sync(4, 4, true, false, None),
+            active_own_user_sas_flow_for_provisional_encryption_sync(4, 4, true, false, None),
             None
         );
     }
@@ -12889,7 +12956,7 @@ mod tests {
             None
         );
         assert!(
-            run_own_user_sas_start(213, "restricted_sync", async {
+            run_own_user_sas_start(213, "provisional_encryption_sync", async {
                 Err::<Option<u8>, _>(koushi_sdk::E2eeTrustError::Sdk(
                     "private SDK detail".to_owned(),
                 ))
@@ -12911,36 +12978,11 @@ mod tests {
                 "stage=sas_start_finished flow_id=211 source=request_ready outcome=started",
                 "stage=sas_start_attempted flow_id=212 source=initial",
                 "stage=sas_start_finished flow_id=212 source=initial outcome=pending",
-                "stage=sas_start_attempted flow_id=213 source=restricted_sync",
-                "stage=sas_start_finished flow_id=213 source=restricted_sync outcome=failed failure_kind=sdk",
+                "stage=sas_start_attempted flow_id=213 source=provisional_encryption_sync",
+                "stage=sas_start_finished flow_id=213 source=provisional_encryption_sync outcome=failed failure_kind=sdk",
             ]
         );
         assert!(!events.join(" ").contains("private SDK detail"));
-    }
-
-    #[test]
-    fn restricted_sync_failure_streak_reports_once_and_resets_after_success() {
-        let mut failure_reported = false;
-        assert!(should_report_restricted_sync_failure(
-            &mut failure_reported,
-            false
-        ));
-        assert!(!should_report_restricted_sync_failure(
-            &mut failure_reported,
-            false
-        ));
-        assert!(!should_report_restricted_sync_failure(
-            &mut failure_reported,
-            true
-        ));
-        assert!(should_report_restricted_sync_failure(
-            &mut failure_reported,
-            false
-        ));
-        assert!(!should_report_restricted_sync_failure(
-            &mut failure_reported,
-            false
-        ));
     }
 
     #[test]
@@ -13342,7 +13384,7 @@ mod tests {
         shutdown_and_ack(&handle).await;
         let tokens: Vec<_> = std::iter::from_fn(|| probe_rx.try_recv().ok()).collect();
         assert!(tokens.contains(&"trust_observer_terminated"));
-        assert!(tokens.contains(&"restricted_sync_terminated"));
+        assert!(tokens.contains(&"provisional_encryption_sync_terminated"));
         assert!(tokens.contains(&"current_session_released"));
         assert_no_logout_finished(&mut action_rx);
         while let Ok(event) = event_rx.try_recv() {
@@ -13979,7 +14021,7 @@ mod tests {
             .collect::<Vec<_>>();
         let mut remaining = stages.as_slice();
         for expected in [
-            "restricted_catch_up_skipped",
+            "provisional_encryption_sync_skipped",
             "ready_projection_dispatched",
             "normal_sync_started",
         ] {
@@ -14543,6 +14585,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recovery_submission_pauses_and_failure_resumes_the_single_provisional_owner() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        assert_eq!(inspect_sync_owners(&handle).await, (true, false, false));
+
+        let (completion_tx, completion) = oneshot::channel();
+        handle
+            .send(AccountMessage::ConfigureRecoveryResult { completion })
+            .await;
+        handle
+            .send(AccountMessage::Command(AccountCommand::SubmitRecovery {
+                request_id: RequestId {
+                    connection_id: RuntimeConnectionId(1),
+                    sequence: 901,
+                },
+                request: koushi_state::RecoveryRequest {
+                    secret: koushi_state::AuthSecret::new("synthetic-recovery-secret"),
+                },
+            }))
+            .await;
+        assert_eq!(
+            inspect_sync_owners(&handle).await,
+            (false, false, false),
+            "recovery submission must stop and join provisional encryption sync"
+        );
+
+        completion_tx
+            .send(Err(koushi_sdk::E2eeRecoveryError::Sdk(
+                "synthetic failure".to_owned(),
+            )))
+            .expect("release recovery result");
+        loop {
+            let actions = action_rx.recv().await.expect("recovery failure action");
+            if matches!(actions.as_slice(), [AppAction::E2eeRecoveryFailed { .. }]) {
+                break;
+            }
+        }
+        assert_eq!(
+            inspect_sync_owners(&handle).await,
+            (true, false, false),
+            "failed recovery must resume exactly one provisional encryption owner"
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
     async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let (handle, mut action_rx) = login_gated_actor().await;
@@ -14917,7 +15004,7 @@ mod tests {
                 .iter()
                 .any(|record| {
                     record.event.source == "core.verification_admission"
-                        && record.event.stage == "restricted_catch_up_started"
+                        && record.event.stage == "provisional_encryption_sync_started"
                 }),
             "gated admission must diagnose restricted sync ownership start"
         );
@@ -14937,7 +15024,10 @@ mod tests {
             (false, false, false),
             "restricted owner must stop before Ready projection acknowledgement"
         );
-        assert_eq!(probe_rx.try_recv(), Ok("restricted_sync_terminated"));
+        assert_eq!(
+            probe_rx.try_recv(),
+            Ok("provisional_encryption_sync_terminated")
+        );
         acknowledge_next_verified_projection(&handle, &mut action_rx).await;
         assert_eq!(
             inspect_sync_owners(&handle).await,
@@ -15002,7 +15092,7 @@ mod tests {
                 );
                 assert_eq!(
                     probe_rx.try_recv(),
-                    Ok("restricted_sync_terminated"),
+                    Ok("provisional_encryption_sync_terminated"),
                     "LogoutFinished preceded restricted-sync termination"
                 );
                 assert_eq!(
@@ -15220,7 +15310,10 @@ mod tests {
             }
         }
         assert_eq!(probe_rx.try_recv(), Ok("trust_observer_terminated"));
-        assert_eq!(probe_rx.try_recv(), Ok("restricted_sync_terminated"));
+        assert_eq!(
+            probe_rx.try_recv(),
+            Ok("provisional_encryption_sync_terminated")
+        );
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
 
@@ -16423,7 +16516,7 @@ mod tests {
     }
 
     #[test]
-    fn restricted_sync_once_guard_precedes_sync_actor_spawn_and_send() {
+    fn manual_sync_once_rejection_precedes_sync_actor_spawn_and_send() {
         let source = include_str!("account.rs");
         let route_body = source
             .split("async fn route_sync_command")
@@ -16431,8 +16524,8 @@ mod tests {
             .and_then(|rest| rest.split("async fn spawn_sync_actor").next())
             .expect("route_sync_command body");
         let guard = route_body
-            .find("restricted_sync_blocks_sync_once(")
-            .expect("restricted sync must gate SyncOnce at the AccountActor boundary");
+            .find("is_manual_sync_once(")
+            .expect("AccountActor must reject manual SyncOnce at its boundary");
         let spawn = route_body
             .find("self.spawn_sync_actor(")
             .expect("normal routing should retain lazy SyncActor spawn");
@@ -16445,29 +16538,43 @@ mod tests {
             route_body[guard..spawn].contains("CoreFailure::SyncFailed")
                 && route_body[guard..spawn].contains("SyncFailureKind::Internal")
                 && route_body[guard..spawn].contains("return;"),
-            "restricted-owner rejection must emit one fixed Internal failure before routing"
+            "manual SyncOnce rejection must emit one fixed Internal failure before routing"
         );
     }
 
     #[test]
-    fn restricted_sync_blocks_only_sync_once_commands() {
+    fn manual_sync_once_is_the_only_rejected_sync_command() {
         let request_id = test_request_id();
 
-        assert!(restricted_sync_blocks_sync_once(
-            true,
-            &SyncCommand::SyncOnce { request_id },
-        ));
-        assert!(!restricted_sync_blocks_sync_once(
-            false,
-            &SyncCommand::SyncOnce { request_id },
-        ));
+        assert!(is_manual_sync_once(&SyncCommand::SyncOnce { request_id }));
         for command in [
             SyncCommand::Start { request_id },
             SyncCommand::Stop { request_id },
             SyncCommand::Restart { request_id },
         ] {
-            assert!(!restricted_sync_blocks_sync_once(true, &command));
+            assert!(!is_manual_sync_once(&command));
         }
+    }
+
+    #[test]
+    fn provisional_verification_uses_encryption_sync_service() {
+        let source = include_str!("account.rs");
+        let provisional_owner = source
+            .split("fn start_provisional_encryption_sync")
+            .nth(1)
+            .expect("provisional encryption owner")
+            .split("async fn stop_provisional_runtime")
+            .next()
+            .expect("provisional owner body");
+
+        assert!(
+            provisional_owner.contains("provisional_encryption_sync_loop"),
+            "provisional verification must use EncryptionSyncService"
+        );
+        assert!(
+            !provisional_owner.contains("restricted_verification_sync_once_with_token"),
+            "provisional verification must never construct classic /sync"
+        );
     }
 
     #[cfg(feature = "qa-bin")]
@@ -17238,7 +17345,8 @@ mod tests {
             recovery_task: None,
             pending_recovery_completion: None,
             recovery_trust_settlement_task: None,
-            restricted_sync: None,
+            provisional_encryption_sync: None,
+            encryption_sync_permit: koushi_sdk::new_encryption_sync_permit_owner(),
             pending_ready_events: Vec::new(),
             pending_trust_transition: None,
             next_trust_transition_id: 0,
@@ -17249,6 +17357,7 @@ mod tests {
             trust_observation_override: std::sync::Mutex::new(None),
             trust_observation_is_synthetic: false,
             recovery_download_override: std::sync::Mutex::new(None),
+            recovery_result_override: std::sync::Mutex::new(None),
             close_store_results: std::collections::VecDeque::new(),
             device_cleanup_results: std::collections::VecDeque::new(),
             store: store.clone(),

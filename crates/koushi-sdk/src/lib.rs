@@ -549,7 +549,6 @@ pub use sliding_sync_discovery::{
 
 const LOGIN_DISCOVERY_PATH: &str = "_matrix/client/v3/login";
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
-const RESTRICTED_VERIFICATION_SYNC_SERVER_TIMEOUT: Duration = Duration::from_secs(3);
 const SYNC_INVITE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const SYNC_INVITE_PROBE_CONNECTION_ID: &str = "koushi-invite";
 const SYNC_INVITE_PROBE_LIST_KEY: &str = "koushi_invites";
@@ -1677,6 +1676,68 @@ fn delete_devices_auth_data(
 }
 
 #[cfg(test)]
+mod provisional_encryption_sync_tests {
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use serde_json::json;
+    use wiremock::{
+        Mock, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    use super::SessionInfo;
+
+    #[tokio::test]
+    async fn uses_simplified_sliding_sync_without_room_lists() {
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let session = super::MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: server.uri(),
+                user_id: "@provisional:example.invalid".to_owned(),
+                device_id: "PROVISIONAL".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        );
+        Mock::given(method("POST"))
+            .and(path(
+                "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "pos": "0" })))
+            .expect(1)
+            .mount(&server.server())
+            .await;
+
+        super::provisional_encryption_sync_loop(
+            &session,
+            super::new_encryption_sync_permit_owner(),
+            || async { super::MatrixSyncLoopControl::Stop },
+        )
+        .await
+        .expect("one provisional encryption response");
+
+        let requests = server.received_requests().await.expect("captured requests");
+        let request = requests
+            .iter()
+            .find(|request| {
+                request.url.path() == "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+            })
+            .expect("simplified sliding sync request");
+        let body: serde_json::Value = serde_json::from_slice(&request.body).expect("JSON body");
+        assert_eq!(body["conn_id"], "encryption");
+        assert_eq!(body["extensions"]["e2ee"]["enabled"], true);
+        assert_eq!(body["extensions"]["to_device"]["enabled"], true);
+        assert!(body.get("lists").is_none());
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.url.path() != "/_matrix/client/v3/sync"),
+            "provisional encryption must not issue classic /sync"
+        );
+    }
+}
+
+#[cfg(test)]
 mod device_cleanup_tests {
     use matrix_sdk::ruma::api::error::{ErrorKind, UnknownTokenErrorData};
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -2477,8 +2538,7 @@ mod e2ee_trust_tests {
         map_sdk_sas_emojis_to_desktop, map_sdk_verification_state, map_verification_method_facts,
         mismatch_sas_verification, observe_incoming_verification_requests, rename_device,
         request_device_verification, reset_identity, restore_key_backup, restore_session,
-        restricted_verification_sync_filter, start_sas_verification,
-        write_recovery_key_if_requested,
+        start_sas_verification, write_recovery_key_if_requested,
     };
 
     const MATRIX_KEY_EXPORT_HEADER: &str = "-----BEGIN MEGOLM SESSION DATA-----";
@@ -3042,15 +3102,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         let _ = super::request_own_user_sas_verification;
         let _opaque: Option<super::MatrixOwnUserVerificationHandle> = None;
         assert!(!std::any::type_name::<super::MatrixOwnUserVerificationHandle>().contains('@'));
-    }
-
-    #[test]
-    fn restricted_sync_filter_suppresses_rooms_and_presence_but_keeps_account_data() {
-        let filter = restricted_verification_sync_filter();
-        let json = serde_json::to_value(filter).expect("filter serializes");
-        assert_eq!(json["presence"]["types"], serde_json::json!([]));
-        assert_eq!(json["room"]["rooms"], serde_json::json!([]));
-        assert!(json.get("account_data").is_none());
     }
 
     #[test]
@@ -4873,9 +4924,7 @@ impl PersistableMatrixSession {
                     auth_kind: PersistableSessionJsonKind::Password,
                     homeserver: self.info.homeserver.clone(),
                     authentication_method: self.info.authentication_method,
-                    sliding_sync_positive_evidence: self
-                        .sliding_sync_positive_evidence
-                        .clone(),
+                    sliding_sync_positive_evidence: self.sliding_sync_positive_evidence.clone(),
                     session: session.clone(),
                 })
                 .map_err(|error| PasswordLoginError::Serialization(error.to_string()))
@@ -4886,9 +4935,7 @@ impl PersistableMatrixSession {
             } => serde_json::to_string(&SerializedOauthPersistableMatrixSession {
                 auth_kind: PersistableSessionJsonKind::OAuth,
                 homeserver: self.info.homeserver.clone(),
-                sliding_sync_positive_evidence: self
-                    .sliding_sync_positive_evidence
-                    .clone(),
+                sliding_sync_positive_evidence: self.sliding_sync_positive_evidence.clone(),
                 user_session: user_session.clone(),
                 client_id: client_id.clone(),
             })
@@ -6248,6 +6295,7 @@ pub fn logout_blocking(session: &MatrixClientSession) -> Result<(), PasswordLogi
     runtime.block_on(logout(session))
 }
 
+#[cfg(any(test, feature = "test-hooks", feature = "smoke"))]
 pub fn sync_once_blocking(session: &MatrixClientSession) -> Result<(), MatrixSyncError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -8764,6 +8812,7 @@ pub async fn room_timeline_visible_items(
     Ok(items)
 }
 
+#[cfg(any(test, feature = "test-hooks", feature = "smoke"))]
 pub async fn sync_once(session: &MatrixClientSession) -> Result<(), MatrixSyncError> {
     session
         .client()
@@ -8784,48 +8833,53 @@ pub async fn close_session_stores(session: &MatrixClientSession) -> Result<(), M
         .map_err(|_| MatrixSyncError::Sdk)
 }
 
-fn restricted_verification_sync_filter() -> matrix_sdk::ruma::api::client::filter::FilterDefinition
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("provisional encryption sync failed")]
+pub enum ProvisionalEncryptionSyncError {
+    Sdk,
+}
+
+pub type EncryptionSyncPermitOwner =
+    Arc<tokio::sync::Mutex<matrix_sdk_ui::encryption_sync_service::EncryptionSyncPermit>>;
+
+pub fn new_encryption_sync_permit_owner() -> EncryptionSyncPermitOwner {
+    Arc::new(tokio::sync::Mutex::new(
+        matrix_sdk_ui::encryption_sync_service::EncryptionSyncPermit::new(),
+    ))
+}
+
+/// Runs the encryption-only Simplified Sliding Sync owner used while a newly
+/// authenticated session is waiting for trust admission.
+///
+/// The callback runs after every committed encryption response. Dropping this
+/// future drops the SDK stream and its exclusive permit before normal sync is
+/// allowed to start.
+pub async fn provisional_encryption_sync_loop<F, C>(
+    session: &MatrixClientSession,
+    permit: EncryptionSyncPermitOwner,
+    mut on_successful_sync: F,
+) -> Result<(), ProvisionalEncryptionSyncError>
+where
+    F: FnMut() -> C,
+    C: Future<Output = MatrixSyncLoopControl>,
 {
-    let mut filter = matrix_sdk::ruma::api::client::filter::FilterDefinition::default();
-    filter.presence = matrix_sdk::ruma::api::client::filter::Filter::ignore_all();
-    filter.room = matrix_sdk::ruma::api::client::filter::RoomFilter::ignore_all();
-    filter
-}
+    use matrix_sdk_ui::encryption_sync_service::EncryptionSyncService;
 
-fn restricted_verification_sync_settings() -> matrix_sdk::config::SyncSettings {
-    matrix_sdk::config::SyncSettings::new()
-        .token(matrix_sdk::config::SyncToken::NoToken)
-        .save_sync_token(false)
-        .timeout(RESTRICTED_VERIFICATION_SYNC_SERVER_TIMEOUT)
-        .filter(
-            matrix_sdk::ruma::api::client::sync::sync_events::v3::Filter::FilterDefinition(
-                restricted_verification_sync_filter(),
-            ),
-        )
-}
-
-pub async fn restricted_verification_sync_once(
-    session: &MatrixClientSession,
-) -> Result<(), MatrixSyncError> {
-    restricted_verification_sync_once_with_token(session, None)
+    let permit = permit.lock_owned().await;
+    let service = EncryptionSyncService::new(session.client().clone(), None)
         .await
-        .map(|_| ())
-}
+        .map_err(|_| ProvisionalEncryptionSyncError::Sdk)?;
+    let stream = service.sync(permit);
+    futures_util::pin_mut!(stream);
 
-pub async fn restricted_verification_sync_once_with_token(
-    session: &MatrixClientSession,
-    token: Option<String>,
-) -> Result<String, MatrixSyncError> {
-    let mut settings = restricted_verification_sync_settings();
-    if let Some(token) = token {
-        settings = settings.token(token);
+    while let Some(result) = stream.next().await {
+        result.map_err(|_| ProvisionalEncryptionSyncError::Sdk)?;
+        if on_successful_sync().await == MatrixSyncLoopControl::Stop {
+            return Ok(());
+        }
     }
-    session
-        .client()
-        .sync_once(settings)
-        .await
-        .map(|response| response.next_batch)
-        .map_err(|_| MatrixSyncError::Sdk)
+
+    Err(ProvisionalEncryptionSyncError::Sdk)
 }
 
 pub async fn sync_loop<F, C>(
