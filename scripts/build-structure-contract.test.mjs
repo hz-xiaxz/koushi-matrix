@@ -99,18 +99,55 @@ test("CI gates positive invitations on exactly Tuwunel and Synapse", () => {
     invitationJob,
     /npm --prefix apps\/desktop run qa:headless-invites:\$\{\{ matrix\.server \}\}/
   );
-  assert.match(invitationJob, /if: matrix\.server == 'tuwunel'[\s\S]*actions\/cache@v4/);
+  assert.match(invitationJob, /if: matrix\.server == 'tuwunel'[\s\S]*actions\/cache@/);
   assert.match(invitationJob, /matrix-construct\/tuwunel\/releases\/download\/v1\.7\.1\//);
+  assert.match(
+    invitationJob,
+    /64d6b60a781e2dad74e840ed6e211eced8c4206ce2d307fe62bbc62e3ffcc983/
+  );
+  assert.match(
+    invitationJob,
+    /key: tuwunel-v1\.7\.1-x86_64-v1-linux-gnu-64d6b60a781e2dad74e840ed6e211eced8c4206ce2d307fe62bbc62e3ffcc983/
+  );
+  const checksum = invitationJob.indexOf("sha256sum --check");
+  const decompress = invitationJob.indexOf("unzstd");
+  assert.ok(checksum >= 0 && decompress > checksum, "Tuwunel checksum must precede decompression");
   assert.match(invitationJob, /if: matrix\.server == 'synapse'\n\s+run: docker version/);
   assert.match(invitationJob, /name: core-invites-\$\{\{ matrix\.server \}\}-qa-logs/);
   assert.doesNotMatch(invitationJob, /(?:server:\s*\[[^\]]*conduit|--server=conduit)/i);
   assert.doesNotMatch(invitationJob, /(?:\|\s*(?:tee|grep)|\|\|\s*true|;\s*true)/);
+
+  const actionUses = invitationJob.match(/^\s+(?:- )?uses: .+$/gm) ?? [];
+  assert.equal(actionUses.length, 5);
+  for (const actionUse of actionUses) {
+    assert.match(actionUse, /@[0-9a-f]{40}\s+#\s+(?:v\d+|1\.96\.0)$/);
+  }
 
   // Conduit media coverage is unrelated to the positive invitation migration
   // and remains temporary until PR3 removes active Conduit QA as a whole.
   assert.match(conduitJob, /- name: Install Conduit/);
   assert.match(conduitJob, /--server=conduit --scenario=media/);
   assert.doesNotMatch(conduitJob, /scenario=login_sync/);
+});
+
+test("headless QA validates captured output before writing uploadable artifacts", () => {
+  const headless = readRepoFile("scripts/desktop-headless-local-qa.mjs");
+  const sdkStart = headless.indexOf("function runHeadlessQa(");
+  const coreStart = headless.indexOf("function runCoreHeadlessQa(");
+  const validationStart = headless.indexOf("function assertQaOutputIsPrivate(");
+
+  assert.ok(sdkStart >= 0 && coreStart > sdkStart && validationStart > coreStart);
+  const sdkRunner = headless.slice(sdkStart, coreStart);
+  const coreRunner = headless.slice(coreStart, validationStart);
+  for (const [label, runner] of [
+    ["SDK", sdkRunner],
+    ["Core", coreRunner]
+  ]) {
+    const validation = runner.indexOf("assertQaOutputIsPrivate(");
+    const artifactWrite = runner.indexOf("writeQaOutputFiles(");
+    assert.ok(validation >= 0, `${label} runner must validate captured output`);
+    assert.ok(artifactWrite > validation, `${label} runner must validate before artifact writes`);
+  }
 });
 
 test("submodule guard is wired into commit and QA entrypoints", () => {

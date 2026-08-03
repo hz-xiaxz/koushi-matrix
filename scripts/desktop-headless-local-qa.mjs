@@ -376,11 +376,11 @@ function runHeadlessQa({
       timeout: timeoutMs
     }
   );
-  writeQaOutputFiles(logPath, "sdk", result.stdout, result.stderr);
   assertQaOutputIsPrivate("headless SDK QA", result, [
     ["passwordA", passwordA],
     ["passwordB", passwordB]
   ]);
+  writeQaOutputFiles(logPath, "sdk", result.stdout, result.stderr);
   appendQaOutput(logPath, result.stdout, result.stderr);
   if (result.error?.code === "ETIMEDOUT") {
     throw new Error(
@@ -491,11 +491,11 @@ function runCoreHeadlessQa({
       timeout: timeoutMs
     }
   );
-  writeQaOutputFiles(logPath, `core-${legLabel}`, result.stdout, result.stderr);
   assertQaOutputIsPrivate("headless core QA", result, [
     ["passwordA", passwordA],
     ["passwordB", passwordB]
   ]);
+  writeQaOutputFiles(logPath, `core-${legLabel}`, result.stdout, result.stderr);
   appendQaOutput(logPath, result.stdout, result.stderr);
   if (result.status !== 0) {
     if (result.error?.code === "ETIMEDOUT") {
