@@ -11,6 +11,16 @@ function readRepoFile(path) {
   return readFileSync(join(repoRoot, path), "utf8");
 }
 
+function workflowJobSource(workflow, jobName) {
+  const startMarker = `\n  ${jobName}:\n`;
+  const start = workflow.indexOf(startMarker);
+  assert.ok(start >= 0, `expected CI job ${jobName}`);
+  const remainder = workflow.slice(start + startMarker.length);
+  const nextJob = /\n  [a-z0-9_-]+:\n/i.exec(remainder);
+  const end = nextJob ? start + startMarker.length + nextJob.index : workflow.length;
+  return workflow.slice(start, end);
+}
+
 test("root workspace owns the desktop Tauri crate and the only lockfile", () => {
   const rootCargo = readRepoFile("Cargo.toml");
   const tauriCargo = readRepoFile("apps/desktop/src-tauri/Cargo.toml");
@@ -26,6 +36,17 @@ test("vendored Matrix SDK crates are consumed through root submodule paths", () 
   const sdkCargo = readRepoFile("crates/koushi-sdk/Cargo.toml");
   const coreCargo = readRepoFile("crates/koushi-core/Cargo.toml");
   const gitmodules = readRepoFile(".gitmodules");
+  const engineeringRules = readRepoFile("docs/policies/engineering-rules.md");
+  const buildRulesStart = engineeringRules.indexOf("## Build, Dependencies, QA Gates");
+  const buildRulesEnd = engineeringRules.indexOf("\n## ", buildRulesStart);
+
+  assert.ok(buildRulesStart >= 0 && buildRulesEnd > buildRulesStart);
+  const buildRules = engineeringRules.slice(buildRulesStart, buildRulesEnd);
+  const sdkPolicyStart = buildRules.indexOf("\n1. ");
+  const sdkPolicyEnd = buildRules.indexOf("\n2. ", sdkPolicyStart);
+
+  assert.ok(sdkPolicyStart >= 0 && sdkPolicyEnd > sdkPolicyStart);
+  const sdkDependencyPolicy = buildRules.slice(sdkPolicyStart, sdkPolicyEnd);
 
   assert.match(rootCargo, /^\[workspace\.dependencies\]$/m);
   assert.match(rootCargo, /matrix-sdk = \{ path = "vendor\/matrix-rust-sdk\/crates\/matrix-sdk"/);
@@ -35,6 +56,15 @@ test("vendored Matrix SDK crates are consumed through root submodule paths", () 
   assert.doesNotMatch(gitmodules, /^\s*branch\s*=/m);
   assert.doesNotMatch(sdkCargo, /vendor\/matrix-rust-sdk/);
   assert.doesNotMatch(coreCargo, /vendor\/matrix-rust-sdk/);
+  assert.doesNotMatch(sdkDependencyPolicy, /rev-pinned\s+git\s+dependency/);
+  assert.doesNotMatch(sdkDependencyPolicy, /pinned\s+git\s+revision/);
+  assert.doesNotMatch(sdkDependencyPolicy, /github\.com\/[^\s`]*matrix-rust-sdk/);
+  assert.doesNotMatch(sdkDependencyPolicy, /app crates must not depend on it by local path/);
+  assert.match(sdkDependencyPolicy, /root workspace Matrix SDK\s+dependencies/);
+  assert.match(
+    sdkDependencyPolicy,
+    /use their exact paths beneath\s+`vendor\/matrix-rust-sdk`/
+  );
 });
 
 test("toolchain and dev dependency profile are pinned for stable incremental builds", () => {
@@ -57,6 +87,47 @@ test("CI and npm scripts use the unified workspace contracts", () => {
   assert.doesNotMatch(ci, /apps\/desktop\/src-tauri\s*$/m);
   assert.match(ci, /cargo test -p koushi-desktop/);
   assert.match(releaseGate, /cargo check[\s\S]*-p[\s\S]*koushi-desktop/);
+});
+
+test("CI gates positive invitations on exactly Tuwunel and Synapse", () => {
+  const ci = readRepoFile(".github/workflows/ci.yml");
+  const invitationJob = workflowJobSource(ci, "core-invites");
+  const conduitJob = workflowJobSource(ci, "core-homeserver");
+
+  assert.match(invitationJob, /^\s{8}server: \[tuwunel, synapse\]$/m);
+  assert.match(
+    invitationJob,
+    /--server=\$\{\{ matrix\.server \}\}[\s\S]*--scenario=invites_dm[\s\S]*--core-backend=sync-service/
+  );
+  assert.match(invitationJob, /if: matrix\.server == 'tuwunel'[\s\S]*actions\/cache@/);
+  assert.match(invitationJob, /matrix-construct\/tuwunel\/releases\/download\/v1\.7\.1\//);
+  assert.match(
+    invitationJob,
+    /64d6b60a781e2dad74e840ed6e211eced8c4206ce2d307fe62bbc62e3ffcc983/
+  );
+  assert.match(
+    invitationJob,
+    /key: tuwunel-v1\.7\.1-x86_64-v1-linux-gnu-64d6b60a781e2dad74e840ed6e211eced8c4206ce2d307fe62bbc62e3ffcc983/
+  );
+  const checksum = invitationJob.indexOf("sha256sum --check");
+  const decompress = invitationJob.indexOf("unzstd");
+  assert.ok(checksum >= 0 && decompress > checksum, "Tuwunel checksum must precede decompression");
+  assert.match(invitationJob, /if: matrix\.server == 'synapse'\n\s+run: docker version/);
+  assert.match(invitationJob, /name: core-invites-\$\{\{ matrix\.server \}\}-qa-logs/);
+  assert.doesNotMatch(invitationJob, /(?:server:\s*\[[^\]]*conduit|--server=conduit)/i);
+  assert.doesNotMatch(invitationJob, /(?:\|\s*(?:tee|grep)|\|\|\s*true|;\s*true)/);
+
+  const actionUses = invitationJob.match(/^\s+(?:- )?uses: .+$/gm) ?? [];
+  assert.equal(actionUses.length, 5);
+  for (const actionUse of actionUses) {
+    assert.match(actionUse, /@[0-9a-f]{40}\s+#\s+(?:v\d+|1\.96\.0)$/);
+  }
+
+  // Conduit media coverage is unrelated to the positive invitation migration
+  // and remains temporary until PR3 removes active Conduit QA as a whole.
+  assert.match(conduitJob, /- name: Install Conduit/);
+  assert.match(conduitJob, /--server=conduit --scenario=media/);
+  assert.doesNotMatch(conduitJob, /scenario=login_sync/);
 });
 
 test("submodule guard is wired into commit and QA entrypoints", () => {
@@ -82,7 +153,7 @@ test("headless core QA can run cargo binaries with the release profile", () => {
   assert.match(headless, /--cargo-profile=dev\|release/);
   assert.match(headless, /explicitCoreBackendOption/);
   assert.match(headless, /defaultCoreBackendForScenario\(scenarioOption, cargoProfileOption\)/);
-  assert.match(headless, /--cargo-profile=release cannot run LegacySync/);
+  assert.match(headless, /--cargo-profile=release cannot force a QA backend/);
   assert.match(headless, /function selectedScenarios/);
   assert.match(headless, /for \(const scenario of scenarios\)/);
   assert.match(headless, /KOUSHI_QA_SCENARIO: scenario/);

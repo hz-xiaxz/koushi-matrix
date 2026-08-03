@@ -3901,22 +3901,17 @@ fn test_only() {
     expect(source).not.toContain("console.log(fixture");
   });
 
-  test("headless local QA runner preserves raw child logs before public privacy validation", () => {
+  test("headless local QA routes SDK and Core output through the validated artifact boundary", () => {
     const source = readFileSync(
       new URL("../../../../scripts/desktop-headless-local-qa.mjs", import.meta.url),
       "utf8"
     );
 
-    const firstValidation = source.indexOf("assertQaOutputIsPrivate(");
-    const firstWrite = source.indexOf("writeQaOutputFiles(");
-
-    expect(source).toContain("./lib/qa-token-contract.mjs");
-    expect(source).toContain("assertNoMatrixIdentifiers");
-    expect(source).toContain("assertNoLocalPaths");
-    expect(source).toContain("assertNoRawSdkErrors");
-    expect(firstValidation).toBeGreaterThan(-1);
-    expect(firstWrite).toBeGreaterThan(-1);
-    expect(firstWrite).toBeLessThan(firstValidation);
+    expect(source).toContain('from "./lib/qa-output-artifacts.mjs"');
+    expect(source.match(/writeValidatedQaOutputFiles\(\{/g)).toHaveLength(2);
+    expect(source).toContain('label: "sdk"');
+    expect(source).toContain("label: `core-${legLabel}`");
+    expect(source.match(/validate: \(output\) =>\s*assertQaOutputIsPrivate/g)).toHaveLength(2);
   });
 
   test("headless local QA failure messages do not replay raw child output or paths", () => {

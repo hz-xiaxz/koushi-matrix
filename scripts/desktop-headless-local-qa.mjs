@@ -18,8 +18,10 @@ import {
   checkInstalledHomeserver,
   conduitConfig,
   freePort,
+  homeserverFixtureCapabilities,
   minimalEnvironment,
   registerUser,
+  selectedServers,
   startHomeserver,
   stopProcess,
   tuwunelConfig,
@@ -30,6 +32,7 @@ import {
   assertNoMatrixIdentifiers,
   assertNoRawSdkErrors
 } from "./lib/qa-token-contract.mjs";
+import { writeValidatedQaOutputFiles } from "./lib/qa-output-artifacts.mjs";
 import { assertSdkSubmoduleSynced } from "./lib/sdk-submodule-status.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -111,14 +114,32 @@ if (args.has("--check-tools")) {
 }
 
 if (args.has("--check-probed-backend-map")) {
-  if (expectedSyncBackendForLeg(false) !== undefined) {
-    throw new Error("probed backend must be selected by behavior");
+  if (expectedSyncBackendForLeg("probed") !== undefined) {
+    throw new Error("probed legs must remain behavior-selected for every fixture");
   }
-  if (expectedSyncBackendForLeg(true) !== "LegacySync") {
+  if (expectedSyncBackendForLeg("legacy") !== "LegacySync") {
     throw new Error("forced legacy leg must retain its backend assertion");
   }
-  console.log("probed sync backend is behavior-selected; forced legacy assertion ok");
+  console.log(
+    "tuwunel probed=behavior-selected conduit probed=behavior-selected forced=LegacySync"
+  );
   process.exit(0);
+}
+
+if (args.has("--check-core-backend-map")) {
+  try {
+    validateReleaseBackend();
+    for (const leg of selectedCoreBackendLegs()) {
+      const config = coreBackendLegConfig(leg);
+      console.log(
+        `leg=${config.legLabel} force=${config.forceBackend ?? "none"} expect=${config.expectSyncBackend ?? "behavior-selected"}`
+      );
+    }
+    process.exit(0);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
 }
 
 if (args.has("--print-conduit-config")) {
@@ -208,6 +229,7 @@ async function run() {
 
 async function runForServer(serverKind, scenario) {
   checkInstalledHomeserver(serverKind);
+  const fixtureCapabilities = homeserverFixtureCapabilities(serverKind);
 
   const fixture = fixtureRunOption ? loadQaFixture(fixtureRunOption, serverKind) : null;
   const port = await freePort();
@@ -237,7 +259,8 @@ async function runForServer(serverKind, scenario) {
   const serverProcess = startHomeserver(serverKind, configPath, logPath, {
     serverName,
     port,
-    dataDir
+    dataDir,
+    slidingSyncEnabled: fixtureCapabilities.simplifiedSlidingSync.enabled
   });
   try {
     await waitForHomeserver(homeserver, serverProcess, timeoutMs, logPath);
@@ -258,9 +281,30 @@ async function runForServer(serverKind, scenario) {
     }
 
     if (runCoreQa) {
+      // Explicit temporary SyncService leg for Issue #412 PR1. It bypasses the
+      // known-obsolete invite-only probe so this PR can prove the real
+      // SyncService all_rooms invitation path before PR2 deletes selection.
+      if (shouldRunCoreBackend("sync-service")) {
+        const leg = coreBackendLegConfig("sync-service");
+        const coreUsers = await registerQaUsers(homeserver, "core_sync_service");
+        const coreSyncServiceResult = runCoreHeadlessQa({
+          serverKind,
+          homeserver,
+          serverName,
+          ...coreUsers,
+          logPath,
+          scenario,
+          legLabel: leg.legLabel,
+          forceBackend: leg.forceBackend,
+          expectSyncBackend: leg.expectSyncBackend
+        });
+        console.log(`core QA (forced SyncService): ${coreSyncServiceResult.trim()}`);
+      }
+
       // Leg 1: behavior-probed backend. The core's typed capability probe owns
       // fail-closed selection; server family labels are not capability facts.
       if (shouldRunCoreBackend("probed")) {
+        const leg = coreBackendLegConfig("probed");
         const coreUsers = fixture ?? (await registerQaUsers(homeserver, "core_probed"));
         if (!fixture && serverKind === "synapse") {
           writeQaFixture(runDir, {
@@ -276,8 +320,8 @@ async function runForServer(serverKind, scenario) {
           ...coreUsers,
           logPath,
           scenario,
-          legLabel: "probed",
-          expectSyncBackend: expectedSyncBackendForLeg(false),
+          legLabel: leg.legLabel,
+          expectSyncBackend: leg.expectSyncBackend,
           replayExistingStress: fixtureReplay
         });
         console.log(`core QA (probed backend): ${coreQaResult.trim()}`);
@@ -288,6 +332,7 @@ async function runForServer(serverKind, scenario) {
       // /sync works against MSC4186-capable servers too, so this leg
       // exercises the LegacySync product path end-to-end.
       if (shouldRunCoreBackend("legacy")) {
+        const leg = coreBackendLegConfig("legacy");
         const coreUsers = await registerQaUsers(homeserver, "core_legacy");
         const coreLegacyResult = runCoreHeadlessQa({
           serverKind,
@@ -296,9 +341,9 @@ async function runForServer(serverKind, scenario) {
           ...coreUsers,
           logPath,
           scenario,
-          legLabel: "legacy",
-          forceLegacyBackend: true,
-          expectSyncBackend: expectedSyncBackendForLeg(true)
+          legLabel: leg.legLabel,
+          forceBackend: leg.forceBackend,
+          expectSyncBackend: leg.expectSyncBackend
         });
         console.log(`core QA (forced LegacySync): ${coreLegacyResult.trim()}`);
         if (!coreLegacyResult.includes("sync_backend_a=LegacySync")) {
@@ -367,11 +412,17 @@ function runHeadlessQa({
       timeout: timeoutMs
     }
   );
-  writeQaOutputFiles(logPath, "sdk", result.stdout, result.stderr);
-  assertQaOutputIsPrivate("headless SDK QA", result, [
-    ["passwordA", passwordA],
-    ["passwordB", passwordB]
-  ]);
+  writeValidatedQaOutputFiles({
+    directory: dirname(logPath),
+    label: "sdk",
+    stdout: result.stdout,
+    stderr: result.stderr,
+    validate: (output) =>
+      assertQaOutputIsPrivate("headless SDK QA", output, [
+        ["passwordA", passwordA],
+        ["passwordB", passwordB]
+      ])
+  });
   appendQaOutput(logPath, result.stdout, result.stderr);
   if (result.error?.code === "ETIMEDOUT") {
     throw new Error(
@@ -398,7 +449,7 @@ function runCoreHeadlessQa({
   logPath,
   scenario,
   legLabel = "default",
-  forceLegacyBackend = false,
+  forceBackend = null,
   expectSyncBackend,
   replayExistingStress = false
 }) {
@@ -426,9 +477,10 @@ function runCoreHeadlessQa({
   if (userC) {
     env.KOUSHI_LOCAL_QA_USER_C = userC;
   }
-  if (forceLegacyBackend) {
-    // Debug/test-only override; release builds ignore it entirely.
-    env.KOUSHI_QA_FORCE_SYNC_BACKEND = "legacy";
+  if (forceBackend !== null) {
+    // Debug/test-only override; release builds ignore it entirely. The
+    // sync_service value is temporary and is removed with selection in PR2.
+    env.KOUSHI_QA_FORCE_SYNC_BACKEND = forceBackend;
   }
   if (expectSyncBackend) {
     env.KOUSHI_LOCAL_QA_EXPECT_SYNC_BACKEND = expectSyncBackend;
@@ -482,11 +534,17 @@ function runCoreHeadlessQa({
       timeout: timeoutMs
     }
   );
-  writeQaOutputFiles(logPath, `core-${legLabel}`, result.stdout, result.stderr);
-  assertQaOutputIsPrivate("headless core QA", result, [
-    ["passwordA", passwordA],
-    ["passwordB", passwordB]
-  ]);
+  writeValidatedQaOutputFiles({
+    directory: dirname(logPath),
+    label: `core-${legLabel}`,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    validate: (output) =>
+      assertQaOutputIsPrivate("headless core QA", output, [
+        ["passwordA", passwordA],
+        ["passwordB", passwordB]
+      ])
+  });
   appendQaOutput(logPath, result.stdout, result.stderr);
   if (result.status !== 0) {
     if (result.error?.code === "ETIMEDOUT") {
@@ -526,12 +584,6 @@ function appendQaOutput(logPath, stdout, stderr) {
     log.write(stderr);
   }
   log.end();
-}
-
-function writeQaOutputFiles(logPath, label, stdout, stderr) {
-  const dir = dirname(logPath);
-  writeFileSync(join(dir, `${label}-stdout.log`), stdout || "");
-  writeFileSync(join(dir, `${label}-stderr.log`), stderr || "");
 }
 
 function writeQaFixture(runDir, fixture) {
@@ -598,24 +650,49 @@ function copyFixtureDataDir(fixture, dataDir) {
   });
 }
 
-function selectedServers(value) {
-  if (value === "both") {
-    return ["conduit", "tuwunel"];
+function expectedSyncBackendForLeg(backend) {
+  if (backend === "sync-service") {
+    return "SyncService";
   }
-  if (value === "all") {
-    return ["conduit", "tuwunel", "synapse"];
+  if (backend === "legacy") {
+    return "LegacySync";
   }
-  if (value === "conduit" || value === "tuwunel" || value === "synapse") {
-    return [value];
-  }
-  if (value === "matrixorg") {
-    return ["synapse"];
-  }
-  throw new Error("--server must be conduit, tuwunel, synapse, matrixorg, both, or all");
+  return undefined;
 }
 
-function expectedSyncBackendForLeg(forceLegacyBackend) {
-  return forceLegacyBackend ? "LegacySync" : undefined;
+function selectedCoreBackendLegs() {
+  if (coreBackendOption === "both") {
+    return ["probed", "legacy"];
+  }
+  if (["probed", "sync-service", "legacy"].includes(coreBackendOption)) {
+    return [coreBackendOption];
+  }
+  throw new Error("--core-backend must be probed, sync-service, legacy, or both");
+}
+
+function coreBackendLegConfig(backend) {
+  if (backend === "sync-service") {
+    return {
+      legLabel: "sync-service",
+      forceBackend: "sync_service",
+      expectSyncBackend: expectedSyncBackendForLeg(backend)
+    };
+  }
+  if (backend === "legacy") {
+    return {
+      legLabel: "legacy",
+      forceBackend: "legacy",
+      expectSyncBackend: expectedSyncBackendForLeg(backend)
+    };
+  }
+  if (backend === "probed") {
+    return {
+      legLabel: "probed",
+      forceBackend: null,
+      expectSyncBackend: expectedSyncBackendForLeg(backend)
+    };
+  }
+  throw new Error("--core-backend must be probed, sync-service, legacy, or both");
 }
 
 function selectedScenarios(value) {
@@ -641,13 +718,7 @@ function defaultCoreBackendForScenario(value, cargoProfile) {
 }
 
 function shouldRunCoreBackend(backend) {
-  if (coreBackendOption === "both") {
-    return true;
-  }
-  if (coreBackendOption === "probed" || coreBackendOption === "legacy") {
-    return coreBackendOption === backend;
-  }
-  throw new Error("--core-backend must be probed, legacy, or both");
+  return selectedCoreBackendLegs().includes(backend);
 }
 
 function cargoProfileArgs() {
@@ -664,10 +735,12 @@ function validateReleaseBackend() {
   if (
     cargoProfileOption === "release" &&
     explicitCoreBackendOption !== undefined &&
-    (coreBackendOption === "legacy" || coreBackendOption === "both")
+    (coreBackendOption === "sync-service" ||
+      coreBackendOption === "legacy" ||
+      coreBackendOption === "both")
   ) {
     throw new Error(
-      "--cargo-profile=release cannot run LegacySync; use --core-backend=probed or --cargo-profile=dev"
+      "--cargo-profile=release cannot force a QA backend; use --core-backend=probed or --cargo-profile=dev"
     );
   }
 }
@@ -692,12 +765,16 @@ function safeTimestamp() {
 
 function printUsage() {
   console.log(
-    "Usage: desktop-headless-local-qa.mjs --run [--server=conduit|tuwunel|synapse|matrixorg|both|all] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_legacy_fallback|timeline_legacy_persisted_gap|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--core-backend=probed|legacy|both] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
+    "Usage: desktop-headless-local-qa.mjs --run [--server=conduit|tuwunel|synapse|matrixorg|both|all] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_legacy_fallback|timeline_legacy_persisted_gap|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--core-backend=probed|sync-service|legacy|both] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
   );
   console.log("Starts a disposable local homeserver and runs non-GUI Matrix SDK QA.");
+  console.log("  --server=both  Runs the positive Sliding Sync fixtures: Tuwunel and Synapse.");
+  console.log("  --server=conduit  Temporarily runs legacy scenarios against Conduit.");
   console.log("  --server=synapse/matrixorg  Runs local Synapse in Docker.");
   console.log("  --core  Also run the headless-core-qa binary (Phase 2+ core runtime QA).");
-  console.log("  --core-backend  Select core backend leg. E2EE scenarios default to probed.");
+  console.log(
+    "  --core-backend  Select core backend leg; sync-service is a temporary debug-only Issue #412 QA bypass."
+  );
   console.log("  --cargo-profile  Cargo profile for headless QA binaries; release runs faster after build.");
   console.log("  --fixture-run  Replay a saved local Synapse fixture by copying its data dir.");
   console.log(

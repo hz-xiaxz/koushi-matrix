@@ -332,17 +332,17 @@ describe("App Space Members integration", () => {
   });
 
   test("disables cancellation when the exact Space settings deny kick", async () => {
-    const api = createBrowserFakeApi();
-    const roomSettings = await api.loadRoomSettings("!space-alpha:example.invalid");
-    roomSettings.state.domain.room_management.settings!.permissions.can_kick = false;
-    vi.spyOn(api, "loadRoomSettings").mockResolvedValue(roomSettings);
-    const originalLoadSpaceMembers = api.loadSpaceMembers.bind(api);
-    vi.spyOn(api, "loadSpaceMembers").mockImplementation(async (spaceId, generation) => {
-      const membersSnapshot = await originalLoadSpaceMembers(spaceId, generation);
-      membersSnapshot.state.domain.room_management = structuredClone(
-        roomSettings.state.domain.room_management
-      );
-      return membersSnapshot;
+    const api = createBrowserFakeApi({
+      roomPermissions: {
+        "!space-alpha:example.invalid": {
+          can_edit_settings: true,
+          can_edit_roles: true,
+          can_invite: true,
+          can_kick: false,
+          can_ban: true,
+          can_unban: true
+        }
+      }
     });
     const cancelSpaceInvite = vi.spyOn(api, "cancelSpaceInvite");
 
@@ -350,13 +350,17 @@ describe("App Space Members integration", () => {
     await openSpaceMembersFromSidebar();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Cancel invitation" })).toHaveProperty(
+      expect(screen.getByRole("button", { name: "Invite to Space" })).toHaveProperty(
         "disabled",
-        true
+        false
       );
-    }, { timeout: 5000 });
+    });
+    expect(screen.getByRole("button", { name: "Cancel invitation" })).toHaveProperty(
+      "disabled",
+      true
+    );
     expect(cancelSpaceInvite).not.toHaveBeenCalled();
-  }, 10_000);
+  });
 
   test("shows localized cancellation failure and records only fixed diagnostics", async () => {
     const api = createBrowserFakeApi();

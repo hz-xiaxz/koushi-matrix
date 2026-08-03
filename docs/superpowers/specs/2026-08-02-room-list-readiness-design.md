@@ -1,5 +1,14 @@
 # Room-list readiness and cold-start projection design
 
+## Status
+
+Superseded for conflicting Issue #412 behavior by
+[Required Simplified Sliding Sync And Diagnostics Design](./2026-08-03-single-sliding-sync-diagnostics-design.md).
+This file remains a historical record of the Issue #409 readiness design. The
+Legacy fallback and authenticated invite-only probing assumed by the design
+are transitional until PR2 of the Issue #412 migration lands; they are not the
+target canon.
+
 ## Scope
 
 Issue #409 fixes the misleading cold-start state where the desktop renders an

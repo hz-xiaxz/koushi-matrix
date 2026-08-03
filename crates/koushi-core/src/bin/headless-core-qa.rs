@@ -1930,6 +1930,7 @@ async fn run_invites_dm_stage(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
+    sync_backend_b: SyncBackendKind,
 ) -> Result<(), String> {
     let user_b_full_id = format!("@{}:{}", config.user_b, config.server_name);
     let user_a_full_id = format!("@{}:{}", config.user_a, config.server_name);
@@ -1955,6 +1956,11 @@ async fn run_invites_dm_stage(
         "invites_dm wait for room invite",
     )
     .await?;
+    assert_expected_backend(
+        config.expect_sync_backend,
+        sync_backend_b,
+        "invites_dm invited room projection",
+    )?;
     println!("invite_recv=ok");
 
     accept_invite_for_qa(conn_b, &accept_room_id, "invites_dm accept room invite").await?;
@@ -2870,11 +2876,7 @@ async fn run_e2ee_trust_stage(
             .map_err(|e| format!("submit sync start A2: {e}"))?;
         let sync_backend_a2 =
             wait_for_sync_started_and_running(conn_a2, sync_start_a2_id, "sync start A2").await?;
-        assert_expected_backend(
-            config.expect_sync_backend.as_deref(),
-            sync_backend_a2,
-            "sync start A2",
-        )?;
+        assert_expected_backend(config.expect_sync_backend, sync_backend_a2, "sync start A2")?;
 
         wait_for_room_in_room_list(
             conn_a2,
@@ -4275,7 +4277,7 @@ async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), String> {
             .await?;
     println!("sync_backend_a={sync_backend_a:?}");
     assert_expected_backend(
-        config.expect_sync_backend.as_deref(),
+        config.expect_sync_backend,
         sync_backend_a,
         "cache_restore sync start",
     )?;
@@ -5266,7 +5268,7 @@ async fn run_timeline_reconnect_scenario_impl(
     )
     .await?;
     assert_expected_backend(
-        config.expect_sync_backend.as_deref(),
+        config.expect_sync_backend,
         sync_backend_a,
         "timeline_reconnect sync start A",
     )?;
@@ -5307,7 +5309,7 @@ async fn run_timeline_reconnect_scenario_impl(
     )
     .await?;
     assert_expected_backend(
-        config.expect_sync_backend.as_deref(),
+        config.expect_sync_backend,
         sync_backend_b,
         "timeline_reconnect sync start B",
     )?;
@@ -6602,6 +6604,8 @@ fn should_run_focused_send_queue_route(scenario: QaScenario) -> bool {
 }
 
 async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, String> {
+    expected_backend_for_scenario(scenario, config.expect_sync_backend)?;
+
     if scenario == QaScenario::Safety {
         println!("safety=ok");
         return Ok(scenario_report(&config.server_kind, scenario));
@@ -6696,11 +6700,9 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
     let sync_backend_a =
         wait_for_sync_started_and_running(&mut conn_a, sync_start_id, "sync start A").await?;
     println!("sync_backend_a={sync_backend_a:?}");
-    assert_expected_backend(
-        config.expect_sync_backend.as_deref(),
-        sync_backend_a,
-        "sync start A",
-    )?;
+    if !scenario.should_run_stage(QaStage::InvitesDm) {
+        assert_expected_backend(config.expect_sync_backend, sync_backend_a, "sync start A")?;
+    }
 
     println!("sync_a=running");
     println!("login_sync=ok");
@@ -6746,7 +6748,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             .await?;
             println!("sync_backend_b={sync_backend_b:?}");
             assert_expected_backend(
-                config.expect_sync_backend.as_deref(),
+                config.expect_sync_backend,
                 sync_backend_b,
                 "timeline_stress replay sync start B",
             )?;
@@ -6832,11 +6834,13 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
         )
         .await?;
         println!("sync_backend_b={:?}", participant.sync_backend);
-        assert_expected_backend(
-            config.expect_sync_backend.as_deref(),
-            participant.sync_backend,
-            "normal secondary sync start B",
-        )?;
+        if !scenario.should_run_stage(QaStage::InvitesDm) {
+            assert_expected_backend(
+                config.expect_sync_backend,
+                participant.sync_backend,
+                "normal secondary sync start B",
+            )?;
+        }
         println!("sync_b=running");
         Some(participant)
     } else {
@@ -6844,11 +6848,17 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
     };
 
     if scenario.should_run_stage(QaStage::InvitesDm) {
-        let conn_b = &mut normal_secondary
+        let participant_b = normal_secondary
             .as_mut()
-            .ok_or_else(|| "InvitesDm requires the normal secondary participant".to_owned())?
-            .conn;
-        run_invites_dm_stage(&config, &mut conn_a, conn_b).await?;
+            .ok_or_else(|| "InvitesDm requires the normal secondary participant".to_owned())?;
+        let sync_backend_b = participant_b.sync_backend;
+        run_invites_dm_stage(
+            &config,
+            &mut conn_a,
+            &mut participant_b.conn,
+            sync_backend_b,
+        )
+        .await?;
     }
 
     if scenario == QaScenario::InvitesDm {
@@ -12939,6 +12949,43 @@ fn verification_state_matches_target(
 // Config and helpers
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExpectedSyncBackend {
+    SyncService,
+    LegacySync,
+}
+
+impl ExpectedSyncBackend {
+    fn from_env_value(value: &str) -> Result<Self, String> {
+        match value {
+            "SyncService" => Ok(Self::SyncService),
+            "LegacySync" => Ok(Self::LegacySync),
+            other => Err(format!(
+                "{ENV_EXPECT_SYNC_BACKEND} must be SyncService or LegacySync; got {other}"
+            )),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::SyncService => "SyncService",
+            Self::LegacySync => "LegacySync",
+        }
+    }
+}
+
+fn expected_backend_for_scenario(
+    scenario: QaScenario,
+    expected: Option<ExpectedSyncBackend>,
+) -> Result<Option<ExpectedSyncBackend>, String> {
+    if scenario.should_run_stage(QaStage::InvitesDm) && expected.is_none() {
+        return Err(format!(
+            "invites_dm requires {ENV_EXPECT_SYNC_BACKEND} to prove the selected sync backend"
+        ));
+    }
+    Ok(expected)
+}
+
 struct QaConfig {
     homeserver: String,
     server_name: String,
@@ -12948,9 +12995,9 @@ struct QaConfig {
     user_b: String,
     password_b: String,
     user_c: Option<String>,
-    /// Expected sync backend ("SyncService" | "LegacySync"); QA fails on
-    /// mismatch when set. Plain assertion input, not a credential.
-    expect_sync_backend: Option<String>,
+    /// Expected sync backend; QA fails on mismatch when set. Plain assertion
+    /// input, not a credential.
+    expect_sync_backend: Option<ExpectedSyncBackend>,
     /// Identity reset changes cross-signing identity for the account. Keep it
     /// opt-in so real-account QA cannot accidentally invalidate other devices.
     allow_identity_reset: bool,
@@ -12967,7 +13014,10 @@ impl QaConfig {
             user_b: env_required(ENV_USER_B)?,
             password_b: env_required(ENV_PASSWORD_B)?,
             user_c: std::env::var(ENV_USER_C).ok(),
-            expect_sync_backend: std::env::var(ENV_EXPECT_SYNC_BACKEND).ok(),
+            expect_sync_backend: std::env::var(ENV_EXPECT_SYNC_BACKEND)
+                .ok()
+                .map(|value| ExpectedSyncBackend::from_env_value(&value))
+                .transpose()?,
             allow_identity_reset: env_flag_enabled(ENV_ALLOW_IDENTITY_RESET)?,
         })
     }
@@ -13947,20 +13997,22 @@ fn shutdown_active_streams(active_streams: &Arc<Mutex<Vec<TcpStream>>>) {
 
 /// Fail when an expected backend is configured and the observed one differs.
 fn assert_expected_backend(
-    expected: Option<&str>,
+    expected: Option<ExpectedSyncBackend>,
     observed: SyncBackendKind,
     label: &str,
 ) -> Result<(), String> {
     let Some(expected) = expected else {
         return Ok(());
     };
-    let observed_name = match observed {
-        SyncBackendKind::SyncService => "SyncService",
-        SyncBackendKind::LegacySync => "LegacySync",
+    let observed = match observed {
+        SyncBackendKind::SyncService => ExpectedSyncBackend::SyncService,
+        SyncBackendKind::LegacySync => ExpectedSyncBackend::LegacySync,
     };
-    if observed_name != expected {
+    if observed != expected {
         return Err(format!(
-            "{label}: sync backend mismatch: expected {expected}, observed {observed_name}"
+            "{label}: sync backend mismatch: expected {}, observed {}",
+            expected.as_str(),
+            observed.as_str(),
         ));
     }
     Ok(())
@@ -18589,6 +18641,95 @@ mod tests {
         assert_eq!(
             QaScenario::from_env_value("timeline_stress").unwrap(),
             QaScenario::TimelineStress
+        );
+    }
+
+    #[test]
+    fn invites_dm_requires_expected_sync_backend() {
+        for scenario in [QaScenario::InvitesDm, QaScenario::All] {
+            let error = expected_backend_for_scenario(scenario, None).expect_err(
+                "every scenario that runs InvitesDm must require a backend expectation",
+            );
+            assert!(error.contains(ENV_EXPECT_SYNC_BACKEND));
+        }
+
+        assert_eq!(
+            expected_backend_for_scenario(
+                QaScenario::InvitesDm,
+                Some(ExpectedSyncBackend::SyncService),
+            )
+            .unwrap(),
+            Some(ExpectedSyncBackend::SyncService)
+        );
+        assert_eq!(
+            expected_backend_for_scenario(
+                QaScenario::InvitesDm,
+                Some(ExpectedSyncBackend::LegacySync),
+            )
+            .unwrap(),
+            Some(ExpectedSyncBackend::LegacySync)
+        );
+    }
+
+    #[test]
+    fn invites_dm_backend_mismatch_follows_projection_proof() {
+        let source = include_str!("headless-core-qa.rs");
+        let run_async = source
+            .split("async fn run_async")
+            .nth(1)
+            .expect("run_async should exist");
+        let primary_sync_route = run_async
+            .split("let sync_backend_a =")
+            .nth(1)
+            .expect("run_async should observe the primary backend")
+            .split("if scenario == QaScenario::TimelineStress")
+            .next()
+            .expect("timeline stress should follow primary sync startup");
+        assert!(
+            primary_sync_route.contains(
+                "if !scenario.should_run_stage(QaStage::InvitesDm) {\n        assert_expected_backend("
+            ),
+            "the primary route must suppress its pre-stage mismatch assertion for invitation-bearing scenarios"
+        );
+        let shared_secondary_route = source
+            .split(
+                "let mut normal_secondary = if should_run_normal_secondary_participant(scenario)",
+            )
+            .nth(1)
+            .expect("run_async should create the shared secondary participant")
+            .split("if scenario == QaScenario::InvitesDm")
+            .next()
+            .expect("the focused InvitesDm cleanup should follow its stage");
+        assert!(
+            shared_secondary_route.contains(
+                "if !scenario.should_run_stage(QaStage::InvitesDm) {\n            assert_expected_backend("
+            ),
+            "the shared route must suppress the pre-stage mismatch assertion for invitation-bearing scenarios"
+        );
+        assert!(
+            shared_secondary_route.contains("if scenario.should_run_stage(QaStage::InvitesDm) {"),
+            "the shared route must dispatch every invitation-bearing scenario through InvitesDm"
+        );
+        let stage = source
+            .split("async fn run_invites_dm_stage")
+            .nth(1)
+            .expect("InvitesDm stage should exist")
+            .split("async fn run_directory_stage")
+            .next()
+            .expect("directory stage should follow InvitesDm");
+        let projection_observation = stage
+            .find("wait_for_invite_in_snapshot(")
+            .expect("InvitesDm must observe the invite through the Core snapshot");
+        let backend_assertion = stage
+            .find("assert_expected_backend(")
+            .expect("InvitesDm must assert the selected backend");
+        assert!(
+            projection_observation < backend_assertion,
+            "the selected backend must be asserted after the invite reaches the Core snapshot"
+        );
+        assert!(
+            !stage.contains("invited_rooms("),
+            "InvitesDm must not use the SDK client invite list as proof"
         );
     }
 

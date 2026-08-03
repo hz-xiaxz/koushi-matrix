@@ -203,6 +203,20 @@ IDs, invite display names, or raw SDK errors. The SyncService room-list observer
 must consume non-left entries so invited-room diffs wake the Rust projection
 loop; joined-only observation can leave the invite snapshot stale.
 
+Before PR2 removes Legacy Sync, both positive Sliding Sync invitation lanes
+must finish green. These PR1-only lanes explicitly select SyncService through
+the debug/test-only `KOUSHI_QA_FORCE_SYNC_BACKEND=sync_service` bypass. This is
+solely to prove the real unfiltered `all_rooms` invitation path while the known
+obsolete invite-only capability probe still misclassifies supported servers;
+release builds cannot honor the override. PR2 deletes the probe, the override,
+and the backend selector. Reproduce the CI matrix locally with these exact
+commands:
+
+```bash
+npm --prefix apps/desktop run qa:headless-invites:tuwunel
+npm --prefix apps/desktop run qa:headless-invites:synapse
+```
+
 `e2ee_trust=ok` is the Phase A E2EE trust signal. The core lane proves
 cross-signing bootstrap, encrypted seed-room backup upload, passphrase-backed
 key-backup enable, wrong-secret restore failure, successful joined-room restore
