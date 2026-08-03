@@ -27,6 +27,16 @@ test("vendored Matrix SDK crates are consumed through root submodule paths", () 
   const coreCargo = readRepoFile("crates/koushi-core/Cargo.toml");
   const gitmodules = readRepoFile(".gitmodules");
   const engineeringRules = readRepoFile("docs/policies/engineering-rules.md");
+  const buildRulesStart = engineeringRules.indexOf("## Build, Dependencies, QA Gates");
+  const buildRulesEnd = engineeringRules.indexOf("\n## ", buildRulesStart);
+
+  assert.ok(buildRulesStart >= 0 && buildRulesEnd > buildRulesStart);
+  const buildRules = engineeringRules.slice(buildRulesStart, buildRulesEnd);
+  const sdkPolicyStart = buildRules.indexOf("\n1. ");
+  const sdkPolicyEnd = buildRules.indexOf("\n2. ", sdkPolicyStart);
+
+  assert.ok(sdkPolicyStart >= 0 && sdkPolicyEnd > sdkPolicyStart);
+  const sdkDependencyPolicy = buildRules.slice(sdkPolicyStart, sdkPolicyEnd);
 
   assert.match(rootCargo, /^\[workspace\.dependencies\]$/m);
   assert.match(rootCargo, /matrix-sdk = \{ path = "vendor\/matrix-rust-sdk\/crates\/matrix-sdk"/);
@@ -36,13 +46,14 @@ test("vendored Matrix SDK crates are consumed through root submodule paths", () 
   assert.doesNotMatch(gitmodules, /^\s*branch\s*=/m);
   assert.doesNotMatch(sdkCargo, /vendor\/matrix-rust-sdk/);
   assert.doesNotMatch(coreCargo, /vendor\/matrix-rust-sdk/);
-  assert.doesNotMatch(engineeringRules, /rev-pinned\s+git\s+dependency/);
-  assert.doesNotMatch(engineeringRules, /pinned\s+git\s+revision/);
-  assert.doesNotMatch(engineeringRules, /github\.com\/[^\s`]*matrix-rust-sdk/);
-  assert.doesNotMatch(engineeringRules, /app crates must not depend on it by local path/);
+  assert.doesNotMatch(sdkDependencyPolicy, /rev-pinned\s+git\s+dependency/);
+  assert.doesNotMatch(sdkDependencyPolicy, /pinned\s+git\s+revision/);
+  assert.doesNotMatch(sdkDependencyPolicy, /github\.com\/[^\s`]*matrix-rust-sdk/);
+  assert.doesNotMatch(sdkDependencyPolicy, /app crates must not depend on it by local path/);
+  assert.match(sdkDependencyPolicy, /root workspace Matrix SDK\s+dependencies/);
   assert.match(
-    engineeringRules,
-    /root workspace Matrix SDK\s+dependencies[\s\S]*exact paths beneath\s+`vendor\/matrix-rust-sdk`/
+    sdkDependencyPolicy,
+    /use their exact paths beneath\s+`vendor\/matrix-rust-sdk`/
   );
 });
 
