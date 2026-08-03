@@ -97,7 +97,7 @@ test("CI gates positive invitations on exactly Tuwunel and Synapse", () => {
   assert.match(invitationJob, /^\s{8}server: \[tuwunel, synapse\]$/m);
   assert.match(
     invitationJob,
-    /npm --prefix apps\/desktop run qa:headless-invites:\$\{\{ matrix\.server \}\}/
+    /--server=\$\{\{ matrix\.server \}\}[\s\S]*--scenario=invites_dm[\s\S]*--core-backend=sync-service/
   );
   assert.match(invitationJob, /if: matrix\.server == 'tuwunel'[\s\S]*actions\/cache@/);
   assert.match(invitationJob, /matrix-construct\/tuwunel\/releases\/download\/v1\.7\.1\//);
@@ -173,7 +173,7 @@ test("headless core QA can run cargo binaries with the release profile", () => {
   assert.match(headless, /--cargo-profile=dev\|release/);
   assert.match(headless, /explicitCoreBackendOption/);
   assert.match(headless, /defaultCoreBackendForScenario\(scenarioOption, cargoProfileOption\)/);
-  assert.match(headless, /--cargo-profile=release cannot run LegacySync/);
+  assert.match(headless, /--cargo-profile=release cannot force a QA backend/);
   assert.match(headless, /function selectedScenarios/);
   assert.match(headless, /for \(const scenario of scenarios\)/);
   assert.match(headless, /KOUSHI_QA_SCENARIO: scenario/);

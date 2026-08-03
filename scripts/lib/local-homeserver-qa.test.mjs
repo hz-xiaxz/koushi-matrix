@@ -126,6 +126,64 @@ test("backend expectation follows the selected fixture capability", () => {
   );
 });
 
+test("explicit SyncService backend selects only its forced QA leg", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/desktop-headless-local-qa.mjs",
+      "--check-core-backend-map",
+      "--core-backend=sync-service"
+    ],
+    {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.trim(),
+    "leg=sync-service force=sync_service expect=SyncService"
+  );
+});
+
+test("core backend selector rejects unknown values", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/desktop-headless-local-qa.mjs",
+      "--check-core-backend-map",
+      "--core-backend=unknown"
+    ],
+    {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8"
+    }
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--core-backend must be probed, sync-service, legacy, or both/);
+});
+
+test("release profile rejects the debug-only SyncService override", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/desktop-headless-local-qa.mjs",
+      "--check-core-backend-map",
+      "--cargo-profile=release",
+      "--core-backend=sync-service"
+    ],
+    {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8"
+    }
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--cargo-profile=release cannot force a QA backend/);
+});
+
 test("server selection keeps individual Sliding Sync fixtures", () => {
   assert.deepEqual(selectedServers("tuwunel"), ["tuwunel"]);
   assert.deepEqual(selectedServers("synapse"), ["synapse"]);

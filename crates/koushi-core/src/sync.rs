@@ -59,15 +59,15 @@ use crate::failure::{CoreFailure, SyncFailureKind};
 use crate::ids::RequestId;
 use crate::room::RoomMessage;
 
-/// QA/debug-only override: when set to `legacy`, the capability probe is
-/// skipped and the `LegacySync` backend is selected. This exists because both
-/// local QA homeservers (Conduit, Tuwunel) advertise MSC4186, so the legacy
-/// path would otherwise be unreachable in the local QA matrix; legacy `/sync`
-/// works against MSC4186-capable servers too (canon decision, Phase 3 review).
+/// QA/debug-only override: when set to `legacy` or `sync_service`, the
+/// capability probe is skipped and the requested backend is selected. The
+/// SyncService value is a temporary Issue #412 migration bypass for the
+/// obsolete invite-only probe; PR2 removes this override with backend
+/// selection. The legacy value retains the existing fallback regression leg.
 ///
 /// COMPILE-TIME GATE: release builds must never honor this override
-/// (release-gate structural rule pattern). Any value other than `legacy` is
-/// ignored and the probe runs normally.
+/// (release-gate structural rule pattern). Any other value is ignored and the
+/// probe runs normally.
 #[cfg(any(debug_assertions, test))]
 const ENV_FORCE_SYNC_BACKEND: &str = "KOUSHI_QA_FORCE_SYNC_BACKEND";
 const SYNC_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
@@ -235,6 +235,7 @@ enum ActiveBackend {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BackendProbeReason {
     ForcedLegacy,
+    ForcedSyncService,
     SlidingSyncUnavailable,
     InviteListSupported,
     InviteListKnownIncomplete,
@@ -250,6 +251,7 @@ struct BackendProbeResult {
 fn backend_probe_reason_label(reason: BackendProbeReason) -> &'static str {
     match reason {
         BackendProbeReason::ForcedLegacy => "forced_legacy",
+        BackendProbeReason::ForcedSyncService => "forced_sync_service",
         BackendProbeReason::SlidingSyncUnavailable => "sliding_sync_unavailable",
         BackendProbeReason::InviteListSupported => "invite_list_supported",
         BackendProbeReason::InviteListKnownIncomplete => "invite_list_known_incomplete",
@@ -1941,16 +1943,13 @@ fn backend_from_invite_list_support(
 /// contract before any sync owner starts. Missing or indeterminate contract
 /// results fail closed to legacy sync.
 ///
-/// Debug/test builds honor `KOUSHI_QA_FORCE_SYNC_BACKEND=legacy`
-/// (skip the probe, select `LegacySync`); release builds compile the check
-/// out entirely and always probe.
+/// Debug/test builds honor `KOUSHI_QA_FORCE_SYNC_BACKEND=legacy` and the
+/// temporary Issue #412 migration value `sync_service`; release builds compile
+/// the check out entirely and always probe.
 async fn probe_backend(session: &MatrixClientSession) -> BackendProbeResult {
     #[cfg(any(debug_assertions, test))]
-    if forced_legacy_backend() {
-        return BackendProbeResult {
-            backend: SyncBackendKind::LegacySync,
-            reason: BackendProbeReason::ForcedLegacy,
-        };
+    if let Some(forced) = forced_backend_override() {
+        return forced;
     }
 
     let client = session.client();
@@ -2022,12 +2021,22 @@ async fn legacy_sync_is_cold_start(client: &matrix_sdk::Client) -> bool {
     )
 }
 
-/// True only when the QA env override requests the legacy backend.
-/// Value must be exactly `legacy`; anything else is ignored (probe normally).
+/// Return the explicitly requested QA backend, if any.
+/// Values must match exactly; anything else is ignored (probe normally).
 /// Debug/test builds only — this symbol does not exist in release builds.
 #[cfg(any(debug_assertions, test))]
-fn forced_legacy_backend() -> bool {
-    std::env::var(ENV_FORCE_SYNC_BACKEND).is_ok_and(|value| value == "legacy")
+fn forced_backend_override() -> Option<BackendProbeResult> {
+    match std::env::var(ENV_FORCE_SYNC_BACKEND).as_deref() {
+        Ok("legacy") => Some(BackendProbeResult {
+            backend: SyncBackendKind::LegacySync,
+            reason: BackendProbeReason::ForcedLegacy,
+        }),
+        Ok("sync_service") => Some(BackendProbeResult {
+            backend: SyncBackendKind::SyncService,
+            reason: BackendProbeReason::ForcedSyncService,
+        }),
+        _ => None,
+    }
 }
 
 /// Map an SDK sync error to a coarse `SyncFailureKind`. Never exposes raw
@@ -2926,24 +2935,41 @@ pub mod tests {
     // race-free.
 
     #[test]
-    fn forced_backend_override_honors_legacy_only() {
+    fn forced_backend_override_selects_only_explicit_qa_backends() {
         let _guard = FORCE_BACKEND_ENV_LOCK
             .lock()
             .expect("backend environment lock");
         // Unset → no force.
         unsafe { std::env::remove_var(ENV_FORCE_SYNC_BACKEND) };
-        assert!(!forced_legacy_backend());
+        assert_eq!(forced_backend_override(), None);
 
-        // Exactly "legacy" → force.
+        // Exactly "legacy" → retain the existing forced LegacySync leg.
         unsafe { std::env::set_var(ENV_FORCE_SYNC_BACKEND, "legacy") };
-        assert!(forced_legacy_backend());
+        assert_eq!(
+            forced_backend_override(),
+            Some(BackendProbeResult {
+                backend: SyncBackendKind::LegacySync,
+                reason: BackendProbeReason::ForcedLegacy,
+            })
+        );
+
+        // Exactly "sync_service" → bypass the obsolete invite-only probe.
+        unsafe { std::env::set_var(ENV_FORCE_SYNC_BACKEND, "sync_service") };
+        assert_eq!(
+            forced_backend_override(),
+            Some(BackendProbeResult {
+                backend: SyncBackendKind::SyncService,
+                reason: BackendProbeReason::ForcedSyncService,
+            })
+        );
 
         // Any other value → ignored (probe normally).
-        for bogus in ["Legacy", "LEGACY", "sync_service", "1", ""] {
+        for bogus in ["Legacy", "LEGACY", "SyncService", "SYNC_SERVICE", "1", ""] {
             unsafe { std::env::set_var(ENV_FORCE_SYNC_BACKEND, bogus) };
-            assert!(
-                !forced_legacy_backend(),
-                "value {bogus:?} must not force the legacy backend"
+            assert_eq!(
+                forced_backend_override(),
+                None,
+                "value {bogus:?} must not force a QA backend"
             );
         }
 
@@ -2995,6 +3021,7 @@ pub mod tests {
     fn invite_list_probe_reason_labels_are_private_safe_tokens() {
         for reason in [
             BackendProbeReason::ForcedLegacy,
+            BackendProbeReason::ForcedSyncService,
             BackendProbeReason::SlidingSyncUnavailable,
             BackendProbeReason::InviteListSupported,
             BackendProbeReason::InviteListKnownIncomplete,

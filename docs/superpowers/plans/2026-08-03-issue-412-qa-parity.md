@@ -6,6 +6,16 @@
 
 **Architecture:** This is the first of three sequential PRs for Issue #412. It intentionally keeps the current Legacy fallback while adding server fixtures, an invitation acceptance lane, and an SDK request-contract test. The PR must merge and both positive server lanes must be green before the runtime-removal plan begins.
 
+**PR1 integration correction:** Tuwunel 1.7.1 returns the real SyncService
+`all_rooms` invitation data but omits the transitional `koushi_invites` probe
+list, so the known obsolete invite-only probe selects LegacySync before the
+scenario can exercise SyncService. The two positive invitation lanes therefore
+use a debug/test-only explicit `sync_service` override solely to bypass that
+probe and prove the actual unfiltered `all_rooms` path. Release selection is
+unchanged. PR2 deletes the invite-only probe, this override, and the QA backend
+selector together; changing the probe in PR1 would invalidate the required
+migration ordering.
+
 **Tech Stack:** Rust, matrix-rust-sdk, wiremock, Node.js test runner, local homeserver QA, GitHub Actions, Markdown.
 
 ---
@@ -69,10 +79,10 @@
 - [ ] Extend the existing invitation scenario assertion so the invited room is observed from the live all-rooms projection and the run reports the selected backend as `sync_service`; do not infer success from logs or from `Client::invited_rooms()`.
 - [ ] Run `cargo test -p koushi-core --bin headless-core-qa invites_dm_requires_expected_sync_backend`; confirm the assertion fails because the runner cannot yet require/report the positive backend.
 - [ ] Add a typed expected-backend input to the QA harness and propagate it through the Node runner. Keep the existing forced-Legacy leg only as a temporary PR1 regression comparison.
-- [ ] Add package scripts for the positive Tuwunel and positive Synapse invitation lanes with `--core --scenario=invites_dm --core-backend=probed` and a 240000 ms timeout.
+- [ ] Add package scripts for the positive Tuwunel and positive Synapse invitation lanes with `--core --scenario=invites_dm --core-backend=sync-service` and a 240000 ms timeout. The selector sets the temporary debug/test-only `KOUSHI_QA_FORCE_SYNC_BACKEND=sync_service` override and requires `SyncService` from the typed Core event.
 - [ ] Run `cargo test -p koushi-core --bin headless-core-qa invites_dm`; confirm exit code 0.
-- [ ] Run `node scripts/desktop-headless-local-qa.mjs --run --server=tuwunel --core --scenario=invites_dm --core-backend=probed --timeout-ms=240000` and record its exit code in the PR body.
-- [ ] Run `node scripts/desktop-headless-local-qa.mjs --run --server=synapse --core --scenario=invites_dm --core-backend=probed --timeout-ms=240000` and record its exit code in the PR body.
+- [ ] Run `node scripts/desktop-headless-local-qa.mjs --run --server=tuwunel --core --scenario=invites_dm --core-backend=sync-service --timeout-ms=240000` and record its exit code in the PR body.
+- [ ] Run `node scripts/desktop-headless-local-qa.mjs --run --server=synapse --core --scenario=invites_dm --core-backend=sync-service --timeout-ms=240000` and record its exit code in the PR body.
 - [ ] Commit with message `test: prove sliding sync invitations on supported servers`.
 
 ## Task 5: Put the positive invitation matrix in CI

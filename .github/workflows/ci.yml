@@ -129,8 +129,9 @@ jobs:
         run: cargo machete
 
   core-invites:
-    # PR2 may remove Legacy Sync only after the same positive invitation proof
-    # passes on both supported Sliding Sync fixtures.
+    # PR1 forces the debug-only SyncService selector because the obsolete
+    # invite-only probe misclassifies these supported fixtures. PR2 removes
+    # both the probe and this temporary selector after these all_rooms proofs.
     name: Core invitations (${{ matrix.server }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -185,8 +186,11 @@ jobs:
       - name: Verify Docker is available for Synapse
         if: matrix.server == 'synapse'
         run: docker version
-      - name: Positive invitation scenario
-        run: npm --prefix apps/desktop run qa:headless-invites:${{ matrix.server }}
+      - name: Positive forced-SyncService invitation scenario
+        run: |
+          node scripts/desktop-headless-local-qa.mjs --run \
+            --server=${{ matrix.server }} --core --scenario=invites_dm \
+            --core-backend=sync-service --timeout-ms=240000
       - name: Upload server-specific core QA logs on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
