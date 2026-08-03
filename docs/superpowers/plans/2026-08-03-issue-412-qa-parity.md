@@ -78,7 +78,7 @@ migration ordering.
 
 - [ ] Extend the existing invitation scenario assertion so the invited room is observed from the live all-rooms projection and the run reports the selected backend as `sync_service`; do not infer success from logs or from `Client::invited_rooms()`.
 - [ ] Run `cargo test -p koushi-core --bin headless-core-qa invites_dm_requires_expected_sync_backend`; confirm the assertion fails because the runner cannot yet require/report the positive backend.
-- [ ] Add a typed expected-backend input to the QA harness and propagate it through the Node runner. Keep the existing forced-Legacy leg only as a temporary PR1 regression comparison.
+- [ ] Add a typed expected-backend input to the QA harness and propagate it through the Node runner. Apply a fixed expectation only to explicit `sync-service` and `legacy` legs; ordinary `probed` legs remain behavior-selected because the transitional invite-only probe may legitimately choose LegacySync until PR2. Keep the existing forced-Legacy leg only as a temporary PR1 regression comparison.
 - [ ] Add package scripts for the positive Tuwunel and positive Synapse invitation lanes with `--core --scenario=invites_dm --core-backend=sync-service` and a 240000 ms timeout. The selector sets the temporary debug/test-only `KOUSHI_QA_FORCE_SYNC_BACKEND=sync_service` override and requires `SyncService` from the typed Core event.
 - [ ] Run `cargo test -p koushi-core --bin headless-core-qa invites_dm`; confirm exit code 0.
 - [ ] Run `node scripts/desktop-headless-local-qa.mjs --run --server=tuwunel --core --scenario=invites_dm --core-backend=sync-service --timeout-ms=240000` and record its exit code in the PR body.

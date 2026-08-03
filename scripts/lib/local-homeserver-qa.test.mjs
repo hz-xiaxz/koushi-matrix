@@ -109,7 +109,7 @@ test("Tuwunel fixture intrinsically advertises simplified Sliding Sync", () => {
   });
 });
 
-test("backend expectation follows the selected fixture capability", () => {
+test("probed backend expectation remains behavior-selected for every fixture", () => {
   const result = spawnSync(
     process.execPath,
     ["scripts/desktop-headless-local-qa.mjs", "--check-probed-backend-map"],
@@ -122,8 +122,26 @@ test("backend expectation follows the selected fixture capability", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(
     result.stdout,
-    /enabled probed=SyncService disabled probed=LegacySync forced=LegacySync/
+    /tuwunel probed=behavior-selected conduit probed=behavior-selected forced=LegacySync/
   );
+});
+
+test("explicit probed backend has no fixed expectation", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/desktop-headless-local-qa.mjs",
+      "--check-core-backend-map",
+      "--core-backend=probed"
+    ],
+    {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "leg=probed force=none expect=behavior-selected");
 });
 
 test("explicit SyncService backend selects only its forced QA leg", () => {
@@ -144,6 +162,48 @@ test("explicit SyncService backend selects only its forced QA leg", () => {
   assert.equal(
     result.stdout.trim(),
     "leg=sync-service force=sync_service expect=SyncService"
+  );
+});
+
+test("explicit Legacy backend selects only its forced QA leg", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/desktop-headless-local-qa.mjs",
+      "--check-core-backend-map",
+      "--core-backend=legacy"
+    ],
+    {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "leg=legacy force=legacy expect=LegacySync");
+});
+
+test("both keeps probed behavior-selected and Legacy strict", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/desktop-headless-local-qa.mjs",
+      "--check-core-backend-map",
+      "--core-backend=both"
+    ],
+    {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.trim(),
+    [
+      "leg=probed force=none expect=behavior-selected",
+      "leg=legacy force=legacy expect=LegacySync"
+    ].join("\n")
   );
 });
 

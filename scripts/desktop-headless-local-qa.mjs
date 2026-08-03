@@ -113,29 +113,25 @@ if (args.has("--check-tools")) {
 }
 
 if (args.has("--check-probed-backend-map")) {
-  const enabledCapabilities = homeserverFixtureCapabilities("tuwunel");
-  const disabledCapabilities = homeserverFixtureCapabilities("conduit");
-  if (expectedSyncBackendForLeg(enabledCapabilities, false) !== "SyncService") {
-    throw new Error("enabled fixture probed leg must require SyncService");
+  if (expectedSyncBackendForLeg("probed") !== undefined) {
+    throw new Error("probed legs must remain behavior-selected for every fixture");
   }
-  if (expectedSyncBackendForLeg(disabledCapabilities, false) !== "LegacySync") {
-    throw new Error("disabled fixture probed leg must require LegacySync");
-  }
-  if (expectedSyncBackendForLeg(enabledCapabilities, true) !== "LegacySync") {
+  if (expectedSyncBackendForLeg("legacy") !== "LegacySync") {
     throw new Error("forced legacy leg must retain its backend assertion");
   }
-  console.log("enabled probed=SyncService disabled probed=LegacySync forced=LegacySync");
+  console.log(
+    "tuwunel probed=behavior-selected conduit probed=behavior-selected forced=LegacySync"
+  );
   process.exit(0);
 }
 
 if (args.has("--check-core-backend-map")) {
   try {
     validateReleaseBackend();
-    const fixtureCapabilities = homeserverFixtureCapabilities("tuwunel");
     for (const leg of selectedCoreBackendLegs()) {
-      const config = coreBackendLegConfig(leg, fixtureCapabilities);
+      const config = coreBackendLegConfig(leg);
       console.log(
-        `leg=${config.legLabel} force=${config.forceBackend ?? "none"} expect=${config.expectSyncBackend}`
+        `leg=${config.legLabel} force=${config.forceBackend ?? "none"} expect=${config.expectSyncBackend ?? "behavior-selected"}`
       );
     }
     process.exit(0);
@@ -288,7 +284,7 @@ async function runForServer(serverKind, scenario) {
       // known-obsolete invite-only probe so this PR can prove the real
       // SyncService all_rooms invitation path before PR2 deletes selection.
       if (shouldRunCoreBackend("sync-service")) {
-        const leg = coreBackendLegConfig("sync-service", fixtureCapabilities);
+        const leg = coreBackendLegConfig("sync-service");
         const coreUsers = await registerQaUsers(homeserver, "core_sync_service");
         const coreSyncServiceResult = runCoreHeadlessQa({
           serverKind,
@@ -307,6 +303,7 @@ async function runForServer(serverKind, scenario) {
       // Leg 1: behavior-probed backend. The core's typed capability probe owns
       // fail-closed selection; server family labels are not capability facts.
       if (shouldRunCoreBackend("probed")) {
+        const leg = coreBackendLegConfig("probed");
         const coreUsers = fixture ?? (await registerQaUsers(homeserver, "core_probed"));
         if (!fixture && serverKind === "synapse") {
           writeQaFixture(runDir, {
@@ -322,8 +319,8 @@ async function runForServer(serverKind, scenario) {
           ...coreUsers,
           logPath,
           scenario,
-          legLabel: "probed",
-          expectSyncBackend: expectedSyncBackendForLeg(fixtureCapabilities, false),
+          legLabel: leg.legLabel,
+          expectSyncBackend: leg.expectSyncBackend,
           replayExistingStress: fixtureReplay
         });
         console.log(`core QA (probed backend): ${coreQaResult.trim()}`);
@@ -334,7 +331,7 @@ async function runForServer(serverKind, scenario) {
       // /sync works against MSC4186-capable servers too, so this leg
       // exercises the LegacySync product path end-to-end.
       if (shouldRunCoreBackend("legacy")) {
-        const leg = coreBackendLegConfig("legacy", fixtureCapabilities);
+        const leg = coreBackendLegConfig("legacy");
         const coreUsers = await registerQaUsers(homeserver, "core_legacy");
         const coreLegacyResult = runCoreHeadlessQa({
           serverKind,
@@ -646,15 +643,14 @@ function copyFixtureDataDir(fixture, dataDir) {
   });
 }
 
-/**
- * @param {ReturnType<typeof homeserverFixtureCapabilities>} fixtureCapabilities
- * @param {boolean} forceLegacyBackend
- */
-function expectedSyncBackendForLeg(fixtureCapabilities, forceLegacyBackend) {
-  if (forceLegacyBackend) {
+function expectedSyncBackendForLeg(backend) {
+  if (backend === "sync-service") {
+    return "SyncService";
+  }
+  if (backend === "legacy") {
     return "LegacySync";
   }
-  return fixtureCapabilities.simplifiedSlidingSync.enabled ? "SyncService" : "LegacySync";
+  return undefined;
 }
 
 function selectedCoreBackendLegs() {
@@ -667,26 +663,26 @@ function selectedCoreBackendLegs() {
   throw new Error("--core-backend must be probed, sync-service, legacy, or both");
 }
 
-function coreBackendLegConfig(backend, fixtureCapabilities) {
+function coreBackendLegConfig(backend) {
   if (backend === "sync-service") {
     return {
       legLabel: "sync-service",
       forceBackend: "sync_service",
-      expectSyncBackend: "SyncService"
+      expectSyncBackend: expectedSyncBackendForLeg(backend)
     };
   }
   if (backend === "legacy") {
     return {
       legLabel: "legacy",
       forceBackend: "legacy",
-      expectSyncBackend: "LegacySync"
+      expectSyncBackend: expectedSyncBackendForLeg(backend)
     };
   }
   if (backend === "probed") {
     return {
       legLabel: "probed",
       forceBackend: null,
-      expectSyncBackend: expectedSyncBackendForLeg(fixtureCapabilities, false)
+      expectSyncBackend: expectedSyncBackendForLeg(backend)
     };
   }
   throw new Error("--core-backend must be probed, sync-service, legacy, or both");
