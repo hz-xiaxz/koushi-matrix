@@ -52,10 +52,10 @@
 
 - [ ] Add a failing SDK test that captures the serialized first request made by `RoomListService::new`/`all_rooms` and asserts connection id `room-list`, list name `all_rooms`, `is_invite` omitted, timeline limit `1`, required state parity, and enabled account-data/receipt/typing/thread extensions.
 - [ ] Keep the expected request fields traceable to Element X 26.07.28's SDK pin `ccd225e58eb900e321411397d1c13c2d9b312bb6`; compare behavior, not source formatting.
-- [ ] Run `cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28`; confirm it fails before the request-contract test/observable exists.
+- [ ] Run `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28)`; confirm it fails before the request-contract test/observable exists.
 - [ ] If the existing request already passes, retain the test as the proof and make no speculative SDK rewrite. If one field differs, make the minimum request-builder correction required by the asserted contract.
 - [ ] Record the comparison and decision in `docs/upstream/matrix-rust-sdk-feedback.md`, including that no wholesale SDK rebase is justified by this guard.
-- [ ] Run `node scripts/check-sdk-submodule.mjs` and `cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28`; confirm both exit 0.
+- [ ] Run `node scripts/check-sdk-submodule.mjs` and `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28)`; confirm both exit 0.
 - [ ] Commit with message `test: lock element x sliding sync request parity`.
 
 ## Task 4: Add an invitation acceptance scenario that reports the selected backend

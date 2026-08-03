@@ -126,7 +126,7 @@ or SDK boundary without logging private Matrix payloads.
   and extension contract. For durable TDD RED evidence, the real request-capture
   test was first run with an intentionally wrong sentinel endpoint expectation
   using
-  `cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28`;
+  `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28)`;
   the single test failed on the endpoint mismatch with exit `101`. After the
   expectation was changed to the authoritative Element X endpoint, the same
   command passed `1/1` with exit `0`. No request-builder production change was
@@ -291,8 +291,8 @@ Current SDK-only patch area:
 - `cargo test -p matrix-sdk --lib test_request_user_identity_does_not_deadlock_with_olm_regeneration`
 - `cargo test -p matrix-sdk --lib`
 - `cargo test --manifest-path vendor/matrix-rust-sdk/crates/matrix-sdk-ui/Cargo.toml room_list_service`
-- `cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28`
-- `cargo test -p matrix-sdk-ui test_all_rooms_are_declared`
+- `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28)`
+- `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui test_all_rooms_are_declared)`
 - `git -C vendor/matrix-rust-sdk diff --check`
 
 ## Remaining Before Upstream PR

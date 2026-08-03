@@ -91,7 +91,7 @@
 
 - [ ] Add a failing SDK test proving the observable remains unchanged at `SyncService::State::Running`, advances only after a successful all-rooms response is processed, reports only a process-local monotonic sequence and `pos_present`, and does not expose room ids or the `pos` value.
 - [ ] Add a failure/reconnect test proving failed requests do not advance the sequence and a later successful response does.
-- [ ] Run `cargo test -p matrix-sdk-ui committed_all_rooms_response_observable`; confirm RED.
+- [ ] Run `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui committed_all_rooms_response_observable)`; confirm RED.
 - [ ] Add the minimum read-only latest-value observable at the point where all-rooms response handling and event-cache commit have succeeded. Do not add a second sync loop or Koushi product state inside the SDK.
 - [ ] Record the additive patch and upstream rationale in the ledger.
 - [ ] Run the SDK tests and `node scripts/check-sdk-submodule.mjs`; confirm exit code 0.
