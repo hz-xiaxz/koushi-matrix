@@ -1,9 +1,12 @@
 use futures_util::StreamExt;
 use koushi_sdk::{
     MatrixRoomListRoom, MatrixRoomListSnapshot, MatrixRoomListSpace, MatrixRoomTags,
-    MatrixSearchCandidate, MatrixTimelineItem,
+    MatrixSearchCandidate, MatrixTimelineItem, PersistableMatrixSession,
 };
-use koushi_state::{AuthSecret, LoginRequest, RecoveryRequest, SessionAuthenticationMethod};
+use koushi_state::{
+    AuthSecret, LoginRequest, RecoveryRequest, SessionAuthenticationMethod,
+    SlidingSyncPositiveEvidence,
+};
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -17,6 +20,32 @@ use std::{
 // Password-login fixtures advertise the capability that Task 3's shared AccountActor
 // admission gate will inspect. Discovery is deliberately not performed inside the SDK login.
 const MATRIX_VERSIONS_RESPONSE: &str = r#"{"versions":["r0.6.0","v1.1","v1.2","v1.3","v1.4","v1.5","v1.6","v1.7"],"unstable_features":{"org.matrix.simplified_msc3575":true}}"#;
+
+const LEGACY_PERSISTED_SESSION: &str = r#"{"homeserver":"https://matrix.example.invalid","user_id":"@alice:example.invalid","device_id":"ALICEDEVICE","access_token":"synthetic-access"}"#;
+
+#[test]
+fn persisted_session_round_trips_only_positive_sliding_sync_evidence() {
+    let legacy = PersistableMatrixSession::from_json(LEGACY_PERSISTED_SESSION)
+        .expect("legacy persisted session");
+    assert_eq!(legacy.sliding_sync_positive_evidence(), None);
+
+    let evidence = SlidingSyncPositiveEvidence {
+        observed_at_ms: 1_820_000_000_000,
+    };
+    let supported = legacy.with_sliding_sync_positive_evidence(evidence.clone());
+    let json = supported.to_json().expect("serialize supported session");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("session JSON");
+    assert_eq!(
+        value["sliding_sync_positive_evidence"]["observed_at_ms"],
+        evidence.observed_at_ms
+    );
+
+    let reopened = PersistableMatrixSession::from_json(&json).expect("reopen supported session");
+    assert_eq!(
+        reopened.sliding_sync_positive_evidence(),
+        Some(evidence)
+    );
+}
 
 #[test]
 fn password_login_versions_fixture_is_capability_ready_for_task_3_shared_gate() {

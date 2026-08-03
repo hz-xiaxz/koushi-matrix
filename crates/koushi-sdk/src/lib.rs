@@ -4349,6 +4349,7 @@ impl MatrixClientSession {
                     user_session: oauth_session.user,
                     client_id: oauth_session.client_id,
                 },
+                sliding_sync_positive_evidence: None,
             });
         }
 
@@ -4360,6 +4361,7 @@ impl MatrixClientSession {
         Ok(PersistableMatrixSession {
             info: self.info.clone(),
             session: PersistableSessionKind::Matrix(session),
+            sliding_sync_positive_evidence: None,
         })
     }
 
@@ -4845,6 +4847,7 @@ pub enum MatrixEventCacheError {
 pub struct PersistableMatrixSession {
     pub info: SessionInfo,
     session: PersistableSessionKind,
+    sliding_sync_positive_evidence: Option<koushi_state::SlidingSyncPositiveEvidence>,
 }
 
 #[derive(Clone)]
@@ -4870,6 +4873,9 @@ impl PersistableMatrixSession {
                     auth_kind: PersistableSessionJsonKind::Password,
                     homeserver: self.info.homeserver.clone(),
                     authentication_method: self.info.authentication_method,
+                    sliding_sync_positive_evidence: self
+                        .sliding_sync_positive_evidence
+                        .clone(),
                     session: session.clone(),
                 })
                 .map_err(|error| PasswordLoginError::Serialization(error.to_string()))
@@ -4880,6 +4886,9 @@ impl PersistableMatrixSession {
             } => serde_json::to_string(&SerializedOauthPersistableMatrixSession {
                 auth_kind: PersistableSessionJsonKind::OAuth,
                 homeserver: self.info.homeserver.clone(),
+                sliding_sync_positive_evidence: self
+                    .sliding_sync_positive_evidence
+                    .clone(),
                 user_session: user_session.clone(),
                 client_id: client_id.clone(),
             })
@@ -4910,6 +4919,7 @@ impl PersistableMatrixSession {
                     user_session: serialized.user_session,
                     client_id: serialized.client_id,
                 },
+                sliding_sync_positive_evidence: serialized.sliding_sync_positive_evidence,
             });
         }
 
@@ -4925,7 +4935,22 @@ impl PersistableMatrixSession {
         Ok(Self {
             info,
             session: PersistableSessionKind::Matrix(session),
+            sliding_sync_positive_evidence: serialized.sliding_sync_positive_evidence,
         })
+    }
+
+    pub fn sliding_sync_positive_evidence(
+        &self,
+    ) -> Option<koushi_state::SlidingSyncPositiveEvidence> {
+        self.sliding_sync_positive_evidence.clone()
+    }
+
+    pub fn with_sliding_sync_positive_evidence(
+        mut self,
+        evidence: koushi_state::SlidingSyncPositiveEvidence,
+    ) -> Self {
+        self.sliding_sync_positive_evidence = Some(evidence);
+        self
     }
 
     pub fn matrix_session(&self) -> Option<MatrixSession> {
@@ -4969,6 +4994,8 @@ struct SerializedPersistableMatrixSession {
     homeserver: String,
     #[serde(default)]
     authentication_method: koushi_state::SessionAuthenticationMethod,
+    #[serde(default)]
+    sliding_sync_positive_evidence: Option<koushi_state::SlidingSyncPositiveEvidence>,
     #[serde(flatten)]
     session: MatrixSession,
 }
@@ -4978,6 +5005,8 @@ struct SerializedTaggedMatrixSession {
     auth_kind: PersistableSessionJsonKind,
     homeserver: String,
     authentication_method: koushi_state::SessionAuthenticationMethod,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sliding_sync_positive_evidence: Option<koushi_state::SlidingSyncPositiveEvidence>,
     #[serde(flatten)]
     session: MatrixSession,
 }
@@ -4986,6 +5015,8 @@ struct SerializedTaggedMatrixSession {
 struct SerializedOauthPersistableMatrixSession {
     auth_kind: PersistableSessionJsonKind,
     homeserver: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sliding_sync_positive_evidence: Option<koushi_state::SlidingSyncPositiveEvidence>,
     user_session: UserSession,
     client_id: ClientId,
 }
