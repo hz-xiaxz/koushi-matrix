@@ -1,10 +1,16 @@
 # Session / Sync Lifecycle Redesign (Login And Reconnect Root Fix)
 
 Date: 2026-07-06
-Status: Approved design, pending implementation plan
+Status: Superseded for conflicting Issue #412 behavior by
+[Required Simplified Sliding Sync And Diagnostics Design](./2026-08-03-single-sliding-sync-diagnostics-design.md)
 Branch context: `codex/fix-live-message-sync` (contains uncommitted diagnostic and
 interim auth/sync changes from the 2026-07-06 HANDOFF; see "Working Tree
 Handling" below)
+
+This file remains a historical record of the earlier lifecycle redesign. The
+Legacy fallback and authenticated invite-only probing described or assumed
+below are transitional until PR2 of the Issue #412 migration lands; they are
+not the target canon.
 
 ## Problem
 

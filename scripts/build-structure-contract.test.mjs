@@ -26,6 +26,7 @@ test("vendored Matrix SDK crates are consumed through root submodule paths", () 
   const sdkCargo = readRepoFile("crates/koushi-sdk/Cargo.toml");
   const coreCargo = readRepoFile("crates/koushi-core/Cargo.toml");
   const gitmodules = readRepoFile(".gitmodules");
+  const engineeringRules = readRepoFile("docs/policies/engineering-rules.md");
 
   assert.match(rootCargo, /^\[workspace\.dependencies\]$/m);
   assert.match(rootCargo, /matrix-sdk = \{ path = "vendor\/matrix-rust-sdk\/crates\/matrix-sdk"/);
@@ -35,6 +36,14 @@ test("vendored Matrix SDK crates are consumed through root submodule paths", () 
   assert.doesNotMatch(gitmodules, /^\s*branch\s*=/m);
   assert.doesNotMatch(sdkCargo, /vendor\/matrix-rust-sdk/);
   assert.doesNotMatch(coreCargo, /vendor\/matrix-rust-sdk/);
+  assert.doesNotMatch(engineeringRules, /rev-pinned\s+git\s+dependency/);
+  assert.doesNotMatch(engineeringRules, /pinned\s+git\s+revision/);
+  assert.doesNotMatch(engineeringRules, /github\.com\/[^\s`]*matrix-rust-sdk/);
+  assert.doesNotMatch(engineeringRules, /app crates must not depend on it by local path/);
+  assert.match(
+    engineeringRules,
+    /root workspace Matrix SDK\s+dependencies[\s\S]*exact paths beneath\s+`vendor\/matrix-rust-sdk`/
+  );
 });
 
 test("toolchain and dev dependency profile are pinned for stable incremental builds", () => {

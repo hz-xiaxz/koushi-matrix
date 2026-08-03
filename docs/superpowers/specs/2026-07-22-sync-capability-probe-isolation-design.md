@@ -2,10 +2,12 @@
 
 ## Status
 
-Approved design for the matrix.org connection regression introduced by PR
-#289. The implementation isolates the authenticated MSC4186 invite-list
-capability probe from the authoritative desktop session while preserving the
-fail-closed fallback to legacy sync.
+Superseded for conflicting Issue #412 behavior by
+[Required Simplified Sliding Sync And Diagnostics Design](./2026-08-03-single-sliding-sync-diagnostics-design.md).
+This file remains a historical record of the matrix.org connection regression
+introduced by PR #289 and its approved isolation fix. The Legacy fallback and
+authenticated invite-only probing described below are transitional until PR2
+of the Issue #412 migration lands; they are not the target canon.
 
 ## Problem
 
