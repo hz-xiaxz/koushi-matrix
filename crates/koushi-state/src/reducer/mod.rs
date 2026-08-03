@@ -31,6 +31,7 @@ mod search;
 mod session;
 mod session_status;
 mod settings;
+mod sliding_sync;
 mod space_members;
 mod submission;
 mod sync;
@@ -81,6 +82,13 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
     match action {
         AppAction::AppStarted => session::handle_app_started(state),
         AppAction::RestoreSessionRequested => session::handle_restore_session_requested(state),
+        action @ (AppAction::SlidingSyncCapabilityCheckStarted { .. }
+        | AppAction::SlidingSyncCapabilityCheckCompleted { .. }
+        | AppAction::SlidingSyncCapabilityRetryAccepted { .. }
+        | AppAction::SlidingSyncCapabilityRevalidationStarted { .. }
+        | AppAction::SlidingSyncCapabilityRevalidationCompleted { .. }) => {
+            sliding_sync::reduce(state, action)
+        }
         AppAction::RestoreSessionSucceeded(info) => {
             session::handle_restore_session_succeeded(state, info)
         }
@@ -1646,6 +1654,7 @@ pub(crate) fn session_user_id(state: &AppState) -> Option<&str> {
         | SessionState::AwaitingBootstrapConfirmation { info, .. }
         | SessionState::Rejecting { info, .. }
         | SessionState::Locked(info)
+        | SessionState::CapabilityBlocked { info, .. }
         | SessionState::SwitchingAccount { info } => Some(info.user_id.as_str()),
         _ => None,
     }
@@ -1660,6 +1669,7 @@ pub(crate) fn current_session_info(state: &AppState) -> Option<crate::state::Ses
         | SessionState::Rejecting { info, .. }
         | SessionState::Ready(info)
         | SessionState::Locked(info) => Some(info.clone()),
+        SessionState::CapabilityBlocked { info, .. } => Some(info.clone()),
         SessionState::SignedOut
         | SessionState::Restoring
         | SessionState::SwitchingAccount { .. }

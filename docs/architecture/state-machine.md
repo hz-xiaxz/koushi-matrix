@@ -73,6 +73,9 @@ than applied.
 stateDiagram-v2
     [*] --> SignedOut
     SignedOut --> Restoring: AppStarted
+    Restoring --> CapabilityBlocked: Unsupported / retryable failure without positive evidence
+    CapabilityBlocked --> Restoring: CapabilityRetryAccepted(matching epoch + request)
+    CapabilityBlocked --> LoggingOut: LogoutRequested
     Restoring --> Provisional: AuthenticatedSessionInstalled
     Restoring --> SignedOut: RestoreSessionFailed
     SignedOut --> Authenticating: LoginSubmitted / CompleteOidcLogin
@@ -87,10 +90,71 @@ stateDiagram-v2
     Verifying --> Rejecting: RejectSession
     Rejecting --> SignedOut: ProvisionalSessionDiscarded
     Ready --> Locked: CurrentDeviceTrustChanged(non-Verified) / SessionLocked
+    Ready --> CapabilityBlocked: Revalidation Unsupported(matching epoch + request)
     Ready --> LoggingOut: LogoutRequested
     Locked --> LoggingOut: LogoutRequested
+    Locked --> CapabilityBlocked: in-flight revalidation Unsupported(matching epoch + request)
     LoggingOut --> SignedOut: LogoutFinished
 ```
+
+Simplified Sliding Sync capability admission is a Rust-owned state slice that
+fences every completion by both account epoch and request ID. It runs before
+new authentication is committed and before a stored session enters the trust
+gate.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unknown
+    Unknown --> Checking: CapabilityCheckStarted(valid admission)
+    Checking --> Supported: Supported(matching epoch + request) / continue from network
+    Checking --> Supported: Unreachable or InvalidResponse + cached positive evidence / continue cache-only + schedule revalidation
+    Checking --> Blocked: Unsupported(matching epoch + request)
+    Checking --> Blocked: Unreachable or InvalidResponse without cached positive evidence
+    Blocked --> Checking: CapabilityRetryAccepted(matching epoch + blocked request)
+    Checking --> Checking: stale epoch or request completion ignored
+    Blocked --> Blocked: stale retry ignored
+    Supported --> Revalidating: RevalidationStarted(matching epoch, active session)
+    Revalidating --> Supported: Supported / refresh positive evidence
+    Revalidating --> Supported: Unreachable or InvalidResponse / remain pending without leaving Ready
+    Revalidating --> Blocked: Unsupported / stop sync and preserve local session
+    Revalidating --> Revalidating: stale epoch or request completion ignored
+```
+
+- `Supported` requires current network evidence. A stored-session restore may
+  temporarily reuse persisted positive evidence only for `Unreachable` or
+  `InvalidResponse`; it remains marked for revalidation. An explicit
+  `Unsupported` result always blocks and is never presented as offline.
+- `CapabilityBlocked` is authenticated local state but not a Ready session. It
+  preserves `SessionInfo`, cached positive evidence, credentials, stores, and
+  unrelated errors. It admits retry, sign out, account/homeserver change, and
+  local-data management only; it starts no Sync, Room, Timeline, or Search
+  actor.
+- The process-local accepted account epoch is monotonic and is not serialized.
+  A check may start only from `Unknown` with a newer epoch and a session-matching
+  admission, so a delayed start cannot overwrite a retry, revalidation, or
+  replacement account. The epoch survives local session reset for the life of
+  the process. The correlated capability slice is process-local as well and is
+  omitted from `AppState` serialization; deserialization always restores
+  `Unknown` with a zero epoch rather than reviving an in-flight attempt.
+- Retry replaces only the matching capability attempt. Stale account epochs,
+  request IDs, and blocked-request IDs are ignored without changing any state.
+- Logout, restore/login failure, account replacement, and a newer login attempt
+  retire the active capability attempt. Completion and retry also revalidate
+  that the admission still matches the current session; a late result cannot
+  revive a replaced session. Retry request IDs must advance beyond the blocked
+  request ID.
+- Cache-admitted restores retain their account epoch, stored-session identity,
+  and one authoritative positive-evidence value through a correlated
+  revalidation. Revalidation starts only from Ready; an in-flight completion
+  may also settle after the same session becomes Locked. A retryable failure
+  leaves the current Ready/Reconnecting or Locked state unchanged and marks
+  revalidation pending. Only an explicit `Unsupported` result enters
+  `CapabilityBlocked` and emits the sync-stop effect; actor-level ordered child
+  shutdown is wired by the shared admission gate in the next implementation
+  task.
+- A successful check emits an engine-neutral continuation effect; the later
+  authenticated-session installation remains responsible for entering the
+  provisional trust gate. The reducer never performs network discovery.
 
 Provisional-device cleanup is a Rust-owned AppState state machine alongside the
 session gate, so it can represent method-discovery failures before a

@@ -121,6 +121,11 @@ pub use state::{
     room_settings_share_link, search_query_too_short, sort_threads_list_items,
     staged_upload_item_with_completed_output,
 };
+pub use state::{
+    SlidingSyncAdmission, SlidingSyncAdmissionKind, SlidingSyncAdmissionSource,
+    SlidingSyncCapabilityFailureKind, SlidingSyncCapabilityResult, SlidingSyncCapabilityState,
+    SlidingSyncPositiveEvidence, SlidingSyncRevalidationState,
+};
 pub use submission::{
     ComposerSubmissionTarget, ComposerSubmissionTerminalOutcome, ComposerTarget, SubmissionId,
 };

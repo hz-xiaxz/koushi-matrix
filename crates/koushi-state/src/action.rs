@@ -30,6 +30,7 @@ use crate::state::{
     TimelineScrollAnchor, TrustOperationFailureKind, UserProfile, VerificationCancelReason,
     VerificationGateFailureKind, VerificationGateState, VerificationMethod, VerificationTarget,
 };
+use crate::state::{SlidingSyncAdmission, SlidingSyncCapabilityResult};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum AppAction {
@@ -39,6 +40,31 @@ pub enum AppAction {
     RestoreSessionNotFound,
     RestoreSessionFailed {
         message: String,
+    },
+    SlidingSyncCapabilityCheckStarted {
+        account_epoch: u64,
+        request_id: u64,
+        admission: SlidingSyncAdmission,
+        positive_evidence: Option<crate::state::SlidingSyncPositiveEvidence>,
+    },
+    SlidingSyncCapabilityCheckCompleted {
+        account_epoch: u64,
+        request_id: u64,
+        result: SlidingSyncCapabilityResult,
+    },
+    SlidingSyncCapabilityRetryAccepted {
+        account_epoch: u64,
+        blocked_request_id: u64,
+        request_id: u64,
+    },
+    SlidingSyncCapabilityRevalidationStarted {
+        account_epoch: u64,
+        request_id: u64,
+    },
+    SlidingSyncCapabilityRevalidationCompleted {
+        account_epoch: u64,
+        request_id: u64,
+        result: SlidingSyncCapabilityResult,
     },
     SwitchAccountRequested {
         info: SessionInfo,

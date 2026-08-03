@@ -5,9 +5,9 @@ use crate::{
         AppError, AppState, CurrentDeviceTrustState, DeviceCleanupAuthMode,
         DeviceCleanupFailureKind, DeviceCleanupLocalMode, DeviceCleanupOfferReason,
         DeviceCleanupRemoteOutcome, DeviceCleanupState, LoginAttemptId, ProvisionalPhase,
-        SessionState, SoftLogoutReauthState, SyncState, VerificationAccountKind,
-        VerificationGateFailureKind, VerificationGateRejectReason, VerificationGateState,
-        VerificationMethod, VerificationMethodCapability,
+        SessionState, SlidingSyncCapabilityState, SoftLogoutReauthState, SyncState,
+        VerificationAccountKind, VerificationGateFailureKind, VerificationGateRejectReason,
+        VerificationGateState, VerificationMethod, VerificationMethodCapability,
     },
 };
 
@@ -16,8 +16,15 @@ use super::{
     current_session_info, is_session_ready,
 };
 
+fn reset_app_state_preserving_account_epoch(state: &mut AppState) {
+    let account_epoch = state.sliding_sync_account_epoch;
+    *state = AppState::default();
+    state.sliding_sync_account_epoch = account_epoch;
+}
+
 pub(crate) fn handle_app_started(state: &mut AppState) -> Vec<AppEffect> {
     state.session = SessionState::Restoring;
+    state.sliding_sync_capability = SlidingSyncCapabilityState::Unknown;
     vec![AppEffect::RestoreSession]
 }
 
@@ -26,6 +33,7 @@ pub(crate) fn handle_restore_session_requested(state: &mut AppState) -> Vec<AppE
         return Vec::new();
     }
     state.session = SessionState::Restoring;
+    state.sliding_sync_capability = SlidingSyncCapabilityState::Unknown;
     vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
 }
 
@@ -511,7 +519,7 @@ pub(crate) fn handle_device_cleanup_completed(
     ) {
         return Vec::new();
     }
-    *state = AppState::default();
+    reset_app_state_preserving_account_epoch(state);
     vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
 }
 
@@ -622,12 +630,13 @@ pub(crate) fn handle_provisional_session_discarded(state: &mut AppState) -> Vec<
     if !matches!(state.session, SessionState::Rejecting { .. }) {
         return Vec::new();
     }
-    *state = AppState::default();
+    reset_app_state_preserving_account_epoch(state);
     vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
 }
 
 pub(crate) fn handle_restore_session_not_found(state: &mut AppState) -> Vec<AppEffect> {
     state.session = SessionState::SignedOut;
+    state.sliding_sync_capability = SlidingSyncCapabilityState::Unknown;
     vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
 }
 
@@ -636,6 +645,7 @@ pub(crate) fn handle_restore_session_failed(
     message: String,
 ) -> Vec<AppEffect> {
     state.session = SessionState::SignedOut;
+    state.sliding_sync_capability = SlidingSyncCapabilityState::Unknown;
     state.errors.push(AppError {
         code: "restore_failed".to_owned(),
         message,
@@ -690,6 +700,7 @@ fn admit_authentication_start(
         homeserver,
         attempt_id,
     };
+    state.sliding_sync_capability = SlidingSyncCapabilityState::Unknown;
     true
 }
 
@@ -708,6 +719,7 @@ pub(crate) fn handle_login_failed(
         return Vec::new();
     }
     state.session = SessionState::SignedOut;
+    state.sliding_sync_capability = SlidingSyncCapabilityState::Unknown;
     state.errors.push(AppError {
         code: "login_failed".to_owned(),
         message,
@@ -801,6 +813,7 @@ pub(crate) fn handle_session_locked(state: &mut AppState) -> Vec<AppEffect> {
 
 pub(crate) fn handle_logout_requested(state: &mut AppState) -> Vec<AppEffect> {
     state.session = SessionState::LoggingOut;
+    state.sliding_sync_capability = SlidingSyncCapabilityState::Unknown;
     state.device_cleanup = DeviceCleanupState::Idle;
     state.sync = SyncState::Stopped;
     let mut effects = vec![
@@ -812,7 +825,7 @@ pub(crate) fn handle_logout_requested(state: &mut AppState) -> Vec<AppEffect> {
 }
 
 pub(crate) fn handle_logout_finished(state: &mut AppState) -> Vec<AppEffect> {
-    *state = AppState::default();
+    reset_app_state_preserving_account_epoch(state);
     vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
 }
 
@@ -825,6 +838,7 @@ pub(crate) fn handle_switch_account_requested(
     }
 
     state.session = SessionState::SwitchingAccount { info: info.clone() };
+    state.sliding_sync_capability = SlidingSyncCapabilityState::Unknown;
     state.sync = SyncState::Stopped;
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)];
     effects.extend(clear_session_views(state));

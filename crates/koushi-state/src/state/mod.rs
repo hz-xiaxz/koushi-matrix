@@ -29,6 +29,7 @@ mod search;
 mod session;
 mod session_status;
 mod settings;
+mod sliding_sync;
 mod space_members;
 mod sync;
 mod thread;
@@ -68,6 +69,11 @@ pub use session_status::{
     CurrentSessionBackupState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,
     CurrentSessionStatusState, CurrentSessionSyncState, CurrentSessionVerification,
     OwnIdentityVerification, SessionStatusRefreshTrigger,
+};
+pub use sliding_sync::{
+    SlidingSyncAdmission, SlidingSyncAdmissionKind, SlidingSyncAdmissionSource,
+    SlidingSyncCapabilityFailureKind, SlidingSyncCapabilityResult, SlidingSyncCapabilityState,
+    SlidingSyncPositiveEvidence, SlidingSyncRevalidationState,
 };
 
 // ── Re-exports: settings ────────────────────────────────────────────────────
@@ -243,6 +249,10 @@ pub(crate) fn default_true() -> bool {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppState {
     pub session: SessionState,
+    #[serde(skip)]
+    pub sliding_sync_account_epoch: u64,
+    #[serde(skip)]
+    pub sliding_sync_capability: SlidingSyncCapabilityState,
     #[serde(default)]
     pub device_cleanup: DeviceCleanupState,
     #[serde(default)]
@@ -321,6 +331,8 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             session: SessionState::SignedOut,
+            sliding_sync_account_epoch: 0,
+            sliding_sync_capability: SlidingSyncCapabilityState::Unknown,
             device_cleanup: DeviceCleanupState::Idle,
             current_session_status: CurrentSessionStatusState::Idle,
             auth: AuthDiscoveryState::Unknown,

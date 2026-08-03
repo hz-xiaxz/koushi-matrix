@@ -41,6 +41,10 @@ pub enum SessionState {
     },
     Ready(SessionInfo),
     Locked(SessionInfo),
+    CapabilityBlocked {
+        info: SessionInfo,
+        failure: super::SlidingSyncCapabilityFailureKind,
+    },
     LoggingOut,
 }
 
