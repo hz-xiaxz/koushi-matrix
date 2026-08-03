@@ -118,7 +118,7 @@
 - [ ] Replace `SyncMode`, `SyncBackendKind`, and `RoomListSource::{SyncService,Legacy}` with engine-neutral lifecycle/readiness state. Do not leave one-variant backend enums.
 - [x] Reconcile cache projections as stale until the all-rooms committed sequence advances and the full loaded range is applied; treat omission from a reconciled live range as removal, but not absence from cache.
 - [x] Run `cargo test -p koushi-core --lib sync`, `cargo test -p koushi-core --test runtime_room_list_sync`, `cargo test -p koushi-core --test runtime_session`, and `cargo test -p koushi-state --test sliding_sync_capability`; confirm exit code 0.
-- [ ] Commit with message `refactor: require one sliding sync runtime`.
+- [x] Commit with message `refactor: require one sliding sync runtime`.
 
 The remaining one-variant wire-enum cleanup above is intentionally serialized
 with Task 8, which removes the matching Rust/Tauri/TypeScript contract shapes
@@ -134,13 +134,13 @@ mismatch.
 - Modify: `crates/koushi-core/src/timeline.rs`
 - Modify: `crates/koushi-core/tests/runtime_timeline.rs`
 
-- [ ] Add tests that every production timeline is event-cache backed, retry identity is engine-neutral, and absent range entries do not synthesize room leave events.
-- [ ] Add a source/request inventory test that production Rust cannot construct a classic Matrix `/v3/sync` request.
-- [ ] Run `cargo test -p koushi-sdk --test timeline_gap_adapter` and `cargo test -p koushi-core --lib timeline`; confirm RED on backend-tagged checkpoints and Legacy branches.
-- [ ] Remove `MatrixCommittedRoomTimelineBackend`, Legacy committed-response constructors, global Legacy fences, and fallback timeline repair. Preserve event-cache lifecycle and bounded gap repair.
-- [ ] Make retry/checkpoint keys depend on generation/response sequence/range identity rather than backend.
-- [ ] Run `cargo test -p koushi-sdk --test timeline_gap_adapter`, `cargo test -p koushi-core --lib timeline`, and `cargo test -p koushi-core --lib gap_repair`; confirm exit code 0.
-- [ ] Commit with message `refactor: remove legacy timeline provenance`.
+- [x] Add tests that every production timeline is event-cache backed, retry identity is engine-neutral, and absent range entries do not synthesize room leave events.
+- [x] Add a source/request inventory test that production Rust cannot construct a classic Matrix `/v3/sync` request.
+- [x] Run `cargo test -p koushi-sdk --test timeline_gap_adapter` and `cargo test -p koushi-core --lib timeline`; confirm RED on backend-tagged checkpoints and Legacy branches.
+- [x] Remove `MatrixCommittedRoomTimelineBackend`, Legacy committed-response constructors, global Legacy fences, and fallback timeline repair. Preserve event-cache lifecycle and bounded gap repair.
+- [x] Make retry/checkpoint keys depend on generation/response sequence/range identity rather than backend.
+- [x] Run `cargo test -p koushi-sdk --test timeline_gap_adapter`, `cargo test -p koushi-core --lib timeline`, and `cargo test -p koushi-core --lib gap_repair`; confirm exit code 0.
+- [x] Commit with message `refactor: remove legacy timeline provenance`.
 
 ## Task 8: Remove impossible wire states across Tauri and TypeScript
 

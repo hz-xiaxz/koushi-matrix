@@ -27,6 +27,7 @@ The current Koushi-required SDK topic stack is:
 - `fix(room-list): expand own-member state key`
 - `feat(room-list): expose committed all-rooms response`
 - `feat(room-list): expose authoritative all-rooms readiness`
+- `feat(room-list): correlate response checkpoints`
 - `fix(crypto): harden async delivery ownership`
 - `fix: avoid identity query Olm lock deadlock`
 - `Handle stale order tracker readers`
@@ -65,29 +66,35 @@ or SDK boundary without logging private Matrix payloads.
   small, additive, no behavior change — good candidate for an upstream PR
   alongside (or independent of) the search-index patch.
 
-- Committed per-room sync-response provenance (2026-07-17, issue #275):
+- Historical/superseded committed per-room sync-response provenance
+  (2026-07-17, issue #275):
   `EventCache` retains a private-safe `CommittedRoomTimelineObservation` for
   each joined room after timeline topology persistence. It distinguishes a
   response with no timeline mutation from one that inserted an exact opaque
   gap, and late subscribers receive the latest observation. Ancillary
   post-processing failures cannot erase already-committed provenance. Why:
-  clients using legacy `/sync` need the same exact, generation-fenced
-  live-catchup anchor that SyncService exposes through room-subscription
+  this was introduced so clients using legacy `/sync` could obtain the same
+  exact, generation-fenced live-catchup anchor that SyncService exposes through room-subscription
   checkpoints; otherwise a newly received live event can coexist with an
   unrepaired offline interval. Upstreaming intent: propose the retained
   backend-neutral observation API upstream after the #275 production proof,
   keeping room IDs, event IDs, pagination tokens, and raw errors out of Debug
-  output.
+  output. Issue #412 removed the desktop Legacy Sync adapter and no production
+  Koushi path consumes this API now.
 
-- Committed sync-response fence (2026-07-17, issue #275): `EventCache` also
+- Historical/superseded committed sync-response fence (2026-07-17, issue
+  #275): `EventCache` also
   retains one `CommittedRoomUpdatesResponse` only after all joined/left room
   topology work for that response has completed. Its monotonic response
   sequence and aggregate room counts let consumers distinguish an unchanged,
   omitted room from a response that has not committed yet. This closes the
   legacy `/sync` ambiguity without exposing room IDs, event IDs, pagination
-  tokens, message bodies, or raw errors. The desktop adapter uses an omitted
-  room only as a bounded signal to inspect and repair its newest persisted
-  live-edge gap after restart.
+  tokens, message bodies, or raw errors. The former desktop adapter used an
+  omitted room only as a bounded signal to inspect and repair its newest
+  persisted live-edge gap after restart. Issue #412 removed that adapter.
+  Current omission repair uses the exact response-correlated
+  `RoomListService` room checkpoint plus its matching global committed
+  all-rooms sequence.
 
 - Idempotent remote SAS-start replay (2026-07-20, issue #285 hardening): a
   repeated `m.key.verification.start` from the same peer, device, and flow no
@@ -145,7 +152,12 @@ or SDK boundary without logging private Matrix payloads.
   position value. The SDK separately retains the top-level response room IDs
   behind `RoomList`, excluding extension-only updates, so its public
   `current_entries_snapshot()` can correlate filtered entries with the same
-  response sequence without exposing the ID set. Before the first response of
+  response sequence without exposing the ID set. Active-room subscription
+  checkpoints carry that exact response sequence as token-free provenance,
+  including responses with no timeline update, and are published before the
+  matching global latest value. This lets callers distinguish an included room
+  from a room omitted by that exact incremental response without treating
+  omission as leave. Before the first response of
   a sync/recovery cycle the snapshot remains provisional cache data; afterwards
   dynamic entries reset to the observed response set, so a cache-only omitted
   room cannot survive an authoritative full-range projection. Failed requests

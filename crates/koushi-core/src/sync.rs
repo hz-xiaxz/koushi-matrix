@@ -617,13 +617,30 @@ async fn start_room_observation(
 async fn start_timeline_observation(
     timeline_tx: &mpsc::Sender<crate::timeline::TimelineMessage>,
     room_list_service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
+    core_generation: u64,
 ) {
     let _ = timeline_tx
         .send(crate::timeline::TimelineMessage::SyncStarted {
-            room_list_service: Some(room_list_service),
-            legacy_committed_from_response_sequence: None,
+            room_list_service,
+            core_generation,
         })
         .await;
+}
+
+async fn forward_latest_timeline_response_commit(
+    timeline_tx: &mpsc::Sender<crate::timeline::TimelineMessage>,
+    core_generation: u64,
+    response_sequence: u64,
+) -> bool {
+    timeline_tx
+        .send(
+            crate::timeline::TimelineMessage::AllRoomsResponseCommitted {
+                core_generation,
+                response_sequence,
+            },
+        )
+        .await
+        .is_ok()
 }
 
 async fn reconcile_committed_room_list(
@@ -775,7 +792,22 @@ async fn observe_sync_service(
                     {
                         return internal_observer_failure(connected);
                     }
+                    start_timeline_observation(
+                        &timeline_tx,
+                        room_list_service.clone(),
+                        run_generation,
+                    )
+                    .await;
                     room_observation_started = true;
+                }
+                if !forward_latest_timeline_response_commit(
+                    &timeline_tx,
+                    run_generation,
+                    committed.sequence(),
+                )
+                .await
+                {
+                    return internal_observer_failure(connected);
                 }
                 if !committed.range_fully_loaded() {
                     continue;
@@ -804,7 +836,6 @@ async fn observe_sync_service(
                     }
                     connected = true;
                     reconnecting = false;
-                    start_timeline_observation(&timeline_tx, room_list_service.clone()).await;
                     let _ = control_tx
                         .send(SyncActorControl::FirstResponseCommitted { run_generation })
                         .await;
@@ -939,6 +970,31 @@ pub mod tests {
         assert!(handoff > committed);
         assert!(handoff > fully_loaded);
         assert!(!observer.contains("RoomListServiceStateKind"));
+    }
+
+    #[test]
+    fn latest_observed_commit_is_forwarded_to_timeline_before_range_readiness() {
+        let source = include_str!("sync.rs");
+        let observer = source
+            .split("async fn observe_sync_service")
+            .nth(1)
+            .expect("observer body");
+        let committed = observer
+            .find("Signal::Committed(committed)")
+            .expect("committed response branch");
+        let forwarding = observer
+            .find("forward_latest_timeline_response_commit(")
+            .expect("global timeline commit handoff");
+        let fully_loaded = observer
+            .find("if !committed.range_fully_loaded()")
+            .expect("complete all-rooms range guard");
+
+        assert!(forwarding > committed);
+        assert!(forwarding < fully_loaded);
+        let handoff = &observer[forwarding..fully_loaded];
+        assert!(handoff.contains("run_generation"));
+        assert!(handoff.contains("committed.sequence()"));
+        assert!(!handoff.contains("backend"));
     }
 
     #[test]

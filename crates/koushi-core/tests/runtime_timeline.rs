@@ -17,6 +17,44 @@ use koushi_state::{
 mod support;
 use support::*;
 
+const FORBIDDEN_TIMELINE_SYNC_TOKENS: [&str; 4] = [
+    "/_matrix/client/v3/sync",
+    "LegacyResponseCommitted",
+    "MatrixCommittedRoomTimelineBackend",
+    "RoomAbsent",
+];
+
+fn classic_sync_or_legacy_checkpoint_tokens(source: &str) -> Result<(), Vec<&'static str>> {
+    let found = FORBIDDEN_TIMELINE_SYNC_TOKENS
+        .into_iter()
+        .filter(|token| source.contains(token))
+        .collect::<Vec<_>>();
+    if found.is_empty() { Ok(()) } else { Err(found) }
+}
+
+fn assert_no_classic_sync_or_legacy_checkpoint_path(source: &str) {
+    if let Err(found) = classic_sync_or_legacy_checkpoint_tokens(source) {
+        panic!("forbidden production timeline sync tokens: {found:?}");
+    }
+}
+
+#[test]
+fn production_timeline_has_no_classic_sync_or_legacy_checkpoint_path() {
+    let source = include_str!("../src/timeline.rs");
+    assert_no_classic_sync_or_legacy_checkpoint_path(source);
+}
+
+#[test]
+fn production_inventory_covers_code_after_cfg_test_modules() {
+    let synthetic = r#"
+fn before_tests() {}
+#[cfg(test)]
+mod tests {}
+fn timeline_actor() { let _ = LegacyResponseCommitted; }
+"#;
+    assert!(classic_sync_or_legacy_checkpoint_tokens(synthetic).is_err());
+}
+
 fn draft_account() -> SessionKeyId {
     let info = session_info();
     SessionKeyId {
