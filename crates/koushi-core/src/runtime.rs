@@ -379,6 +379,7 @@ fn session_user_id(state: &AppState) -> Option<&str> {
         | SessionState::Rejecting { info, .. }
         | SessionState::Ready(info)
         | SessionState::Locked(info)
+        | SessionState::CapabilityBlocked { info, .. }
         | SessionState::SwitchingAccount { info } => Some(info.user_id.as_str()),
         SessionState::SignedOut
         | SessionState::Restoring
@@ -678,6 +679,7 @@ fn live_receipt_profile_diagnostic_event(
         | SessionState::Rejecting { info, .. }
         | SessionState::Ready(info)
         | SessionState::Locked(info)
+        | SessionState::CapabilityBlocked { info, .. }
         | SessionState::SwitchingAccount { info } => Some(info.user_id.as_str()),
         SessionState::SignedOut
         | SessionState::Restoring
@@ -5087,6 +5089,57 @@ impl AppActor {
     async fn handle_app_effects(&mut self, request_id: RequestId, effects: Vec<AppEffect>) {
         for effect in effects {
             match effect {
+                AppEffect::ContinueSlidingSyncAdmission {
+                    account_epoch,
+                    request_id,
+                    source,
+                    ..
+                } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::ContinueSlidingSyncAdmission {
+                            account_epoch,
+                            request_id,
+                            source,
+                        })
+                        .await;
+                }
+                AppEffect::RetrySlidingSyncCapabilityDiscovery {
+                    account_epoch,
+                    blocked_request_id,
+                    request_id,
+                } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::RetrySlidingSyncCapabilityDiscovery {
+                            account_epoch,
+                            blocked_request_id,
+                            request_id,
+                        })
+                        .await;
+                }
+                AppEffect::ScheduleSlidingSyncCapabilityRevalidation { account_epoch } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::ScheduleSlidingSyncCapabilityRevalidation {
+                            account_epoch,
+                        })
+                        .await;
+                }
+                AppEffect::SettleSlidingSyncCapabilityRevalidation {
+                    account_epoch,
+                    request_id,
+                    result,
+                } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::SettleSlidingSyncCapabilityRevalidation {
+                            account_epoch,
+                            request_id,
+                            result,
+                        })
+                        .await;
+                }
                 AppEffect::StartSync => {
                     trace_runtime_sync!(
                         "effect_start_sync",
@@ -5418,6 +5471,57 @@ impl AppActor {
     ) {
         for effect in effects {
             match effect {
+                AppEffect::ContinueSlidingSyncAdmission {
+                    account_epoch,
+                    request_id,
+                    source,
+                    ..
+                } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::ContinueSlidingSyncAdmission {
+                            account_epoch: *account_epoch,
+                            request_id: *request_id,
+                            source: *source,
+                        })
+                        .await;
+                }
+                AppEffect::RetrySlidingSyncCapabilityDiscovery {
+                    account_epoch,
+                    blocked_request_id,
+                    request_id,
+                } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::RetrySlidingSyncCapabilityDiscovery {
+                            account_epoch: *account_epoch,
+                            blocked_request_id: *blocked_request_id,
+                            request_id: *request_id,
+                        })
+                        .await;
+                }
+                AppEffect::ScheduleSlidingSyncCapabilityRevalidation { account_epoch } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::ScheduleSlidingSyncCapabilityRevalidation {
+                            account_epoch: *account_epoch,
+                        })
+                        .await;
+                }
+                AppEffect::SettleSlidingSyncCapabilityRevalidation {
+                    account_epoch,
+                    request_id,
+                    result,
+                } => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::SettleSlidingSyncCapabilityRevalidation {
+                            account_epoch: *account_epoch,
+                            request_id: *request_id,
+                            result: result.clone(),
+                        })
+                        .await;
+                }
                 AppEffect::StartSync => {
                     let request_id = self.next_internal_request_id();
                     trace_runtime_sync!(
@@ -5701,6 +5805,7 @@ impl AppActor {
             | SessionState::Restoring
             | SessionState::SwitchingAccount { .. }
             | SessionState::Authenticating { .. }
+            | SessionState::CapabilityBlocked { .. }
             | SessionState::LoggingOut => None,
         }
     }
@@ -5966,6 +6071,7 @@ fn composer_draft_session_key(state: &AppState) -> Option<koushi_key::SessionKey
         | SessionState::AwaitingBootstrapConfirmation { .. }
         | SessionState::Rejecting { .. }
         | SessionState::LoggingOut
+        | SessionState::CapabilityBlocked { .. }
         | SessionState::Locked(_) => None,
     }
 }
@@ -6289,6 +6395,7 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         AccountCommand::QaSetLocalDeviceBlacklisted { .. }
         | AccountCommand::QaRefreshDeviceKeysAndAssertKnown { .. } => None,
         AccountCommand::CompleteOidcLogin { .. }
+        | AccountCommand::RetrySlidingSyncCapability { .. }
         | AccountCommand::QuerySavedSessions { .. }
         | AccountCommand::SetPresence { .. }
         | AccountCommand::DownloadAvatarThumbnail { .. }

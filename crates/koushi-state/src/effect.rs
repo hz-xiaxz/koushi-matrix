@@ -3,8 +3,8 @@ use crate::{
     state::{
         AttachmentFilter, AttachmentScope, AttachmentSort, LoginAttemptId, RoomPreferencesState,
         SearchCrawlerSettings, SearchRoomFilter, SearchScope, SessionInfo, SettingsValues,
-        SlidingSyncAdmissionKind, SlidingSyncAdmissionSource, VerificationCancelReason,
-        VerificationMethod, VerificationTarget,
+        SlidingSyncAdmissionKind, SlidingSyncAdmissionSource, SlidingSyncCapabilityResult,
+        VerificationCancelReason, VerificationMethod, VerificationTarget,
     },
 };
 
@@ -20,8 +20,18 @@ pub enum AppEffect {
         admission: SlidingSyncAdmissionKind,
         source: SlidingSyncAdmissionSource,
     },
+    RetrySlidingSyncCapabilityDiscovery {
+        account_epoch: u64,
+        blocked_request_id: u64,
+        request_id: u64,
+    },
     ScheduleSlidingSyncCapabilityRevalidation {
         account_epoch: u64,
+    },
+    SettleSlidingSyncCapabilityRevalidation {
+        account_epoch: u64,
+        request_id: u64,
+        result: SlidingSyncCapabilityResult,
     },
     Login {
         attempt_id: LoginAttemptId,

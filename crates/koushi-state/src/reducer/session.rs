@@ -62,7 +62,16 @@ pub(crate) fn handle_restore_session_succeeded(
     state: &mut AppState,
     info: crate::state::SessionInfo,
 ) -> Vec<AppEffect> {
-    if !matches!(state.session, SessionState::Restoring) {
+    let expected = match &state.session {
+        SessionState::Restoring => true,
+        SessionState::SwitchingAccount { info: target } => {
+            target.homeserver == info.homeserver
+                && target.user_id == info.user_id
+                && target.device_id == info.device_id
+        }
+        _ => false,
+    };
+    if !expected {
         return Vec::new();
     }
     install_provisional_session(state, info)

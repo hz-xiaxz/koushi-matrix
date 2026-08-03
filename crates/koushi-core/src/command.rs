@@ -102,6 +102,7 @@ impl CoreCommand {
                 | AccountCommand::CompleteOidcLogin { request_id, .. }
                 | AccountCommand::RestoreSession { request_id, .. }
                 | AccountCommand::RestoreLastSession { request_id }
+                | AccountCommand::RetrySlidingSyncCapability { request_id }
                 | AccountCommand::QuerySavedSessions { request_id }
                 | AccountCommand::QueryDevices { request_id }
                 | AccountCommand::RefreshCurrentSessionStatus { request_id, .. }
@@ -1163,6 +1164,11 @@ pub enum AccountCommand {
     RestoreLastSession {
         request_id: RequestId,
     },
+    /// Retry the required Simplified Sliding Sync capability check for the
+    /// currently blocked stored-session restore.
+    RetrySlidingSyncCapability {
+        request_id: RequestId,
+    },
     /// List saved sessions (homeserver / user_id / device_id only — never
     /// secrets). Answered by `AccountEvent::SavedSessionsListed`.
     QuerySavedSessions {
@@ -1397,7 +1403,6 @@ impl AccountCommand {
                 | Self::UnignoreUser { .. }
                 | Self::ReportUser { .. }
                 | Self::ProbeLocalEncryptionHealth { .. }
-                | Self::ResetLocalData { .. }
         )
     }
 }
@@ -1456,6 +1461,10 @@ impl fmt::Debug for AccountCommand {
                 .finish(),
             Self::RestoreLastSession { request_id } => formatter
                 .debug_struct("RestoreLastSession")
+                .field("request_id", request_id)
+                .finish(),
+            Self::RetrySlidingSyncCapability { request_id } => formatter
+                .debug_struct("RetrySlidingSyncCapability")
                 .field("request_id", request_id)
                 .finish(),
             Self::QuerySavedSessions { request_id } => formatter
@@ -3202,6 +3211,21 @@ mod tests {
         });
 
         assert!(!command.requires_ready_session());
+    }
+
+    #[test]
+    fn capability_recovery_commands_are_allowed_while_session_is_blocked() {
+        let retry = CoreCommand::Account(AccountCommand::RetrySlidingSyncCapability {
+            request_id: fake_rid(74),
+        });
+        let reset = CoreCommand::Account(AccountCommand::ResetLocalData {
+            request_id: fake_rid(75),
+        });
+
+        assert!(!retry.requires_ready_session());
+        assert!(!reset.requires_ready_session());
+        assert_eq!(retry.request_id(), fake_rid(74));
+        assert!(format!("{retry:?}").contains("RetrySlidingSyncCapability"));
     }
 
     #[cfg(feature = "qa-bin")]

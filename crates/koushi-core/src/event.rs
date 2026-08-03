@@ -2274,6 +2274,7 @@ pub fn timeline_projection_own_user_id(state: &AppState) -> Option<&str> {
         | SessionState::Rejecting { .. }
         | SessionState::LoggingOut
         | SessionState::Locked(_)
+        | SessionState::CapabilityBlocked { .. }
         | SessionState::SwitchingAccount { .. } => None,
     }
 }

@@ -176,6 +176,8 @@ pub fn build_state_delta(
 fn audit_app_state_delta_slices(state: &AppState) {
     let AppState {
         session: _,
+        sliding_sync_account_epoch: _,
+        sliding_sync_capability: _,
         current_session_status: _,
         auth: _,
         device_sessions: _,

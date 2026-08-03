@@ -49,8 +49,9 @@ use koushi_state::{
     DeviceSessionSummary, E2eeRecoveryState, IdentityResetAuthType, IdentityResetState,
     LoginAttemptId, LoginRequest, OperationFailureKind, OwnProfile, PresenceKind,
     RecoveryKeyDeliveryState, RecoveryMethod, RecoveryRequest, SasEmoji, ScheduledSendCapability,
-    ScheduledSendHandle, ScheduledSendItem, SessionInfo, TrustOperationFailureKind,
-    VerificationCancelReason, VerificationFlowState, VerificationTarget,
+    ScheduledSendHandle, ScheduledSendItem, SessionInfo, SlidingSyncAdmission,
+    SlidingSyncAdmissionSource, SlidingSyncCapabilityResult, SlidingSyncPositiveEvidence,
+    TrustOperationFailureKind, VerificationCancelReason, VerificationFlowState, VerificationTarget,
 };
 use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::ruma::events::room::MediaSource as SdkMediaSource;
@@ -98,6 +99,61 @@ const SESSION_NOT_FOUND_FAILURE: CoreFailure = CoreFailure::SessionNotFound;
 const READ_PERSISTENCE_DEBOUNCE: Duration = Duration::from_millis(100);
 const READ_PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 static READ_PERSISTENCE_SESSION_SERIAL: AtomicU64 = AtomicU64::new(0);
+
+fn sliding_sync_capability_result(
+    result: koushi_sdk::SlidingSyncDiscoveryResult,
+) -> SlidingSyncCapabilityResult {
+    match result {
+        koushi_sdk::SlidingSyncDiscoveryResult::Supported { .. } => {
+            SlidingSyncCapabilityResult::Supported {
+                evidence: SlidingSyncPositiveEvidence {
+                    observed_at_ms: current_epoch_ms(),
+                },
+            }
+        }
+        koushi_sdk::SlidingSyncDiscoveryResult::Unsupported { .. } => {
+            SlidingSyncCapabilityResult::Unsupported
+        }
+        koushi_sdk::SlidingSyncDiscoveryResult::Unreachable { .. } => {
+            SlidingSyncCapabilityResult::Unreachable
+        }
+        koushi_sdk::SlidingSyncDiscoveryResult::InvalidResponse { .. } => {
+            SlidingSyncCapabilityResult::InvalidResponse
+        }
+    }
+}
+
+fn sliding_sync_auth_failure_kind(result: &SlidingSyncCapabilityResult) -> AuthFailureKind {
+    match result {
+        SlidingSyncCapabilityResult::Unsupported => AuthFailureKind::Unsupported,
+        SlidingSyncCapabilityResult::Unreachable => AuthFailureKind::Network,
+        SlidingSyncCapabilityResult::InvalidResponse
+        | SlidingSyncCapabilityResult::Supported { .. } => AuthFailureKind::Sdk,
+    }
+}
+
+fn sliding_sync_revalidation_completion_is_current(
+    active: Option<(u64, u64)>,
+    account_epoch: u64,
+    request_id: u64,
+) -> bool {
+    active == Some((account_epoch, request_id))
+}
+
+fn record_sliding_sync_capability_persistence(outcome: &'static str) {
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(
+            if outcome == "saved" {
+                DiagnosticLevel::Info
+            } else {
+                DiagnosticLevel::Warn
+            },
+            "core.sliding_sync_capability",
+            "positive_evidence_persistence",
+        )
+        .field(DiagnosticField::token("outcome", outcome)),
+    );
+}
 
 /// Maximum number of concurrent avatar thumbnail downloads. Bounded to avoid
 /// flooding the SDK media layer with parallel requests during large room joins.
@@ -402,6 +458,34 @@ fn record_restore_store_event(event: DiagnosticEvent) {
 /// Messages routed to the AccountActor task.
 pub enum AccountMessage {
     Command(AccountCommand),
+    ContinueSlidingSyncAdmission {
+        account_epoch: u64,
+        request_id: u64,
+        source: SlidingSyncAdmissionSource,
+    },
+    RetrySlidingSyncCapabilityDiscovery {
+        account_epoch: u64,
+        blocked_request_id: u64,
+        request_id: u64,
+    },
+    ScheduleSlidingSyncCapabilityRevalidation {
+        account_epoch: u64,
+    },
+    SlidingSyncCapabilityDiscovered {
+        account_epoch: u64,
+        request_id: u64,
+        result: koushi_sdk::SlidingSyncDiscoveryResult,
+    },
+    SlidingSyncCapabilityRevalidationDiscovered {
+        account_epoch: u64,
+        request_id: u64,
+        result: koushi_sdk::SlidingSyncDiscoveryResult,
+    },
+    SettleSlidingSyncCapabilityRevalidation {
+        account_epoch: u64,
+        request_id: u64,
+        result: SlidingSyncCapabilityResult,
+    },
     SyncCommand(SyncCommand),
     RoomCommand(RoomCommand),
     TimelineCommand(TimelineCommand),
@@ -709,6 +793,7 @@ impl AccountActorHandle {
 }
 
 /// How a successful store-backed restore is reported.
+#[derive(Clone, Copy)]
 enum RestoreOutcome {
     /// `RestoreSession` command → `AccountEvent::SessionRestored`.
     Restored,
@@ -841,6 +926,115 @@ struct PendingSessionTeardown {
     session: Arc<MatrixClientSession>,
     key_id: Option<SessionKeyId>,
     continuation: SessionTeardownContinuation,
+}
+
+enum PendingSlidingSyncAdmission {
+    NewLogin {
+        account_epoch: u64,
+        request_id: u64,
+        core_request_id: RequestId,
+        login_session: MatrixClientSession,
+        persistable: PersistableMatrixSession,
+        key_id: SessionKeyId,
+        action: AppAction,
+        ready_events: Vec<CoreEvent>,
+    },
+    StoredSessionRestore {
+        account_epoch: u64,
+        request_id: u64,
+        core_request_id: RequestId,
+        persistable: PersistableMatrixSession,
+        key_id: SessionKeyId,
+        outcome: RestoreOutcome,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct PendingSlidingSyncRetry {
+    account_epoch: u64,
+    blocked_request_id: u64,
+    request_id: u64,
+    core_request_id: RequestId,
+}
+
+#[derive(Clone)]
+struct StoredSlidingSyncAdmissionContext {
+    core_request_id: RequestId,
+    persistable: PersistableMatrixSession,
+    key_id: SessionKeyId,
+    outcome: RestoreOutcome,
+}
+
+impl PendingSlidingSyncAdmission {
+    fn correlation(&self) -> (u64, u64) {
+        match self {
+            Self::NewLogin {
+                account_epoch,
+                request_id,
+                ..
+            }
+            | Self::StoredSessionRestore {
+                account_epoch,
+                request_id,
+                ..
+            } => (*account_epoch, *request_id),
+        }
+    }
+
+    fn positive_evidence(&self) -> Option<SlidingSyncPositiveEvidence> {
+        match self {
+            Self::NewLogin { persistable, .. } | Self::StoredSessionRestore { persistable, .. } => {
+                persistable.sliding_sync_positive_evidence()
+            }
+        }
+    }
+
+    fn key_id(&self) -> &SessionKeyId {
+        match self {
+            Self::NewLogin { key_id, .. } | Self::StoredSessionRestore { key_id, .. } => key_id,
+        }
+    }
+
+    fn set_positive_evidence(&mut self, evidence: SlidingSyncPositiveEvidence) {
+        match self {
+            Self::NewLogin { persistable, .. } | Self::StoredSessionRestore { persistable, .. } => {
+                *persistable = persistable
+                    .clone()
+                    .with_sliding_sync_positive_evidence(evidence);
+            }
+        }
+    }
+
+    fn prepare_retry(
+        &mut self,
+        request_id: u64,
+        core_request_id: RequestId,
+    ) -> Option<(
+        u64,
+        SlidingSyncAdmission,
+        String,
+        Option<SlidingSyncPositiveEvidence>,
+    )> {
+        let Self::StoredSessionRestore {
+            account_epoch,
+            request_id: active_request_id,
+            core_request_id: active_core_request_id,
+            persistable,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        *active_request_id = request_id;
+        *active_core_request_id = core_request_id;
+        let info = persistable.info.clone();
+        Some((
+            *account_epoch,
+            SlidingSyncAdmission::StoredSessionRestore { info: info.clone() },
+            info.homeserver,
+            persistable.sliding_sync_positive_evidence(),
+        ))
+    }
 }
 
 enum SessionTeardownContinuation {
@@ -1484,6 +1678,15 @@ pub struct AccountActor {
     session_key_id: Option<SessionKeyId>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
     provisional_persistable: Option<PersistableMatrixSession>,
+    sliding_sync_positive_evidence: Option<SlidingSyncPositiveEvidence>,
+    sliding_sync_account_epoch: u64,
+    sliding_sync_request_id: u64,
+    pending_sliding_sync_admission: Option<PendingSlidingSyncAdmission>,
+    pending_sliding_sync_retry: Option<PendingSlidingSyncRetry>,
+    stored_sliding_sync_admission: Option<StoredSlidingSyncAdmissionContext>,
+    sliding_sync_discovery_task: Option<crate::executor::JoinHandle<()>>,
+    sliding_sync_revalidation_pending: Option<u64>,
+    sliding_sync_revalidation_request: Option<(u64, u64)>,
     session_promoted: bool,
     trust_generation: u64,
     trust_observer: Option<crate::executor::JoinHandle<()>>,
@@ -1678,6 +1881,15 @@ impl AccountActor {
             session_key_id: None,
             composer_draft_leases,
             provisional_persistable: None,
+            sliding_sync_positive_evidence: None,
+            sliding_sync_account_epoch: 0,
+            sliding_sync_request_id: 0,
+            pending_sliding_sync_admission: None,
+            pending_sliding_sync_retry: None,
+            stored_sliding_sync_admission: None,
+            sliding_sync_discovery_task: None,
+            sliding_sync_revalidation_pending: None,
+            sliding_sync_revalidation_request: None,
             session_promoted: false,
             trust_generation: 0,
             trust_observer: None,
@@ -1780,6 +1992,62 @@ impl AccountActor {
                 }
                 AccountMessage::Command(command) => {
                     self.handle_command(command).await;
+                }
+                AccountMessage::ContinueSlidingSyncAdmission {
+                    account_epoch,
+                    request_id,
+                    source,
+                } => {
+                    self.continue_sliding_sync_admission(account_epoch, request_id, source)
+                        .await;
+                }
+                AccountMessage::RetrySlidingSyncCapabilityDiscovery {
+                    account_epoch,
+                    blocked_request_id,
+                    request_id,
+                } => {
+                    self.start_sliding_sync_capability_retry(
+                        account_epoch,
+                        blocked_request_id,
+                        request_id,
+                    )
+                    .await;
+                }
+                AccountMessage::ScheduleSlidingSyncCapabilityRevalidation { account_epoch } => {
+                    if account_epoch == self.sliding_sync_account_epoch {
+                        self.sliding_sync_revalidation_pending = Some(account_epoch);
+                        if self.session_promoted {
+                            self.start_sliding_sync_revalidation(account_epoch).await;
+                        }
+                    }
+                }
+                AccountMessage::SlidingSyncCapabilityDiscovered {
+                    account_epoch,
+                    request_id,
+                    result,
+                } => {
+                    self.finish_sliding_sync_capability_discovery(
+                        account_epoch,
+                        request_id,
+                        result,
+                    )
+                    .await;
+                }
+                AccountMessage::SlidingSyncCapabilityRevalidationDiscovered {
+                    account_epoch,
+                    request_id,
+                    result,
+                } => {
+                    self.finish_sliding_sync_revalidation(account_epoch, request_id, result)
+                        .await;
+                }
+                AccountMessage::SettleSlidingSyncCapabilityRevalidation {
+                    account_epoch,
+                    request_id,
+                    result,
+                } => {
+                    self.settle_sliding_sync_revalidation(account_epoch, request_id, result)
+                        .await;
                 }
                 AccountMessage::SyncCommand(sync_command) => {
                     self.route_sync_command(sync_command).await;
@@ -2713,6 +2981,12 @@ impl AccountActor {
     }
 
     async fn shutdown_owned_runtime(&mut self) {
+        self.cancel_sliding_sync_discovery_task().await;
+        self.discard_pending_sliding_sync_admission().await;
+        self.pending_sliding_sync_retry = None;
+        self.stored_sliding_sync_admission = None;
+        self.sliding_sync_revalidation_pending = None;
+        self.sliding_sync_revalidation_request = None;
         if let Some(task) = self.teardown_retry_task.take() {
             task.abort();
             let _ = task.await;
@@ -3875,6 +4149,9 @@ impl AccountActor {
             }
             AccountCommand::RestoreLastSession { request_id } => {
                 self.handle_restore_last_session(request_id).await;
+            }
+            AccountCommand::RetrySlidingSyncCapability { request_id } => {
+                self.handle_retry_sliding_sync_capability(request_id).await;
             }
             AccountCommand::QuerySavedSessions { request_id } => {
                 self.handle_query_saved_sessions(request_id).await;
@@ -6292,6 +6569,515 @@ impl AccountActor {
         }
     }
 
+    fn next_sliding_sync_correlation(&mut self) -> Option<(u64, u64)> {
+        self.sliding_sync_account_epoch = self.sliding_sync_account_epoch.checked_add(1)?;
+        self.sliding_sync_request_id = self.sliding_sync_request_id.checked_add(1)?;
+        Some((
+            self.sliding_sync_account_epoch,
+            self.sliding_sync_request_id,
+        ))
+    }
+
+    fn next_sliding_sync_request_id(&mut self) -> Option<u64> {
+        self.sliding_sync_request_id = self.sliding_sync_request_id.checked_add(1)?;
+        Some(self.sliding_sync_request_id)
+    }
+
+    async fn handle_retry_sliding_sync_capability(&mut self, core_request_id: RequestId) {
+        let Some((account_epoch, blocked_request_id)) = self
+            .pending_sliding_sync_admission
+            .as_ref()
+            .map(PendingSlidingSyncAdmission::correlation)
+        else {
+            self.emit_failure(core_request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        let Some(request_id) = self.next_sliding_sync_request_id() else {
+            self.emit_failure(
+                core_request_id,
+                CoreFailure::AccountOperationFailed {
+                    kind: AuthFailureKind::Sdk,
+                },
+            );
+            return;
+        };
+        self.pending_sliding_sync_retry = Some(PendingSlidingSyncRetry {
+            account_epoch,
+            blocked_request_id,
+            request_id,
+            core_request_id,
+        });
+        self.send_actions(vec![AppAction::SlidingSyncCapabilityRetryAccepted {
+            account_epoch,
+            blocked_request_id,
+            request_id,
+        }])
+        .await;
+    }
+
+    async fn start_sliding_sync_capability_retry(
+        &mut self,
+        account_epoch: u64,
+        blocked_request_id: u64,
+        request_id: u64,
+    ) {
+        let Some(pending_retry) = self.pending_sliding_sync_retry else {
+            return;
+        };
+        if pending_retry.account_epoch != account_epoch
+            || pending_retry.blocked_request_id != blocked_request_id
+            || pending_retry.request_id != request_id
+            || self
+                .pending_sliding_sync_admission
+                .as_ref()
+                .map(PendingSlidingSyncAdmission::correlation)
+                != Some((account_epoch, blocked_request_id))
+        {
+            return;
+        }
+        let Some((active_epoch, admission, homeserver, positive_evidence)) = self
+            .pending_sliding_sync_admission
+            .as_mut()
+            .and_then(|pending| pending.prepare_retry(request_id, pending_retry.core_request_id))
+        else {
+            return;
+        };
+        if active_epoch != account_epoch {
+            return;
+        }
+        self.pending_sliding_sync_retry = None;
+        self.cancel_sliding_sync_discovery_task().await;
+        self.send_actions(vec![AppAction::SlidingSyncCapabilityCheckStarted {
+            account_epoch,
+            request_id,
+            admission,
+            positive_evidence,
+        }])
+        .await;
+        let tx = self.self_tx.clone();
+        self.sliding_sync_discovery_task = Some(executor::spawn(async move {
+            let result = koushi_sdk::discover_sliding_sync_support(&homeserver).await;
+            let _ = tx
+                .send(AccountMessage::SlidingSyncCapabilityDiscovered {
+                    account_epoch,
+                    request_id,
+                    result,
+                })
+                .await;
+        }));
+    }
+
+    async fn begin_sliding_sync_capability_discovery(
+        &mut self,
+        pending: PendingSlidingSyncAdmission,
+        admission: SlidingSyncAdmission,
+        homeserver: String,
+    ) {
+        self.cancel_sliding_sync_discovery_task().await;
+        self.discard_pending_sliding_sync_admission().await;
+        self.pending_sliding_sync_retry = None;
+        self.stored_sliding_sync_admission = None;
+        self.sliding_sync_revalidation_pending = None;
+        let (account_epoch, request_id) = pending.correlation();
+        let positive_evidence = pending.positive_evidence();
+        self.pending_sliding_sync_admission = Some(pending);
+        self.send_actions(vec![AppAction::SlidingSyncCapabilityCheckStarted {
+            account_epoch,
+            request_id,
+            admission,
+            positive_evidence,
+        }])
+        .await;
+        let tx = self.self_tx.clone();
+        self.sliding_sync_discovery_task = Some(executor::spawn(async move {
+            let result = koushi_sdk::discover_sliding_sync_support(&homeserver).await;
+            let _ = tx
+                .send(AccountMessage::SlidingSyncCapabilityDiscovered {
+                    account_epoch,
+                    request_id,
+                    result,
+                })
+                .await;
+        }));
+    }
+
+    async fn finish_sliding_sync_capability_discovery(
+        &mut self,
+        account_epoch: u64,
+        request_id: u64,
+        result: koushi_sdk::SlidingSyncDiscoveryResult,
+    ) {
+        if self
+            .pending_sliding_sync_admission
+            .as_ref()
+            .map(PendingSlidingSyncAdmission::correlation)
+            != Some((account_epoch, request_id))
+        {
+            return;
+        }
+        self.sliding_sync_discovery_task = None;
+        let state_result = sliding_sync_capability_result(result);
+        if matches!(state_result, SlidingSyncCapabilityResult::Supported { .. })
+            && let SlidingSyncCapabilityResult::Supported { evidence } = &state_result
+            && let Some(pending) = self.pending_sliding_sync_admission.as_mut()
+        {
+            pending.set_positive_evidence(evidence.clone());
+        }
+        let has_positive_evidence = self
+            .pending_sliding_sync_admission
+            .as_ref()
+            .and_then(PendingSlidingSyncAdmission::positive_evidence)
+            .is_some();
+        let is_restore = matches!(
+            self.pending_sliding_sync_admission,
+            Some(PendingSlidingSyncAdmission::StoredSessionRestore { .. })
+        );
+        let will_continue = matches!(&state_result, SlidingSyncCapabilityResult::Supported { .. })
+            || (is_restore
+                && has_positive_evidence
+                && matches!(
+                    state_result,
+                    SlidingSyncCapabilityResult::Unreachable
+                        | SlidingSyncCapabilityResult::InvalidResponse
+                ));
+        self.send_actions(vec![AppAction::SlidingSyncCapabilityCheckCompleted {
+            account_epoch,
+            request_id,
+            result: state_result.clone(),
+        }])
+        .await;
+        if !will_continue {
+            let core_request_id = match self.pending_sliding_sync_admission.as_ref() {
+                Some(PendingSlidingSyncAdmission::NewLogin {
+                    core_request_id, ..
+                })
+                | Some(PendingSlidingSyncAdmission::StoredSessionRestore {
+                    core_request_id, ..
+                }) => *core_request_id,
+                None => return,
+            };
+            if matches!(
+                self.pending_sliding_sync_admission,
+                Some(PendingSlidingSyncAdmission::NewLogin { .. })
+            ) {
+                self.discard_pending_sliding_sync_admission().await;
+                self.send_actions(vec![AppAction::LoginFailed {
+                    attempt_id: LoginAttemptId::new(
+                        core_request_id.connection_id.0,
+                        core_request_id.sequence,
+                    ),
+                    message: "login failed".to_owned(),
+                }])
+                .await;
+            }
+            self.emit_failure(
+                core_request_id,
+                CoreFailure::AccountOperationFailed {
+                    kind: sliding_sync_auth_failure_kind(&state_result),
+                },
+            );
+        }
+    }
+
+    async fn continue_sliding_sync_admission(
+        &mut self,
+        account_epoch: u64,
+        request_id: u64,
+        source: SlidingSyncAdmissionSource,
+    ) {
+        if self
+            .pending_sliding_sync_admission
+            .as_ref()
+            .map(PendingSlidingSyncAdmission::correlation)
+            != Some((account_epoch, request_id))
+        {
+            return;
+        }
+        let pending = self
+            .pending_sliding_sync_admission
+            .take()
+            .expect("matching Sliding Sync admission remains pending");
+        match pending {
+            PendingSlidingSyncAdmission::NewLogin {
+                core_request_id,
+                login_session,
+                persistable,
+                key_id,
+                action,
+                ready_events,
+                ..
+            } => match self.restore_into_store(&persistable, &key_id).await {
+                Ok(store_backed) => {
+                    self.stored_sliding_sync_admission = None;
+                    drop(login_session);
+                    self.install_provisional_session(store_backed, persistable, key_id, action)
+                        .await;
+                    self.pending_ready_events.extend(ready_events);
+                }
+                Err(failure) => {
+                    self.abort_login(login_session, &key_id, false).await;
+                    self.emit_failure(core_request_id, failure);
+                    self.send_actions(vec![AppAction::LoginFailed {
+                        attempt_id: LoginAttemptId::new(
+                            core_request_id.connection_id.0,
+                            core_request_id.sequence,
+                        ),
+                        message: "login failed".to_owned(),
+                    }])
+                    .await;
+                }
+            },
+            PendingSlidingSyncAdmission::StoredSessionRestore {
+                core_request_id,
+                persistable,
+                key_id,
+                outcome,
+                ..
+            } => {
+                if source == SlidingSyncAdmissionSource::Network
+                    && persistable.sliding_sync_positive_evidence().is_some()
+                {
+                    let persistence_outcome = if self
+                        .persist_stored_sliding_sync_session(&key_id, &persistable)
+                        .await
+                        .is_ok()
+                    {
+                        "saved"
+                    } else {
+                        "failed"
+                    };
+                    record_sliding_sync_capability_persistence(persistence_outcome);
+                }
+                trace_account_request("restore_account", core_request_id, "store_restore_begin");
+                match self.restore_into_store(&persistable, &key_id).await {
+                    Ok(session) => {
+                        trace_account_request(
+                            "restore_account",
+                            core_request_id,
+                            "store_restore_ok",
+                        );
+                        let info = session.info.clone();
+                        let account_key = account_key_from_info(&info);
+                        self.stored_sliding_sync_admission =
+                            Some(StoredSlidingSyncAdmissionContext {
+                                core_request_id,
+                                persistable: persistable.clone(),
+                                key_id: key_id.clone(),
+                                outcome,
+                            });
+                        self.install_provisional_session(
+                            session,
+                            persistable,
+                            key_id,
+                            AppAction::RestoreSessionSucceeded(info),
+                        )
+                        .await;
+                        self.pending_ready_events
+                            .push(CoreEvent::Account(match outcome {
+                                RestoreOutcome::Restored => AccountEvent::SessionRestored {
+                                    request_id: core_request_id,
+                                    account_key,
+                                },
+                                RestoreOutcome::Switched => AccountEvent::AccountSwitched {
+                                    request_id: core_request_id,
+                                    account_key,
+                                },
+                            }));
+                    }
+                    Err(failure) => {
+                        trace_account_request(
+                            "restore_account",
+                            core_request_id,
+                            "store_restore_failed",
+                        );
+                        self.send_actions(vec![AppAction::RestoreSessionFailed {
+                            message: RESTORE_FAILED_MESSAGE.to_owned(),
+                        }])
+                        .await;
+                        self.emit_failure(core_request_id, failure);
+                    }
+                }
+            }
+        }
+    }
+
+    async fn start_sliding_sync_revalidation(&mut self, account_epoch: u64) {
+        if self.sliding_sync_revalidation_pending != Some(account_epoch)
+            || self.sliding_sync_discovery_task.is_some()
+        {
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let homeserver = session.info.homeserver.clone();
+        let Some(request_id) = self.next_sliding_sync_request_id() else {
+            return;
+        };
+        self.send_actions(vec![AppAction::SlidingSyncCapabilityRevalidationStarted {
+            account_epoch,
+            request_id,
+        }])
+        .await;
+        self.sliding_sync_revalidation_pending = None;
+        self.sliding_sync_revalidation_request = Some((account_epoch, request_id));
+        let tx = self.self_tx.clone();
+        self.sliding_sync_discovery_task = Some(executor::spawn(async move {
+            let result = koushi_sdk::discover_sliding_sync_support(&homeserver).await;
+            let _ = tx
+                .send(
+                    AccountMessage::SlidingSyncCapabilityRevalidationDiscovered {
+                        account_epoch,
+                        request_id,
+                        result,
+                    },
+                )
+                .await;
+        }));
+    }
+
+    async fn finish_sliding_sync_revalidation(
+        &mut self,
+        account_epoch: u64,
+        request_id: u64,
+        result: koushi_sdk::SlidingSyncDiscoveryResult,
+    ) {
+        if account_epoch != self.sliding_sync_account_epoch
+            || !sliding_sync_revalidation_completion_is_current(
+                self.sliding_sync_revalidation_request,
+                account_epoch,
+                request_id,
+            )
+        {
+            return;
+        }
+        let state_result = sliding_sync_capability_result(result);
+        self.send_actions(vec![
+            AppAction::SlidingSyncCapabilityRevalidationCompleted {
+                account_epoch,
+                request_id,
+                result: state_result,
+            },
+        ])
+        .await;
+    }
+
+    async fn settle_sliding_sync_revalidation(
+        &mut self,
+        account_epoch: u64,
+        request_id: u64,
+        state_result: SlidingSyncCapabilityResult,
+    ) {
+        if account_epoch != self.sliding_sync_account_epoch
+            || !sliding_sync_revalidation_completion_is_current(
+                self.sliding_sync_revalidation_request,
+                account_epoch,
+                request_id,
+            )
+        {
+            return;
+        }
+        self.sliding_sync_revalidation_request = None;
+        self.sliding_sync_discovery_task = None;
+        if let SlidingSyncCapabilityResult::Supported { evidence } = &state_result {
+            self.sliding_sync_positive_evidence = Some(evidence.clone());
+            if let Some(context) = self.stored_sliding_sync_admission.as_mut() {
+                context.persistable = context
+                    .persistable
+                    .clone()
+                    .with_sliding_sync_positive_evidence(evidence.clone());
+            }
+            let outcome = if self
+                .persist_sliding_sync_positive_evidence(evidence.clone())
+                .await
+                .is_ok()
+            {
+                "saved"
+            } else {
+                "failed"
+            };
+            record_sliding_sync_capability_persistence(outcome);
+        } else if matches!(state_result, SlidingSyncCapabilityResult::Unsupported) {
+            if let Some(context) = self.stored_sliding_sync_admission.clone() {
+                self.pending_sliding_sync_admission =
+                    Some(PendingSlidingSyncAdmission::StoredSessionRestore {
+                        account_epoch,
+                        request_id,
+                        core_request_id: context.core_request_id,
+                        persistable: context.persistable,
+                        key_id: context.key_id,
+                        outcome: context.outcome,
+                    });
+            }
+            self.stop_current_session_runtime().await;
+            self.session_promoted = false;
+        } else {
+            self.sliding_sync_revalidation_pending = Some(account_epoch);
+        }
+    }
+
+    async fn persist_sliding_sync_positive_evidence(
+        &self,
+        evidence: SlidingSyncPositiveEvidence,
+    ) -> Result<(), ()> {
+        let (Some(session), Some(key_id)) = (self.session.clone(), self.session_key_id.clone())
+        else {
+            return Err(());
+        };
+        let store = self.store.clone();
+        executor::spawn_blocking(move || {
+            let persistable = session
+                .persistable_session()
+                .map_err(|_| ())?
+                .with_sliding_sync_positive_evidence(evidence);
+            let json = persistable.to_json().map_err(|_| ())?;
+            store
+                .credential_backend()
+                .save_matrix_session(&key_id, &StoredMatrixSession::new(json))
+                .map_err(|_| ())
+        })
+        .await
+        .map_err(|_| ())?
+    }
+
+    async fn persist_stored_sliding_sync_session(
+        &self,
+        key_id: &SessionKeyId,
+        persistable: &PersistableMatrixSession,
+    ) -> Result<(), ()> {
+        let store = self.store.clone();
+        let key_id = key_id.clone();
+        let persistable = persistable.clone();
+        executor::spawn_blocking(move || {
+            let json = persistable.to_json().map_err(|_| ())?;
+            store
+                .credential_backend()
+                .save_matrix_session(&key_id, &StoredMatrixSession::new(json))
+                .map_err(|_| ())
+        })
+        .await
+        .map_err(|_| ())?
+    }
+
+    async fn cancel_sliding_sync_discovery_task(&mut self) {
+        self.sliding_sync_revalidation_request = None;
+        if let Some(task) = self.sliding_sync_discovery_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    async fn discard_pending_sliding_sync_admission(&mut self) {
+        if let Some(PendingSlidingSyncAdmission::NewLogin {
+            login_session,
+            key_id,
+            ..
+        }) = self.pending_sliding_sync_admission.take()
+        {
+            self.abort_login(login_session, &key_id, false).await;
+        }
+    }
+
     async fn handle_start_oidc_login(&mut self, request_id: RequestId, homeserver: String) {
         match koushi_sdk::start_oidc_login(&homeserver, OIDC_REDIRECT_URI).await {
             Ok((pending, authorization)) => {
@@ -6413,48 +7199,50 @@ impl AccountActor {
             }
         };
 
-        let store_backed = match self.restore_into_store(&persistable, &key_id).await {
-            Ok(session) => session,
-            Err(failure) => {
-                self.abort_login(login_session, &key_id, false).await;
-                self.emit_failure(request_id, failure);
-                self.send_actions(vec![AppAction::LoginFailed {
+        let Some((account_epoch, capability_request_id)) = self.next_sliding_sync_correlation()
+        else {
+            self.abort_login(login_session, &key_id, false).await;
+            self.emit_failure(request_id, CoreFailure::StoreUnavailable);
+            self.send_actions(vec![AppAction::LoginFailed {
+                attempt_id: LoginAttemptId::new(request_id.connection_id.0, request_id.sequence),
+                message: "login failed".to_owned(),
+            }])
+            .await;
+            return;
+        };
+        let mut ready_events = vec![CoreEvent::Account(AccountEvent::LoggedIn {
+            request_id: start_request_id,
+            account_key: account_key.clone(),
+        })];
+        if request_id != start_request_id {
+            ready_events.push(CoreEvent::Account(AccountEvent::LoggedIn {
+                request_id,
+                account_key,
+            }));
+        }
+        self.begin_sliding_sync_capability_discovery(
+            PendingSlidingSyncAdmission::NewLogin {
+                account_epoch,
+                request_id: capability_request_id,
+                core_request_id: request_id,
+                login_session,
+                persistable,
+                key_id,
+                action: AppAction::LoginSucceeded {
                     attempt_id: LoginAttemptId::new(
                         request_id.connection_id.0,
                         request_id.sequence,
                     ),
-                    message: "login failed".to_owned(),
-                }])
-                .await;
-                return;
-            }
-        };
-
-        drop(login_session);
-
-        self.install_provisional_session(
-            store_backed,
-            persistable,
-            key_id,
-            AppAction::LoginSucceeded {
-                attempt_id: LoginAttemptId::new(request_id.connection_id.0, request_id.sequence),
-                info,
+                    info,
+                },
+                ready_events,
             },
+            SlidingSyncAdmission::NewLogin {
+                attempt_id: LoginAttemptId::new(request_id.connection_id.0, request_id.sequence),
+            },
+            homeserver,
         )
         .await;
-
-        self.pending_ready_events
-            .push(CoreEvent::Account(AccountEvent::LoggedIn {
-                request_id: start_request_id,
-                account_key: account_key.clone(),
-            }));
-        if request_id != start_request_id {
-            self.pending_ready_events
-                .push(CoreEvent::Account(AccountEvent::LoggedIn {
-                    request_id,
-                    account_key,
-                }));
-        }
     }
 
     async fn handle_login_password(&mut self, request_id: RequestId, request: LoginRequest) {
@@ -6517,49 +7305,37 @@ impl AccountActor {
             }
         };
 
-        // Store bootstrap step 2b: restore the session into the per-account
-        // encrypted store. The store-backed session replaces the login client
-        // BEFORE any sync or E2EE traffic. Fail-closed: if store creation or
-        // the store-backed restore fails, the storeless session is dropped,
-        // never kept as a fallback.
-        let store_backed = match self.restore_into_store(&persistable, &key_id).await {
-            Ok(session) => session,
-            Err(failure) => {
-                self.abort_login(login_session, &key_id, false).await;
-                self.emit_failure(request_id, failure);
-                self.send_actions(vec![AppAction::LoginFailed {
-                    attempt_id: LoginAttemptId::new(
-                        request_id.connection_id.0,
-                        request_id.sequence,
-                    ),
-                    message: "login failed".to_owned(),
-                }])
-                .await;
-                return;
-            }
-        };
-
-        // The storeless client never synced; drop it inside the runtime
-        // context (Async rule 11).
-        drop(login_session);
-
-        self.install_provisional_session(
-            store_backed,
-            persistable,
-            key_id,
-            AppAction::LoginSucceeded {
+        let Some((account_epoch, capability_request_id)) = self.next_sliding_sync_correlation()
+        else {
+            self.abort_login(login_session, &key_id, false).await;
+            self.emit_failure(request_id, CoreFailure::StoreUnavailable);
+            self.send_actions(vec![AppAction::LoginFailed {
                 attempt_id: LoginAttemptId::new(request_id.connection_id.0, request_id.sequence),
-                info,
+                message: "login failed".to_owned(),
+            }])
+            .await;
+            return;
+        };
+        let homeserver = info.homeserver.clone();
+        let attempt_id = LoginAttemptId::new(request_id.connection_id.0, request_id.sequence);
+        self.begin_sliding_sync_capability_discovery(
+            PendingSlidingSyncAdmission::NewLogin {
+                account_epoch,
+                request_id: capability_request_id,
+                core_request_id: request_id,
+                login_session,
+                persistable,
+                key_id,
+                action: AppAction::LoginSucceeded { attempt_id, info },
+                ready_events: vec![CoreEvent::Account(AccountEvent::LoggedIn {
+                    request_id,
+                    account_key,
+                })],
             },
+            SlidingSyncAdmission::NewLogin { attempt_id },
+            homeserver,
         )
         .await;
-
-        // Emit domain event carrying the request_id for command correlation.
-        self.pending_ready_events
-            .push(CoreEvent::Account(AccountEvent::LoggedIn {
-                request_id,
-                account_key,
-            }));
     }
 
     async fn handle_restore_session(&mut self, request_id: RequestId, account_key: AccountKey) {
@@ -7387,43 +8163,31 @@ impl AccountActor {
             }
         };
 
-        trace_account_request("restore_account", request_id, "store_restore_begin");
-        match self.restore_into_store(&persistable, &key_id).await {
-            Err(failure) => {
-                trace_account_request("restore_account", request_id, "store_restore_failed");
-                self.send_actions(vec![AppAction::RestoreSessionFailed {
-                    message: RESTORE_FAILED_MESSAGE.to_owned(),
-                }])
-                .await;
-                self.emit_failure(request_id, failure);
-            }
-            Ok(session) => {
-                trace_account_request("restore_account", request_id, "store_restore_ok");
-                startup_trace::trace_phase(StartupPhase::Restore, restore_started);
-                let info = session.info.clone();
-                let account_key = account_key_from_info(&info);
-
-                self.install_provisional_session(
-                    session,
-                    persistable,
-                    key_id,
-                    AppAction::RestoreSessionSucceeded(info),
-                )
-                .await;
-
-                self.pending_ready_events
-                    .push(CoreEvent::Account(match outcome {
-                        RestoreOutcome::Restored => AccountEvent::SessionRestored {
-                            request_id,
-                            account_key,
-                        },
-                        RestoreOutcome::Switched => AccountEvent::AccountSwitched {
-                            request_id,
-                            account_key,
-                        },
-                    }));
-            }
-        }
+        startup_trace::trace_phase(StartupPhase::Restore, restore_started);
+        let Some((account_epoch, capability_request_id)) = self.next_sliding_sync_correlation()
+        else {
+            self.send_actions(vec![AppAction::RestoreSessionFailed {
+                message: RESTORE_FAILED_MESSAGE.to_owned(),
+            }])
+            .await;
+            self.emit_failure(request_id, CoreFailure::StoreUnavailable);
+            return;
+        };
+        let info = persistable.info.clone();
+        let homeserver = info.homeserver.clone();
+        self.begin_sliding_sync_capability_discovery(
+            PendingSlidingSyncAdmission::StoredSessionRestore {
+                account_epoch,
+                request_id: capability_request_id,
+                core_request_id: request_id,
+                persistable,
+                key_id,
+                outcome,
+            },
+            SlidingSyncAdmission::StoredSessionRestore { info },
+            homeserver,
+        )
+        .await;
     }
 
     async fn handle_start_session_bootstrap(
@@ -7739,6 +8503,9 @@ impl AccountActor {
         self.session_promoted = true;
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
+        }
+        if let Some(account_epoch) = self.sliding_sync_revalidation_pending {
+            self.start_sliding_sync_revalidation(account_epoch).await;
         }
         record_recovery_verification_event(
             recovery_verification_event("promoted", flow_id)
@@ -8110,10 +8877,47 @@ impl AccountActor {
         server_logout: bool,
         preserve_persistence: bool,
     ) {
+        if self.session.is_none()
+            && let Some(pending) = self.pending_sliding_sync_admission.take()
+        {
+            self.cancel_sliding_sync_discovery_task().await;
+            self.pending_sliding_sync_retry = None;
+            self.stored_sliding_sync_admission = None;
+            self.sliding_sync_revalidation_pending = None;
+            let key_id = match pending {
+                PendingSlidingSyncAdmission::NewLogin {
+                    login_session,
+                    key_id,
+                    ..
+                } => {
+                    self.abort_login(login_session, &key_id, false).await;
+                    key_id
+                }
+                PendingSlidingSyncAdmission::StoredSessionRestore { key_id, .. } => {
+                    if preserve_persistence {
+                        self.forget_last_session_pointer_if_matches(&key_id).await;
+                    } else {
+                        self.clear_account_persistence(&key_id).await;
+                    }
+                    key_id
+                }
+            };
+            self.send_actions(vec![AppAction::LogoutFinished]).await;
+            self.emit(CoreEvent::Account(AccountEvent::LoggedOut {
+                request_id,
+                account_key: AccountKey(key_id.user_id),
+            }));
+            return;
+        }
         if self.pending_session_teardown.is_some() {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         }
+        self.cancel_sliding_sync_discovery_task().await;
+        self.discard_pending_sliding_sync_admission().await;
+        self.pending_sliding_sync_retry = None;
+        self.stored_sliding_sync_admission = None;
+        self.sliding_sync_revalidation_pending = None;
         let session = match self.session.take() {
             Some(s) => s,
             None => {
@@ -8293,6 +9097,7 @@ impl AccountActor {
         self.pending_device_cleanup = None;
         self.session = Some(session.clone());
         self.session_key_id = Some(key_id);
+        self.sliding_sync_positive_evidence = persistable.sliding_sync_positive_evidence();
         self.provisional_persistable = Some(persistable);
         self.session_promoted = false;
         self.send_actions(vec![action]).await;
@@ -8750,6 +9555,9 @@ impl AccountActor {
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
         }
+        if let Some(account_epoch) = self.sliding_sync_revalidation_pending {
+            self.start_sliding_sync_revalidation(account_epoch).await;
+        }
         if let Some(pending) = self.pending_recovery_completion.take()
             && pending.generation == generation
         {
@@ -8779,11 +9587,15 @@ impl AccountActor {
         let store = self.store.clone();
         let session = session.clone();
         let key_id = key_id.clone();
+        let sliding_sync_positive_evidence = self.sliding_sync_positive_evidence.clone();
         executor::spawn_blocking(move || {
             let backend = store.credential_backend();
-            let persistable = session
+            let mut persistable = session
                 .persistable_session()
                 .map_err(|_| CoreFailure::StoreUnavailable)?;
+            if let Some(evidence) = sliding_sync_positive_evidence {
+                persistable = persistable.with_sliding_sync_positive_evidence(evidence);
+            }
             let json = persistable
                 .to_json()
                 .map_err(|_| CoreFailure::StoreUnavailable)?;
@@ -9459,10 +10271,15 @@ impl AccountActor {
 
     async fn handle_reset_local_data(&mut self, request_id: RequestId) {
         let started_at = Instant::now();
+        let key_id = self.session_key_id.clone().or_else(|| {
+            self.pending_sliding_sync_admission
+                .as_ref()
+                .map(|pending| pending.key_id().clone())
+        });
         record_local_data_reset_event(local_data_reset_event("started", request_id).field(
-            DiagnosticField::boolean("session_key_available", self.session_key_id.is_some()),
+            DiagnosticField::boolean("session_key_available", key_id.is_some()),
         ));
-        let Some(key_id) = self.session_key_id.clone() else {
+        let Some(key_id) = key_id else {
             record_local_data_reset_event(
                 local_data_reset_event("rejected", request_id)
                     .field(DiagnosticField::token("reason", "session_key_unavailable"))
@@ -9483,6 +10300,11 @@ impl AccountActor {
             "session_runtime_stop_started",
             request_id,
         ));
+        self.cancel_sliding_sync_discovery_task().await;
+        self.discard_pending_sliding_sync_admission().await;
+        self.pending_sliding_sync_retry = None;
+        self.stored_sliding_sync_admission = None;
+        self.sliding_sync_revalidation_pending = None;
         self.stop_current_session_runtime().await;
         record_local_data_reset_event(
             local_data_reset_event("session_runtime_stop_finished", request_id).field(
@@ -10699,6 +11521,7 @@ mod tests {
         server
             .mock_versions()
             .with_feature(crate::scheduled_send::MSC4140_FEATURE, true)
+            .with_feature("org.matrix.simplified_msc3575", true)
             .ok()
             .mount()
             .await;
@@ -10758,7 +11581,8 @@ mod tests {
         )
         .await;
         loop {
-            let actions = action_rx.recv().await.expect("old account install action");
+            let actions =
+                recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx).await;
             if matches!(
                 actions.as_slice(),
                 [AppAction::LoginSucceeded { info, .. }]
@@ -10806,6 +11630,18 @@ mod tests {
             },
         )
         .await;
+        loop {
+            let actions =
+                recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx).await;
+            if matches!(
+                actions.as_slice(),
+                [AppAction::LoginSucceeded { info, .. }]
+                    if info.user_id == replacement_account.user_id
+                        && info.device_id == replacement_account.device_id
+            ) {
+                break;
+            }
+        }
         assert!(
             handle
                 .send(AccountMessage::ScheduleServerDelayedSend {
@@ -11784,6 +12620,64 @@ mod tests {
     }
 
     #[test]
+    fn sliding_sync_evidence_persistence_diagnostic_is_private_and_closed() {
+        let output = std::process::Command::new(
+            std::env::current_exe().expect("current test executable should be available"),
+        )
+        .args([
+            "--exact",
+            "account::tests::sliding_sync_evidence_persistence_diagnostic_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .output()
+        .expect("sliding sync persistence diagnostic child should run");
+        assert!(output.status.success(), "child failed: {output:?}");
+        assert!(output.stderr.is_empty(), "diagnostics must stay buffered");
+
+        let stdout = String::from_utf8(output.stdout).expect("child stdout should be utf8");
+        let snapshot: serde_json::Value = serde_json::from_str(
+            stdout
+                .lines()
+                .find(|line| line.starts_with('{'))
+                .expect("child should print one JSON snapshot"),
+        )
+        .expect("child output should be a JSON snapshot");
+        let matching = snapshot["records"]
+            .as_array()
+            .expect("diagnostic records")
+            .iter()
+            .filter(|record| {
+                record["event"]["source"] == "core.sliding_sync_capability"
+                    && record["event"]["stage"] == "positive_evidence_persistence"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(matching.len(), 2);
+        let outcomes = matching
+            .iter()
+            .map(|record| record["event"]["fields"][0]["value"]["value"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(outcomes, vec![Some("saved"), Some("failed")]);
+        assert!(matching.iter().all(|record| {
+            record["event"]["fields"]
+                .as_array()
+                .is_some_and(|fields| fields.len() == 1 && fields[0]["key"] == "outcome")
+        }));
+    }
+
+    #[test]
+    #[ignore]
+    fn sliding_sync_evidence_persistence_diagnostic_child() {
+        record_sliding_sync_capability_persistence("saved");
+        record_sliding_sync_capability_persistence("failed");
+        println!(
+            "{}",
+            serde_json::to_string(&koushi_diagnostics::snapshot())
+                .expect("diagnostic snapshot should serialize")
+        );
+    }
+
+    #[test]
     fn sas_verification_tokens_are_closed_and_private_safe() {
         use koushi_sdk::MatrixSasState as SasState;
         use koushi_sdk::MatrixVerificationCancelKind as CancelKind;
@@ -12326,8 +13220,10 @@ mod tests {
             }))
             .await;
         while !matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { .. }])
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
         ) {}
         let files_before_logout = recursive_file_count(data_dir.path());
         assert!(files_before_logout > baseline_files);
@@ -12341,7 +13237,13 @@ mod tests {
                 request_id,
             }))
             .await;
-        while probe_rx.recv().await != Some("session_store_close_retrying") {}
+        recv_probe_with_sliding_sync_effects(
+            &handle,
+            &mut action_rx,
+            &mut probe_rx,
+            "session_store_close_retrying",
+        )
+        .await;
         assert_eq!(recursive_file_count(data_dir.path()), files_before_logout);
         assert_no_logout_finished(&mut action_rx);
 
@@ -12432,8 +13334,10 @@ mod tests {
             }))
             .await;
         while !matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { .. }])
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
         ) {}
         shutdown_and_ack(&handle).await;
         let tokens: Vec<_> = std::iter::from_fn(|| probe_rx.try_recv().ok()).collect();
@@ -12507,8 +13411,10 @@ mod tests {
             }))
             .await;
         while !matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { .. }])
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
         ) {}
         handle
             .send(AccountMessage::ConfigureCloseStoreResults {
@@ -12529,7 +13435,13 @@ mod tests {
                 },
             }))
             .await;
-        while probe_rx.recv().await != Some("session_store_close_retrying") {}
+        recv_probe_with_sliding_sync_effects(
+            &handle,
+            &mut action_rx,
+            &mut probe_rx,
+            "session_store_close_retrying",
+        )
+        .await;
         shutdown_and_ack(&handle).await;
         let tokens: Vec<_> = std::iter::from_fn(|| probe_rx.try_recv().ok()).collect();
         assert!(tokens.contains(&"teardown_retry_terminated"));
@@ -12668,7 +13580,8 @@ mod tests {
             .expect("password pre-success body");
         assert!(!before_success.contains("persist_session("));
         assert!(!before_success.contains("spawn_sync_actor("));
-        assert!(before_success.contains("install_provisional_session"));
+        assert!(before_success.contains("begin_sliding_sync_capability_discovery"));
+        assert!(!before_success.contains("install_provisional_session"));
 
         let restore = source
             .split("async fn restore_account")
@@ -12680,7 +13593,47 @@ mod tests {
             .next()
             .expect("restore pre-success body");
         assert!(!before_restore_success.contains("spawn_sync_actor("));
-        assert!(before_restore_success.contains("install_provisional_session"));
+        assert!(before_restore_success.contains("begin_sliding_sync_capability_discovery"));
+        assert!(!before_restore_success.contains("install_provisional_session"));
+        let continuation = source
+            .split("async fn continue_sliding_sync_admission")
+            .nth(1)
+            .and_then(|body| {
+                body.split("async fn start_sliding_sync_revalidation")
+                    .next()
+            })
+            .expect("shared capability continuation");
+        assert!(continuation.contains("install_provisional_session"));
+        let discovery_completion = source
+            .split("async fn finish_sliding_sync_capability_discovery")
+            .nth(1)
+            .and_then(|body| {
+                body.split("async fn continue_sliding_sync_admission")
+                    .next()
+            })
+            .expect("capability discovery completion");
+        assert!(
+            !discovery_completion.contains("self.continue_sliding_sync_admission("),
+            "session installation must wait for the reducer-produced continuation effect"
+        );
+    }
+
+    #[test]
+    fn sliding_sync_revalidation_completion_requires_the_exact_active_request() {
+        let active = Some((7, 12));
+
+        assert!(sliding_sync_revalidation_completion_is_current(
+            active, 7, 12
+        ));
+        assert!(!sliding_sync_revalidation_completion_is_current(
+            active, 7, 11
+        ));
+        assert!(!sliding_sync_revalidation_completion_is_current(
+            active, 6, 12
+        ));
+        assert!(!sliding_sync_revalidation_completion_is_current(
+            None, 7, 12
+        ));
     }
 
     #[test]
@@ -12734,6 +13687,22 @@ mod tests {
                 }))
                 .await
         );
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::SlidingSyncCapabilityCheckStarted {
+                admission: SlidingSyncAdmission::NewLogin { .. },
+                ..
+            }])
+        ));
+        assert!(matches!(
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::SlidingSyncCapabilityCheckCompleted {
+                result: SlidingSyncCapabilityResult::Supported { .. },
+                ..
+            }]
+        ));
         let actions = action_rx.recv().await.expect("provisional login action");
         assert!(matches!(
             actions.as_slice(),
@@ -12772,6 +13741,74 @@ mod tests {
             Some([AppAction::RestoreSessionNotFound])
         ));
         let _ = restarted.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn unsupported_password_login_never_installs_or_persists_the_session() {
+        let homeserver = spawn_unsupported_quarantine_password_server();
+        let cred_dir = tempdir().expect("tempdir");
+        let data_dir = tempdir().expect("tempdir");
+        let (handle, mut action_rx, mut event_rx) =
+            spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
+        let request_id = test_request_id();
+        assert!(
+            handle
+                .send(AccountMessage::Command(AccountCommand::LoginPassword {
+                    request_id,
+                    request: LoginRequest {
+                        homeserver,
+                        username: "fixture-user".to_owned(),
+                        password: koushi_state::AuthSecret::new("synthetic-password"),
+                        device_display_name: None,
+                    },
+                }))
+                .await
+        );
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::SlidingSyncCapabilityCheckStarted {
+                admission: SlidingSyncAdmission::NewLogin { .. },
+                ..
+            }])
+        ));
+        assert!(matches!(
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::SlidingSyncCapabilityCheckCompleted {
+                result: SlidingSyncCapabilityResult::Unsupported,
+                ..
+            }]
+        ));
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::LoginFailed { .. }])
+        ));
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (false, false, false, false)
+        );
+        let backend = CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(
+            cred_dir.path(),
+        ));
+        assert!(backend.load_last_session().expect("last pointer").is_none());
+        assert!(
+            backend
+                .load_saved_sessions()
+                .expect("saved sessions")
+                .sessions()
+                .is_empty()
+        );
+        assert!(matches!(
+            event_rx.recv().await,
+            Ok(CoreEvent::OperationFailed {
+                request_id: failed_request_id,
+                failure: CoreFailure::AccountOperationFailed {
+                    kind: AuthFailureKind::Unsupported,
+                },
+            }) if failed_request_id == request_id
+        ));
+        let _ = handle.send(AccountMessage::Shutdown).await;
     }
 
     #[tokio::test]
@@ -12840,7 +13877,25 @@ mod tests {
         ));
         assert!(matches!(
             action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { attempt_id, .. }])
+            Some([AppAction::SlidingSyncCapabilityCheckStarted {
+                admission: SlidingSyncAdmission::NewLogin { attempt_id },
+                ..
+            }]) if *attempt_id == LoginAttemptId::new(41, 7)
+        ));
+        assert!(matches!(
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::SlidingSyncCapabilityCheckCompleted {
+                result: SlidingSyncCapabilityResult::Supported { .. },
+                ..
+            }]
+        ));
+        assert!(matches!(
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { attempt_id, .. }]
                 if *attempt_id == LoginAttemptId::new(41, 7)
         ));
         assert_eq!(
@@ -12898,8 +13953,10 @@ mod tests {
             }))
             .await;
         while !matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { .. }])
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
         ) {}
 
         assert_eq!(
@@ -12939,7 +13996,8 @@ mod tests {
 
     #[tokio::test]
     async fn verified_offline_warm_restore_reaches_ready_without_network_catch_up() {
-        let (homeserver, offline) = spawn_controllable_quarantine_password_server();
+        let (homeserver, offline, sliding_sync_supported) =
+            spawn_controllable_quarantine_password_server();
         let login = koushi_sdk::login_with_password_with_store(
             &LoginRequest {
                 homeserver,
@@ -12956,6 +14014,9 @@ mod tests {
             login
                 .persistable_session()
                 .expect("persistable")
+                .with_sliding_sync_positive_evidence(SlidingSyncPositiveEvidence {
+                    observed_at_ms: 11,
+                })
                 .to_json()
                 .expect("json"),
         );
@@ -12975,6 +14036,7 @@ mod tests {
         let (handle, mut action_rx, _event_rx) =
             spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
         configure_verified_trust(&handle).await;
+        offline.store(true, std::sync::atomic::Ordering::SeqCst);
         handle
             .send(AccountMessage::Command(
                 AccountCommand::RestoreLastSession {
@@ -12982,19 +14044,124 @@ mod tests {
                 },
             ))
             .await;
-        while !matches!(
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::SlidingSyncCapabilityCheckStarted {
+                admission: SlidingSyncAdmission::StoredSessionRestore { .. },
+                positive_evidence: Some(_),
+                ..
+            }])
+        ));
+        let (offline_epoch, offline_request_id) = match action_rx.recv().await.as_deref() {
+            Some(
+                [
+                    AppAction::SlidingSyncCapabilityCheckCompleted {
+                        account_epoch,
+                        request_id,
+                        result: SlidingSyncCapabilityResult::Unreachable,
+                    },
+                ],
+            ) => (*account_epoch, *request_id),
+            other => panic!("expected unreachable capability result, got {other:?}"),
+        };
+        handle
+            .send(AccountMessage::ContinueSlidingSyncAdmission {
+                account_epoch: offline_epoch,
+                request_id: offline_request_id,
+                source: SlidingSyncAdmissionSource::PositiveCache,
+            })
+            .await;
+        handle
+            .send(AccountMessage::ScheduleSlidingSyncCapabilityRevalidation {
+                account_epoch: offline_epoch,
+            })
+            .await;
+        assert!(matches!(
             action_rx.recv().await.as_deref(),
             Some([AppAction::RestoreSessionSucceeded(_)])
-        ) {}
-        offline.store(true, std::sync::atomic::Ordering::SeqCst);
+        ));
 
+        offline.store(false, std::sync::atomic::Ordering::SeqCst);
+        sliding_sync_supported.store(false, std::sync::atomic::Ordering::SeqCst);
         executor::timeout(
             Duration::from_secs(1),
             acknowledge_next_verified_projection(&handle, &mut action_rx),
         )
         .await
         .expect("offline verified restore must reach Ready without network catch-up");
-        assert_eq!(inspect_sync_owners(&handle).await, (false, false, true));
+        let (account_epoch, blocked_request_id) = match action_rx.recv().await.as_deref() {
+            Some(
+                [
+                    AppAction::SlidingSyncCapabilityRevalidationStarted {
+                        account_epoch,
+                        request_id,
+                    },
+                ],
+            ) => (*account_epoch, *request_id),
+            other => panic!("expected revalidation start, got {other:?}"),
+        };
+        let revalidation_result = loop {
+            let actions = action_rx.recv().await.expect("revalidation action");
+            if let [AppAction::SlidingSyncCapabilityRevalidationCompleted { result, .. }] =
+                actions.as_slice()
+            {
+                break result.clone();
+            }
+        };
+        assert_eq!(
+            revalidation_result,
+            SlidingSyncCapabilityResult::Unsupported
+        );
+        assert_eq!(
+            inspect_sync_owners(&handle).await,
+            (false, false, true),
+            "actor must await the reducer-accepted settlement effect"
+        );
+        handle
+            .send(AccountMessage::SettleSlidingSyncCapabilityRevalidation {
+                account_epoch,
+                request_id: blocked_request_id,
+                result: SlidingSyncCapabilityResult::Unsupported,
+            })
+            .await;
+        assert_eq!(inspect_sync_owners(&handle).await, (false, false, false));
+        handle
+            .send(AccountMessage::Command(
+                AccountCommand::RetrySlidingSyncCapability {
+                    request_id: RequestId {
+                        connection_id: RuntimeConnectionId(1),
+                        sequence: 2,
+                    },
+                },
+            ))
+            .await;
+        loop {
+            let actions =
+                recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx).await;
+            if matches!(
+                actions.as_slice(),
+                [AppAction::SlidingSyncCapabilityRetryAccepted {
+                    account_epoch: accepted_epoch,
+                    blocked_request_id: accepted_request_id,
+                    ..
+                }] if *accepted_epoch == account_epoch && *accepted_request_id == blocked_request_id
+            ) {
+                break;
+            }
+        }
+        loop {
+            let actions = action_rx.recv().await.expect("retry start action");
+            if matches!(
+                actions.as_slice(),
+                [AppAction::SlidingSyncCapabilityCheckStarted {
+                    admission: SlidingSyncAdmission::StoredSessionRestore { .. },
+                    ..
+                }]
+            ) {
+                break;
+            }
+        }
+        assert_eq!(inspect_sync_owners(&handle).await, (false, false, false));
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
 
@@ -13029,8 +14196,10 @@ mod tests {
             }))
             .await;
         while !matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { .. }])
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
         ) {}
         (handle, action_rx)
     }
@@ -13601,7 +14770,8 @@ mod tests {
             })
             .await;
         let (generation, transition_id) = loop {
-            let actions = action_rx.recv().await.expect("account actions");
+            let actions =
+                recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx).await;
             if let [
                 AppAction::AuthoritativeDeviceTrustChanged {
                     generation,
@@ -13805,10 +14975,13 @@ mod tests {
                 }))
                 .await
         );
-        assert!(matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { .. }])
-        ));
+        loop {
+            let actions =
+                recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx).await;
+            if matches!(actions.as_slice(), [AppAction::LoginSucceeded { .. }]) {
+                break;
+            }
+        }
         assert!(
             recursive_file_count(data_dir.path()) > baseline_files,
             "keyed store was not created"
@@ -13903,8 +15076,10 @@ mod tests {
             }))
             .await;
         while !matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { .. }])
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
         ) {}
         handle
             .send(AccountMessage::RejectProvisionalSession {
@@ -13985,8 +15160,10 @@ mod tests {
             }))
             .await;
         while !matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { .. }])
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
         ) {}
         handle
             .send(AccountMessage::RejectProvisionalSession { request_id })
@@ -14033,8 +15210,10 @@ mod tests {
             );
             loop {
                 if matches!(
-                    action_rx.recv().await.as_deref(),
-                    Some([AppAction::LoginSucceeded { .. }])
+                    recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                        .await
+                        .as_slice(),
+                    [AppAction::LoginSucceeded { .. }]
                 ) {
                     break;
                 }
@@ -14070,8 +15249,10 @@ mod tests {
             }))
             .await;
         while !matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::LoginSucceeded { .. }])
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
         ) {}
         handle
             .send(AccountMessage::ConfigureCloseStoreResults {
@@ -14093,7 +15274,13 @@ mod tests {
                 },
             }))
             .await;
-        while probe_rx.recv().await != Some("session_store_close_retrying") {}
+        recv_probe_with_sliding_sync_effects(
+            &handle,
+            &mut action_rx,
+            &mut probe_rx,
+            "session_store_close_retrying",
+        )
+        .await;
         assert_no_login_succeeded_for(&mut action_rx, &second_homeserver);
         assert_eq!(
             inspect_session_runtime(&handle).await,
@@ -14135,7 +15322,8 @@ mod tests {
             .await;
         while probe_rx.recv().await != Some("replacement_teardown_complete") {}
         loop {
-            let actions = action_rx.recv().await.expect("replacement action");
+            let actions =
+                recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx).await;
             if matches!(
                 actions.as_slice(),
                 [AppAction::LoginSucceeded { info, .. }] if info.homeserver == second_homeserver
@@ -14343,7 +15531,7 @@ mod tests {
         action_rx: &mut mpsc::Receiver<Vec<AppAction>>,
     ) {
         let generation = loop {
-            let actions = action_rx.recv().await.expect("account actions");
+            let actions = recv_account_action_with_sliding_sync_effects(handle, action_rx).await;
             if let [
                 AppAction::AuthoritativeDeviceTrustChanged {
                     generation,
@@ -14393,6 +15581,102 @@ mod tests {
         }
     }
 
+    async fn recv_account_action_with_sliding_sync_effects(
+        handle: &AccountActorHandle,
+        action_rx: &mut mpsc::Receiver<Vec<AppAction>>,
+    ) -> Vec<AppAction> {
+        let actions = action_rx.recv().await.expect("account action channel");
+        route_sliding_sync_effects(handle, &actions).await;
+        actions
+    }
+
+    async fn route_sliding_sync_effects(handle: &AccountActorHandle, actions: &[AppAction]) {
+        for action in actions {
+            match action {
+                AppAction::SlidingSyncCapabilityCheckCompleted {
+                    account_epoch,
+                    request_id,
+                    result,
+                } => {
+                    let source = match result {
+                        SlidingSyncCapabilityResult::Supported { .. } => {
+                            Some(SlidingSyncAdmissionSource::Network)
+                        }
+                        SlidingSyncCapabilityResult::Unreachable
+                        | SlidingSyncCapabilityResult::InvalidResponse => None,
+                        SlidingSyncCapabilityResult::Unsupported => None,
+                    };
+                    if let Some(source) = source {
+                        handle
+                            .send(AccountMessage::ContinueSlidingSyncAdmission {
+                                account_epoch: *account_epoch,
+                                request_id: *request_id,
+                                source,
+                            })
+                            .await;
+                    }
+                }
+                AppAction::SlidingSyncCapabilityRetryAccepted {
+                    account_epoch,
+                    blocked_request_id,
+                    request_id,
+                } => {
+                    handle
+                        .send(AccountMessage::RetrySlidingSyncCapabilityDiscovery {
+                            account_epoch: *account_epoch,
+                            blocked_request_id: *blocked_request_id,
+                            request_id: *request_id,
+                        })
+                        .await;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    async fn recv_probe_with_sliding_sync_effects(
+        handle: &AccountActorHandle,
+        action_rx: &mut mpsc::Receiver<Vec<AppAction>>,
+        probe_rx: &mut mpsc::UnboundedReceiver<&'static str>,
+        expected: &'static str,
+    ) {
+        loop {
+            tokio::select! {
+                token = probe_rx.recv() => {
+                    if token == Some(expected) {
+                        return;
+                    }
+                }
+                actions = action_rx.recv() => {
+                    let actions = actions.expect("account action channel");
+                    route_sliding_sync_effects(handle, &actions).await;
+                }
+            }
+        }
+    }
+
+    async fn recv_until_session_install(
+        handle: &AccountActorHandle,
+        action_rx: &mut mpsc::Receiver<Vec<AppAction>>,
+    ) -> Vec<AppAction> {
+        loop {
+            let actions = recv_account_action_with_sliding_sync_effects(handle, action_rx).await;
+            if actions.iter().any(|action| {
+                matches!(
+                    action,
+                    AppAction::LoginSucceeded { .. } | AppAction::RestoreSessionSucceeded(_)
+                )
+            }) {
+                return actions;
+            }
+            assert!(actions.iter().all(|action| matches!(
+                action,
+                AppAction::SlidingSyncCapabilityCheckStarted { .. }
+                    | AppAction::SlidingSyncCapabilityCheckCompleted { .. }
+            )));
+        }
+    }
+
     #[tokio::test]
     async fn restore_installs_provisional_without_normal_sync_or_public_ready_event() {
         let homeserver = spawn_quarantine_password_server();
@@ -14439,9 +15723,21 @@ mod tests {
                 .await
         );
         assert!(matches!(
-            action_rx.recv().await.as_deref(),
-            Some([AppAction::RestoreSessionSucceeded(_)])
+            recv_until_session_install(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::RestoreSessionSucceeded(_)]
         ));
+        let persisted = backend
+            .load_matrix_session(&key_id)
+            .expect("restored credential should remain readable");
+        assert!(
+            PersistableMatrixSession::from_json(persisted.as_str())
+                .expect("persisted restored session")
+                .sliding_sync_positive_evidence()
+                .is_some(),
+            "network support evidence must be durable before trust promotion"
+        );
         let public_ready = executor::timeout(Duration::from_millis(100), async {
             loop {
                 match event_rx.recv().await.expect("event stream") {
@@ -14456,6 +15752,143 @@ mod tests {
             public_ready.is_err(),
             "restore escaped quarantine before Verified"
         );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn unsupported_restore_preserves_persisted_session_and_positive_evidence() {
+        let homeserver = spawn_unsupported_quarantine_password_server();
+        let login = koushi_sdk::login_with_password_with_store(
+            &LoginRequest {
+                homeserver,
+                username: "fixture-user".to_owned(),
+                password: koushi_state::AuthSecret::new("synthetic-password"),
+                device_display_name: None,
+            },
+            None,
+        )
+        .await
+        .expect("fixture login");
+        let expected_info = login.info.clone();
+        let key_id = session_key_id_from_info(&login.info);
+        let evidence = SlidingSyncPositiveEvidence { observed_at_ms: 7 };
+        let stored = StoredMatrixSession::new(
+            login
+                .persistable_session()
+                .expect("persistable")
+                .with_sliding_sync_positive_evidence(evidence.clone())
+                .to_json()
+                .expect("json"),
+        );
+        drop(login);
+
+        let cred_dir = tempdir().expect("tempdir");
+        let data_dir = tempdir().expect("tempdir");
+        let backend = CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(
+            cred_dir.path(),
+        ));
+        backend
+            .save_matrix_session(&key_id, &stored)
+            .expect("session seed");
+        backend.remember_saved_session(&key_id).expect("index seed");
+        backend.save_last_session(&key_id).expect("pointer seed");
+
+        let (handle, mut action_rx, _event_rx) =
+            spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
+        assert!(
+            handle
+                .send(AccountMessage::Command(
+                    AccountCommand::RestoreLastSession {
+                        request_id: test_request_id(),
+                    },
+                ))
+                .await
+        );
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::SlidingSyncCapabilityCheckStarted {
+                admission: SlidingSyncAdmission::StoredSessionRestore { .. },
+                positive_evidence: Some(saved),
+                ..
+            }]) if saved == &evidence
+        ));
+        assert!(matches!(
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::SlidingSyncCapabilityCheckCompleted {
+                result: SlidingSyncCapabilityResult::Unsupported,
+                ..
+            }]
+        ));
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (false, false, false, false)
+        );
+        let persisted = backend
+            .load_matrix_session(&key_id)
+            .expect("preserved session");
+        let reopened = PersistableMatrixSession::from_json(persisted.as_str())
+            .expect("preserved session JSON");
+        assert_eq!(reopened.info, expected_info);
+        assert_eq!(reopened.sliding_sync_positive_evidence(), Some(evidence));
+        assert!(backend.load_last_session().expect("last pointer").is_some());
+
+        assert!(
+            handle
+                .send(AccountMessage::Command(
+                    AccountCommand::RetrySlidingSyncCapability {
+                        request_id: RequestId {
+                            connection_id: RuntimeConnectionId(1),
+                            sequence: 2,
+                        },
+                    },
+                ))
+                .await
+        );
+        assert!(matches!(
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::SlidingSyncCapabilityRetryAccepted { .. }]
+        ));
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::SlidingSyncCapabilityCheckStarted {
+                admission: SlidingSyncAdmission::StoredSessionRestore { .. },
+                ..
+            }])
+        ));
+        assert!(matches!(
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::SlidingSyncCapabilityCheckCompleted {
+                result: SlidingSyncCapabilityResult::Unsupported,
+                ..
+            }]
+        ));
+
+        handle
+            .send(AccountMessage::Command(AccountCommand::ResetLocalData {
+                request_id: RequestId {
+                    connection_id: RuntimeConnectionId(1),
+                    sequence: 3,
+                },
+            }))
+            .await;
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([
+                AppAction::ResetLocalDataCompleted { request_id: 3 },
+                AppAction::LogoutFinished,
+            ])
+        ));
+        assert!(koushi_key::is_missing_credential_error(
+            &backend
+                .load_matrix_session(&key_id)
+                .expect_err("blocked session persistence should be deleted")
+        ));
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
 
@@ -14493,19 +15926,26 @@ mod tests {
             "FIXTUREDEVICE",
             None,
             Some(std::sync::Arc::clone(&control)),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         );
         (homeserver, control)
     }
 
-    fn spawn_controllable_quarantine_password_server()
-    -> (String, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    fn spawn_controllable_quarantine_password_server() -> (
+        String,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
         let offline = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let homeserver = spawn_named_quarantine_password_server_with_offline(
+        let sliding_sync_supported = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let homeserver = spawn_named_quarantine_password_server_with_controls(
             "@fixture-user:example.invalid",
             "FIXTUREDEVICE",
             Some(std::sync::Arc::clone(&offline)),
+            None,
+            std::sync::Arc::clone(&sliding_sync_supported),
         );
-        (homeserver, offline)
+        (homeserver, offline, sliding_sync_supported)
     }
 
     fn spawn_named_quarantine_password_server(
@@ -14520,7 +15960,23 @@ mod tests {
         device_id: &'static str,
         offline: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     ) -> String {
-        spawn_named_quarantine_password_server_with_controls(user_id, device_id, offline, None)
+        spawn_named_quarantine_password_server_with_controls(
+            user_id,
+            device_id,
+            offline,
+            None,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        )
+    }
+
+    fn spawn_unsupported_quarantine_password_server() -> String {
+        spawn_named_quarantine_password_server_with_controls(
+            "@fixture-user:example.invalid",
+            "FIXTUREDEVICE",
+            None,
+            None,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
     }
 
     fn spawn_named_quarantine_password_server_with_controls(
@@ -14528,6 +15984,7 @@ mod tests {
         device_id: &'static str,
         offline: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
         key_query_control: Option<std::sync::Arc<KeyQueryControl>>,
+        sliding_sync_supported: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> String {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -14560,7 +16017,11 @@ mod tests {
                     continue;
                 }
                 let body = if text.starts_with("GET /_matrix/client/versions ") {
-                    r#"{"versions":["v1.7"]}"#.to_owned()
+                    let sliding_sync_supported =
+                        sliding_sync_supported.load(std::sync::atomic::Ordering::SeqCst);
+                    format!(
+                        r#"{{"versions":["v1.7"],"unstable_features":{{"org.matrix.simplified_msc3575":{sliding_sync_supported}}}}}"#
+                    )
                 } else if text.contains("/_matrix/client/") && text.contains("login") {
                     format!(
                         r#"{{"access_token":"fixture-token","device_id":"{device_id}","user_id":"{user_id}"}}"#
@@ -14623,7 +16084,7 @@ mod tests {
                     panic!("fixture response {request_number} failed: {error}")
                 });
             assert!(
-                response.contains(r#"{"versions":["v1.7"]}"#),
+                response.contains(r#""org.matrix.simplified_msc3575":true"#),
                 "fixture response {request_number}: {response}"
             );
         }
@@ -14646,6 +16107,13 @@ mod tests {
             .split("    async fn handle_login_password")
             .next()
             .expect("restore_account should precede login handler");
+        let restore_continuation = source
+            .split("async fn continue_sliding_sync_admission")
+            .nth(1)
+            .expect("restore admission continuation should exist")
+            .split("async fn start_sliding_sync_revalidation")
+            .next()
+            .expect("restore continuation should precede revalidation");
 
         assert!(
             restore_last.contains(
@@ -14670,19 +16138,22 @@ mod tests {
             "restore must log before loading the persisted Matrix session blob"
         );
         assert!(
-            restore_account.contains(
-                "trace_account_request(\"restore_account\", request_id, \"store_restore_ok\")"
-            ),
+            restore_continuation.contains("trace_account_request(")
+                && restore_continuation.contains("\"restore_account\"")
+                && restore_continuation.contains("core_request_id")
+                && restore_continuation.contains("\"store_restore_ok\""),
             "restore must log successful SDK store restore before sync starts"
         );
-        assert!(restore_account.contains("install_provisional_session"));
+        assert!(restore_continuation.contains("install_provisional_session"));
         assert!(!restore_account.contains("sync_actor_spawned"));
         assert!(
             source.contains("DiagnosticField::request_id"),
             "restore diagnostics must include request ids for correlation"
         );
         assert!(
-            !restore_last.contains("account_name()") && !restore_account.contains("account_name()"),
+            !restore_last.contains("account_name()")
+                && !restore_account.contains("account_name()")
+                && !restore_continuation.contains("account_name()"),
             "startup restore diagnostics must not print account identifiers"
         );
     }
@@ -15745,6 +17216,15 @@ mod tests {
             session: None,
             session_key_id: Some(key_id.clone()),
             provisional_persistable: None,
+            sliding_sync_positive_evidence: None,
+            sliding_sync_account_epoch: 0,
+            sliding_sync_request_id: 0,
+            pending_sliding_sync_admission: None,
+            pending_sliding_sync_retry: None,
+            stored_sliding_sync_admission: None,
+            sliding_sync_discovery_task: None,
+            sliding_sync_revalidation_pending: None,
+            sliding_sync_revalidation_request: None,
             session_promoted: false,
             trust_generation: 0,
             trust_observer: None,

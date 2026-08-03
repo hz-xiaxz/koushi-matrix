@@ -4,6 +4,12 @@ use crate::{
     SlidingSyncPositiveEvidence, SlidingSyncRevalidationState, SyncState, UiEvent,
 };
 
+fn same_session_identity(left: &crate::SessionInfo, right: &crate::SessionInfo) -> bool {
+    left.homeserver == right.homeserver
+        && left.user_id == right.user_id
+        && left.device_id == right.device_id
+}
+
 fn initial_admission_matches_session(state: &AppState, admission: &SlidingSyncAdmission) -> bool {
     match (admission, &state.session) {
         (
@@ -13,6 +19,10 @@ fn initial_admission_matches_session(state: &AppState, admission: &SlidingSyncAd
             },
         ) => attempt_id == active,
         (SlidingSyncAdmission::StoredSessionRestore { .. }, SessionState::Restoring) => true,
+        (
+            SlidingSyncAdmission::StoredSessionRestore { info },
+            SessionState::SwitchingAccount { info: target },
+        ) => same_session_identity(info, target),
         _ => false,
     }
 }
@@ -208,7 +218,14 @@ pub(crate) fn handle_retry(
         admission,
         positive_evidence,
     };
-    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+    vec![
+        AppEffect::RetrySlidingSyncCapabilityDiscovery {
+            account_epoch,
+            blocked_request_id,
+            request_id,
+        },
+        AppEffect::EmitUiEvent(UiEvent::SessionChanged),
+    ]
 }
 
 pub(crate) fn handle_revalidation_started(
@@ -274,6 +291,9 @@ pub(crate) fn handle_revalidation_completed(
     let prior_evidence = evidence.clone();
     match result {
         SlidingSyncCapabilityResult::Supported { evidence } => {
+            let result = SlidingSyncCapabilityResult::Supported {
+                evidence: evidence.clone(),
+            };
             state.sliding_sync_capability = SlidingSyncCapabilityState::Supported {
                 account_epoch,
                 request_id,
@@ -281,7 +301,14 @@ pub(crate) fn handle_revalidation_completed(
                 evidence,
                 revalidation: SlidingSyncRevalidationState::NotRequired,
             };
-            vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+            vec![
+                AppEffect::SettleSlidingSyncCapabilityRevalidation {
+                    account_epoch,
+                    request_id,
+                    result,
+                },
+                AppEffect::EmitUiEvent(UiEvent::SessionChanged),
+            ]
         }
         SlidingSyncCapabilityResult::Unsupported => {
             let SlidingSyncAdmission::StoredSessionRestore { info } = &admission else {
@@ -300,7 +327,11 @@ pub(crate) fn handle_revalidation_completed(
                 positive_evidence: Some(prior_evidence),
             };
             vec![
-                AppEffect::StopSync,
+                AppEffect::SettleSlidingSyncCapabilityRevalidation {
+                    account_epoch,
+                    request_id,
+                    result: SlidingSyncCapabilityResult::Unsupported,
+                },
                 AppEffect::EmitUiEvent(UiEvent::SessionChanged),
             ]
         }
@@ -313,7 +344,14 @@ pub(crate) fn handle_revalidation_completed(
                 evidence: prior_evidence,
                 revalidation: SlidingSyncRevalidationState::Pending { failure },
             };
-            vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+            vec![
+                AppEffect::SettleSlidingSyncCapabilityRevalidation {
+                    account_epoch,
+                    request_id,
+                    result,
+                },
+                AppEffect::EmitUiEvent(UiEvent::SessionChanged),
+            ]
         }
     }
 }

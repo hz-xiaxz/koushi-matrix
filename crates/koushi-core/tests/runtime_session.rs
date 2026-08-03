@@ -9,7 +9,12 @@ use koushi_core::{
 };
 use koushi_state::{
     AppAction, AuthSecret, LoginAttemptId, LoginRequest, RecoveryMethod, RecoveryRequest,
-    SessionState, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
+    SessionState, SlidingSyncCapabilityState, StagedUploadCompressionChoice, StagedUploadItem,
+    StagedUploadKind,
+};
+use matrix_sdk::{
+    ruma::{device_id, user_id},
+    test_utils::mocks::{LoginResponseTemplate200, MatrixMockServer},
 };
 
 #[tokio::test]
@@ -51,6 +56,211 @@ async fn password_command_projects_authentication_before_account_actor_completio
                 panic!("account actor completed before AuthenticationStarted was observed")
             }
             _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn password_login_capability_gate_round_trips_through_reducer_effects() {
+    let server = MatrixMockServer::new().await;
+    server
+        .mock_versions()
+        .with_feature("org.matrix.simplified_msc3575", true)
+        .ok()
+        .mount()
+        .await;
+    server.mock_login().ok().mock_once().mount().await;
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let credential_dir = tempfile::tempdir().expect("runtime credential directory");
+    let runtime = CoreRuntime::start_with_data_dir_and_file_credentials(
+        data_dir.path().to_path_buf(),
+        credential_dir.path().to_path_buf(),
+    );
+    assert!(
+        runtime
+            .configure_trust_observation_for_testing(koushi_sdk::CurrentDeviceTrustObservation {
+                current: koushi_state::CurrentDeviceTrustState::Verified,
+                updates: Box::pin(futures_util::stream::pending()),
+            },)
+            .await
+    );
+    let mut connection = runtime.attach();
+    let request_id = connection.next_request_id();
+    connection
+        .command(CoreCommand::Account(AccountCommand::LoginPassword {
+            request_id,
+            request: LoginRequest {
+                homeserver: server.uri(),
+                username: "reducer-gate".to_owned(),
+                password: AuthSecret::new("synthetic-password"),
+                device_display_name: None,
+            },
+        }))
+        .await
+        .expect("submit login");
+
+    let state = wait_for_state_event(&mut connection, |state| {
+        matches!(state.session, SessionState::Ready(_))
+    })
+    .await;
+    assert!(matches!(
+        state.sliding_sync_capability,
+        SlidingSyncCapabilityState::Supported { .. }
+    ));
+}
+
+#[tokio::test]
+async fn account_switch_capability_gate_round_trips_through_reducer_effects() {
+    let server_a = MatrixMockServer::new().await;
+    server_a
+        .mock_versions()
+        .with_feature("org.matrix.simplified_msc3575", true)
+        .ok()
+        .mount()
+        .await;
+    server_a
+        .mock_login()
+        .ok_with(LoginResponseTemplate200::new(
+            "token-a",
+            device_id!("DEVICEA"),
+            user_id!("@alpha:localhost"),
+        ))
+        .mock_once()
+        .mount()
+        .await;
+    server_a
+        .mock_logout()
+        .ignore_access_token()
+        .ok()
+        .mock_once()
+        .mount()
+        .await;
+
+    let server_b = MatrixMockServer::new().await;
+    server_b
+        .mock_versions()
+        .with_feature("org.matrix.simplified_msc3575", true)
+        .ok()
+        .mount()
+        .await;
+    server_b
+        .mock_login()
+        .ok_with(LoginResponseTemplate200::new(
+            "token-b",
+            device_id!("DEVICEB"),
+            user_id!("@beta:localhost"),
+        ))
+        .mock_once()
+        .mount()
+        .await;
+
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let credential_dir = tempfile::tempdir().expect("runtime credential directory");
+    let runtime = CoreRuntime::start_with_data_dir_and_file_credentials(
+        data_dir.path().to_path_buf(),
+        credential_dir.path().to_path_buf(),
+    );
+    let mut connection = runtime.attach();
+
+    configure_verified_runtime_trust(&runtime).await;
+    submit_runtime_password_login(&connection, server_a.uri(), "alpha").await;
+    wait_for_runtime_account(&mut connection, Some("@alpha:localhost"), "alpha login").await;
+
+    let logout_request_id = connection.next_request_id();
+    connection
+        .command(CoreCommand::Account(AccountCommand::Logout {
+            request_id: logout_request_id,
+        }))
+        .await
+        .expect("submit local logout");
+    wait_for_runtime_account(&mut connection, None, "alpha logout").await;
+
+    configure_verified_runtime_trust(&runtime).await;
+    submit_runtime_password_login(&connection, server_b.uri(), "beta").await;
+    wait_for_runtime_account(&mut connection, Some("@beta:localhost"), "beta login").await;
+
+    configure_verified_runtime_trust(&runtime).await;
+    let switch_request_id = connection.next_request_id();
+    connection
+        .command(CoreCommand::Account(AccountCommand::SwitchAccount {
+            request_id: switch_request_id,
+            account_key: AccountKey("@alpha:localhost".to_owned()),
+        }))
+        .await
+        .expect("submit account switch");
+    let switched =
+        wait_for_runtime_account(&mut connection, Some("@alpha:localhost"), "switch to alpha")
+            .await;
+    assert!(matches!(
+        switched.sliding_sync_capability,
+        SlidingSyncCapabilityState::Supported { .. }
+    ));
+}
+
+async fn configure_verified_runtime_trust(runtime: &CoreRuntime) {
+    assert!(
+        runtime
+            .configure_trust_observation_for_testing(koushi_sdk::CurrentDeviceTrustObservation {
+                current: koushi_state::CurrentDeviceTrustState::Verified,
+                updates: Box::pin(futures_util::stream::pending()),
+            },)
+            .await
+    );
+}
+
+async fn submit_runtime_password_login(
+    connection: &koushi_core::runtime::CoreConnection,
+    homeserver: String,
+    username: &str,
+) {
+    let request_id = connection.next_request_id();
+    connection
+        .command(CoreCommand::Account(AccountCommand::LoginPassword {
+            request_id,
+            request: LoginRequest {
+                homeserver,
+                username: username.to_owned(),
+                password: AuthSecret::new("synthetic-password"),
+                device_display_name: None,
+            },
+        }))
+        .await
+        .expect("submit password login");
+}
+
+async fn wait_for_runtime_account(
+    connection: &mut koushi_core::runtime::CoreConnection,
+    ready_user_id: Option<&str>,
+    stage: &str,
+) -> koushi_state::AppState {
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let snapshot = connection.snapshot();
+            let matches = match ready_user_id {
+                Some(user_id) => matches!(
+                    &snapshot.session,
+                    SessionState::Ready(info) if info.user_id == user_id
+                ),
+                None => matches!(snapshot.session, SessionState::SignedOut),
+            };
+            if matches {
+                return snapshot;
+            }
+            connection
+                .recv_event()
+                .await
+                .expect("runtime event stream must remain open");
+        }
+    })
+    .await;
+    match result {
+        Ok(snapshot) => snapshot,
+        Err(_) => {
+            let snapshot = connection.snapshot();
+            panic!(
+                "{stage} did not settle; current session: {:?}; sliding sync: {:?}",
+                snapshot.session, snapshot.sliding_sync_capability
+            )
         }
     }
 }

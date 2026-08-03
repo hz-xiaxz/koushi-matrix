@@ -143,6 +143,60 @@ fn supported_advances_login_and_restore_admission() {
 }
 
 #[test]
+fn stored_restore_capability_gate_accepts_only_the_active_switch_target() {
+    let target = session_info();
+    let mut state = AppState {
+        session: SessionState::SwitchingAccount {
+            info: target.clone(),
+        },
+        ..AppState::default()
+    };
+    let effects = reduce(
+        &mut state,
+        AppAction::SlidingSyncCapabilityCheckStarted {
+            account_epoch: ACCOUNT_EPOCH,
+            request_id: REQUEST_ID,
+            admission: SlidingSyncAdmission::StoredSessionRestore {
+                info: target.clone(),
+            },
+            positive_evidence: None,
+        },
+    );
+    assert!(!effects.is_empty());
+    assert!(
+        complete(
+            &mut state,
+            ACCOUNT_EPOCH,
+            REQUEST_ID,
+            SlidingSyncCapabilityResult::Supported {
+                evidence: positive_evidence(4_000),
+            },
+        )
+        .iter()
+        .any(|effect| matches!(effect, AppEffect::ContinueSlidingSyncAdmission { .. }))
+    );
+
+    let mut stale = AppState {
+        session: SessionState::SwitchingAccount { info: target },
+        ..AppState::default()
+    };
+    let mut other = session_info();
+    other.user_id = "@other:example.invalid".to_owned();
+    assert!(
+        reduce(
+            &mut stale,
+            AppAction::SlidingSyncCapabilityCheckStarted {
+                account_epoch: ACCOUNT_EPOCH,
+                request_id: REQUEST_ID,
+                admission: SlidingSyncAdmission::StoredSessionRestore { info: other },
+                positive_evidence: None,
+            },
+        )
+        .is_empty()
+    );
+}
+
+#[test]
 fn unsupported_unreachable_and_invalid_response_are_distinct_recoverable_blocks() {
     for (result, failure) in [
         (
@@ -267,9 +321,14 @@ fn retry_clears_only_the_current_capability_attempt() {
     );
     assert_eq!(
         effects,
-        vec![AppEffect::EmitUiEvent(
-            koushi_state::UiEvent::SessionChanged
-        )]
+        vec![
+            AppEffect::RetrySlidingSyncCapabilityDiscovery {
+                account_epoch: ACCOUNT_EPOCH,
+                blocked_request_id: REQUEST_ID,
+                request_id: REQUEST_ID + 1,
+            },
+            AppEffect::EmitUiEvent(koushi_state::UiEvent::SessionChanged),
+        ]
     );
 }
 
@@ -770,9 +829,14 @@ fn cached_restore_revalidation_blocks_only_explicit_unsupported() {
     ));
     assert_eq!(
         retryable,
-        vec![AppEffect::EmitUiEvent(
-            koushi_state::UiEvent::SessionChanged
-        )]
+        vec![
+            AppEffect::SettleSlidingSyncCapabilityRevalidation {
+                account_epoch: ACCOUNT_EPOCH,
+                request_id: REQUEST_ID + 1,
+                result: SlidingSyncCapabilityResult::InvalidResponse,
+            },
+            AppEffect::EmitUiEvent(koushi_state::UiEvent::SessionChanged),
+        ]
     );
 
     state.session = SessionState::Ready(session_info());
@@ -798,5 +862,11 @@ fn cached_restore_revalidation_blocks_only_explicit_unsupported() {
             ..
         }
     ));
-    assert!(blocked.contains(&AppEffect::StopSync));
+    assert!(
+        blocked.contains(&AppEffect::SettleSlidingSyncCapabilityRevalidation {
+            account_epoch: ACCOUNT_EPOCH,
+            request_id: REQUEST_ID + 2,
+            result: SlidingSyncCapabilityResult::Unsupported,
+        })
+    );
 }
