@@ -11,6 +11,16 @@ function readRepoFile(path) {
   return readFileSync(join(repoRoot, path), "utf8");
 }
 
+function workflowJobSource(workflow, jobName) {
+  const startMarker = `\n  ${jobName}:\n`;
+  const start = workflow.indexOf(startMarker);
+  assert.ok(start >= 0, `expected CI job ${jobName}`);
+  const remainder = workflow.slice(start + startMarker.length);
+  const nextJob = /\n  [a-z0-9_-]+:\n/i.exec(remainder);
+  const end = nextJob ? start + startMarker.length + nextJob.index : workflow.length;
+  return workflow.slice(start, end);
+}
+
 test("root workspace owns the desktop Tauri crate and the only lockfile", () => {
   const rootCargo = readRepoFile("Cargo.toml");
   const tauriCargo = readRepoFile("apps/desktop/src-tauri/Cargo.toml");
@@ -77,6 +87,30 @@ test("CI and npm scripts use the unified workspace contracts", () => {
   assert.doesNotMatch(ci, /apps\/desktop\/src-tauri\s*$/m);
   assert.match(ci, /cargo test -p koushi-desktop/);
   assert.match(releaseGate, /cargo check[\s\S]*-p[\s\S]*koushi-desktop/);
+});
+
+test("CI gates positive invitations on exactly Tuwunel and Synapse", () => {
+  const ci = readRepoFile(".github/workflows/ci.yml");
+  const invitationJob = workflowJobSource(ci, "core-invites");
+  const conduitJob = workflowJobSource(ci, "core-homeserver");
+
+  assert.match(invitationJob, /^\s{8}server: \[tuwunel, synapse\]$/m);
+  assert.match(
+    invitationJob,
+    /npm --prefix apps\/desktop run qa:headless-invites:\$\{\{ matrix\.server \}\}/
+  );
+  assert.match(invitationJob, /if: matrix\.server == 'tuwunel'[\s\S]*actions\/cache@v4/);
+  assert.match(invitationJob, /matrix-construct\/tuwunel\/releases\/download\/v1\.7\.1\//);
+  assert.match(invitationJob, /if: matrix\.server == 'synapse'\n\s+run: docker version/);
+  assert.match(invitationJob, /name: core-invites-\$\{\{ matrix\.server \}\}-qa-logs/);
+  assert.doesNotMatch(invitationJob, /(?:server:\s*\[[^\]]*conduit|--server=conduit)/i);
+  assert.doesNotMatch(invitationJob, /(?:\|\s*(?:tee|grep)|\|\|\s*true|;\s*true)/);
+
+  // Conduit media coverage is unrelated to the positive invitation migration
+  // and remains temporary until PR3 removes active Conduit QA as a whole.
+  assert.match(conduitJob, /- name: Install Conduit/);
+  assert.match(conduitJob, /--server=conduit --scenario=media/);
+  assert.doesNotMatch(conduitJob, /scenario=login_sync/);
 });
 
 test("submodule guard is wired into commit and QA entrypoints", () => {

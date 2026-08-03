@@ -128,14 +128,81 @@ jobs:
       - name: cargo-machete (unused deps)
         run: cargo machete
 
+  core-invites:
+    # PR2 may remove Legacy Sync only after the same positive invitation proof
+    # passes on both supported Sliding Sync fixtures.
+    name: Core invitations (${{ matrix.server }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        server: [tuwunel, synapse]
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Rust toolchain (1.96.0)
+        uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          shared-key: koushi-core-invites-ci
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev
+      - name: Submodule sync guard
+        run: node scripts/check-sdk-submodule.mjs
+      - name: Cache Tuwunel v1.7.1 download
+        if: matrix.server == 'tuwunel'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/koushi/tuwunel/v1.7.1
+          key: tuwunel-v1.7.1-x86_64-v1-linux-gnu
+      - name: Install Tuwunel v1.7.1
+        if: matrix.server == 'tuwunel'
+        env:
+          TUWUNEL_URL: https://github.com/matrix-construct/tuwunel/releases/download/v1.7.1/v1.7.1-release-all-x86_64-v1-linux-gnu-tuwunel.zst
+        run: |
+          sudo apt-get install -y --no-install-recommends zstd
+          mkdir -p "$HOME/.cache/koushi/tuwunel/v1.7.1" "$HOME/.local/bin"
+          archive="$HOME/.cache/koushi/tuwunel/v1.7.1/tuwunel.zst"
+          if [[ ! -s "$archive" ]]; then
+            curl --proto '=https' --tlsv1.2 -fsSLo "$archive" "$TUWUNEL_URL"
+          fi
+          unzstd -f -o "$HOME/.local/bin/tuwunel" "$archive"
+          chmod 0755 "$HOME/.local/bin/tuwunel"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Verify Tuwunel is runnable
+        if: matrix.server == 'tuwunel'
+        run: tuwunel --version
+      - name: Verify Docker is available for Synapse
+        if: matrix.server == 'synapse'
+        run: docker version
+      - name: Positive invitation scenario
+        run: npm --prefix apps/desktop run qa:headless-invites:${{ matrix.server }}
+      - name: Upload server-specific core QA logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-invites-${{ matrix.server }}-qa-logs
+          # Upload only the runner's private-data-validated outputs. Raw
+          # homeserver logs can contain Matrix request metadata.
+          path: |
+            .local-secrets/headless-local-qa/**/core-*.log
+            .local-secrets/headless-local-qa/**/sdk-*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   core-homeserver:
-    # Runs the Rust core against a real local homeserver. Nothing else in CI
-    # exercises this tier, which is how #334 shipped: most focused scenarios
-    # timed out at login while `--scenario=all` (the only one anybody ran by
-    # hand) stayed green. Kept a separate job so it builds in parallel with the
-    # Rust job rather than serialising behind it, keeps its own dependency
-    # cache, and names itself when it fails.
-    name: Core homeserver QA (conduit)
+    # Keeps the unrelated Conduit media proof until PR3 removes active Conduit
+    # QA. This remains separate from the positive invitation matrix so the
+    # temporary coverage builds in parallel and names itself when it fails.
+    name: Core homeserver QA (conduit media)
     runs-on: ubuntu-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target-ci
@@ -174,11 +241,6 @@ jobs:
         # `required-features = ["qa-bin"]`, which is how a broken
         # `RoomCommand::SetSpaceChild` call sat on main undetected.
         run: cargo test -p koushi-core --features qa-bin --bin headless-core-qa
-      - name: Core scenario — login and sync
-        run: |
-          node scripts/desktop-headless-local-qa.mjs --run \
-            --server=conduit --scenario=login_sync --core --core-backend=probed \
-            --timeout-ms=600000
       - name: Core scenario — media
         run: |
           node scripts/desktop-headless-local-qa.mjs --run \
