@@ -25,6 +25,7 @@ The current Koushi-required SDK topic stack is:
 - `fix(timeline): publish gap barrier in visible suffix`
 - `fix(crypto): ignore replayed SAS starts`
 - `fix(room-list): expand own-member state key`
+- `feat(room-list): expose committed all-rooms response`
 - `fix(crypto): harden async delivery ownership`
 - `fix: avoid identity query Olm lock deadlock`
 - `Handle stale order tracker readers`
@@ -133,6 +134,28 @@ or SDK boundary without logging private Matrix payloads.
   necessary, and this test-only guard does not justify a wholesale SDK rebase
   or upgrade.
 
+- Committed all-rooms response observable (2026-08-04, issue #412 runtime):
+  `RoomListService` exposes a read-only latest-value observable that advances
+  only after a successful `all_rooms` Sliding Sync response has completed
+  client processing, including the event-cache commit. Its payload is limited
+  to a process-local monotonic sequence and `pos_present`; it contains no room
+  IDs and never exposes the position value. Failed requests leave the value
+  unchanged, while a later successful reconnect advances it. Why: callers need
+  to distinguish `SyncService::State::Running` from the first authoritative
+  room-list response before declaring room projections ready. Upstreaming
+  intent: propose this small additive lifecycle observable independently of
+  Koushi product state; it adds no second sync loop or application policy to
+  the SDK.
+
+- Shared encryption-sync permit injection (2026-08-04, issue #412 runtime):
+  `EncryptionSyncPermit` has a production constructor and `SyncServiceBuilder`
+  accepts an application-owned permit. Koushi uses one permit across the
+  provisional verification owner and the normal `SyncService`, stopping and
+  joining the former before starting the latter. Why: the previous public API
+  could not express a lifecycle handoff without using a test-only constructor
+  or creating unrelated permits. Upstreaming intent: propose the additive
+  constructor and builder injection as an explicit single-owner contract.
+
 - Non-blocking own-user identity query (2026-07-30, issue #375):
   `Encryption::request_user_identity` clones the current `OlmMachine` and
   releases the client's read guard before awaiting `/keys/query`. Previously
@@ -219,6 +242,9 @@ Current SDK-only patch area:
 - `vendor/matrix-rust-sdk/crates/matrix-sdk-crypto/src/machine/tests/interactive_verification.rs`
 - `vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/mod.rs`
 - `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/src/room_list_service/mod.rs`
+- `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/src/room_list_service/all_rooms.rs`
+- `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/src/encryption_sync_service.rs`
+- `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/src/sync_service.rs`
 - `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/tests/integration/room_list_service.rs`
 
 ## API Questions
@@ -293,6 +319,7 @@ Current SDK-only patch area:
 - `cargo test --manifest-path vendor/matrix-rust-sdk/crates/matrix-sdk-ui/Cargo.toml room_list_service`
 - `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28)`
 - `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui test_all_rooms_are_declared)`
+- `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui committed_all_rooms_response_observable)`
 - `git -C vendor/matrix-rust-sdk diff --check`
 
 ## Remaining Before Upstream PR
