@@ -418,6 +418,7 @@ export interface ComposerDraftAccountOwner {
 export interface BrowserFakeApiOptions {
   restoreSession?: boolean;
   session?: "ready" | "signedOut" | "needsRecovery" | "locked";
+  roomPermissions?: Readonly<Record<string, RoomPermissionFacts>>;
   spaceMemberInviteOutcome?: "pending" | "success" | "failure";
   spaceMemberInviteCancellationOutcome?:
     | "pending"
@@ -435,6 +436,7 @@ export function createBrowserFakeApi(options: BrowserFakeApiOptions = {}): Deskt
 
 class BrowserFakeApi implements DesktopApi {
   private snapshot: DesktopSnapshot;
+  private readonly roomPermissions: Readonly<Record<string, RoomPermissionFacts>>;
   private readonly spaceMemberInviteOutcome: NonNullable<
     BrowserFakeApiOptions["spaceMemberInviteOutcome"]
   >;
@@ -582,6 +584,12 @@ class BrowserFakeApi implements DesktopApi {
   }
 
   constructor(options: BrowserFakeApiOptions) {
+    this.roomPermissions = Object.fromEntries(
+      Object.entries(options.roomPermissions ?? {}).map(([roomId, permissions]) => [
+        roomId,
+        { ...permissions }
+      ])
+    );
     this.spaceMemberInviteOutcome = options.spaceMemberInviteOutcome ?? "success";
     this.spaceMemberInviteCancellationOutcome =
       options.spaceMemberInviteCancellationOutcome ?? "success";
@@ -3971,9 +3979,12 @@ class BrowserFakeApi implements DesktopApi {
 
   private roomSettingsSnapshot(roomId: string): RoomSettingsSnapshot {
     const room = this.snapshot.state.domain.rooms.find((candidate) => candidate.room_id === roomId);
-    const permissions = roomId.includes("readonly")
-      ? readonlyRoomPermissionFacts()
-      : editableRoomPermissionFacts();
+    const configuredPermissions = this.roomPermissions[roomId];
+    const permissions = configuredPermissions
+      ? { ...configuredPermissions }
+      : roomId.includes("readonly")
+        ? readonlyRoomPermissionFacts()
+        : editableRoomPermissionFacts();
     return {
       room_id: roomId,
       name: room?.display_name ?? null,

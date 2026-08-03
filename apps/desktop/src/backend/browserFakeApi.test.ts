@@ -1842,6 +1842,33 @@ describe("BrowserFakeApi settings preview", () => {
     });
   });
 
+  test("initializes exact room permission facts from typed fixture options", async () => {
+    const roomId = "!space-alpha:example.invalid";
+    const api = createBrowserFakeApi({
+      roomPermissions: {
+        [roomId]: {
+          can_edit_settings: true,
+          can_edit_roles: true,
+          can_invite: true,
+          can_kick: false,
+          can_ban: true,
+          can_unban: true
+        }
+      }
+    });
+
+    const loaded = await api.loadRoomSettings(roomId);
+
+    expect(loaded.state.domain.room_management.settings?.permissions).toEqual({
+      can_edit_settings: true,
+      can_edit_roles: true,
+      can_invite: true,
+      can_kick: false,
+      can_ban: true,
+      can_unban: true
+    });
+  });
+
   test("models room member role updates from Rust-owned power-level facts", async () => {
     const api = createBrowserFakeApi();
 
