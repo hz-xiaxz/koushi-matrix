@@ -6832,11 +6832,13 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
         )
         .await?;
         println!("sync_backend_b={:?}", participant.sync_backend);
-        assert_expected_backend(
-            config.expect_sync_backend,
-            participant.sync_backend,
-            "normal secondary sync start B",
-        )?;
+        if !scenario.should_run_stage(QaStage::InvitesDm) {
+            assert_expected_backend(
+                config.expect_sync_backend,
+                participant.sync_backend,
+                "normal secondary sync start B",
+            )?;
+        }
         println!("sync_b=running");
         Some(participant)
     } else {
@@ -12974,7 +12976,7 @@ fn expected_backend_for_scenario(
     scenario: QaScenario,
     expected: Option<ExpectedSyncBackend>,
 ) -> Result<Option<ExpectedSyncBackend>, String> {
-    if scenario == QaScenario::InvitesDm && expected.is_none() {
+    if scenario.should_run_stage(QaStage::InvitesDm) && expected.is_none() {
         return Err(format!(
             "invites_dm requires {ENV_EXPECT_SYNC_BACKEND} to prove the selected sync backend"
         ));
@@ -18642,9 +18644,12 @@ mod tests {
 
     #[test]
     fn invites_dm_requires_expected_sync_backend() {
-        let error = expected_backend_for_scenario(QaScenario::InvitesDm, None)
-            .expect_err("invites_dm must not run without a backend expectation");
-        assert!(error.contains(ENV_EXPECT_SYNC_BACKEND));
+        for scenario in [QaScenario::InvitesDm, QaScenario::All] {
+            let error = expected_backend_for_scenario(scenario, None).expect_err(
+                "every scenario that runs InvitesDm must require a backend expectation",
+            );
+            assert!(error.contains(ENV_EXPECT_SYNC_BACKEND));
+        }
 
         assert_eq!(
             expected_backend_for_scenario(
@@ -18662,8 +18667,30 @@ mod tests {
             .unwrap(),
             Some(ExpectedSyncBackend::LegacySync)
         );
+    }
 
+    #[test]
+    fn invites_dm_backend_mismatch_follows_projection_proof() {
         let source = include_str!("headless-core-qa.rs");
+        let shared_secondary_route = source
+            .split(
+                "let mut normal_secondary = if should_run_normal_secondary_participant(scenario)",
+            )
+            .nth(1)
+            .expect("run_async should create the shared secondary participant")
+            .split("if scenario == QaScenario::InvitesDm")
+            .next()
+            .expect("the focused InvitesDm cleanup should follow its stage");
+        assert!(
+            shared_secondary_route.contains(
+                "if !scenario.should_run_stage(QaStage::InvitesDm) {\n            assert_expected_backend("
+            ),
+            "the shared route must suppress the pre-stage mismatch assertion for invitation-bearing scenarios"
+        );
+        assert!(
+            shared_secondary_route.contains("if scenario.should_run_stage(QaStage::InvitesDm) {"),
+            "the shared route must dispatch every invitation-bearing scenario through InvitesDm"
+        );
         let stage = source
             .split("async fn run_invites_dm_stage")
             .nth(1)
