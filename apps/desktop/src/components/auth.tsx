@@ -1,11 +1,12 @@
 import { type FormEvent, type RefObject } from "react";
-import { Hash, KeyRound, ShieldCheck } from "lucide-react";
+import { Hash, KeyRound, ShieldAlert, ShieldCheck } from "lucide-react";
 import { t } from "../i18n/messages";
 import type {
   AppError,
   AuthFailureKind,
   DesktopSnapshot,
-  LoginFlow
+  LoginFlow,
+  SessionState
 } from "../domain/types";
 import { ICON_SIZE } from "../app/uiShared";
 import { ImeSafeForm, ImeTextField, SecureImeTextField } from "./ImeTextControl";
@@ -71,6 +72,67 @@ export function RecoveryPanel({
       </ImeSafeForm>
     </section>
   );
+}
+
+export function SlidingSyncCapabilityBlockedScreen({
+  isBusy,
+  session,
+  onRetry,
+  onSignOut,
+  onChangeHomeserver
+}: {
+  isBusy: boolean;
+  session: Extract<SessionState, { kind: "capabilityBlocked" }>;
+  onRetry: () => void;
+  onSignOut: () => void;
+  onChangeHomeserver: () => void;
+}) {
+  const message = slidingSyncCapabilityFailureLabel(session.failure);
+
+  return (
+    <main className="auth-screen" data-testid="sliding-sync-capability-blocked">
+      <section className="auth-panel">
+        <div className="auth-brand">
+          <div className="auth-mark recovery-mark">
+            <ShieldAlert size={ICON_SIZE.auth} />
+          </div>
+          <div>
+            <h1>{t("slidingSync.blockedTitle")}</h1>
+            <p dir="auto">{session.user_id ?? t("auth.matrixAccount")}</p>
+          </div>
+        </div>
+        <div className="auth-error" role="alert">
+          {message}
+        </div>
+        <div className="auth-session-summary">
+          <span>{t("settings.homeserver")}</span>
+          <strong dir="auto">{session.homeserver}</strong>
+        </div>
+        <button className="auth-submit" disabled={isBusy} type="button" onClick={onRetry}>
+          {t("gate.retry")}
+        </button>
+        <button className="auth-secondary" disabled={isBusy} type="button" onClick={onChangeHomeserver}>
+          {t("slidingSync.changeHomeserver")}
+        </button>
+        <button className="auth-secondary" disabled={isBusy} type="button" onClick={onSignOut}>
+          {t("gate.signOut")}
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function slidingSyncCapabilityFailureLabel(
+  failure: Extract<SessionState, { kind: "capabilityBlocked" }>["failure"]
+): string {
+  switch (failure) {
+    case "unreachable":
+      return t("slidingSync.unreachable");
+    case "invalidResponse":
+      return t("slidingSync.invalidResponse");
+    case "unsupported":
+      return t("slidingSync.unsupported");
+  }
 }
 
 export function AuthScreen({

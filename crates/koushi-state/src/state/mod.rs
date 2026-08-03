@@ -51,7 +51,7 @@ pub use composer_draft::{
 pub use errors::{AppError, OperationFailureKind};
 
 // ── Re-exports: sync ────────────────────────────────────────────────────────
-pub use sync::{SyncLifecycleStatus, SyncMode, SyncModeFailureKind, SyncState};
+pub use sync::{SyncLifecycleStatus, SyncState};
 
 // ── Re-exports: session ─────────────────────────────────────────────────────
 pub use session::{
@@ -133,10 +133,10 @@ pub use room_interactions::{
 
 // ── Re-exports: navigation ──────────────────────────────────────────────────
 pub use navigation::{
-    FocusedContextState, MainTimelineAnchor, NavigationState, RoomListEntryKind, RoomListFilter,
-    RoomListFailureKind, RoomListProjection, RoomListProjectionItem, RoomListReadiness,
-    RoomListSort, RoomListSource, TimelineScrollAnchor, TimelineScrollAnchorEdge,
-    compute_room_list_projection,
+    FocusedContextState, MainTimelineAnchor, NavigationState, RoomListEntryKind,
+    RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListProjectionItem,
+    RoomListReadiness, RoomListSort, RoomListSource, TimelineScrollAnchor,
+    TimelineScrollAnchorEdge, compute_room_list_projection,
 };
 
 // ── Re-exports: activity ────────────────────────────────────────────────────
@@ -279,8 +279,6 @@ pub struct AppState {
     pub sync: SyncState,
     #[serde(default)]
     pub sync_generation: u64,
-    #[serde(default)]
-    pub sync_mode: SyncMode,
     pub navigation: NavigationState,
     pub spaces: Vec<SpaceSummary>,
     pub rooms: Vec<RoomSummary>,
@@ -348,7 +346,6 @@ impl Default for AppState {
             space_members: SpaceMembersState::default(),
             sync: SyncState::Stopped,
             sync_generation: 0,
-            sync_mode: SyncMode::Unsupported,
             navigation: NavigationState::default(),
             spaces: Vec::new(),
             rooms: Vec::new(),

@@ -7680,7 +7680,59 @@ test("edit composer respects the Rust-owned composer shortcut resolver", async (
       eventId: "$seed-event:example.invalid",
       body: editedBody,
       mentions: { targets: [] }
+  });
+});
+
+test("sliding sync capability block exposes only Rust-owned recovery actions", async ({ page }) => {
+  await gotoReadyShell(page);
+
+  const showCapabilityBlock = async () => {
+    await page.evaluate(() => {
+      const snapshot = window.__harness.currentSnapshot();
+      const blocked = {
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          domain: {
+            ...snapshot.state.domain,
+            session: {
+              kind: "capabilityBlocked" as const,
+              homeserver: "https://unsupported.example.invalid",
+              user_id: "@blocked:example.invalid",
+              device_id: "BLOCKED",
+              failure: "unsupported" as const
+            },
+            sync: "stopped" as const,
+            rooms: [],
+            spaces: [],
+            invites: []
+          }
+        },
+        timeline: []
+      };
+      window.__harness.setSnapshot(blocked);
+      window.__harness.setCommandResponse("retry_sliding_sync_capability", blocked);
+      window.__harness.pushStateChanged();
+      window.__harness.clearInvocations();
     });
+    await expect(page.getByTestId("sliding-sync-capability-blocked")).toBeVisible();
+  };
+
+  await showCapabilityBlock();
+  await expect(page.getByText("This homeserver does not support Simplified Sliding Sync.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect.poll(() => invocationCount(page, "retry_sliding_sync_capability")).toBe(1);
+
+  await page.getByRole("button", { name: "Change homeserver" }).click();
+  await expect.poll(() => invocationCount(page, "change_homeserver")).toBe(1);
+  expect(await invocationCount(page, "logout")).toBe(0);
+  await expect(page.getByTestId("auth-screen")).toBeVisible();
+
+  await showCapabilityBlock();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect.poll(() => invocationCount(page, "logout")).toBe(1);
+  await expect(page.getByTestId("auth-screen")).toBeVisible();
 });
 
 test("device session manager renames and signs out from Rust-owned snapshot", async ({ page }) => {

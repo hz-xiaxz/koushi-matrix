@@ -661,11 +661,12 @@
     "generation": 1,
     "kind": "StateDelta"
   },
-  "syncModeChanged": {
+  "syncStarted": {
     "event": {
-      "ModeChanged": {
-        "mode": {
-          "kind": "simplified"
+      "Started": {
+        "request_id": {
+          "connection_id": 3,
+          "sequence": 7
         }
       }
     },

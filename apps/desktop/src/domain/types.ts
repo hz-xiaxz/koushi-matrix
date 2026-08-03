@@ -70,7 +70,6 @@ export interface AppDomainState {
   profile: ProfileState;
   space_members: SpaceMembersState;
   sync: SyncState;
-  sync_mode: SyncMode;
   spaces: SpaceSummary[];
   rooms: RoomSummary[];
   invites: InvitePreview[];
@@ -483,22 +482,7 @@ export type ProvisionalPhase =
   | { kind: "discoveringMethods" }
   | { kind: "recheckingTrust"; failureKind?: VerificationGateFailureKind | null };
 
-export interface SessionState {
-  kind:
-    | "signedOut"
-    | "restoring"
-    | "switchingAccount"
-    | "authenticating"
-    | "needsRecovery"
-    | "recovering"
-    | "provisional"
-    | "awaitingVerification"
-    | "verifying"
-    | "awaitingBootstrapConfirmation"
-    | "rejecting"
-    | "ready"
-    | "locked"
-    | "loggingOut";
+interface SessionStateFields {
   homeserver?: string;
   user_id?: string;
   device_id?: string;
@@ -511,7 +495,58 @@ export interface SessionState {
   destination_written?: boolean;
   reason?: "existingIdentityWithoutProof" | "userRejected";
   recovery_methods?: RecoveryMethod[];
+  failure?: "unsupported" | "unreachable" | "invalidResponse";
 }
+
+type ExactSessionState<
+  K extends string,
+  RequiredKeys extends keyof SessionStateFields = never,
+  HasFailure extends boolean = false
+> = {
+  kind: K;
+} & Required<Pick<SessionStateFields, RequiredKeys>> &
+  Omit<SessionStateFields, RequiredKeys | "failure"> &
+  (HasFailure extends true
+    ? Required<Pick<SessionStateFields, "failure">>
+    : { failure?: never });
+
+type SessionAccountState<K extends string> = ExactSessionState<
+  K,
+  "homeserver" | "user_id" | "device_id"
+>;
+
+export type SessionState =
+  | ExactSessionState<"signedOut">
+  | ExactSessionState<"restoring">
+  | SessionAccountState<"switchingAccount">
+  | ExactSessionState<"authenticating", "homeserver" | "attempt_id">
+  | ExactSessionState<"needsRecovery", "user_id" | "recovery_methods">
+  | ExactSessionState<"recovering">
+  | ExactSessionState<
+      "provisional",
+      "homeserver" | "user_id" | "device_id" | "phase"
+    >
+  | ExactSessionState<
+      "awaitingVerification",
+      "homeserver" | "user_id" | "device_id" | "gate"
+    >
+  | ExactSessionState<
+      "verifying",
+      "homeserver" | "user_id" | "device_id" | "gate" | "method" | "flow_id" | "sas_emojis"
+    >
+  | ExactSessionState<
+      "awaitingBootstrapConfirmation",
+      "homeserver" | "user_id" | "device_id" | "gate" | "flow_id" | "destination_written"
+    >
+  | ExactSessionState<"rejecting", "homeserver" | "user_id" | "device_id" | "reason">
+  | SessionAccountState<"ready">
+  | SessionAccountState<"locked">
+  | ExactSessionState<
+      "capabilityBlocked",
+      "homeserver" | "user_id" | "device_id" | "failure",
+      true
+    >
+  | ExactSessionState<"loggingOut">;
 
 export type SessionStatusRefreshTrigger = "open" | "manual";
 export type SessionAuthenticationMethod = "password" | "sso" | "oauth" | "token" | "unknown";
@@ -551,16 +586,6 @@ export type SyncState =
   | { failed: string }
   | { reconnecting: string };
 
-// Rust SyncMode is #[serde(tag = "kind", rename_all = "camelCase")].
-export type SyncMode =
-  | { kind: "unsupported" }
-  | { kind: "legacy" }
-  | { kind: "simplified" }
-  | { kind: "transitioning" }
-  | { kind: "failed"; failureKind: SyncModeFailureKind };
-
-export type SyncModeFailureKind = "network" | "auth" | "store" | "internal";
-
 // Rust RoomListFilter is #[serde(tag = "kind", rename_all = "camelCase")].
 export type RoomListFilter =
   | { kind: "rooms" }
@@ -569,7 +594,7 @@ export type RoomListFilter =
   | { kind: "favourites" }
   | { kind: "invites" };
 
-export type RoomListSource = "cache" | "syncService" | "legacy";
+export type RoomListSource = "cache" | "live";
 
 export type RoomListFailureKind = "connectivity" | "service" | "stopped";
 

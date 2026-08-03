@@ -23,7 +23,7 @@ use koushi_state::{
     RoomInteractionState, RoomListProjection, RoomManagementState, RoomNotificationSettings,
     RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchMatchField, SearchMatchKind,
     SearchResult, SearchScope, SearchState, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceMembersState, SpaceSummary, StagedUploadItem, SyncMode, SyncState,
+    SoftLogoutReauthState, SpaceMembersState, SpaceSummary, StagedUploadItem, SyncState,
     ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     TypographyDisplayProfile, VerificationGateRejectReason, VerificationGateState,
     VerificationMethod, native_attention_capabilities_for_platform, resolve_locale_display_profile,
@@ -144,8 +144,6 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync: Option<FrontendSyncState>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sync_mode: Option<SyncMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub spaces: Option<Vec<SpaceSummary>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rooms: Option<Vec<RoomSummary>>,
@@ -203,7 +201,6 @@ impl FrontendDomainStateChangedSlices {
             && self.profile.is_none()
             && self.space_members.is_none()
             && self.sync.is_none()
-            && self.sync_mode.is_none()
             && self.spaces.is_none()
             && self.rooms.is_none()
             && self.invites.is_none()
@@ -293,7 +290,6 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         domain.profile = changed.profile;
         domain.space_members = changed.space_members;
         domain.sync = changed.sync.map(Into::into);
-        domain.sync_mode = changed.sync_mode;
         domain.spaces = changed.spaces;
         domain.rooms = changed.rooms;
         domain.invites = changed.invites;
@@ -381,7 +377,6 @@ pub struct FrontendDomainState {
     pub profile: ProfileState,
     pub space_members: SpaceMembersState,
     pub sync: FrontendSyncState,
-    pub sync_mode: SyncMode,
     pub spaces: Vec<SpaceSummary>,
     pub rooms: Vec<RoomSummary>,
     pub invites: Vec<InvitePreview>,
@@ -451,7 +446,6 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             profile: state.profile,
             space_members: state.space_members,
             sync: state.sync.into(),
-            sync_mode: state.sync_mode,
             spaces: state.spaces,
             rooms: state.rooms,
             invites: state.invites,
@@ -562,6 +556,12 @@ pub enum FrontendSessionState {
         user_id: String,
         device_id: String,
     },
+    CapabilityBlocked {
+        homeserver: String,
+        user_id: String,
+        device_id: String,
+        failure: koushi_state::SlidingSyncCapabilityFailureKind,
+    },
     LoggingOut,
 }
 
@@ -646,6 +646,12 @@ impl From<SessionState> for FrontendSessionState {
                 homeserver: info.homeserver,
                 user_id: info.user_id,
                 device_id: info.device_id,
+            },
+            SessionState::CapabilityBlocked { info, failure } => Self::CapabilityBlocked {
+                homeserver: info.homeserver,
+                user_id: info.user_id,
+                device_id: info.device_id,
+                failure,
             },
             SessionState::LoggingOut => Self::LoggingOut,
         }
@@ -1034,12 +1040,6 @@ mod tests {
         assert_eq!(
             value["state"]["ui"]["basic_operation"]["kind"],
             json!("idle")
-        );
-        // sync_mode must be present so the UI can render the Rust-owned sync
-        // backend/capability state (sliding sync vs legacy) without inference.
-        assert_eq!(
-            value["state"]["domain"]["sync_mode"]["kind"],
-            json!("unsupported")
         );
         // room_list must be present so the UI renders the Rust-owned filtered
         // room-list projection instead of computing filters locally.
@@ -1694,6 +1694,41 @@ mod tests {
     }
 
     #[test]
+    fn frontend_capability_blocked_session_serializes_typed_failures() {
+        let info = SessionInfo {
+            homeserver: "https://example.invalid".into(),
+            user_id: "@blocked:example.invalid".into(),
+            device_id: "BLOCKEDDEVICE".into(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        };
+
+        for (failure, expected) in [
+            (
+                koushi_state::SlidingSyncCapabilityFailureKind::Unsupported,
+                "unsupported",
+            ),
+            (
+                koushi_state::SlidingSyncCapabilityFailureKind::Unreachable,
+                "unreachable",
+            ),
+            (
+                koushi_state::SlidingSyncCapabilityFailureKind::InvalidResponse,
+                "invalidResponse",
+            ),
+        ] {
+            let value = serde_json::to_value(super::FrontendSessionState::from(
+                SessionState::CapabilityBlocked {
+                    info: info.clone(),
+                    failure,
+                },
+            ))
+            .expect("capability-blocked session should serialize");
+            assert_eq!(value["kind"], "capabilityBlocked");
+            assert_eq!(value["failure"], expected);
+        }
+    }
+
+    #[test]
     fn frontend_sync_state_serializes_failed_and_reconnecting() {
         assert_eq!(
             serde_json::to_value(FrontendSyncState::from(SyncState::Failed {
@@ -1897,7 +1932,7 @@ mod tests {
             joined_members: 4,
         });
         state.room_list.readiness = koushi_state::RoomListReadiness::Ready {
-            source: koushi_state::RoomListSource::SyncService,
+            source: koushi_state::RoomListSource::Live,
             generation: 9,
         };
 

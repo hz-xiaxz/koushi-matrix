@@ -368,7 +368,6 @@ function makeSnapshot(): DesktopSnapshot {
           operation: { kind: "idle" }
         },
         sync: "running",
-        sync_mode: { kind: "unsupported" },
         spaces: [
           {
             space_id: "!space-alpha:example.invalid",

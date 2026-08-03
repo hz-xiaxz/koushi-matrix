@@ -1,6 +1,6 @@
 use crate::{
     effect::{AppEffect, UiEvent},
-    state::{AppError, AppState, SessionState, SyncLifecycleStatus, SyncMode, SyncState},
+    state::{AppError, AppState, SessionState, SyncLifecycleStatus, SyncState},
 };
 
 use super::{current_session_info, is_session_ready};
@@ -114,13 +114,4 @@ pub(crate) fn handle_sync_stopped(state: &mut AppState) -> Vec<AppEffect> {
 
     state.sync = SyncState::Stopped;
     vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
-}
-
-pub(crate) fn handle_sync_mode_changed(state: &mut AppState, mode: SyncMode) -> Vec<AppEffect> {
-    if state.sync_mode == mode {
-        return Vec::new();
-    }
-
-    state.sync_mode = mode;
-    vec![AppEffect::EmitUiEvent(UiEvent::SyncModeChanged)]
 }

@@ -103,6 +103,8 @@ export interface DesktopApi {
   submitSoftLogoutReauth(password: string): Promise<DesktopSnapshot>;
   listSavedSessions(): Promise<SavedSessionInfo[]>;
   switchAccount(session: SavedSessionInfo): Promise<DesktopSnapshot>;
+  retrySlidingSyncCapability(): Promise<DesktopSnapshot>;
+  changeHomeserver(): Promise<DesktopSnapshot>;
   logout(): Promise<DesktopSnapshot>;
   submitRecovery(secret: string): Promise<DesktopSnapshot>;
   startDeviceCleanup(): Promise<DesktopSnapshot>;
@@ -704,9 +706,11 @@ class BrowserFakeApi implements DesktopApi {
     password: string,
     deviceDisplayName: string
   ): Promise<DesktopSnapshot> {
+    const attempt_id = this.nextRequestId();
     this.snapshot.state.domain.session = {
       kind: "authenticating",
-      homeserver: normalizeHomeserver(homeserver)
+      homeserver: normalizeHomeserver(homeserver),
+      attempt_id: { connection_id: 1, sequence: attempt_id }
     };
     this.snapshot.state.ui.errors = this.snapshot.state.ui.errors.filter(
       (error) => error.code !== "login_failed"
@@ -773,6 +777,16 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
+  async retrySlidingSyncCapability(): Promise<DesktopSnapshot> {
+    return this.getSnapshot();
+  }
+
+  async changeHomeserver(): Promise<DesktopSnapshot> {
+    this.snapshot.state.domain.session = { kind: "signedOut" };
+    this.clearSessionViews();
+    return this.getSnapshot();
+  }
+
   async logout(): Promise<DesktopSnapshot> {
     this.snapshot.state.domain.session = { kind: "signedOut" };
     this.clearSessionViews();
@@ -788,19 +802,24 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
+    const session = this.snapshot.state.domain.session;
+    const gate =
+      "gate" in session && session.gate
+        ? { ...session.gate, failureKind: null }
+        : {
+            methods: ["recoveryKey" as const],
+            account_kind: "newIdentity" as const,
+            failureKind: null
+          };
     this.snapshot.state.domain.session = {
-      ...this.snapshot.state.domain.session,
       kind: "verifying",
+      homeserver: session.homeserver ?? savedSessions[0].homeserver,
+      user_id: session.user_id ?? savedSessions[0].user_id,
+      device_id: session.device_id ?? savedSessions[0].device_id,
+      gate,
       method: "recoveryKey",
-      flow_id: this.snapshot.state.domain.session.flow_id ?? this.nextRequestId(),
-      ...("gate" in this.snapshot.state.domain.session && this.snapshot.state.domain.session.gate
-        ? {
-            gate: {
-              ...this.snapshot.state.domain.session.gate,
-              failureKind: null
-            }
-          }
-        : {})
+      flow_id: session.flow_id ?? this.nextRequestId(),
+      sas_emojis: []
     };
     this.snapshot.state.ui.errors = this.snapshot.state.ui.errors.filter(
       (error) => error.code !== "e2ee_recovery_failed"
@@ -1287,7 +1306,18 @@ class BrowserFakeApi implements DesktopApi {
   async startOwnUserSas(): Promise<DesktopSnapshot> {
     const flowId = this.nextRequestId();
     const session = this.snapshot.state.domain.session;
-    if (session.kind === "awaitingVerification") this.snapshot.state.domain.session = { ...session, kind: "verifying", method: "existingDeviceSas", flow_id: flowId, sas_emojis: [], ...(session.gate ? { gate: { ...session.gate, failureKind: null } } : {}) };
+    if (session.kind === "awaitingVerification") {
+      this.snapshot.state.domain.session = {
+        kind: "verifying",
+        homeserver: session.homeserver,
+        user_id: session.user_id,
+        device_id: session.device_id,
+        gate: { ...session.gate, failureKind: null },
+        method: "existingDeviceSas",
+        flow_id: flowId,
+        sas_emojis: []
+      };
+    }
     return this.getSnapshot();
   }
   async retryCurrentDeviceTrustDiscovery(): Promise<DesktopSnapshot> {
@@ -1297,14 +1327,32 @@ class BrowserFakeApi implements DesktopApi {
   }
   async mismatchSasVerification(flowId: number): Promise<DesktopSnapshot> {
     const session = this.snapshot.state.domain.session;
-    if (session.flow_id === flowId && session.gate) this.snapshot.state.domain.session = { ...session, kind: "awaitingVerification", gate: { ...session.gate, failureKind: "mismatch" }, method: undefined, flow_id: undefined, sas_emojis: undefined };
+    if (session.kind === "verifying" && session.flow_id === flowId) {
+      this.snapshot.state.domain.session = {
+        kind: "awaitingVerification",
+        homeserver: session.homeserver,
+        user_id: session.user_id,
+        device_id: session.device_id,
+        gate: { ...session.gate, failureKind: "mismatch" }
+      };
+    }
     return this.getSnapshot();
   }
   async startSessionBootstrap(passphrase: string | null, recoveryKeyDestinationPath: string): Promise<DesktopSnapshot> {
     const flowId = this.nextRequestId();
     const session = this.snapshot.state.domain.session;
     void passphrase;
-    if (session.gate && recoveryKeyDestinationPath.trim()) this.snapshot.state.domain.session = { ...session, kind: "awaitingBootstrapConfirmation", flow_id: flowId, destination_written: true, gate: { ...session.gate, failureKind: null } };
+    if (session.kind === "awaitingVerification" && recoveryKeyDestinationPath.trim()) {
+      this.snapshot.state.domain.session = {
+        kind: "awaitingBootstrapConfirmation",
+        homeserver: session.homeserver,
+        user_id: session.user_id,
+        device_id: session.device_id,
+        gate: { ...session.gate, failureKind: null },
+        flow_id: flowId,
+        destination_written: true
+      };
+    }
     return this.getSnapshot();
   }
   async confirmSessionBootstrapSaved(flowId: number): Promise<DesktopSnapshot> {
@@ -1351,8 +1399,14 @@ class BrowserFakeApi implements DesktopApi {
 
   async cancelVerification(flowId: number): Promise<DesktopSnapshot> {
     const session = this.snapshot.state.domain.session;
-    if (session.flow_id === flowId && session.gate) {
-      this.snapshot.state.domain.session = { ...session, kind: "awaitingVerification", gate: { ...session.gate, failureKind: "cancelled" }, method: undefined, flow_id: undefined, sas_emojis: undefined };
+    if (session.kind === "verifying" && session.flow_id === flowId) {
+      this.snapshot.state.domain.session = {
+        kind: "awaitingVerification",
+        homeserver: session.homeserver,
+        user_id: session.user_id,
+        device_id: session.device_id,
+        gate: { ...session.gate, failureKind: "cancelled" }
+      };
       return this.getSnapshot();
     }
     if (!this.isReady()) {
@@ -4223,7 +4277,6 @@ class BrowserFakeApi implements DesktopApi {
     this.threadComposerDrafts.clear();
     this.threadComposerDraftRevisions.clear();
     this.snapshot.state.domain.sync = "stopped";
-    this.snapshot.state.domain.sync_mode = { kind: "unsupported" };
     this.snapshot.state.ui.navigation = {
       active_space_id: null,
       active_room_id: null,
@@ -4652,7 +4705,6 @@ function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): Desk
         profile: defaultProfileState(session.user_id),
         space_members: createBrowserFakeSpaceMembersState(active_space_id),
         sync: "running",
-        sync_mode: { kind: "unsupported" },
         spaces,
         rooms,
         invites,
@@ -4784,7 +4836,6 @@ function createSignedOutSnapshot(): DesktopSnapshot {
         profile: defaultProfileState(null),
         space_members: emptyBrowserFakeSpaceMembersState(),
         sync: "stopped",
-        sync_mode: { kind: "unsupported" },
         spaces: [],
         rooms: [],
         invites: [],

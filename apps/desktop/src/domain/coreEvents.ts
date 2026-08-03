@@ -32,7 +32,6 @@ import type {
   MentionIntent,
   SearchCrawlerFailureKind,
   SidebarModel,
-  SyncMode,
   ThreadSnapshot,
   ThreadsListItem,
   TimelineMessage
@@ -566,15 +565,12 @@ export type AccountEvent =
     }
   | { ReportCompleted: { request_id: RequestId; kind: ReportKind } };
 
-export type SyncBackendKind = "SyncService" | "LegacySync";
-
 export type SyncEvent =
-  | { Started: { request_id: RequestId | null; backend: SyncBackendKind } }
+  | { Started: { request_id: RequestId | null } }
   | "Running"
   | "Reconnecting"
   | "Failed"
-  | { Stopped: { request_id: RequestId | null } }
-  | { ModeChanged: { mode: SyncMode } };
+  | { Stopped: { request_id: RequestId | null } };
 
 export type RoomEvent =
   | { RoomCreated: { request_id: RequestId; room_id: string } }

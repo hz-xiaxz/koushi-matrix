@@ -113,6 +113,14 @@ class TauriDesktopApi implements DesktopApi {
     });
   }
 
+  async retrySlidingSyncCapability(): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("retry_sliding_sync_capability");
+  }
+
+  async changeHomeserver(): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("change_homeserver");
+  }
+
   async logout(): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("logout");
   }

@@ -2991,7 +2991,7 @@ fn test_only() {
       readFileSync(new URL("../../../../apps/desktop/package.json", import.meta.url), "utf8")
     );
     const localHeadlessCoreReleaseQa =
-      "node ../../scripts/desktop-headless-local-qa.mjs --run --server=both --core --scenario=login_sync,directory,timeline_reconnect --timeout-ms=600000 --cargo-profile=release && node ../../scripts/desktop-headless-local-qa.mjs --run --server=conduit --core --scenario=send_queue --timeout-ms=600000 --cargo-profile=release";
+      "node ../../scripts/desktop-headless-local-qa.mjs --run --server=both --core --scenario=login_sync,directory,timeline_reconnect,send_queue --timeout-ms=600000 --cargo-profile=release";
 
     expect(packageJson.scripts?.["qa:headless-basic:local"]).toBe(localHeadlessCoreReleaseQa);
     expect(packageJson.scripts?.["qa:headless-basic:real"]).toBe(
@@ -3631,7 +3631,6 @@ fn test_only() {
     for (const token of [
       "node:22.22.3-bookworm",
       "ARG RUST_TOOLCHAIN=1.96.0",
-      "ARG CONDUIT_URL=https://gitlab.com/api/v4/projects/famedly%2Fconduit/jobs/artifacts/master/raw/x86_64-unknown-linux-musl?job=artifacts",
       "ARG TUWUNEL_VERSION=v1.7.1",
       "ARG TUWUNEL_ZST_URL=https://github.com/matrix-construct/tuwunel/releases/download/v1.7.1/v1.7.1-release-all-x86_64-v1-linux-gnu-tuwunel.zst",
       "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}",
@@ -3645,10 +3644,8 @@ fn test_only() {
       "xvfb",
       "fonts-noto-color-emoji",
       "cargo install tauri-driver --locked",
-      "curl --proto '=https' --tlsv1.2 -fsSLo /usr/local/bin/conduit",
       "curl --proto '=https' --tlsv1.2 -fsSLo /tmp/tuwunel.zst",
       "unzstd -f -o /usr/local/bin/tuwunel /tmp/tuwunel.zst",
-      "conduit --version",
       "tuwunel --version",
       'RUSTC="$(rustup which rustc)"',
       'RUSTDOC="$(rustup which rustdoc)"'
@@ -3671,10 +3668,9 @@ fn test_only() {
     expect(agents).toContain("NPM_CONFIG_CACHE=/tmp/npm-cache");
     expect(agents).toContain("koushi-desktop-linux-gui:basic-ops");
     expect(agents).toContain("--scenario=local-send");
-    expect(agents).toContain("--server=conduit");
+    expect(agents).toContain("--server=tuwunel");
     expect(agents).toContain("--artifact-dir=/work/artifacts/linux-gui-local-send-docker");
     expect(agents).toContain("--timeout-ms=180000");
-    expect(agents).toContain("conduit");
     expect(agents).toContain("tuwunel");
     expect(agents).toContain("zstd");
     expect(agents).toContain(
@@ -3786,8 +3782,8 @@ fn test_only() {
     const output = runScript("scripts/desktop-headless-local-qa.mjs", ["--list"]);
 
     for (const check of [
-      "verify installed Conduit binary",
       "verify installed Tuwunel binary",
+      "verify local Synapse Docker runtime when --server=synapse",
       "start disposable local homeserver",
       "register synthetic local users",
       "run headless Matrix SDK operations",
@@ -3910,7 +3906,7 @@ fn test_only() {
     expect(source).toContain('from "./lib/qa-output-artifacts.mjs"');
     expect(source.match(/writeValidatedQaOutputFiles\(\{/g)).toHaveLength(2);
     expect(source).toContain('label: "sdk"');
-    expect(source).toContain("label: `core-${legLabel}`");
+    expect(source).toContain("label: `core-${qaLabel}`");
     expect(source.match(/validate: \(output\) =>\s*assertQaOutputIsPrivate/g)).toHaveLength(2);
   });
 
@@ -3927,12 +3923,8 @@ fn test_only() {
   });
 
   test("headless local QA configs bind only to loopback disposable stores", () => {
-    const conduit = runScript("scripts/desktop-headless-local-qa.mjs", ["--print-conduit-config"]);
     const tuwunel = runScript("scripts/desktop-headless-local-qa.mjs", ["--print-tuwunel-config"]);
 
-    expect(conduit).toContain('address = "127.0.0.1"');
-    expect(conduit).toContain('database_path = "/tmp/conduit-data"');
-    expect(conduit).toContain("allow_federation = false");
     expect(tuwunel).toContain('address = ["127.0.0.1"]');
     expect(tuwunel).toContain('database_path = "/tmp/tuwunel-data"');
     expect(tuwunel).toContain("allow_federation = false");
@@ -3958,7 +3950,6 @@ fn test_only() {
       "utf8"
     );
 
-    expect(docs).toContain("conduit");
     expect(docs).toContain("tuwunel");
     expect(docs).toContain("zstd");
     expect(docs).toContain("unzstd");

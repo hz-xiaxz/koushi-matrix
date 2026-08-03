@@ -293,6 +293,7 @@ fn qa_session_label(session: &koushi_state::SessionState) -> &'static str {
         SessionState::Rejecting { .. } => "rejecting",
         SessionState::Ready(_) => "ready",
         SessionState::Locked(_) => "locked",
+        SessionState::CapabilityBlocked { .. } => "capabilityBlocked",
         SessionState::LoggingOut => "loggingOut",
     }
 }
@@ -1376,6 +1377,16 @@ pub(crate) fn build_submit_recovery_command(
 
 pub(crate) fn build_logout_command(request_id: koushi_core::RequestId) -> CoreCommand {
     CoreCommand::Account(AccountCommand::Logout { request_id })
+}
+
+pub(crate) fn build_retry_sliding_sync_capability_command(
+    request_id: koushi_core::RequestId,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::RetrySlidingSyncCapability { request_id })
+}
+
+pub(crate) fn build_change_homeserver_command(request_id: koushi_core::RequestId) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::ChangeHomeserver { request_id })
 }
 
 pub(crate) fn build_restart_sync_command(request_id: koushi_core::RequestId) -> CoreCommand {
@@ -3199,6 +3210,7 @@ fn account_key_from_app_state(snapshot: &koushi_state::AppState) -> AccountKey {
         | koushi_state::SessionState::AwaitingBootstrapConfirmation { info, .. }
         | koushi_state::SessionState::Rejecting { info, .. }
         | koushi_state::SessionState::Locked(info)
+        | koushi_state::SessionState::CapabilityBlocked { info, .. }
         | koushi_state::SessionState::SwitchingAccount { info } => AccountKey(info.user_id.clone()),
         _ => AccountKey(String::new()),
     }
@@ -3792,8 +3804,8 @@ mod tests {
         build_bootstrap_cross_signing_command, build_bootstrap_secure_backup_command,
         build_cancel_identity_reset_command, build_cancel_scheduled_send_command,
         build_cancel_send_command, build_cancel_verification_command,
-        build_change_secure_backup_passphrase_command, build_close_activity_command,
-        build_close_files_view_command, build_close_search_command,
+        build_change_homeserver_command, build_change_secure_backup_passphrase_command,
+        build_close_activity_command, build_close_files_view_command, build_close_search_command,
         build_confirm_sas_verification_command, build_create_room_command,
         build_create_space_command, build_decline_invite_command, build_discover_login_command,
         build_download_media_command, build_edit_message_command, build_enable_key_backup_command,
@@ -3814,12 +3826,13 @@ mod tests {
         build_report_user_command, build_reschedule_scheduled_send_command,
         build_reset_identity_command, build_reset_local_data_command, build_restart_sync_command,
         build_restore_timeline_anchor_command, build_retry_activity_resolution_command,
-        build_retry_send_command, build_schedule_send_command, build_select_room_command,
-        build_select_space_command, build_send_reaction_command, build_send_read_receipt_command,
-        build_send_reply_command, build_send_text_command, build_send_thread_reply_command,
-        build_set_activity_tab_command, build_set_avatar_command, build_set_composer_draft_command,
-        build_set_display_name_command, build_set_fully_read_command,
-        build_set_local_user_alias_command, build_set_presence_command, build_set_room_tag_command,
+        build_retry_send_command, build_retry_sliding_sync_capability_command,
+        build_schedule_send_command, build_select_room_command, build_select_space_command,
+        build_send_reaction_command, build_send_read_receipt_command, build_send_reply_command,
+        build_send_text_command, build_send_thread_reply_command, build_set_activity_tab_command,
+        build_set_avatar_command, build_set_composer_draft_command, build_set_display_name_command,
+        build_set_fully_read_command, build_set_local_user_alias_command,
+        build_set_presence_command, build_set_room_tag_command,
         build_set_room_url_preview_override_command, build_set_space_child_command,
         build_set_thread_composer_draft_command, build_set_typing_command,
         build_start_device_cleanup_command, build_start_direct_message_command,
@@ -4421,6 +4434,20 @@ mod tests {
         match build_logout_command(fake_request_id(4)) {
             CoreCommand::Account(AccountCommand::Logout { request_id }) => {
                 assert_eq!(request_id, fake_request_id(4));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        match build_retry_sliding_sync_capability_command(fake_request_id(41)) {
+            CoreCommand::Account(AccountCommand::RetrySlidingSyncCapability { request_id }) => {
+                assert_eq!(request_id, fake_request_id(41));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        match build_change_homeserver_command(fake_request_id(42)) {
+            CoreCommand::Account(AccountCommand::ChangeHomeserver { request_id }) => {
+                assert_eq!(request_id, fake_request_id(42));
             }
             other => panic!("unexpected command: {other:?}"),
         }

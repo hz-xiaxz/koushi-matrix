@@ -19,16 +19,16 @@ use crate::state::{
     NativeAttentionSoundOutcome, NativeAttentionState, NavigationState, OperationFailureKind,
     OwnProfile, PinnedEvent, PresenceKind, ProfileUpdateRequest, RecoveryKeyDeliveryState,
     RecoveryMethod, RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListSource,
-    RoomMentionPermission,
-    RoomModerationAction, RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot,
-    RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
-    ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
-    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceMemberInviteOutcome,
-    SpaceMembersProjection, SpaceSummary, StagedUploadCompressionChoice, StagedUploadItem,
-    StagedUploadOutputSelection, SyncLifecycleStatus, SyncMode, TimelineContinuityInspection,
-    TimelineGapRepairFailureKind, TimelineMediaDownloadState, TimelineMediaGalleryItem,
-    TimelineScrollAnchor, TrustOperationFailureKind, UserProfile, VerificationCancelReason,
-    VerificationGateFailureKind, VerificationGateState, VerificationMethod, VerificationTarget,
+    RoomMentionPermission, RoomModerationAction, RoomPreferencesState, RoomSettingChange,
+    RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji,
+    ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope,
+    SessionInfo, SessionStatusRefreshTrigger, SettingsPatch, SettingsValues,
+    SpaceMemberInviteOutcome, SpaceMembersProjection, SpaceSummary, StagedUploadCompressionChoice,
+    StagedUploadItem, StagedUploadOutputSelection, SyncLifecycleStatus,
+    TimelineContinuityInspection, TimelineGapRepairFailureKind, TimelineMediaDownloadState,
+    TimelineMediaGalleryItem, TimelineScrollAnchor, TrustOperationFailureKind, UserProfile,
+    VerificationCancelReason, VerificationGateFailureKind, VerificationGateState,
+    VerificationMethod, VerificationTarget,
 };
 use crate::state::{SlidingSyncAdmission, SlidingSyncCapabilityResult};
 
@@ -593,9 +593,6 @@ pub enum AppAction {
     SyncStatusChanged {
         generation: u64,
         status: SyncLifecycleStatus,
-    },
-    SyncModeChanged {
-        mode: SyncMode,
     },
     RoomListUpdated {
         spaces: Vec<SpaceSummary>,

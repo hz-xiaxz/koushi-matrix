@@ -103,6 +103,7 @@ impl CoreCommand {
                 | AccountCommand::RestoreSession { request_id, .. }
                 | AccountCommand::RestoreLastSession { request_id }
                 | AccountCommand::RetrySlidingSyncCapability { request_id }
+                | AccountCommand::ChangeHomeserver { request_id }
                 | AccountCommand::QuerySavedSessions { request_id }
                 | AccountCommand::QueryDevices { request_id }
                 | AccountCommand::RefreshCurrentSessionStatus { request_id, .. }
@@ -1170,6 +1171,11 @@ pub enum AccountCommand {
     RetrySlidingSyncCapability {
         request_id: RequestId,
     },
+    /// Leave the current local admission and return to homeserver selection
+    /// without contacting the old server or deleting its saved session/store.
+    ChangeHomeserver {
+        request_id: RequestId,
+    },
     /// List saved sessions (homeserver / user_id / device_id only — never
     /// secrets). Answered by `AccountEvent::SavedSessionsListed`.
     QuerySavedSessions {
@@ -1466,6 +1472,10 @@ impl fmt::Debug for AccountCommand {
                 .finish(),
             Self::RetrySlidingSyncCapability { request_id } => formatter
                 .debug_struct("RetrySlidingSyncCapability")
+                .field("request_id", request_id)
+                .finish(),
+            Self::ChangeHomeserver { request_id } => formatter
+                .debug_struct("ChangeHomeserver")
                 .field("request_id", request_id)
                 .finish(),
             Self::QuerySavedSessions { request_id } => formatter
@@ -3231,11 +3241,17 @@ mod tests {
         let reset = CoreCommand::Account(AccountCommand::ResetLocalData {
             request_id: fake_rid(75),
         });
+        let change_homeserver = CoreCommand::Account(AccountCommand::ChangeHomeserver {
+            request_id: fake_rid(76),
+        });
 
         assert!(!retry.requires_ready_session());
         assert!(!reset.requires_ready_session());
+        assert!(!change_homeserver.requires_ready_session());
         assert_eq!(retry.request_id(), fake_rid(74));
+        assert_eq!(change_homeserver.request_id(), fake_rid(76));
         assert!(format!("{retry:?}").contains("RetrySlidingSyncCapability"));
+        assert!(format!("{change_homeserver:?}").contains("ChangeHomeserver"));
     }
 
     #[cfg(feature = "qa-bin")]

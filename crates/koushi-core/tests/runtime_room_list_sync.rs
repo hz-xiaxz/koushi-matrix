@@ -10,7 +10,7 @@ use std::{
 };
 
 use koushi_core::command::{AccountCommand, AppCommand, CoreCommand};
-use koushi_core::runtime::CoreRuntime;
+use koushi_core::{SyncEvent, runtime::CoreRuntime};
 use koushi_state::{AppAction, AuthSecret, LoginRequest, RoomListFilter, SessionState, SyncState};
 use matrix_sdk::test_utils::mocks::MatrixMockServer;
 use serde_json::{Map, Value, json};
@@ -36,6 +36,57 @@ fn production_runtime_requires_committed_all_rooms_readiness() {
     assert!(!production.contains("run_legacy_sync_loop"));
     assert!(production.contains("room_list_service: Arc<"));
     assert!(production.contains("room_list_service,"));
+}
+
+#[test]
+fn sync_event_wire_has_no_backend_or_mode_transition() {
+    let started: SyncEvent = serde_json::from_value(json!({
+        "Started": { "request_id": null }
+    }))
+    .expect("deserialize backend-free sync start");
+    assert_eq!(
+        serde_json::to_value(started).expect("serialize sync start"),
+        json!({ "Started": { "request_id": null } })
+    );
+
+    for obsolete in [
+        json!({ "Started": { "request_id": null, "backend": "SyncService" } }),
+        json!({ "Started": { "request_id": null, "backend": "LegacySync" } }),
+        json!({ "ModeChanged": { "mode": "legacy" } }),
+        json!({ "ModeChanged": { "mode": "simplified" } }),
+        json!({ "ModeChanged": { "mode": "transitioning" } }),
+    ] {
+        assert!(
+            serde_json::from_value::<SyncEvent>(obsolete).is_err(),
+            "obsolete sync wire state must be rejected"
+        );
+    }
+}
+
+#[test]
+fn production_core_has_no_legacy_or_mode_transition_vocabulary() {
+    let sources = [
+        include_str!("../src/event.rs"),
+        include_str!("../src/state_delta.rs"),
+        include_str!("../src/sync.rs"),
+        include_str!("../src/room.rs"),
+    ]
+    .join("\n");
+
+    for forbidden in [
+        "SyncBackendKind",
+        "LegacySync",
+        "ModeChanged",
+        "SyncMode",
+        "sync_mode",
+        "RoomListSource::Legacy",
+        "RoomListSource::SyncService",
+    ] {
+        assert!(
+            !sources.contains(forbidden),
+            "production core still contains forbidden sync vocabulary: {forbidden}"
+        );
+    }
 }
 
 const SLIDING_SYNC_PATH: &str = "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync";

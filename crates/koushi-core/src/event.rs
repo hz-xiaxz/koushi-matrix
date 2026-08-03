@@ -10,7 +10,7 @@ use koushi_state::{
     LocalEncryptionHealth, MediaTransferProgress, MentionIntent, NativeAttentionDispatchId,
     NativeAttentionSummary, OperationFailureKind, PinnedEvent, PresenceKind, ProfileState,
     ReplyQuote, RoomModerationAction, RoomSettingsSnapshot, RoomTagKind, SessionState,
-    SpaceMemberInviteOutcome, SubmissionId, SyncMode, ThreadsListItem, VerificationFlowState,
+    SpaceMemberInviteOutcome, SubmissionId, ThreadsListItem, VerificationFlowState,
     resolve_optional_user_display_name, resolve_user_display_name,
 };
 use serde::{Deserialize, Serialize};
@@ -593,28 +593,13 @@ fn identity_reset_state_name(state: &IdentityResetState) -> &'static str {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum SyncEvent {
-    Started {
-        request_id: Option<RequestId>,
-        backend: SyncBackendKind,
-    },
+    Started { request_id: Option<RequestId> },
     Running,
     Reconnecting,
     Failed,
-    Stopped {
-        request_id: Option<RequestId>,
-    },
-    ModeChanged {
-        mode: SyncMode,
-    },
-}
-
-/// Selected sync backend, emitted so QA can assert server capability
-/// (Async rule 9).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum SyncBackendKind {
-    SyncService,
-    LegacySync,
+    Stopped { request_id: Option<RequestId> },
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]

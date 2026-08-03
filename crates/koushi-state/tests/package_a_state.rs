@@ -6,7 +6,7 @@ use koushi_state::{
     OperationFailureKind, QrLoginState, RecoveryKeyDeliveryState, RoomKeyExportState,
     RoomKeyImportState, RoomListEntryKind, RoomListFilter, RoomListProjectionItem, RoomSummary,
     RoomTagInfo, SecureBackupPassphraseChangeState, SecureBackupSetupState, SessionInfo,
-    SessionState, SoftLogoutReauthState, SyncMode, TrustOperationFailureKind, UiEvent, reduce,
+    SessionState, SoftLogoutReauthState, TrustOperationFailureKind, UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -605,7 +605,6 @@ fn account_management_auth_submitted_transitions_awaiting_uia_to_working() {
 fn ready_state_with_rooms(rooms: Vec<RoomSummary>) -> AppState {
     AppState {
         session: SessionState::Ready(session_info()),
-        sync_mode: SyncMode::Simplified,
         rooms,
         ..AppState::default()
     }

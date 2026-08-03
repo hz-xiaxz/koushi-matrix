@@ -6417,6 +6417,7 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         | AccountCommand::QaRefreshDeviceKeysAndAssertKnown { .. } => None,
         AccountCommand::CompleteOidcLogin { .. }
         | AccountCommand::RetrySlidingSyncCapability { .. }
+        | AccountCommand::ChangeHomeserver { .. }
         | AccountCommand::QuerySavedSessions { .. }
         | AccountCommand::SetPresence { .. }
         | AccountCommand::DownloadAvatarThumbnail { .. }
@@ -9743,6 +9744,18 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn change_homeserver_has_no_speculative_app_projection() {
+        let command = AccountCommand::ChangeHomeserver {
+            request_id: RequestId {
+                connection_id: RuntimeConnectionId(4),
+                sequence: 12,
+            },
+        };
+
+        assert_eq!(account_command_projected_action(&command), None);
     }
 
     #[test]

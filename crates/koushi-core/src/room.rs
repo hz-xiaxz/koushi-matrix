@@ -10,7 +10,7 @@
 //! Constructing ad-hoc `RoomListService` instances is PROHIBITED: they are
 //! not driven by the sync loop, race the running `SyncService`, and return
 //! entries without the live service's `required_state` (e.g. `m.room.create`
-//! for space classification — deterministically broken on Conduit).
+//! for space classification when a homeserver omits the required room state).
 //!
 //! `RoomMessage::SyncStarted` carries the ONE live `RoomListService` owned by
 //! the running `SyncService` (`sync_service.room_list_service()`). The actor
@@ -3274,8 +3274,7 @@ async fn project_room_list_snapshot(
 fn room_list_source_label(source: RoomListSource) -> &'static str {
     match source {
         RoomListSource::Cache => "cache",
-        RoomListSource::SyncService => "sync_service",
-        RoomListSource::Legacy => "legacy",
+        RoomListSource::Live => "live",
     }
 }
 
@@ -5206,7 +5205,7 @@ pub mod tests {
             command_rx,
             stop_rx,
             1,
-            RoomListSource::SyncService,
+            RoomListSource::Live,
             Arc::new(AtomicBool::new(false)),
             entries_limit,
             room_updates_rx,
@@ -6036,7 +6035,7 @@ pub mod tests {
             &action_tx,
             &event_tx,
             1,
-            RoomListSource::SyncService,
+            RoomListSource::Live,
             true,
         )
         .await;
@@ -6079,7 +6078,7 @@ pub mod tests {
             &action_tx,
             &event_tx,
             1,
-            RoomListSource::SyncService,
+            RoomListSource::Live,
             false,
         )
         .await;
@@ -6213,7 +6212,7 @@ pub mod tests {
             &action_tx,
             &event_tx,
             1,
-            RoomListSource::SyncService,
+            RoomListSource::Live,
             &Arc::new(AtomicBool::new(true)),
         )
         .await;
@@ -6335,7 +6334,7 @@ pub mod tests {
             &action_tx,
             &event_tx,
             1,
-            RoomListSource::SyncService,
+            RoomListSource::Live,
             true,
         )
         .await;
@@ -7111,7 +7110,7 @@ pub mod tests {
                 .send(RoomMessage::SyncStarted {
                     session: session.clone(),
                     room_list_service: first_service,
-                    source: RoomListSource::SyncService,
+                    source: RoomListSource::Live,
                     backend_generation: 1,
                 })
                 .await
@@ -7121,7 +7120,7 @@ pub mod tests {
                 .send(RoomMessage::SyncStarted {
                     session,
                     room_list_service: replacement_service,
-                    source: RoomListSource::SyncService,
+                    source: RoomListSource::Live,
                     backend_generation: 2,
                 })
                 .await

@@ -22,11 +22,11 @@ use std::{
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixClientSession;
-use koushi_state::{AppAction, RoomListSource, SyncLifecycleStatus, SyncMode};
+use koushi_state::{AppAction, RoomListSource, SyncLifecycleStatus};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::command::SyncCommand;
-use crate::event::{CoreEvent, SyncBackendKind, SyncEvent};
+use crate::event::{CoreEvent, SyncEvent};
 use crate::executor;
 #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
 use crate::failure::CoreFailure;
@@ -370,16 +370,6 @@ impl SyncActor {
 
     async fn fail(&mut self, kind: SyncFailureKind) {
         self.lifecycle = SyncLifecycle::Failed;
-        let mode = SyncMode::Failed {
-            kind: match kind {
-                SyncFailureKind::Http => koushi_state::SyncModeFailureKind::Network,
-                SyncFailureKind::Auth => koushi_state::SyncModeFailureKind::Auth,
-                SyncFailureKind::Store => koushi_state::SyncModeFailureKind::Store,
-                SyncFailureKind::Internal => koushi_state::SyncModeFailureKind::Internal,
-            },
-        };
-        self.reduce(vec![AppAction::SyncModeChanged { mode }]);
-        self.emit(CoreEvent::Sync(SyncEvent::ModeChanged { mode }));
         self.emit(CoreEvent::Sync(SyncEvent::Failed));
         self.project_sync_status(SyncLifecycleStatus::Failed {
             reason: sync_failure_kind_label(kind).to_owned(),
@@ -423,7 +413,6 @@ impl SyncActor {
         ) {
             self.emit(CoreEvent::Sync(SyncEvent::Started {
                 request_id: Some(request_id),
-                backend: SyncBackendKind::SyncService,
             }));
             if self.lifecycle == SyncLifecycle::Running {
                 self.project_sync_status(SyncLifecycleStatus::Running).await;
@@ -436,15 +425,8 @@ impl SyncActor {
         self.active_start_request_id = Some(request_id);
         self.project_sync_status(SyncLifecycleStatus::Starting)
             .await;
-        self.reduce(vec![AppAction::SyncModeChanged {
-            mode: SyncMode::Simplified,
-        }]);
         self.emit(CoreEvent::Sync(SyncEvent::Started {
             request_id: Some(request_id),
-            backend: SyncBackendKind::SyncService,
-        }));
-        self.emit(CoreEvent::Sync(SyncEvent::ModeChanged {
-            mode: SyncMode::Simplified,
         }));
 
         if self.start_sync_service().await.is_err() {
@@ -591,10 +573,6 @@ impl SyncActor {
     async fn project_sync_status(&self, status: SyncLifecycleStatus) {
         send_sync_status(&self.action_tx, &self.sync_generation, status).await;
     }
-
-    fn reduce(&self, actions: Vec<AppAction>) {
-        let _ = self.action_tx.try_send(actions);
-    }
 }
 
 async fn start_room_observation(
@@ -607,7 +585,7 @@ async fn start_room_observation(
         .send(RoomMessage::SyncStarted {
             session,
             room_list_service,
-            source: RoomListSource::SyncService,
+            source: RoomListSource::Live,
             backend_generation: run_generation,
         })
         .await
@@ -651,7 +629,7 @@ async fn reconcile_committed_room_list(
     let (ack_tx, ack_rx) = oneshot::channel();
     if room_tx
         .send(RoomMessage::ReconcileCommittedRange {
-            source: RoomListSource::SyncService,
+            source: RoomListSource::Live,
             backend_generation: run_generation,
             response_sequence,
             ack: ack_tx,
@@ -725,7 +703,7 @@ async fn stop_room_observation(room_tx: mpsc::Sender<RoomMessage>, run_generatio
 async fn notify_room_runtime_stopped(room_tx: mpsc::Sender<RoomMessage>, run_generation: u64) {
     let _ = room_tx
         .send(RoomMessage::BackendSyncStopped {
-            source: RoomListSource::SyncService,
+            source: RoomListSource::Live,
             backend_generation: run_generation,
         })
         .await;
@@ -945,7 +923,6 @@ pub mod tests {
         assert!(!production.contains("KOUSHI_QA_FORCE_SYNC_BACKEND"));
         assert!(!production.contains("probe_backend"));
         assert!(!production.contains("run_legacy_sync_loop"));
-        assert!(!production.contains("LegacySync"));
         assert!(production.contains("room_list_service: Arc<"));
         assert!(production.contains("room_list_service,"));
     }

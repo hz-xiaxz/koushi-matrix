@@ -482,6 +482,8 @@ describe("BrowserFakeApi settings preview", () => {
       method: "existingDeviceSas",
       flow_id: 51,
       gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity", failureKind: null }
+      ,
+      sas_emojis: []
     };
     expect((await api.confirmSasVerification(50)).state.domain.session.flow_id).toBe(51);
     const confirmed = await api.confirmSasVerification(51);

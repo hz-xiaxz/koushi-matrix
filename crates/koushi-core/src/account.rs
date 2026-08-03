@@ -4286,6 +4286,9 @@ impl AccountActor {
             AccountCommand::Logout { request_id } => {
                 self.handle_logout(request_id).await;
             }
+            AccountCommand::ChangeHomeserver { request_id } => {
+                self.handle_change_homeserver(request_id).await;
+            }
             AccountCommand::SwitchAccount {
                 request_id,
                 account_key,
@@ -6842,7 +6845,7 @@ impl AccountActor {
                     self.pending_ready_events.extend(ready_events);
                 }
                 Err(failure) => {
-                    self.abort_login(login_session, &key_id, false).await;
+                    self.abort_login(login_session, &key_id, false, true).await;
                     self.emit_failure(core_request_id, failure);
                     self.send_actions(vec![AppAction::LoginFailed {
                         attempt_id: LoginAttemptId::new(
@@ -7101,7 +7104,7 @@ impl AccountActor {
             ..
         }) = self.pending_sliding_sync_admission.take()
         {
-            self.abort_login(login_session, &key_id, false).await;
+            self.abort_login(login_session, &key_id, false, true).await;
         }
     }
 
@@ -7212,7 +7215,7 @@ impl AccountActor {
         let persistable = match login_session.persistable_session() {
             Ok(persistable) => persistable,
             Err(_) => {
-                self.abort_login(login_session, &key_id, false).await;
+                self.abort_login(login_session, &key_id, false, true).await;
                 self.emit_failure(request_id, CoreFailure::StoreUnavailable);
                 self.send_actions(vec![AppAction::LoginFailed {
                     attempt_id: LoginAttemptId::new(
@@ -7228,7 +7231,7 @@ impl AccountActor {
 
         let Some((account_epoch, capability_request_id)) = self.next_sliding_sync_correlation()
         else {
-            self.abort_login(login_session, &key_id, false).await;
+            self.abort_login(login_session, &key_id, false, true).await;
             self.emit_failure(request_id, CoreFailure::StoreUnavailable);
             self.send_actions(vec![AppAction::LoginFailed {
                 attempt_id: LoginAttemptId::new(request_id.connection_id.0, request_id.sequence),
@@ -7318,7 +7321,7 @@ impl AccountActor {
         let persistable = match login_session.persistable_session() {
             Ok(persistable) => persistable,
             Err(_) => {
-                self.abort_login(login_session, &key_id, false).await;
+                self.abort_login(login_session, &key_id, false, true).await;
                 self.emit_failure(request_id, CoreFailure::StoreUnavailable);
                 self.send_actions(vec![AppAction::LoginFailed {
                     attempt_id: LoginAttemptId::new(
@@ -7334,7 +7337,7 @@ impl AccountActor {
 
         let Some((account_epoch, capability_request_id)) = self.next_sliding_sync_correlation()
         else {
-            self.abort_login(login_session, &key_id, false).await;
+            self.abort_login(login_session, &key_id, false, true).await;
             self.emit_failure(request_id, CoreFailure::StoreUnavailable);
             self.send_actions(vec![AppAction::LoginFailed {
                 attempt_id: LoginAttemptId::new(request_id.connection_id.0, request_id.sequence),
@@ -8024,7 +8027,7 @@ impl AccountActor {
         let persistable = match self.persist_session(&login_session, &key_id).await {
             Ok(persistable) => persistable,
             Err(failure) => {
-                self.abort_login(login_session, &key_id, false).await;
+                self.abort_login(login_session, &key_id, false, true).await;
                 self.send_actions(vec![AppAction::SoftLogoutReauthFailed {
                     request_id: request_id.sequence,
                     kind: AuthFailureKind::Sdk,
@@ -8051,7 +8054,7 @@ impl AccountActor {
         let store_backed = match self.restore_into_store(&persistable, &key_id).await {
             Ok(session) => session,
             Err(failure) => {
-                self.abort_login(login_session, &key_id, true).await;
+                self.abort_login(login_session, &key_id, true, true).await;
                 self.send_actions(vec![AppAction::SoftLogoutReauthFailed {
                     request_id: request_id.sequence,
                     kind: AuthFailureKind::Sdk,
@@ -8938,7 +8941,8 @@ impl AccountActor {
                     key_id,
                     ..
                 } => {
-                    self.abort_login(login_session, &key_id, false).await;
+                    self.abort_login(login_session, &key_id, false, server_logout)
+                        .await;
                     key_id
                 }
                 PendingSlidingSyncAdmission::StoredSessionRestore { key_id, .. } => {
@@ -9106,6 +9110,10 @@ impl AccountActor {
 
     async fn handle_logout(&mut self, request_id: RequestId) {
         self.perform_logout(request_id, true, true).await;
+    }
+
+    async fn handle_change_homeserver(&mut self, request_id: RequestId) {
+        self.perform_logout(request_id, false, true).await;
     }
 
     // --- helpers ---
@@ -9762,8 +9770,11 @@ impl AccountActor {
         login_session: MatrixClientSession,
         key_id: &SessionKeyId,
         credentials_persisted: bool,
+        server_logout: bool,
     ) {
-        let _ = koushi_sdk::logout(&login_session).await;
+        if server_logout {
+            let _ = koushi_sdk::logout(&login_session).await;
+        }
         drop(login_session);
         if credentials_persisted {
             self.clear_account_persistence(key_id).await;
@@ -13605,6 +13616,28 @@ mod tests {
             !compact.contains("cache_path().is_some()"),
             "restore_into_store must not use cache_path presence as an encryption invariant"
         );
+    }
+
+    #[test]
+    fn changing_homeserver_does_not_logout_pending_login_on_the_old_server() {
+        let source = include_str!("account.rs");
+        let logout = source
+            .split("async fn perform_logout")
+            .nth(1)
+            .expect("perform_logout should exist")
+            .split("async fn close_pending_session_stores")
+            .next()
+            .expect("perform_logout body");
+        let abort = source
+            .split("async fn abort_login")
+            .nth(1)
+            .expect("abort_login should exist")
+            .split("async fn prefer_saved_device_for_password_login")
+            .next()
+            .expect("abort_login body");
+
+        assert!(logout.contains("self.abort_login(login_session, &key_id, false, server_logout)"));
+        assert!(abort.contains("if server_logout") && abort.contains("koushi_sdk::logout"));
     }
 
     #[test]

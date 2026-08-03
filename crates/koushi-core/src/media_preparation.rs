@@ -5,10 +5,10 @@ use koushi_media::{
     PreparedImageFormat, PreparedImageVariant, prepare_image_output,
 };
 use koushi_state::{
-    ComposerTarget, ImageUploadCompressionMode, ImageUploadCompressionPolicy,
-    MediaPreparationFailureKind, PreparedUploadFormat, PreparedUploadVariant,
-    StagedUploadCompressionChoice, StagedUploadFormatChoice, StagedUploadItem, StagedUploadKind,
-    StagedUploadOutputSelection, StagedUploadPreparation, StagedUploadResizeChoice,
+    ComposerTarget, ImageUploadCompressionPolicy, MediaPreparationFailureKind,
+    PreparedUploadFormat, PreparedUploadVariant, StagedUploadCompressionChoice,
+    StagedUploadFormatChoice, StagedUploadItem, StagedUploadKind, StagedUploadOutputSelection,
+    StagedUploadPreparation, StagedUploadResizeChoice,
 };
 use tokio::sync::{Mutex, MutexGuard};
 
