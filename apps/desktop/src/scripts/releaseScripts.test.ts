@@ -3901,22 +3901,39 @@ fn test_only() {
     expect(source).not.toContain("console.log(fixture");
   });
 
-  test("headless local QA runner preserves raw child logs before public privacy validation", () => {
+  test("headless local QA validates captured output before writing uploadable sdk/core artifacts", () => {
     const source = readFileSync(
       new URL("../../../../scripts/desktop-headless-local-qa.mjs", import.meta.url),
       "utf8"
     );
 
-    const firstValidation = source.indexOf("assertQaOutputIsPrivate(");
-    const firstWrite = source.indexOf("writeQaOutputFiles(");
+    const sdkStart = source.indexOf("function runHeadlessQa(");
+    const coreStart = source.indexOf("function runCoreHeadlessQa(");
+    const validationHelperStart = source.indexOf("function assertQaOutputIsPrivate(");
 
     expect(source).toContain("./lib/qa-token-contract.mjs");
     expect(source).toContain("assertNoMatrixIdentifiers");
     expect(source).toContain("assertNoLocalPaths");
     expect(source).toContain("assertNoRawSdkErrors");
-    expect(firstValidation).toBeGreaterThan(-1);
-    expect(firstWrite).toBeGreaterThan(-1);
-    expect(firstWrite).toBeLessThan(firstValidation);
+    expect(sdkStart).toBeGreaterThanOrEqual(0);
+    expect(coreStart).toBeGreaterThan(sdkStart);
+    expect(validationHelperStart).toBeGreaterThan(coreStart);
+
+    const sdkRunner = source.slice(sdkStart, coreStart);
+    const coreRunner = source.slice(coreStart, validationHelperStart);
+    for (const [label, runner] of [
+      ["SDK", sdkRunner],
+      ["Core", coreRunner]
+    ]) {
+      const validation = runner.indexOf("assertQaOutputIsPrivate(");
+      const artifactWrite = runner.indexOf("writeQaOutputFiles(");
+
+      expect(validation, `${label} runner must validate captured output`).toBeGreaterThanOrEqual(0);
+      expect(
+        artifactWrite,
+        `${label} runner must leave no uploadable artifact when validation throws`
+      ).toBeGreaterThan(validation);
+    }
   });
 
   test("headless local QA failure messages do not replay raw child output or paths", () => {
