@@ -3901,39 +3901,17 @@ fn test_only() {
     expect(source).not.toContain("console.log(fixture");
   });
 
-  test("headless local QA validates captured output before writing uploadable sdk/core artifacts", () => {
+  test("headless local QA routes SDK and Core output through the validated artifact boundary", () => {
     const source = readFileSync(
       new URL("../../../../scripts/desktop-headless-local-qa.mjs", import.meta.url),
       "utf8"
     );
 
-    const sdkStart = source.indexOf("function runHeadlessQa(");
-    const coreStart = source.indexOf("function runCoreHeadlessQa(");
-    const validationHelperStart = source.indexOf("function assertQaOutputIsPrivate(");
-
-    expect(source).toContain("./lib/qa-token-contract.mjs");
-    expect(source).toContain("assertNoMatrixIdentifiers");
-    expect(source).toContain("assertNoLocalPaths");
-    expect(source).toContain("assertNoRawSdkErrors");
-    expect(sdkStart).toBeGreaterThanOrEqual(0);
-    expect(coreStart).toBeGreaterThan(sdkStart);
-    expect(validationHelperStart).toBeGreaterThan(coreStart);
-
-    const sdkRunner = source.slice(sdkStart, coreStart);
-    const coreRunner = source.slice(coreStart, validationHelperStart);
-    for (const [label, runner] of [
-      ["SDK", sdkRunner],
-      ["Core", coreRunner]
-    ]) {
-      const validation = runner.indexOf("assertQaOutputIsPrivate(");
-      const artifactWrite = runner.indexOf("writeQaOutputFiles(");
-
-      expect(validation, `${label} runner must validate captured output`).toBeGreaterThanOrEqual(0);
-      expect(
-        artifactWrite,
-        `${label} runner must leave no uploadable artifact when validation throws`
-      ).toBeGreaterThan(validation);
-    }
+    expect(source).toContain('from "./lib/qa-output-artifacts.mjs"');
+    expect(source.match(/writeValidatedQaOutputFiles\(\{/g)).toHaveLength(2);
+    expect(source).toContain('label: "sdk"');
+    expect(source).toContain("label: `core-${legLabel}`");
+    expect(source.match(/validate: \(output\) =>\s*assertQaOutputIsPrivate/g)).toHaveLength(2);
   });
 
   test("headless local QA failure messages do not replay raw child output or paths", () => {

@@ -32,6 +32,7 @@ import {
   assertNoMatrixIdentifiers,
   assertNoRawSdkErrors
 } from "./lib/qa-token-contract.mjs";
+import { writeValidatedQaOutputFiles } from "./lib/qa-output-artifacts.mjs";
 import { assertSdkSubmoduleSynced } from "./lib/sdk-submodule-status.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -411,11 +412,17 @@ function runHeadlessQa({
       timeout: timeoutMs
     }
   );
-  assertQaOutputIsPrivate("headless SDK QA", result, [
-    ["passwordA", passwordA],
-    ["passwordB", passwordB]
-  ]);
-  writeQaOutputFiles(logPath, "sdk", result.stdout, result.stderr);
+  writeValidatedQaOutputFiles({
+    directory: dirname(logPath),
+    label: "sdk",
+    stdout: result.stdout,
+    stderr: result.stderr,
+    validate: (output) =>
+      assertQaOutputIsPrivate("headless SDK QA", output, [
+        ["passwordA", passwordA],
+        ["passwordB", passwordB]
+      ])
+  });
   appendQaOutput(logPath, result.stdout, result.stderr);
   if (result.error?.code === "ETIMEDOUT") {
     throw new Error(
@@ -527,11 +534,17 @@ function runCoreHeadlessQa({
       timeout: timeoutMs
     }
   );
-  assertQaOutputIsPrivate("headless core QA", result, [
-    ["passwordA", passwordA],
-    ["passwordB", passwordB]
-  ]);
-  writeQaOutputFiles(logPath, `core-${legLabel}`, result.stdout, result.stderr);
+  writeValidatedQaOutputFiles({
+    directory: dirname(logPath),
+    label: `core-${legLabel}`,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    validate: (output) =>
+      assertQaOutputIsPrivate("headless core QA", output, [
+        ["passwordA", passwordA],
+        ["passwordB", passwordB]
+      ])
+  });
   appendQaOutput(logPath, result.stdout, result.stderr);
   if (result.status !== 0) {
     if (result.error?.code === "ETIMEDOUT") {
@@ -571,12 +584,6 @@ function appendQaOutput(logPath, stdout, stderr) {
     log.write(stderr);
   }
   log.end();
-}
-
-function writeQaOutputFiles(logPath, label, stdout, stderr) {
-  const dir = dirname(logPath);
-  writeFileSync(join(dir, `${label}-stdout.log`), stdout || "");
-  writeFileSync(join(dir, `${label}-stderr.log`), stderr || "");
 }
 
 function writeQaFixture(runDir, fixture) {

@@ -130,26 +130,6 @@ test("CI gates positive invitations on exactly Tuwunel and Synapse", () => {
   assert.doesNotMatch(conduitJob, /scenario=login_sync/);
 });
 
-test("headless QA validates captured output before writing uploadable artifacts", () => {
-  const headless = readRepoFile("scripts/desktop-headless-local-qa.mjs");
-  const sdkStart = headless.indexOf("function runHeadlessQa(");
-  const coreStart = headless.indexOf("function runCoreHeadlessQa(");
-  const validationStart = headless.indexOf("function assertQaOutputIsPrivate(");
-
-  assert.ok(sdkStart >= 0 && coreStart > sdkStart && validationStart > coreStart);
-  const sdkRunner = headless.slice(sdkStart, coreStart);
-  const coreRunner = headless.slice(coreStart, validationStart);
-  for (const [label, runner] of [
-    ["SDK", sdkRunner],
-    ["Core", coreRunner]
-  ]) {
-    const validation = runner.indexOf("assertQaOutputIsPrivate(");
-    const artifactWrite = runner.indexOf("writeQaOutputFiles(");
-    assert.ok(validation >= 0, `${label} runner must validate captured output`);
-    assert.ok(artifactWrite > validation, `${label} runner must validate before artifact writes`);
-  }
-});
-
 test("submodule guard is wired into commit and QA entrypoints", () => {
   const preCommit = readRepoFile(".githooks/pre-commit");
   const headless = readRepoFile("scripts/desktop-headless-local-qa.mjs");
