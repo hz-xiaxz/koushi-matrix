@@ -7,6 +7,18 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
+/** @typedef {"conduit" | "tuwunel" | "synapse"} LocalHomeserverKind */
+
+/**
+ * @typedef {object} SynapseFixtureOptions
+ * @property {boolean} [slidingSyncEnabled]
+ */
+
+/**
+ * @typedef {LocalHomeserverKind | "matrixorg" | "both" | "all"}
+ *   HomeserverSelection
+ */
+
 export function minimalEnvironment() {
   const env = {};
   for (const key of [
@@ -119,8 +131,8 @@ trusted_servers = []
  */
 
 /**
- * @param {"conduit" | "tuwunel" | "synapse"} serverKind
- * @param {{ slidingSyncEnabled?: boolean }} [options]
+ * @param {LocalHomeserverKind} serverKind
+ * @param {SynapseFixtureOptions} [options]
  * @returns {HomeserverFixtureCapabilities}
  */
 export function homeserverFixtureCapabilities(
@@ -152,6 +164,10 @@ export function homeserverFixtureCapabilities(
   };
 }
 
+/**
+ * @param {HomeserverSelection} value Requested CLI homeserver selection.
+ * @returns {LocalHomeserverKind[]} Concrete homeserver fixtures to run.
+ */
 export function selectedServers(value) {
   if (value === "both") {
     return ["tuwunel", "synapse"];
@@ -263,6 +279,7 @@ function startSynapseHomeserver(
   return child;
 }
 
+/** @returns {string} Dockerfile for the pinned local Synapse QA image. */
 export function synapseDockerfile() {
   return `FROM docker.io/matrixdotorg/synapse:v1.157.0
 COPY synapse-local-qa-start.sh /synapse-local-qa-start.sh
@@ -271,6 +288,10 @@ ENTRYPOINT ["/synapse-local-qa-start.sh"]
 `;
 }
 
+/**
+ * @param {SynapseFixtureOptions} [options] Requested Synapse fixture capabilities.
+ * @returns {string} Entrypoint that creates and validates the requested fixture config.
+ */
 export function synapseEntrypoint({ slidingSyncEnabled = true } = {}) {
   return `#!/bin/bash
 set -euo pipefail
@@ -328,9 +349,42 @@ rc_invites:
     burst_count: 1000
 experimental_features:
   msc3266_enabled: true
-  msc3575_enabled: ${slidingSyncEnabled}
 YAML
 fi
+export KOUSHI_SYNAPSE_MSC3575_ENABLED=${slidingSyncEnabled ? "true" : "false"}
+python3 - /data/homeserver.yaml <<'PYTHON'
+import os
+from pathlib import Path
+import sys
+
+import yaml
+
+config_path = Path(sys.argv[1])
+requested_value = os.environ["KOUSHI_SYNAPSE_MSC3575_ENABLED"]
+if requested_value not in {"true", "false"}:
+    raise RuntimeError("invalid simplified Sliding Sync fixture value")
+expected = requested_value == "true"
+
+with config_path.open("r", encoding="utf-8") as config_file:
+    config = yaml.safe_load(config_file) or {}
+if not isinstance(config, dict):
+    raise RuntimeError("Synapse config root must be a mapping")
+experimental_features = config.get("experimental_features")
+if experimental_features is None:
+    experimental_features = {}
+elif not isinstance(experimental_features, dict):
+    raise RuntimeError("Synapse experimental_features must be a mapping")
+experimental_features["msc3575_enabled"] = expected
+config["experimental_features"] = experimental_features
+
+with config_path.open("w", encoding="utf-8") as config_file:
+    yaml.safe_dump(config, config_file, sort_keys=False)
+with config_path.open("r", encoding="utf-8") as config_file:
+    loaded = yaml.safe_load(config_file) or {}
+actual = loaded.get("experimental_features", {}).get("msc3575_enabled")
+if type(actual) is not bool or actual != expected:
+    raise RuntimeError("simplified Sliding Sync fixture value did not persist")
+PYTHON
 /start.py run
 `;
 }
