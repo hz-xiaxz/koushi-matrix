@@ -4130,11 +4130,10 @@ impl AccountActor {
         }
     }
 
-    /// Ordered shutdown of the RoomActor (before sync stop in the shutdown
-    /// sequence). The RoomActor is not Option<> since it is always present;
-    /// we send Shutdown and the task finishes on its own after processing it.
+    /// Ordered shutdown of the RoomActor after the session runtime has stopped.
+    /// The acknowledgement is the actor task join, including its observation.
     async fn stop_room_actor(&mut self) {
-        let _ = self.room_actor.send(RoomMessage::Shutdown).await;
+        self.room_actor.shutdown().await;
     }
 
     async fn clear_room_actor_session(&mut self) {

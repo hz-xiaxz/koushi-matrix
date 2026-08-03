@@ -89,13 +89,13 @@
 - Modify: `docs/upstream/matrix-rust-sdk-feedback.md`
 - Test: `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/src/room_list_service/mod.rs`
 
-- [ ] Add a failing SDK test proving the observable remains unchanged at `SyncService::State::Running`, advances only after a successful all-rooms response is processed, reports only a process-local monotonic sequence and `pos_present`, and does not expose room ids or the `pos` value.
-- [ ] Add a failure/reconnect test proving failed requests do not advance the sequence and a later successful response does.
-- [ ] Run `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui committed_all_rooms_response_observable)`; confirm RED.
-- [ ] Add the minimum read-only latest-value observable at the point where all-rooms response handling and event-cache commit have succeeded. Do not add a second sync loop or Koushi product state inside the SDK.
-- [ ] Record the additive patch and upstream rationale in the ledger.
-- [ ] Run the SDK tests and `node scripts/check-sdk-submodule.mjs`; confirm exit code 0.
-- [ ] Commit with message `feat(sdk): expose committed room list response`.
+- [x] Add a failing SDK test proving the observable remains unchanged at `SyncService::State::Running`, advances only after a successful all-rooms response is processed, reports only a process-local monotonic sequence and `pos_present`, and does not expose room ids or the `pos` value.
+- [x] Add a failure/reconnect test proving failed requests do not advance the sequence and a later successful response does.
+- [x] Run `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui committed_all_rooms_response_observable)`; confirm RED.
+- [x] Add the minimum read-only latest-value observable at the point where all-rooms response handling and event-cache commit have succeeded. Do not add a second sync loop or Koushi product state inside the SDK.
+- [x] Record the additive patch and upstream rationale in the ledger.
+- [x] Run the SDK tests and `node scripts/check-sdk-submodule.mjs`; confirm exit code 0.
+- [x] Commit with message `feat(sdk): expose committed room list response`.
 
 ## Task 6: Collapse SyncActor to one SyncService and one all_rooms list
 
@@ -110,15 +110,21 @@
 - Modify: `crates/koushi-core/tests/runtime_room_list_sync.rs`
 - Modify: `crates/koushi-core/tests/runtime_session.rs`
 
-- [ ] Add/replace lifecycle tests proving exactly one normal `SyncService`, one `room-list` connection, one unfiltered `all_rooms` list carrying joined and invited rooms, and one encryption connection.
-- [ ] Add tests that `Running` alone is not connected, the first committed response plus reconciled all-rooms range is connected, reconnect retains the same engine, and cancellation joins all owners.
-- [ ] Add a constructor/compile contract that RoomActor receives a non-optional `RoomListService` and never falls back to `Client::rooms()`/`invited_rooms()` as live truth.
-- [ ] Run `cargo test -p koushi-core --lib sync_service_has_one_all_rooms_owner` and `cargo test -p koushi-core --test runtime_room_list_sync`; confirm RED.
-- [ ] Remove backend probing, fallback selection, `KOUSHI_QA_FORCE_SYNC_BACKEND`, Legacy loop ownership, and backend transition fences. Start only the mandatory SyncService after capability success.
+- [x] Add/replace lifecycle tests proving exactly one normal `SyncService`, one `room-list` connection, one unfiltered `all_rooms` list carrying joined and invited rooms, and one encryption connection.
+- [x] Add tests that `Running` alone is not connected, the first committed response plus reconciled all-rooms range is connected, reconnect retains the same engine, and cancellation joins all owners.
+- [x] Add a constructor/compile contract that RoomActor receives a non-optional `RoomListService` and never falls back to `Client::rooms()`/`invited_rooms()` as live truth.
+- [x] Run `cargo test -p koushi-core --lib sync_service_has_one_all_rooms_owner` and `cargo test -p koushi-core --test runtime_room_list_sync`; confirm RED.
+- [x] Remove backend probing, fallback selection, `KOUSHI_QA_FORCE_SYNC_BACKEND`, Legacy loop ownership, and backend transition fences. Start only the mandatory SyncService after capability success.
 - [ ] Replace `SyncMode`, `SyncBackendKind`, and `RoomListSource::{SyncService,Legacy}` with engine-neutral lifecycle/readiness state. Do not leave one-variant backend enums.
-- [ ] Reconcile cache projections as stale until the all-rooms committed sequence advances and the full loaded range is applied; treat omission from a reconciled live range as removal, but not absence from cache.
-- [ ] Run `cargo test -p koushi-core --lib sync`, `cargo test -p koushi-core --test runtime_room_list_sync`, `cargo test -p koushi-core --test runtime_session`, and `cargo test -p koushi-state --test sliding_sync_capability`; confirm exit code 0.
+- [x] Reconcile cache projections as stale until the all-rooms committed sequence advances and the full loaded range is applied; treat omission from a reconciled live range as removal, but not absence from cache.
+- [x] Run `cargo test -p koushi-core --lib sync`, `cargo test -p koushi-core --test runtime_room_list_sync`, `cargo test -p koushi-core --test runtime_session`, and `cargo test -p koushi-state --test sliding_sync_capability`; confirm exit code 0.
 - [ ] Commit with message `refactor: require one sliding sync runtime`.
+
+The remaining one-variant wire-enum cleanup above is intentionally serialized
+with Task 8, which removes the matching Rust/Tauri/TypeScript contract shapes
+atomically. Task 6 removes every production Legacy route and owner first; Task
+8 removes the now-dead transport vocabulary without an intermediate wire
+mismatch.
 
 ## Task 7: Remove Legacy timeline provenance and fallback repair
 

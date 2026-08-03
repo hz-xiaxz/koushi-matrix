@@ -26,6 +26,7 @@ The current Koushi-required SDK topic stack is:
 - `fix(crypto): ignore replayed SAS starts`
 - `fix(room-list): expand own-member state key`
 - `feat(room-list): expose committed all-rooms response`
+- `feat(room-list): expose authoritative all-rooms readiness`
 - `fix(crypto): harden async delivery ownership`
 - `fix: avoid identity query Olm lock deadlock`
 - `Handle stale order tracker readers`
@@ -134,18 +135,27 @@ or SDK boundary without logging private Matrix payloads.
   necessary, and this test-only guard does not justify a wholesale SDK rebase
   or upgrade.
 
-- Committed all-rooms response observable (2026-08-04, issue #412 runtime):
+- Committed all-rooms response and projection readiness (2026-08-04, issue #412
+  runtime):
   `RoomListService` exposes a read-only latest-value observable that advances
   only after a successful `all_rooms` Sliding Sync response has completed
-  client processing, including the event-cache commit. Its payload is limited
-  to a process-local monotonic sequence and `pos_present`; it contains no room
-  IDs and never exposes the position value. Failed requests leave the value
-  unchanged, while a later successful reconnect advances it. Why: callers need
-  to distinguish `SyncService::State::Running` from the first authoritative
-  room-list response before declaring room projections ready. Upstreaming
-  intent: propose this small additive lifecycle observable independently of
-  Koushi product state; it adds no second sync loop or application policy to
-  the SDK.
+  client processing, including the event-cache commit. Its public payload is
+  limited to a process-local monotonic sequence, `pos_present`, and coarse
+  complete-range readiness; it contains no room IDs and never exposes the
+  position value. The SDK separately retains the top-level response room IDs
+  behind `RoomList`, excluding extension-only updates, so its public
+  `current_entries_snapshot()` can correlate filtered entries with the same
+  response sequence without exposing the ID set. Before the first response of
+  a sync/recovery cycle the snapshot remains provisional cache data; afterwards
+  dynamic entries reset to the observed response set, so a cache-only omitted
+  room cannot survive an authoritative full-range projection. Failed requests
+  leave the committed value unchanged, while a later successful reconnect
+  advances it. Why: callers need to distinguish `SyncService::State::Running`
+  from a complete response and must reconcile that exact SDK-owned projection
+  before declaring connectivity. Upstreaming intent: propose the lifecycle
+  observable, range readiness, and response-correlated snapshot as additive
+  room-list APIs independently of Koushi product state; they add no second sync
+  loop or application policy to the SDK.
 
 - Shared encryption-sync permit injection (2026-08-04, issue #412 runtime):
   `EncryptionSyncPermit` has a production constructor and `SyncServiceBuilder`
