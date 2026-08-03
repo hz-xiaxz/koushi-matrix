@@ -111,14 +111,10 @@ or SDK boundary without logging private Matrix payloads.
   capability preflight.
 
 - Element X all-rooms request parity guard (2026-08-03, issue #412 PR1):
-  the requested comparison revision
-  `ccd225571c53be6ba7f6f907ded762b13c6bb878` is not an object published by
-  `matrix-org/matrix-rust-sdk`; an exact SHA fetch returned `not our ref`, so it
-  was not silently substituted. The approved issue #412 design identifies the
-  Element X 26.07.28 SDK pin as
-  `ccd225e58eb900e321411397d1c13c2d9b312bb6`. An exact source comparison to
-  that fetchable revision found the same `room-list` connection, sole
-  `all_rooms` list, unset invite filter, timeline limit `1`, ordered
+  a direct source comparison to the Issue #412 and Element X 26.07.28 SDK pin
+  `ccd225e58eb900e321411397d1c13c2d9b312bb6` found the same request contract:
+  the `room-list` connection, sole `all_rooms` list, unset invite filter,
+  timeline limit `1`, ordered
   `DEFAULT_REQUIRED_STATE`, and enabled account-data, all-subscribed receipts,
   typing, and capability-gated thread subscriptions with limit `10`. Koushi's
   existing narrow own-member patch expands only `$ME` to
