@@ -15,7 +15,7 @@
 //! OS keychain (a keychain prompt during automation is a failure per the
 //! engineering rules), so the guard runs BEFORE any login.
 //!
-//! Phase 4 flow (both probed SyncService leg and forced LegacySync leg):
+//! Phase 4 flow (one required Simplified Sliding Sync runtime):
 //!   A creates room + space + sets space child + invites B to both
 //!   B joins room + space
 //!   both assert room list contains expected room and space (event-driven)
@@ -37,7 +37,7 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::pin::Pin;
 use std::process::ExitCode;
 use std::sync::{
-    Arc, Condvar, Mutex,
+    Arc, Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::thread::{self, JoinHandle};
@@ -54,10 +54,10 @@ use koushi_core::command::{
 use koushi_core::composer_draft_lifecycle::ComposerDraftScope;
 use koushi_core::event::{
     AccountEvent, ActivityEvent, CoreEvent, E2eeTrustEvent, LinkPreviewState, LiveSignalsEvent,
-    LocalEncryptionEvent, PaginationDirection, PaginationState, RoomEvent, SearchEvent,
-    SyncBackendKind, SyncEvent, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent,
-    TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMessageActions,
-    TimelineSendState, TimelineUnreadPosition, TimelineViewportObservation,
+    LocalEncryptionEvent, PaginationDirection, PaginationState, RoomEvent, SearchEvent, SyncEvent,
+    TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition,
+    TimelineItem, TimelineItemId, TimelineMessageActions, TimelineSendState,
+    TimelineUnreadPosition, TimelineViewportObservation,
 };
 use koushi_core::failure::{CoreFailure, RoomFailureKind};
 use koushi_core::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
@@ -94,10 +94,6 @@ const ENV_PASSWORD_A: &str = "KOUSHI_LOCAL_QA_PASSWORD_A";
 const ENV_USER_B: &str = "KOUSHI_LOCAL_QA_USER_B";
 const ENV_PASSWORD_B: &str = "KOUSHI_LOCAL_QA_PASSWORD_B";
 const ENV_USER_C: &str = "KOUSHI_LOCAL_QA_USER_C";
-/// Optional assertion input (a plain string, not a credential — no gating
-/// needed): when set, QA fails if the backend reported in SyncEvent::Started
-/// differs. Valid values: "SyncService" | "LegacySync".
-const ENV_EXPECT_SYNC_BACKEND: &str = "KOUSHI_LOCAL_QA_EXPECT_SYNC_BACKEND";
 const ENV_QA_SCENARIO: &str = "KOUSHI_QA_SCENARIO";
 const ENV_ALLOW_IDENTITY_RESET: &str = "KOUSHI_QA_ALLOW_IDENTITY_RESET";
 const ENV_E2EE_RECIPIENT_SECOND_DEVICE: &str = "KOUSHI_QA_E2EE_RECIPIENT_SECOND_DEVICE";
@@ -251,8 +247,6 @@ enum QaScenario {
     RoomPeopleProjection,
     Timeline,
     TimelineReconnect,
-    TimelineLegacyFallback,
-    TimelineLegacyPersistedGap,
     TimelineStress,
     Activity,
     Composer,
@@ -288,8 +282,6 @@ enum QaStage {
     RoomPeopleProjection,
     Timeline,
     TimelineReconnect,
-    TimelineLegacyFallback,
-    TimelineLegacyPersistedGap,
     TimelineStress,
     Activity,
     Composer,
@@ -410,8 +402,6 @@ impl QaScenario {
             "room_people_projection" => Ok(Self::RoomPeopleProjection),
             "timeline" => Ok(Self::Timeline),
             "timeline_reconnect" => Ok(Self::TimelineReconnect),
-            "timeline_legacy_fallback" => Ok(Self::TimelineLegacyFallback),
-            "timeline_legacy_persisted_gap" => Ok(Self::TimelineLegacyPersistedGap),
             "timeline_stress" => Ok(Self::TimelineStress),
             "activity" => Ok(Self::Activity),
             "composer" => Ok(Self::Composer),
@@ -427,7 +417,7 @@ impl QaScenario {
             "link_preview" => Ok(Self::LinkPreview),
             "cache_restore" => Ok(Self::CacheRestore),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_legacy_fallback, timeline_legacy_persisted_gap, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
             )),
         }
     }
@@ -436,11 +426,7 @@ impl QaScenario {
         match self {
             Self::All => !matches!(
                 stage,
-                QaStage::TimelineReconnect
-                    | QaStage::TimelineLegacyFallback
-                    | QaStage::TimelineLegacyPersistedGap
-                    | QaStage::TimelineStress
-                    | QaStage::DeviceCleanup
+                QaStage::TimelineReconnect | QaStage::TimelineStress | QaStage::DeviceCleanup
             ),
             Self::Safety => matches!(stage, QaStage::Safety),
             Self::LoginSync => matches!(stage, QaStage::Safety | QaStage::LoginSync),
@@ -504,12 +490,6 @@ impl QaScenario {
             ),
             Self::TimelineReconnect => {
                 matches!(stage, QaStage::Safety | QaStage::TimelineReconnect)
-            }
-            Self::TimelineLegacyFallback => {
-                matches!(stage, QaStage::Safety | QaStage::TimelineLegacyFallback)
-            }
-            Self::TimelineLegacyPersistedGap => {
-                matches!(stage, QaStage::Safety | QaStage::TimelineLegacyPersistedGap)
             }
             Self::TimelineStress => matches!(
                 stage,
@@ -715,18 +695,6 @@ fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "live_catchup_checkpoint=ok",
             "live_catchup_gap_repaired=ok",
             "timeline_reconnect=ok",
-        ],
-        QaStage::TimelineLegacyFallback => &[
-            "legacy_fallback_checkpoint=ok",
-            "legacy_fallback_gap_repaired=ok",
-            "legacy_fallback_settled=ok",
-            "legacy_fallback_lifecycle=ok",
-        ],
-        QaStage::TimelineLegacyPersistedGap => &[
-            "legacy_live_tail_room_absent=ok",
-            "live_tail_anchored_silent_gap=ok",
-            "live_tail_detached_gap=ok",
-            "live_tail_historical_continuation=ok",
         ],
         QaStage::TimelineStress => &[
             "timeline_stress=ok",
@@ -947,12 +915,6 @@ fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             QaStage::Timeline,
         ],
         QaScenario::TimelineReconnect => vec![QaStage::Safety, QaStage::TimelineReconnect],
-        QaScenario::TimelineLegacyFallback => {
-            vec![QaStage::Safety, QaStage::TimelineLegacyFallback]
-        }
-        QaScenario::TimelineLegacyPersistedGap => {
-            vec![QaStage::Safety, QaStage::TimelineLegacyPersistedGap]
-        }
         QaScenario::TimelineStress => vec![
             QaStage::Safety,
             QaStage::LoginSync,
@@ -1117,8 +1079,6 @@ fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static str> {
             tokens
         }
         QaScenario::TimelineReconnect
-        | QaScenario::TimelineLegacyFallback
-        | QaScenario::TimelineLegacyPersistedGap
         | QaScenario::CacheRestore
         | QaScenario::DeviceCleanup
         | QaScenario::GateRestore
@@ -1930,7 +1890,6 @@ async fn run_invites_dm_stage(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
-    sync_backend_b: SyncBackendKind,
 ) -> Result<(), String> {
     let user_b_full_id = format!("@{}:{}", config.user_b, config.server_name);
     let user_a_full_id = format!("@{}:{}", config.user_a, config.server_name);
@@ -1956,11 +1915,6 @@ async fn run_invites_dm_stage(
         "invites_dm wait for room invite",
     )
     .await?;
-    assert_expected_backend(
-        config.expect_sync_backend,
-        sync_backend_b,
-        "invites_dm invited room projection",
-    )?;
     println!("invite_recv=ok");
 
     accept_invite_for_qa(conn_b, &accept_room_id, "invites_dm accept room invite").await?;
@@ -2874,9 +2828,7 @@ async fn run_e2ee_trust_stage(
             }))
             .await
             .map_err(|e| format!("submit sync start A2: {e}"))?;
-        let sync_backend_a2 =
-            wait_for_sync_started_and_running(conn_a2, sync_start_a2_id, "sync start A2").await?;
-        assert_expected_backend(config.expect_sync_backend, sync_backend_a2, "sync start A2")?;
+        wait_for_sync_started_and_running(conn_a2, sync_start_a2_id, "sync start A2").await?;
 
         wait_for_room_in_room_list(
             conn_a2,
@@ -4272,15 +4224,7 @@ async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), String> {
     }))
     .await
     .map_err(|e| format!("cache_restore: submit Sync start failed: {e}"))?;
-    let sync_backend_a =
-        wait_for_sync_started_and_running(&mut conn, sync_start_id, "cache_restore sync start")
-            .await?;
-    println!("sync_backend_a={sync_backend_a:?}");
-    assert_expected_backend(
-        config.expect_sync_backend,
-        sync_backend_a,
-        "cache_restore sync start",
-    )?;
+    wait_for_sync_started_and_running(&mut conn, sync_start_id, "cache_restore sync start").await?;
 
     // Create rooms, send DEPTH messages, paginate to EndReached. Track items
     // across the paginate to find the deterministic deep anchor (m0 = oldest).
@@ -4904,7 +4848,6 @@ async fn run_focused_send_queue_scenario(config: &QaConfig) -> Result<(), String
         mut conn,
         account_key,
         bootstrap_recovery_secret,
-        sync_backend: _,
     } = login_synced_participant_for_qa(
         &config.homeserver,
         qa_data_dir("send_queue_bootstrap"),
@@ -4964,7 +4907,6 @@ async fn run_send_queue_stage(
         mut conn,
         account_key,
         bootstrap_recovery_secret: _,
-        sync_backend: _,
     } = login_synced_participant_for_qa(
         &proxy_homeserver,
         data_dir.clone(),
@@ -5208,28 +5150,16 @@ async fn unsubscribe_timeline_for_qa(
 }
 
 async fn run_timeline_reconnect_scenario(config: &QaConfig) -> Result<(), String> {
-    run_timeline_reconnect_scenario_impl(config, false, false).await
+    run_timeline_reconnect_scenario_impl(config).await
 }
 
-async fn run_timeline_legacy_fallback_scenario(config: &QaConfig) -> Result<(), String> {
-    run_timeline_reconnect_scenario_impl(config, true, false).await
-}
-
-async fn run_timeline_legacy_persisted_gap_scenario(config: &QaConfig) -> Result<(), String> {
-    run_timeline_reconnect_scenario_impl(config, true, true).await
-}
-
-async fn run_timeline_reconnect_scenario_impl(
-    config: &QaConfig,
-    legacy_fallback: bool,
-    restart_with_persisted_gap: bool,
-) -> Result<(), String> {
+async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), String> {
+    // The public scenario selector exercises the single live reconnect path.
+    // The dormant persisted-gap fixture remains below for its separate
+    // timeline continuity assertions.
+    let restart_with_persisted_gap = false;
     let proxy = QaTcpProxy::start(&config.homeserver)?;
-    let data_dir_a = qa_data_dir(if restart_with_persisted_gap {
-        "timeline_legacy_persisted_gap_a"
-    } else {
-        "timeline_reconnect_a"
-    });
+    let data_dir_a = qa_data_dir("timeline_reconnect_a");
     let data_dir_b = qa_data_dir("timeline_reconnect_b");
 
     let runtime_a = CoreRuntime::start_with_data_dir(data_dir_a.clone());
@@ -5261,17 +5191,12 @@ async fn run_timeline_reconnect_scenario_impl(
         }))
         .await
         .map_err(|e| format!("timeline_reconnect: submit sync start A failed: {e}"))?;
-    let sync_backend_a = wait_for_sync_started_and_running(
+    wait_for_sync_started_and_running(
         &mut conn_a,
         sync_start_a_id,
         "timeline_reconnect sync start A",
     )
     .await?;
-    assert_expected_backend(
-        config.expect_sync_backend,
-        sync_backend_a,
-        "timeline_reconnect sync start A",
-    )?;
 
     let runtime_b = CoreRuntime::start_with_data_dir(data_dir_b);
     let mut conn_b = runtime_b.attach();
@@ -5302,17 +5227,12 @@ async fn run_timeline_reconnect_scenario_impl(
         }))
         .await
         .map_err(|e| format!("timeline_reconnect: submit sync start B failed: {e}"))?;
-    let sync_backend_b = wait_for_sync_started_and_running(
+    wait_for_sync_started_and_running(
         &mut conn_b,
         sync_start_b_id,
         "timeline_reconnect sync start B",
     )
     .await?;
-    assert_expected_backend(
-        config.expect_sync_backend,
-        sync_backend_b,
-        "timeline_reconnect sync start B",
-    )?;
 
     let user_b_full_id = format!("@{}:{}", config.user_b, config.server_name);
     let room_id = if restart_with_persisted_gap {
@@ -5435,28 +5355,16 @@ async fn run_timeline_reconnect_scenario_impl(
         "timeline_reconnect A receives known anchor",
     )
     .await?;
-    if legacy_fallback {
-        if restart_with_persisted_gap {
-            unsubscribe_timeline_for_qa(
-                &mut conn_a,
-                &key_a,
-                "timeline legacy persisted gap unsubscribe before first response",
-            )
-            .await?;
-        }
-        stop_sync_for_qa(&mut conn_a, "timeline legacy fallback stop A").await?;
-    } else {
-        unsubscribe_timeline_for_qa(
-            &mut conn_a,
-            &key_a,
-            "timeline_reconnect unsubscribe A before offline gap",
-        )
-        .await?;
-        proxy.disable();
-        wait_for_sync_reconnecting(&mut conn_a, "timeline_reconnect A offline").await?;
-    }
+    unsubscribe_timeline_for_qa(
+        &mut conn_a,
+        &key_a,
+        "timeline_reconnect unsubscribe A before offline gap",
+    )
+    .await?;
+    proxy.disable();
+    wait_for_sync_reconnecting(&mut conn_a, "timeline_reconnect A offline").await?;
 
-    let offline_event_count = if legacy_fallback { 140 } else { 21 };
+    let offline_event_count = 21;
     let offline_bodies = (0..offline_event_count)
         .map(|index| format!("QA timeline reconnect offline {index:02}"))
         .collect::<Vec<_>>();
@@ -5484,39 +5392,8 @@ async fn run_timeline_reconnect_scenario_impl(
         .await?;
     }
 
-    if legacy_fallback {
-        proxy.arm_legacy_fallback()?;
-        let start_id = conn_a.next_request_id();
-        conn_a
-            .command(CoreCommand::Sync(SyncCommand::Start {
-                request_id: start_id,
-            }))
-            .await
-            .map_err(|e| format!("timeline legacy fallback: submit start A failed: {e}"))?;
-        let selected = wait_for_sync_started(
-            &mut conn_a,
-            start_id,
-            "timeline legacy fallback selects SyncService",
-        )
-        .await?;
-        if selected != SyncBackendKind::SyncService {
-            return Err("timeline legacy fallback did not initially select SyncService".to_owned());
-        }
-        wait_for_legacy_fallback_starting(&mut conn_a, "timeline legacy fallback starting").await?;
-        proxy.wait_for_legacy_request_held(EVENT_TIMEOUT)?;
-        prove_legacy_stays_starting(&mut conn_a, "timeline legacy fallback lifecycle barrier")
-            .await?;
-        proxy.release_legacy()?;
-        wait_for_sync_running_after_reconnect(
-            &mut conn_a,
-            "timeline legacy fallback first response committed",
-        )
-        .await?;
-    } else {
-        proxy.enable();
-        wait_for_sync_running_after_reconnect(&mut conn_a, "timeline_reconnect A recovered")
-            .await?;
-    }
+    proxy.enable();
+    wait_for_sync_running_after_reconnect(&mut conn_a, "timeline_reconnect A recovered").await?;
     let newest_persisted_gap = if restart_with_persisted_gap {
         proxy.disable();
         wait_for_sync_reconnecting(
@@ -5624,7 +5501,6 @@ async fn run_timeline_reconnect_scenario_impl(
         )
         .await?;
 
-        proxy.arm_legacy_fallback()?;
         let restart_sync_id = restarted_conn.next_request_id();
         restarted_conn
             .command(CoreCommand::Sync(SyncCommand::Start {
@@ -5634,30 +5510,12 @@ async fn run_timeline_reconnect_scenario_impl(
             .map_err(|e| {
                 format!("timeline legacy persisted gap: submit restarted sync A failed: {e}")
             })?;
-        let selected = wait_for_sync_started(
+        wait_for_sync_started(
             &mut restarted_conn,
             restart_sync_id,
             "timeline legacy persisted gap restart selects SyncService",
         )
         .await?;
-        if selected != SyncBackendKind::SyncService {
-            return Err(
-                "timeline legacy persisted gap restart did not initially select SyncService"
-                    .to_owned(),
-            );
-        }
-        wait_for_legacy_fallback_starting(
-            &mut restarted_conn,
-            "timeline legacy persisted gap fallback starting",
-        )
-        .await?;
-        proxy.wait_for_legacy_request_held(EVENT_TIMEOUT)?;
-        prove_legacy_stays_starting(
-            &mut restarted_conn,
-            "timeline legacy persisted gap lifecycle barrier",
-        )
-        .await?;
-        proxy.release_legacy()?;
         wait_for_sync_running_after_reconnect(
             &mut restarted_conn,
             "timeline legacy persisted gap room-absent response committed",
@@ -5694,18 +5552,7 @@ async fn run_timeline_reconnect_scenario_impl(
             seed_body.to_owned(),
         )?;
     }
-    let reopened_before_later = if legacy_fallback {
-        Some(
-            subscribe_and_ack_active_timeline_projection_for_qa(
-                &mut conn_a,
-                &key_a,
-                "timeline legacy fallback authoritative items after first commit",
-            )
-            .await?,
-        )
-    } else {
-        None
-    };
+    let reopened_before_later = None;
     if let Some(baseline) = room_absent_checkpoint_baseline {
         let initial_live_tail_snapshot_baseline = initial_live_tail_snapshot_baseline
             .expect("persisted-gap live-tail snapshot baseline must be armed before refresh");
@@ -5822,7 +5669,6 @@ async fn run_timeline_reconnect_scenario_impl(
         )
         .await?;
 
-        proxy.arm_legacy_fallback()?;
         let detached_sync_start_id = detached_conn.next_request_id();
         detached_conn
             .command(CoreCommand::Sync(SyncCommand::Start {
@@ -5832,30 +5678,12 @@ async fn run_timeline_reconnect_scenario_impl(
             .map_err(|e| {
                 format!("timeline legacy persisted gap: submit detached sync A failed: {e}")
             })?;
-        let detached_selected = wait_for_sync_started(
+        wait_for_sync_started(
             &mut detached_conn,
             detached_sync_start_id,
             "timeline legacy persisted gap detached restart selects SyncService",
         )
         .await?;
-        if detached_selected != SyncBackendKind::SyncService {
-            return Err(
-                "timeline legacy persisted gap detached restart did not initially select SyncService"
-                    .to_owned(),
-            );
-        }
-        wait_for_legacy_fallback_starting(
-            &mut detached_conn,
-            "timeline legacy persisted gap detached fallback starting",
-        )
-        .await?;
-        proxy.wait_for_legacy_request_held(EVENT_TIMEOUT)?;
-        prove_legacy_stays_starting(
-            &mut detached_conn,
-            "timeline legacy persisted gap detached lifecycle barrier",
-        )
-        .await?;
-        proxy.release_legacy()?;
         wait_for_sync_running_after_reconnect(
             &mut detached_conn,
             "timeline legacy persisted gap detached room-absent response committed",
@@ -5983,34 +5811,6 @@ async fn run_timeline_reconnect_scenario_impl(
         .await?;
         return Ok(());
     }
-    let mut expected_bodies = newest_persisted_gap
-        .map(|(bodies, _)| bodies)
-        .unwrap_or(offline_bodies.clone());
-    if legacy_fallback {
-        let later_body = "QA timeline legacy fallback later live event".to_owned();
-        let later_txn = "qa-timeline-legacy-fallback-later";
-        let later_send_id = conn_b.next_request_id();
-        conn_b
-            .command(CoreCommand::Timeline(TimelineCommand::SendText {
-                request_id: later_send_id,
-                key: key_b.clone(),
-                transaction_id: later_txn.to_owned(),
-                body: later_body.clone(),
-                mentions: MentionIntent::default(),
-            }))
-            .await
-            .map_err(|e| format!("timeline legacy fallback: submit later send failed: {e}"))?;
-        wait_for_send_flow_completion(
-            &mut conn_b,
-            later_send_id,
-            &key_b,
-            later_txn,
-            &later_body,
-            "timeline legacy fallback later live send",
-        )
-        .await?;
-        expected_bodies.push(later_body);
-    }
     let reopened_items = match reopened_before_later {
         Some(items) => items,
         None => {
@@ -6022,82 +5822,18 @@ async fn run_timeline_reconnect_scenario_impl(
             .await?
         }
     };
-    if legacy_fallback {
-        wait_for_exact_items_and_gap_release(
-            &mut conn_a,
-            &key_a,
-            reopened_items,
-            &expected_bodies,
-            None,
-            None,
-            "timeline legacy fallback exact recovery",
-        )
-        .await?;
-        if restart_with_persisted_gap {
-            match conn_a.snapshot().timeline.continuity {
-                koushi_state::TimelineContinuityState::Incomplete { gap_count: 1, .. } => {
-                    println!("legacy_persisted_gap_unrelated_gap_retained=ok");
-                }
-                ref continuity => {
-                    return Err(format!(
-                        "timeline legacy persisted gap expected one unrelated older gap after newest repair, got {continuity:?}"
-                    ));
-                }
-            }
-        }
-        let settled_body = "QA timeline legacy fallback settled live event";
-        let settled_txn = "qa-timeline-legacy-fallback-settled";
-        let settled_send_id = conn_b.next_request_id();
-        conn_b
-            .command(CoreCommand::Timeline(TimelineCommand::SendText {
-                request_id: settled_send_id,
-                key: key_b.clone(),
-                transaction_id: settled_txn.to_owned(),
-                body: settled_body.to_owned(),
-                mentions: MentionIntent::default(),
-            }))
-            .await
-            .map_err(|e| format!("timeline legacy fallback: submit settled send failed: {e}"))?;
-        wait_for_send_flow_completion(
-            &mut conn_b,
-            settled_send_id,
-            &key_b,
-            settled_txn,
-            settled_body,
-            "timeline legacy fallback settled send",
-        )
-        .await?;
-        wait_for_item_with_body(
-            &mut conn_a,
-            &key_a,
-            settled_body,
-            "timeline legacy fallback receives after repair settlement",
-        )
-        .await?;
-        if restart_with_persisted_gap {
-            println!("legacy_persisted_gap_fence=ok");
-            println!("legacy_persisted_gap_repaired=ok");
-            println!("legacy_persisted_gap_settled=ok");
-        } else {
-            println!("legacy_fallback_checkpoint=ok");
-            println!("legacy_fallback_gap_repaired=ok");
-            println!("legacy_fallback_settled=ok");
-            println!("legacy_fallback_lifecycle=ok");
-        }
-    } else {
-        wait_for_all_items_with_bodies(
-            &mut conn_a,
-            &key_a,
-            &reopened_items,
-            &offline_bodies,
-            "timeline_reconnect A repairs the complete missed batch",
-        )
-        .await?;
-        println!("timeline_reconnect_recv_after_reconnect=ok");
-        println!("live_catchup_checkpoint=ok");
-        println!("live_catchup_gap_repaired=ok");
-        println!("timeline_reconnect=ok");
-    }
+    wait_for_all_items_with_bodies(
+        &mut conn_a,
+        &key_a,
+        &reopened_items,
+        &offline_bodies,
+        "timeline_reconnect A repairs the complete missed batch",
+    )
+    .await?;
+    println!("timeline_reconnect_recv_after_reconnect=ok");
+    println!("live_catchup_checkpoint=ok");
+    println!("live_catchup_gap_repaired=ok");
+    println!("timeline_reconnect=ok");
 
     cleanup_logged_in_runtime(
         conn_b,
@@ -6604,8 +6340,6 @@ fn should_run_focused_send_queue_route(scenario: QaScenario) -> bool {
 }
 
 async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, String> {
-    expected_backend_for_scenario(scenario, config.expect_sync_backend)?;
-
     if scenario == QaScenario::Safety {
         println!("safety=ok");
         return Ok(scenario_report(&config.server_kind, scenario));
@@ -6620,16 +6354,6 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
     if scenario == QaScenario::TimelineReconnect {
         println!("safety=ok");
         run_timeline_reconnect_scenario(&config).await?;
-        return Ok(scenario_report(&config.server_kind, scenario));
-    }
-    if scenario == QaScenario::TimelineLegacyFallback {
-        println!("safety=ok");
-        run_timeline_legacy_fallback_scenario(&config).await?;
-        return Ok(scenario_report(&config.server_kind, scenario));
-    }
-    if scenario == QaScenario::TimelineLegacyPersistedGap {
-        println!("safety=ok");
-        run_timeline_legacy_persisted_gap_scenario(&config).await?;
         return Ok(scenario_report(&config.server_kind, scenario));
     }
     if scenario == QaScenario::GateNoProof {
@@ -6697,12 +6421,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
         .await
         .map_err(|e| format!("submit sync start A: {e}"))?;
 
-    let sync_backend_a =
-        wait_for_sync_started_and_running(&mut conn_a, sync_start_id, "sync start A").await?;
-    println!("sync_backend_a={sync_backend_a:?}");
-    if !scenario.should_run_stage(QaStage::InvitesDm) {
-        assert_expected_backend(config.expect_sync_backend, sync_backend_a, "sync start A")?;
-    }
+    wait_for_sync_started_and_running(&mut conn_a, sync_start_id, "sync start A").await?;
 
     println!("sync_a=running");
     println!("login_sync=ok");
@@ -6740,18 +6459,12 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
                 .await
                 .map_err(|e| format!("timeline_stress replay: submit sync start B failed: {e}"))?;
 
-            let sync_backend_b = wait_for_sync_started_and_running(
+            wait_for_sync_started_and_running(
                 &mut conn_b,
                 sync_start_b_id,
                 "timeline_stress replay sync start B",
             )
             .await?;
-            println!("sync_backend_b={sync_backend_b:?}");
-            assert_expected_backend(
-                config.expect_sync_backend,
-                sync_backend_b,
-                "timeline_stress replay sync start B",
-            )?;
             println!("sync_b=running");
 
             run_timeline_stress_replay_stage(
@@ -6833,14 +6546,6 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             QaParticipantLoginGate::BootstrapNewIdentity,
         )
         .await?;
-        println!("sync_backend_b={:?}", participant.sync_backend);
-        if !scenario.should_run_stage(QaStage::InvitesDm) {
-            assert_expected_backend(
-                config.expect_sync_backend,
-                participant.sync_backend,
-                "normal secondary sync start B",
-            )?;
-        }
         println!("sync_b=running");
         Some(participant)
     } else {
@@ -6851,14 +6556,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
         let participant_b = normal_secondary
             .as_mut()
             .ok_or_else(|| "InvitesDm requires the normal secondary participant".to_owned())?;
-        let sync_backend_b = participant_b.sync_backend;
-        run_invites_dm_stage(
-            &config,
-            &mut conn_a,
-            &mut participant_b.conn,
-            sync_backend_b,
-        )
-        .await?;
+        run_invites_dm_stage(&config, &mut conn_a, &mut participant_b.conn).await?;
     }
 
     if scenario == QaScenario::InvitesDm {
@@ -7010,7 +6708,6 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
         conn: mut conn_b,
         account_key: mut account_key_b,
         bootstrap_recovery_secret: _,
-        sync_backend: _,
     } = normal_secondary;
 
     // B joins the room
@@ -8466,6 +8163,7 @@ fn session_gate_closed_summary(
         SessionState::Ready(_) => ("ready", false, 0),
         SessionState::Rejecting { .. } => ("rejecting", false, 0),
         SessionState::Locked(_) => ("locked", false, 0),
+        SessionState::CapabilityBlocked { .. } => ("capability_blocked", false, 0),
         SessionState::SignedOut => ("signed_out", false, 0),
         SessionState::Restoring => ("restoring", false, 0),
         SessionState::SwitchingAccount { .. } => ("switching", false, 0),
@@ -8494,6 +8192,7 @@ fn gate_session_phase(session: &SessionState) -> &'static str {
         SessionState::Rejecting { .. } => "rejecting",
         SessionState::Ready(_) => "ready",
         SessionState::Locked(_) => "locked",
+        SessionState::CapabilityBlocked { .. } => "capability_blocked",
         SessionState::SignedOut => "signed_out",
         SessionState::Restoring => "restoring",
         SessionState::SwitchingAccount { .. } => "switching",
@@ -10180,16 +9879,12 @@ async fn wait_for_invite_absent(
 // ---------------------------------------------------------------------------
 
 /// Wait for `SyncEvent::Started` for the request, then `Running`.
-///
-/// Runtime SyncService fallback emits another `Started` with the same request id
-/// before `Running`; return the latest backend so QA records the effective
-/// backend, not only the initially advertised one.
 async fn wait_for_sync_started_and_running(
     conn: &mut CoreConnection,
     request_id: koushi_core::ids::RequestId,
     label: &str,
-) -> Result<SyncBackendKind, String> {
-    let mut observed_backend = None;
+) -> Result<(), String> {
+    let mut saw_started = false;
     let mut saw_running_before_started = false;
     let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
     loop {
@@ -10200,18 +9895,17 @@ async fn wait_for_sync_started_and_running(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::Sync(SyncEvent::Started {
-                request_id: ev_id,
-                backend,
-            }) if ev_id == Some(request_id) => {
-                observed_backend = Some(backend);
+            CoreEvent::Sync(SyncEvent::Started { request_id: ev_id })
+                if ev_id == Some(request_id) =>
+            {
+                saw_started = true;
                 if saw_running_before_started {
-                    return Ok(backend);
+                    return Ok(());
                 }
             }
             CoreEvent::Sync(SyncEvent::Running) => {
-                if let Some(backend) = observed_backend {
-                    return Ok(backend);
+                if saw_started {
+                    return Ok(());
                 }
                 saw_running_before_started = true;
             }
@@ -10235,7 +9929,7 @@ async fn wait_for_sync_started(
     conn: &mut CoreConnection,
     request_id: RequestId,
     label: &str,
-) -> Result<SyncBackendKind, String> {
+) -> Result<(), String> {
     loop {
         let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
             .await
@@ -10244,8 +9938,7 @@ async fn wait_for_sync_started(
         match event {
             CoreEvent::Sync(SyncEvent::Started {
                 request_id: Some(event_request_id),
-                backend,
-            }) if event_request_id == request_id => return Ok(backend),
+            }) if event_request_id == request_id => return Ok(()),
             CoreEvent::OperationFailed {
                 request_id: event_request_id,
                 failure,
@@ -10303,10 +9996,7 @@ async fn stop_sync_for_qa(conn: &mut CoreConnection, label: &str) -> Result<(), 
     wait_for_sync_stopped(conn, request_id, label).await
 }
 
-async fn start_sync_for_qa(
-    conn: &mut CoreConnection,
-    label: &str,
-) -> Result<SyncBackendKind, String> {
+async fn start_sync_for_qa(conn: &mut CoreConnection, label: &str) -> Result<(), String> {
     let request_id = conn.next_request_id();
     conn.command(CoreCommand::Sync(SyncCommand::Start { request_id }))
         .await
@@ -10374,68 +10064,6 @@ async fn wait_for_sync_running_after_reconnect(
             _ => {}
         }
     }
-}
-
-async fn wait_for_legacy_fallback_starting(
-    conn: &mut CoreConnection,
-    label: &str,
-) -> Result<(), String> {
-    loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
-            .await
-            .map_err(|_| format!("{label}: timed out waiting for automatic LegacySync fallback"))?
-            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-        match event {
-            CoreEvent::Sync(SyncEvent::Started {
-                backend: SyncBackendKind::LegacySync,
-                ..
-            }) => return Ok(()),
-            _ => {}
-        }
-    }
-}
-
-async fn prove_legacy_stays_starting(conn: &mut CoreConnection, label: &str) -> Result<(), String> {
-    for _ in 0..2 {
-        let request_id = conn.next_request_id();
-        conn.command(CoreCommand::Sync(SyncCommand::Start { request_id }))
-            .await
-            .map_err(|e| format!("{label}: submit lifecycle barrier failed: {e}"))?;
-        loop {
-            let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
-                .await
-                .map_err(|_| format!("{label}: timed out waiting for lifecycle barrier"))?
-                .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-            match event {
-                CoreEvent::Sync(SyncEvent::Running)
-                | CoreEvent::StateChanged(koushi_state::AppState {
-                    sync: koushi_state::SyncState::Running,
-                    ..
-                }) => {
-                    return Err(format!(
-                        "{label}: Running was emitted while the first legacy response was held"
-                    ));
-                }
-                CoreEvent::Sync(SyncEvent::Started {
-                    request_id: Some(event_request_id),
-                    backend: SyncBackendKind::LegacySync,
-                }) if event_request_id == request_id => break,
-                CoreEvent::OperationFailed {
-                    request_id: event_request_id,
-                    failure,
-                } if event_request_id == request_id => {
-                    return Err(format!("{label}: lifecycle barrier failed: {failure:?}"));
-                }
-                _ => {}
-            }
-        }
-        if matches!(conn.snapshot().sync, koushi_state::SyncState::Running) {
-            return Err(format!(
-                "{label}: snapshot became Running while the first legacy response was held"
-            ));
-        }
-    }
-    Ok(())
 }
 
 /// Wait for a `StateChanged` snapshot where `SessionState::Ready`.
@@ -11008,6 +10636,7 @@ fn authenticated_session_info_from_state(session: &SessionState) -> Option<&Sess
         | SessionState::SwitchingAccount { .. }
         | SessionState::Authenticating { .. }
         | SessionState::Locked(_)
+        | SessionState::CapabilityBlocked { .. }
         | SessionState::LoggingOut => None,
     }
 }
@@ -12356,7 +11985,6 @@ struct QaParticipantLoginOutcome {
     conn: CoreConnection,
     account_key: AccountKey,
     bootstrap_recovery_secret: Option<AuthSecret>,
-    sync_backend: SyncBackendKind,
 }
 
 struct QaOwnedLoggedInRuntime {
@@ -12541,7 +12169,7 @@ async fn login_synced_participant_for_qa(
     let runtime = CoreRuntime::start_with_data_dir(data_dir);
     let conn = runtime.attach();
     let mut participant = QaOwnedRuntimeParticipant::new(runtime, conn);
-    let login_stage_result: Result<(Option<AuthSecret>, SyncBackendKind), String> = async {
+    let login_stage_result: Result<Option<AuthSecret>, String> = async {
         let login_id = participant.conn.next_request_id();
         participant
             .conn
@@ -12581,20 +12209,19 @@ async fn login_synced_participant_for_qa(
         let account_key = wait_for_logged_in(&mut participant.conn, login_id, label).await?;
         participant.mark_logged_in(account_key);
         wait_for_ready_snapshot(&mut participant.conn, label).await?;
-        let sync_backend = start_sync_for_qa(&mut participant.conn, label).await?;
-        Ok((bootstrap_recovery_secret, sync_backend))
+        start_sync_for_qa(&mut participant.conn, label).await?;
+        Ok(bootstrap_recovery_secret)
     }
     .await;
-    let ((bootstrap_recovery_secret, sync_backend), participant) =
-        retain_or_cleanup_owned_participant_after_stage(
-            login_stage_result,
-            participant,
-            |participant| async move {
-                cleanup_owned_e2ee_participant_best_effort(participant, "participant login cleanup")
-                    .await
-            },
-        )
-        .await?;
+    let (bootstrap_recovery_secret, participant) = retain_or_cleanup_owned_participant_after_stage(
+        login_stage_result,
+        participant,
+        |participant| async move {
+            cleanup_owned_e2ee_participant_best_effort(participant, "participant login cleanup")
+                .await
+        },
+    )
+    .await?;
     let QaOwnedLoggedInRuntime {
         runtime,
         conn,
@@ -12606,7 +12233,6 @@ async fn login_synced_participant_for_qa(
         conn,
         account_key,
         bootstrap_recovery_secret,
-        sync_backend,
     })
 }
 
@@ -12949,43 +12575,6 @@ fn verification_state_matches_target(
 // Config and helpers
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ExpectedSyncBackend {
-    SyncService,
-    LegacySync,
-}
-
-impl ExpectedSyncBackend {
-    fn from_env_value(value: &str) -> Result<Self, String> {
-        match value {
-            "SyncService" => Ok(Self::SyncService),
-            "LegacySync" => Ok(Self::LegacySync),
-            other => Err(format!(
-                "{ENV_EXPECT_SYNC_BACKEND} must be SyncService or LegacySync; got {other}"
-            )),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::SyncService => "SyncService",
-            Self::LegacySync => "LegacySync",
-        }
-    }
-}
-
-fn expected_backend_for_scenario(
-    scenario: QaScenario,
-    expected: Option<ExpectedSyncBackend>,
-) -> Result<Option<ExpectedSyncBackend>, String> {
-    if scenario.should_run_stage(QaStage::InvitesDm) && expected.is_none() {
-        return Err(format!(
-            "invites_dm requires {ENV_EXPECT_SYNC_BACKEND} to prove the selected sync backend"
-        ));
-    }
-    Ok(expected)
-}
-
 struct QaConfig {
     homeserver: String,
     server_name: String,
@@ -12995,9 +12584,6 @@ struct QaConfig {
     user_b: String,
     password_b: String,
     user_c: Option<String>,
-    /// Expected sync backend; QA fails on mismatch when set. Plain assertion
-    /// input, not a credential.
-    expect_sync_backend: Option<ExpectedSyncBackend>,
     /// Identity reset changes cross-signing identity for the account. Keep it
     /// opt-in so real-account QA cannot accidentally invalidate other devices.
     allow_identity_reset: bool,
@@ -13014,10 +12600,6 @@ impl QaConfig {
             user_b: env_required(ENV_USER_B)?,
             password_b: env_required(ENV_PASSWORD_B)?,
             user_c: std::env::var(ENV_USER_C).ok(),
-            expect_sync_backend: std::env::var(ENV_EXPECT_SYNC_BACKEND)
-                .ok()
-                .map(|value| ExpectedSyncBackend::from_env_value(&value))
-                .transpose()?,
             allow_identity_reset: env_flag_enabled(ENV_ALLOW_IDENTITY_RESET)?,
         })
     }
@@ -13114,42 +12696,12 @@ struct QaTcpProxy {
     room_send_responses_completed: Arc<AtomicUsize>,
     running: Arc<AtomicBool>,
     active_streams: Arc<Mutex<Vec<TcpStream>>>,
-    fallback_control: Arc<(Mutex<QaFallbackProxyState>, Condvar)>,
     messages_control: Arc<Mutex<QaMessagesProxyControl>>,
     accept_thread: Option<JoinHandle<()>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum QaFallbackProxyPhase {
-    Open,
-    Armed,
-    AwaitingLegacy,
-    LegacyHeld,
-    Released,
-}
-
-#[derive(Debug)]
-struct QaFallbackProxyState {
-    phase: QaFallbackProxyPhase,
-    versions_forwarded: bool,
-    sync_service_failed: bool,
-}
-
-impl Default for QaFallbackProxyState {
-    fn default() -> Self {
-        Self {
-            phase: QaFallbackProxyPhase::Open,
-            versions_forwarded: false,
-            sync_service_failed: false,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum QaProxyRequestKind {
-    Versions,
-    SyncService,
-    LegacySync,
     RoomSend,
     RoomMessages,
     Other,
@@ -13159,7 +12711,6 @@ enum QaProxyRequestKind {
 enum QaProxyRequestAction {
     Forward,
     FailClosed,
-    HoldLegacy,
     ServeCannedMessages(Vec<u8>),
 }
 
@@ -13378,8 +12929,6 @@ impl QaTcpProxy {
         let room_send_responses_completed = Arc::new(AtomicUsize::new(0));
         let running = Arc::new(AtomicBool::new(true));
         let active_streams = Arc::new(Mutex::new(Vec::new()));
-        let fallback_control =
-            Arc::new((Mutex::new(QaFallbackProxyState::default()), Condvar::new()));
         let messages_control = Arc::new(Mutex::new(QaMessagesProxyControl::default()));
 
         let thread_enabled = enabled.clone();
@@ -13387,7 +12936,6 @@ impl QaTcpProxy {
         let thread_room_send_responses_completed = room_send_responses_completed.clone();
         let thread_running = running.clone();
         let thread_streams = active_streams.clone();
-        let thread_fallback_control = fallback_control.clone();
         let thread_messages_control = messages_control.clone();
         let accept_thread = thread::spawn(move || {
             while thread_running.load(Ordering::SeqCst) {
@@ -13401,7 +12949,6 @@ impl QaTcpProxy {
                             client,
                             target,
                             thread_streams.clone(),
-                            thread_fallback_control.clone(),
                             thread_messages_control.clone(),
                             thread_room_send_forwarded.clone(),
                             thread_room_send_responses_completed.clone(),
@@ -13426,7 +12973,6 @@ impl QaTcpProxy {
             room_send_responses_completed,
             running,
             active_streams,
-            fallback_control,
             messages_control,
             accept_thread: Some(accept_thread),
         })
@@ -13451,56 +12997,6 @@ impl QaTcpProxy {
 
     fn room_send_responses_completed_count(&self) -> usize {
         self.room_send_responses_completed.load(Ordering::SeqCst)
-    }
-
-    fn arm_legacy_fallback(&self) -> Result<(), String> {
-        let (state, _) = &*self.fallback_control;
-        let mut state = state
-            .lock()
-            .map_err(|_| "timeline fallback proxy state lock was poisoned".to_owned())?;
-        *state = QaFallbackProxyState {
-            phase: QaFallbackProxyPhase::Armed,
-            versions_forwarded: false,
-            sync_service_failed: false,
-        };
-        Ok(())
-    }
-
-    fn wait_for_legacy_request_held(&self, timeout: Duration) -> Result<(), String> {
-        let (state, changed) = &*self.fallback_control;
-        let state = state
-            .lock()
-            .map_err(|_| "timeline fallback proxy state lock was poisoned".to_owned())?;
-        let (state, wait) = changed
-            .wait_timeout_while(state, timeout, |state| {
-                state.phase != QaFallbackProxyPhase::LegacyHeld
-            })
-            .map_err(|_| "timeline fallback proxy wait lock was poisoned".to_owned())?;
-        if wait.timed_out() || state.phase != QaFallbackProxyPhase::LegacyHeld {
-            return Err(
-                "timed out waiting for the first legacy sync request to be held".to_owned(),
-            );
-        }
-        if !state.sync_service_failed {
-            return Err("legacy request arrived without a failed SyncService request".to_owned());
-        }
-        Ok(())
-    }
-
-    fn release_legacy(&self) -> Result<(), String> {
-        let (state, changed) = &*self.fallback_control;
-        let mut state = state
-            .lock()
-            .map_err(|_| "timeline fallback proxy state lock was poisoned".to_owned())?;
-        if state.phase != QaFallbackProxyPhase::LegacyHeld {
-            return Err(
-                "legacy fallback proxy release requested before a legacy request was held"
-                    .to_owned(),
-            );
-        }
-        state.phase = QaFallbackProxyPhase::Released;
-        changed.notify_all();
-        Ok(())
     }
 
     fn arm_first_live_tail_messages_page(
@@ -13583,10 +13079,6 @@ impl QaTcpProxy {
 impl Drop for QaTcpProxy {
     fn drop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
-        if let Ok(mut state) = self.fallback_control.0.lock() {
-            state.phase = QaFallbackProxyPhase::Released;
-            self.fallback_control.1.notify_all();
-        }
         shutdown_active_streams(&self.active_streams);
         let _ = TcpStream::connect(self.listen_addr);
         if let Some(thread) = self.accept_thread.take() {
@@ -13614,7 +13106,6 @@ fn spawn_proxy_pair(
     mut client: TcpStream,
     target: SocketAddr,
     active_streams: Arc<Mutex<Vec<TcpStream>>>,
-    fallback_control: Arc<(Mutex<QaFallbackProxyState>, Condvar)>,
     messages_control: Arc<Mutex<QaMessagesProxyControl>>,
     room_send_forwarded: Arc<AtomicUsize>,
     room_send_responses_completed: Arc<AtomicUsize>,
@@ -13624,7 +13115,6 @@ fn spawn_proxy_pair(
             &mut client,
             target,
             active_streams,
-            fallback_control,
             messages_control,
             room_send_forwarded,
             room_send_responses_completed,
@@ -13637,7 +13127,6 @@ fn proxy_single_http_request(
     client: &mut TcpStream,
     target: SocketAddr,
     active_streams: Arc<Mutex<Vec<TcpStream>>>,
-    fallback_control: Arc<(Mutex<QaFallbackProxyState>, Condvar)>,
     messages_control: Arc<Mutex<QaMessagesProxyControl>>,
     room_send_forwarded: Arc<AtomicUsize>,
     room_send_responses_completed: Arc<AtomicUsize>,
@@ -13677,7 +13166,7 @@ fn proxy_single_http_request(
 
     let request_kind = qa_proxy_request_kind(&request_head)?;
     let action = qa_messages_proxy_action(&messages_control, request_kind, &request_head)?
-        .unwrap_or(fallback_proxy_action(&fallback_control, request_kind)?);
+        .unwrap_or(QaProxyRequestAction::Forward);
     let count_forwarded_room_send =
         request_kind == QaProxyRequestKind::RoomSend && action == QaProxyRequestAction::Forward;
     match action {
@@ -13687,23 +13176,6 @@ fn proxy_single_http_request(
                 io::ErrorKind::ConnectionReset,
                 "QA proxy closed a selected sync request",
             ));
-        }
-        QaProxyRequestAction::HoldLegacy => {
-            let (state, changed) = &*fallback_control;
-            let mut state = state
-                .lock()
-                .map_err(|_| io::Error::other("QA fallback proxy state lock was poisoned"))?;
-            while state.phase == QaFallbackProxyPhase::LegacyHeld {
-                state = changed
-                    .wait(state)
-                    .map_err(|_| io::Error::other("QA fallback proxy wait lock was poisoned"))?;
-            }
-            if state.phase != QaFallbackProxyPhase::Released {
-                return Err(io::Error::new(
-                    io::ErrorKind::ConnectionAborted,
-                    "QA fallback proxy stopped before legacy release",
-                ));
-            }
         }
         QaProxyRequestAction::ServeCannedMessages(body) => {
             write_qa_json_response(client, &body)?;
@@ -13759,13 +13231,6 @@ fn qa_proxy_request_kind(request: &[u8]) -> io::Result<QaProxyRequestKind> {
     }
     let path = target.split_once('?').map_or(target, |(path, _)| path);
     Ok(match (method, path) {
-        ("GET", "/_matrix/client/versions") => QaProxyRequestKind::Versions,
-        (_, "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync") => {
-            QaProxyRequestKind::SyncService
-        }
-        (_, "/_matrix/client/v3/sync" | "/_matrix/client/r0/sync") => {
-            QaProxyRequestKind::LegacySync
-        }
         ("PUT", path)
             if path.starts_with("/_matrix/client/")
                 && path.contains("/rooms/")
@@ -13886,41 +13351,6 @@ fn write_qa_json_response(client: &mut TcpStream, body: &[u8]) -> io::Result<()>
     io::Write::write_all(client, body)
 }
 
-fn fallback_proxy_action(
-    control: &Arc<(Mutex<QaFallbackProxyState>, Condvar)>,
-    request: QaProxyRequestKind,
-) -> io::Result<QaProxyRequestAction> {
-    let (state, changed) = &**control;
-    let mut state = state
-        .lock()
-        .map_err(|_| io::Error::other("QA fallback proxy state lock was poisoned"))?;
-    let action = match (state.phase, request) {
-        (QaFallbackProxyPhase::Armed, QaProxyRequestKind::Versions) => {
-            state.versions_forwarded = true;
-            QaProxyRequestAction::Forward
-        }
-        (
-            QaFallbackProxyPhase::Armed | QaFallbackProxyPhase::AwaitingLegacy,
-            QaProxyRequestKind::SyncService,
-        ) => {
-            state.phase = QaFallbackProxyPhase::AwaitingLegacy;
-            state.sync_service_failed = true;
-            changed.notify_all();
-            QaProxyRequestAction::FailClosed
-        }
-        (QaFallbackProxyPhase::AwaitingLegacy, QaProxyRequestKind::LegacySync) => {
-            state.phase = QaFallbackProxyPhase::LegacyHeld;
-            changed.notify_all();
-            QaProxyRequestAction::HoldLegacy
-        }
-        (QaFallbackProxyPhase::LegacyHeld, QaProxyRequestKind::LegacySync) => {
-            QaProxyRequestAction::HoldLegacy
-        }
-        _ => QaProxyRequestAction::Forward,
-    };
-    Ok(action)
-}
-
 fn http_content_length(request_head: &[u8]) -> io::Result<usize> {
     let head = String::from_utf8_lossy(request_head);
     for line in head.lines().skip(1) {
@@ -13993,29 +13423,6 @@ fn shutdown_active_streams(active_streams: &Arc<Mutex<Vec<TcpStream>>>) {
             let _ = stream.shutdown(Shutdown::Both);
         }
     }
-}
-
-/// Fail when an expected backend is configured and the observed one differs.
-fn assert_expected_backend(
-    expected: Option<ExpectedSyncBackend>,
-    observed: SyncBackendKind,
-    label: &str,
-) -> Result<(), String> {
-    let Some(expected) = expected else {
-        return Ok(());
-    };
-    let observed = match observed {
-        SyncBackendKind::SyncService => ExpectedSyncBackend::SyncService,
-        SyncBackendKind::LegacySync => ExpectedSyncBackend::LegacySync,
-    };
-    if observed != expected {
-        return Err(format!(
-            "{label}: sync backend mismatch: expected {}, observed {}",
-            expected.as_str(),
-            observed.as_str(),
-        ));
-    }
-    Ok(())
 }
 
 fn env_required(name: &str) -> Result<String, String> {
@@ -18571,14 +17978,6 @@ mod tests {
             QaScenario::TimelineReconnect
         );
         assert_eq!(
-            QaScenario::from_env_value("timeline_legacy_fallback").unwrap(),
-            QaScenario::TimelineLegacyFallback
-        );
-        assert_eq!(
-            QaScenario::from_env_value("timeline_legacy_persisted_gap").unwrap(),
-            QaScenario::TimelineLegacyPersistedGap
-        );
-        assert_eq!(
             QaScenario::from_env_value("activity").unwrap(),
             QaScenario::Activity
         );
@@ -18641,95 +18040,6 @@ mod tests {
         assert_eq!(
             QaScenario::from_env_value("timeline_stress").unwrap(),
             QaScenario::TimelineStress
-        );
-    }
-
-    #[test]
-    fn invites_dm_requires_expected_sync_backend() {
-        for scenario in [QaScenario::InvitesDm, QaScenario::All] {
-            let error = expected_backend_for_scenario(scenario, None).expect_err(
-                "every scenario that runs InvitesDm must require a backend expectation",
-            );
-            assert!(error.contains(ENV_EXPECT_SYNC_BACKEND));
-        }
-
-        assert_eq!(
-            expected_backend_for_scenario(
-                QaScenario::InvitesDm,
-                Some(ExpectedSyncBackend::SyncService),
-            )
-            .unwrap(),
-            Some(ExpectedSyncBackend::SyncService)
-        );
-        assert_eq!(
-            expected_backend_for_scenario(
-                QaScenario::InvitesDm,
-                Some(ExpectedSyncBackend::LegacySync),
-            )
-            .unwrap(),
-            Some(ExpectedSyncBackend::LegacySync)
-        );
-    }
-
-    #[test]
-    fn invites_dm_backend_mismatch_follows_projection_proof() {
-        let source = include_str!("headless-core-qa.rs");
-        let run_async = source
-            .split("async fn run_async")
-            .nth(1)
-            .expect("run_async should exist");
-        let primary_sync_route = run_async
-            .split("let sync_backend_a =")
-            .nth(1)
-            .expect("run_async should observe the primary backend")
-            .split("if scenario == QaScenario::TimelineStress")
-            .next()
-            .expect("timeline stress should follow primary sync startup");
-        assert!(
-            primary_sync_route.contains(
-                "if !scenario.should_run_stage(QaStage::InvitesDm) {\n        assert_expected_backend("
-            ),
-            "the primary route must suppress its pre-stage mismatch assertion for invitation-bearing scenarios"
-        );
-        let shared_secondary_route = source
-            .split(
-                "let mut normal_secondary = if should_run_normal_secondary_participant(scenario)",
-            )
-            .nth(1)
-            .expect("run_async should create the shared secondary participant")
-            .split("if scenario == QaScenario::InvitesDm")
-            .next()
-            .expect("the focused InvitesDm cleanup should follow its stage");
-        assert!(
-            shared_secondary_route.contains(
-                "if !scenario.should_run_stage(QaStage::InvitesDm) {\n            assert_expected_backend("
-            ),
-            "the shared route must suppress the pre-stage mismatch assertion for invitation-bearing scenarios"
-        );
-        assert!(
-            shared_secondary_route.contains("if scenario.should_run_stage(QaStage::InvitesDm) {"),
-            "the shared route must dispatch every invitation-bearing scenario through InvitesDm"
-        );
-        let stage = source
-            .split("async fn run_invites_dm_stage")
-            .nth(1)
-            .expect("InvitesDm stage should exist")
-            .split("async fn run_directory_stage")
-            .next()
-            .expect("directory stage should follow InvitesDm");
-        let projection_observation = stage
-            .find("wait_for_invite_in_snapshot(")
-            .expect("InvitesDm must observe the invite through the Core snapshot");
-        let backend_assertion = stage
-            .find("assert_expected_backend(")
-            .expect("InvitesDm must assert the selected backend");
-        assert!(
-            projection_observation < backend_assertion,
-            "the selected backend must be asserted after the invite reaches the Core snapshot"
-        );
-        assert!(
-            !stage.contains("invited_rooms("),
-            "InvitesDm must not use the SDK client invite list as proof"
         );
     }
 
@@ -19676,22 +18986,6 @@ mod tests {
         assert!(!QaScenario::TimelineReconnect.should_run_stage(QaStage::LoginSync));
         assert!(!QaScenario::TimelineReconnect.should_run_stage(QaStage::Timeline));
         assert!(!QaScenario::TimelineReconnect.should_run_stage(QaStage::SendQueue));
-
-        assert!(QaScenario::TimelineLegacyFallback.should_run_stage(QaStage::Safety));
-        assert!(
-            QaScenario::TimelineLegacyFallback.should_run_stage(QaStage::TimelineLegacyFallback)
-        );
-        assert!(!QaScenario::TimelineLegacyFallback.should_run_stage(QaStage::LoginSync));
-
-        assert!(QaScenario::TimelineLegacyPersistedGap.should_run_stage(QaStage::Safety));
-        assert!(
-            QaScenario::TimelineLegacyPersistedGap
-                .should_run_stage(QaStage::TimelineLegacyPersistedGap)
-        );
-        assert!(
-            !QaScenario::TimelineLegacyPersistedGap
-                .should_run_stage(QaStage::TimelineLegacyFallback)
-        );
 
         assert!(QaScenario::TimelineStress.should_run_stage(QaStage::LoginSync));
         assert!(QaScenario::TimelineStress.should_run_stage(QaStage::RoomSpace));
@@ -21783,28 +21077,6 @@ mod tests {
     }
 
     #[test]
-    fn fallback_proxy_classifies_closed_sync_routes_without_query_data() {
-        assert_eq!(
-            qa_proxy_request_kind(
-                b"GET /_matrix/client/versions HTTP/1.1\r\nHost: example.test\r\n\r\n"
-            )
-            .unwrap(),
-            QaProxyRequestKind::Versions,
-        );
-        assert_eq!(
-            qa_proxy_request_kind(b"POST /_matrix/client/unstable/org.matrix.simplified_msc3575/sync?pos=private HTTP/1.1\r\nHost: example.test\r\n\r\n").unwrap(),
-            QaProxyRequestKind::SyncService,
-        );
-        assert_eq!(
-            qa_proxy_request_kind(
-                b"GET /_matrix/client/v3/sync?since=private HTTP/1.1\r\nHost: example.test\r\n\r\n"
-            )
-            .unwrap(),
-            QaProxyRequestKind::LegacySync,
-        );
-    }
-
-    #[test]
     fn live_tail_proxy_enforces_tokenless_refresh_and_exact_continuation_requests() {
         let metadata = qa_room_messages_request_metadata(
             b"GET /_matrix/client/v3/rooms/%21room%3Aexample.invalid/messages?dir=b&limit=128 HTTP/1.1\r\nHost: example.invalid\r\n\r\n",
@@ -21882,34 +21154,6 @@ mod tests {
                 "$older:example.invalid",
             ]
         );
-    }
-
-    #[test]
-    fn fallback_proxy_fails_sync_service_then_holds_legacy() {
-        let control = Arc::new((
-            Mutex::new(QaFallbackProxyState {
-                phase: QaFallbackProxyPhase::Armed,
-                versions_forwarded: false,
-                sync_service_failed: false,
-            }),
-            Condvar::new(),
-        ));
-        assert_eq!(
-            fallback_proxy_action(&control, QaProxyRequestKind::Versions).unwrap(),
-            QaProxyRequestAction::Forward,
-        );
-        assert_eq!(
-            fallback_proxy_action(&control, QaProxyRequestKind::SyncService).unwrap(),
-            QaProxyRequestAction::FailClosed,
-        );
-        assert_eq!(
-            fallback_proxy_action(&control, QaProxyRequestKind::LegacySync).unwrap(),
-            QaProxyRequestAction::HoldLegacy,
-        );
-        let state = control.0.lock().unwrap();
-        assert!(state.versions_forwarded);
-        assert!(state.sync_service_failed);
-        assert_eq!(state.phase, QaFallbackProxyPhase::LegacyHeld);
     }
 
     #[test]
@@ -22737,26 +21981,6 @@ mod tests {
                 "live_catchup_checkpoint=ok",
                 "live_catchup_gap_repaired=ok",
                 "timeline_reconnect=ok",
-            ]
-        );
-        assert_eq!(
-            final_tokens_for_scenario(QaScenario::TimelineLegacyFallback),
-            [
-                "safety=ok",
-                "legacy_fallback_checkpoint=ok",
-                "legacy_fallback_gap_repaired=ok",
-                "legacy_fallback_settled=ok",
-                "legacy_fallback_lifecycle=ok",
-            ]
-        );
-        assert_eq!(
-            final_tokens_for_scenario(QaScenario::TimelineLegacyPersistedGap),
-            [
-                "safety=ok",
-                "legacy_live_tail_room_absent=ok",
-                "live_tail_anchored_silent_gap=ok",
-                "live_tail_detached_gap=ok",
-                "live_tail_historical_continuation=ok",
             ]
         );
         assert_eq!(

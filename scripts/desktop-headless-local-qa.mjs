@@ -16,7 +16,6 @@ import { fileURLToPath } from "node:url";
 
 import {
   checkInstalledHomeserver,
-  conduitConfig,
   freePort,
   homeserverFixtureCapabilities,
   minimalEnvironment,
@@ -68,9 +67,6 @@ const checks = [
   "scenario send_queue",
   "scenario restore_cleanup",
   "scenario cache_restore",
-  "scenario timeline_legacy_fallback",
-  "scenario timeline_legacy_persisted_gap",
-  "verify installed Conduit binary",
   "verify installed Tuwunel binary",
   "verify local Synapse Docker runtime when --server=synapse",
   "start disposable local homeserver",
@@ -84,9 +80,6 @@ const serverOption = optionValue("--server") ?? "both";
 const timeoutMs = Number(optionValue("--timeout-ms") ?? "90000");
 const scenarioOption = optionValue("--scenario") ?? "all";
 const cargoProfileOption = optionValue("--cargo-profile") ?? "dev";
-const explicitCoreBackendOption = optionValue("--core-backend");
-const coreBackendOption =
-  explicitCoreBackendOption ?? defaultCoreBackendForScenario(scenarioOption, cargoProfileOption);
 const fixtureRunOption = optionValue("--fixture-run");
 const fixtureReplay = args.has("--fixture-replay") || fixtureRunOption !== undefined;
 const e2eeRecipientSecondDeviceOption = args.has("--e2ee-recipient-second-device");
@@ -97,6 +90,16 @@ const e2eePauseSyncBeforeMultiDeviceSendOption = args.has(
 // headless-local-qa binary. When this flag is present, both QA paths run for
 // each server so both layers are exercised.
 const runCoreQa = args.has("--core");
+
+const obsoleteCoreBackendOption = optionValue("--core-backend");
+if (obsoleteCoreBackendOption !== undefined) {
+  console.error("--core-backend is obsolete: the production runtime has one Sliding Sync engine");
+  process.exit(1);
+}
+if (process.env.KOUSHI_QA_FORCE_SYNC_BACKEND !== undefined) {
+  console.error("KOUSHI_QA_FORCE_SYNC_BACKEND is obsolete: backend forcing is no longer supported");
+  process.exit(1);
+}
 
 if (args.has("--list")) {
   for (const check of checks) {
@@ -110,42 +113,6 @@ if (args.has("--check-tools")) {
     checkInstalledHomeserver(serverKind);
   }
   console.log("headless local QA tools available");
-  process.exit(0);
-}
-
-if (args.has("--check-probed-backend-map")) {
-  if (expectedSyncBackendForLeg("probed") !== undefined) {
-    throw new Error("probed legs must remain behavior-selected for every fixture");
-  }
-  if (expectedSyncBackendForLeg("legacy") !== "LegacySync") {
-    throw new Error("forced legacy leg must retain its backend assertion");
-  }
-  console.log(
-    "tuwunel probed=behavior-selected conduit probed=behavior-selected forced=LegacySync"
-  );
-  process.exit(0);
-}
-
-if (args.has("--check-core-backend-map")) {
-  try {
-    validateReleaseBackend();
-    for (const leg of selectedCoreBackendLegs()) {
-      const config = coreBackendLegConfig(leg);
-      console.log(
-        `leg=${config.legLabel} force=${config.forceBackend ?? "none"} expect=${config.expectSyncBackend ?? "behavior-selected"}`
-      );
-    }
-    process.exit(0);
-  } catch (error) {
-    console.error(error.message);
-    process.exit(1);
-  }
-}
-
-if (args.has("--print-conduit-config")) {
-  console.log(
-    conduitConfig({ serverName: "localhost:6167", port: 6167, dataDir: "/tmp/conduit-data" })
-  );
   process.exit(0);
 }
 
@@ -172,6 +139,11 @@ async function run() {
   assertSdkSubmoduleSynced({ repoRoot });
   const scenarios = selectedScenarios(scenarioOption);
 
+  const retiredScenario = scenarios.find((scenario) => scenario.startsWith("timeline_legacy_"));
+  if (retiredScenario) {
+    throw new Error(`legacy fallback scenarios are obsolete: ${retiredScenario}`);
+  }
+
   if (
     (e2eeRecipientSecondDeviceOption || e2eePauseSyncBeforeMultiDeviceSendOption) &&
     !runCoreQa
@@ -181,25 +153,6 @@ async function run() {
   if (scenarios.includes("timeline_stress") && !runCoreQa) {
     throw new Error("--scenario=timeline_stress requires --core because it validates Core state");
   }
-  const legacyFallbackScenarios = [
-    "timeline_legacy_fallback",
-    "timeline_legacy_persisted_gap"
-  ];
-  const selectedLegacyFallbackScenario = legacyFallbackScenarios.find((scenario) =>
-    scenarios.includes(scenario)
-  );
-  if (selectedLegacyFallbackScenario) {
-    if (!runCoreQa) {
-      throw new Error(
-        `--scenario=${selectedLegacyFallbackScenario} requires --core because it validates Core fallback state`
-      );
-    }
-    if (coreBackendOption !== "probed") {
-      throw new Error(
-        `--scenario=${selectedLegacyFallbackScenario} requires --core-backend=probed`
-      );
-    }
-  }
   if (fixtureRunOption !== undefined) {
     if (scenarios.length !== 1 || scenarios[0] !== "timeline_stress") {
       throw new Error("--fixture-run is currently supported only with --scenario=timeline_stress");
@@ -207,16 +160,12 @@ async function run() {
     if (!runCoreQa) {
       throw new Error("--fixture-run requires --core");
     }
-    if (coreBackendOption !== "probed") {
-      throw new Error("--fixture-run requires --core-backend=probed");
-    }
   }
   cargoProfileArgs();
-  validateReleaseBackend();
 
   const servers = selectedServers(serverOption);
   if (fixtureRunOption !== undefined && (servers.length !== 1 || servers[0] !== "synapse")) {
-    throw new Error("--fixture-run requires --server=synapse or --server=matrixorg");
+    throw new Error("--fixture-run requires --server=synapse");
   }
   mkdirSync(localSecretsRoot, { recursive: true });
 
@@ -245,12 +194,10 @@ async function runForServer(serverKind, scenario) {
   }
 
   const configPath = join(runDir, `${serverKind}.toml`);
-  if (serverKind === "conduit" || serverKind === "tuwunel") {
+  if (serverKind === "tuwunel") {
     writeFileSync(
       configPath,
-      serverKind === "conduit"
-        ? conduitConfig({ serverName, port, dataDir })
-        : tuwunelConfig({ serverName, port, dataDir })
+      tuwunelConfig({ serverName, port, dataDir })
     );
   } else if (serverKind === "synapse") {
     writeFileSync(configPath, "Synapse local QA is configured through Docker env.\n");
@@ -281,77 +228,24 @@ async function runForServer(serverKind, scenario) {
     }
 
     if (runCoreQa) {
-      // Explicit temporary SyncService leg for Issue #412 PR1. It bypasses the
-      // known-obsolete invite-only probe so this PR can prove the real
-      // SyncService all_rooms invitation path before PR2 deletes selection.
-      if (shouldRunCoreBackend("sync-service")) {
-        const leg = coreBackendLegConfig("sync-service");
-        const coreUsers = await registerQaUsers(homeserver, "core_sync_service");
-        const coreSyncServiceResult = runCoreHeadlessQa({
+      const coreUsers = fixture ?? (await registerQaUsers(homeserver, "core"));
+      if (!fixture && serverKind === "synapse") {
+        writeQaFixture(runDir, {
           serverKind,
-          homeserver,
           serverName,
-          ...coreUsers,
-          logPath,
-          scenario,
-          legLabel: leg.legLabel,
-          forceBackend: leg.forceBackend,
-          expectSyncBackend: leg.expectSyncBackend
+          ...coreUsers
         });
-        console.log(`core QA (forced SyncService): ${coreSyncServiceResult.trim()}`);
       }
-
-      // Leg 1: behavior-probed backend. The core's typed capability probe owns
-      // fail-closed selection; server family labels are not capability facts.
-      if (shouldRunCoreBackend("probed")) {
-        const leg = coreBackendLegConfig("probed");
-        const coreUsers = fixture ?? (await registerQaUsers(homeserver, "core_probed"));
-        if (!fixture && serverKind === "synapse") {
-          writeQaFixture(runDir, {
-            serverKind,
-            serverName,
-            ...coreUsers
-          });
-        }
-        const coreQaResult = runCoreHeadlessQa({
-          serverKind,
-          homeserver,
-          serverName,
-          ...coreUsers,
-          logPath,
-          scenario,
-          legLabel: leg.legLabel,
-          expectSyncBackend: leg.expectSyncBackend,
-          replayExistingStress: fixtureReplay
-        });
-        console.log(`core QA (probed backend): ${coreQaResult.trim()}`);
-      }
-
-      // Leg 2: forced LegacySync (debug/test-only env override). Fresh data
-      // dir + cred store dir so no store state leaks across legs. Legacy
-      // /sync works against MSC4186-capable servers too, so this leg
-      // exercises the LegacySync product path end-to-end.
-      if (shouldRunCoreBackend("legacy")) {
-        const leg = coreBackendLegConfig("legacy");
-        const coreUsers = await registerQaUsers(homeserver, "core_legacy");
-        const coreLegacyResult = runCoreHeadlessQa({
-          serverKind,
-          homeserver,
-          serverName,
-          ...coreUsers,
-          logPath,
-          scenario,
-          legLabel: leg.legLabel,
-          forceBackend: leg.forceBackend,
-          expectSyncBackend: leg.expectSyncBackend
-        });
-        console.log(`core QA (forced LegacySync): ${coreLegacyResult.trim()}`);
-        if (!coreLegacyResult.includes("sync_backend_a=LegacySync")) {
-          throw new Error(
-            "forced-legacy core QA leg did not report sync_backend_a=LegacySync"
-          );
-        }
-      }
+      const coreQaResult = runCoreHeadlessQa({
+        serverKind,
+        homeserver,
+        serverName,
+        ...coreUsers,
+        logPath,
+        scenario,
+        replayExistingStress: fixtureReplay
+      });
+      console.log(`core QA: ${coreQaResult.trim()}`);
     }
   } finally {
     await stopProcess(serverProcess);
@@ -448,17 +342,14 @@ function runCoreHeadlessQa({
   userC,
   logPath,
   scenario,
-  legLabel = "default",
-  forceBackend = null,
-  expectSyncBackend,
+  qaLabel = "core",
   replayExistingStress = false
 }) {
-  // Per-leg dirs so backend legs never share SDK store or credential state.
-  const runDataDir = join(logPath, "..", `core-qa-data-${legLabel}`);
+  const runDataDir = join(logPath, "..", `core-qa-data-${qaLabel}`);
   mkdirSync(runDataDir, { recursive: true });
 
   // The file credential store dir keeps QA unattended (no OS keychain prompts).
-  const credStoreDir = join(logPath, "..", `core-qa-cred-${legLabel}`);
+  const credStoreDir = join(logPath, "..", `core-qa-cred-${qaLabel}`);
   mkdirSync(credStoreDir, { recursive: true });
 
   const env = {
@@ -476,14 +367,6 @@ function runCoreHeadlessQa({
   };
   if (userC) {
     env.KOUSHI_LOCAL_QA_USER_C = userC;
-  }
-  if (forceBackend !== null) {
-    // Debug/test-only override; release builds ignore it entirely. The
-    // sync_service value is temporary and is removed with selection in PR2.
-    env.KOUSHI_QA_FORCE_SYNC_BACKEND = forceBackend;
-  }
-  if (expectSyncBackend) {
-    env.KOUSHI_LOCAL_QA_EXPECT_SYNC_BACKEND = expectSyncBackend;
   }
   for (const name of [
     "KOUSHI_QA_STRESS_SPACES",
@@ -536,7 +419,7 @@ function runCoreHeadlessQa({
   );
   writeValidatedQaOutputFiles({
     directory: dirname(logPath),
-    label: `core-${legLabel}`,
+    label: `core-${qaLabel}`,
     stdout: result.stdout,
     stderr: result.stderr,
     validate: (output) =>
@@ -549,11 +432,11 @@ function runCoreHeadlessQa({
   if (result.status !== 0) {
     if (result.error?.code === "ETIMEDOUT") {
       throw new Error(
-        `headless core QA (leg=${legLabel}) timed out for ${serverKind}; child output omitted after private-data validation`
+        `headless core QA (${qaLabel}) timed out for ${serverKind}; child output omitted after private-data validation`
       );
     }
     throw new Error(
-      `headless core QA (leg=${legLabel}) failed for ${serverKind} with status ${result.status ?? "unknown"}; child output omitted after private-data validation`
+      `headless core QA (${qaLabel}) failed for ${serverKind} with status ${result.status ?? "unknown"}; child output omitted after private-data validation`
     );
   }
   return result.stdout;
@@ -650,51 +533,6 @@ function copyFixtureDataDir(fixture, dataDir) {
   });
 }
 
-function expectedSyncBackendForLeg(backend) {
-  if (backend === "sync-service") {
-    return "SyncService";
-  }
-  if (backend === "legacy") {
-    return "LegacySync";
-  }
-  return undefined;
-}
-
-function selectedCoreBackendLegs() {
-  if (coreBackendOption === "both") {
-    return ["probed", "legacy"];
-  }
-  if (["probed", "sync-service", "legacy"].includes(coreBackendOption)) {
-    return [coreBackendOption];
-  }
-  throw new Error("--core-backend must be probed, sync-service, legacy, or both");
-}
-
-function coreBackendLegConfig(backend) {
-  if (backend === "sync-service") {
-    return {
-      legLabel: "sync-service",
-      forceBackend: "sync_service",
-      expectSyncBackend: expectedSyncBackendForLeg(backend)
-    };
-  }
-  if (backend === "legacy") {
-    return {
-      legLabel: "legacy",
-      forceBackend: "legacy",
-      expectSyncBackend: expectedSyncBackendForLeg(backend)
-    };
-  }
-  if (backend === "probed") {
-    return {
-      legLabel: "probed",
-      forceBackend: null,
-      expectSyncBackend: expectedSyncBackendForLeg(backend)
-    };
-  }
-  throw new Error("--core-backend must be probed, sync-service, legacy, or both");
-}
-
 function selectedScenarios(value) {
   const scenarios = value
     .split(",")
@@ -706,21 +544,6 @@ function selectedScenarios(value) {
   return scenarios;
 }
 
-function defaultCoreBackendForScenario(value, cargoProfile) {
-  if (cargoProfile === "release") {
-    return "probed";
-  }
-  const scenarios = selectedScenarios(value);
-  if (scenarios.some((scenario) => ["all", "e2ee_trust", "device_cleanup", "gate_restore", "gate_negative", "gate_no_proof", "timeline_stress", "timeline_legacy_fallback", "timeline_legacy_persisted_gap"].includes(scenario))) {
-    return "probed";
-  }
-  return "both";
-}
-
-function shouldRunCoreBackend(backend) {
-  return selectedCoreBackendLegs().includes(backend);
-}
-
 function cargoProfileArgs() {
   if (cargoProfileOption === "dev") {
     return [];
@@ -729,20 +552,6 @@ function cargoProfileArgs() {
     return ["--release"];
   }
   throw new Error("--cargo-profile must be dev or release");
-}
-
-function validateReleaseBackend() {
-  if (
-    cargoProfileOption === "release" &&
-    explicitCoreBackendOption !== undefined &&
-    (coreBackendOption === "sync-service" ||
-      coreBackendOption === "legacy" ||
-      coreBackendOption === "both")
-  ) {
-    throw new Error(
-      "--cargo-profile=release cannot force a QA backend; use --core-backend=probed or --cargo-profile=dev"
-    );
-  }
 }
 
 function optionValue(name) {
@@ -765,16 +574,12 @@ function safeTimestamp() {
 
 function printUsage() {
   console.log(
-    "Usage: desktop-headless-local-qa.mjs --run [--server=conduit|tuwunel|synapse|matrixorg|both|all] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_legacy_fallback|timeline_legacy_persisted_gap|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--core-backend=probed|sync-service|legacy|both] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
+    "Usage: desktop-headless-local-qa.mjs --run [--server=tuwunel|synapse|both] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
   );
   console.log("Starts a disposable local homeserver and runs non-GUI Matrix SDK QA.");
   console.log("  --server=both  Runs the positive Sliding Sync fixtures: Tuwunel and Synapse.");
-  console.log("  --server=conduit  Temporarily runs legacy scenarios against Conduit.");
-  console.log("  --server=synapse/matrixorg  Runs local Synapse in Docker.");
+  console.log("  --server=synapse  Runs local Synapse in Docker.");
   console.log("  --core  Also run the headless-core-qa binary (Phase 2+ core runtime QA).");
-  console.log(
-    "  --core-backend  Select core backend leg; sync-service is a temporary debug-only Issue #412 QA bypass."
-  );
   console.log("  --cargo-profile  Cargo profile for headless QA binaries; release runs faster after build.");
   console.log("  --fixture-run  Replay a saved local Synapse fixture by copying its data dir.");
   console.log(

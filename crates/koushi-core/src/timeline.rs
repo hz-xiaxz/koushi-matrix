@@ -317,7 +317,7 @@ pub(crate) enum TimelineMessage {
     /// Sync started: carries the one live `RoomListService`. Subscribing a timeline must also
     /// subscribe its room with the live service so the server streams that
     /// room's new timeline events (canon: TimelineActor description; without
-    /// this, e.g. Conduit's sliding sync only delivers the initial window).
+    /// this on servers that only deliver the initial window).
     SyncStarted {
         room_list_service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
         core_generation: u64,
@@ -4998,7 +4998,7 @@ impl TimelineManagerActor {
         // On the sliding-sync backend, subscribing a timeline must also
         // subscribe its room with the live RoomListService so the server
         // streams the room's NEW timeline events; the all-rooms list alone
-        // only guarantees the initial window on some servers (Conduit).
+        // only guarantees the initial window on some servers.
         // This is the Element X room-open pattern.
         let mut subscription_generation = None;
         if let Some(service) = &self.room_list_service {
@@ -13193,7 +13193,7 @@ struct TimelineActor {
     own_user_id: Option<matrix_sdk::ruma::OwnedUserId>,
     /// event_id → SDK transaction id for events this actor sent. Used to
     /// address local-echo items whose remote echo has not arrived (e.g.
-    /// Conduit's sliding sync does not echo own events into the timeline),
+    /// some Sliding Sync implementations do not echo own events into the timeline),
     /// so edit/redact by event id can fall back to the transaction identity.
     sent_event_txns: HashMap<String, matrix_sdk::ruma::OwnedTransactionId>,
     /// event_id -> SDK media source. This cache may contain encrypted media
@@ -17239,7 +17239,7 @@ impl TimelineActor {
         // Edits go through the SDK Timeline so the Set diff on the original
         // item is produced locally (send-queue local echo) instead of
         // depending on the server echoing the edit back through sync —
-        // Conduit's sliding sync does not deliver it reliably (Phase 5
+        // some Sliding Sync implementations do not deliver it reliably (Phase 5
         // review finding). Canon rule 1: relay the SDK.
         let candidates = self.item_ids_for_event(&event_id);
         if candidates.is_empty() {

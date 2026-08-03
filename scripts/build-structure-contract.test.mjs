@@ -92,13 +92,14 @@ test("CI and npm scripts use the unified workspace contracts", () => {
 test("CI gates positive invitations on exactly Tuwunel and Synapse", () => {
   const ci = readRepoFile(".github/workflows/ci.yml");
   const invitationJob = workflowJobSource(ci, "core-invites");
-  const conduitJob = workflowJobSource(ci, "core-homeserver");
+  const binaryJob = workflowJobSource(ci, "core-homeserver");
 
   assert.match(invitationJob, /^\s{8}server: \[tuwunel, synapse\]$/m);
   assert.match(
     invitationJob,
-    /--server=\$\{\{ matrix\.server \}\}[\s\S]*--scenario=invites_dm[\s\S]*--core-backend=sync-service/
+    /--server=\$\{\{ matrix\.server \}\}[\s\S]*--scenario=invites_dm/
   );
+  assert.doesNotMatch(invitationJob, /--core-backend|KOUSHI_QA_FORCE_SYNC_BACKEND/);
   assert.match(invitationJob, /if: matrix\.server == 'tuwunel'[\s\S]*actions\/cache@/);
   assert.match(invitationJob, /matrix-construct\/tuwunel\/releases\/download\/v1\.7\.1\//);
   assert.match(
@@ -123,11 +124,9 @@ test("CI gates positive invitations on exactly Tuwunel and Synapse", () => {
     assert.match(actionUse, /@[0-9a-f]{40}\s+#\s+(?:v\d+|1\.96\.0)$/);
   }
 
-  // Conduit media coverage is unrelated to the positive invitation migration
-  // and remains temporary until PR3 removes active Conduit QA as a whole.
-  assert.match(conduitJob, /- name: Install Conduit/);
-  assert.match(conduitJob, /--server=conduit --scenario=media/);
-  assert.doesNotMatch(conduitJob, /scenario=login_sync/);
+  assert.match(binaryJob, /name: Core QA binary tests/);
+  assert.match(binaryJob, /cargo test -p koushi-core --features qa-bin --bin headless-core-qa/);
+  assert.doesNotMatch(binaryJob, /Conduit|conduit|--server=/);
 });
 
 test("submodule guard is wired into commit and QA entrypoints", () => {
@@ -151,18 +150,19 @@ test("headless core QA can run cargo binaries with the release profile", () => {
   assert.match(headless, /optionValue\("--cargo-profile"\)/);
   assert.match(headless, /cargoProfileArgs/);
   assert.match(headless, /--cargo-profile=dev\|release/);
-  assert.match(headless, /explicitCoreBackendOption/);
-  assert.match(headless, /defaultCoreBackendForScenario\(scenarioOption, cargoProfileOption\)/);
-  assert.match(headless, /--cargo-profile=release cannot force a QA backend/);
+  assert.match(headless, /--core-backend is obsolete/);
+  assert.match(headless, /KOUSHI_QA_FORCE_SYNC_BACKEND is obsolete/);
+  assert.doesNotMatch(headless, /explicitCoreBackendOption/);
+  assert.doesNotMatch(headless, /defaultCoreBackendForScenario/);
   assert.match(headless, /function selectedScenarios/);
   assert.match(headless, /for \(const scenario of scenarios\)/);
   assert.match(headless, /KOUSHI_QA_SCENARIO: scenario/);
   assert.match(
     packageJson,
-    /"qa:headless-core": "node \.\.\/\.\.\/scripts\/desktop-headless-local-qa\.mjs --run --server=both --core --scenario=login_sync,directory,timeline_reconnect --timeout-ms=600000 --cargo-profile=release && node \.\.\/\.\.\/scripts\/desktop-headless-local-qa\.mjs --run --server=conduit --core --scenario=send_queue --timeout-ms=600000 --cargo-profile=release"/
+    /"qa:headless-core": "node \.\.\/\.\.\/scripts\/desktop-headless-local-qa\.mjs --run --server=both --core --scenario=login_sync,directory,timeline_reconnect,send_queue --timeout-ms=600000 --cargo-profile=release"/
   );
   assert.match(
     packageJson,
-    /"qa:headless-basic:local": "node \.\.\/\.\.\/scripts\/desktop-headless-local-qa\.mjs --run --server=both --core --scenario=login_sync,directory,timeline_reconnect --timeout-ms=600000 --cargo-profile=release && node \.\.\/\.\.\/scripts\/desktop-headless-local-qa\.mjs --run --server=conduit --core --scenario=send_queue --timeout-ms=600000 --cargo-profile=release"/
+    /"qa:headless-basic:local": "node \.\.\/\.\.\/scripts\/desktop-headless-local-qa\.mjs --run --server=both --core --scenario=login_sync,directory,timeline_reconnect,send_queue --timeout-ms=600000 --cargo-profile=release"/
   );
 });

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-/** @typedef {"conduit" | "tuwunel" | "synapse"} LocalHomeserverKind */
+/** @typedef {"tuwunel" | "synapse"} LocalHomeserverKind */
 
 /**
  * @typedef {object} SynapseFixtureOptions
@@ -15,7 +15,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
  */
 
 /**
- * @typedef {LocalHomeserverKind | "matrixorg" | "both" | "all"}
+ * @typedef {LocalHomeserverKind | "both"}
  *   HomeserverSelection
  */
 
@@ -81,23 +81,6 @@ function checkDockerAvailable() {
   }
 }
 
-export function conduitConfig({ serverName, port, dataDir }) {
-  return `[global]
-server_name = ${tomlString(serverName)}
-database_backend = "sqlite"
-database_path = ${tomlString(dataDir)}
-address = "127.0.0.1"
-port = ${port}
-max_request_size = 20000000
-allow_registration = true
-allow_federation = false
-allow_room_creation = true
-allow_check_for_updates = false
-enable_lightning_bolt = false
-trusted_servers = []
-`;
-}
-
 export function tuwunelConfig({ serverName, port, dataDir }) {
   return `[global]
 server_name = ${tomlString(serverName)}
@@ -148,9 +131,6 @@ export function homeserverFixtureCapabilities(
   } else if (serverKind === "synapse") {
     configuration = "synapse_experimental_feature";
     enabled = slidingSyncEnabled;
-  } else if (serverKind === "conduit") {
-    configuration = "unsupported";
-    enabled = false;
   } else {
     throw new Error(`unknown local homeserver kind: ${serverKind}`);
   }
@@ -172,16 +152,10 @@ export function selectedServers(value) {
   if (value === "both") {
     return ["tuwunel", "synapse"];
   }
-  if (value === "all") {
-    return ["conduit", "tuwunel", "synapse"];
-  }
-  if (value === "conduit" || value === "tuwunel" || value === "synapse") {
+  if (value === "tuwunel" || value === "synapse") {
     return [value];
   }
-  if (value === "matrixorg") {
-    return ["synapse"];
-  }
-  throw new Error("--server must be conduit, tuwunel, synapse, matrixorg, both, or all");
+  throw new Error("--server must be tuwunel, synapse, or both");
 }
 
 export function startHomeserver(serverKind, configPath, logPath, options = {}) {
@@ -194,13 +168,6 @@ export function startHomeserver(serverKind, configPath, logPath, options = {}) {
 }
 
 function startHomeserverProcess(serverKind, configPath, options) {
-  if (serverKind === "conduit") {
-    return spawn("conduit", [], {
-      cwd: repoRoot,
-      env: { ...minimalEnvironment(), CONDUIT_CONFIG: configPath },
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-  }
   if (serverKind === "tuwunel") {
     return spawn("tuwunel", ["--config", configPath], {
       cwd: repoRoot,

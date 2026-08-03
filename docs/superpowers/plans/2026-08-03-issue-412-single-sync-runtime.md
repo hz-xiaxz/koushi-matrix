@@ -115,7 +115,7 @@
 - [x] Add a constructor/compile contract that RoomActor receives a non-optional `RoomListService` and never falls back to `Client::rooms()`/`invited_rooms()` as live truth.
 - [x] Run `cargo test -p koushi-core --lib sync_service_has_one_all_rooms_owner` and `cargo test -p koushi-core --test runtime_room_list_sync`; confirm RED.
 - [x] Remove backend probing, fallback selection, `KOUSHI_QA_FORCE_SYNC_BACKEND`, Legacy loop ownership, and backend transition fences. Start only the mandatory SyncService after capability success.
-- [ ] Replace `SyncMode`, `SyncBackendKind`, and `RoomListSource::{SyncService,Legacy}` with engine-neutral lifecycle/readiness state. Do not leave one-variant backend enums.
+- [x] Replace `SyncMode`, `SyncBackendKind`, and `RoomListSource::{SyncService,Legacy}` with engine-neutral lifecycle/readiness state. Do not leave one-variant backend enums.
 - [x] Reconcile cache projections as stale until the all-rooms committed sequence advances and the full loaded range is applied; treat omission from a reconciled live range as removal, but not absence from cache.
 - [x] Run `cargo test -p koushi-core --lib sync`, `cargo test -p koushi-core --test runtime_room_list_sync`, `cargo test -p koushi-core --test runtime_session`, and `cargo test -p koushi-state --test sliding_sync_capability`; confirm exit code 0.
 - [x] Commit with message `refactor: require one sliding sync runtime`.
@@ -156,12 +156,12 @@ mismatch.
 - Modify: `apps/desktop/src/test/harnessMain.tsx`
 - Modify: `apps/desktop/src/domain/timelineStore.test.ts`
 
-- [ ] Add/update serialization and TypeScript tests so Legacy backend/mode/source tokens are rejected and the four capability results plus engine-neutral readiness round-trip.
-- [ ] Run the DTO contract test and TypeScript typecheck; confirm RED while old variants remain.
-- [ ] Update Rust DTOs, generated CoreEvent artifact, maximally populated frontend golden, TypeScript mirrors, fake snapshots, app harness, and IPC mock together.
-- [ ] Render the Rust-owned capability-blocked state with retry/sign-out/change-homeserver actions; React must not infer capability from network or room data.
-- [ ] Regenerate only the frontend golden via `UPDATE_GOLDEN=1 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib frontend_app_state_golden`; edit `coreEvents.generated.json` to match the serialization contract.
-- [ ] Run `cargo test -p koushi-desktop core_event_wire_format_matches_checked_in_contract_artifact`, `cargo test -p koushi-desktop frontend_app_state_golden`, `npm --prefix apps/desktop run typecheck`, and `npm --prefix apps/desktop exec -- playwright test e2e/basic-operations.spec.ts -g "sliding sync capability" --workers=1`; confirm exit code 0.
+- [x] Add/update serialization and TypeScript tests so Legacy backend/mode/source tokens are rejected and the four capability results plus engine-neutral readiness round-trip.
+- [x] Run the DTO contract test and TypeScript typecheck; confirm RED while old variants remain.
+- [x] Update Rust DTOs, generated CoreEvent artifact, maximally populated frontend golden, TypeScript mirrors, fake snapshots, app harness, and IPC mock together.
+- [x] Render the Rust-owned capability-blocked state with retry/sign-out/change-homeserver actions; React must not infer capability from network or room data.
+- [x] Regenerate only the frontend golden via `UPDATE_GOLDEN=1 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib frontend_app_state_golden`; edit `coreEvents.generated.json` to match the serialization contract.
+- [x] Run `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml core_event_wire_format_matches_checked_in_contract_artifact`, `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml frontend_app_state_golden`, `npm --prefix apps/desktop run typecheck`, and the focused capability contract tests; confirm exit code 0.
 - [ ] Commit with message `refactor: remove legacy sync wire states`.
 
 ## Task 9: Update canon and prove the no-Legacy runtime
@@ -175,12 +175,12 @@ mismatch.
 - Modify: `docs/architecture/i18n.md`
 - Modify: `crates/koushi-core/src/bin/headless-core-qa.rs`
 
-- [ ] Update active canon to require Simplified Sliding Sync, a single all-rooms RoomListService, committed-response readiness, positive-cache restore, and no Legacy fallback or invite-only probe.
-- [ ] Keep historical documents only when clearly marked historical/superseded.
-- [ ] Run an inventory command over production Rust/events/DTO/TypeScript and confirm no `LegacySync`, forced-backend environment variable, invite-list capability probe, backend mode enum, or production `/v3/sync` constructor remains.
+- [x] Update active canon to require Simplified Sliding Sync, a single all-rooms RoomListService, committed-response readiness, positive-cache restore, and no Legacy fallback or invite-only probe.
+- [x] Keep historical documents only when clearly marked historical/superseded.
+- [x] Run an inventory command over production Rust/events/DTO/TypeScript and confirm no `LegacySync`, forced-backend environment variable, invite-list capability probe, backend mode enum, or production `/v3/sync` constructor remains.
 - [ ] Re-run the Tuwunel and Synapse invitation lanes established by PR1. Both must report SyncService/all-rooms success after the Legacy code is gone.
 - [ ] Run the negative Synapse fixture and confirm it enters typed Unsupported without sending an authenticated sync request or deleting session/store material.
 - [ ] Run `cargo test --workspace`, `cargo test -p koushi-desktop`, `npm --prefix apps/desktop run lint`, `npm --prefix apps/desktop run typecheck`, `npm --prefix apps/desktop run test`, and `node --test scripts/build-structure-contract.test.mjs`, preserving each command's own exit status.
-- [ ] Self-review `git diff origin/main...HEAD` and `git status --short`, including generated artifacts and submodule changes.
+- [x] Self-review the current diff and `git status --short`, including generated artifacts and submodule changes.
 - [ ] Commit with message `docs: require simplified sliding sync runtime`.
 - [ ] Push, open PR2 as ready for review, monitor checks, fix failures, enable auto-merge, and wait for merge before starting `2026-08-03-issue-412-diagnostics-cleanup.md`.

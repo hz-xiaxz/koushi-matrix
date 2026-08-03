@@ -3560,3 +3560,9 @@ stateDiagram-v2
 - Avatar MXC URIs, thumbnail state, and user-room avatar associations are
   account-scoped sensitive metadata. Debug, logs, tests, QA tokens, fixtures,
   and issue evidence must redact real values.
+# Current sync contract (Issue #412)
+
+Session admission requires Element X-compatible Simplified Sliding Sync.
+Legacy `/sync`, backend-selection states, and fallback transitions are not
+valid state-machine states. Older diagrams and dated migration notes below are
+historical context only.

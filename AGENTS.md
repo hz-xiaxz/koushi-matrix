@@ -4,6 +4,16 @@ This is the operational entry file for agents and QA automation in this local
 environment. It records setup commands, troubleshooting, and environment
 footguns. Durable repository rules do not live here.
 
+## Issue #412 current sync/QA contract
+
+The effective runtime and QA contract is one Element X-compatible Simplified
+Sliding Sync engine. Legacy `/sync`, backend probing/forcing, and fallback
+selection are removed. Local QA accepts only `--server=tuwunel`,
+`--server=synapse`, or `--server=both`; `--core-backend`,
+`KOUSHI_QA_FORCE_SYNC_BACKEND`, `conduit`, and `timeline_legacy_*` scenarios
+must be rejected. Older dated examples in this file that mention those names
+are historical notes and must not be used as commands.
+
 ## Read Order
 
 1. [REPOSITORY_RULES.md](REPOSITORY_RULES.md) - root durable rules for this

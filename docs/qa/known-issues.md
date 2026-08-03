@@ -1,5 +1,10 @@
 # QA Known Issues
 
+> Issue #412 supersedes the historical backend-selection examples in this
+> file. The current runtime requires Simplified Sliding Sync and the active
+> local QA supports only Tuwunel/Synapse; old `conduit`, `LegacySync`, and
+> `--core-backend` commands below are archival evidence, not runnable gates.
+
 This file records currently known product/QA blockers that should be easy to
 find before claiming a release gate is green.
 

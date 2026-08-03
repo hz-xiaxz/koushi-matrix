@@ -1351,3 +1351,9 @@ and keeps the same QA hierarchy.
 - **Phase 15+:** finish desktop interaction completeness, E2EE trust
   implementation and GUI, performance/soak, distribution hardening,
   platform credential-store evidence, signing/notarization, and release.
+# Current sync contract (Issue #412)
+
+The desktop runtime has one required sync engine: Element X-compatible
+Simplified Sliding Sync. Legacy `/sync`, backend probing/forcing, and fallback
+selection are removed. The older backend discussion later in this document is
+historical context and is not an implementation or QA contract.

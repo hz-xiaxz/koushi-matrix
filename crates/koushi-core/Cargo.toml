@@ -42,7 +42,7 @@ tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 
 [features]
 # Exposes CoreRuntime::inject_actions for QA binaries and integration tests.
-test-hooks = []
+test-hooks = ["koushi-sdk/test-hooks"]
 # Enables the headless-core-qa binary.
 qa-bin = ["koushi-sdk/test-hooks"]
 
