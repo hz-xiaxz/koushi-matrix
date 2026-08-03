@@ -113,13 +113,13 @@ if (args.has("--check-tools")) {
 }
 
 if (args.has("--check-probed-backend-map")) {
-  if (expectedSyncBackendForLeg(false) !== undefined) {
-    throw new Error("probed backend must be selected by behavior");
+  if (expectedSyncBackendForLeg(false) !== "SyncService") {
+    throw new Error("probed backend leg must require SyncService");
   }
   if (expectedSyncBackendForLeg(true) !== "LegacySync") {
     throw new Error("forced legacy leg must retain its backend assertion");
   }
-  console.log("probed sync backend is behavior-selected; forced legacy assertion ok");
+  console.log("probed SyncService and forced LegacySync assertions ok");
   process.exit(0);
 }
 
@@ -603,7 +603,7 @@ function copyFixtureDataDir(fixture, dataDir) {
 }
 
 function expectedSyncBackendForLeg(forceLegacyBackend) {
-  return forceLegacyBackend ? "LegacySync" : undefined;
+  return forceLegacyBackend ? "LegacySync" : "SyncService";
 }
 
 function selectedScenarios(value) {

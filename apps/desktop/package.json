@@ -16,6 +16,8 @@
     "qa:mac-gui": "node ../../scripts/desktop-mac-gui-smoke.mjs --run",
     "qa:linux-gui": "node ../../scripts/desktop-linux-gui-qa.mjs --run",
     "qa:headless-local": "node ../../scripts/desktop-headless-local-qa.mjs --run",
+    "qa:headless-invites:tuwunel": "node ../../scripts/desktop-headless-local-qa.mjs --run --server=tuwunel --core --scenario=invites_dm --core-backend=probed --timeout-ms=240000",
+    "qa:headless-invites:synapse": "node ../../scripts/desktop-headless-local-qa.mjs --run --server=synapse --core --scenario=invites_dm --core-backend=probed --timeout-ms=240000",
     "qa:headless-core": "node ../../scripts/desktop-headless-local-qa.mjs --run --server=both --core --scenario=login_sync,directory,timeline_reconnect --timeout-ms=600000 --cargo-profile=release && node ../../scripts/desktop-headless-local-qa.mjs --run --server=conduit --core --scenario=send_queue --timeout-ms=600000 --cargo-profile=release",
     "qa:headless-basic:local": "node ../../scripts/desktop-headless-local-qa.mjs --run --server=both --core --scenario=login_sync,directory,timeline_reconnect --timeout-ms=600000 --cargo-profile=release && node ../../scripts/desktop-headless-local-qa.mjs --run --server=conduit --core --scenario=send_queue --timeout-ms=600000 --cargo-profile=release",
     "qa:headless-basic:real": "node ../../scripts/desktop-real-homeserver-qa.mjs --run --scenario=space_compat",
