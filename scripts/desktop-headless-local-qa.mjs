@@ -113,13 +113,18 @@ if (args.has("--check-tools")) {
 }
 
 if (args.has("--check-probed-backend-map")) {
-  if (expectedSyncBackendForLeg(false) !== "SyncService") {
-    throw new Error("probed backend leg must require SyncService");
+  const enabledCapabilities = homeserverFixtureCapabilities("tuwunel");
+  const disabledCapabilities = homeserverFixtureCapabilities("conduit");
+  if (expectedSyncBackendForLeg(enabledCapabilities, false) !== "SyncService") {
+    throw new Error("enabled fixture probed leg must require SyncService");
   }
-  if (expectedSyncBackendForLeg(true) !== "LegacySync") {
+  if (expectedSyncBackendForLeg(disabledCapabilities, false) !== "LegacySync") {
+    throw new Error("disabled fixture probed leg must require LegacySync");
+  }
+  if (expectedSyncBackendForLeg(enabledCapabilities, true) !== "LegacySync") {
     throw new Error("forced legacy leg must retain its backend assertion");
   }
-  console.log("probed SyncService and forced LegacySync assertions ok");
+  console.log("enabled probed=SyncService disabled probed=LegacySync forced=LegacySync");
   process.exit(0);
 }
 
@@ -281,7 +286,7 @@ async function runForServer(serverKind, scenario) {
           logPath,
           scenario,
           legLabel: "probed",
-          expectSyncBackend: expectedSyncBackendForLeg(false),
+          expectSyncBackend: expectedSyncBackendForLeg(fixtureCapabilities, false),
           replayExistingStress: fixtureReplay
         });
         console.log(`core QA (probed backend): ${coreQaResult.trim()}`);
@@ -302,7 +307,7 @@ async function runForServer(serverKind, scenario) {
           scenario,
           legLabel: "legacy",
           forceLegacyBackend: true,
-          expectSyncBackend: expectedSyncBackendForLeg(true)
+          expectSyncBackend: expectedSyncBackendForLeg(fixtureCapabilities, true)
         });
         console.log(`core QA (forced LegacySync): ${coreLegacyResult.trim()}`);
         if (!coreLegacyResult.includes("sync_backend_a=LegacySync")) {
@@ -602,8 +607,15 @@ function copyFixtureDataDir(fixture, dataDir) {
   });
 }
 
-function expectedSyncBackendForLeg(forceLegacyBackend) {
-  return forceLegacyBackend ? "LegacySync" : "SyncService";
+/**
+ * @param {ReturnType<typeof homeserverFixtureCapabilities>} fixtureCapabilities
+ * @param {boolean} forceLegacyBackend
+ */
+function expectedSyncBackendForLeg(fixtureCapabilities, forceLegacyBackend) {
+  if (forceLegacyBackend) {
+    return "LegacySync";
+  }
+  return fixtureCapabilities.simplifiedSlidingSync.enabled ? "SyncService" : "LegacySync";
 }
 
 function selectedScenarios(value) {

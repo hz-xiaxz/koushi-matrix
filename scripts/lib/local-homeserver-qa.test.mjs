@@ -109,6 +109,23 @@ test("Tuwunel fixture intrinsically advertises simplified Sliding Sync", () => {
   });
 });
 
+test("backend expectation follows the selected fixture capability", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/desktop-headless-local-qa.mjs", "--check-probed-backend-map"],
+    {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    result.stdout,
+    /enabled probed=SyncService disabled probed=LegacySync forced=LegacySync/
+  );
+});
+
 test("server selection keeps individual Sliding Sync fixtures", () => {
   assert.deepEqual(selectedServers("tuwunel"), ["tuwunel"]);
   assert.deepEqual(selectedServers("synapse"), ["synapse"]);
