@@ -1,6 +1,6 @@
 # Matrix Rust SDK Feedback Packet
 
-Date: 2026-07-30
+Date: 2026-08-03
 
 This note separates SDK-upstreamable material from desktop-product decisions. Element Desktop/Web compatibility work in this repository is UX-only and is intentionally out of scope for the SDK feedback.
 
@@ -109,6 +109,26 @@ or SDK boundary without logging private Matrix payloads.
   integration requests assert the exact expansion. Upstreaming intent: submit
   the helper and request-shape regressions independently of Koushi's backend
   capability preflight.
+
+- Element X all-rooms request parity guard (2026-08-03, issue #412 PR1):
+  the requested comparison revision
+  `ccd225571c53be6ba7f6f907ded762b13c6bb878` is not an object published by
+  `matrix-org/matrix-rust-sdk`; an exact SHA fetch returned `not our ref`, so it
+  was not silently substituted. The approved issue #412 design identifies the
+  Element X 26.07.28 SDK pin as
+  `ccd225e58eb900e321411397d1c13c2d9b312bb6`. An exact source comparison to
+  that fetchable revision found the same `room-list` connection, sole
+  `all_rooms` list, unset invite filter, timeline limit `1`, ordered
+  `DEFAULT_REQUIRED_STATE`, and enabled account-data, all-subscribed receipts,
+  typing, and capability-gated thread subscriptions with limit `10`. Koushi's
+  existing narrow own-member patch expands only `$ME` to
+  `@example:localhost` in the authenticated test request. Local SDK commit
+  `1e70c6661c6f14fe8760c76cb8022fa12bc43861` adds
+  `all_rooms_request_matches_element_x_26_07_28`, which drives the real first
+  `RoomListService` request through `MatrixMockServer`/wiremock and asserts the
+  serialized URL, query, connection ID, list, required state, filter, timeline,
+  and extension contract. No request-builder production change was necessary,
+  and this test-only guard does not justify a wholesale SDK rebase or upgrade.
 
 - Non-blocking own-user identity query (2026-07-30, issue #375):
   `Encryption::request_user_identity` clones the current `OlmMachine` and
@@ -268,6 +288,8 @@ Current SDK-only patch area:
 - `cargo test -p matrix-sdk --lib test_request_user_identity_does_not_deadlock_with_olm_regeneration`
 - `cargo test -p matrix-sdk --lib`
 - `cargo test --manifest-path vendor/matrix-rust-sdk/crates/matrix-sdk-ui/Cargo.toml room_list_service`
+- `cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28`
+- `cargo test -p matrix-sdk-ui test_all_rooms_are_declared`
 - `git -C vendor/matrix-rust-sdk diff --check`
 
 ## Remaining Before Upstream PR
