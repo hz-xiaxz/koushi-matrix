@@ -9141,8 +9141,9 @@ async fn wait_for_room_list_containing(
         return Ok(snapshot);
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| {
                 let snapshot = conn.snapshot();
@@ -9237,8 +9238,9 @@ async fn wait_for_space_in_space_list(
         return Ok(snapshot);
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| {
                 let snapshot = conn.snapshot();
@@ -9285,8 +9287,9 @@ async fn wait_for_space_child_projection(
         return Ok(snapshot);
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| {
                 let snapshot = conn.snapshot();
@@ -9346,8 +9349,9 @@ async fn select_space_and_wait_for_room_scope(
         return Ok(snapshot);
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| {
                 let snapshot = conn.snapshot();
@@ -9486,8 +9490,9 @@ async fn wait_for_dm_room_in_room_list(
         return Ok(snapshot);
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| {
                 let snapshot = conn.snapshot();
@@ -9558,8 +9563,9 @@ async fn select_space_scope_for_qa(
     .await
     .map_err(|e| format!("{label}: submit select space failed: {e}"))?;
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| {
                 let snapshot = conn.snapshot();
@@ -9913,8 +9919,9 @@ async fn wait_for_invite_in_snapshot(
         return Ok(snapshot);
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| {
                 let snapshot = conn.snapshot();
@@ -9963,8 +9970,9 @@ async fn wait_for_invite_absent(
         return Ok(snapshot);
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| {
                 let snapshot = conn.snapshot();
@@ -10132,8 +10140,9 @@ async fn wait_for_sync_reconnecting(conn: &mut CoreConnection, label: &str) -> R
         return Ok(());
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| format!("{label}: timed out waiting for SyncEvent::Reconnecting"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
@@ -10163,8 +10172,9 @@ async fn wait_for_sync_running_after_reconnect(
         return Ok(());
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
-        let event = tokio::time::timeout(ROOM_LIST_EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
             .map_err(|_| format!("{label}: timed out waiting for SyncEvent::Running"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;

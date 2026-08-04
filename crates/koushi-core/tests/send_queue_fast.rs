@@ -22,7 +22,65 @@ use matrix_sdk::{
     ruma::{event_id, room_id},
     test_utils::mocks::MatrixMockServer,
 };
-use matrix_sdk_test::JoinedRoomBuilder;
+use serde_json::{Value, json};
+use wiremock::{
+    Mock, Request, Respond, ResponseTemplate,
+    matchers::{method, path},
+};
+
+const FAST_SEND_QUEUE_SLIDING_SYNC_PATH: &str =
+    "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync";
+
+struct FastSendQueueSlidingSyncResponder {
+    room_id: String,
+    request_count: AtomicUsize,
+}
+
+impl Respond for FastSendQueueSlidingSyncResponder {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let request_body: Value =
+            serde_json::from_slice(&request.body).expect("fast SendQueue sliding-sync request");
+        let position = format!(
+            "fast-send-queue-pos-{}",
+            self.request_count.fetch_add(1, Ordering::AcqRel)
+        );
+        let room_id = self.room_id.clone();
+        let mut rooms = serde_json::Map::new();
+        rooms.insert(
+            room_id.clone(),
+            json!({
+                "initial": true,
+                "required_state": [{
+                    "type": "m.room.member",
+                    "state_key": "@fast-send-queue:localhost",
+                    "sender": "@fast-send-queue:localhost",
+                    "event_id": "$fast-send-queue-member:localhost",
+                    "origin_server_ts": 1,
+                    "content": { "membership": "join" }
+                }]
+            }),
+        );
+        let mut response = json!({
+            "pos": position,
+            "lists": {
+                "all_rooms": {
+                    "count": 1,
+                    "ops": [{
+                        "op": "SYNC",
+                        "range": [0, 0],
+                        "room_ids": [room_id]
+                    }]
+                }
+            },
+            "rooms": rooms,
+            "extensions": {}
+        });
+        if let Some(transaction_id) = request_body.get("txn_id") {
+            response["txn_id"] = transaction_id.clone();
+        }
+        ResponseTemplate::new(200).set_body_json(response)
+    }
+}
 
 struct FastTcpProxy {
     listen_addr: SocketAddr,
@@ -1802,7 +1860,12 @@ async fn run_fast_send_queue_feedback() {
     let data_dir = tempfile::tempdir().expect("fast_send_queue data directory");
     let credential_dir = tempfile::tempdir().expect("fast_send_queue credential directory");
 
-    server.mock_versions().ok().mount().await;
+    server
+        .mock_versions()
+        .with_feature("org.matrix.simplified_msc3575", true)
+        .ok()
+        .mount()
+        .await;
     server.mock_login().ok().mock_once().mount().await;
     server
         .mock_room_state_encryption()
@@ -1810,13 +1873,13 @@ async fn run_fast_send_queue_feedback() {
         .plain()
         .mount()
         .await;
-    server
-        .mock_sync()
-        .ok(|builder| {
-            builder.add_joined_room(JoinedRoomBuilder::new(room_id));
+    Mock::given(method("POST"))
+        .and(path(FAST_SEND_QUEUE_SLIDING_SYNC_PATH))
+        .respond_with(FastSendQueueSlidingSyncResponder {
+            room_id: room_id.to_string(),
+            request_count: AtomicUsize::new(0),
         })
-        .mock_once()
-        .mount()
+        .mount(&server.server())
         .await;
 
     let runtime = CoreRuntime::start_with_data_dir_and_file_credentials(
@@ -2274,14 +2337,6 @@ async fn run_fast_send_queue_feedback() {
         .mock_once()
         .mount_as_scoped()
         .await;
-    let replacement_sync_guard = server
-        .mock_sync()
-        .ok(|builder| {
-            builder.add_joined_room(JoinedRoomBuilder::new(room_id));
-        })
-        .mock_once()
-        .mount_as_scoped()
-        .await;
     proxy.arm_response_containing("$fast-fifo-first:localhost");
     let retry_id = fast_send_queue_phase(
         "fast_send_queue first retry command",
@@ -2360,7 +2415,6 @@ async fn run_fast_send_queue_feedback() {
     );
     drop(fifo_second_guard);
     drop(fifo_first_guard);
-    drop(replacement_sync_guard);
     fast_send_queue_phase(
         "fast_send_queue stop replacement sync",
         stop_sync_for_qa(&mut conn, "fast_send_queue stop replacement sync"),
