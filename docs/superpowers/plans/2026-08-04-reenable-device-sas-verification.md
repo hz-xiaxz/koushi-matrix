@@ -233,7 +233,7 @@ git commit -m "docs: record SAS verification implementation plan"
 - Consumes: validated branch commits.
 - Produces: merged remote default-branch commit and closed topic branch.
 
-- [ ] **Step 1: Reconcile and push**
+- [x] **Step 1: Reconcile and push**
 
 ```bash
 git fetch origin
@@ -244,7 +244,7 @@ git push --set-upstream origin codex/reenable-sas-verification
 
 Re-run affected focused gates after any nontrivial rebase resolution.
 
-- [ ] **Step 2: Open an accurate PR**
+- [x] **Step 2: Open an accurate PR**
 
 Create a non-draft PR describing the default re-enablement, mandatory warning, unchanged Rust/Core lifecycle, SAS-only guidance correction, and exact local validation evidence.
 
