@@ -7,9 +7,11 @@
 //!
 //! `SyncService::State::Running` means only that the SDK engine is running. It
 //! is not connectivity evidence. Koushi becomes connected and hands the live
-//! room-list service to dependent actors only after the SDK reports that the
-//! complete `all_rooms` range was processed and committed to the event cache,
-//! and RoomActor acknowledges projecting that exact committed response.
+//! room-list service to dependent actors after the SDK reports a committed
+//! `all_rooms` response with a Sliding Sync position, and RoomActor
+//! acknowledges projecting that exact committed response. The SDK may omit a
+//! room count for an empty account, so complete-range status remains a
+//! projection diagnostic rather than a startup gate.
 
 use std::{
     collections::BTreeSet,
@@ -136,6 +138,20 @@ fn internal_observer_failure(ever_connected: bool) -> SyncTaskOutcome {
     }
 }
 
+fn internal_observer_failure_at(reason: &'static str, ever_connected: bool) -> SyncTaskOutcome {
+    trace_sync!(
+        "observer_exit",
+        [
+            DiagnosticField::token("reason", reason),
+            DiagnosticField::boolean("ever_connected", ever_connected),
+        ],
+        "reason={} ever_connected={}",
+        reason,
+        ever_connected
+    );
+    internal_observer_failure(ever_connected)
+}
+
 #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
 fn sync_once_admitted(
     lifecycle: SyncLifecycle,
@@ -207,6 +223,14 @@ fn sync_service_state_trace_label(state: &matrix_sdk_ui::sync_service::State) ->
         matrix_sdk_ui::sync_service::State::Error(_) => "error",
         matrix_sdk_ui::sync_service::State::Terminated => "terminated",
     }
+}
+
+fn committed_response_is_handoff_evidence(
+    pos_present: bool,
+    response_sequence: u64,
+    last_committed_sequence: u64,
+) -> bool {
+    pos_present && response_sequence > last_committed_sequence
 }
 
 pub struct SyncActor {
@@ -446,6 +470,11 @@ impl SyncActor {
             .build()
             .await
             .map_err(|_| {
+                record(DiagnosticEvent::new(
+                    DiagnosticLevel::Error,
+                    "core.sync",
+                    "service_build_failed",
+                ));
                 if let Some(handle) = self.ignored_user_list_handler.take() {
                     client.remove_event_handler(handle);
                 }
@@ -745,20 +774,52 @@ async fn observe_sync_service(
             tokio::select! {
                 state = state_sub.next() => match state {
                     Some(state) => Signal::State(state),
-                    None => return internal_observer_failure(connected),
+                    None => return internal_observer_failure_at("state_subscription_closed", connected),
                 },
                 committed = committed_all_rooms_response.next() => match committed {
                     Some(committed) => Signal::Committed(committed),
-                    None => return internal_observer_failure(connected),
+                    None => return internal_observer_failure_at("response_subscription_closed", connected),
                 },
             }
         };
 
         match signal {
             Signal::Committed(committed)
-                if committed.pos_present() && committed.sequence() > last_committed_sequence =>
+                if committed_response_is_handoff_evidence(
+                    committed.pos_present(),
+                    committed.sequence(),
+                    last_committed_sequence,
+                ) =>
             {
                 last_committed_sequence = committed.sequence();
+                trace_sync!(
+                    "committed_response",
+                    [
+                        DiagnosticField::count("sequence", committed.sequence()),
+                        DiagnosticField::boolean(
+                            "range_fully_loaded",
+                            committed.range_fully_loaded()
+                        ),
+                        DiagnosticField::count(
+                            "rooms_from_response",
+                            committed.rooms_from_response_count() as u64,
+                        ),
+                        DiagnosticField::boolean("pos_present", committed.pos_present()),
+                    ],
+                    "sequence={} range_fully_loaded={} rooms_from_response={} pos_present={}",
+                    committed.sequence(),
+                    committed.range_fully_loaded(),
+                    committed.rooms_from_response_count(),
+                    committed.pos_present()
+                );
+                if room_observation_started && committed.rooms_from_response_count() > 0 {
+                    let _ = room_tx
+                        .send(RoomMessage::RefreshCommittedProjection {
+                            source: RoomListSource::Live,
+                            backend_generation: run_generation,
+                        })
+                        .await;
+                }
                 if !room_observation_started {
                     if !start_room_observation(
                         session.clone(),
@@ -768,7 +829,10 @@ async fn observe_sync_service(
                     )
                     .await
                     {
-                        return internal_observer_failure(connected);
+                        return internal_observer_failure_at(
+                            "room_observation_start_failed",
+                            connected,
+                        );
                     }
                     start_timeline_observation(
                         &timeline_tx,
@@ -785,10 +849,16 @@ async fn observe_sync_service(
                 )
                 .await
                 {
-                    return internal_observer_failure(connected);
-                }
-                if !committed.range_fully_loaded() {
-                    continue;
+                    trace_sync!(
+                        "timeline_commit_forward_unavailable",
+                        [
+                            DiagnosticField::count("sequence", committed.sequence()),
+                            DiagnosticField::boolean("connected", connected),
+                        ],
+                        "sequence={} connected={}",
+                        committed.sequence(),
+                        connected
+                    );
                 }
                 if !connected {
                     match reconcile_committed_room_list(
@@ -809,7 +879,10 @@ async fn observe_sync_service(
                             continue;
                         }
                         RoomListReconcileResult::Failed => {
-                            return internal_observer_failure(connected);
+                            return internal_observer_failure_at(
+                                "initial_room_reconcile_failed",
+                                connected,
+                            );
                         }
                     }
                     connected = true;
@@ -839,7 +912,10 @@ async fn observe_sync_service(
                             continue;
                         }
                         RoomListReconcileResult::Failed => {
-                            return internal_observer_failure(connected);
+                            return internal_observer_failure_at(
+                                "reconnect_room_reconcile_failed",
+                                connected,
+                            );
                         }
                     }
                     reconnecting = false;
@@ -933,20 +1009,18 @@ pub mod tests {
         let observer = source
             .split("async fn observe_sync_service")
             .nth(1)
-            .expect("observer body");
+            .expect("observer body")
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("observer production body");
         let committed = observer
             .find("Signal::Committed(committed)")
             .expect("committed response branch");
-        let fully_loaded = observer
-            .find("if !committed.range_fully_loaded()")
-            .expect("complete all-rooms range guard");
         let handoff = observer
             .find("reconcile_committed_room_list")
             .expect("RoomActor reconciliation handoff");
-        assert!(fully_loaded > committed);
         assert!(handoff > committed);
-        assert!(handoff > fully_loaded);
-        assert!(!observer.contains("RoomListServiceStateKind"));
+        assert!(!observer.contains("if !committed.range_fully_loaded()"));
     }
 
     #[test]
@@ -955,23 +1029,30 @@ pub mod tests {
         let observer = source
             .split("async fn observe_sync_service")
             .nth(1)
-            .expect("observer body");
+            .expect("observer body")
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("observer production body");
         let committed = observer
             .find("Signal::Committed(committed)")
             .expect("committed response branch");
         let forwarding = observer
             .find("forward_latest_timeline_response_commit(")
             .expect("global timeline commit handoff");
-        let fully_loaded = observer
-            .find("if !committed.range_fully_loaded()")
-            .expect("complete all-rooms range guard");
 
         assert!(forwarding > committed);
-        assert!(forwarding < fully_loaded);
-        let handoff = &observer[forwarding..fully_loaded];
+        let handoff = &observer[forwarding..];
         assert!(handoff.contains("run_generation"));
         assert!(handoff.contains("committed.sequence()"));
         assert!(!handoff.contains("backend"));
+    }
+
+    #[test]
+    fn any_new_positioned_commit_is_startup_handoff_evidence() {
+        assert!(committed_response_is_handoff_evidence(true, 1, 0));
+        assert!(committed_response_is_handoff_evidence(true, 2, 1));
+        assert!(!committed_response_is_handoff_evidence(false, 1, 0));
+        assert!(!committed_response_is_handoff_evidence(true, 1, 1));
     }
 
     #[test]

@@ -1842,6 +1842,8 @@ async fn cleanup_after_login_sync(
         "restored logout A",
     )
     .await?;
+    drop(conn_a2);
+    runtime_a2.shutdown().await;
     println!("restore_cleanup=ok");
     Ok("restore_cleanup=ok".to_owned())
 }
@@ -9240,10 +9242,13 @@ async fn wait_for_space_in_space_list(
             .await
             .map_err(|_| {
                 let snapshot = conn.snapshot();
+                let observer_diagnostics =
+                    invite_observer_diagnostic_summary(&koushi_diagnostics::snapshot());
+                let sync_diagnostics = sync_diagnostic_summary(&koushi_diagnostics::snapshot());
                 format!(
                     "{label}: timed out waiting for space list to include the expected space \
-                     (have {} spaces)",
-                    snapshot.spaces.len()
+                     (have {} spaces; {observer_diagnostics}; {sync_diagnostics})",
+                    snapshot.spaces.len(),
                 )
             })?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
@@ -9660,9 +9665,17 @@ struct InviteObserverDiagnosticSummary {
     invite_projection: u64,
     invite_projection_delivered: u64,
     invite_projection_undelivered: u64,
+    last_projection_rooms: u64,
+    last_projection_spaces: u64,
+    last_projection_invites: u64,
+    last_refresh_entries: u64,
+    last_refresh_invites: u64,
+    last_refresh_authoritative: bool,
+    last_refresh_room_present: bool,
     lagged: u64,
     closed: u64,
     exit: u64,
+    last_exit_reason: Option<&'static str>,
     dropped: u64,
 }
 
@@ -9701,6 +9714,20 @@ fn diagnostic_has_token(
 ) -> bool {
     event.fields.iter().any(|field| {
         field.key == key && field.value == koushi_diagnostics::DiagnosticValue::Token(expected)
+    })
+}
+
+fn diagnostic_token_field(
+    event: &koushi_diagnostics::DiagnosticEvent,
+    key: &'static str,
+) -> Option<&'static str> {
+    event.fields.iter().find_map(|field| {
+        if field.key == key
+            && let koushi_diagnostics::DiagnosticValue::Token(value) = field.value
+        {
+            return Some(value);
+        }
+        None
     })
 }
 
@@ -9743,13 +9770,36 @@ fn invite_observer_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticS
                         summary.invite_projection_undelivered.saturating_add(1);
                 }
             }
+            "room_list_projection" => {
+                summary.last_projection_rooms =
+                    diagnostic_count_field(event, "rooms_count").unwrap_or(0);
+                summary.last_projection_spaces =
+                    diagnostic_count_field(event, "spaces_count").unwrap_or(0);
+                summary.last_projection_invites =
+                    diagnostic_count_field(event, "invites_count").unwrap_or(0);
+            }
+            "live_observer_refresh_snapshot" => {
+                summary.last_refresh_entries =
+                    diagnostic_count_field(event, "entries_count").unwrap_or(0);
+                summary.last_refresh_invites =
+                    diagnostic_count_field(event, "invited_entries_count").unwrap_or(0);
+                summary.last_refresh_authoritative =
+                    diagnostic_boolean_field(event, "authoritative").unwrap_or(false);
+            }
+            "live_observer_refresh_room" => {
+                summary.last_refresh_room_present =
+                    diagnostic_boolean_field(event, "requested_room_present").unwrap_or(false);
+            }
             "live_observer_base_lagged" => {
                 summary.lagged = summary.lagged.saturating_add(1);
             }
             "live_observer_auxiliary_closed" => {
                 summary.closed = summary.closed.saturating_add(1);
             }
-            "live_observer_exit" => summary.exit = summary.exit.saturating_add(1),
+            "live_observer_exit" => {
+                summary.exit = summary.exit.saturating_add(1);
+                summary.last_exit_reason = diagnostic_token_field(event, "reason");
+            }
             _ => {}
         }
     }
@@ -9759,8 +9809,14 @@ fn invite_observer_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticS
          observer_diag_base_membership_change_seen={} \
          observer_diag_base_projection_required_seen={} observer_diag_invite_projection={} \
          observer_diag_invite_projection_delivered={} \
-         observer_diag_invite_projection_undelivered={} observer_diag_lagged={} \
-         observer_diag_closed={} observer_diag_exit={} observer_diag_dropped={}",
+         observer_diag_invite_projection_undelivered={} observer_diag_last_projection_rooms={} \
+         observer_diag_last_projection_spaces={} observer_diag_last_projection_invites={} \
+         observer_diag_last_refresh_entries={} observer_diag_last_refresh_invites={} \
+         observer_diag_last_refresh_authoritative={} \
+         observer_diag_last_refresh_room_present={} \
+         observer_diag_lagged={} \
+         observer_diag_closed={} observer_diag_exit={} observer_diag_last_exit_reason={} \
+         observer_diag_dropped={}",
         summary.started,
         summary.rls_wake_max,
         summary.base_wake_max,
@@ -9770,10 +9826,72 @@ fn invite_observer_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticS
         summary.invite_projection,
         summary.invite_projection_delivered,
         summary.invite_projection_undelivered,
+        summary.last_projection_rooms,
+        summary.last_projection_spaces,
+        summary.last_projection_invites,
+        summary.last_refresh_entries,
+        summary.last_refresh_invites,
+        summary.last_refresh_authoritative,
+        summary.last_refresh_room_present,
         summary.lagged,
         summary.closed,
         summary.exit,
+        summary.last_exit_reason.unwrap_or("unknown"),
         summary.dropped,
+    )
+}
+
+fn sync_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticSnapshot) -> String {
+    let mut service_build_failed = 0_u64;
+    let mut committed_response = 0_u64;
+    let mut task_ended = 0_u64;
+    let mut last_task_kind = "unknown";
+    let mut last_state = "unknown";
+    let mut last_lifecycle = "unknown";
+    let mut last_rooms_from_response = 0_u64;
+    let mut last_observer_exit_reason = "unknown";
+    for record in &snapshot.records {
+        let event = &record.event;
+        if event.source != "core.sync" {
+            continue;
+        }
+        match event.stage {
+            "service_build_failed" => service_build_failed = service_build_failed.saturating_add(1),
+            "committed_response" => {
+                committed_response = committed_response.saturating_add(1);
+                last_rooms_from_response =
+                    diagnostic_count_field(event, "rooms_from_response").unwrap_or(0);
+            }
+            "task_ended" => {
+                task_ended = task_ended.saturating_add(1);
+                last_task_kind = diagnostic_token_field(event, "kind").unwrap_or("unknown");
+            }
+            "sync_service_state" => {
+                last_state = diagnostic_token_field(event, "state").unwrap_or("unknown");
+            }
+            "status_projected" => {
+                last_lifecycle = diagnostic_token_field(event, "lifecycle").unwrap_or("unknown");
+            }
+            "observer_exit" => {
+                last_observer_exit_reason =
+                    diagnostic_token_field(event, "reason").unwrap_or("unknown");
+            }
+            _ => {}
+        }
+    }
+    format!(
+        "sync_diag_service_build_failed={} sync_diag_committed_response={} \
+         sync_diag_task_ended={} sync_diag_last_task_kind={} sync_diag_last_state={} \
+         sync_diag_last_lifecycle={} sync_diag_last_rooms_from_response={} \
+         sync_diag_last_observer_exit_reason={}",
+        service_build_failed,
+        committed_response,
+        task_ended,
+        last_task_kind,
+        last_state,
+        last_lifecycle,
+        last_rooms_from_response,
+        last_observer_exit_reason,
     )
 }
 
@@ -9802,9 +9920,10 @@ async fn wait_for_invite_in_snapshot(
                 let snapshot = conn.snapshot();
                 let observer_diagnostics =
                     invite_observer_diagnostic_summary(&koushi_diagnostics::snapshot());
+                let sync_diagnostics = sync_diagnostic_summary(&koushi_diagnostics::snapshot());
                 format!(
                     "{label}: timed out waiting for invite snapshot \
-                     (have {} invites; {observer_diagnostics})",
+                     (have {} invites; {observer_diagnostics}; {sync_diagnostics})",
                     snapshot.invites.len(),
                 )
             })?
@@ -9911,7 +10030,8 @@ async fn wait_for_sync_started_and_running(
             }
             CoreEvent::Sync(SyncEvent::Failed) => {
                 return Err(format!(
-                    "{label}: SyncEvent::Failed received before Running"
+                    "{label}: SyncEvent::Failed received before Running ({})",
+                    sync_diagnostic_summary(&koushi_diagnostics::snapshot())
                 ));
             }
             CoreEvent::OperationFailed {
@@ -17481,8 +17601,14 @@ mod tests {
              observer_diag_base_membership_change_seen=false \
              observer_diag_base_projection_required_seen=true \
              observer_diag_invite_projection=1 observer_diag_invite_projection_delivered=1 \
-             observer_diag_invite_projection_undelivered=0 observer_diag_lagged=1 \
-             observer_diag_closed=1 observer_diag_exit=1 observer_diag_dropped=2"
+             observer_diag_invite_projection_undelivered=0 observer_diag_last_projection_rooms=0 \
+             observer_diag_last_projection_spaces=0 observer_diag_last_projection_invites=0 \
+             observer_diag_last_refresh_entries=0 observer_diag_last_refresh_invites=0 \
+             observer_diag_last_refresh_authoritative=false \
+             observer_diag_last_refresh_room_present=false \
+             observer_diag_lagged=1 \
+             observer_diag_closed=1 observer_diag_exit=1 observer_diag_last_exit_reason=unknown \
+             observer_diag_dropped=2"
         );
         assert!(!summary.contains("private-room"));
         assert!(!summary.contains("room_id"));

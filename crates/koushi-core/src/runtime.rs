@@ -1012,6 +1012,46 @@ pub struct EventStreamLag {
     pub skipped: u64,
 }
 
+/// A task handle that is aborted if its owner is dropped without an orderly
+/// shutdown. Explicit shutdown takes the handle and awaits it; error paths in
+/// headless QA and embedding callers therefore cannot leave detached runtime
+/// tasks keeping the process alive indefinitely.
+struct AbortOnDrop<T> {
+    handle: Option<executor::JoinHandle<T>>,
+}
+
+impl<T> AbortOnDrop<T> {
+    fn new(handle: executor::JoinHandle<T>) -> Self {
+        Self {
+            handle: Some(handle),
+        }
+    }
+
+    fn get(&self) -> &executor::JoinHandle<T> {
+        self.handle
+            .as_ref()
+            .expect("abort-on-drop task handle must remain present")
+    }
+
+    fn take(&mut self) -> executor::JoinHandle<T> {
+        self.handle
+            .take()
+            .expect("abort-on-drop task handle must be taken once")
+    }
+
+    fn abort(&self) {
+        if let Some(handle) = &self.handle {
+            handle.abort();
+        }
+    }
+}
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.abort();
+    }
+}
+
 /// Owns the actor tree and creates [`CoreConnection`] handles.
 pub struct CoreRuntime {
     command_tx: mpsc::Sender<CoreCommandEnvelope>,
@@ -1029,12 +1069,12 @@ pub struct CoreRuntime {
     /// receives descriptors only; adapters may operate on this cache through
     /// the typed runtime boundary.
     media_preparation: Arc<crate::media_preparation::MediaPreparationService>,
-    media_lifecycle: executor::JoinHandle<()>,
+    media_lifecycle: AbortOnDrop<()>,
     #[cfg(any(test, feature = "test-hooks"))]
     account_actor_test_handle: AccountActorHandle,
     #[cfg(any(test, feature = "test-hooks"))]
     composer_draft_store_actor_for_testing: StoreActor,
-    actor: executor::JoinHandle<()>,
+    actor: AbortOnDrop<()>,
 }
 
 #[cfg(any(test, feature = "test-hooks"))]
@@ -1267,12 +1307,12 @@ impl CoreRuntime {
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_test_tx,
             media_preparation,
-            media_lifecycle,
+            media_lifecycle: AbortOnDrop::new(media_lifecycle),
             #[cfg(any(test, feature = "test-hooks"))]
             account_actor_test_handle,
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_store_actor_for_testing,
-            actor,
+            actor: AbortOnDrop::new(actor),
         }
     }
 
@@ -1399,7 +1439,7 @@ impl CoreRuntime {
     }
 
     pub fn shutdown_handle(&self) -> &executor::JoinHandle<()> {
-        &self.actor
+        self.actor.get()
     }
 
     /// Close the command inbox and wait until AppActor has completed its
@@ -1415,16 +1455,16 @@ impl CoreRuntime {
             #[cfg(any(test, feature = "test-hooks"))]
                 composer_draft_test_tx: _,
             media_preparation: _,
-            media_lifecycle,
+            mut media_lifecycle,
             #[cfg(any(test, feature = "test-hooks"))]
                 account_actor_test_handle: _,
             #[cfg(any(test, feature = "test-hooks"))]
                 composer_draft_store_actor_for_testing: _,
-            actor,
+            mut actor,
         } = self;
         drop(command_tx);
-        let _ = actor.await;
-        let _ = media_lifecycle.await;
+        let _ = actor.take().await;
+        let _ = media_lifecycle.take().await;
     }
 }
 
@@ -6590,6 +6630,7 @@ mod tests {
         membership: SpaceMemberMembership,
         command: impl FnOnce(RequestId) -> crate::command::RoomCommand,
     ) -> (AppState, CoreFailure, u64) {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let runtime = CoreRuntime::start_with_event_capacity(64);
         let mut connection = runtime.attach();
         let space_id = "!closed-forward-space:example.invalid";
@@ -7270,6 +7311,7 @@ mod tests {
 
     #[test]
     fn read_receipt_profile_diagnostic_reports_child_room_profile_cache_miss() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let room_id = "!child:example.invalid";
         let mut state = AppState {
             session: SessionState::Ready(SessionInfo {
@@ -7333,6 +7375,7 @@ mod tests {
 
     #[test]
     fn profile_resolution_diagnostic_counts_actual_resolution_sources() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let room_id = "!resolution-room:example.invalid";
         let mut state = AppState {
             session: SessionState::Ready(SessionInfo {
@@ -7684,6 +7727,7 @@ mod tests {
 
     #[test]
     fn app_loop_trace_ignores_subthreshold_iterations() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let before = koushi_diagnostics::snapshot();
         app_loop_trace("test_boundary", 1, 2, Duration::from_millis(99));
         let after = koushi_diagnostics::snapshot();
@@ -7705,6 +7749,7 @@ mod tests {
 
     #[test]
     fn app_loop_trace_records_at_threshold_without_environment_switch() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let before = koushi_diagnostics::snapshot();
         app_loop_trace("test_boundary", 3, 4, Duration::from_millis(100));
         let after = koushi_diagnostics::snapshot();
@@ -10205,7 +10250,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let homeserver = format!("http://{}", listener.local_addr().expect("address"));
         std::thread::spawn(move || {
-            for _ in 0..128 {
+            for _ in 0..4096 {
                 let Ok((mut stream, _)) = listener.accept() else {
                     return;
                 };
@@ -10230,13 +10275,39 @@ mod tests {
                     }
                     let text = String::from_utf8_lossy(&request);
                     let body = if text.starts_with("GET /_matrix/client/versions ") {
-                        r#"{"versions":["v1.7"]}"#
+                        r#"{"versions":["v1.7"],"unstable_features":{"org.matrix.simplified_msc3575":true}}"#
                     } else if text.contains("/_matrix/client/") && text.contains("login") {
                         r#"{"access_token":"fixture-token","device_id":"FIXTUREDEVICE","user_id":"@fixture-user:example.invalid"}"#
+                    } else if text
+                        .contains("/_matrix/client/unstable/org.matrix.simplified_msc3575/sync")
+                    {
+                        if text.contains("\"conn_id\":\"room-list\"") {
+                            r#"{"pos":"sliding-pos","lists":{"all_rooms":{"count":1,"ops":[{"op":"SYNC","range":[0,0],"room_ids":["!fixture-room:example.invalid"]}]}},"rooms":{"!fixture-room:example.invalid":{"initial":true,"required_state":[{"type":"m.room.create","state_key":"","sender":"@fixture-user:example.invalid","event_id":"$create:example.invalid","origin_server_ts":1,"content":{"creator":"@fixture-user:example.invalid","room_version":"10"}},{"type":"m.room.name","state_key":"","sender":"@fixture-user:example.invalid","event_id":"$name:example.invalid","origin_server_ts":2,"content":{"name":"Fixture room"}},{"type":"m.room.member","state_key":"@fixture-user:example.invalid","sender":"@fixture-user:example.invalid","event_id":"$member:example.invalid","origin_server_ts":3,"content":{"membership":"join"}}]}},"extensions":{}}"#
+                        } else {
+                            r#"{"pos":"sliding-pos"}"#
+                        }
                     } else if text.contains("/_matrix/client/") && text.contains("/sync") {
                         r#"{"next_batch":"batch","device_lists":{"changed":[],"left":[]},"rooms":{"invite":{},"join":{},"leave":{},"knock":{}},"to_device":{"events":[]},"presence":{"events":[]},"account_data":{"events":[]},"device_one_time_keys_count":{}}"#
                     } else {
                         r#"{"errcode":"M_NOT_FOUND","error":"not found"}"#
+                    };
+                    let body = if text
+                        .contains("/_matrix/client/unstable/org.matrix.simplified_msc3575/sync")
+                    {
+                        let mut response: serde_json::Value =
+                            serde_json::from_str(body).expect("sliding-sync fixture response");
+                        if let Some(txn_id) = text
+                            .split_once("\r\n\r\n")
+                            .and_then(|(_, body)| {
+                                serde_json::from_str::<serde_json::Value>(body).ok()
+                            })
+                            .and_then(|request| request.get("txn_id").cloned())
+                        {
+                            response["txn_id"] = txn_id;
+                        }
+                        response.to_string()
+                    } else {
+                        body.to_owned()
                     };
                     let response = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",

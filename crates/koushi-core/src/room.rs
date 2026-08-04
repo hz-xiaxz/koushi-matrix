@@ -127,12 +127,29 @@ pub enum RoomMessage {
         backend_generation: u64,
     },
     /// A committed response must not become connected until the matching
-    /// complete all-rooms range has been projected reliably.
+    /// response has been projected reliably. Empty accounts may omit the SDK
+    /// room count, so that response is treated as a complete empty projection.
     ReconcileCommittedRange {
         source: RoomListSource,
         backend_generation: u64,
         response_sequence: u64,
         ack: oneshot::Sender<RoomListReconcileAck>,
+    },
+    /// Re-project the current entries after a committed Sliding Sync response.
+    /// The source remains the single live `RoomListService`; this wake only
+    /// closes the response/store publication window for membership changes.
+    RefreshCommittedProjection {
+        source: RoomListSource,
+        backend_generation: u64,
+    },
+    /// Re-project after the base client reports an invite/leave membership
+    /// update. The dynamic room-list stream can observe that update before
+    /// the client room store publishes the corresponding room, so the actor
+    /// performs the same bounded live-service refresh used by local room
+    /// mutations.
+    RefreshMembershipProjection {
+        source: RoomListSource,
+        room_generation: u64,
     },
     /// Stop only the observation owned by this runtime generation and
     /// acknowledge after its task has joined.
@@ -261,6 +278,9 @@ pub enum RoomListReconcileAck {
 
 enum RoomListObservationCommand {
     Refresh,
+    RefreshRoom {
+        room_id: String,
+    },
     Reconcile {
         backend_generation: u64,
         response_sequence: u64,
@@ -430,6 +450,39 @@ impl RoomActor {
                                 ack,
                             })
                             .await;
+                    }
+                }
+                RoomMessage::RefreshCommittedProjection {
+                    source,
+                    backend_generation,
+                } => {
+                    if self.room_list_source == Some(source)
+                        && self.room_list_backend_generation == Some(backend_generation)
+                        && let Some(observation) = &self.observation
+                        && observation.source == source
+                        && observation.generation == self.room_list_generation
+                    {
+                        // This is a single post-commit wake. Operation
+                        // refreshes use bounded retries because the local
+                        // mutation may settle asynchronously; a sync response
+                        // must not spawn retry work for every response.
+                        let _ = observation
+                            .command_tx
+                            .try_send(RoomListObservationCommand::Refresh);
+                    }
+                }
+                RoomMessage::RefreshMembershipProjection {
+                    source,
+                    room_generation,
+                } => {
+                    if self.room_list_source == Some(source)
+                        && self.room_list_generation == room_generation
+                    {
+                        // Membership updates are sparse and can precede the
+                        // SDK room-store publication. Use the existing
+                        // bounded refresh path so the single live service is
+                        // re-read after that publication window closes.
+                        self.refresh_room_list();
                     }
                 }
                 RoomMessage::StopSyncObservation {
@@ -1595,6 +1648,7 @@ impl RoomActor {
         };
         match koushi_sdk::join_room_by_id(session, &room_id).await {
             Ok(joined_room_id) => {
+                self.refresh_room_list_for_room(&joined_room_id);
                 self.emit(CoreEvent::Room(RoomEvent::InviteAccepted {
                     request_id,
                     room_id: joined_room_id,
@@ -1615,6 +1669,7 @@ impl RoomActor {
         };
         match koushi_sdk::leave_room(session, &room_id).await {
             Ok(declined_room_id) => {
+                self.refresh_room_list();
                 self.emit(CoreEvent::Room(RoomEvent::InviteDeclined {
                     request_id,
                     room_id: declined_room_id,
@@ -1635,11 +1690,12 @@ impl RoomActor {
         };
         match koushi_sdk::start_direct_message(session, &user_id).await {
             Ok(room_id) => {
+                let room_id_for_projection = room_id.clone();
                 self.emit(CoreEvent::Room(RoomEvent::DirectMessageStarted {
                     request_id,
                     room_id,
                 }));
-                self.refresh_room_list();
+                self.refresh_room_list_for_room(&room_id_for_projection);
             }
             Err(error) => {
                 let kind = classify_room_error(&error);
@@ -2425,10 +2481,51 @@ impl RoomActor {
     /// Before sync starts this is intentionally a no-op: reducer-owned cached
     /// rows remain visible until the live service begins projecting.
     fn refresh_room_list(&self) {
+        self.refresh_room_list_with_command(RoomListObservationCommand::Refresh);
+    }
+
+    /// Seed the same live service with a room returned by a successful local
+    /// operation, then use its normal snapshot projection. This is needed for
+    /// newly-created DMs whose list position is not present until a later
+    /// server response; it does not create a second service or sync loop.
+    fn refresh_room_list_for_room(&self, room_id: &str) {
+        self.refresh_room_list_with_command(RoomListObservationCommand::RefreshRoom {
+            room_id: room_id.to_owned(),
+        });
+    }
+
+    fn refresh_room_list_with_command(&self, command: RoomListObservationCommand) {
         if let Some(observation) = &self.observation {
-            let _ = observation
-                .command_tx
-                .try_send(RoomListObservationCommand::Refresh);
+            let retry_room_id = match &command {
+                RoomListObservationCommand::Refresh => None,
+                RoomListObservationCommand::RefreshRoom { room_id } => Some(room_id.clone()),
+                RoomListObservationCommand::Reconcile { .. } => return,
+            };
+            let command_tx = observation.command_tx.clone();
+            let _ = command_tx.try_send(command);
+            // A successful local mutation can update the SDK room store just
+            // after the immediate refresh observes the live list. Keep the
+            // same live-service projection authoritative by retrying a few
+            // bounded wakes; this never creates another service or network
+            // sync loop.
+            let _ = executor::spawn(async move {
+                for delay in [
+                    Duration::from_millis(100),
+                    Duration::from_millis(300),
+                    Duration::from_millis(1_000),
+                ] {
+                    executor::sleep(delay).await;
+                    let retry_command = match retry_room_id.as_deref() {
+                        Some(room_id) => RoomListObservationCommand::RefreshRoom {
+                            room_id: room_id.to_owned(),
+                        },
+                        None => RoomListObservationCommand::Refresh,
+                    };
+                    if command_tx.send(retry_command).await.is_err() {
+                        break;
+                    }
+                }
+            });
         }
     }
 
@@ -3081,7 +3178,14 @@ fn room_list_range_is_complete(
     maximum_number_of_rooms: Option<u32>,
     current_entries: usize,
 ) -> bool {
-    maximum_number_of_rooms.and_then(|count| usize::try_from(count).ok()) == Some(current_entries)
+    match maximum_number_of_rooms.and_then(|count| usize::try_from(count).ok()) {
+        Some(maximum_number_of_rooms) => maximum_number_of_rooms == current_entries,
+        // Some Simplified Sliding Sync responses omit `count`. The committed
+        // response sequence is still the SDK's authority for the observed
+        // projection; later responses replace it as the server reveals more
+        // rooms.
+        None => true,
+    }
 }
 
 fn room_stop_matches_generation(active_generation: Option<u64>, stopped_generation: u64) -> bool {
@@ -3122,7 +3226,7 @@ impl LiveRoomListReconciliation {
     }
 
     fn is_complete(&self, current_entries: usize) -> bool {
-        self.range_fully_loaded
+        (self.range_fully_loaded || self.maximum_number_of_rooms.is_none())
             && room_list_range_is_complete(self.maximum_number_of_rooms, current_entries)
     }
 
@@ -3285,13 +3389,14 @@ fn room_list_source_label(source: RoomListSource) -> &'static str {
 /// `required_state`, including `m.room.create` for space classification) and
 /// KEEPS CONSUMING it: the current entry vector is maintained by applying
 /// each `VectorDiff` batch, and every visible joined/invited batch triggers a
-/// re-normalization. The base client's committed room-update broadcast remains
-/// only an auxiliary wake source for mention-membership and pinned-state
-/// invalidation; it never projects rooms or invites and never owns or drives
-/// another network sync.
+/// re-normalization. The base client's committed room-update broadcast is an
+/// auxiliary wake source for membership-sensitive re-normalization,
+/// mention-membership and pinned-state invalidation; it never supplies rooms
+/// or invites and never owns or drives another network sync.
 /// The first batch (a Reset with the current entries) doubles as the initial
-/// snapshot. A refresh request (operation-triggered) re-normalizes from the
-/// current entries without touching the service. Exits on the oneshot stop
+/// snapshot. A refresh request (operation-triggered) re-reads the current
+/// entries snapshot from that same service without creating another service or
+/// sync loop. Exits on the oneshot stop
 /// signal or when the stream ends.
 async fn run_live_room_list_observation(
     session: Arc<MatrixClientSession>,
@@ -3429,65 +3534,136 @@ async fn run_live_room_list_observation_with_sources(
                     break;
                 };
                 match command {
-                    RoomListObservationCommand::Refresh => {}
+                    RoomListObservationCommand::Refresh => {
+                        // Read through the same live service that owns the
+                        // entries stream. A committed response can publish
+                        // its observed IDs before the matching SDK room-store
+                        // update reaches the dynamic-entry stream; refreshing
+                        // only `current` would therefore re-project the same
+                        // stale vector and lose an invite during that window.
+                        // This remains a bounded wake, not a second room-list
+                        // source or a new sync service.
+                        let snapshot = all_rooms.current_entries_snapshot();
+                        let invited_entries = snapshot
+                            .entries()
+                            .iter()
+                            .filter(|entry| {
+                                (*entry).clone().into_inner().state()
+                                    == matrix_sdk::RoomState::Invited
+                            })
+                            .count();
+                        record(
+                            DiagnosticEvent::new(
+                                DiagnosticLevel::Debug,
+                                "core.room",
+                                "live_observer_refresh_snapshot",
+                            )
+                            .field(DiagnosticField::count(
+                                "entries_count",
+                                snapshot.entries().len() as u64,
+                            ))
+                            .field(DiagnosticField::count(
+                                "invited_entries_count",
+                                invited_entries as u64,
+                            ))
+                            .field(DiagnosticField::boolean(
+                                "authoritative",
+                                snapshot.is_authoritative(),
+                            )),
+                        );
+                        reconciliation.report_maximum(snapshot.maximum_number_of_rooms());
+                        if let Some(range_fully_loaded) = snapshot.range_fully_loaded() {
+                            reconciliation.report_range_fully_loaded(range_fully_loaded);
+                        }
+                        current = snapshot.into_entries();
+                    }
+                    RoomListObservationCommand::RefreshRoom { room_id } => {
+                        let requested_room_id =
+                            matrix_sdk::ruma::OwnedRoomId::try_from(room_id.as_str()).ok();
+                        if let Some(room_id) = requested_room_id.as_ref() {
+                            all_rooms.remember_room_id(room_id.clone());
+                        }
+                        let snapshot = all_rooms.current_entries_snapshot();
+                        let requested_room_present = requested_room_id.as_ref().is_some_and(|room_id| {
+                            snapshot
+                                .entries()
+                                .iter()
+                                .any(|entry| entry.room_id() == room_id)
+                        });
+                        record(
+                            DiagnosticEvent::new(
+                                DiagnosticLevel::Debug,
+                                "core.room",
+                                "live_observer_refresh_room",
+                            )
+                            .field(DiagnosticField::count(
+                                "entries_count",
+                                snapshot.entries().len() as u64,
+                            ))
+                            .field(DiagnosticField::boolean(
+                                "requested_room_present",
+                                requested_room_present,
+                            ))
+                            .field(DiagnosticField::boolean(
+                                "authoritative",
+                                snapshot.is_authoritative(),
+                            )),
+                        );
+                        reconciliation.report_maximum(snapshot.maximum_number_of_rooms());
+                        if let Some(range_fully_loaded) = snapshot.range_fully_loaded() {
+                            reconciliation.report_range_fully_loaded(range_fully_loaded);
+                        }
+                        current = snapshot.into_entries();
+                    }
                     RoomListObservationCommand::Reconcile {
                         backend_generation,
                         response_sequence,
                         ack,
                     } => {
                         let snapshot = all_rooms.current_entries_snapshot();
-                        let Some(snapshot_sequence) = snapshot.response_sequence() else {
-                            record_live_observer_exit(
-                                DiagnosticLevel::Error,
-                                "committed_snapshot_missing_authority",
-                                rls_wake_count,
-                                base_wake_count,
-                            );
-                            break;
-                        };
-                        let Some(maximum_number_of_rooms) = snapshot.maximum_number_of_rooms()
-                        else {
-                            record_live_observer_exit(
-                                DiagnosticLevel::Error,
-                                "committed_snapshot_missing_maximum",
-                                rls_wake_count,
-                                base_wake_count,
-                            );
-                            break;
-                        };
-                        if snapshot_sequence < response_sequence {
-                            record_live_observer_exit(
-                                DiagnosticLevel::Error,
-                                "committed_snapshot_behind_response",
-                                rls_wake_count,
-                                base_wake_count,
-                            );
-                            break;
+                        let maximum_number_of_rooms = snapshot.maximum_number_of_rooms();
+                        let snapshot_sequence = snapshot.response_sequence();
+                        if snapshot_sequence.is_none() {
+                            // The SDK can publish the committed-response signal before
+                            // the RoomListService snapshot carries its response sequence.
+                            // Keep the acknowledgement pending and let the next service
+                            // update retry projection instead of terminating observation.
+                            reconciliation.begin(backend_generation, response_sequence, ack);
+                            continue;
                         }
-                        let snapshot_is_complete = snapshot.range_fully_loaded() == Some(true)
-                            && usize::try_from(maximum_number_of_rooms).ok()
-                                == Some(snapshot.entries().len());
-                        if snapshot_sequence > response_sequence && !snapshot_is_complete {
+                        if snapshot_sequence.is_some_and(|sequence| sequence < response_sequence) {
+                            // The committed response and RoomListService snapshot are
+                            // delivered on separate SDK observers. Wait for the service
+                            // snapshot to catch up rather than treating this normal race as
+                            // an infrastructure failure.
+                            reconciliation.begin(backend_generation, response_sequence, ack);
+                            continue;
+                        }
+                        let snapshot_is_complete = room_list_range_is_complete(
+                            maximum_number_of_rooms,
+                            snapshot.entries().len(),
+                        );
+                        if snapshot_sequence.is_some_and(|sequence| sequence > response_sequence)
+                            && !snapshot_is_complete
+                        {
                             let _ = ack.send(RoomListReconcileAck::Superseded {
                                 backend_generation,
                                 room_generation: generation,
-                                response_sequence: snapshot_sequence,
+                                response_sequence: snapshot_sequence
+                                    .expect("checked snapshot sequence"),
                             });
                             continue;
                         }
-                        if !snapshot_is_complete {
-                            record_live_observer_exit(
-                                DiagnosticLevel::Error,
-                                "committed_snapshot_not_complete_response",
-                                rls_wake_count,
-                                base_wake_count,
-                            );
-                            break;
-                        }
-                        reconciliation.report_maximum(Some(maximum_number_of_rooms));
+                        reconciliation.report_maximum(maximum_number_of_rooms);
                         reconciliation.report_range_fully_loaded(true);
                         current = snapshot.into_entries();
-                        reconciliation.begin(backend_generation, snapshot_sequence, ack);
+                        reconciliation.begin(
+                            backend_generation,
+                            snapshot_sequence
+                                .unwrap_or(response_sequence)
+                                .max(response_sequence),
+                            ack,
+                        );
                     }
                 }
                 project_live_entries_and_ack_if_reconciled(
@@ -3619,10 +3795,17 @@ async fn run_live_room_list_observation_with_sources(
                 let mut update_count = 0_u64;
                 let mut lagged = false;
                 let mut updated_joined_room_ids = BTreeSet::new();
+                let mut projection_required = false;
+                let mut invite_update_observed = false;
+                let mut invite_membership_changed = false;
                 let mut pinned_event_room_ids = BTreeSet::new();
                 match room_update {
                     Ok(updates) => {
                         update_count = 1;
+                        projection_required = room_updates_require_room_list_projection(&updates);
+                        invite_update_observed =
+                            !updates.invited.is_empty() || !updates.left.is_empty();
+                        invite_membership_changed = room_updates_include_joined_state(&updates);
                         updated_joined_room_ids.extend(
                             updates.joined.keys().map(ToString::to_string),
                         );
@@ -3637,6 +3820,10 @@ async fn run_live_room_list_observation_with_sources(
                     match room_updates_rx.try_recv() {
                         Ok(updates) => {
                             update_count = update_count.saturating_add(1);
+                            projection_required |= room_updates_require_room_list_projection(&updates);
+                            invite_update_observed |=
+                                !updates.invited.is_empty() || !updates.left.is_empty();
+                            invite_membership_changed |= room_updates_include_joined_state(&updates);
                             updated_joined_room_ids.extend(
                                 updates.joined.keys().map(ToString::to_string),
                             );
@@ -3653,6 +3840,7 @@ async fn run_live_room_list_observation_with_sources(
                     }
                 }
 
+                projection_required |= lagged;
                 if room_updates_closed {
                     record(
                         DiagnosticEvent::new(
@@ -3677,7 +3865,19 @@ async fn run_live_room_list_observation_with_sources(
                         .field(DiagnosticField::token("source", "base_room_updates"))
                         .field(DiagnosticField::count("wake_count", base_wake_count))
                         .field(DiagnosticField::count("drained_update_count", update_count))
-                        .field(DiagnosticField::boolean("lagged", lagged)),
+                        .field(DiagnosticField::boolean("lagged", lagged))
+                        .field(DiagnosticField::boolean(
+                            "invite_update_observed",
+                            invite_update_observed,
+                        ))
+                        .field(DiagnosticField::boolean(
+                            "invite_membership_changed",
+                            invite_membership_changed,
+                        ))
+                        .field(DiagnosticField::boolean(
+                            "projection_required",
+                            projection_required,
+                        )),
                     );
                 }
                 if lagged {
@@ -3689,8 +3889,35 @@ async fn run_live_room_list_observation_with_sources(
                         )
                         .field(DiagnosticField::count("rls_wake_count", rls_wake_count))
                         .field(DiagnosticField::count("base_wake_count", base_wake_count))
-                        .field(DiagnosticField::count("drained_update_count", update_count)),
+                        .field(DiagnosticField::count("drained_update_count", update_count))
+                        .field(DiagnosticField::boolean(
+                            "projection_required",
+                            projection_required,
+                        )),
                     );
+                }
+                if projection_required {
+                    project_live_entries_and_ack_if_reconciled(
+                        &mut reconciliation,
+                        &session,
+                        &current,
+                        &known_room_ids,
+                        &room_tx,
+                        &action_tx,
+                        &event_tx,
+                        generation,
+                        source,
+                        &authoritative,
+                    )
+                    .await;
+                }
+                if invite_update_observed {
+                    let _ = room_tx
+                        .send(RoomMessage::RefreshMembershipProjection {
+                            source,
+                            room_generation: generation,
+                        })
+                        .await;
                 }
                 if lagged || !updated_joined_room_ids.is_empty() {
                     let _ = room_tx
@@ -3723,6 +3950,19 @@ fn record_live_observer_exit(
             .field(DiagnosticField::count("rls_wake_count", rls_wake_count))
             .field(DiagnosticField::count("base_wake_count", base_wake_count)),
     );
+}
+
+fn room_updates_include_joined_state(updates: &matrix_sdk_base::sync::RoomUpdates) -> bool {
+    updates.joined.values().any(|update| match &update.state {
+        matrix_sdk_base::sync::State::Before(events)
+        | matrix_sdk_base::sync::State::After(events) => !events.is_empty(),
+    })
+}
+
+fn room_updates_require_room_list_projection(updates: &matrix_sdk_base::sync::RoomUpdates) -> bool {
+    !updates.left.is_empty()
+        || !updates.invited.is_empty()
+        || room_updates_include_joined_state(updates)
 }
 
 /// Normalize the live service's current entries and project the result.
@@ -3771,7 +4011,12 @@ async fn invite_previews_from_service_entries(
 ) -> Vec<koushi_sdk::MatrixInvitePreview> {
     let mut invites = Vec::new();
     for room in rooms {
-        debug_assert_eq!(room.state(), matrix_sdk::RoomState::Invited);
+        if room.state() != matrix_sdk::RoomState::Invited {
+            // The SDK room object is live and can transition to Joined after
+            // the entries vector was collected. Do not panic or re-project a
+            // stale invite during that normal acceptance race.
+            continue;
+        }
         let display_name = room
             .display_name()
             .await
@@ -5222,6 +5467,7 @@ pub mod tests {
 
     #[test]
     fn room_operation_records_without_environment_switch() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         trace_room_operation("create_room", "test_always_on", make_request_id(999));
         assert!(koushi_diagnostics::snapshot().records.iter().any(|record| {
             record.event.source == "core.room" && record.event.stage == "test_always_on"
@@ -6229,10 +6475,11 @@ pub mod tests {
     }
 
     #[test]
-    fn complete_live_range_requires_the_exact_sdk_reported_count() {
+    fn complete_live_range_accepts_committed_responses_without_a_count() {
         assert!(room_list_range_is_complete(Some(0), 0));
         assert!(room_list_range_is_complete(Some(250), 250));
-        assert!(!room_list_range_is_complete(None, 0));
+        assert!(room_list_range_is_complete(None, 0));
+        assert!(room_list_range_is_complete(None, 1));
         assert!(!room_list_range_is_complete(Some(250), 249));
         assert!(
             !room_list_range_is_complete(Some(250), 251),
@@ -6298,6 +6545,37 @@ pub mod tests {
             !reconciliation.is_authoritative(2),
             "a newly growing range returns to provisional until complete"
         );
+    }
+
+    #[tokio::test]
+    async fn committed_response_without_count_stays_authoritative_as_entries_change() {
+        let mut reconciliation = LiveRoomListReconciliation::default();
+        reconciliation.report_maximum(None);
+        reconciliation.report_range_fully_loaded(false);
+        let (ready_tx, ready_rx) = oneshot::channel();
+        reconciliation.begin(7, 11, ready_tx);
+
+        let (backend_generation, sequence, ready_tx) = reconciliation
+            .finish_if_complete(2)
+            .expect("missing count must not block the committed projection");
+        assert_eq!((backend_generation, sequence), (7, 11));
+        assert!(reconciliation.is_authoritative(2));
+        ready_tx
+            .send(RoomListReconcileAck::Reconciled {
+                backend_generation,
+                room_generation: 3,
+                response_sequence: sequence,
+            })
+            .map_err(|_| ())
+            .expect("readiness receiver");
+        assert!(matches!(
+            ready_rx.await.expect("readiness ack"),
+            RoomListReconcileAck::Reconciled {
+                backend_generation: 7,
+                room_generation: 3,
+                response_sequence: 11,
+            }
+        ));
     }
 
     #[tokio::test]
@@ -7301,6 +7579,7 @@ pub mod tests {
 
     #[test]
     fn failed_space_member_diagnostics_do_not_fabricate_member_counts() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let before = koushi_diagnostics::snapshot().records.len();
         record_core_space_members_load_failure("sync_refresh", 7);
         let record = koushi_diagnostics::snapshot()
@@ -7342,6 +7621,7 @@ pub mod tests {
 
     #[test]
     fn core_space_members_diagnostics_are_private_data_free() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let projection = SpaceMembersProjection {
             space_id: "!private:example.invalid".to_owned(),
             generation: 4,

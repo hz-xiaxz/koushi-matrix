@@ -177,6 +177,7 @@ mod tests {
 
     #[test]
     fn unread_helpers_collect_typed_records_without_trace_env() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let room = private_room();
         trace_room_list_snapshot(std::slice::from_ref(&room));
         let input = capture_room_list_applied(std::slice::from_ref(&room));
@@ -261,6 +262,7 @@ mod tests {
 
     #[test]
     fn activity_plain_unread_non_candidates_are_suppressed() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let room = private_room();
 
         trace_activity_room("activity_recent_event", &room, false, "plain_unread_only");

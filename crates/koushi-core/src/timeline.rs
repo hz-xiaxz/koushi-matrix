@@ -11319,6 +11319,7 @@ mod timeline_gap_repair_tracker_tests {
 
     #[test]
     fn unlocated_gap_diagnostics_are_private_safe() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_timeline_gap_projection(
             4,
             GapBoundaryPresenceCounts {
@@ -11376,6 +11377,7 @@ mod timeline_gap_repair_tracker_tests {
 
     #[test]
     fn gap_projection_boundary_diagnostics_correlate_without_private_identifiers() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_timeline_gap_projection_boundary(
             "relay_received",
             "accepted",
@@ -11628,6 +11630,7 @@ mod timeline_gap_repair_tracker_tests {
 
     #[test]
     fn viewport_wake_evaluation_diagnostics_are_private_safe() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_timeline_gap_repair_evaluation("wake", 2, 1, true, true, "awaiting_render_ack");
 
         let record = koushi_diagnostics::snapshot()
@@ -12734,6 +12737,7 @@ mod timeline_gap_repair_tracker_tests {
 
     #[test]
     fn gap_repair_attempt_diagnostics_emit_once_per_changed_admission() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let demand_revision = 9_004_001;
         let mut tracker = TimelineGapRepairTracker::default();
@@ -12800,6 +12804,7 @@ mod timeline_gap_repair_tracker_tests {
 
     #[test]
     fn gap_repair_attempt_diagnostics_emit_one_budget_update_per_sdk_result() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let demand_revision = 9_004_101;
         let mut tracker = TimelineGapRepairTracker::default();
@@ -35258,6 +35263,7 @@ mod tests {
 
     #[test]
     fn timeline_diagnostic_helpers_collect_typed_records_without_trace_env() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let key = room_key();
         let request_id = fake_rid(7001);
         record_read_retry(
@@ -35447,6 +35453,7 @@ mod tests {
 
     #[test]
     fn timeline_items_record_batch_only_by_default() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let key = room_key();
         let baseline = koushi_diagnostics::snapshot().records.len();
         trace_timeline_items(
@@ -35487,6 +35494,7 @@ mod tests {
 
     #[test]
     fn thread_projection_diagnostic_records_only_thread_batches() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let baseline = koushi_diagnostics::snapshot().records.len();
         let thread_key = TimelineKey {
             account_key: AccountKey("@a:test".to_owned()),
@@ -35537,6 +35545,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_replay_path_records_subscribed_done_stage() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let key = room_key();
         let (actor_tx, mut actor_rx) = mpsc::channel(1);
         let actor_task = executor::spawn(async move {
@@ -35859,6 +35868,7 @@ mod tests {
 
     #[test]
     fn reaction_and_read_signal_collector_fields_are_typed_and_private() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let key = room_key();
         let request_id = fake_rid(7002);
         trace_timeline_actor_operation(
@@ -36725,6 +36735,7 @@ mod tests {
 
     #[tokio::test]
     async fn production_receipt_diff_delivery_sends_receipts_when_local_lookup_fails() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         use koushi_state::SessionAuthenticationMethod;
         use matrix_sdk::ruma::event_id;
         use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -39916,6 +39927,7 @@ mod tests {
 
     #[test]
     fn send_completion_trace_orders_terminal_before_and_after_binding() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let coordinator = SharedSendCompletionCoordinator::default();
         let (ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
         let key = room_key();

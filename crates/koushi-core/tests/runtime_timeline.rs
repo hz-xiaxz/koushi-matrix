@@ -1074,6 +1074,7 @@ impl CorruptComposerLoadFixture {
 #[tokio::test]
 async fn corrupt_load_attempts_once_per_session() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
     let mut fixture = CorruptComposerLoadFixture::start().await;
     let benign_room = "!benign:example.test";
     let mut unexpected_reload = fixture
@@ -1103,6 +1104,7 @@ async fn corrupt_load_attempts_once_per_session() {
 #[tokio::test]
 async fn revision_commands_fail_while_composer_load_failed() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
     let mut fixture = CorruptComposerLoadFixture::start().await;
     let before = fixture.connection.snapshot();
     let set_request_id = fixture.connection.next_request_id();
@@ -1153,6 +1155,7 @@ async fn revision_commands_fail_while_composer_load_failed() {
 #[tokio::test]
 async fn lock_unlock_retries_repaired_composer_payload() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
     let mut fixture = CorruptComposerLoadFixture::start().await;
     std::fs::write(&fixture.payload_path, &fixture.valid_payload)
         .expect("install repaired valid encrypted payload");

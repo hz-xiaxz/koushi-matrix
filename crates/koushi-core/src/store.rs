@@ -1797,6 +1797,7 @@ mod tests {
 
     #[test]
     fn store_diagnostic_producer_records_typed_outcome_without_environment_switch() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_file_credential_store_active();
         let record = koushi_diagnostics::snapshot()
             .records
@@ -1897,6 +1898,7 @@ mod tests {
 
     #[test]
     fn account_store_and_search_config_trace_unlock_secret_source() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let data_dir = tempdir().expect("tempdir");
         let cred_dir = tempdir().expect("tempdir");
         let key_id = make_key_id();

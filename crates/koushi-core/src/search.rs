@@ -1583,6 +1583,7 @@ mod tests {
 
     #[test]
     fn search_producer_records_typed_start_fields_without_environment_switch() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         trace_search_start(
             RequestId {
                 connection_id: RuntimeConnectionId(8),

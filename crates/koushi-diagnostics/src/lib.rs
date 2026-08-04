@@ -191,6 +191,24 @@ impl DiagnosticBuffer {
 
 static GLOBAL_BUFFER: OnceLock<DiagnosticBuffer> = OnceLock::new();
 
+/// Test-only coordination for assertions against the process-wide diagnostic
+/// buffer. Production diagnostics remain concurrent; tests that inspect the
+/// global stream must hold this guard across the operation that emits and
+/// checks records so parallel tests cannot consume one another's evidence.
+#[doc(hidden)]
+pub mod test_support {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    static GLOBAL_DIAGNOSTIC_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    pub fn lock() -> MutexGuard<'static, ()> {
+        GLOBAL_DIAGNOSTIC_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 pub fn record(event: DiagnosticEvent) {
     GLOBAL_BUFFER
         .get_or_init(|| DiagnosticBuffer::new(DEFAULT_DIAGNOSTIC_CAPACITY))

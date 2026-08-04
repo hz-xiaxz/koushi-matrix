@@ -12342,6 +12342,7 @@ mod tests {
 
     #[tokio::test]
     async fn actor_sas_settlement_emits_exactly_one_terminal_and_clears_runtime() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let cred_dir = tempdir().expect("credential tempdir");
         let data_dir = tempdir().expect("data tempdir");
@@ -12548,6 +12549,7 @@ mod tests {
 
     #[test]
     fn account_trace_preserves_typed_request_fields_without_environment_switch() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         trace_account_request(
             "test_account_typed_fields",
             RequestId {
@@ -12947,6 +12949,7 @@ mod tests {
 
     #[tokio::test]
     async fn own_user_sas_start_helper_traces_started_pending_and_failed_results() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();
 
         assert_eq!(
@@ -14008,6 +14011,7 @@ mod tests {
 
     #[tokio::test]
     async fn verified_warm_restore_skips_restricted_and_full_state_preparation() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let homeserver = spawn_quarantine_password_server();
         let cred_dir = tempdir().expect("tempdir");
@@ -14663,6 +14667,7 @@ mod tests {
 
     #[tokio::test]
     async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let (handle, mut action_rx) = login_gated_actor().await;
         let flow_id = 80;
@@ -15029,6 +15034,7 @@ mod tests {
 
     #[tokio::test]
     async fn verification_to_normal_sync_handoff_has_one_owner() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let (handle, mut action_rx) = login_gated_actor().await;
         assert!(
