@@ -77,7 +77,18 @@ describe("diagnosticReport", () => {
         lastFailureRetryability: "permanent",
         roomListTaskRunning: false,
         encryptionTaskRunning: false,
-        posPresent: false
+        posPresent: false,
+        directAccountDataSource: "sliding_sync_event",
+        directMappedRoomCount: 4,
+        directTargetCount: 5,
+        projectedDmCount: 2,
+        explicitDmCount: 1,
+        fallbackDmCount: 1,
+        directNonDmCount: 7,
+        directInvalidEntryCount: 0,
+        directEventWakeCount: 1,
+        directEventAppliedCount: 1,
+        directEventStreamRunning: true
       }
     });
 
@@ -113,7 +124,18 @@ describe("diagnosticReport", () => {
       "sync.last_failure_retryability=permanent",
       "sync.room_list_task_running=false",
       "sync.encryption_task_running=false",
-      "sync.pos_present=false"
+      "sync.pos_present=false",
+      "direct_classification.source=sliding_sync_event",
+      "direct_classification.mapped_room_count=4",
+      "direct_classification.target_count=5",
+      "direct_classification.projected_dm_count=2",
+      "direct_classification.explicit_dm_count=1",
+      "direct_classification.fallback_dm_count=1",
+      "direct_classification.non_dm_count=7",
+      "direct_classification.invalid_entry_count=0",
+      "direct_classification.event_wake_count=1",
+      "direct_classification.event_applied_count=1",
+      "direct_classification.event_stream_running=true"
     ].join("\n");
     expect(report).toContain(expected);
     expect(report).not.toContain("https://");

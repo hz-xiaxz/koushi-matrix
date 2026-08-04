@@ -116,6 +116,17 @@ export interface SlidingSyncDiagnostics {
   roomListTaskRunning: boolean;
   encryptionTaskRunning: boolean;
   posPresent: boolean;
+  directAccountDataSource: "unavailable" | "local_store" | "sliding_sync_event";
+  directMappedRoomCount: number;
+  directTargetCount: number;
+  projectedDmCount: number;
+  explicitDmCount: number;
+  fallbackDmCount: number;
+  directNonDmCount: number;
+  directInvalidEntryCount: number;
+  directEventWakeCount: number;
+  directEventAppliedCount: number;
+  directEventStreamRunning: boolean;
 }
 
 export const DEFAULT_SLIDING_SYNC_DIAGNOSTICS: SlidingSyncDiagnostics = {
@@ -149,7 +160,18 @@ export const DEFAULT_SLIDING_SYNC_DIAGNOSTICS: SlidingSyncDiagnostics = {
   lastFailureRetryability: "none",
   roomListTaskRunning: false,
   encryptionTaskRunning: false,
-  posPresent: false
+  posPresent: false,
+  directAccountDataSource: "unavailable",
+  directMappedRoomCount: 0,
+  directTargetCount: 0,
+  projectedDmCount: 0,
+  explicitDmCount: 0,
+  fallbackDmCount: 0,
+  directNonDmCount: 0,
+  directInvalidEntryCount: 0,
+  directEventWakeCount: 0,
+  directEventAppliedCount: 0,
+  directEventStreamRunning: false
 };
 
 export const DEFAULT_DIAGNOSTIC_LOG_LIMIT = 10_000;
@@ -327,8 +349,23 @@ function formatSlidingSyncDiagnostics(sync: SlidingSyncDiagnostics | undefined):
     `sync.last_failure_retryability=${sync.lastFailureRetryability}`,
     `sync.room_list_task_running=${sync.roomListTaskRunning}`,
     `sync.encryption_task_running=${sync.encryptionTaskRunning}`,
-    `sync.pos_present=${sync.posPresent}`
+    `sync.pos_present=${sync.posPresent}`,
+    `direct_classification.source=${sync.directAccountDataSource}`,
+    `direct_classification.mapped_room_count=${normalizedCount(sync.directMappedRoomCount)}`,
+    `direct_classification.target_count=${normalizedCount(sync.directTargetCount)}`,
+    `direct_classification.projected_dm_count=${normalizedCount(sync.projectedDmCount)}`,
+    `direct_classification.explicit_dm_count=${normalizedCount(sync.explicitDmCount)}`,
+    `direct_classification.fallback_dm_count=${normalizedCount(sync.fallbackDmCount)}`,
+    `direct_classification.non_dm_count=${normalizedCount(sync.directNonDmCount)}`,
+    `direct_classification.invalid_entry_count=${normalizedCount(sync.directInvalidEntryCount)}`,
+    `direct_classification.event_wake_count=${normalizedCount(sync.directEventWakeCount)}`,
+    `direct_classification.event_applied_count=${normalizedCount(sync.directEventAppliedCount)}`,
+    `direct_classification.event_stream_running=${sync.directEventStreamRunning}`
   ];
+}
+
+function normalizedCount(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
 
 function formatSecurityDiagnostics(security: SecurityDiagnostics | undefined): string[] {

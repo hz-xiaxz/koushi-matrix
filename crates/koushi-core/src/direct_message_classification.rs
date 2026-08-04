@@ -28,8 +28,9 @@ impl DirectClassificationState {
                 invalid_entry_count: 1,
                 ..Self::default()
             },
-            MatrixCachedDirectAccountData::Missing
-            | MatrixCachedDirectAccountData::StoreError => Self::default(),
+            MatrixCachedDirectAccountData::Missing | MatrixCachedDirectAccountData::StoreError => {
+                Self::default()
+            }
         }
     }
 
@@ -62,8 +63,8 @@ impl DirectClassificationState {
 
     pub(crate) fn replace_targets(&mut self, next: MatrixDirectTargetsByRoom) -> bool {
         self.event_wake_count = self.event_wake_count.saturating_add(1);
-        let changed = self.source == DirectAccountDataSource::Unavailable
-            || self.targets_by_room != next;
+        let changed =
+            self.source == DirectAccountDataSource::Unavailable || self.targets_by_room != next;
         self.source = DirectAccountDataSource::SlidingSyncEvent;
         self.invalid_entry_count = 0;
         if !changed {

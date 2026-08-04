@@ -17,6 +17,7 @@ mod causal_projection;
 pub mod command;
 pub mod composer_draft_lifecycle;
 mod credential_vault;
+mod direct_message_classification;
 pub mod event;
 pub mod executor;
 pub mod failure;
@@ -34,7 +35,6 @@ pub(crate) mod scheduled_send;
 pub mod search;
 pub(crate) mod search_crawler;
 pub mod settings;
-mod direct_message_classification;
 mod sliding_sync_diagnostics;
 pub(crate) mod startup_trace;
 pub mod state_delta;
@@ -52,6 +52,7 @@ pub use command::{
     SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
     TimelineCommand, UploadMediaKind, UploadMediaRequest, UploadMediaThumbnail,
 };
+pub use direct_message_classification::DirectAccountDataSource;
 pub use event::{
     AccountEvent, ActivityEvent, AppStateSnapshot, CjkTextPolicyEvent, CoreEvent, E2eeTrustEvent,
     IntentNoOpReason, IntentOutcome, LinkPreview, LinkPreviewImage, LinkPreviewState,
@@ -67,7 +68,6 @@ pub use failure::{
     CoreFailure, LoginFailureKind, ProfileFailureKind, RecoveryFailureKind, RoomFailureKind,
     SearchFailureKind, SyncFailureKind, TimelineFailureKind,
 };
-pub use direct_message_classification::DirectAccountDataSource;
 pub use ids::{
     AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey,
     TimelineKind,

@@ -63,7 +63,6 @@ use koushi_sdk::{
     MatrixRoomSettingChange, MatrixRoomSettingsSnapshot, MatrixRoomTagKind, MatrixRoomTags,
     MatrixSpaceMemberEntry, MatrixSpaceMembersProjection, MatrixUserTrustState,
 };
-use matrix_sdk::ruma::events::direct::DirectEvent;
 use koushi_state::{
     AppAction, AvatarImage, AvatarThumbnailState, BasicOperationRequest,
     DirectoryPreviewJoinability, DirectoryPreviewMembership, DirectoryQuery, DirectoryRoomPreview,
@@ -79,12 +78,11 @@ use koushi_state::{
 };
 #[cfg(test)]
 use koushi_state::{ProfileResolutionInput, ProfileResolutionSource, resolve_people_label};
+use matrix_sdk::ruma::events::direct::DirectEvent;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
-use crate::direct_message_classification::{
-    DirectAccountDataSource, DirectClassificationState,
-};
+use crate::direct_message_classification::{DirectAccountDataSource, DirectClassificationState};
 use crate::event::{CoreEvent, ReportKind, RoomEvent};
 use crate::executor;
 use crate::failure::{CoreFailure, RoomFailureKind};
@@ -3307,6 +3305,7 @@ async fn project_live_entries_and_ack_if_reconciled(
     generation: u64,
     source: RoomListSource,
     authoritative: &Arc<AtomicBool>,
+    sliding_sync_diagnostics: &crate::SlidingSyncDiagnostics,
 ) {
     let projection_is_authoritative = reconciliation.is_complete(current.len());
     authoritative.store(projection_is_authoritative, Ordering::Release);
@@ -3321,6 +3320,8 @@ async fn project_live_entries_and_ack_if_reconciled(
         generation,
         source,
         authoritative,
+        Some(direct_state),
+        Some(sliding_sync_diagnostics),
     )
     .await;
     if !delivered {
@@ -3352,7 +3353,10 @@ async fn project_live_entries_and_ack_if_reconciled(
 #[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LiveObserverTestEvent {
-    RlsProjected { wake_count: u64, entries_len: usize },
+    RlsProjected {
+        wake_count: u64,
+        entries_len: usize,
+    },
     DirectEventStreamClosed,
     DirectClassificationUpdated {
         event_wake_count: u64,
@@ -3478,6 +3482,10 @@ fn room_list_source_label(source: RoomListSource) -> &'static str {
     }
 }
 
+fn usize_to_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
 fn direct_account_data_source_label(source: DirectAccountDataSource) -> &'static str {
     match source {
         DirectAccountDataSource::Unavailable => "unavailable",
@@ -3497,9 +3505,7 @@ fn direct_account_data_initial_reason(
     }
 }
 
-fn record_direct_account_data_initialization(
-    cached: &koushi_sdk::MatrixCachedDirectAccountData,
-) {
+fn record_direct_account_data_initialization(cached: &koushi_sdk::MatrixCachedDirectAccountData) {
     let source = match cached {
         koushi_sdk::MatrixCachedDirectAccountData::Present(_) => {
             DirectAccountDataSource::LocalStore
@@ -3582,6 +3588,17 @@ async fn run_live_room_list_observation(
     let cached_direct = koushi_sdk::cached_direct_account_data_targets_by_room(&session).await;
     record_direct_account_data_initialization(&cached_direct);
     let direct_state = DirectClassificationState::from_cached(cached_direct);
+    sliding_sync_diagnostics.direct_classification_initialized(
+        direct_state.source(),
+        usize_to_u64(direct_state.targets_by_room().len()),
+        usize_to_u64(
+            direct_state
+                .targets_by_room()
+                .values()
+                .map(Vec::len)
+                .sum::<usize>(),
+        ),
+    );
     let room_updates_rx = session.client().subscribe_to_all_room_updates();
     #[cfg(test)]
     let (_direct_event_tx, direct_events_rx) = mpsc::unbounded_channel();
@@ -3646,15 +3663,16 @@ async fn run_live_room_list_observation_with_sources(
     generation: u64,
     source: RoomListSource,
     authoritative: Arc<AtomicBool>,
-    _sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+    sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     _direct_observer: matrix_sdk::event_handler::ObservableEventHandler<(DirectEvent, ())>,
     direct_events: matrix_sdk::event_handler::EventHandlerSubscriber<(DirectEvent, ())>,
     mut direct_state: DirectClassificationState,
     entries_limit: usize,
     mut room_updates_rx: broadcast::Receiver<matrix_sdk_base::sync::RoomUpdates>,
     #[cfg(test)] test_event_tx: Option<mpsc::UnboundedSender<LiveObserverTestEvent>>,
-    #[cfg(test)] direct_events_rx:
-        mpsc::UnboundedReceiver<matrix_sdk::ruma::events::direct::DirectEventContent>,
+    #[cfg(test)] direct_events_rx: mpsc::UnboundedReceiver<
+        matrix_sdk::ruma::events::direct::DirectEventContent,
+    >,
     #[cfg(test)] direct_event_source: LiveDirectEventTestSource,
     #[cfg(test)] mut entries_start_rx: Option<mpsc::Receiver<()>>,
 ) {
@@ -3903,6 +3921,7 @@ async fn run_live_room_list_observation_with_sources(
                     generation,
                     source,
                     &authoritative,
+                    &sliding_sync_diagnostics,
                 ).await;
             }
             next_loading_state = loading_state.next() => {
@@ -3936,6 +3955,7 @@ async fn run_live_room_list_observation_with_sources(
                             generation,
                             source,
                             &authoritative,
+                            &sliding_sync_diagnostics,
                         ).await;
                     }
                 }
@@ -3967,6 +3987,7 @@ async fn run_live_room_list_observation_with_sources(
                         generation,
                         source,
                         &authoritative,
+                        &sliding_sync_diagnostics,
                     ).await;
                 }
             }
@@ -4010,6 +4031,7 @@ async fn run_live_room_list_observation_with_sources(
                         generation,
                         source,
                         &authoritative,
+                        &sliding_sync_diagnostics,
                     ).await;
                     #[cfg(test)]
                     emit_live_observer_test_event(
@@ -4139,6 +4161,7 @@ async fn run_live_room_list_observation_with_sources(
                         generation,
                         source,
                         &authoritative,
+                        &sliding_sync_diagnostics,
                     )
                     .await;
                 }
@@ -4171,6 +4194,20 @@ async fn run_live_room_list_observation_with_sources(
                         let changed = direct_state.replace_targets(
                             koushi_sdk::direct_account_data_targets_by_room(&content),
                         );
+                        sliding_sync_diagnostics.direct_event_recorded(
+                            direct_state.source(),
+                            usize_to_u64(direct_state.targets_by_room().len()),
+                            usize_to_u64(
+                                direct_state
+                                    .targets_by_room()
+                                    .values()
+                                    .map(Vec::len)
+                                    .sum::<usize>(),
+                            ),
+                            direct_state.event_wake_count(),
+                            direct_state.applied_update_count(),
+                            true,
+                        );
                         #[cfg(test)]
                         emit_live_observer_test_event(
                             &test_event_tx,
@@ -4192,6 +4229,7 @@ async fn run_live_room_list_observation_with_sources(
                                 generation,
                                 source,
                                 &authoritative,
+                                &sliding_sync_diagnostics,
                             )
                             .await;
                             #[cfg(test)]
@@ -4210,6 +4248,20 @@ async fn run_live_room_list_observation_with_sources(
                     }
                     None => {
                         direct_events_closed = true;
+                        sliding_sync_diagnostics.direct_event_recorded(
+                            direct_state.source(),
+                            usize_to_u64(direct_state.targets_by_room().len()),
+                            usize_to_u64(
+                                direct_state
+                                    .targets_by_room()
+                                    .values()
+                                    .map(Vec::len)
+                                    .sum::<usize>(),
+                            ),
+                            direct_state.event_wake_count(),
+                            direct_state.applied_update_count(),
+                            false,
+                        );
                         #[cfg(test)]
                         emit_live_observer_test_event(
                             &test_event_tx,
@@ -4301,6 +4353,8 @@ async fn normalize_and_project_entries(
     generation: u64,
     source: RoomListSource,
     authoritative: &Arc<AtomicBool>,
+    direct_state: Option<&DirectClassificationState>,
+    sliding_sync_diagnostics: Option<&crate::SlidingSyncDiagnostics>,
 ) -> bool {
     // Collect before the await: mapping lazily across the await trips a
     // higher-ranked lifetime check on the iterator closure.
@@ -4329,6 +4383,23 @@ async fn normalize_and_project_entries(
     )
     .await;
     snapshot.invites = invite_previews_from_service_entries(invited_rooms).await;
+    if let (Some(direct_state), Some(diagnostics)) = (direct_state, sliding_sync_diagnostics) {
+        let projected_dms = snapshot.rooms.iter().filter(|room| room.is_dm).count();
+        let explicit_dms = direct_state.authoritative_targets().map_or(0, |targets| {
+            snapshot
+                .rooms
+                .iter()
+                .filter(|room| room.is_dm && targets.contains_key(room.room_id.as_str()))
+                .count()
+        });
+        diagnostics.direct_projection_recorded(
+            usize_to_u64(projected_dms),
+            usize_to_u64(explicit_dms),
+            usize_to_u64(projected_dms.saturating_sub(explicit_dms)),
+            usize_to_u64(snapshot.rooms.len().saturating_sub(projected_dms)),
+            direct_state.invalid_entry_count(),
+        );
+    }
     let identity = room_list_identity_counts(
         snapshot
             .rooms
@@ -5817,10 +5888,7 @@ pub mod tests {
             assert_eq!(actual, expected);
         }
 
-        fn send_direct_event(
-            &self,
-            content: matrix_sdk::ruma::events::direct::DirectEventContent,
-        ) {
+        fn send_direct_event(&self, content: matrix_sdk::ruma::events::direct::DirectEventContent) {
             self.direct_event_tx
                 .as_ref()
                 .expect("direct event source should be open")
@@ -6859,8 +6927,13 @@ pub mod tests {
         use matrix_sdk::{
             ruma::{
                 OwnedRoomId, OwnedUserId,
-                events::{AnySyncStateEvent, direct::{DirectEventContent, OwnedDirectUserIdentifier}},
-                room_id, serde::Raw, user_id,
+                events::{
+                    AnySyncStateEvent,
+                    direct::{DirectEventContent, OwnedDirectUserIdentifier},
+                },
+                room_id,
+                serde::Raw,
+                user_id,
             },
             test_utils::mocks::MatrixMockServer,
         };
@@ -6920,7 +6993,9 @@ pub mod tests {
         content.insert(OwnedDirectUserIdentifier::from(user_id), vec![room_id]);
         harness.send_direct_event(content.clone());
 
-        let projected = harness.next_actions("direct account-data reprojection").await;
+        let projected = harness
+            .next_actions("direct account-data reprojection")
+            .await;
         assert!(projected.iter().any(|action| {
             matches!(
                 action,
@@ -6931,9 +7006,11 @@ pub mod tests {
         }));
         assert!(matches!(
             projected.as_slice(),
-            [AppAction::RoomListSnapshotProvisional { .. }
-                | AppAction::RoomListSnapshotAuthoritative { .. },
-             AppAction::UserProfilesUpdated { .. }]
+            [
+                AppAction::RoomListSnapshotProvisional { .. }
+                    | AppAction::RoomListSnapshotAuthoritative { .. },
+                AppAction::UserProfilesUpdated { .. }
+            ]
         ));
         harness
             .expect_event(
@@ -6947,9 +7024,11 @@ pub mod tests {
             .await;
 
         harness.send_direct_event(content);
-        assert!(tokio::time::timeout(Duration::from_millis(100), harness.action_rx.recv())
-            .await
-            .is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), harness.action_rx.recv())
+                .await
+                .is_err()
+        );
 
         harness.stop().await;
     }
@@ -7140,10 +7219,11 @@ pub mod tests {
             eyeball_im::Vector::from_iter([matrix_sdk_ui::room_list_service::RoomListItem::from(
                 room,
             )]);
-        let direct_state = crate::direct_message_classification::DirectClassificationState::from_targets(
-            koushi_sdk::MatrixDirectTargetsByRoom::from([(dm_room_id.to_string(), Vec::new())]),
-            crate::direct_message_classification::DirectAccountDataSource::LocalStore,
-        );
+        let direct_state =
+            crate::direct_message_classification::DirectClassificationState::from_targets(
+                koushi_sdk::MatrixDirectTargetsByRoom::from([(dm_room_id.to_string(), Vec::new())]),
+                crate::direct_message_classification::DirectAccountDataSource::LocalStore,
+            );
         let known_room_ids = Arc::new(RwLock::new(BTreeSet::new()));
         let (room_tx, _room_rx) = mpsc::channel(4);
         let (action_tx, mut action_rx) = mpsc::channel(4);
@@ -7160,6 +7240,8 @@ pub mod tests {
             1,
             RoomListSource::Live,
             &Arc::new(AtomicBool::new(false)),
+            None,
+            None,
         )
         .await;
 
@@ -7268,6 +7350,8 @@ pub mod tests {
             1,
             RoomListSource::Live,
             &Arc::new(AtomicBool::new(true)),
+            None,
+            None,
         )
         .await;
 

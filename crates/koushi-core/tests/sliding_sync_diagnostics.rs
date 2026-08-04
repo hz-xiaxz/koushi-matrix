@@ -1,10 +1,34 @@
 use koushi_core::{
-    SlidingSyncDiagnostics, SlidingSyncDiscoveryDiagnostic, SlidingSyncFailureDiagnostic,
-    SlidingSyncFailureKind, SlidingSyncFailureOrigin, SlidingSyncFailureRetryability,
-    SlidingSyncFailureStage, SlidingSyncHttpErrorSource, SlidingSyncHttpStatus,
-    SlidingSyncLifecycle, SlidingSyncMatrixErrorKind, SlidingSyncProvisionalHandoffBucket,
-    SlidingSyncSdkVersion,
+    DirectAccountDataSource, SlidingSyncDiagnostics, SlidingSyncDiscoveryDiagnostic,
+    SlidingSyncFailureDiagnostic, SlidingSyncFailureKind, SlidingSyncFailureOrigin,
+    SlidingSyncFailureRetryability, SlidingSyncFailureStage, SlidingSyncHttpErrorSource,
+    SlidingSyncHttpStatus, SlidingSyncLifecycle, SlidingSyncMatrixErrorKind,
+    SlidingSyncProvisionalHandoffBucket, SlidingSyncSdkVersion,
 };
+
+#[test]
+fn direct_classification_diagnostics_are_latest_wins() {
+    let diagnostics = SlidingSyncDiagnostics::default();
+    diagnostics.direct_classification_initialized(DirectAccountDataSource::LocalStore, 3, 4);
+    diagnostics.direct_projection_recorded(2, 1, 1, 7, 0);
+    diagnostics.direct_event_recorded(DirectAccountDataSource::SlidingSyncEvent, 4, 5, 1, 1, true);
+
+    let snapshot = diagnostics.snapshot();
+    assert_eq!(
+        snapshot.direct_account_data_source,
+        DirectAccountDataSource::SlidingSyncEvent
+    );
+    assert_eq!(snapshot.direct_mapped_room_count, 4);
+    assert_eq!(snapshot.direct_target_count, 5);
+    assert_eq!(snapshot.projected_dm_count, 2);
+    assert_eq!(snapshot.explicit_dm_count, 1);
+    assert_eq!(snapshot.fallback_dm_count, 1);
+    assert_eq!(snapshot.direct_non_dm_count, 7);
+    assert_eq!(snapshot.direct_invalid_entry_count, 0);
+    assert_eq!(snapshot.direct_event_wake_count, 1);
+    assert_eq!(snapshot.direct_event_applied_count, 1);
+    assert!(snapshot.direct_event_stream_running);
+}
 
 #[test]
 fn snapshot_is_latest_wins_and_tracks_actionable_sync_failure() {
@@ -84,6 +108,9 @@ fn snapshot_is_latest_wins_and_tracks_actionable_sync_failure() {
 fn snapshot_serialization_has_no_channel_for_private_values() {
     let diagnostics = SlidingSyncDiagnostics::default();
     diagnostics.record_discovery(SlidingSyncDiscoveryDiagnostic::supported());
+    diagnostics.direct_classification_initialized(DirectAccountDataSource::LocalStore, 3, 4);
+    diagnostics.direct_projection_recorded(2, 1, 1, 7, 0);
+    diagnostics.direct_event_recorded(DirectAccountDataSource::SlidingSyncEvent, 4, 5, 1, 1, true);
     diagnostics.sync_started(23);
     diagnostics.sync_offline(SlidingSyncFailureDiagnostic {
         origin: SlidingSyncFailureOrigin::Encryption,

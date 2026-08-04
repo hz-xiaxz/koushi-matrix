@@ -12,6 +12,8 @@ use std::{
 
 use serde::Serialize;
 
+use crate::direct_message_classification::DirectAccountDataSource;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SlidingSyncDiscoveryState {
@@ -349,6 +351,17 @@ pub struct SlidingSyncDiagnosticsSnapshot {
     pub room_list_task_running: bool,
     pub encryption_task_running: bool,
     pub pos_present: bool,
+    pub direct_account_data_source: DirectAccountDataSource,
+    pub direct_mapped_room_count: u64,
+    pub direct_target_count: u64,
+    pub projected_dm_count: u64,
+    pub explicit_dm_count: u64,
+    pub fallback_dm_count: u64,
+    pub direct_non_dm_count: u64,
+    pub direct_invalid_entry_count: u64,
+    pub direct_event_wake_count: u64,
+    pub direct_event_applied_count: u64,
+    pub direct_event_stream_running: bool,
 }
 
 impl Default for SlidingSyncDiagnosticsSnapshot {
@@ -385,6 +398,17 @@ impl Default for SlidingSyncDiagnosticsSnapshot {
             room_list_task_running: false,
             encryption_task_running: false,
             pos_present: false,
+            direct_account_data_source: DirectAccountDataSource::Unavailable,
+            direct_mapped_room_count: 0,
+            direct_target_count: 0,
+            projected_dm_count: 0,
+            explicit_dm_count: 0,
+            fallback_dm_count: 0,
+            direct_non_dm_count: 0,
+            direct_invalid_entry_count: 0,
+            direct_event_wake_count: 0,
+            direct_event_applied_count: 0,
+            direct_event_stream_running: false,
         }
     }
 }
@@ -437,6 +461,56 @@ impl SlidingSyncDiagnostics {
 
     pub fn runtime_profile(&self, version: SlidingSyncSdkVersion) {
         self.update(|state| state.snapshot.sdk_sliding_sync_version = version);
+    }
+
+    pub fn direct_classification_initialized(
+        &self,
+        source: DirectAccountDataSource,
+        mapped_rooms: u64,
+        targets: u64,
+    ) {
+        self.update(|state| {
+            state.snapshot.direct_account_data_source = source;
+            state.snapshot.direct_mapped_room_count = mapped_rooms;
+            state.snapshot.direct_target_count = targets;
+            state.snapshot.direct_event_stream_running = true;
+        });
+    }
+
+    pub fn direct_event_recorded(
+        &self,
+        source: DirectAccountDataSource,
+        mapped_rooms: u64,
+        targets: u64,
+        wakes: u64,
+        applied: u64,
+        stream_running: bool,
+    ) {
+        self.update(|state| {
+            state.snapshot.direct_account_data_source = source;
+            state.snapshot.direct_mapped_room_count = mapped_rooms;
+            state.snapshot.direct_target_count = targets;
+            state.snapshot.direct_event_wake_count = wakes;
+            state.snapshot.direct_event_applied_count = applied;
+            state.snapshot.direct_event_stream_running = stream_running;
+        });
+    }
+
+    pub fn direct_projection_recorded(
+        &self,
+        projected_dms: u64,
+        explicit_dms: u64,
+        fallback_dms: u64,
+        non_dms: u64,
+        invalid_entries: u64,
+    ) {
+        self.update(|state| {
+            state.snapshot.projected_dm_count = projected_dms;
+            state.snapshot.explicit_dm_count = explicit_dms;
+            state.snapshot.fallback_dm_count = fallback_dms;
+            state.snapshot.direct_non_dm_count = non_dms;
+            state.snapshot.direct_invalid_entry_count = invalid_entries;
+        });
     }
 
     pub fn provisional_encryption_started(&self) {
