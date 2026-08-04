@@ -2864,6 +2864,41 @@ mod tests {
     }
 
     #[test]
+    fn loading_persisted_space_order_reorders_existing_spaces() {
+        let mut state = ready_state();
+        state.spaces = vec![
+            test_space("!space-a:example.invalid"),
+            test_space("!space-b:example.invalid"),
+        ];
+
+        let effects = reduce(
+            &mut state,
+            AppAction::NavigationLoaded {
+                navigation: NavigationState {
+                    space_order: vec![
+                        "!space-b:example.invalid".to_owned(),
+                        "!space-a:example.invalid".to_owned(),
+                    ],
+                    ..NavigationState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            effects,
+            vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
+        );
+        assert_eq!(
+            state
+                .spaces
+                .iter()
+                .map(|space| space.space_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["!space-b:example.invalid", "!space-a:example.invalid"]
+        );
+    }
+
+    #[test]
     fn live_signal_actions_update_rust_owned_state() {
         let mut state = ready_state();
 
