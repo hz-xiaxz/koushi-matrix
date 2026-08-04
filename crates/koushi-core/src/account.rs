@@ -3796,6 +3796,16 @@ impl AccountActor {
     /// Also spawn the SearchActor (Phase 6).
     async fn spawn_sync_actor(&mut self, session: Arc<MatrixClientSession>) {
         trace_restore_simple("spawn_sync_actor", "begin");
+        // A trust promotion can race the reducer's StartSync effect and reach
+        // this constructor after the normal actor is already owned. Keep the
+        // existing owner; replacing its handle would drop the old sender,
+        // make that actor stop its SyncService implicitly, and publish a stale
+        // stopped status into the still-valid runtime. Session replacement
+        // paths retire the old actor before installing the new session.
+        if self.sync_actor.is_some() {
+            trace_restore_simple("spawn_sync_actor", "already_owned");
+            return;
+        }
         // Give the RoomActor the session so room ops work even before sync
         // starts. The room-list observation starts later, on the SyncActor's
         // RoomMessage::SyncStarted (which carries the live RoomListService on
@@ -3999,9 +4009,16 @@ impl AccountActor {
 
     /// Ordered shutdown of the SyncActor (step 4 of the shutdown sequence).
     async fn stop_sync_actor(&mut self) {
-        if let Some(handle) = self.sync_actor.take() {
-            let _ = handle.shutdown().await;
-        }
+        let Some(handle) = self.sync_actor.take() else {
+            return;
+        };
+        #[cfg(feature = "qa-bin")]
+        record(DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.account",
+            "sync_actor_stop",
+        ));
+        let _ = handle.shutdown().await;
     }
 
     async fn stop_recovery_observer(&mut self) {

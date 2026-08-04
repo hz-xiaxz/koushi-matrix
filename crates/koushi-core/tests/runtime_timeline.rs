@@ -169,6 +169,8 @@ async fn seed_composer_payload(
     )
     .await
     .expect("seed composer payload must settle");
+    drop(connection);
+    runtime.shutdown().await;
 }
 
 async fn wait_for_composer_load_io(
@@ -1069,6 +1071,16 @@ impl CorruptComposerLoadFixture {
             failed_before,
         }
     }
+
+    async fn shutdown(self) {
+        let Self {
+            runtime,
+            connection,
+            ..
+        } = self;
+        drop(connection);
+        runtime.shutdown().await;
+    }
 }
 
 #[tokio::test]
@@ -1099,6 +1111,7 @@ async fn corrupt_load_attempts_once_per_session() {
         composer_load_diagnostic_count("load_failed"),
         fixture.failed_before + 1
     );
+    fixture.shutdown().await;
 }
 
 #[tokio::test]
@@ -1150,6 +1163,7 @@ async fn revision_commands_fail_while_composer_load_failed() {
         std::fs::read(&fixture.payload_path).expect("read corrupt payload"),
         fixture.corrupt_payload
     );
+    fixture.shutdown().await;
 }
 
 #[tokio::test]
@@ -1188,6 +1202,7 @@ async fn lock_unlock_retries_repaired_composer_payload() {
                 .is_some_and(|body| body == "persisted before corruption")
     })
     .await;
+    fixture.shutdown().await;
 }
 
 #[tokio::test]

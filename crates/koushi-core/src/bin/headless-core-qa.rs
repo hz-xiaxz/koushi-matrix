@@ -9857,7 +9857,11 @@ fn sync_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticSnapshot) ->
     let mut service_build_failed = 0_u64;
     let mut committed_response = 0_u64;
     let mut task_ended = 0_u64;
+    let mut command_start = 0_u64;
+    let mut command_stop = 0_u64;
+    let mut command_restart = 0_u64;
     let mut last_task_kind = "unknown";
+    let mut last_command_lifecycle = "unknown";
     let mut last_state = "unknown";
     let mut last_lifecycle = "unknown";
     let mut last_rooms_from_response = 0_u64;
@@ -9868,6 +9872,16 @@ fn sync_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticSnapshot) ->
             continue;
         }
         match event.stage {
+            "command" => {
+                last_command_lifecycle =
+                    diagnostic_token_field(event, "lifecycle").unwrap_or("unknown");
+                match diagnostic_token_field(event, "kind").unwrap_or("unknown") {
+                    "start" => command_start = command_start.saturating_add(1),
+                    "stop" => command_stop = command_stop.saturating_add(1),
+                    "restart" => command_restart = command_restart.saturating_add(1),
+                    _ => {}
+                }
+            }
             "service_build_failed" => service_build_failed = service_build_failed.saturating_add(1),
             "committed_response" => {
                 committed_response = committed_response.saturating_add(1);
@@ -9893,18 +9907,99 @@ fn sync_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticSnapshot) ->
     }
     format!(
         "sync_diag_service_build_failed={} sync_diag_committed_response={} \
-         sync_diag_task_ended={} sync_diag_last_task_kind={} sync_diag_last_state={} \
+         sync_diag_task_ended={} sync_diag_command_start={} sync_diag_command_stop={} \
+         sync_diag_command_restart={} sync_diag_last_task_kind={} \
+         sync_diag_last_command_lifecycle={} sync_diag_last_state={} \
          sync_diag_last_lifecycle={} sync_diag_last_rooms_from_response={} \
          sync_diag_last_observer_exit_reason={}",
         service_build_failed,
         committed_response,
         task_ended,
+        command_start,
+        command_stop,
+        command_restart,
         last_task_kind,
+        last_command_lifecycle,
         last_state,
         last_lifecycle,
         last_rooms_from_response,
         last_observer_exit_reason,
     )
+}
+
+fn runtime_sync_diagnostic_summary(snapshot: &koushi_diagnostics::DiagnosticSnapshot) -> String {
+    let mut stop_command_effect = 0_u64;
+    let mut stop_actor_projection = 0_u64;
+    let mut account_sync_actor_stop = 0_u64;
+    let mut session_invalidated = 0_u64;
+    for record in &snapshot.records {
+        let event = &record.event;
+        match (event.source, event.stage) {
+            ("core.runtime", "effect_stop_sync") => {
+                match diagnostic_token_field(event, "source").unwrap_or("unknown") {
+                    "command_effect" => stop_command_effect = stop_command_effect.saturating_add(1),
+                    "actor_projection" => {
+                        stop_actor_projection = stop_actor_projection.saturating_add(1)
+                    }
+                    _ => {}
+                }
+            }
+            ("core.account", "sync_actor_stop") => {
+                account_sync_actor_stop = account_sync_actor_stop.saturating_add(1);
+            }
+            ("core.account", "session_invalidated") => {
+                session_invalidated = session_invalidated.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    let trust_path = trust_admission_diagnostic_summary(snapshot);
+    format!(
+        "runtime_diag_stop_command_effect={} runtime_diag_stop_actor_projection={} \
+         runtime_diag_account_sync_actor_stop={} runtime_diag_session_invalidated={} \
+         runtime_diag_trust_path={trust_path}",
+        stop_command_effect, stop_actor_projection, account_sync_actor_stop, session_invalidated,
+    )
+}
+
+fn sync_state_diagnostic_label(sync: &koushi_state::SyncState) -> &'static str {
+    match sync {
+        koushi_state::SyncState::Stopped => "stopped",
+        koushi_state::SyncState::Starting => "starting",
+        koushi_state::SyncState::Running => "running",
+        koushi_state::SyncState::Failed { .. } => "failed",
+        koushi_state::SyncState::Reconnecting { .. } => "reconnecting",
+    }
+}
+
+fn session_state_diagnostic_label(session: &koushi_state::SessionState) -> &'static str {
+    match session {
+        koushi_state::SessionState::SignedOut => "signed_out",
+        koushi_state::SessionState::Ready(_) => "ready",
+        koushi_state::SessionState::Locked(_) => "locked",
+        koushi_state::SessionState::LoggingOut => "logging_out",
+        koushi_state::SessionState::Restoring => "restoring",
+        koushi_state::SessionState::SwitchingAccount { .. } => "switching_account",
+        koushi_state::SessionState::Authenticating { .. } => "authenticating",
+        koushi_state::SessionState::Provisional { .. } => "provisional",
+        koushi_state::SessionState::AwaitingVerification { .. } => "awaiting_verification",
+        koushi_state::SessionState::Verifying { .. } => "verifying",
+        koushi_state::SessionState::AwaitingBootstrapConfirmation { .. } => {
+            "awaiting_bootstrap_confirmation"
+        }
+        koushi_state::SessionState::Rejecting { .. } => "rejecting",
+        koushi_state::SessionState::CapabilityBlocked { .. } => "capability_blocked",
+    }
+}
+
+fn sync_event_diagnostic_label(event: &SyncEvent) -> &'static str {
+    match event {
+        SyncEvent::Started { .. } => "started",
+        SyncEvent::Running => "running",
+        SyncEvent::Reconnecting => "reconnecting",
+        SyncEvent::Failed => "failed",
+        SyncEvent::Stopped { .. } => "stopped",
+    }
 }
 
 async fn wait_for_invite_in_snapshot(
@@ -9925,6 +10020,9 @@ async fn wait_for_invite_in_snapshot(
         return Ok(snapshot);
     }
 
+    let mut last_sync_event = "none";
+    let mut last_snapshot_sync = sync_state_diagnostic_label(&snapshot.sync);
+    let mut last_snapshot_session = session_state_diagnostic_label(&snapshot.session);
     let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
     loop {
         let event = tokio::time::timeout_at(deadline, conn.recv_event())
@@ -9933,16 +10031,30 @@ async fn wait_for_invite_in_snapshot(
                 let snapshot = conn.snapshot();
                 let observer_diagnostics =
                     invite_observer_diagnostic_summary(&koushi_diagnostics::snapshot());
-                let sync_diagnostics = sync_diagnostic_summary(&koushi_diagnostics::snapshot());
+                let diagnostics = koushi_diagnostics::snapshot();
+                let sync_diagnostics = sync_diagnostic_summary(&diagnostics);
+                let runtime_diagnostics = runtime_sync_diagnostic_summary(&diagnostics);
+                let sync_state = sync_state_diagnostic_label(&snapshot.sync);
+                let session_state = session_state_diagnostic_label(&snapshot.session);
                 format!(
                     "{label}: timed out waiting for invite snapshot \
-                     (have {} invites; {observer_diagnostics}; {sync_diagnostics})",
+                     (have {} invites; snapshot_sync={sync_state} snapshot_session={session_state} \
+                     last_sync_event={last_sync_event} last_snapshot_sync={last_snapshot_sync} \
+                     last_snapshot_session={last_snapshot_session} snapshot_rooms={} \
+                     snapshot_spaces={} snapshot_invites={}; {observer_diagnostics}; \
+                     {sync_diagnostics}; {runtime_diagnostics})",
+                    snapshot.invites.len(),
+                    snapshot.rooms.len(),
+                    snapshot.spaces.len(),
                     snapshot.invites.len(),
                 )
             })?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
+            CoreEvent::Sync(sync_event) => {
+                last_sync_event = sync_event_diagnostic_label(&sync_event);
+            }
             CoreEvent::Room(RoomEvent::RoomListUpdated) => {
                 let snapshot = conn.snapshot();
                 if contains_expected(&snapshot) {
@@ -9950,6 +10062,8 @@ async fn wait_for_invite_in_snapshot(
                 }
             }
             CoreEvent::StateChanged(snapshot) => {
+                last_snapshot_sync = sync_state_diagnostic_label(&snapshot.sync);
+                last_snapshot_session = session_state_diagnostic_label(&snapshot.session);
                 if contains_expected(&snapshot) {
                     return Ok(snapshot);
                 }
