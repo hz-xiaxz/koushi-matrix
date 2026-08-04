@@ -491,7 +491,7 @@ function makeSnapshot(): DesktopSnapshot {
           room_id: "!room-alpha:example.invalid",
           is_subscribed: true,
           is_paginating_backwards: false,
-          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "hello", mode: "Plain" },
+          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "hello", document: { version: 2, inlines: [{ kind: "text", text: "hello" }] }, mode: "Plain" },
           submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] },
           scheduled_send_capability: "unknown",
           scheduled_sends: [],
@@ -506,7 +506,7 @@ function makeSnapshot(): DesktopSnapshot {
           root_event_id: "$thread-root:example.invalid",
           intent: "existingThread",
           is_subscribed: true,
-          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", mode: "Plain" },
+          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", document: { version: 2, inlines: [] }, mode: "Plain" },
           staged_uploads: []
         },
         focused_context: { kind: "closed" },

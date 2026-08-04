@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { createBrowserFakeApi } from "./browserFakeApi";
+import { documentFromText, insertMention } from "../domain/composerDocument";
 import { parseComposerDraftRevision as revision } from "../domain/composerDraftRevision";
 import type { ComposerTarget, DesktopSnapshot, LiveReadReceipt } from "../domain/types";
 
@@ -544,6 +545,39 @@ describe("BrowserFakeApi settings preview", () => {
     expect(replay.snapshot.state.ui.timeline.composer.accepted_submission_ids).toContain("submission-same");
   });
 
+  test("draft snapshots retain structured mention identity instead of inferring display text", async () => {
+    const api = createBrowserFakeApi();
+    const roomId = "!room-alpha:example.invalid";
+    await api.selectRoom(roomId);
+    const account = await readyAccount(api);
+    const { generation, lease } = await beginComposerLease(api, account, {
+      kind: "main",
+      room_id: roomId
+    });
+    const target = {
+      kind: "user" as const,
+      user_id: "@alice:example.invalid",
+      display_label: "Same Name"
+    };
+    const document = insertMention(documentFromText("hello "), 6, 6, target, "Same Name");
+
+    const snapshot = await api.setComposerDraft(
+      account,
+      lease.leaseId,
+      generation,
+      roomId,
+      document,
+      revision("1")
+    );
+
+    expect(snapshot.state.ui.timeline.composer.draft).toBe("hello @Same Name");
+    expect(snapshot.state.ui.timeline.composer.document).toEqual(document);
+    expect(snapshot.state.ui.timeline.composer.document.inlines.at(-1)).toMatchObject({
+      kind: "mention",
+      target: { user_id: "@alice:example.invalid" }
+    });
+  });
+
   test("leases preserve exact large revisions and expose the Rust-owned clear token", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
@@ -568,7 +602,7 @@ describe("BrowserFakeApi settings preview", () => {
       lease.leaseId,
       rendererGeneration,
       roomId,
-      "captured",
+      documentFromText("captured"),
       captured
     );
     const response = await api.sendText(
@@ -614,7 +648,7 @@ describe("BrowserFakeApi settings preview", () => {
       mainLease.leaseId,
       generation,
       roomId,
-      "main accepted",
+      documentFromText("main accepted"),
       revision("1")
     );
     const sent = await api.sendText(
@@ -637,7 +671,7 @@ describe("BrowserFakeApi settings preview", () => {
       mainLease.leaseId,
       generation,
       roomId,
-      "main accepted",
+      documentFromText("main accepted"),
       revision("1")
     );
     expect(staleMain.state.ui.timeline.composer.draft).toBe("");
@@ -646,7 +680,7 @@ describe("BrowserFakeApi settings preview", () => {
       mainLease.leaseId,
       generation,
       roomId,
-      "immediate next",
+      documentFromText("immediate next"),
       revision("3")
     );
     expect(nextMain.state.ui.timeline.composer.draft).toBe("immediate next");
@@ -679,7 +713,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       roomId,
       rootId,
-      "thread accepted",
+      documentFromText("thread accepted"),
       revision("5")
     );
     const threadSent = await api.sendThreadReply(
@@ -700,7 +734,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       roomId,
       rootId,
-      "thread accepted",
+      documentFromText("thread accepted"),
       revision("5")
     );
     expect(staleThread.state.ui.thread).toMatchObject({
@@ -713,7 +747,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       roomId,
       rootId,
-      "immediate thread next",
+      documentFromText("immediate thread next"),
       revision("7")
     );
     const lateThreadAcceptance = await api.sendThreadReply(
@@ -749,7 +783,7 @@ describe("BrowserFakeApi settings preview", () => {
       lease.leaseId,
       generation,
       roomId,
-      "captured reply",
+      documentFromText("captured reply"),
       revision("1")
     );
     await api.setComposerDraft(
@@ -757,7 +791,7 @@ describe("BrowserFakeApi settings preview", () => {
       lease.leaseId,
       generation,
       roomId,
-      "newer draft",
+      documentFromText("newer draft"),
       revision("2")
     );
     const response = await api.sendReply(
@@ -814,7 +848,7 @@ describe("BrowserFakeApi settings preview", () => {
         mainLease.leaseId,
         generation,
         roomId,
-        "must not cross accounts",
+        documentFromText("must not cross accounts"),
         revision("1")
       )
     ).rejects.toThrow("composer draft lease mismatch");
@@ -825,7 +859,7 @@ describe("BrowserFakeApi settings preview", () => {
         generation,
         roomId,
         rootId,
-        "must not cross accounts",
+        documentFromText("must not cross accounts"),
         revision("1")
       )
     ).rejects.toThrow("composer draft lease mismatch");

@@ -41,7 +41,8 @@ import {
   type ComposerDraftOperationCapture,
   type ComposerDraftScope
 } from "./domain/composerDraftLifecycle";
-import type { ComposerDraftRevision, TimelinePaneState } from "./domain/types";
+import type { ComposerDocument, ComposerDraftRevision, TimelinePaneState } from "./domain/types";
+import { documentFromText, plainBodyFromDocument } from "./domain/composerDocument";
 import type { MatrixPermalinkTarget } from "./domain/matrixPermalink";
 import { resolveDirectorySubmission } from "./domain/directorySubmission";
 import { serverNameFromMatrixId } from "./domain/matrixPermalink";
@@ -1351,13 +1352,13 @@ export function App() {
   const [threadComposerMentions, setThreadComposerMentions] = useState<Record<string, MentionIntent>>({});
   const mainComposerOverlayRef = useRef<{
     scope: ComposerDraftScope;
-    value: string;
+    document: ComposerDocument;
     revision: ComposerDraftRevision | null;
     debounceHandle: number | null;
   } | null>(null);
   const threadComposerOverlayRef = useRef<{
     scope: ComposerDraftScope;
-    value: string;
+    document: ComposerDocument;
     revision: ComposerDraftRevision | null;
     debounceHandle: number | null;
   } | null>(null);
@@ -1430,10 +1431,10 @@ export function App() {
             overlay.revision = composerDraftLifecycleRegistryRef.current!.nextDraft(scope);
             composerDraftLifecycleRegistryRef.current!.setActiveOverlay(
               scope,
-              overlay.value,
+              overlay.document,
               overlay.revision
             );
-            queueComposerDraftPersist(scope, overlay.value, overlay.revision);
+            queueComposerDraftPersist(scope, overlay.document, overlay.revision);
           }
         })
         .catch(() => undefined);
@@ -1465,10 +1466,10 @@ export function App() {
             overlay.revision = composerDraftLifecycleRegistryRef.current!.nextDraft(scope);
             composerDraftLifecycleRegistryRef.current!.setActiveOverlay(
               scope,
-              overlay.value,
+              overlay.document,
               overlay.revision
             );
-            queueThreadComposerDraftPersist(scope, overlay.value, overlay.revision);
+            queueThreadComposerDraftPersist(scope, overlay.document, overlay.revision);
           }
         })
         .catch(() => undefined);
@@ -1754,7 +1755,7 @@ export function App() {
     mainComposerOverlay.scope.account.homeserver === currentComposerAccount?.homeserver &&
     mainComposerOverlay.scope.account.user_id === currentComposerAccount?.userId &&
     mainComposerOverlay.scope.account.device_id === currentComposerAccount?.deviceId
-      ? mainComposerOverlay.value
+      ? plainBodyFromDocument(mainComposerOverlay.document)
       : snapshotComposerDraft;
   const mainComposerDraftImeKey = [accountOwnerKey, "main", timelineRoomId ?? "no-room",
     snapshot?.state.ui.timeline.composer.last_accepted_clear_revision ??
@@ -1780,7 +1781,7 @@ export function App() {
     activeThreadScope &&
     threadComposerOverlay &&
     composerDraftScopesEqual(activeThreadScope, threadComposerOverlay.scope)
-      ? threadComposerOverlay.value
+      ? plainBodyFromDocument(threadComposerOverlay.document)
       : undefined;
   const threadComposerDraftImeKey =
     activeThreadState?.kind === "open" && activeThreadState.composer
@@ -3062,10 +3063,10 @@ export function App() {
       }
       while (true) {
         const activeOverlay = overlayForScope();
-        if (!activeOverlay || activeOverlay.value.length === 0) break;
+        if (!activeOverlay || activeOverlay.document.inlines.length === 0) break;
         const revision = activeOverlay.revision ?? registry.nextDraft(scope);
         activeOverlay.revision = revision;
-        registry.setActiveOverlay(scope, activeOverlay.value, revision);
+        registry.setActiveOverlay(scope, activeOverlay.document, revision);
         const admitted = beginComposerOperation(scope);
         if (!admitted) return false;
         const account = composerDraftApiAccount(scope);
@@ -3076,7 +3077,7 @@ export function App() {
               admitted.lease.leaseId,
               admitted.lease.rendererGeneration,
               scope.target.room_id,
-              activeOverlay.value,
+              activeOverlay.document,
               revision
             );
           } else {
@@ -3086,7 +3087,7 @@ export function App() {
               admitted.lease.rendererGeneration,
               scope.target.room_id,
               scope.target.root_event_id,
-              activeOverlay.value,
+              activeOverlay.document,
               revision
             );
           }
@@ -4182,6 +4183,7 @@ export function App() {
   }
 
   function updateComposerDraft(value: string) {
+    const document = documentFromText(value);
     const roomId = snapshot?.state.ui.timeline.room_id;
     const account = readyComposerDraftAccountOwner(snapshot);
     if (!roomId || !account) return;
@@ -4193,13 +4195,13 @@ export function App() {
       : null;
     mainComposerOverlayRef.current = {
       scope,
-      value,
+      document,
       revision,
       debounceHandle: null
     };
-    composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, value, revision);
+    composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, document, revision);
     updateComposerTypingSignal(roomId, value);
-    if (revision) queueComposerDraftPersist(scope, value, revision);
+    if (revision) queueComposerDraftPersist(scope, document, revision);
   }
 
   function updateComposerTypingSignal(roomId: string, value: string) {
@@ -4224,7 +4226,7 @@ export function App() {
 
   function queueComposerDraftPersist(
     scope: ComposerDraftScope,
-    value: string,
+    document: ComposerDocument,
     revision: ComposerDraftRevision
   ) {
     if (scope.target.kind !== "main") return;
@@ -4244,7 +4246,7 @@ export function App() {
           admitted.lease.leaseId,
           admitted.lease.rendererGeneration,
           scope.target.room_id,
-          value,
+          document,
           revision
         )
         .then((nextSnapshot) => {
@@ -4255,7 +4257,7 @@ export function App() {
             submissionAccountOwnerRef.current !== composerDraftAccountOwnerKey(account) ||
             !currentOverlay ||
             !composerDraftScopesEqual(currentOverlay.scope, scope) ||
-            currentOverlay.value !== value ||
+            currentOverlay.document !== document ||
             currentOverlay.revision !== revision
           ) return;
           setSnapshot(nextSnapshot);
@@ -4526,6 +4528,7 @@ export function App() {
     rootEventId: string,
     draft: string
   ) {
+    const document = documentFromText(draft);
     const account = readyComposerDraftAccountOwner(snapshot);
     if (!account) return;
     const target: ComposerTarget = { kind: "thread", room_id: roomId, root_event_id: rootEventId };
@@ -4536,12 +4539,12 @@ export function App() {
       : null;
     threadComposerOverlayRef.current = {
       scope,
-      value: draft,
+      document,
       revision,
       debounceHandle: null
     };
-    composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, draft, revision);
-    if (revision) queueThreadComposerDraftPersist(scope, draft, revision);
+    composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, document, revision);
+    if (revision) queueThreadComposerDraftPersist(scope, document, revision);
   }
 
   async function stageThreadUploadFiles(
@@ -4903,7 +4906,7 @@ export function App() {
 
   function queueThreadComposerDraftPersist(
     scope: ComposerDraftScope,
-    draft: string,
+    document: ComposerDocument,
     revision: ComposerDraftRevision
   ) {
     if (scope.target.kind !== "thread") return;
@@ -4925,7 +4928,7 @@ export function App() {
           admitted.lease.rendererGeneration,
           target.room_id,
           target.root_event_id,
-          draft,
+          document,
           revision
         )
         .then((nextSnapshot) => {
@@ -4937,7 +4940,7 @@ export function App() {
             !currentOverlay ||
             !composerDraftScopesEqual(currentOverlay.scope, scope) ||
             currentOverlay.revision !== revision ||
-            currentOverlay.value !== draft
+            currentOverlay.document !== document
           ) return;
           setSnapshot(nextSnapshot);
         })

@@ -334,6 +334,15 @@ export interface MentionIntent {
   targets: MentionTarget[];
 }
 
+export type ComposerInline =
+  | { kind: "text"; text: string }
+  | { kind: "mention"; target: MentionTarget; display_label: string };
+
+export interface ComposerDocument {
+  version: 2;
+  inlines: ComposerInline[];
+}
+
 export interface FormattedMessageDraft {
   plain_body: string;
   formatted_body: string | null;
@@ -1509,6 +1518,7 @@ export interface ComposerState {
   pending_submission_id?: string | null;
   pending_transaction_id: string | null;
   draft: string;
+  document: ComposerDocument;
   draft_revision: ComposerDraftRevision;
   last_accepted_clear_revision: ComposerDraftRevision;
   mode: ComposerMode;

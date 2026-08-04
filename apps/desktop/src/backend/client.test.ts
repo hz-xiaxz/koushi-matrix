@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDesktopApi } from "./client";
+import { documentFromText } from "../domain/composerDocument";
 import { parseComposerDraftRevision } from "../domain/composerDraftRevision";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -203,7 +204,7 @@ describe("TauriDesktopApi", () => {
       "lease-9",
       "renderer-7",
       "!room:example.invalid",
-      "body",
+      documentFromText("body"),
       parseComposerDraftRevision("9007199254740993")
     );
     await api.releaseComposerDraftLease("lease-9", "renderer-7");
@@ -223,7 +224,7 @@ describe("TauriDesktopApi", () => {
       leaseId: "lease-9",
       rendererGeneration: "renderer-7",
       roomId: "!room:example.invalid",
-      draft: "body",
+      document: documentFromText("body"),
       draftRevision: "9007199254740993"
     });
     expect(invoke).toHaveBeenCalledWith("release_composer_draft_lease", {

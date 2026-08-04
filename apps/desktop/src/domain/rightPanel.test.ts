@@ -348,7 +348,7 @@ function snapshotForPanelMode(
           room_id: null,
           is_subscribed: false,
           is_paginating_backwards: false,
-          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", mode: "Plain" },
+          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", document: { version: 2, inlines: [] }, mode: "Plain" },
           submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] },
           scheduled_send_capability: "unknown",
           scheduled_sends: [],
@@ -370,6 +370,7 @@ function snapshotForPanelMode(
                 draft_revision: COMPOSER_DRAFT_REVISION_ZERO,
                 last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO,
                 draft: "",
+                document: { version: 2, inlines: [] },
                 mode: "Plain"
               },
               staged_uploads: []

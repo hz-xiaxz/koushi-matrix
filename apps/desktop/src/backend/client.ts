@@ -15,6 +15,7 @@ import type {
   ComposerResolverOptions,
   ComposerSurface,
   ComposerTarget,
+  ComposerDocument,
   ComposerDraftRevision,
   ComposerDraftAcceptanceResponse,
   DirectoryQuery,
@@ -746,7 +747,7 @@ class TauriDesktopApi implements DesktopApi {
     leaseId: string,
     rendererGeneration: string,
     roomId: string,
-    draft: string,
+    document: ComposerDocument,
     revision: ComposerDraftRevision
   ): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("set_composer_draft", {
@@ -756,7 +757,7 @@ class TauriDesktopApi implements DesktopApi {
       leaseId,
       rendererGeneration,
       roomId,
-      draft,
+      document,
       draftRevision: revision
     });
   }
@@ -803,7 +804,7 @@ class TauriDesktopApi implements DesktopApi {
     rendererGeneration: string,
     roomId: string,
     rootEventId: string,
-    draft: string,
+    document: ComposerDocument,
     revision: ComposerDraftRevision
   ): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("set_thread_composer_draft", {
@@ -814,7 +815,7 @@ class TauriDesktopApi implements DesktopApi {
       rendererGeneration,
       roomId,
       rootEventId,
-      draft,
+      document,
       draftRevision: revision
     });
   }
