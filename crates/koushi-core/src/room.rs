@@ -3353,6 +3353,10 @@ async fn project_live_entries_and_ack_if_reconciled(
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LiveObserverTestEvent {
     RlsProjected { wake_count: u64, entries_len: usize },
+    DirectClassificationUpdated {
+        event_wake_count: u64,
+        applied_update_count: u64,
+    },
     DirectClassificationProjected {
         event_wake_count: u64,
         applied_update_count: u64,
@@ -3594,6 +3598,7 @@ async fn run_live_room_list_observation(
         room_updates_rx,
         None,
         direct_events_rx,
+        None,
     )
     .await;
     #[cfg(not(test))]
@@ -3641,6 +3646,7 @@ async fn run_live_room_list_observation_with_sources(
     #[cfg(test)] test_event_tx: Option<mpsc::UnboundedSender<LiveObserverTestEvent>>,
     #[cfg(test)] direct_events_rx:
         mpsc::UnboundedReceiver<matrix_sdk::ruma::events::direct::DirectEventContent>,
+    #[cfg(test)] mut entries_start_rx: Option<mpsc::Receiver<()>>,
 ) {
     use futures_util::StreamExt as _;
 
@@ -3654,6 +3660,18 @@ async fn run_live_room_list_observation_with_sources(
     );
     let mut direct_events = Box::pin(direct_events);
     let mut direct_events_closed = false;
+    #[cfg(test)]
+    let mut entries_enabled = entries_start_rx.is_none();
+    #[cfg(not(test))]
+    let mut entries_enabled = true;
+    #[cfg(test)]
+    let mut entries_start = Box::pin(async {
+        if let Some(entries_start_rx) = entries_start_rx.as_mut() {
+            let _ = entries_start_rx.recv().await;
+        }
+    });
+    #[cfg(not(test))]
+    let mut entries_start = Box::pin(futures_util::future::pending::<()>());
 
     let all_rooms = match service.all_rooms().await {
         Ok(all_rooms) => all_rooms,
@@ -3698,9 +3716,13 @@ async fn run_live_room_list_observation_with_sources(
     ));
     let mut rls_wake_count = 0_u64;
     let mut base_wake_count = 0_u64;
+    let mut entries_observed = false;
 
     loop {
         tokio::select! {
+            _ = &mut entries_start, if !entries_enabled => {
+                entries_enabled = true;
+            },
             _ = &mut stop_rx => {
                 record_live_observer_exit(
                     DiagnosticLevel::Debug,
@@ -3932,7 +3954,7 @@ async fn run_live_room_list_observation_with_sources(
                     ).await;
                 }
             }
-            maybe_diffs = entries.next() => match maybe_diffs {
+            maybe_diffs = entries.next(), if entries_enabled => match maybe_diffs {
                 None => {
                     record_live_observer_exit(
                         DiagnosticLevel::Error,
@@ -3947,6 +3969,7 @@ async fn run_live_room_list_observation_with_sources(
                     for diff in diffs {
                         diff.apply(&mut current);
                     }
+                    entries_observed = true;
                     if rls_wake_count.is_power_of_two() {
                         record(
                             DiagnosticEvent::new(
@@ -4132,7 +4155,15 @@ async fn run_live_room_list_observation_with_sources(
                         let changed = direct_state.replace_targets(
                             koushi_sdk::direct_account_data_targets_by_room(&content),
                         );
-                        if changed {
+                        #[cfg(test)]
+                        emit_live_observer_test_event(
+                            &test_event_tx,
+                            LiveObserverTestEvent::DirectClassificationUpdated {
+                                event_wake_count: direct_state.event_wake_count(),
+                                applied_update_count: direct_state.applied_update_count(),
+                            },
+                        );
+                        if changed && entries_observed {
                             project_live_entries_and_ack_if_reconciled(
                                 &mut reconciliation,
                                 &session,
@@ -5742,7 +5773,7 @@ pub mod tests {
         action_rx: mpsc::Receiver<Vec<AppAction>>,
         test_event_rx: mpsc::UnboundedReceiver<LiveObserverTestEvent>,
         direct_event_tx:
-            mpsc::UnboundedSender<matrix_sdk::ruma::events::direct::DirectEventContent>,
+            Option<mpsc::UnboundedSender<matrix_sdk::ruma::events::direct::DirectEventContent>>,
         _command_tx: mpsc::Sender<RoomListObservationCommand>,
         stop_tx: oneshot::Sender<()>,
         task: tokio::task::JoinHandle<()>,
@@ -5765,6 +5796,21 @@ pub mod tests {
             assert_eq!(actual, expected);
         }
 
+        fn send_direct_event(
+            &self,
+            content: matrix_sdk::ruma::events::direct::DirectEventContent,
+        ) {
+            self.direct_event_tx
+                .as_ref()
+                .expect("direct event source should be open")
+                .send(content)
+                .expect("direct event receiver");
+        }
+
+        fn close_direct_event_source(&mut self) {
+            self.direct_event_tx.take();
+        }
+
         async fn stop(self) {
             let _ = self.stop_tx.send(());
             self.task.await.expect("observer task");
@@ -5776,6 +5822,7 @@ pub mod tests {
         homeserver: String,
         entries_limit: usize,
         room_updates_rx: broadcast::Receiver<matrix_sdk_base::sync::RoomUpdates>,
+        entries_start_rx: Option<mpsc::Receiver<()>>,
     ) -> LiveObserverTestHarness {
         let service = Arc::new(
             matrix_sdk_ui::room_list_service::RoomListService::new(client.clone())
@@ -5822,11 +5869,12 @@ pub mod tests {
             room_updates_rx,
             Some(test_event_tx),
             direct_events_rx,
+            entries_start_rx,
         ));
         LiveObserverTestHarness {
             action_rx,
             test_event_rx,
-            direct_event_tx,
+            direct_event_tx: Some(direct_event_tx),
             _command_tx: command_tx,
             stop_tx,
             task,
@@ -6751,7 +6799,7 @@ pub mod tests {
             .await;
         let room_updates_rx = client.subscribe_to_all_room_updates();
         let mut harness =
-            spawn_live_observer_test_harness(client, server.uri(), 2, room_updates_rx).await;
+            spawn_live_observer_test_harness(client, server.uri(), 2, room_updates_rx, None).await;
 
         let projected = harness.next_actions("initial service projection").await;
         assert!(projected.iter().any(|action| {
@@ -6804,7 +6852,7 @@ pub mod tests {
             .await;
         let room_updates_rx = client.subscribe_to_all_room_updates();
         let mut harness =
-            spawn_live_observer_test_harness(client, server.uri(), 2, room_updates_rx).await;
+            spawn_live_observer_test_harness(client, server.uri(), 2, room_updates_rx, None).await;
 
         loop {
             let initial = harness.next_actions("initial room projection").await;
@@ -6833,10 +6881,7 @@ pub mod tests {
         let room_id: OwnedRoomId = dm_room_id.to_owned();
         let mut content = DirectEventContent::default();
         content.insert(OwnedDirectUserIdentifier::from(user_id), vec![room_id]);
-        harness
-            .direct_event_tx
-            .send(content.clone())
-            .expect("direct event receiver");
+        harness.send_direct_event(content.clone());
 
         let projected = harness.next_actions("direct account-data reprojection").await;
         assert!(projected.iter().any(|action| {
@@ -6864,13 +6909,164 @@ pub mod tests {
             )
             .await;
 
-        harness
-            .direct_event_tx
-            .send(content)
-            .expect("direct event receiver");
+        harness.send_direct_event(content);
         assert!(tokio::time::timeout(Duration::from_millis(100), harness.action_rx.recv())
             .await
             .is_err());
+
+        harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn live_room_list_observer_defers_direct_event_projection_until_first_service_entries() {
+        use matrix_sdk::{
+            ruma::{
+                OwnedRoomId, OwnedUserId,
+                events::{
+                    AnySyncStateEvent,
+                    direct::{DirectEventContent, OwnedDirectUserIdentifier},
+                },
+                room_id,
+                serde::Raw,
+                user_id,
+            },
+            test_utils::mocks::MatrixMockServer,
+        };
+        use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let dm_room_id = room_id!("!direct-before-entries:example.invalid");
+        let room_name: Raw<AnySyncStateEvent> = EventFactory::new()
+            .room(dm_room_id)
+            .sender(user_id!("@sender:example.invalid"))
+            .room_name("Direct event before entries")
+            .into();
+        server
+            .sync_room(
+                &client,
+                JoinedRoomBuilder::new(dm_room_id).add_state_event(room_name),
+            )
+            .await;
+
+        let room_updates_rx = client.subscribe_to_all_room_updates();
+        let (entries_start_tx, entries_start_rx) = mpsc::channel(1);
+        let mut harness = spawn_live_observer_test_harness(
+            client,
+            server.uri(),
+            2,
+            room_updates_rx,
+            Some(entries_start_rx),
+        )
+        .await;
+
+        let user_id: OwnedUserId = user_id!("@alice:example.invalid").to_owned();
+        let room_id: OwnedRoomId = dm_room_id.to_owned();
+        let mut content = DirectEventContent::default();
+        content.insert(OwnedDirectUserIdentifier::from(user_id), vec![room_id]);
+        harness.send_direct_event(content);
+        harness
+            .expect_event(
+                "direct account-data state update before first service entries",
+                LiveObserverTestEvent::DirectClassificationUpdated {
+                    event_wake_count: 1,
+                    applied_update_count: 1,
+                },
+            )
+            .await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), harness.action_rx.recv())
+                .await
+                .is_err()
+        );
+
+        entries_start_tx
+            .send(())
+            .await
+            .expect("first service entries gate");
+        let projected = harness
+            .next_actions("first service projection after direct event")
+            .await;
+        assert!(matches!(
+            projected.as_slice(),
+            [
+                AppAction::RoomListSnapshotProvisional { rooms, .. }
+                    | AppAction::RoomListSnapshotAuthoritative { rooms, .. },
+                AppAction::UserProfilesUpdated { .. }
+            ]
+                if rooms.iter().any(|room| room.room_id == dm_room_id.as_str() && room.is_dm)
+        ));
+        harness
+            .expect_event(
+                "first service projection after direct event",
+                LiveObserverTestEvent::RlsProjected {
+                    wake_count: 1,
+                    entries_len: 1,
+                },
+            )
+            .await;
+
+        harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn live_room_list_observer_continues_after_test_direct_event_source_closes() {
+        use matrix_sdk::{ruma::room_id, test_utils::mocks::MatrixMockServer};
+        use matrix_sdk_test::JoinedRoomBuilder;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let initial_room_id = room_id!("!initial-direct-source-close:example.invalid");
+        server
+            .sync_room(&client, JoinedRoomBuilder::new(initial_room_id))
+            .await;
+
+        let room_updates_rx = client.subscribe_to_all_room_updates();
+        let mut harness = spawn_live_observer_test_harness(
+            client.clone(),
+            server.uri(),
+            2,
+            room_updates_rx,
+            None,
+        )
+        .await;
+        let _ = harness.next_actions("initial service projection").await;
+        harness
+            .expect_event(
+                "initial service projection",
+                LiveObserverTestEvent::RlsProjected {
+                    wake_count: 1,
+                    entries_len: 1,
+                },
+            )
+            .await;
+
+        harness.close_direct_event_source();
+        let later_room_id = room_id!("!later-direct-source-close:example.invalid");
+        server
+            .sync_room(&client, JoinedRoomBuilder::new(later_room_id))
+            .await;
+
+        let projected = harness
+            .next_actions("service projection after direct event source closes")
+            .await;
+        assert!(projected.iter().any(|action| {
+            matches!(
+                action,
+                AppAction::RoomListSnapshotProvisional { rooms, .. }
+                    | AppAction::RoomListSnapshotAuthoritative { rooms, .. }
+                    if rooms.iter().any(|room| room.room_id == later_room_id.as_str())
+            )
+        }));
+        harness
+            .expect_event(
+                "service projection after direct event source closes",
+                LiveObserverTestEvent::RlsProjected {
+                    wake_count: 2,
+                    entries_len: 2,
+                },
+            )
+            .await;
 
         harness.stop().await;
     }
