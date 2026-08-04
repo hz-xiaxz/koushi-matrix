@@ -3353,6 +3353,7 @@ async fn project_live_entries_and_ack_if_reconciled(
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LiveObserverTestEvent {
     RlsProjected { wake_count: u64, entries_len: usize },
+    DirectEventStreamClosed,
     DirectClassificationUpdated {
         event_wake_count: u64,
         applied_update_count: u64,
@@ -3362,6 +3363,13 @@ enum LiveObserverTestEvent {
         applied_update_count: u64,
         projected_dm_count: usize,
     },
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LiveDirectEventTestSource {
+    SdkAndInjected,
+    InjectedOnly,
 }
 
 #[cfg(test)]
@@ -3598,6 +3606,7 @@ async fn run_live_room_list_observation(
         room_updates_rx,
         None,
         direct_events_rx,
+        LiveDirectEventTestSource::SdkAndInjected,
         None,
     )
     .await;
@@ -3646,19 +3655,26 @@ async fn run_live_room_list_observation_with_sources(
     #[cfg(test)] test_event_tx: Option<mpsc::UnboundedSender<LiveObserverTestEvent>>,
     #[cfg(test)] direct_events_rx:
         mpsc::UnboundedReceiver<matrix_sdk::ruma::events::direct::DirectEventContent>,
+    #[cfg(test)] direct_event_source: LiveDirectEventTestSource,
     #[cfg(test)] mut entries_start_rx: Option<mpsc::Receiver<()>>,
 ) {
     use futures_util::StreamExt as _;
 
-    let direct_events = direct_events.map(|(event, ())| event.content);
+    let sdk_direct_events = direct_events.map(|(event, ())| event.content);
     #[cfg(test)]
-    let direct_events = futures_util::stream::select(
-        direct_events,
+    let injected_direct_events =
         futures_util::stream::unfold(direct_events_rx, |mut receiver| async move {
             receiver.recv().await.map(|content| (content, receiver))
-        }),
-    );
-    let mut direct_events = Box::pin(direct_events);
+        });
+    #[cfg(test)]
+    let mut direct_events = match direct_event_source {
+        LiveDirectEventTestSource::SdkAndInjected => {
+            futures_util::stream::select(sdk_direct_events, injected_direct_events).boxed()
+        }
+        LiveDirectEventTestSource::InjectedOnly => injected_direct_events.boxed(),
+    };
+    #[cfg(not(test))]
+    let mut direct_events = Box::pin(sdk_direct_events);
     let mut direct_events_closed = false;
     #[cfg(test)]
     let mut entries_enabled = entries_start_rx.is_none();
@@ -4194,6 +4210,11 @@ async fn run_live_room_list_observation_with_sources(
                     }
                     None => {
                         direct_events_closed = true;
+                        #[cfg(test)]
+                        emit_live_observer_test_event(
+                            &test_event_tx,
+                            LiveObserverTestEvent::DirectEventStreamClosed,
+                        );
                         record_direct_event_stream_closed(&direct_state);
                     }
                 }
@@ -5822,6 +5843,7 @@ pub mod tests {
         homeserver: String,
         entries_limit: usize,
         room_updates_rx: broadcast::Receiver<matrix_sdk_base::sync::RoomUpdates>,
+        direct_event_source: LiveDirectEventTestSource,
         entries_start_rx: Option<mpsc::Receiver<()>>,
     ) -> LiveObserverTestHarness {
         let service = Arc::new(
@@ -5869,6 +5891,7 @@ pub mod tests {
             room_updates_rx,
             Some(test_event_tx),
             direct_events_rx,
+            direct_event_source,
             entries_start_rx,
         ));
         LiveObserverTestHarness {
@@ -6798,8 +6821,15 @@ pub mod tests {
             )
             .await;
         let room_updates_rx = client.subscribe_to_all_room_updates();
-        let mut harness =
-            spawn_live_observer_test_harness(client, server.uri(), 2, room_updates_rx, None).await;
+        let mut harness = spawn_live_observer_test_harness(
+            client,
+            server.uri(),
+            2,
+            room_updates_rx,
+            LiveDirectEventTestSource::SdkAndInjected,
+            None,
+        )
+        .await;
 
         let projected = harness.next_actions("initial service projection").await;
         assert!(projected.iter().any(|action| {
@@ -6851,8 +6881,15 @@ pub mod tests {
             )
             .await;
         let room_updates_rx = client.subscribe_to_all_room_updates();
-        let mut harness =
-            spawn_live_observer_test_harness(client, server.uri(), 2, room_updates_rx, None).await;
+        let mut harness = spawn_live_observer_test_harness(
+            client,
+            server.uri(),
+            2,
+            room_updates_rx,
+            LiveDirectEventTestSource::SdkAndInjected,
+            None,
+        )
+        .await;
 
         loop {
             let initial = harness.next_actions("initial room projection").await;
@@ -6956,6 +6993,7 @@ pub mod tests {
             server.uri(),
             2,
             room_updates_rx,
+            LiveDirectEventTestSource::SdkAndInjected,
             Some(entries_start_rx),
         )
         .await;
@@ -7027,6 +7065,7 @@ pub mod tests {
             server.uri(),
             2,
             room_updates_rx,
+            LiveDirectEventTestSource::InjectedOnly,
             None,
         )
         .await;
@@ -7042,6 +7081,12 @@ pub mod tests {
             .await;
 
         harness.close_direct_event_source();
+        harness
+            .expect_event(
+                "direct event stream closure",
+                LiveObserverTestEvent::DirectEventStreamClosed,
+            )
+            .await;
         let later_room_id = room_id!("!later-direct-source-close:example.invalid");
         server
             .sync_room(&client, JoinedRoomBuilder::new(later_room_id))
