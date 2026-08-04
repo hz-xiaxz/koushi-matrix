@@ -83,7 +83,10 @@ import type {
   SpaceMemberEntry,
   SpaceMembersState
 } from "../domain/types";
-import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
+import {
+  DEFAULT_SLIDING_SYNC_DIAGNOSTICS,
+  type DiagnosticLogSnapshot
+} from "../domain/diagnostics";
 import type {
   ComposerDraftLeaseSnapshot,
   ComposerDraftScope
@@ -656,7 +659,11 @@ class BrowserFakeApi implements DesktopApi {
   }
 
   async getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot> {
-    return { entries: [], droppedEntries: 0 };
+    return {
+      entries: [],
+      droppedEntries: 0,
+      slidingSync: { ...DEFAULT_SLIDING_SYNC_DIAGNOSTICS }
+    };
   }
 
   async discoverLoginMethods(homeserver: string): Promise<DesktopSnapshot> {

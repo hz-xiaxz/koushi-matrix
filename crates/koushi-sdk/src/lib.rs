@@ -8452,6 +8452,63 @@ fn matrix_search_error_from_index(error: &IndexError) -> MatrixSearchError {
     }
 }
 
+pub type MatrixDirectTargetsByRoom = BTreeMap<String, Vec<String>>;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum MatrixCachedDirectAccountData {
+    Present(MatrixDirectTargetsByRoom),
+    #[default]
+    Missing,
+    StoreError,
+    Invalid,
+}
+
+pub async fn cached_direct_account_data_targets_by_room(
+    session: &MatrixClientSession,
+) -> MatrixCachedDirectAccountData {
+    match session
+        .client()
+        .account()
+        .account_data::<DirectEventContent>()
+        .await
+    {
+        Ok(Some(raw)) => match raw.deserialize() {
+            Ok(content) => MatrixCachedDirectAccountData::Present(
+                direct_account_data_targets_by_room(&content),
+            ),
+            Err(_) => MatrixCachedDirectAccountData::Invalid,
+        },
+        Ok(None) => MatrixCachedDirectAccountData::Missing,
+        Err(_) => MatrixCachedDirectAccountData::StoreError,
+    }
+}
+
+pub fn direct_account_data_targets_by_room(
+    content: &DirectEventContent,
+) -> MatrixDirectTargetsByRoom {
+    let mut targets_by_room: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (user_id, room_ids) in content.iter() {
+        for room_id in room_ids {
+            targets_by_room
+                .entry(room_id.to_string())
+                .or_default()
+                .insert(user_id.to_string());
+        }
+    }
+    targets_by_room
+        .into_iter()
+        .map(|(room_id, targets)| (room_id, targets.into_iter().collect()))
+        .collect()
+}
+
+/// Normalize joined rooms with an optional authoritative `m.direct` map.
+pub async fn room_list_snapshot_from_sdk_rooms_with_direct_targets(
+    rooms: impl IntoIterator<Item = matrix_sdk::Room>,
+    direct_targets_by_room: Option<&MatrixDirectTargetsByRoom>,
+) -> MatrixRoomListSnapshot {
+    matrix_room_list_snapshot_from_rooms(direct_targets_by_room, rooms).await
+}
+
 /// Normalize a room list snapshot from caller-provided SDK rooms.
 ///
 /// This is the normalization entry point for callers that already hold the
@@ -8463,7 +8520,7 @@ fn matrix_search_error_from_index(error: &IndexError) -> MatrixSearchError {
 pub async fn room_list_snapshot_from_sdk_rooms(
     rooms: impl IntoIterator<Item = matrix_sdk::Room>,
 ) -> MatrixRoomListSnapshot {
-    matrix_room_list_snapshot_from_rooms(&BTreeMap::new(), rooms).await
+    room_list_snapshot_from_sdk_rooms_with_direct_targets(rooms, None).await
 }
 
 /// Normalize joined rooms from the caller's source of truth plus invited rooms
@@ -8476,7 +8533,8 @@ pub async fn room_list_snapshot_from_sdk_rooms_with_invites(
 ) -> MatrixRoomListSnapshot {
     let client = session.client();
     let direct_targets_by_room = matrix_direct_account_data_targets_by_room(&client).await;
-    let mut snapshot = matrix_room_list_snapshot_from_rooms(&direct_targets_by_room, rooms).await;
+    let mut snapshot =
+        matrix_room_list_snapshot_from_rooms(Some(&direct_targets_by_room), rooms).await;
     snapshot.invites = matrix_invite_previews_from_rooms(client.invited_rooms()).await;
     snapshot
 }
@@ -8509,7 +8567,7 @@ pub async fn room_list_snapshot(
         Err(_) => {
             let direct_targets_by_room = matrix_direct_account_data_targets_by_room(&client).await;
             return Ok(matrix_room_list_snapshot_from_rooms(
-                &direct_targets_by_room,
+                Some(&direct_targets_by_room),
                 client.joined_rooms(),
             )
             .await);
@@ -8531,10 +8589,10 @@ pub async fn room_list_snapshot(
     };
 
     let direct_targets_by_room = matrix_direct_account_data_targets_by_room(&client).await;
-    let snapshot = matrix_room_list_snapshot_from_diffs(&direct_targets_by_room, diffs).await;
+    let snapshot = matrix_room_list_snapshot_from_diffs(Some(&direct_targets_by_room), diffs).await;
     if snapshot.rooms.is_empty() && snapshot.spaces.is_empty() {
         return Ok(matrix_room_list_snapshot_from_rooms(
-            &direct_targets_by_room,
+            Some(&direct_targets_by_room),
             client.joined_rooms(),
         )
         .await);
@@ -9799,7 +9857,7 @@ fn matrix_timeline_update_from_ui(
 }
 
 async fn matrix_room_list_snapshot_from_diffs(
-    direct_targets_by_room: &BTreeMap<String, Vec<String>>,
+    direct_targets_by_room: Option<&MatrixDirectTargetsByRoom>,
     diffs: Vec<eyeball_im::VectorDiff<matrix_sdk_ui::room_list_service::RoomListItem>>,
 ) -> MatrixRoomListSnapshot {
     let mut items = Vec::new();
@@ -9827,7 +9885,7 @@ async fn matrix_room_list_snapshot_from_diffs(
 }
 
 async fn matrix_room_list_snapshot_from_items(
-    direct_targets_by_room: &BTreeMap<String, Vec<String>>,
+    direct_targets_by_room: Option<&MatrixDirectTargetsByRoom>,
     items: Vec<matrix_sdk_ui::room_list_service::RoomListItem>,
 ) -> MatrixRoomListSnapshot {
     matrix_room_list_snapshot_from_rooms(
@@ -9838,7 +9896,7 @@ async fn matrix_room_list_snapshot_from_items(
 }
 
 async fn matrix_room_list_snapshot_from_rooms(
-    direct_targets_by_room: &BTreeMap<String, Vec<String>>,
+    direct_targets_by_room: Option<&MatrixDirectTargetsByRoom>,
     rooms: impl IntoIterator<Item = matrix_sdk::Room>,
 ) -> MatrixRoomListSnapshot {
     let mut snapshot = MatrixRoomListSnapshot::default();
@@ -9878,15 +9936,24 @@ async fn matrix_room_list_snapshot_from_rooms(
         let parent_space_ids = matrix_parent_space_ids(&room).await;
         let tags = matrix_room_tags(&room).await;
 
-        let is_dm = if direct_targets_by_room.contains_key(&room_id) {
-            true
-        } else if !room.direct_targets().is_empty() {
-            true
+        let is_dm = match direct_targets_by_room {
+            Some(direct_targets_by_room) => direct_targets_by_room.contains_key(&room_id),
+            None => {
+                if !room.direct_targets().is_empty() {
+                    true
+                } else {
+                    room.is_direct().await.unwrap_or_else(|_| room.is_dm())
+                }
+            }
+        };
+        let empty_direct_targets_by_room = BTreeMap::new();
+        let dm_targets_by_room = if is_dm {
+            direct_targets_by_room.unwrap_or(&empty_direct_targets_by_room)
         } else {
-            room.is_direct().await.unwrap_or_else(|_| room.is_dm())
+            &empty_direct_targets_by_room
         };
         let dm_user_ids =
-            matrix_room_list_dm_user_ids(&room, direct_targets_by_room, is_dm, &mut user_profiles)
+            matrix_room_list_dm_user_ids(&room, dm_targets_by_room, is_dm, &mut user_profiles)
                 .await;
         let joined_members = room.joined_members_count();
 
@@ -9944,7 +10011,7 @@ async fn matrix_room_list_snapshot_from_rooms(
 
 async fn matrix_direct_account_data_targets_by_room(
     client: &matrix_sdk::Client,
-) -> BTreeMap<String, Vec<String>> {
+) -> MatrixDirectTargetsByRoom {
     let Some(targets_by_room) = client
         .account()
         .account_data::<DirectEventContent>()
@@ -9967,27 +10034,9 @@ async fn matrix_direct_account_data_targets_by_room(
     targets_by_room
 }
 
-fn direct_account_data_targets_by_room(
-    content: &DirectEventContent,
-) -> BTreeMap<String, Vec<String>> {
-    let mut targets_by_room: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for (user_id, room_ids) in content.iter() {
-        for room_id in room_ids {
-            targets_by_room
-                .entry(room_id.to_string())
-                .or_default()
-                .insert(user_id.to_string());
-        }
-    }
-    targets_by_room
-        .into_iter()
-        .map(|(room_id, targets)| (room_id, targets.into_iter().collect()))
-        .collect()
-}
-
 async fn matrix_room_list_dm_user_ids(
     room: &matrix_sdk::Room,
-    direct_targets_by_room: &BTreeMap<String, Vec<String>>,
+    direct_targets_by_room: &MatrixDirectTargetsByRoom,
     is_dm: bool,
     user_profiles: &mut BTreeMap<String, MatrixUserProfile>,
 ) -> Vec<String> {
@@ -10001,7 +10050,7 @@ async fn matrix_room_list_dm_user_ids(
             .into_iter()
             .map(|user_id| user_id.to_string())
             .collect();
-        if !cached_direct_targets.is_empty() {
+        if is_dm && !cached_direct_targets.is_empty() {
             cached_direct_targets
         } else if is_dm {
             room.heroes()
@@ -12022,6 +12071,85 @@ mod tests {
             by_room.get(other_room.as_str()),
             Some(&vec!["@alice:example.invalid".to_owned()])
         );
+    }
+
+    #[test]
+    fn direct_account_data_targets_are_sorted_deduplicated_and_indexed_by_room() {
+        use matrix_sdk::ruma::{
+            OwnedRoomId, OwnedUserId,
+            events::direct::{DirectEventContent, OwnedDirectUserIdentifier},
+        };
+
+        let alice: OwnedUserId = "@alice:example.invalid".try_into().unwrap();
+        let bob: OwnedUserId = "@bob:example.invalid".try_into().unwrap();
+        let room: OwnedRoomId = "!dm:example.invalid".try_into().unwrap();
+        let mut content = DirectEventContent::default();
+        content.insert(OwnedDirectUserIdentifier::from(bob), vec![room.clone()]);
+        content.insert(OwnedDirectUserIdentifier::from(alice), vec![room.clone()]);
+
+        assert_eq!(
+            super::direct_account_data_targets_by_room(&content),
+            BTreeMap::from([(
+                room.to_string(),
+                vec![
+                    "@alice:example.invalid".to_owned(),
+                    "@bob:example.invalid".to_owned(),
+                ],
+            )]),
+        );
+    }
+
+    #[test]
+    fn live_direct_account_data_loader_is_local_only() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split("pub async fn cached_direct_account_data_targets_by_room")
+            .nth(1)
+            .expect("local direct loader")
+            .split("pub fn direct_account_data_targets_by_room")
+            .next()
+            .expect("normalizer follows loader");
+        assert!(body.contains("account_data::<DirectEventContent>()"));
+        assert!(!body.contains("fetch_account_data_static"));
+    }
+
+    #[tokio::test]
+    async fn explicit_empty_direct_map_overrides_cached_room_direct_targets() {
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_test::JoinedRoomBuilder;
+        use serde_json::json;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let target = matrix_sdk::ruma::user_id!("@dm-target:example.org");
+        let room_id = matrix_sdk::ruma::room_id!("!stale-dm:example.org");
+
+        server
+            .mock_sync()
+            .ok_and_run(&client, |builder| {
+                builder.add_custom_global_account_data(json!({
+                    "type": "m.direct",
+                    "content": { target: [room_id] }
+                }));
+                builder.add_joined_room(JoinedRoomBuilder::new(room_id));
+            })
+            .await;
+
+        let room = client.get_room(&room_id).expect("joined test room");
+        assert!(
+            !room.direct_targets().is_empty(),
+            "test room must have cached direct targets"
+        );
+
+        let direct_targets_by_room = BTreeMap::new();
+        let snapshot = super::room_list_snapshot_from_sdk_rooms_with_direct_targets(
+            std::iter::once(room),
+            Some(&direct_targets_by_room),
+        )
+        .await;
+
+        assert_eq!(snapshot.rooms.len(), 1);
+        assert!(!snapshot.rooms[0].is_dm);
     }
 
     #[test]

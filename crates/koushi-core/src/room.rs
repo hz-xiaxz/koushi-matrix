@@ -78,9 +78,11 @@ use koushi_state::{
 };
 #[cfg(test)]
 use koushi_state::{ProfileResolutionInput, ProfileResolutionSource, resolve_people_label};
+use matrix_sdk::ruma::events::direct::DirectEvent;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
+use crate::direct_message_classification::{DirectAccountDataSource, DirectClassificationState};
 use crate::event::{CoreEvent, ReportKind, RoomEvent};
 use crate::executor;
 use crate::failure::{CoreFailure, RoomFailureKind};
@@ -264,6 +266,11 @@ struct RoomListObservation {
 }
 
 pub enum RoomListReconcileAck {
+    Projected {
+        backend_generation: u64,
+        room_generation: u64,
+        response_sequence: u64,
+    },
     Reconciled {
         backend_generation: u64,
         room_generation: u64,
@@ -310,6 +317,7 @@ pub struct RoomActor {
     space_member_refresh_pending: bool,
     action_tx: mpsc::Sender<Vec<AppAction>>,
     event_tx: broadcast::Sender<CoreEvent>,
+    sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     self_tx: mpsc::Sender<RoomMessage>,
     command_rx: mpsc::Receiver<RoomMessage>,
 }
@@ -341,6 +349,7 @@ impl RoomActor {
     pub fn spawn(
         action_tx: mpsc::Sender<Vec<AppAction>>,
         event_tx: broadcast::Sender<CoreEvent>,
+        sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     ) -> RoomActorHandle {
         let (tx, command_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let actor = RoomActor {
@@ -365,6 +374,7 @@ impl RoomActor {
             space_member_refresh_pending: false,
             action_tx,
             event_tx,
+            sliding_sync_diagnostics,
             self_tx: tx.clone(),
             command_rx,
         };
@@ -607,6 +617,7 @@ impl RoomActor {
             generation,
             source,
             authoritative.clone(),
+            self.sliding_sync_diagnostics.clone(),
         ));
         self.observation = Some(RoomListObservation {
             stop_tx,
@@ -3222,7 +3233,7 @@ struct LiveRoomListReconciliation {
     maximum_number_of_rooms: Option<u32>,
     range_fully_loaded: bool,
     authoritative: bool,
-    pending: Option<(u64, u64, oneshot::Sender<RoomListReconcileAck>)>,
+    pending: Option<(u64, u64, Option<oneshot::Sender<RoomListReconcileAck>>)>,
 }
 
 impl LiveRoomListReconciliation {
@@ -3247,7 +3258,7 @@ impl LiveRoomListReconciliation {
         ready_tx: oneshot::Sender<RoomListReconcileAck>,
     ) {
         self.authoritative = false;
-        self.pending = Some((backend_generation, response_sequence, ready_tx));
+        self.pending = Some((backend_generation, response_sequence, Some(ready_tx)));
     }
 
     fn is_complete(&self, current_entries: usize) -> bool {
@@ -3259,6 +3270,11 @@ impl LiveRoomListReconciliation {
         self.pending.is_some()
     }
 
+    fn take_projection_ack(&mut self) -> Option<(u64, u64, oneshot::Sender<RoomListReconcileAck>)> {
+        let (backend_generation, response_sequence, ready_tx) = self.pending.as_mut()?;
+        Some((*backend_generation, *response_sequence, ready_tx.take()?))
+    }
+
     fn is_authoritative(&self, current_entries: usize) -> bool {
         self.authoritative && self.is_complete(current_entries)
     }
@@ -3266,7 +3282,7 @@ impl LiveRoomListReconciliation {
     fn finish_if_complete(
         &mut self,
         current_entries: usize,
-    ) -> Option<(u64, u64, oneshot::Sender<RoomListReconcileAck>)> {
+    ) -> Option<(u64, u64, Option<oneshot::Sender<RoomListReconcileAck>>)> {
         if !self.is_complete(current_entries) {
             return None;
         }
@@ -3281,6 +3297,7 @@ async fn project_live_entries_and_ack_if_reconciled(
     reconciliation: &mut LiveRoomListReconciliation,
     session: &MatrixClientSession,
     current: &eyeball_im::Vector<matrix_sdk_ui::room_list_service::RoomListItem>,
+    direct_state: &DirectClassificationState,
     known_room_ids: &Arc<RwLock<BTreeSet<String>>>,
     room_tx: &mpsc::Sender<RoomMessage>,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
@@ -3288,15 +3305,14 @@ async fn project_live_entries_and_ack_if_reconciled(
     generation: u64,
     source: RoomListSource,
     authoritative: &Arc<AtomicBool>,
+    sliding_sync_diagnostics: &crate::SlidingSyncDiagnostics,
 ) {
-    let completion = reconciliation.finish_if_complete(current.len());
-    authoritative.store(
-        reconciliation.is_authoritative(current.len()),
-        Ordering::Release,
-    );
+    let projection_is_authoritative = reconciliation.is_complete(current.len());
+    authoritative.store(projection_is_authoritative, Ordering::Release);
     let delivered = normalize_and_project_entries(
         session,
         current,
+        direct_state.authoritative_targets(),
         known_room_ids,
         room_tx,
         action_tx,
@@ -3304,10 +3320,29 @@ async fn project_live_entries_and_ack_if_reconciled(
         generation,
         source,
         authoritative,
+        Some(direct_state),
+        Some(sliding_sync_diagnostics),
     )
     .await;
-    if delivered && let Some((backend_generation, response_sequence, ack)) = completion {
-        let _ = ack.send(RoomListReconcileAck::Reconciled {
+    if !delivered {
+        authoritative.store(false, Ordering::Release);
+        return;
+    }
+    if projection_is_authoritative {
+        if let Some((backend_generation, response_sequence, ack)) =
+            reconciliation.finish_if_complete(current.len())
+            && let Some(ack) = ack
+        {
+            let _ = ack.send(RoomListReconcileAck::Reconciled {
+                backend_generation,
+                room_generation: generation,
+                response_sequence,
+            });
+        }
+    } else if let Some((backend_generation, response_sequence, ack)) =
+        reconciliation.take_projection_ack()
+    {
+        let _ = ack.send(RoomListReconcileAck::Projected {
             backend_generation,
             room_generation: generation,
             response_sequence,
@@ -3318,7 +3353,27 @@ async fn project_live_entries_and_ack_if_reconciled(
 #[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LiveObserverTestEvent {
-    RlsProjected { wake_count: u64, entries_len: usize },
+    RlsProjected {
+        wake_count: u64,
+        entries_len: usize,
+    },
+    DirectEventStreamClosed,
+    DirectClassificationUpdated {
+        event_wake_count: u64,
+        applied_update_count: u64,
+    },
+    DirectClassificationProjected {
+        event_wake_count: u64,
+        applied_update_count: u64,
+        projected_dm_count: usize,
+    },
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LiveDirectEventTestSource {
+    SdkAndInjected,
+    InjectedOnly,
 }
 
 #[cfg(test)]
@@ -3329,6 +3384,26 @@ fn emit_live_observer_test_event(
     if let Some(tx) = tx {
         let _ = tx.send(event);
     }
+}
+
+#[cfg(test)]
+fn projected_direct_room_count(
+    current: &eyeball_im::Vector<matrix_sdk_ui::room_list_service::RoomListItem>,
+    direct_state: &DirectClassificationState,
+) -> usize {
+    let Some(targets_by_room) = direct_state.authoritative_targets() else {
+        return 0;
+    };
+    current
+        .iter()
+        .map(|item| item.clone().into_inner())
+        .filter(|room| {
+            room.state() == matrix_sdk::RoomState::Joined
+                && targets_by_room.contains_key(room.room_id().as_str())
+        })
+        .map(|room| room.room_id().to_owned())
+        .collect::<BTreeSet<_>>()
+        .len()
 }
 
 /// Normalize a snapshot and project it as a generation-fenced room-list action +
@@ -3407,6 +3482,77 @@ fn room_list_source_label(source: RoomListSource) -> &'static str {
     }
 }
 
+fn usize_to_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+fn direct_account_data_source_label(source: DirectAccountDataSource) -> &'static str {
+    match source {
+        DirectAccountDataSource::Unavailable => "unavailable",
+        DirectAccountDataSource::LocalStore => "local_store",
+        DirectAccountDataSource::SlidingSyncEvent => "sliding_sync_event",
+    }
+}
+
+fn direct_account_data_initial_reason(
+    cached: &koushi_sdk::MatrixCachedDirectAccountData,
+) -> Option<&'static str> {
+    match cached {
+        koushi_sdk::MatrixCachedDirectAccountData::Present(_) => None,
+        koushi_sdk::MatrixCachedDirectAccountData::Missing => Some("missing"),
+        koushi_sdk::MatrixCachedDirectAccountData::StoreError => Some("store_error"),
+        koushi_sdk::MatrixCachedDirectAccountData::Invalid => Some("invalid"),
+    }
+}
+
+fn record_direct_account_data_initialization(cached: &koushi_sdk::MatrixCachedDirectAccountData) {
+    let source = match cached {
+        koushi_sdk::MatrixCachedDirectAccountData::Present(_) => {
+            DirectAccountDataSource::LocalStore
+        }
+        koushi_sdk::MatrixCachedDirectAccountData::Missing
+        | koushi_sdk::MatrixCachedDirectAccountData::StoreError
+        | koushi_sdk::MatrixCachedDirectAccountData::Invalid => {
+            DirectAccountDataSource::Unavailable
+        }
+    };
+    let mut event = DiagnosticEvent::new(
+        DiagnosticLevel::Debug,
+        "core.room",
+        "direct_account_data_initialized",
+    )
+    .field(DiagnosticField::token(
+        "source",
+        direct_account_data_source_label(source),
+    ));
+    if let Some(reason) = direct_account_data_initial_reason(cached) {
+        event = event.field(DiagnosticField::token("reason", reason));
+    }
+    record(event);
+}
+
+fn record_direct_event_stream_closed(state: &DirectClassificationState) {
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Warn,
+            "core.room",
+            "direct_event_stream_closed",
+        )
+        .field(DiagnosticField::token(
+            "source",
+            direct_account_data_source_label(state.source()),
+        ))
+        .field(DiagnosticField::count(
+            "event_wake_count",
+            state.event_wake_count(),
+        ))
+        .field(DiagnosticField::count(
+            "event_applied_count",
+            state.applied_update_count(),
+        )),
+    );
+}
+
 /// SyncService-path observation loop (Async rule 1: relay the SDK's
 /// observable streams). Subscribes to the live `RoomListService`'s
 /// `all_rooms()` entries stream (`entries_with_dynamic_adapters` with the
@@ -3435,8 +3581,27 @@ async fn run_live_room_list_observation(
     generation: u64,
     source: RoomListSource,
     authoritative: Arc<AtomicBool>,
+    sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
 ) {
+    let direct_observer = session.client().observe_events::<DirectEvent, ()>();
+    let direct_events = direct_observer.subscribe();
+    let cached_direct = koushi_sdk::cached_direct_account_data_targets_by_room(&session).await;
+    record_direct_account_data_initialization(&cached_direct);
+    let direct_state = DirectClassificationState::from_cached(cached_direct);
+    sliding_sync_diagnostics.direct_classification_initialized(
+        direct_state.source(),
+        usize_to_u64(direct_state.targets_by_room().len()),
+        usize_to_u64(
+            direct_state
+                .targets_by_room()
+                .values()
+                .map(Vec::len)
+                .sum::<usize>(),
+        ),
+    );
     let room_updates_rx = session.client().subscribe_to_all_room_updates();
+    #[cfg(test)]
+    let (_direct_event_tx, direct_events_rx) = mpsc::unbounded_channel();
     #[cfg(test)]
     run_live_room_list_observation_with_sources(
         session,
@@ -3450,8 +3615,15 @@ async fn run_live_room_list_observation(
         generation,
         source,
         authoritative,
+        sliding_sync_diagnostics,
+        direct_observer,
+        direct_events,
+        direct_state,
         ROOM_LIST_ENTRIES_PAGE_SIZE,
         room_updates_rx,
+        None,
+        direct_events_rx,
+        LiveDirectEventTestSource::SdkAndInjected,
         None,
     )
     .await;
@@ -3468,6 +3640,10 @@ async fn run_live_room_list_observation(
         generation,
         source,
         authoritative,
+        sliding_sync_diagnostics,
+        direct_observer,
+        direct_events,
+        direct_state,
         ROOM_LIST_ENTRIES_PAGE_SIZE,
         room_updates_rx,
     )
@@ -3487,11 +3663,49 @@ async fn run_live_room_list_observation_with_sources(
     generation: u64,
     source: RoomListSource,
     authoritative: Arc<AtomicBool>,
+    sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+    _direct_observer: matrix_sdk::event_handler::ObservableEventHandler<(DirectEvent, ())>,
+    direct_events: matrix_sdk::event_handler::EventHandlerSubscriber<(DirectEvent, ())>,
+    mut direct_state: DirectClassificationState,
     entries_limit: usize,
     mut room_updates_rx: broadcast::Receiver<matrix_sdk_base::sync::RoomUpdates>,
     #[cfg(test)] test_event_tx: Option<mpsc::UnboundedSender<LiveObserverTestEvent>>,
+    #[cfg(test)] direct_events_rx: mpsc::UnboundedReceiver<
+        matrix_sdk::ruma::events::direct::DirectEventContent,
+    >,
+    #[cfg(test)] direct_event_source: LiveDirectEventTestSource,
+    #[cfg(test)] mut entries_start_rx: Option<mpsc::Receiver<()>>,
 ) {
     use futures_util::StreamExt as _;
+
+    let sdk_direct_events = direct_events.map(|(event, ())| event.content);
+    #[cfg(test)]
+    let injected_direct_events =
+        futures_util::stream::unfold(direct_events_rx, |mut receiver| async move {
+            receiver.recv().await.map(|content| (content, receiver))
+        });
+    #[cfg(test)]
+    let mut direct_events = match direct_event_source {
+        LiveDirectEventTestSource::SdkAndInjected => {
+            futures_util::stream::select(sdk_direct_events, injected_direct_events).boxed()
+        }
+        LiveDirectEventTestSource::InjectedOnly => injected_direct_events.boxed(),
+    };
+    #[cfg(not(test))]
+    let mut direct_events = Box::pin(sdk_direct_events);
+    let mut direct_events_closed = false;
+    #[cfg(test)]
+    let mut entries_enabled = entries_start_rx.is_none();
+    #[cfg(not(test))]
+    let mut entries_enabled = true;
+    #[cfg(test)]
+    let mut entries_start = Box::pin(async {
+        if let Some(entries_start_rx) = entries_start_rx.as_mut() {
+            let _ = entries_start_rx.recv().await;
+        }
+    });
+    #[cfg(not(test))]
+    let mut entries_start = Box::pin(futures_util::future::pending::<()>());
 
     let all_rooms = match service.all_rooms().await {
         Ok(all_rooms) => all_rooms,
@@ -3536,9 +3750,13 @@ async fn run_live_room_list_observation_with_sources(
     ));
     let mut rls_wake_count = 0_u64;
     let mut base_wake_count = 0_u64;
+    let mut entries_observed = false;
 
     loop {
         tokio::select! {
+            _ = &mut entries_start, if !entries_enabled => {
+                entries_enabled = true;
+            },
             _ = &mut stop_rx => {
                 record_live_observer_exit(
                     DiagnosticLevel::Debug,
@@ -3695,6 +3913,7 @@ async fn run_live_room_list_observation_with_sources(
                     &mut reconciliation,
                     &session,
                     &current,
+                    &direct_state,
                     &known_room_ids,
                     &room_tx,
                     &action_tx,
@@ -3702,6 +3921,7 @@ async fn run_live_room_list_observation_with_sources(
                     generation,
                     source,
                     &authoritative,
+                    &sliding_sync_diagnostics,
                 ).await;
             }
             next_loading_state = loading_state.next() => {
@@ -3727,6 +3947,7 @@ async fn run_live_room_list_observation_with_sources(
                             &mut reconciliation,
                             &session,
                             &current,
+                            &direct_state,
                             &known_room_ids,
                             &room_tx,
                             &action_tx,
@@ -3734,6 +3955,7 @@ async fn run_live_room_list_observation_with_sources(
                             generation,
                             source,
                             &authoritative,
+                            &sliding_sync_diagnostics,
                         ).await;
                     }
                 }
@@ -3757,6 +3979,7 @@ async fn run_live_room_list_observation_with_sources(
                         &mut reconciliation,
                         &session,
                         &current,
+                        &direct_state,
                         &known_room_ids,
                         &room_tx,
                         &action_tx,
@@ -3764,10 +3987,11 @@ async fn run_live_room_list_observation_with_sources(
                         generation,
                         source,
                         &authoritative,
+                        &sliding_sync_diagnostics,
                     ).await;
                 }
             }
-            maybe_diffs = entries.next() => match maybe_diffs {
+            maybe_diffs = entries.next(), if entries_enabled => match maybe_diffs {
                 None => {
                     record_live_observer_exit(
                         DiagnosticLevel::Error,
@@ -3782,6 +4006,7 @@ async fn run_live_room_list_observation_with_sources(
                     for diff in diffs {
                         diff.apply(&mut current);
                     }
+                    entries_observed = true;
                     if rls_wake_count.is_power_of_two() {
                         record(
                             DiagnosticEvent::new(
@@ -3798,6 +4023,7 @@ async fn run_live_room_list_observation_with_sources(
                         &mut reconciliation,
                         &session,
                         &current,
+                        &direct_state,
                         &known_room_ids,
                         &room_tx,
                         &action_tx,
@@ -3805,6 +4031,7 @@ async fn run_live_room_list_observation_with_sources(
                         generation,
                         source,
                         &authoritative,
+                        &sliding_sync_diagnostics,
                     ).await;
                     #[cfg(test)]
                     emit_live_observer_test_event(
@@ -3926,6 +4153,7 @@ async fn run_live_room_list_observation_with_sources(
                         &mut reconciliation,
                         &session,
                         &current,
+                        &direct_state,
                         &known_room_ids,
                         &room_tx,
                         &action_tx,
@@ -3933,6 +4161,7 @@ async fn run_live_room_list_observation_with_sources(
                         generation,
                         source,
                         &authoritative,
+                        &sliding_sync_diagnostics,
                     )
                     .await;
                 }
@@ -3957,6 +4186,89 @@ async fn run_live_room_list_observation_with_sources(
                             room_ids: pinned_event_room_ids,
                         })
                         .await;
+                }
+            }
+            next_direct = direct_events.next(), if !direct_events_closed => {
+                match next_direct {
+                    Some(content) => {
+                        let changed = direct_state.replace_targets(
+                            koushi_sdk::direct_account_data_targets_by_room(&content),
+                        );
+                        sliding_sync_diagnostics.direct_event_recorded(
+                            direct_state.source(),
+                            usize_to_u64(direct_state.targets_by_room().len()),
+                            usize_to_u64(
+                                direct_state
+                                    .targets_by_room()
+                                    .values()
+                                    .map(Vec::len)
+                                    .sum::<usize>(),
+                            ),
+                            direct_state.event_wake_count(),
+                            direct_state.applied_update_count(),
+                            true,
+                        );
+                        #[cfg(test)]
+                        emit_live_observer_test_event(
+                            &test_event_tx,
+                            LiveObserverTestEvent::DirectClassificationUpdated {
+                                event_wake_count: direct_state.event_wake_count(),
+                                applied_update_count: direct_state.applied_update_count(),
+                            },
+                        );
+                        if changed && entries_observed {
+                            project_live_entries_and_ack_if_reconciled(
+                                &mut reconciliation,
+                                &session,
+                                &current,
+                                &direct_state,
+                                &known_room_ids,
+                                &room_tx,
+                                &action_tx,
+                                &event_tx,
+                                generation,
+                                source,
+                                &authoritative,
+                                &sliding_sync_diagnostics,
+                            )
+                            .await;
+                            #[cfg(test)]
+                            emit_live_observer_test_event(
+                                &test_event_tx,
+                                LiveObserverTestEvent::DirectClassificationProjected {
+                                    event_wake_count: direct_state.event_wake_count(),
+                                    applied_update_count: direct_state.applied_update_count(),
+                                    projected_dm_count: projected_direct_room_count(
+                                        &current,
+                                        &direct_state,
+                                    ),
+                                },
+                            );
+                        }
+                    }
+                    None => {
+                        direct_events_closed = true;
+                        sliding_sync_diagnostics.direct_event_recorded(
+                            direct_state.source(),
+                            usize_to_u64(direct_state.targets_by_room().len()),
+                            usize_to_u64(
+                                direct_state
+                                    .targets_by_room()
+                                    .values()
+                                    .map(Vec::len)
+                                    .sum::<usize>(),
+                            ),
+                            direct_state.event_wake_count(),
+                            direct_state.applied_update_count(),
+                            false,
+                        );
+                        #[cfg(test)]
+                        emit_live_observer_test_event(
+                            &test_event_tx,
+                            LiveObserverTestEvent::DirectEventStreamClosed,
+                        );
+                        record_direct_event_stream_closed(&direct_state);
+                    }
                 }
             }
         }
@@ -3990,10 +4302,50 @@ fn room_updates_require_room_list_projection(updates: &matrix_sdk_base::sync::Ro
         || room_updates_include_joined_state(updates)
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct RoomListIdentityCounts {
+    input_entry_count: usize,
+    unique_room_id_count: usize,
+    duplicate_entry_count: usize,
+    display_name_collision_group_count: usize,
+    display_name_collision_entry_count: usize,
+}
+
+fn room_list_identity_counts<'a>(
+    entries: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> RoomListIdentityCounts {
+    let mut names_by_room_id = BTreeMap::new();
+    let mut input_entry_count = 0;
+    for (room_id, display_name) in entries {
+        input_entry_count += 1;
+        names_by_room_id
+            .entry(room_id)
+            .or_insert(display_name.trim());
+    }
+    let mut name_counts = BTreeMap::<&str, usize>::new();
+    for display_name in names_by_room_id
+        .values()
+        .copied()
+        .filter(|name| !name.is_empty())
+    {
+        *name_counts.entry(display_name).or_default() += 1;
+    }
+    let collision_counts = name_counts.values().copied().filter(|count| *count > 1);
+    let collision_counts = collision_counts.collect::<Vec<_>>();
+    RoomListIdentityCounts {
+        input_entry_count,
+        unique_room_id_count: names_by_room_id.len(),
+        duplicate_entry_count: input_entry_count.saturating_sub(names_by_room_id.len()),
+        display_name_collision_group_count: collision_counts.len(),
+        display_name_collision_entry_count: collision_counts.into_iter().sum(),
+    }
+}
+
 /// Normalize the live service's current entries and project the result.
 async fn normalize_and_project_entries(
     _session: &MatrixClientSession,
     current: &eyeball_im::Vector<matrix_sdk_ui::room_list_service::RoomListItem>,
+    direct_targets_by_room: Option<&koushi_sdk::MatrixDirectTargetsByRoom>,
     known_room_ids: &Arc<RwLock<BTreeSet<String>>>,
     room_tx: &mpsc::Sender<RoomMessage>,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
@@ -4001,23 +4353,109 @@ async fn normalize_and_project_entries(
     generation: u64,
     source: RoomListSource,
     authoritative: &Arc<AtomicBool>,
+    direct_state: Option<&DirectClassificationState>,
+    sliding_sync_diagnostics: Option<&crate::SlidingSyncDiagnostics>,
 ) -> bool {
     // Collect before the await: mapping lazily across the await trips a
     // higher-ranked lifetime check on the iterator closure.
     let mut joined_rooms = Vec::with_capacity(current.len());
     let mut invited_rooms = Vec::new();
+    let mut seen_room_ids = BTreeSet::new();
+    let mut excluded_membership_count = 0_usize;
     for item in current.iter() {
         let room = item.clone().into_inner();
+        if !seen_room_ids.insert(room.room_id().to_owned()) {
+            continue;
+        }
         match room.state() {
             matrix_sdk::RoomState::Joined => joined_rooms.push(room),
             matrix_sdk::RoomState::Invited => invited_rooms.push(room),
             matrix_sdk::RoomState::Knocked
             | matrix_sdk::RoomState::Left
-            | matrix_sdk::RoomState::Banned => {}
+            | matrix_sdk::RoomState::Banned => excluded_membership_count += 1,
         }
     }
-    let mut snapshot = koushi_sdk::room_list_snapshot_from_sdk_rooms(joined_rooms).await;
+    let joined_count = joined_rooms.len();
+    let invited_count = invited_rooms.len();
+    let mut snapshot = koushi_sdk::room_list_snapshot_from_sdk_rooms_with_direct_targets(
+        joined_rooms,
+        direct_targets_by_room,
+    )
+    .await;
     snapshot.invites = invite_previews_from_service_entries(invited_rooms).await;
+    if let (Some(direct_state), Some(diagnostics)) = (direct_state, sliding_sync_diagnostics) {
+        let projected_dms = snapshot.rooms.iter().filter(|room| room.is_dm).count();
+        let explicit_dms = direct_state.authoritative_targets().map_or(0, |targets| {
+            snapshot
+                .rooms
+                .iter()
+                .filter(|room| room.is_dm && targets.contains_key(room.room_id.as_str()))
+                .count()
+        });
+        diagnostics.direct_projection_recorded(
+            usize_to_u64(projected_dms),
+            usize_to_u64(explicit_dms),
+            usize_to_u64(projected_dms.saturating_sub(explicit_dms)),
+            usize_to_u64(snapshot.rooms.len().saturating_sub(projected_dms)),
+            direct_state.invalid_entry_count(),
+        );
+    }
+    let identity = room_list_identity_counts(
+        snapshot
+            .rooms
+            .iter()
+            .map(|room| (room.room_id.as_str(), room.display_name.as_str()))
+            .chain(
+                snapshot
+                    .spaces
+                    .iter()
+                    .map(|space| (space.space_id.as_str(), space.display_name.as_str())),
+            ),
+    );
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "core.room", "room_list_input")
+            .field(DiagnosticField::count(
+                "sdk_store_entry_count",
+                current.len() as u64,
+            ))
+            .field(DiagnosticField::count(
+                "unique_input_room_id_count",
+                seen_room_ids.len() as u64,
+            ))
+            .field(DiagnosticField::count(
+                "duplicate_input_entry_count",
+                current.len().saturating_sub(seen_room_ids.len()) as u64,
+            ))
+            .field(DiagnosticField::count("joined_count", joined_count as u64))
+            .field(DiagnosticField::count(
+                "invited_count",
+                invited_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "excluded_membership_count",
+                excluded_membership_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "normalized_input_entry_count",
+                identity.input_entry_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "normalized_unique_room_id_count",
+                identity.unique_room_id_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "normalized_duplicate_entry_count",
+                identity.duplicate_entry_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "display_name_collision_group_count",
+                identity.display_name_collision_group_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "display_name_collision_entry_count",
+                identity.display_name_collision_entry_count as u64,
+            )),
+    );
     relay_missing_space_child_links(&snapshot, room_tx).await;
     project_room_list_snapshot(
         &snapshot,
@@ -5390,6 +5828,22 @@ pub mod tests {
         }
     }
 
+    #[test]
+    fn room_list_identity_counts_distinguish_id_duplicates_from_name_collisions() {
+        let counts = room_list_identity_counts([
+            ("!one:example.org", "Element Web/Desktop"),
+            ("!one:example.org", "Element Web/Desktop"),
+            ("!two:example.org", "Element Web/Desktop"),
+            ("!three:example.org", "Different"),
+        ]);
+
+        assert_eq!(counts.input_entry_count, 4);
+        assert_eq!(counts.unique_room_id_count, 3);
+        assert_eq!(counts.duplicate_entry_count, 1);
+        assert_eq!(counts.display_name_collision_group_count, 1);
+        assert_eq!(counts.display_name_collision_entry_count, 2);
+    }
+
     async fn wait_for_live_observer_test_event(
         rx: &mut mpsc::UnboundedReceiver<LiveObserverTestEvent>,
         label: &'static str,
@@ -5410,6 +5864,8 @@ pub mod tests {
     struct LiveObserverTestHarness {
         action_rx: mpsc::Receiver<Vec<AppAction>>,
         test_event_rx: mpsc::UnboundedReceiver<LiveObserverTestEvent>,
+        direct_event_tx:
+            Option<mpsc::UnboundedSender<matrix_sdk::ruma::events::direct::DirectEventContent>>,
         _command_tx: mpsc::Sender<RoomListObservationCommand>,
         stop_tx: oneshot::Sender<()>,
         task: tokio::task::JoinHandle<()>,
@@ -5432,6 +5888,18 @@ pub mod tests {
             assert_eq!(actual, expected);
         }
 
+        fn send_direct_event(&self, content: matrix_sdk::ruma::events::direct::DirectEventContent) {
+            self.direct_event_tx
+                .as_ref()
+                .expect("direct event source should be open")
+                .send(content)
+                .expect("direct event receiver");
+        }
+
+        fn close_direct_event_source(&mut self) {
+            self.direct_event_tx.take();
+        }
+
         async fn stop(self) {
             let _ = self.stop_tx.send(());
             self.task.await.expect("observer task");
@@ -5443,6 +5911,8 @@ pub mod tests {
         homeserver: String,
         entries_limit: usize,
         room_updates_rx: broadcast::Receiver<matrix_sdk_base::sync::RoomUpdates>,
+        direct_event_source: LiveDirectEventTestSource,
+        entries_start_rx: Option<mpsc::Receiver<()>>,
     ) -> LiveObserverTestHarness {
         let service = Arc::new(
             matrix_sdk_ui::room_list_service::RoomListService::new(client.clone())
@@ -5458,6 +5928,9 @@ pub mod tests {
                 authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
             },
         ));
+        let direct_observer = session.client().observe_events::<DirectEvent, ()>();
+        let direct_events = direct_observer.subscribe();
+        let direct_state = DirectClassificationState::default();
         let known_room_ids = Arc::new(RwLock::new(BTreeSet::new()));
         let (room_tx, _room_rx) = mpsc::channel(4);
         let (action_tx, action_rx) = mpsc::channel(8);
@@ -5465,6 +5938,7 @@ pub mod tests {
         let (command_tx, command_rx) = mpsc::channel(1);
         let (stop_tx, stop_rx) = oneshot::channel();
         let (test_event_tx, test_event_rx) = mpsc::unbounded_channel();
+        let (direct_event_tx, direct_events_rx) = mpsc::unbounded_channel();
         let task = tokio::spawn(run_live_room_list_observation_with_sources(
             session,
             service,
@@ -5477,13 +5951,21 @@ pub mod tests {
             1,
             RoomListSource::Live,
             Arc::new(AtomicBool::new(false)),
+            crate::SlidingSyncDiagnostics::default(),
+            direct_observer,
+            direct_events,
+            direct_state,
             entries_limit,
             room_updates_rx,
             Some(test_event_tx),
+            direct_events_rx,
+            direct_event_source,
+            entries_start_rx,
         ));
         LiveObserverTestHarness {
             action_rx,
             test_event_rx,
+            direct_event_tx: Some(direct_event_tx),
             _command_tx: command_tx,
             stop_tx,
             task,
@@ -6407,13 +6889,22 @@ pub mod tests {
             )
             .await;
         let room_updates_rx = client.subscribe_to_all_room_updates();
-        let mut harness =
-            spawn_live_observer_test_harness(client, server.uri(), 2, room_updates_rx).await;
+        let mut harness = spawn_live_observer_test_harness(
+            client,
+            server.uri(),
+            2,
+            room_updates_rx,
+            LiveDirectEventTestSource::SdkAndInjected,
+            None,
+        )
+        .await;
 
         let projected = harness.next_actions("initial service projection").await;
         assert!(projected.iter().any(|action| {
             matches!(
-                action, AppAction::RoomListSnapshotProvisional { rooms, invites, .. }
+                action,
+                AppAction::RoomListSnapshotProvisional { rooms, invites, .. }
+                    | AppAction::RoomListSnapshotAuthoritative { rooms, invites, .. }
                     if rooms.iter().any(|room| room.room_id == visible_room_id.as_str())
                     && invites.iter().any(|invite| invite.room_id == invited_room_id.as_str())
             )
@@ -6429,6 +6920,379 @@ pub mod tests {
             .await;
 
         harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn live_room_list_observer_reclassifies_dm_from_direct_event_without_timeline_update() {
+        use matrix_sdk::{
+            ruma::{
+                OwnedRoomId, OwnedUserId,
+                events::{
+                    AnySyncStateEvent,
+                    direct::{DirectEventContent, OwnedDirectUserIdentifier},
+                },
+                room_id,
+                serde::Raw,
+                user_id,
+            },
+            test_utils::mocks::MatrixMockServer,
+        };
+        use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let dm_room_id = room_id!("!direct-event-room:example.invalid");
+        let room_name: Raw<AnySyncStateEvent> = EventFactory::new()
+            .room(dm_room_id)
+            .sender(user_id!("@sender:example.invalid"))
+            .room_name("Direct event room")
+            .into();
+        server
+            .sync_room(
+                &client,
+                JoinedRoomBuilder::new(dm_room_id).add_state_event(room_name),
+            )
+            .await;
+        let room_updates_rx = client.subscribe_to_all_room_updates();
+        let mut harness = spawn_live_observer_test_harness(
+            client,
+            server.uri(),
+            2,
+            room_updates_rx,
+            LiveDirectEventTestSource::SdkAndInjected,
+            None,
+        )
+        .await;
+
+        loop {
+            let initial = harness.next_actions("initial room projection").await;
+            if initial.iter().any(|action| {
+                matches!(
+                    action,
+                    AppAction::RoomListSnapshotProvisional { rooms, .. }
+                        | AppAction::RoomListSnapshotAuthoritative { rooms, .. }
+                        if rooms.iter().any(|room| room.room_id == dm_room_id.as_str())
+                )
+            }) {
+                break;
+            }
+        }
+        harness
+            .expect_event(
+                "initial room projection",
+                LiveObserverTestEvent::RlsProjected {
+                    wake_count: 1,
+                    entries_len: 1,
+                },
+            )
+            .await;
+
+        let user_id: OwnedUserId = user_id!("@alice:example.invalid").to_owned();
+        let room_id: OwnedRoomId = dm_room_id.to_owned();
+        let mut content = DirectEventContent::default();
+        content.insert(OwnedDirectUserIdentifier::from(user_id), vec![room_id]);
+        harness.send_direct_event(content.clone());
+
+        let projected = harness
+            .next_actions("direct account-data reprojection")
+            .await;
+        assert!(projected.iter().any(|action| {
+            matches!(
+                action,
+                AppAction::RoomListSnapshotProvisional { rooms, .. }
+                    | AppAction::RoomListSnapshotAuthoritative { rooms, .. }
+                    if rooms.iter().any(|room| room.room_id == dm_room_id.as_str() && room.is_dm)
+            )
+        }));
+        assert!(matches!(
+            projected.as_slice(),
+            [
+                AppAction::RoomListSnapshotProvisional { .. }
+                    | AppAction::RoomListSnapshotAuthoritative { .. },
+                AppAction::UserProfilesUpdated { .. }
+            ]
+        ));
+        harness
+            .expect_event(
+                "direct account-data reprojection",
+                LiveObserverTestEvent::DirectClassificationProjected {
+                    event_wake_count: 1,
+                    applied_update_count: 1,
+                    projected_dm_count: 1,
+                },
+            )
+            .await;
+
+        harness.send_direct_event(content);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), harness.action_rx.recv())
+                .await
+                .is_err()
+        );
+
+        harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn live_room_list_observer_defers_direct_event_projection_until_first_service_entries() {
+        use matrix_sdk::{
+            ruma::{
+                OwnedRoomId, OwnedUserId,
+                events::{
+                    AnySyncStateEvent,
+                    direct::{DirectEventContent, OwnedDirectUserIdentifier},
+                },
+                room_id,
+                serde::Raw,
+                user_id,
+            },
+            test_utils::mocks::MatrixMockServer,
+        };
+        use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let dm_room_id = room_id!("!direct-before-entries:example.invalid");
+        let room_name: Raw<AnySyncStateEvent> = EventFactory::new()
+            .room(dm_room_id)
+            .sender(user_id!("@sender:example.invalid"))
+            .room_name("Direct event before entries")
+            .into();
+        server
+            .sync_room(
+                &client,
+                JoinedRoomBuilder::new(dm_room_id).add_state_event(room_name),
+            )
+            .await;
+
+        let room_updates_rx = client.subscribe_to_all_room_updates();
+        let (entries_start_tx, entries_start_rx) = mpsc::channel(1);
+        let mut harness = spawn_live_observer_test_harness(
+            client,
+            server.uri(),
+            2,
+            room_updates_rx,
+            LiveDirectEventTestSource::SdkAndInjected,
+            Some(entries_start_rx),
+        )
+        .await;
+
+        let user_id: OwnedUserId = user_id!("@alice:example.invalid").to_owned();
+        let room_id: OwnedRoomId = dm_room_id.to_owned();
+        let mut content = DirectEventContent::default();
+        content.insert(OwnedDirectUserIdentifier::from(user_id), vec![room_id]);
+        harness.send_direct_event(content);
+        harness
+            .expect_event(
+                "direct account-data state update before first service entries",
+                LiveObserverTestEvent::DirectClassificationUpdated {
+                    event_wake_count: 1,
+                    applied_update_count: 1,
+                },
+            )
+            .await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), harness.action_rx.recv())
+                .await
+                .is_err()
+        );
+
+        entries_start_tx
+            .send(())
+            .await
+            .expect("first service entries gate");
+        let projected = harness
+            .next_actions("first service projection after direct event")
+            .await;
+        assert!(matches!(
+            projected.as_slice(),
+            [
+                AppAction::RoomListSnapshotProvisional { rooms, .. }
+                    | AppAction::RoomListSnapshotAuthoritative { rooms, .. },
+                AppAction::UserProfilesUpdated { .. }
+            ]
+                if rooms.iter().any(|room| room.room_id == dm_room_id.as_str() && room.is_dm)
+        ));
+        harness
+            .expect_event(
+                "first service projection after direct event",
+                LiveObserverTestEvent::RlsProjected {
+                    wake_count: 1,
+                    entries_len: 1,
+                },
+            )
+            .await;
+
+        harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn live_room_list_observer_continues_after_test_direct_event_source_closes() {
+        use matrix_sdk::{ruma::room_id, test_utils::mocks::MatrixMockServer};
+        use matrix_sdk_test::JoinedRoomBuilder;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let initial_room_id = room_id!("!initial-direct-source-close:example.invalid");
+        server
+            .sync_room(&client, JoinedRoomBuilder::new(initial_room_id))
+            .await;
+
+        let room_updates_rx = client.subscribe_to_all_room_updates();
+        let mut harness = spawn_live_observer_test_harness(
+            client.clone(),
+            server.uri(),
+            2,
+            room_updates_rx,
+            LiveDirectEventTestSource::InjectedOnly,
+            None,
+        )
+        .await;
+        let _ = harness.next_actions("initial service projection").await;
+        harness
+            .expect_event(
+                "initial service projection",
+                LiveObserverTestEvent::RlsProjected {
+                    wake_count: 1,
+                    entries_len: 1,
+                },
+            )
+            .await;
+
+        harness.close_direct_event_source();
+        harness
+            .expect_event(
+                "direct event stream closure",
+                LiveObserverTestEvent::DirectEventStreamClosed,
+            )
+            .await;
+        let later_room_id = room_id!("!later-direct-source-close:example.invalid");
+        server
+            .sync_room(&client, JoinedRoomBuilder::new(later_room_id))
+            .await;
+
+        let projected = harness
+            .next_actions("service projection after direct event source closes")
+            .await;
+        assert!(projected.iter().any(|action| {
+            matches!(
+                action,
+                AppAction::RoomListSnapshotProvisional { rooms, .. }
+                    | AppAction::RoomListSnapshotAuthoritative { rooms, .. }
+                    if rooms.iter().any(|room| room.room_id == later_room_id.as_str())
+            )
+        }));
+        harness
+            .expect_event(
+                "service projection after direct event source closes",
+                LiveObserverTestEvent::RlsProjected {
+                    wake_count: 2,
+                    entries_len: 2,
+                },
+            )
+            .await;
+
+        harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn normalize_and_project_entries_uses_cached_direct_map_before_timeline_update() {
+        use matrix_sdk::{ruma::room_id, test_utils::mocks::MatrixMockServer};
+        use matrix_sdk_test::JoinedRoomBuilder;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let dm_room_id = room_id!("!cached-direct-room:example.invalid");
+        let room = server
+            .sync_room(&client, JoinedRoomBuilder::new(dm_room_id))
+            .await;
+        let session = MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: server.uri(),
+                user_id: "@observer:example.invalid".to_owned(),
+                device_id: "OBSERVER".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        );
+        let current =
+            eyeball_im::Vector::from_iter([matrix_sdk_ui::room_list_service::RoomListItem::from(
+                room,
+            )]);
+        let direct_state =
+            crate::direct_message_classification::DirectClassificationState::from_targets(
+                koushi_sdk::MatrixDirectTargetsByRoom::from([(dm_room_id.to_string(), Vec::new())]),
+                crate::direct_message_classification::DirectAccountDataSource::LocalStore,
+            );
+        let known_room_ids = Arc::new(RwLock::new(BTreeSet::new()));
+        let (room_tx, _room_rx) = mpsc::channel(4);
+        let (action_tx, mut action_rx) = mpsc::channel(4);
+        let (event_tx, _event_rx) = broadcast::channel(4);
+
+        normalize_and_project_entries(
+            &session,
+            &current,
+            direct_state.authoritative_targets(),
+            &known_room_ids,
+            &room_tx,
+            &action_tx,
+            &event_tx,
+            1,
+            RoomListSource::Live,
+            &Arc::new(AtomicBool::new(false)),
+            None,
+            None,
+        )
+        .await;
+
+        let actions = action_rx.recv().await.expect("room projection");
+        assert!(matches!(
+            actions.as_slice(),
+            [AppAction::RoomListSnapshotProvisional { rooms, .. },
+             AppAction::UserProfilesUpdated { .. }]
+                if rooms.first().is_some_and(|room| room.is_dm)
+        ));
+    }
+
+    #[test]
+    fn live_direct_observer_subscribes_before_cached_account_data_read() {
+        let source = include_str!("room.rs");
+        let body = source
+            .split("async fn run_live_room_list_observation(")
+            .nth(1)
+            .expect("live observer")
+            .split("async fn run_live_room_list_observation_with_sources(")
+            .next()
+            .expect("wrapper body");
+        let subscribe = body.find("observe_events::<DirectEvent, ()>").unwrap();
+        let cached_read = body
+            .find("cached_direct_account_data_targets_by_room")
+            .unwrap();
+        assert!(subscribe < cached_read);
+    }
+
+    #[test]
+    fn direct_account_data_initial_reason_tokens_are_bounded() {
+        use koushi_sdk::MatrixCachedDirectAccountData;
+
+        assert_eq!(
+            direct_account_data_initial_reason(&MatrixCachedDirectAccountData::Missing),
+            Some("missing")
+        );
+        assert_eq!(
+            direct_account_data_initial_reason(&MatrixCachedDirectAccountData::StoreError),
+            Some("store_error")
+        );
+        assert_eq!(
+            direct_account_data_initial_reason(&MatrixCachedDirectAccountData::Invalid),
+            Some("invalid")
+        );
+        assert_eq!(
+            direct_account_data_initial_reason(&MatrixCachedDirectAccountData::Present(
+                koushi_sdk::MatrixDirectTargetsByRoom::new(),
+            )),
+            None
+        );
     }
 
     #[tokio::test]
@@ -6478,6 +7342,7 @@ pub mod tests {
         normalize_and_project_entries(
             &session,
             &current,
+            None,
             &known_room_ids,
             &room_tx,
             &action_tx,
@@ -6485,6 +7350,8 @@ pub mod tests {
             1,
             RoomListSource::Live,
             &Arc::new(AtomicBool::new(true)),
+            None,
+            None,
         )
         .await;
 
@@ -6529,6 +7396,46 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn partial_projection_acknowledges_connectivity_without_authority() {
+        let mut reconciliation = LiveRoomListReconciliation::default();
+        reconciliation.report_maximum(Some(2));
+        reconciliation.report_range_fully_loaded(false);
+        let (ready_tx, ready_rx) = oneshot::channel();
+        reconciliation.begin(7, 11, ready_tx);
+
+        let (backend_generation, sequence, ready_tx) = reconciliation
+            .take_projection_ack()
+            .expect("partial projection acknowledgement");
+        ready_tx
+            .send(RoomListReconcileAck::Projected {
+                backend_generation,
+                room_generation: 3,
+                response_sequence: sequence,
+            })
+            .map_err(|_| ())
+            .expect("readiness receiver");
+
+        assert!(matches!(
+            ready_rx.await.expect("projection acknowledgement"),
+            RoomListReconcileAck::Projected {
+                backend_generation: 7,
+                room_generation: 3,
+                response_sequence: 11,
+            }
+        ));
+        assert!(reconciliation.has_pending_reconciliation());
+        assert!(!reconciliation.is_authoritative(1));
+
+        reconciliation.report_range_fully_loaded(true);
+        let (backend_generation, sequence, ready_tx) = reconciliation
+            .finish_if_complete(2)
+            .expect("later complete range");
+        assert_eq!((backend_generation, sequence), (7, 11));
+        assert!(ready_tx.is_none());
+        assert!(reconciliation.is_authoritative(2));
+    }
+
+    #[tokio::test]
     async fn committed_response_becomes_authoritative_only_after_matching_full_range() {
         let mut reconciliation = LiveRoomListReconciliation::default();
         reconciliation.report_maximum(Some(2));
@@ -6546,6 +7453,7 @@ pub mod tests {
             .expect("matching complete range");
         assert_eq!(backend_generation, 7);
         assert_eq!(sequence, 11);
+        let ready_tx = ready_tx.expect("complete range acknowledgement");
         ready_tx
             .send(RoomListReconcileAck::Reconciled {
                 backend_generation,
@@ -6585,6 +7493,7 @@ pub mod tests {
             .expect("missing count must not block the committed projection");
         assert_eq!((backend_generation, sequence), (7, 11));
         assert!(reconciliation.is_authoritative(2));
+        let ready_tx = ready_tx.expect("complete range acknowledgement");
         ready_tx
             .send(RoomListReconcileAck::Reconciled {
                 backend_generation,
@@ -6654,7 +7563,11 @@ pub mod tests {
     async fn select_space_projects_action() {
         let (action_tx, mut action_rx) = mpsc::channel(16);
         let (event_tx, _event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         handle
             .send(RoomMessage::Command(RoomCommand::SelectSpace {
@@ -6679,7 +7592,11 @@ pub mod tests {
     async fn reorder_spaces_projects_action() {
         let (action_tx, mut action_rx) = mpsc::channel(16);
         let (event_tx, _event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         handle
             .send(RoomMessage::Command(RoomCommand::ReorderSpaces {
@@ -6751,7 +7668,11 @@ pub mod tests {
     async fn select_room_projects_action() {
         let (action_tx, mut action_rx) = mpsc::channel(16);
         let (event_tx, _event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         handle
             .send(RoomMessage::Command(RoomCommand::SelectRoom {
@@ -6776,7 +7697,11 @@ pub mod tests {
     async fn create_room_without_session_emits_session_required() {
         let (action_tx, _action_rx) = mpsc::channel(16);
         let (event_tx, mut event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         let request_id = make_request_id(3);
         handle
@@ -6814,7 +7739,11 @@ pub mod tests {
     async fn leave_room_without_session_emits_session_required() {
         let (action_tx, _action_rx) = mpsc::channel(16);
         let (event_tx, mut event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         let request_id = make_request_id(4);
         handle
@@ -6845,7 +7774,11 @@ pub mod tests {
     async fn forget_room_without_session_emits_session_required() {
         let (action_tx, _action_rx) = mpsc::channel(16);
         let (event_tx, mut event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         let request_id = make_request_id(5);
         handle
@@ -6876,7 +7809,11 @@ pub mod tests {
     async fn set_room_tag_without_session_emits_session_required() {
         let (action_tx, _action_rx) = mpsc::channel(16);
         let (event_tx, mut event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         let request_id = make_request_id(6);
         handle
@@ -6909,7 +7846,11 @@ pub mod tests {
     async fn remove_room_tag_without_session_emits_session_required() {
         let (action_tx, _action_rx) = mpsc::channel(16);
         let (event_tx, mut event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         let request_id = make_request_id(7);
         handle
@@ -6941,7 +7882,11 @@ pub mod tests {
     async fn pin_event_without_session_emits_session_required() {
         let (action_tx, _action_rx) = mpsc::channel(16);
         let (event_tx, mut event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         let request_id = make_request_id(8);
         handle
@@ -6973,7 +7918,11 @@ pub mod tests {
     async fn unpin_event_without_session_emits_session_required() {
         let (action_tx, _action_rx) = mpsc::channel(16);
         let (event_tx, mut event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         let request_id = make_request_id(9);
         handle
@@ -7358,7 +8307,11 @@ pub mod tests {
     async fn session_lifecycle_messages_without_session_complete_cleanly() {
         let (action_tx, _action_rx) = mpsc::channel(16);
         let (event_tx, _event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         // No session, no observation loop: both must be no-ops, and the
         // actor task must still exit on Shutdown.
@@ -7406,7 +8359,11 @@ pub mod tests {
         );
         let (action_tx, _action_rx) = mpsc::channel(16);
         let (event_tx, _event_rx) = broadcast::channel(16);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
 
         assert!(
             handle

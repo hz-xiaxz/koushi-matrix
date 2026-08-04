@@ -6343,6 +6343,7 @@ export function App() {
             jsErrors: getRecentJsErrors(),
             logEntries: [...diagnosticLogEntries, ...runtimeDiagnosticSnapshot.entries],
             droppedLogEntries: runtimeDiagnosticSnapshot.droppedEntries,
+            slidingSyncDiagnostics: runtimeDiagnosticSnapshot.slidingSync,
             securityDiagnostics: qaSecurityDiagnostics()
           })}
           onClose={() => setDiagnosticsOpen(false)}

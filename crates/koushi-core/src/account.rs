@@ -1690,6 +1690,7 @@ pub struct AccountActor {
     sliding_sync_discovery_task: Option<crate::executor::JoinHandle<()>>,
     sliding_sync_revalidation_pending: Option<u64>,
     sliding_sync_revalidation_request: Option<(u64, u64)>,
+    sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     session_promoted: bool,
     trust_generation: u64,
     trust_observer: Option<crate::executor::JoinHandle<()>>,
@@ -1864,13 +1865,35 @@ impl AccountActor {
         initial_link_preview_policy: LinkPreviewContext,
         composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
     ) -> AccountActorHandle {
+        Self::spawn_with_diagnostics(
+            store_actor,
+            action_tx,
+            event_tx,
+            initial_link_preview_policy,
+            composer_draft_leases,
+            crate::SlidingSyncDiagnostics::default(),
+        )
+    }
+
+    pub(crate) fn spawn_with_diagnostics(
+        store_actor: StoreActor,
+        action_tx: mpsc::Sender<Vec<AppAction>>,
+        event_tx: broadcast::Sender<CoreEvent>,
+        initial_link_preview_policy: LinkPreviewContext,
+        composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
+        sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+    ) -> AccountActorHandle {
         // AppActor forwards every Room/Timeline/Sync command here via send().await;
         // sized so heavy sync does not block the AppActor's forwarding.
         let (tx, command_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let data_dir = store_actor.data_dir().to_path_buf();
         // Spawn RoomActor once at AccountActor creation. It starts with no
         // session and waits for RoomMessage::SyncStarted.
-        let room_actor = crate::room::RoomActor::spawn(action_tx.clone(), event_tx.clone());
+        let room_actor = crate::room::RoomActor::spawn(
+            action_tx.clone(),
+            event_tx.clone(),
+            sliding_sync_diagnostics.clone(),
+        );
         let account_work = crate::account_work::AccountWorkScheduler::default();
         let (navigation_projection, navigation_projection_rx) =
             NavigationProjectionIngress::channel();
@@ -1897,6 +1920,7 @@ impl AccountActor {
             sliding_sync_discovery_task: None,
             sliding_sync_revalidation_pending: None,
             sliding_sync_revalidation_request: None,
+            sliding_sync_diagnostics,
             session_promoted: false,
             trust_generation: 0,
             trust_observer: None,
@@ -2380,6 +2404,10 @@ impl AccountActor {
                     generation,
                     succeeded,
                 } => {
+                    if succeeded {
+                        self.sliding_sync_diagnostics
+                            .provisional_encryption_first_response_seen();
+                    }
                     if first_provisional_encryption_sync_is_current(
                         generation,
                         self.trust_generation,
@@ -3910,6 +3938,7 @@ impl AccountActor {
             self.timeline_manager.sender(),
             self.sync_generation.clone(),
             self.encryption_sync_permit.clone(),
+            self.sliding_sync_diagnostics.clone(),
         );
         self.sync_actor = Some(handle);
         trace_restore_simple("spawn_sync_actor", "done");
@@ -6720,6 +6749,7 @@ impl AccountActor {
         admission: SlidingSyncAdmission,
         homeserver: String,
     ) {
+        self.sliding_sync_diagnostics.admission_discovery_started();
         self.cancel_sliding_sync_discovery_task().await;
         self.discard_pending_sliding_sync_admission().await;
         self.pending_sliding_sync_retry = None;
@@ -6763,6 +6793,8 @@ impl AccountActor {
             return;
         }
         self.sliding_sync_discovery_task = None;
+        self.sliding_sync_diagnostics
+            .record_discovery(crate::SlidingSyncDiscoveryDiagnostic::from_result(&result));
         let state_result = sliding_sync_capability_result(result);
         if matches!(state_result, SlidingSyncCapabilityResult::Supported { .. })
             && let SlidingSyncCapabilityResult::Supported { evidence } = &state_result
@@ -6961,6 +6993,7 @@ impl AccountActor {
         let Some(request_id) = self.next_sliding_sync_request_id() else {
             return;
         };
+        self.sliding_sync_diagnostics.discovery_started();
         self.send_actions(vec![AppAction::SlidingSyncCapabilityRevalidationStarted {
             account_epoch,
             request_id,
@@ -6998,6 +7031,8 @@ impl AccountActor {
         {
             return;
         }
+        self.sliding_sync_diagnostics
+            .record_discovery(crate::SlidingSyncDiscoveryDiagnostic::from_result(&result));
         let state_result = sliding_sync_capability_result(result);
         self.send_actions(vec![
             AppAction::SlidingSyncCapabilityRevalidationCompleted {
@@ -9245,6 +9280,8 @@ impl AccountActor {
             generation,
             transition_id,
         ));
+        self.sliding_sync_diagnostics
+            .provisional_encryption_started();
         #[cfg(any(test, feature = "test-hooks"))]
         if self.trust_observation_is_synthetic {
             let _ = session;
@@ -9353,6 +9390,8 @@ impl AccountActor {
         if let Some(task) = self.provisional_encryption_sync.take() {
             task.abort();
             let _ = task.await;
+            self.sliding_sync_diagnostics
+                .provisional_encryption_stopped();
             self.record_lifecycle_probe("provisional_encryption_sync_terminated");
         }
     }
@@ -16142,11 +16181,25 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("address");
         std::thread::spawn(move || {
-            while let Ok((mut stream, _)) = listener.accept() {
+            'accept: while let Ok((mut stream, _)) = listener.accept() {
                 let mut request = Vec::new();
                 let mut buffer = [0_u8; 4096];
                 loop {
-                    let count = stream.read(&mut buffer).expect("read");
+                    let count = match stream.read(&mut buffer) {
+                        Ok(0) => continue 'accept,
+                        Ok(count) => count,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::ConnectionReset
+                                    | std::io::ErrorKind::BrokenPipe
+                                    | std::io::ErrorKind::UnexpectedEof
+                            ) =>
+                        {
+                            continue 'accept;
+                        }
+                        Err(error) => panic!("read: {error}"),
+                    };
                     request.extend_from_slice(&buffer[..count]);
                     let text = String::from_utf8_lossy(&request);
                     let Some(end) = text.find("\r\n\r\n") else {
@@ -17367,7 +17420,11 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let (self_tx, command_rx) = mpsc::channel(16);
         let data_dir_path = store.data_dir().to_path_buf();
-        let room_actor = crate::room::RoomActor::spawn(action_tx.clone(), event_tx.clone());
+        let room_actor = crate::room::RoomActor::spawn(
+            action_tx.clone(),
+            event_tx.clone(),
+            crate::SlidingSyncDiagnostics::default(),
+        );
         let account_work = crate::account_work::AccountWorkScheduler::default();
         let (navigation_projection, navigation_projection_rx) =
             NavigationProjectionIngress::channel();
@@ -17391,6 +17448,7 @@ mod tests {
             sliding_sync_discovery_task: None,
             sliding_sync_revalidation_pending: None,
             sliding_sync_revalidation_request: None,
+            sliding_sync_diagnostics: crate::SlidingSyncDiagnostics::default(),
             session_promoted: false,
             trust_generation: 0,
             trust_observer: None,

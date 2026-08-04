@@ -35,6 +35,12 @@ use crate::failure::CoreFailure;
 use crate::failure::SyncFailureKind;
 use crate::ids::RequestId;
 use crate::room::{RoomListReconcileAck, RoomMessage};
+use crate::{
+    SlidingSyncDiagnostics, SlidingSyncFailureDiagnostic, SlidingSyncFailureKind,
+    SlidingSyncFailureOrigin, SlidingSyncFailureRetryability, SlidingSyncFailureStage,
+    SlidingSyncHttpErrorSource, SlidingSyncHttpStatus, SlidingSyncMatrixErrorKind,
+    SlidingSyncSdkVersion,
+};
 
 const SYNC_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 const SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -219,7 +225,7 @@ fn sync_service_state_trace_label(state: &matrix_sdk_ui::sync_service::State) ->
     match state {
         matrix_sdk_ui::sync_service::State::Idle => "idle",
         matrix_sdk_ui::sync_service::State::Running => "running",
-        matrix_sdk_ui::sync_service::State::Offline => "offline",
+        matrix_sdk_ui::sync_service::State::Offline(_) => "offline",
         matrix_sdk_ui::sync_service::State::Error(_) => "error",
         matrix_sdk_ui::sync_service::State::Terminated => "terminated",
     }
@@ -250,6 +256,7 @@ pub struct SyncActor {
     sync_service: Option<Arc<matrix_sdk_ui::sync_service::SyncService>>,
     active_start_request_id: Option<RequestId>,
     ignored_user_list_handler: Option<matrix_sdk::event_handler::EventHandlerHandle>,
+    diagnostics: SlidingSyncDiagnostics,
 }
 
 impl SyncActor {
@@ -261,6 +268,7 @@ impl SyncActor {
         timeline_tx: mpsc::Sender<crate::timeline::TimelineMessage>,
         sync_generation: Arc<AtomicU64>,
         encryption_sync_permit: koushi_sdk::EncryptionSyncPermitOwner,
+        diagnostics: SlidingSyncDiagnostics,
     ) -> SyncActorHandle {
         let (tx, command_rx) = mpsc::channel(16);
         let (control_tx, control_rx) = mpsc::channel(4);
@@ -281,6 +289,7 @@ impl SyncActor {
             sync_service: None,
             active_start_request_id: None,
             ignored_user_list_handler: None,
+            diagnostics,
         };
         let task = executor::spawn(actor.run());
         SyncActorHandle { tx, task }
@@ -454,12 +463,23 @@ impl SyncActor {
         }));
 
         if self.start_sync_service().await.is_err() {
+            self.diagnostics.failed(SlidingSyncFailureDiagnostic {
+                origin: SlidingSyncFailureOrigin::Supervisor,
+                kind: SlidingSyncFailureKind::Internal,
+                stage: SlidingSyncFailureStage::Supervisor,
+                ..SlidingSyncFailureDiagnostic::default()
+            });
             self.fail(SyncFailureKind::Internal).await;
         }
     }
 
     async fn start_sync_service(&mut self) -> Result<(), ()> {
         let client = self.session.client();
+        self.diagnostics
+            .runtime_profile(match client.sliding_sync_version() {
+                matrix_sdk::sliding_sync::Version::None => SlidingSyncSdkVersion::None,
+                matrix_sdk::sliding_sync::Version::Native => SlidingSyncSdkVersion::Native,
+            });
         self.register_ignored_user_list_handler(&client);
         self.run_generation = self.run_generation.wrapping_add(1).max(1);
         let run_generation = self.run_generation;
@@ -495,8 +515,10 @@ impl SyncActor {
             room_list_service,
             self.control_tx.clone(),
             run_generation,
+            self.diagnostics.clone(),
         ));
 
+        self.diagnostics.sync_started(run_generation);
         service.start().await;
         self.sync_service = Some(service);
         self.sync_task = Some(task);
@@ -533,6 +555,7 @@ impl SyncActor {
         stop_room_observation(self.room_tx.clone(), run_generation).await;
         self.active_start_request_id = None;
         self.lifecycle = SyncLifecycle::Stopped;
+        self.diagnostics.stopped();
         self.emit(CoreEvent::Sync(SyncEvent::Stopped { request_id }));
         self.project_sync_status(SyncLifecycleStatus::Stopped).await;
     }
@@ -680,6 +703,18 @@ fn classify_room_list_reconcile_ack(
     ack: RoomListReconcileAck,
 ) -> RoomListReconcileResult {
     match ack {
+        RoomListReconcileAck::Projected {
+            backend_generation,
+            room_generation,
+            response_sequence: acknowledged_sequence,
+        } if backend_generation == run_generation
+            && room_generation > 0
+            && acknowledged_sequence >= requested_sequence =>
+        {
+            RoomListReconcileResult::Projected {
+                response_sequence: acknowledged_sequence,
+            }
+        }
         RoomListReconcileAck::Reconciled {
             backend_generation,
             room_generation,
@@ -710,6 +745,7 @@ fn classify_room_list_reconcile_ack(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RoomListReconcileResult {
+    Projected { response_sequence: u64 },
     Reconciled { response_sequence: u64 },
     Superseded { response_sequence: u64 },
     Failed,
@@ -752,6 +788,7 @@ async fn observe_sync_service(
     room_list_service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
     control_tx: mpsc::Sender<SyncActorControl>,
     run_generation: u64,
+    diagnostics: SlidingSyncDiagnostics,
 ) -> SyncTaskOutcome {
     let mut connected = false;
     let mut room_observation_started = false;
@@ -868,6 +905,10 @@ async fn observe_sync_service(
                     )
                     .await
                     {
+                        RoomListReconcileResult::Projected { response_sequence } => {
+                            last_committed_sequence =
+                                last_committed_sequence.max(response_sequence);
+                        }
                         RoomListReconcileResult::Reconciled { response_sequence } => {
                             last_committed_sequence =
                                 last_committed_sequence.max(response_sequence);
@@ -901,6 +942,10 @@ async fn observe_sync_service(
                     )
                     .await
                     {
+                        RoomListReconcileResult::Projected { response_sequence } => {
+                            last_committed_sequence =
+                                last_committed_sequence.max(response_sequence);
+                        }
                         RoomListReconcileResult::Reconciled { response_sequence } => {
                             last_committed_sequence =
                                 last_committed_sequence.max(response_sequence);
@@ -923,6 +968,7 @@ async fn observe_sync_service(
                         .send(SyncActorControl::Recovered { run_generation })
                         .await;
                 }
+                diagnostics.response_committed(run_generation, committed.pos_present());
             }
             Signal::Committed(_) => {}
             Signal::State(state) => {
@@ -940,25 +986,33 @@ async fn observe_sync_service(
                     reconnecting
                 );
                 match state {
-                    matrix_sdk_ui::sync_service::State::Offline
-                    | matrix_sdk_ui::sync_service::State::Error(_)
-                        if !reconnecting =>
-                    {
+                    matrix_sdk_ui::sync_service::State::Offline(error) if !reconnecting => {
+                        diagnostics.sync_offline(classify_sync_service_error(&error));
                         reconnecting = true;
-                        let reason = if matches!(state, matrix_sdk_ui::sync_service::State::Offline)
-                        {
-                            "network_offline"
-                        } else {
-                            "network_error"
-                        };
                         let _ = control_tx
                             .send(SyncActorControl::Reconnecting {
                                 run_generation,
-                                reason,
+                                reason: "network_offline",
+                            })
+                            .await;
+                    }
+                    matrix_sdk_ui::sync_service::State::Error(error) if !reconnecting => {
+                        diagnostics.failed(classify_sync_service_error(&error));
+                        reconnecting = true;
+                        let _ = control_tx
+                            .send(SyncActorControl::Reconnecting {
+                                run_generation,
+                                reason: "network_error",
                             })
                             .await;
                     }
                     matrix_sdk_ui::sync_service::State::Terminated => {
+                        diagnostics.failed(SlidingSyncFailureDiagnostic {
+                            origin: SlidingSyncFailureOrigin::Supervisor,
+                            kind: SlidingSyncFailureKind::Internal,
+                            stage: SlidingSyncFailureStage::Supervisor,
+                            ..SlidingSyncFailureDiagnostic::default()
+                        });
                         return SyncTaskOutcome::Failed {
                             kind: SyncFailureKind::Http,
                             ever_connected: connected,
@@ -968,6 +1022,285 @@ async fn observe_sync_service(
                 }
             }
         }
+    }
+}
+
+fn classify_http_status(code: Option<u16>) -> SlidingSyncHttpStatus {
+    match code {
+        Some(400) => SlidingSyncHttpStatus::BadRequest,
+        Some(401) => SlidingSyncHttpStatus::Unauthorized,
+        Some(403) => SlidingSyncHttpStatus::Forbidden,
+        Some(404) => SlidingSyncHttpStatus::NotFound,
+        Some(429) => SlidingSyncHttpStatus::RateLimited,
+        Some(400..=499) => SlidingSyncHttpStatus::ClientError,
+        Some(500..=599) => SlidingSyncHttpStatus::ServerError,
+        Some(_) => SlidingSyncHttpStatus::Other,
+        None => SlidingSyncHttpStatus::None,
+    }
+}
+
+fn classify_matrix_error_kind(
+    kind: Option<&matrix_sdk::ruma::api::error::ErrorKind>,
+) -> SlidingSyncMatrixErrorKind {
+    use matrix_sdk::ruma::api::error::ErrorKind;
+
+    match kind {
+        Some(ErrorKind::MissingToken) => SlidingSyncMatrixErrorKind::MissingToken,
+        Some(ErrorKind::Unknown) => SlidingSyncMatrixErrorKind::Unknown,
+        Some(ErrorKind::BadJson) => SlidingSyncMatrixErrorKind::BadJson,
+        Some(ErrorKind::InvalidParam) => SlidingSyncMatrixErrorKind::InvalidParam,
+        Some(ErrorKind::MissingParam) => SlidingSyncMatrixErrorKind::MissingParam,
+        Some(ErrorKind::NotJson) => SlidingSyncMatrixErrorKind::NotJson,
+        Some(ErrorKind::NotFound) => SlidingSyncMatrixErrorKind::NotFound,
+        Some(ErrorKind::Unauthorized) => SlidingSyncMatrixErrorKind::Unauthorized,
+        Some(ErrorKind::UnknownToken { .. }) => SlidingSyncMatrixErrorKind::UnknownToken,
+        Some(ErrorKind::Forbidden) => SlidingSyncMatrixErrorKind::Forbidden,
+        Some(ErrorKind::UnknownPos) => SlidingSyncMatrixErrorKind::UnknownPos,
+        Some(ErrorKind::Unrecognized) => SlidingSyncMatrixErrorKind::Unrecognized,
+        Some(ErrorKind::LimitExceeded(_)) => SlidingSyncMatrixErrorKind::LimitExceeded,
+        Some(_) => SlidingSyncMatrixErrorKind::Other,
+        None => SlidingSyncMatrixErrorKind::None,
+    }
+}
+
+fn retryability_for_http(
+    status: SlidingSyncHttpStatus,
+    matrix_kind: SlidingSyncMatrixErrorKind,
+    default: SlidingSyncFailureRetryability,
+) -> SlidingSyncFailureRetryability {
+    match matrix_kind {
+        SlidingSyncMatrixErrorKind::UnknownPos | SlidingSyncMatrixErrorKind::LimitExceeded => {
+            SlidingSyncFailureRetryability::Transient
+        }
+        SlidingSyncMatrixErrorKind::MissingToken
+        | SlidingSyncMatrixErrorKind::UnknownToken
+        | SlidingSyncMatrixErrorKind::Forbidden
+        | SlidingSyncMatrixErrorKind::Unrecognized => SlidingSyncFailureRetryability::Permanent,
+        _ => match status {
+            SlidingSyncHttpStatus::RateLimited | SlidingSyncHttpStatus::ServerError => {
+                SlidingSyncFailureRetryability::Transient
+            }
+            SlidingSyncHttpStatus::Unauthorized
+            | SlidingSyncHttpStatus::Forbidden
+            | SlidingSyncHttpStatus::NotFound
+            | SlidingSyncHttpStatus::BadRequest
+            | SlidingSyncHttpStatus::ClientError => SlidingSyncFailureRetryability::Permanent,
+            _ => default,
+        },
+    }
+}
+
+fn classify_http_error(
+    http_error: &matrix_sdk::HttpError,
+) -> (
+    SlidingSyncHttpErrorSource,
+    SlidingSyncHttpStatus,
+    SlidingSyncMatrixErrorKind,
+    SlidingSyncFailureRetryability,
+) {
+    use matrix_sdk::ruma::api::error::FromHttpResponseError;
+
+    match http_error {
+        matrix_sdk::HttpError::Reqwest(error) => {
+            let status = classify_http_status(error.status().map(|status| status.as_u16()));
+            let retryability = retryability_for_http(
+                status,
+                SlidingSyncMatrixErrorKind::None,
+                SlidingSyncFailureRetryability::Transient,
+            );
+            (
+                SlidingSyncHttpErrorSource::Transport,
+                status,
+                SlidingSyncMatrixErrorKind::None,
+                retryability,
+            )
+        }
+        matrix_sdk::HttpError::Api(error) => match error.as_ref() {
+            FromHttpResponseError::Deserialization(_) => (
+                SlidingSyncHttpErrorSource::ResponseDecode,
+                SlidingSyncHttpStatus::None,
+                SlidingSyncMatrixErrorKind::None,
+                SlidingSyncFailureRetryability::Permanent,
+            ),
+            FromHttpResponseError::Server(_) => {
+                let status = classify_http_status(
+                    http_error
+                        .as_client_api_error()
+                        .map(|error| error.status_code.as_u16()),
+                );
+                let matrix_kind = classify_matrix_error_kind(http_error.client_api_error_kind());
+                let retryability = retryability_for_http(
+                    status,
+                    matrix_kind,
+                    SlidingSyncFailureRetryability::Unknown,
+                );
+                (
+                    SlidingSyncHttpErrorSource::ServerResponse,
+                    status,
+                    matrix_kind,
+                    retryability,
+                )
+            }
+            _ => (
+                SlidingSyncHttpErrorSource::NotHttp,
+                SlidingSyncHttpStatus::None,
+                SlidingSyncMatrixErrorKind::None,
+                SlidingSyncFailureRetryability::Unknown,
+            ),
+        },
+        matrix_sdk::HttpError::IntoHttp(_) => (
+            SlidingSyncHttpErrorSource::RequestBuild,
+            SlidingSyncHttpStatus::None,
+            SlidingSyncMatrixErrorKind::None,
+            SlidingSyncFailureRetryability::Permanent,
+        ),
+        matrix_sdk::HttpError::RefreshToken(_) => (
+            SlidingSyncHttpErrorSource::TokenRefresh,
+            SlidingSyncHttpStatus::None,
+            SlidingSyncMatrixErrorKind::None,
+            SlidingSyncFailureRetryability::Unknown,
+        ),
+        matrix_sdk::HttpError::Cached(inner) => {
+            let (_, status, matrix_kind, retryability) = classify_http_error(inner);
+            (
+                SlidingSyncHttpErrorSource::Cached,
+                status,
+                matrix_kind,
+                retryability,
+            )
+        }
+        #[cfg(target_os = "android")]
+        matrix_sdk::HttpError::VerifierBuilder(_) => (
+            SlidingSyncHttpErrorSource::Tls,
+            SlidingSyncHttpStatus::None,
+            SlidingSyncMatrixErrorKind::None,
+            SlidingSyncFailureRetryability::Permanent,
+        ),
+    }
+}
+
+fn classify_matrix_sync_error(
+    error: &matrix_sdk::Error,
+    origin: SlidingSyncFailureOrigin,
+    stage: SlidingSyncFailureStage,
+) -> SlidingSyncFailureDiagnostic {
+    let mut diagnostic = SlidingSyncFailureDiagnostic {
+        origin,
+        stage,
+        ..SlidingSyncFailureDiagnostic::default()
+    };
+    match error {
+        matrix_sdk::Error::AuthenticationRequired => {
+            diagnostic.kind = SlidingSyncFailureKind::Auth;
+            diagnostic.retryability = SlidingSyncFailureRetryability::Permanent;
+        }
+        matrix_sdk::Error::Http(error) => {
+            let (source, status, matrix_kind, retryability) = classify_http_error(error);
+            diagnostic.kind = if matches!(
+                matrix_kind,
+                SlidingSyncMatrixErrorKind::MissingToken
+                    | SlidingSyncMatrixErrorKind::UnknownToken
+                    | SlidingSyncMatrixErrorKind::Forbidden
+            ) || matches!(
+                status,
+                SlidingSyncHttpStatus::Unauthorized | SlidingSyncHttpStatus::Forbidden
+            ) {
+                SlidingSyncFailureKind::Auth
+            } else {
+                SlidingSyncFailureKind::Http
+            };
+            diagnostic.http_error_source = source;
+            diagnostic.http_status = status;
+            diagnostic.matrix_error_kind = matrix_kind;
+            diagnostic.retryability = retryability;
+        }
+        matrix_sdk::Error::Timeout => {
+            diagnostic.kind = SlidingSyncFailureKind::Http;
+            diagnostic.http_error_source = SlidingSyncHttpErrorSource::Transport;
+            diagnostic.retryability = SlidingSyncFailureRetryability::Transient;
+        }
+        matrix_sdk::Error::StateStore(_)
+        | matrix_sdk::Error::EventCacheStore(_)
+        | matrix_sdk::Error::MediaStore(_)
+        | matrix_sdk::Error::BadCryptoStoreState
+        | matrix_sdk::Error::CryptoStoreError(_) => {
+            diagnostic.kind = SlidingSyncFailureKind::Store;
+            diagnostic.retryability = SlidingSyncFailureRetryability::Unknown;
+        }
+        matrix_sdk::Error::SerdeJson(_)
+        | matrix_sdk::Error::Identifier(_)
+        | matrix_sdk::Error::Url(_)
+        | matrix_sdk::Error::SlidingSync(_) => {
+            diagnostic.kind = SlidingSyncFailureKind::Protocol;
+            diagnostic.retryability = SlidingSyncFailureRetryability::Permanent;
+        }
+        _ => {
+            diagnostic.kind = SlidingSyncFailureKind::Internal;
+            diagnostic.retryability = SlidingSyncFailureRetryability::Unknown;
+        }
+    }
+    diagnostic
+}
+
+fn classify_sync_service_error(
+    error: &matrix_sdk_ui::sync_service::Error,
+) -> SlidingSyncFailureDiagnostic {
+    use matrix_sdk_ui::{encryption_sync_service, room_list_service, sync_service};
+
+    match error {
+        sync_service::Error::RoomList(room_list_service::Error::SlidingSync(error)) => {
+            classify_matrix_sync_error(
+                error,
+                SlidingSyncFailureOrigin::RoomList,
+                SlidingSyncFailureStage::RoomListSlidingSync,
+            )
+        }
+        sync_service::Error::RoomList(room_list_service::Error::EventCache(_)) => {
+            SlidingSyncFailureDiagnostic {
+                origin: SlidingSyncFailureOrigin::RoomList,
+                kind: SlidingSyncFailureKind::Store,
+                stage: SlidingSyncFailureStage::RoomListEventCache,
+                retryability: SlidingSyncFailureRetryability::Unknown,
+                ..SlidingSyncFailureDiagnostic::default()
+            }
+        }
+        sync_service::Error::RoomList(
+            room_list_service::Error::UnknownList(_) | room_list_service::Error::RoomNotFound(_),
+        ) => SlidingSyncFailureDiagnostic {
+            origin: SlidingSyncFailureOrigin::RoomList,
+            kind: SlidingSyncFailureKind::Internal,
+            stage: SlidingSyncFailureStage::RoomListProjection,
+            retryability: SlidingSyncFailureRetryability::Permanent,
+            ..SlidingSyncFailureDiagnostic::default()
+        },
+        sync_service::Error::EncryptionSync(encryption_sync_service::Error::SlidingSync(error)) => {
+            classify_matrix_sync_error(
+                error,
+                SlidingSyncFailureOrigin::Encryption,
+                SlidingSyncFailureStage::EncryptionSlidingSync,
+            )
+        }
+        sync_service::Error::EncryptionSync(encryption_sync_service::Error::ClientError(error)) => {
+            classify_matrix_sync_error(
+                error,
+                SlidingSyncFailureOrigin::Encryption,
+                SlidingSyncFailureStage::EncryptionClient,
+            )
+        }
+        sync_service::Error::EncryptionSync(encryption_sync_service::Error::LockError(error)) => {
+            classify_matrix_sync_error(
+                error,
+                SlidingSyncFailureOrigin::Encryption,
+                SlidingSyncFailureStage::EncryptionLock,
+            )
+        }
+        sync_service::Error::Supervisor => SlidingSyncFailureDiagnostic {
+            origin: SlidingSyncFailureOrigin::Supervisor,
+            kind: SlidingSyncFailureKind::Internal,
+            stage: SlidingSyncFailureStage::Supervisor,
+            retryability: SlidingSyncFailureRetryability::Permanent,
+            ..SlidingSyncFailureDiagnostic::default()
+        },
     }
 }
 
@@ -1098,6 +1431,36 @@ pub mod tests {
     }
 
     #[test]
+    fn bad_request_and_schema_errcodes_are_actionable_diagnostics() {
+        use matrix_sdk::ruma::api::error::ErrorKind;
+
+        assert_eq!(
+            classify_http_status(Some(400)),
+            SlidingSyncHttpStatus::BadRequest
+        );
+        for (kind, expected) in [
+            (ErrorKind::Unknown, SlidingSyncMatrixErrorKind::Unknown),
+            (ErrorKind::BadJson, SlidingSyncMatrixErrorKind::BadJson),
+            (
+                ErrorKind::InvalidParam,
+                SlidingSyncMatrixErrorKind::InvalidParam,
+            ),
+            (
+                ErrorKind::MissingParam,
+                SlidingSyncMatrixErrorKind::MissingParam,
+            ),
+            (ErrorKind::NotJson, SlidingSyncMatrixErrorKind::NotJson),
+            (ErrorKind::NotFound, SlidingSyncMatrixErrorKind::NotFound),
+            (
+                ErrorKind::Unauthorized,
+                SlidingSyncMatrixErrorKind::Unauthorized,
+            ),
+        ] {
+            assert_eq!(classify_matrix_error_kind(Some(&kind)), expected);
+        }
+    }
+
+    #[test]
     fn observer_infrastructure_loss_is_not_a_normal_stop() {
         assert!(matches!(
             internal_observer_failure(true),
@@ -1132,6 +1495,36 @@ pub mod tests {
                     backend_generation: 8,
                     room_generation: 3,
                     response_sequence: 12,
+                },
+            ),
+            RoomListReconcileResult::Failed
+        );
+    }
+
+    #[test]
+    fn projected_room_list_ack_is_connectivity_evidence() {
+        assert_eq!(
+            classify_room_list_reconcile_ack(
+                7,
+                11,
+                RoomListReconcileAck::Projected {
+                    backend_generation: 7,
+                    room_generation: 3,
+                    response_sequence: 11,
+                },
+            ),
+            RoomListReconcileResult::Projected {
+                response_sequence: 11,
+            }
+        );
+        assert_eq!(
+            classify_room_list_reconcile_ack(
+                7,
+                11,
+                RoomListReconcileAck::Projected {
+                    backend_generation: 8,
+                    room_generation: 3,
+                    response_sequence: 11,
                 },
             ),
             RoomListReconcileResult::Failed

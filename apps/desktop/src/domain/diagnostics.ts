@@ -24,7 +24,155 @@ export interface DiagnosticLogEntry {
 export interface DiagnosticLogSnapshot {
   entries: DiagnosticLogEntry[];
   droppedEntries: number;
+  slidingSync?: SlidingSyncDiagnostics;
 }
+
+export interface SlidingSyncDiagnostics {
+  discoveryState:
+    | "not_started"
+    | "probing"
+    | "supported"
+    | "unsupported"
+    | "unreachable"
+    | "invalid_response";
+  advertised: boolean;
+  discoverySource: "unknown" | "versions";
+  lastProbeAgeBucket: "never" | "<1m" | "1-5m" | "5-30m" | "30m-2h" | ">=2h";
+  lastHttpStatusClass: "unknown" | "success" | "client_error" | "server_error" | "other";
+  requestSchema: "element_x_all_rooms";
+  engine: "SyncService";
+  sdkSlidingSyncVersion: "unknown" | "none" | "native";
+  roomListSharePos: boolean;
+  encryptionSharePos: boolean;
+  encryptionConnectionProfile: "sdk_default_encryption";
+  encryptionExtensionProfile: "e2ee_to_device";
+  provisionalEncryptionStarted: boolean;
+  provisionalFirstResponseSeen: boolean;
+  provisionalStoppedBeforeFirstResponse: boolean;
+  provisionalToNormalHandoffBucket:
+    | "never"
+    | "under100_milliseconds"
+    | "under_one_second"
+    | "one_second_or_more";
+  lifecycle: "stopped" | "starting" | "running" | "reconnecting" | "failed";
+  connectivityProven: boolean;
+  committedGeneration: number;
+  lastSuccessAgeBucket: "never" | "<1m" | "1-5m" | "5-30m" | "30m-2h" | ">=2h";
+  consecutiveFailureCount: number;
+  lastFailureOrigin: "none" | "room_list" | "encryption" | "supervisor";
+  lastFailureKind:
+    | "none"
+    | "sync_failed_http"
+    | "sync_failed_auth"
+    | "sync_failed_store"
+    | "sync_failed_protocol"
+    | "sync_failed_internal";
+  lastFailureStage:
+    | "none"
+    | "room_list_sliding_sync"
+    | "room_list_event_cache"
+    | "room_list_projection"
+    | "encryption_sliding_sync"
+    | "encryption_lock"
+    | "encryption_client"
+    | "supervisor";
+  lastHttpErrorSource:
+    | "none"
+    | "transport"
+    | "server_response"
+    | "response_decode"
+    | "request_build"
+    | "token_refresh"
+    | "cached"
+    | "tls"
+    | "not_http";
+  lastHttpStatus:
+    | "none"
+    | "bad_request"
+    | "unauthorized"
+    | "forbidden"
+    | "not_found"
+    | "rate_limited"
+    | "client_error"
+    | "server_error"
+    | "other";
+  lastMatrixErrorKind:
+    | "none"
+    | "unknown"
+    | "bad_json"
+    | "invalid_param"
+    | "missing_param"
+    | "not_json"
+    | "not_found"
+    | "unauthorized"
+    | "missing_token"
+    | "unknown_token"
+    | "forbidden"
+    | "unknown_pos"
+    | "unrecognized"
+    | "limit_exceeded"
+    | "other";
+  lastFailureRetryability: "none" | "transient" | "permanent" | "unknown";
+  roomListTaskRunning: boolean;
+  encryptionTaskRunning: boolean;
+  posPresent: boolean;
+  directAccountDataSource: "unavailable" | "local_store" | "sliding_sync_event";
+  directMappedRoomCount: number;
+  directTargetCount: number;
+  projectedDmCount: number;
+  explicitDmCount: number;
+  fallbackDmCount: number;
+  directNonDmCount: number;
+  directInvalidEntryCount: number;
+  directEventWakeCount: number;
+  directEventAppliedCount: number;
+  directEventStreamRunning: boolean;
+}
+
+export const DEFAULT_SLIDING_SYNC_DIAGNOSTICS: SlidingSyncDiagnostics = {
+  discoveryState: "not_started",
+  advertised: false,
+  discoverySource: "unknown",
+  lastProbeAgeBucket: "never",
+  lastHttpStatusClass: "unknown",
+  requestSchema: "element_x_all_rooms",
+  engine: "SyncService",
+  sdkSlidingSyncVersion: "unknown",
+  roomListSharePos: true,
+  encryptionSharePos: false,
+  encryptionConnectionProfile: "sdk_default_encryption",
+  encryptionExtensionProfile: "e2ee_to_device",
+  provisionalEncryptionStarted: false,
+  provisionalFirstResponseSeen: false,
+  provisionalStoppedBeforeFirstResponse: false,
+  provisionalToNormalHandoffBucket: "never",
+  lifecycle: "stopped",
+  connectivityProven: false,
+  committedGeneration: 0,
+  lastSuccessAgeBucket: "never",
+  consecutiveFailureCount: 0,
+  lastFailureOrigin: "none",
+  lastFailureKind: "none",
+  lastFailureStage: "none",
+  lastHttpErrorSource: "none",
+  lastHttpStatus: "none",
+  lastMatrixErrorKind: "none",
+  lastFailureRetryability: "none",
+  roomListTaskRunning: false,
+  encryptionTaskRunning: false,
+  posPresent: false,
+  directAccountDataSource: "unavailable",
+  directMappedRoomCount: 0,
+  directTargetCount: 0,
+  projectedDmCount: 0,
+  explicitDmCount: 0,
+  fallbackDmCount: 0,
+  directNonDmCount: 0,
+  directInvalidEntryCount: 0,
+  directEventWakeCount: 0,
+  directEventAppliedCount: 0,
+  directEventStreamRunning: false
+};
 
 export const DEFAULT_DIAGNOSTIC_LOG_LIMIT = 10_000;
 
@@ -62,6 +210,7 @@ export interface DiagnosticReportInput {
   logEntries?: readonly DiagnosticLogEntry[];
   securityDiagnostics?: SecurityDiagnostics;
   droppedLogEntries?: number;
+  slidingSyncDiagnostics?: SlidingSyncDiagnostics;
 }
 
 export function diagnosticReport({
@@ -76,7 +225,8 @@ export function diagnosticReport({
   jsErrors,
   logEntries = [],
   securityDiagnostics,
-  droppedLogEntries
+  droppedLogEntries,
+  slidingSyncDiagnostics
 }: DiagnosticReportInput): string {
   const crawler = summarizeCrawler(snapshot.state.domain.search_crawler.rooms);
   const roomClassification = summarizeRoomClassification(snapshot);
@@ -134,6 +284,7 @@ export function diagnosticReport({
         ]
       : []),
     ...securityDiagnosticLog,
+    ...formatSlidingSyncDiagnostics(slidingSyncDiagnostics),
     `Diagnostic records dropped: ${normalizeDroppedLogEntries(droppedLogEntries)}`,
     ...diagnosticLog,
     `timeline_matches_active=${timelineMatchesActiveRoom(snapshot)}`,
@@ -160,6 +311,61 @@ export function diagnosticReport({
     ...(jsErrors ? [`js_error_count=${jsErrors.length}`] : [])
   ];
   return lines.join("\n");
+}
+
+function formatSlidingSyncDiagnostics(sync: SlidingSyncDiagnostics | undefined): string[] {
+  if (!sync) {
+    return [];
+  }
+  return [
+    "Sliding Sync:",
+    `sliding_sync.discovery_state=${sync.discoveryState}`,
+    `sliding_sync.advertised=${sync.advertised}`,
+    `sliding_sync.discovery_source=${sync.discoverySource}`,
+    `sliding_sync.last_probe_age_bucket=${sync.lastProbeAgeBucket}`,
+    `sliding_sync.last_http_status_class=${sync.lastHttpStatusClass}`,
+    `sliding_sync.request_schema=${sync.requestSchema}`,
+    `sync.engine=${sync.engine}`,
+    `sync.sdk_sliding_sync_version=${sync.sdkSlidingSyncVersion}`,
+    `sync.room_list_share_pos=${sync.roomListSharePos}`,
+    `sync.encryption_share_pos=${sync.encryptionSharePos}`,
+    `sync.encryption_connection_profile=${sync.encryptionConnectionProfile}`,
+    `sync.encryption_extension_profile=${sync.encryptionExtensionProfile}`,
+    `sync.provisional_encryption_started=${sync.provisionalEncryptionStarted}`,
+    `sync.provisional_first_response_seen=${sync.provisionalFirstResponseSeen}`,
+    `sync.provisional_stopped_before_first_response=${sync.provisionalStoppedBeforeFirstResponse}`,
+    `sync.provisional_to_normal_handoff_bucket=${sync.provisionalToNormalHandoffBucket}`,
+    `sync.lifecycle=${sync.lifecycle}`,
+    `sync.connectivity_proven=${sync.connectivityProven}`,
+    `sync.committed_generation=${Math.max(0, Math.trunc(sync.committedGeneration))}`,
+    `sync.last_success_age_bucket=${sync.lastSuccessAgeBucket}`,
+    `sync.consecutive_failure_count=${Math.max(0, Math.trunc(sync.consecutiveFailureCount))}`,
+    `sync.last_failure_origin=${sync.lastFailureOrigin}`,
+    `sync.last_failure_kind=${sync.lastFailureKind}`,
+    `sync.last_failure_stage=${sync.lastFailureStage}`,
+    `sync.last_http_error_source=${sync.lastHttpErrorSource}`,
+    `sync.last_http_status=${sync.lastHttpStatus}`,
+    `sync.last_matrix_error_kind=${sync.lastMatrixErrorKind}`,
+    `sync.last_failure_retryability=${sync.lastFailureRetryability}`,
+    `sync.room_list_task_running=${sync.roomListTaskRunning}`,
+    `sync.encryption_task_running=${sync.encryptionTaskRunning}`,
+    `sync.pos_present=${sync.posPresent}`,
+    `direct_classification.source=${sync.directAccountDataSource}`,
+    `direct_classification.mapped_room_count=${normalizedCount(sync.directMappedRoomCount)}`,
+    `direct_classification.target_count=${normalizedCount(sync.directTargetCount)}`,
+    `direct_classification.projected_dm_count=${normalizedCount(sync.projectedDmCount)}`,
+    `direct_classification.explicit_dm_count=${normalizedCount(sync.explicitDmCount)}`,
+    `direct_classification.fallback_dm_count=${normalizedCount(sync.fallbackDmCount)}`,
+    `direct_classification.non_dm_count=${normalizedCount(sync.directNonDmCount)}`,
+    `direct_classification.invalid_entry_count=${normalizedCount(sync.directInvalidEntryCount)}`,
+    `direct_classification.event_wake_count=${normalizedCount(sync.directEventWakeCount)}`,
+    `direct_classification.event_applied_count=${normalizedCount(sync.directEventAppliedCount)}`,
+    `direct_classification.event_stream_running=${sync.directEventStreamRunning}`
+  ];
+}
+
+function normalizedCount(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
 
 function formatSecurityDiagnostics(security: SecurityDiagnostics | undefined): string[] {
