@@ -16181,11 +16181,25 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("address");
         std::thread::spawn(move || {
-            while let Ok((mut stream, _)) = listener.accept() {
+            'accept: while let Ok((mut stream, _)) = listener.accept() {
                 let mut request = Vec::new();
                 let mut buffer = [0_u8; 4096];
                 loop {
-                    let count = stream.read(&mut buffer).expect("read");
+                    let count = match stream.read(&mut buffer) {
+                        Ok(0) => continue 'accept,
+                        Ok(count) => count,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::ConnectionReset
+                                    | std::io::ErrorKind::BrokenPipe
+                                    | std::io::ErrorKind::UnexpectedEof
+                            ) =>
+                        {
+                            continue 'accept;
+                        }
+                        Err(error) => panic!("read: {error}"),
+                    };
                     request.extend_from_slice(&buffer[..count]);
                     let text = String::from_utf8_lossy(&request);
                     let Some(end) = text.find("\r\n\r\n") else {

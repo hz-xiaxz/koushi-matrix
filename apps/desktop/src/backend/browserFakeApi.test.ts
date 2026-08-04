@@ -1071,7 +1071,18 @@ describe("BrowserFakeApi settings preview", () => {
         lastFailureRetryability: "none",
         roomListTaskRunning: false,
         encryptionTaskRunning: false,
-        posPresent: false
+        posPresent: false,
+        directAccountDataSource: "unavailable",
+        directMappedRoomCount: 0,
+        directTargetCount: 0,
+        projectedDmCount: 0,
+        explicitDmCount: 0,
+        fallbackDmCount: 0,
+        directNonDmCount: 0,
+        directInvalidEntryCount: 0,
+        directEventWakeCount: 0,
+        directEventAppliedCount: 0,
+        directEventStreamRunning: false
       }
     });
   });
