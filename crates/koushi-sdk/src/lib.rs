@@ -7319,19 +7319,45 @@ pub async fn start_direct_message(
     session: &MatrixClientSession,
     user_id: &str,
 ) -> Result<String, MatrixRoomOperationError> {
+    koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "sdk.room_operation",
+        "start_dm_started",
+    ));
     let user_id = matrix_sdk::ruma::UserId::parse(user_id)
         .map_err(|_| MatrixRoomOperationError::InvalidUserId)?;
     // Get-or-create (#368): reuse the existing joined DM whose only direct
     // target is this user. Unconditional create_dm minted a duplicate DM room
     // on every repeated "Send message".
     if let Some(room) = session.client().get_dm_room(&user_id) {
+        koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+            DiagnosticLevel::Info,
+            "sdk.room_operation",
+            "start_dm_reused",
+        ));
         return Ok(room.room_id().to_string());
     }
-    let room = session
-        .client()
-        .create_dm(&user_id)
-        .await
-        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "sdk.room_operation",
+        "start_dm_create_started",
+    ));
+    let room = match session.client().create_dm(&user_id).await {
+        Ok(room) => room,
+        Err(error) => {
+            koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+                DiagnosticLevel::Warn,
+                "sdk.room_operation",
+                "start_dm_create_failed",
+            ));
+            return Err(MatrixRoomOperationError::from_sdk_error(error));
+        }
+    };
+    koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "sdk.room_operation",
+        "start_dm_create_completed",
+    ));
     Ok(room.room_id().to_string())
 }
 
