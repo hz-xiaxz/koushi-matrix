@@ -7877,13 +7877,29 @@ pub async fn join_room_by_id(
     session: &MatrixClientSession,
     room_id: &str,
 ) -> Result<String, MatrixRoomOperationError> {
+    koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "sdk.room_operation",
+        "join_started",
+    ));
     let room_id = matrix_sdk::ruma::RoomId::parse(room_id)
         .map_err(|_| MatrixRoomOperationError::InvalidRoomId)?;
-    let room = session
-        .client()
-        .join_room_by_id(&room_id)
-        .await
-        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    let room = match session.client().join_room_by_id(&room_id).await {
+        Ok(room) => room,
+        Err(error) => {
+            koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+                DiagnosticLevel::Warn,
+                "sdk.room_operation",
+                "join_failed",
+            ));
+            return Err(MatrixRoomOperationError::from_sdk_error(error));
+        }
+    };
+    koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "sdk.room_operation",
+        "join_completed",
+    ));
     Ok(room.room_id().to_string())
 }
 
