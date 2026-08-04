@@ -106,6 +106,10 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libxdo-dev
       - name: Submodule sync guard
         run: node scripts/check-sdk-submodule.mjs
+      - name: Diagnostic test isolation checker tests
+        run: node --test scripts/check-diagnostic-test-isolation.test.mjs
+      - name: Diagnostic test isolation guard
+        run: node scripts/check-diagnostic-test-isolation.mjs
       - name: Workspace tests
         run: cargo test --workspace --exclude koushi-backend --exclude sidebar-composition --exclude key-management
       - name: Tauri DTO + IPC contract tests

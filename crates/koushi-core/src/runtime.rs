@@ -7523,6 +7523,7 @@ mod tests {
     #[test]
     #[ignore]
     fn room_list_applied_records_without_trace_environment() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         assert!(std::env::var_os("KOUSHI_UNREAD_TRACE").is_none());
         let mut state = AppState {
             session: SessionState::Ready(SessionInfo {
@@ -7605,6 +7606,7 @@ mod tests {
     #[test]
     #[ignore]
     fn native_attention_recomputed_diagnostic_records_private_safe_fields_child() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let mut state = AppState {
             session: SessionState::Ready(SessionInfo {
                 homeserver: "https://example.invalid".to_owned(),

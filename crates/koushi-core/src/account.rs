@@ -12628,6 +12628,7 @@ mod tests {
     #[test]
     #[ignore]
     fn verification_admission_diagnostic_child() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_verification_admission_event(
             DiagnosticEvent::new(
                 DiagnosticLevel::Info,
@@ -12686,6 +12687,7 @@ mod tests {
     #[test]
     #[ignore]
     fn verification_method_discovery_diagnostic_child() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_verification_method_discovery_event(
             verification_method_discovery_event("finished", 7, 11)
                 .field(DiagnosticField::token("outcome", "failed"))
@@ -12747,6 +12749,7 @@ mod tests {
     #[test]
     #[ignore]
     fn sliding_sync_evidence_persistence_diagnostic_child() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_sliding_sync_capability_persistence("saved");
         record_sliding_sync_capability_persistence("failed");
         println!(
@@ -13038,6 +13041,7 @@ mod tests {
     #[test]
     #[ignore]
     fn sas_verification_diagnostic_child() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_sas_verification_event(
             sas_verification_event("request_state_changed", 41)
                 .field(DiagnosticField::token("state", "cancelled"))
@@ -13076,6 +13080,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn event_cache_repair_diagnostic_records_without_trace_environment() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         assert!(std::env::var_os("KOUSHI_TIMELINE_ITEM_TRACE").is_none());
         assert!(std::env::var_os("KOUSHI_SUBSCRIBE_TRACE").is_none());
 
