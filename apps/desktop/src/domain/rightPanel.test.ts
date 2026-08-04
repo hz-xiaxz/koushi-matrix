@@ -150,14 +150,28 @@ function spaceSummary(spaceId: string, label: string): SpaceSummary {
 }
 
 function snapshotForPanelMode(
-  sessionKind: DesktopSnapshot["state"]["domain"]["session"]["kind"],
+  sessionKind: "ready" | "needsRecovery" | "recovering",
   hasThread: boolean
 ): Pick<DesktopSnapshot, "state" | "thread"> {
   return {
     state: {
       schema_version: 3,
       domain: {
-        session: { kind: sessionKind },
+        session:
+          sessionKind === "ready"
+            ? {
+                kind: "ready",
+                homeserver: "https://example.invalid",
+                user_id: "@user:example.invalid",
+                device_id: "DEVICE"
+              }
+            : sessionKind === "needsRecovery"
+              ? {
+                  kind: "needsRecovery",
+                  user_id: "@user:example.invalid",
+                  recovery_methods: ["recoveryKey"]
+                }
+              : { kind: "recovering" },
         current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },
@@ -242,7 +256,6 @@ function snapshotForPanelMode(
           operation: { kind: "idle" }
         },
         sync: "stopped",
-        sync_mode: { kind: "unsupported" },
         spaces: [],
         rooms: [],
         invites: [],

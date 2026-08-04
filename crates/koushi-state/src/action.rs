@@ -19,17 +19,18 @@ use crate::state::{
     NativeAttentionSoundOutcome, NativeAttentionState, NavigationState, OperationFailureKind,
     OwnProfile, PinnedEvent, PresenceKind, ProfileUpdateRequest, RecoveryKeyDeliveryState,
     RecoveryMethod, RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListSource,
-    RoomMentionPermission,
-    RoomModerationAction, RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot,
-    RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
-    ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
-    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceMemberInviteOutcome,
-    SpaceMembersProjection, SpaceSummary, StagedUploadCompressionChoice, StagedUploadItem,
-    StagedUploadOutputSelection, SyncLifecycleStatus, SyncMode, TimelineContinuityInspection,
-    TimelineGapRepairFailureKind, TimelineMediaDownloadState, TimelineMediaGalleryItem,
-    TimelineScrollAnchor, TrustOperationFailureKind, UserProfile, VerificationCancelReason,
-    VerificationGateFailureKind, VerificationGateState, VerificationMethod, VerificationTarget,
+    RoomMentionPermission, RoomModerationAction, RoomPreferencesState, RoomSettingChange,
+    RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji,
+    ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope,
+    SessionInfo, SessionStatusRefreshTrigger, SettingsPatch, SettingsValues,
+    SpaceMemberInviteOutcome, SpaceMembersProjection, SpaceSummary, StagedUploadCompressionChoice,
+    StagedUploadItem, StagedUploadOutputSelection, SyncLifecycleStatus,
+    TimelineContinuityInspection, TimelineGapRepairFailureKind, TimelineMediaDownloadState,
+    TimelineMediaGalleryItem, TimelineScrollAnchor, TrustOperationFailureKind, UserProfile,
+    VerificationCancelReason, VerificationGateFailureKind, VerificationGateState,
+    VerificationMethod, VerificationTarget,
 };
+use crate::state::{SlidingSyncAdmission, SlidingSyncCapabilityResult};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum AppAction {
@@ -39,6 +40,31 @@ pub enum AppAction {
     RestoreSessionNotFound,
     RestoreSessionFailed {
         message: String,
+    },
+    SlidingSyncCapabilityCheckStarted {
+        account_epoch: u64,
+        request_id: u64,
+        admission: SlidingSyncAdmission,
+        positive_evidence: Option<crate::state::SlidingSyncPositiveEvidence>,
+    },
+    SlidingSyncCapabilityCheckCompleted {
+        account_epoch: u64,
+        request_id: u64,
+        result: SlidingSyncCapabilityResult,
+    },
+    SlidingSyncCapabilityRetryAccepted {
+        account_epoch: u64,
+        blocked_request_id: u64,
+        request_id: u64,
+    },
+    SlidingSyncCapabilityRevalidationStarted {
+        account_epoch: u64,
+        request_id: u64,
+    },
+    SlidingSyncCapabilityRevalidationCompleted {
+        account_epoch: u64,
+        request_id: u64,
+        result: SlidingSyncCapabilityResult,
     },
     SwitchAccountRequested {
         info: SessionInfo,
@@ -567,9 +593,6 @@ pub enum AppAction {
     SyncStatusChanged {
         generation: u64,
         status: SyncLifecycleStatus,
-    },
-    SyncModeChanged {
-        mode: SyncMode,
     },
     RoomListUpdated {
         spaces: Vec<SpaceSummary>,

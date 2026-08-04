@@ -109,24 +109,7 @@ test("Tuwunel fixture intrinsically advertises simplified Sliding Sync", () => {
   });
 });
 
-test("probed backend expectation remains behavior-selected for every fixture", () => {
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/desktop-headless-local-qa.mjs", "--check-probed-backend-map"],
-    {
-      cwd: join(import.meta.dirname, "../.."),
-      encoding: "utf8"
-    }
-  );
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(
-    result.stdout,
-    /tuwunel probed=behavior-selected conduit probed=behavior-selected forced=LegacySync/
-  );
-});
-
-test("explicit probed backend has no fixed expectation", () => {
+test("obsolete core backend selector is rejected", () => {
   const result = spawnSync(
     process.execPath,
     [
@@ -140,11 +123,54 @@ test("explicit probed backend has no fixed expectation", () => {
     }
   );
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "leg=probed force=none expect=behavior-selected");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--core-backend is obsolete/);
 });
 
-test("explicit SyncService backend selects only its forced QA leg", () => {
+test("forced backend environment is rejected", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/desktop-headless-local-qa.mjs", "--list"],
+    {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8",
+      env: { ...process.env, KOUSHI_QA_FORCE_SYNC_BACKEND: "legacy" }
+    }
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /KOUSHI_QA_FORCE_SYNC_BACKEND is obsolete/);
+});
+
+test("legacy fallback scenarios are rejected", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/desktop-headless-local-qa.mjs",
+      "--run",
+      "--server=tuwunel",
+      "--core",
+      "--scenario=timeline_legacy_fallback"
+    ],
+    {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8"
+    }
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /legacy fallback scenarios are obsolete/);
+});
+
+test("supported core QA has one engine-neutral run", () => {
+  const runner = readFileSync(join(import.meta.dirname, "../desktop-headless-local-qa.mjs"), "utf8");
+
+  assert.doesNotMatch(runner, /selectedCoreBackendLegs|coreBackendLegConfig|forceBackend|expectSyncBackend/);
+  assert.doesNotMatch(runner, /env\.KOUSHI_QA_FORCE_SYNC_BACKEND\s*=/);
+  assert.equal((runner.match(/runCoreHeadlessQa\(/g) ?? []).length, 2);
+});
+
+test("obsolete core backend values are no longer accepted", () => {
   const result = spawnSync(
     process.execPath,
     [
@@ -158,90 +184,8 @@ test("explicit SyncService backend selects only its forced QA leg", () => {
     }
   );
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(
-    result.stdout.trim(),
-    "leg=sync-service force=sync_service expect=SyncService"
-  );
-});
-
-test("explicit Legacy backend selects only its forced QA leg", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      "scripts/desktop-headless-local-qa.mjs",
-      "--check-core-backend-map",
-      "--core-backend=legacy"
-    ],
-    {
-      cwd: join(import.meta.dirname, "../.."),
-      encoding: "utf8"
-    }
-  );
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "leg=legacy force=legacy expect=LegacySync");
-});
-
-test("both keeps probed behavior-selected and Legacy strict", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      "scripts/desktop-headless-local-qa.mjs",
-      "--check-core-backend-map",
-      "--core-backend=both"
-    ],
-    {
-      cwd: join(import.meta.dirname, "../.."),
-      encoding: "utf8"
-    }
-  );
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(
-    result.stdout.trim(),
-    [
-      "leg=probed force=none expect=behavior-selected",
-      "leg=legacy force=legacy expect=LegacySync"
-    ].join("\n")
-  );
-});
-
-test("core backend selector rejects unknown values", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      "scripts/desktop-headless-local-qa.mjs",
-      "--check-core-backend-map",
-      "--core-backend=unknown"
-    ],
-    {
-      cwd: join(import.meta.dirname, "../.."),
-      encoding: "utf8"
-    }
-  );
-
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /--core-backend must be probed, sync-service, legacy, or both/);
-});
-
-test("release profile rejects the debug-only SyncService override", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      "scripts/desktop-headless-local-qa.mjs",
-      "--check-core-backend-map",
-      "--cargo-profile=release",
-      "--core-backend=sync-service"
-    ],
-    {
-      cwd: join(import.meta.dirname, "../.."),
-      encoding: "utf8"
-    }
-  );
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /--cargo-profile=release cannot force a QA backend/);
+  assert.match(result.stderr, /--core-backend is obsolete/);
 });
 
 test("server selection keeps individual Sliding Sync fixtures", () => {
@@ -253,15 +197,15 @@ test("both selects Tuwunel and Synapse without Conduit", () => {
   assert.deepEqual(selectedServers("both"), ["tuwunel", "synapse"]);
 });
 
-test("server selection preserves temporary compatibility selectors", () => {
-  assert.deepEqual(selectedServers("conduit"), ["conduit"]);
-  assert.deepEqual(selectedServers("all"), ["conduit", "tuwunel", "synapse"]);
-  assert.deepEqual(selectedServers("matrixorg"), ["synapse"]);
+test("server selection rejects retired Conduit and compatibility aliases", () => {
+  assert.throws(() => selectedServers("conduit"), /--server must be tuwunel, synapse, or both/);
+  assert.throws(() => selectedServers("all"), /--server must be tuwunel, synapse, or both/);
+  assert.throws(() => selectedServers("matrixorg"), /--server must be tuwunel, synapse, or both/);
 });
 
 test("server selection rejects unknown values", () => {
   assert.throws(
     () => selectedServers("unknown"),
-    /--server must be conduit, tuwunel, synapse, matrixorg, both, or all/
+    /--server must be tuwunel, synapse, or both/
   );
 });

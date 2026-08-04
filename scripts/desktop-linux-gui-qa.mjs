@@ -10,7 +10,6 @@ import { deflateSync } from "node:zlib";
 
 import {
   checkInstalledHomeserver,
-  conduitConfig,
   createRoom,
   freePort,
   inviteUser as inviteUserToRoom,
@@ -78,7 +77,7 @@ const checks = [
 
 const args = new Set(process.argv.slice(2));
 const guiScenario = optionValue("--scenario") ?? "signed-out";
-const serverOption = optionValue("--server") ?? "conduit";
+const serverOption = optionValue("--server") ?? "tuwunel";
 const qaProfile = optionValue("--qa-profile");
 const realLoginFromStdin = args.has("--real-login-from-stdin");
 const allowEmptyTimeline = args.has("--allow-empty-timeline");
@@ -4061,9 +4060,7 @@ async function startLocalGuiScenario() {
     const configPath = join(runDir, `${serverKind}.toml`);
     writeFileSync(
       configPath,
-      serverKind === "conduit"
-        ? conduitConfig({ serverName, port, dataDir: serverDataDir })
-        : tuwunelConfig({ serverName, port, dataDir: serverDataDir })
+      tuwunelConfig({ serverName, port, dataDir: serverDataDir })
     );
 
     session.serverProcess = startHomeserver(serverKind, configPath, logPath);
@@ -4662,10 +4659,10 @@ function createNamedPipe(path) {
 }
 
 function guiScenarioServerKind() {
-  if (serverOption === "conduit" || serverOption === "tuwunel") {
+  if (serverOption === "tuwunel") {
     return serverOption;
   }
-  throw new Error("--server must be conduit or tuwunel for local GUI scenarios");
+  throw new Error("--server must be tuwunel for local GUI scenarios");
 }
 
 // Write a sensitive payload directly to the FIFO via node:fs/promises. No
@@ -4765,9 +4762,6 @@ function childEnvironment(dataDir, qaLoginPipePath = null, qaControlPipePath = n
   env.KOUSHI_QA_TITLE = "1";
   env.VITE_KOUSHI_QA_TITLE = "1";
   env.KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR = join(dataDir, "qa-credential-store");
-  if (guiScenario === "local-invites-dm") {
-    env.KOUSHI_QA_FORCE_SYNC_BACKEND = "legacy";
-  }
   env.NO_COLOR = "1";
   if (qaProfile !== undefined) {
     env.KOUSHI_RESTORE_SESSION = "1";

@@ -220,7 +220,6 @@ function defaultSnapshotResponse() {
         update: { kind: "idle" }
       },
       sync: "stopped",
-      sync_mode: { kind: "unsupported" },
       navigation: { active_space_id: null, active_room_id: null },
       spaces: [],
       rooms: [],
@@ -339,7 +338,7 @@ function defaultSnapshotResponse() {
     "session", "auth", "device_sessions", "account_management",
     "account_management_capabilities", "soft_logout_reauth", "qr_login", "settings",
     "link_preview_settings", "room_preferences", "locale_profile", "typography_profile", "profile", "sync",
-    "sync_mode", "spaces", "rooms", "invites", "invite_workflow", "room_notification_settings",
+    "spaces", "rooms", "invites", "invite_workflow", "room_notification_settings",
     "room_interactions", "directory", "room_management", "activity", "thread_attention",
     "search", "search_crawler", "live_signals", "e2ee_trust", "local_encryption",
     "native_attention", "cjk_text_policy"

@@ -218,7 +218,7 @@ import {
   InvitesPane,
   TimelinePane
 } from "./components/panes";
-import { AuthScreen } from "./components/auth";
+import { AuthScreen, SlidingSyncCapabilityBlockedScreen } from "./components/auth";
 import {
   CreateEntityDialog,
   type CreateRoomDialogOptions,
@@ -2652,6 +2652,24 @@ export function App() {
       setSnapshot(await api.logout());
       setRightPanelMode("thread");
       await refreshSavedSessions();
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function retrySlidingSyncCapability() {
+    setIsBusy(true);
+    try {
+      setSnapshot(await api.retrySlidingSyncCapability());
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function changeCapabilityHomeserver() {
+    setIsBusy(true);
+    try {
+      setSnapshot(await api.changeHomeserver());
     } finally {
       setIsBusy(false);
     }
@@ -5460,6 +5478,19 @@ export function App() {
   const verificationGate = ["provisional", "awaitingVerification", "verifying", "awaitingBootstrapConfirmation", "rejecting", "locked"].includes(sessionKind);
   if (verificationGate) {
     return <SessionVerificationGate snapshot={snapshot} onSnapshot={setSnapshot} onSignOut={() => void logout()} />;
+  }
+
+  if (sessionKind === "capabilityBlocked") {
+    const blockedSession = snapshot.state.domain.session;
+    return (
+      <SlidingSyncCapabilityBlockedScreen
+        isBusy={isBusy}
+        session={blockedSession}
+        onRetry={() => void retrySlidingSyncCapability()}
+        onSignOut={() => void logout()}
+        onChangeHomeserver={() => void changeCapabilityHomeserver()}
+      />
+    );
   }
 
   if (sessionKind !== "ready") {

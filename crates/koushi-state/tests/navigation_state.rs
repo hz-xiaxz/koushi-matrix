@@ -27,6 +27,72 @@ fn ready_state() -> AppState {
     }
 }
 
+#[test]
+fn room_list_source_wire_is_exactly_cache_or_live() {
+    for (wire, expected) in [
+        (json!("cache"), koushi_state::RoomListSource::Cache),
+        (json!("live"), koushi_state::RoomListSource::Live),
+    ] {
+        assert_eq!(
+            serde_json::from_value::<koushi_state::RoomListSource>(wire)
+                .expect("supported room-list source"),
+            expected
+        );
+    }
+
+    for unsupported in [json!("legacy"), json!("syncService")] {
+        assert!(
+            serde_json::from_value::<koushi_state::RoomListSource>(unsupported).is_err(),
+            "obsolete room-list source must be rejected"
+        );
+    }
+}
+
+#[test]
+fn room_list_readiness_round_trips_every_engine_neutral_wire_state() {
+    let cases = [
+        (
+            koushi_state::RoomListReadiness::Uninitialized,
+            json!({"kind": "uninitialized"}),
+        ),
+        (
+            koushi_state::RoomListReadiness::Loading {
+                source: koushi_state::RoomListSource::Live,
+                generation: 7,
+            },
+            json!({"kind": "loading", "source": "live", "generation": 7}),
+        ),
+        (
+            koushi_state::RoomListReadiness::Ready {
+                source: koushi_state::RoomListSource::Live,
+                generation: 8,
+            },
+            json!({"kind": "ready", "source": "live", "generation": 8}),
+        ),
+        (
+            koushi_state::RoomListReadiness::Failed {
+                source: koushi_state::RoomListSource::Cache,
+                generation: 9,
+                kind: koushi_state::RoomListFailureKind::Connectivity,
+            },
+            json!({
+                "kind": "failed",
+                "source": "cache",
+                "generation": 9,
+                "failureKind": "connectivity"
+            }),
+        ),
+    ];
+
+    for (readiness, expected) in cases {
+        let encoded = serde_json::to_value(readiness).expect("serialize room-list readiness");
+        assert_eq!(encoded, expected);
+        let decoded: koushi_state::RoomListReadiness =
+            serde_json::from_value(encoded).expect("deserialize room-list readiness");
+        assert_eq!(decoded, readiness);
+    }
+}
+
 fn avatar(mxc_uri: &str) -> AvatarImage {
     AvatarImage {
         mxc_uri: mxc_uri.to_owned(),

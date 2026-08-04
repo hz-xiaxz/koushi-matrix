@@ -1,10 +1,8 @@
 use koushi_sdk::{
-    MatrixCommittedRoomTimelineBackend, MatrixCommittedRoomTimelineCheckpoint,
-    MatrixCommittedRoomTimelineOrigin, MatrixCommittedRoomUpdatesResponse,
-    MatrixLiveTailRefreshCancellation, MatrixLiveTailRefreshDiagnostics,
-    MatrixLiveTailRefreshOutcome, MatrixLiveTailRefreshResult, MatrixRoomSubscriptionCheckpoint,
-    MatrixTimelineContinuity, MatrixTimelineGapError, MatrixTimelineGapHandle,
-    MatrixTimelineGapRepairOutcome, PersistableMatrixSession,
+    MatrixCommittedRoomTimelineCheckpoint, MatrixLiveTailRefreshCancellation,
+    MatrixLiveTailRefreshDiagnostics, MatrixLiveTailRefreshOutcome, MatrixLiveTailRefreshResult,
+    MatrixRoomSubscriptionCheckpoint, MatrixTimelineContinuity, MatrixTimelineGapError,
+    MatrixTimelineGapHandle, MatrixTimelineGapRepairOutcome, PersistableMatrixSession,
 };
 
 #[test]
@@ -105,27 +103,12 @@ fn committed_room_checkpoint_contract_is_backend_neutral_and_closed() {
         &matrix_sdk_ui::room_list_service::RoomSubscriptionCheckpoint,
     ) -> MatrixCommittedRoomTimelineCheckpoint =
         MatrixCommittedRoomTimelineCheckpoint::from_room_subscription;
-    let from_legacy: fn(
-        &matrix_sdk::event_cache::CommittedRoomTimelineObservation,
-    ) -> MatrixCommittedRoomTimelineCheckpoint =
-        MatrixCommittedRoomTimelineCheckpoint::from_committed_observation;
-    let response_from_sdk: fn(
-        &matrix_sdk::event_cache::CommittedRoomUpdatesResponse,
-    ) -> MatrixCommittedRoomUpdatesResponse = MatrixCommittedRoomUpdatesResponse::from_sdk;
-    let from_absent: fn(
-        &MatrixCommittedRoomUpdatesResponse,
-        &matrix_sdk::ruma::RoomId,
-    ) -> Option<MatrixCommittedRoomTimelineCheckpoint> =
-        MatrixCommittedRoomTimelineCheckpoint::from_legacy_room_absent;
-    let response_room_checkpoint: fn(
-        &MatrixCommittedRoomUpdatesResponse,
-        &matrix_sdk::ruma::RoomId,
-    ) -> Option<MatrixCommittedRoomTimelineCheckpoint> =
-        MatrixCommittedRoomUpdatesResponse::room_checkpoint;
-    let backend: fn(&MatrixCommittedRoomTimelineCheckpoint) -> MatrixCommittedRoomTimelineBackend =
-        MatrixCommittedRoomTimelineCheckpoint::backend;
     let generation: fn(&MatrixCommittedRoomTimelineCheckpoint) -> u64 =
         MatrixCommittedRoomTimelineCheckpoint::generation;
+    let response_sequence: fn(&MatrixCommittedRoomTimelineCheckpoint) -> u64 =
+        MatrixCommittedRoomTimelineCheckpoint::response_sequence;
+    let observation_sequence: fn(&MatrixCommittedRoomTimelineCheckpoint) -> Option<u64> =
+        MatrixCommittedRoomTimelineCheckpoint::observation_sequence;
     let room_id: fn(&MatrixCommittedRoomTimelineCheckpoint) -> &str =
         MatrixCommittedRoomTimelineCheckpoint::room_id;
     let has_timeline: fn(&MatrixCommittedRoomTimelineCheckpoint) -> bool =
@@ -136,38 +119,41 @@ fn committed_room_checkpoint_contract_is_backend_neutral_and_closed() {
         MatrixCommittedRoomTimelineCheckpoint::inserted_gap_handle;
     let matches_gap: fn(&MatrixCommittedRoomTimelineCheckpoint, &MatrixTimelineGapHandle) -> bool =
         MatrixCommittedRoomTimelineCheckpoint::matches_gap;
-    let origin: fn(&MatrixCommittedRoomTimelineCheckpoint) -> MatrixCommittedRoomTimelineOrigin =
-        MatrixCommittedRoomTimelineCheckpoint::origin;
-    let is_room_absent: fn(&MatrixCommittedRoomTimelineCheckpoint) -> bool =
-        MatrixCommittedRoomTimelineCheckpoint::is_room_absent;
-    let response_generation: fn(&MatrixCommittedRoomUpdatesResponse) -> u64 =
-        MatrixCommittedRoomUpdatesResponse::generation;
-    let joined_room_count: fn(&MatrixCommittedRoomUpdatesResponse) -> usize =
-        MatrixCommittedRoomUpdatesResponse::joined_room_count;
-    let left_room_count: fn(&MatrixCommittedRoomUpdatesResponse) -> usize =
-        MatrixCommittedRoomUpdatesResponse::left_room_count;
-    let invited_room_count: fn(&MatrixCommittedRoomUpdatesResponse) -> usize =
-        MatrixCommittedRoomUpdatesResponse::invited_room_count;
+    let same_response: fn(
+        &MatrixCommittedRoomTimelineCheckpoint,
+        &MatrixCommittedRoomTimelineCheckpoint,
+    ) -> bool = MatrixCommittedRoomTimelineCheckpoint::same_response_as;
     let _ = (
         from_subscription,
-        from_legacy,
-        response_from_sdk,
-        from_absent,
-        response_room_checkpoint,
-        backend,
         generation,
+        response_sequence,
+        observation_sequence,
         room_id,
         has_timeline,
         has_gap,
         gap_handle,
         matches_gap,
-        origin,
-        is_room_absent,
-        response_generation,
-        joined_room_count,
-        left_room_count,
-        invited_room_count,
+        same_response,
     );
+}
+
+#[test]
+fn committed_room_checkpoint_has_no_legacy_or_room_absent_api() {
+    let source = include_str!("../src/lib.rs");
+    for forbidden in [
+        "MatrixCommittedRoomTimelineBackend",
+        "MatrixCommittedRoomTimelineOrigin",
+        "MatrixCommittedRoomUpdatesResponse",
+        "from_committed_observation",
+        "from_legacy_gap_for_testing",
+        "from_legacy_room_absent",
+        "is_room_absent",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "legacy API remains: {forbidden}"
+        );
+    }
 }
 
 #[test]

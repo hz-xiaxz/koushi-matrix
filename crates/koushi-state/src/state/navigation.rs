@@ -73,8 +73,7 @@ pub struct RoomListProjection {
 pub enum RoomListSource {
     #[default]
     Cache,
-    SyncService,
-    Legacy,
+    Live,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

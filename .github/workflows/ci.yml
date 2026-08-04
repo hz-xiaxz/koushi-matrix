@@ -190,7 +190,7 @@ jobs:
         run: |
           node scripts/desktop-headless-local-qa.mjs --run \
             --server=${{ matrix.server }} --core --scenario=invites_dm \
-            --core-backend=sync-service --timeout-ms=240000
+            --timeout-ms=240000
       - name: Upload server-specific core QA logs on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -205,10 +205,7 @@ jobs:
           retention-days: 7
 
   core-homeserver:
-    # Keeps the unrelated Conduit media proof until PR3 removes active Conduit
-    # QA. This remains separate from the positive invitation matrix so the
-    # temporary coverage builds in parallel and names itself when it fails.
-    name: Core homeserver QA (conduit media)
+    name: Core QA binary tests
     runs-on: ubuntu-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target-ci
@@ -226,32 +223,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev zstd
+            build-essential pkg-config libssl-dev
       - name: Submodule sync guard
         run: node scripts/check-sdk-submodule.mjs
-      - name: Install Conduit
-        # Same prebuilt artifact the committed Linux GUI image pins, so CI and
-        # the local lane run the same homeserver build.
-        env:
-          CONDUIT_URL: https://gitlab.com/api/v4/projects/famedly%2Fconduit/jobs/artifacts/master/raw/x86_64-unknown-linux-musl?job=artifacts
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          curl --proto '=https' --tlsv1.2 -fsSLo "$HOME/.local/bin/conduit" "$CONDUIT_URL"
-          chmod 0755 "$HOME/.local/bin/conduit"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Verify Conduit is runnable
-        run: conduit --version
       - name: QA binary unit tests
         # Also the only compile check for the QA binaries: a plain
         # `cargo test --workspace` skips them because both bin targets set
         # `required-features = ["qa-bin"]`, which is how a broken
         # `RoomCommand::SetSpaceChild` call sat on main undetected.
         run: cargo test -p koushi-core --features qa-bin --bin headless-core-qa
-      - name: Core scenario — media
-        run: |
-          node scripts/desktop-headless-local-qa.mjs --run \
-            --server=conduit --scenario=media --core --core-backend=probed \
-            --timeout-ms=600000
       - name: Upload QA logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

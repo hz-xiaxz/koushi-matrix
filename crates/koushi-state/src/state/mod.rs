@@ -29,6 +29,7 @@ mod search;
 mod session;
 mod session_status;
 mod settings;
+mod sliding_sync;
 mod space_members;
 mod sync;
 mod thread;
@@ -50,7 +51,7 @@ pub use composer_draft::{
 pub use errors::{AppError, OperationFailureKind};
 
 // ── Re-exports: sync ────────────────────────────────────────────────────────
-pub use sync::{SyncLifecycleStatus, SyncMode, SyncModeFailureKind, SyncState};
+pub use sync::{SyncLifecycleStatus, SyncState};
 
 // ── Re-exports: session ─────────────────────────────────────────────────────
 pub use session::{
@@ -68,6 +69,11 @@ pub use session_status::{
     CurrentSessionBackupState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,
     CurrentSessionStatusState, CurrentSessionSyncState, CurrentSessionVerification,
     OwnIdentityVerification, SessionStatusRefreshTrigger,
+};
+pub use sliding_sync::{
+    SlidingSyncAdmission, SlidingSyncAdmissionKind, SlidingSyncAdmissionSource,
+    SlidingSyncCapabilityFailureKind, SlidingSyncCapabilityResult, SlidingSyncCapabilityState,
+    SlidingSyncPositiveEvidence, SlidingSyncRevalidationState,
 };
 
 // ── Re-exports: settings ────────────────────────────────────────────────────
@@ -127,10 +133,10 @@ pub use room_interactions::{
 
 // ── Re-exports: navigation ──────────────────────────────────────────────────
 pub use navigation::{
-    FocusedContextState, MainTimelineAnchor, NavigationState, RoomListEntryKind, RoomListFilter,
-    RoomListFailureKind, RoomListProjection, RoomListProjectionItem, RoomListReadiness,
-    RoomListSort, RoomListSource, TimelineScrollAnchor, TimelineScrollAnchorEdge,
-    compute_room_list_projection,
+    FocusedContextState, MainTimelineAnchor, NavigationState, RoomListEntryKind,
+    RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListProjectionItem,
+    RoomListReadiness, RoomListSort, RoomListSource, TimelineScrollAnchor,
+    TimelineScrollAnchorEdge, compute_room_list_projection,
 };
 
 // ── Re-exports: activity ────────────────────────────────────────────────────
@@ -243,6 +249,10 @@ pub(crate) fn default_true() -> bool {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppState {
     pub session: SessionState,
+    #[serde(skip)]
+    pub sliding_sync_account_epoch: u64,
+    #[serde(skip)]
+    pub sliding_sync_capability: SlidingSyncCapabilityState,
     #[serde(default)]
     pub device_cleanup: DeviceCleanupState,
     #[serde(default)]
@@ -269,8 +279,6 @@ pub struct AppState {
     pub sync: SyncState,
     #[serde(default)]
     pub sync_generation: u64,
-    #[serde(default)]
-    pub sync_mode: SyncMode,
     pub navigation: NavigationState,
     pub spaces: Vec<SpaceSummary>,
     pub rooms: Vec<RoomSummary>,
@@ -321,6 +329,8 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             session: SessionState::SignedOut,
+            sliding_sync_account_epoch: 0,
+            sliding_sync_capability: SlidingSyncCapabilityState::Unknown,
             device_cleanup: DeviceCleanupState::Idle,
             current_session_status: CurrentSessionStatusState::Idle,
             auth: AuthDiscoveryState::Unknown,
@@ -336,7 +346,6 @@ impl Default for AppState {
             space_members: SpaceMembersState::default(),
             sync: SyncState::Stopped,
             sync_generation: 0,
-            sync_mode: SyncMode::Unsupported,
             navigation: NavigationState::default(),
             spaces: Vec::new(),
             rooms: Vec::new(),

@@ -102,6 +102,8 @@ impl CoreCommand {
                 | AccountCommand::CompleteOidcLogin { request_id, .. }
                 | AccountCommand::RestoreSession { request_id, .. }
                 | AccountCommand::RestoreLastSession { request_id }
+                | AccountCommand::RetrySlidingSyncCapability { request_id }
+                | AccountCommand::ChangeHomeserver { request_id }
                 | AccountCommand::QuerySavedSessions { request_id }
                 | AccountCommand::QueryDevices { request_id }
                 | AccountCommand::RefreshCurrentSessionStatus { request_id, .. }
@@ -150,8 +152,9 @@ impl CoreCommand {
             Self::Sync(command) => match command {
                 SyncCommand::Start { request_id }
                 | SyncCommand::Stop { request_id }
-                | SyncCommand::Restart { request_id }
-                | SyncCommand::SyncOnce { request_id } => *request_id,
+                | SyncCommand::Restart { request_id } => *request_id,
+                #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+                SyncCommand::SyncOnce { request_id } => *request_id,
             },
             Self::Room(command) => match command {
                 RoomCommand::CreateRoom { request_id, .. }
@@ -1163,6 +1166,16 @@ pub enum AccountCommand {
     RestoreLastSession {
         request_id: RequestId,
     },
+    /// Retry the required Simplified Sliding Sync capability check for the
+    /// currently blocked stored-session restore.
+    RetrySlidingSyncCapability {
+        request_id: RequestId,
+    },
+    /// Leave the current local admission and return to homeserver selection
+    /// without contacting the old server or deleting its saved session/store.
+    ChangeHomeserver {
+        request_id: RequestId,
+    },
     /// List saved sessions (homeserver / user_id / device_id only — never
     /// secrets). Answered by `AccountEvent::SavedSessionsListed`.
     QuerySavedSessions {
@@ -1397,7 +1410,6 @@ impl AccountCommand {
                 | Self::UnignoreUser { .. }
                 | Self::ReportUser { .. }
                 | Self::ProbeLocalEncryptionHealth { .. }
-                | Self::ResetLocalData { .. }
         )
     }
 }
@@ -1456,6 +1468,14 @@ impl fmt::Debug for AccountCommand {
                 .finish(),
             Self::RestoreLastSession { request_id } => formatter
                 .debug_struct("RestoreLastSession")
+                .field("request_id", request_id)
+                .finish(),
+            Self::RetrySlidingSyncCapability { request_id } => formatter
+                .debug_struct("RetrySlidingSyncCapability")
+                .field("request_id", request_id)
+                .finish(),
+            Self::ChangeHomeserver { request_id } => formatter
+                .debug_struct("ChangeHomeserver")
                 .field("request_id", request_id)
                 .finish(),
             Self::QuerySavedSessions { request_id } => formatter
@@ -1780,10 +1800,19 @@ impl fmt::Debug for AccountCommand {
 
 #[derive(Debug)]
 pub enum SyncCommand {
-    Start { request_id: RequestId },
-    Stop { request_id: RequestId },
-    Restart { request_id: RequestId },
-    SyncOnce { request_id: RequestId },
+    Start {
+        request_id: RequestId,
+    },
+    Stop {
+        request_id: RequestId,
+    },
+    Restart {
+        request_id: RequestId,
+    },
+    #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+    SyncOnce {
+        request_id: RequestId,
+    },
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -3202,6 +3231,27 @@ mod tests {
         });
 
         assert!(!command.requires_ready_session());
+    }
+
+    #[test]
+    fn capability_recovery_commands_are_allowed_while_session_is_blocked() {
+        let retry = CoreCommand::Account(AccountCommand::RetrySlidingSyncCapability {
+            request_id: fake_rid(74),
+        });
+        let reset = CoreCommand::Account(AccountCommand::ResetLocalData {
+            request_id: fake_rid(75),
+        });
+        let change_homeserver = CoreCommand::Account(AccountCommand::ChangeHomeserver {
+            request_id: fake_rid(76),
+        });
+
+        assert!(!retry.requires_ready_session());
+        assert!(!reset.requires_ready_session());
+        assert!(!change_homeserver.requires_ready_session());
+        assert_eq!(retry.request_id(), fake_rid(74));
+        assert_eq!(change_homeserver.request_id(), fake_rid(76));
+        assert!(format!("{retry:?}").contains("RetrySlidingSyncCapability"));
+        assert!(format!("{change_homeserver:?}").contains("ChangeHomeserver"));
     }
 
     #[cfg(feature = "qa-bin")]

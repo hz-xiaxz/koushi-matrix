@@ -659,9 +659,6 @@
         }
       ],
       "sync": "running",
-      "sync_mode": {
-        "kind": "unsupported"
-      },
       "thread_attention": {
         "highlight_count": 1,
         "kind": "tracking",
@@ -745,7 +742,7 @@
         "readiness": {
           "generation": 9,
           "kind": "ready",
-          "source": "syncService"
+          "source": "live"
         },
         "sort": {
           "kind": "activity"

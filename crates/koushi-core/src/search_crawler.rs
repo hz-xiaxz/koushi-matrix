@@ -469,6 +469,7 @@ mod tests {
 
     #[test]
     fn crawler_page_producer_records_typed_progress_without_environment_switch() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         trace_crawler_page(DiagnosticLevel::Debug, "test_progress", 12, 9, 4);
         let record = koushi_diagnostics::snapshot()
             .records

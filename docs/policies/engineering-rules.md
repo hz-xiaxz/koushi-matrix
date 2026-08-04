@@ -1066,3 +1066,9 @@ PTY handling, prompt line order) is documented in `AGENTS.md`.
    practices, and security/privacy risks, and must propose canon amendments
    when a finding is caused by a rule gap. See `REPOSITORY_RULES.md`
    `Review And Audit`.
+# Current sync contract (Issue #412)
+
+The only supported desktop sync engine is Element X-compatible Simplified
+Sliding Sync. Do not add legacy `/sync` fallback, backend probing/forcing, or
+backend-selection state to product, QA, or diagnostics code. Historical rules
+below are retained for audit context and are superseded by this contract.

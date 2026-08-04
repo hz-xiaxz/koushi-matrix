@@ -103,9 +103,14 @@ conflict is being resolved.
   older remote revision instead of the code under review.
 - New Matrix behavior is headless-first and local-server-first. It lands in
   `koushi-core` / `koushi-state`, is verified through
-  `CoreCommand` / `CoreEvent` against disposable local Conduit/Tuwunel QA,
+  `CoreCommand` / `CoreEvent` against disposable local Tuwunel/Synapse QA,
   and only then is wired to Tauri/React. GUI-first Matrix behavior is
   prohibited.
+- The desktop runtime has exactly one sync engine: Element X-compatible
+  Simplified Sliding Sync. Legacy `/sync`, backend probing/forcing, and
+  fallback selection are not supported product or QA paths. Local QA accepts
+  only `--server=tuwunel`, `--server=synapse`, or `--server=both`; it rejects
+  `--core-backend` and `KOUSHI_QA_FORCE_SYNC_BACKEND`.
 - Before designing or implementing new user-visible Matrix functionality,
   inspect the corresponding Element Web and Element X Android/iOS behavior
   when those clients have an equivalent flow. Record the observed upstream
@@ -117,7 +122,7 @@ conflict is being resolved.
   **Phase A (headless contract):** model the feature as serializable
   `AppState` / reducers and `CoreCommand` / `CoreEvent` in
   `koushi-state` / `koushi-core`, proven against disposable
-  local Conduit/Tuwunel homeserver QA; exit when the relevant local core QA
+  local Tuwunel/Synapse homeserver QA; exit when the relevant local core QA
   scenario is green. **Phase B (GUI wiring):** a thin Tauri/React view over
   that same Rust state; exit when the browser-headless and, where that gate
   applies, Linux virtual-display GUI tests are green. Issues are split along
@@ -290,7 +295,7 @@ conflict is being resolved.
   command shapes, fake `CoreEvent` streams, DOM scroll behavior, and Tauri IPC
   mock behavior are verified in headless browser tests first.
 - Destructive GUI operation QA during development uses disposable local
-  Conduit/Tuwunel homeservers. Do not use matrix.org or another real
+  Tuwunel/Synapse homeservers. Do not use matrix.org or another real
   homeserver for GUI iteration.
 - Real homeserver QA is reserved for compatibility and release/preflight gates
   after local headless and Linux virtual-display lanes are green and cleanup

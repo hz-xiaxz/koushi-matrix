@@ -135,6 +135,7 @@ mod tests {
 
     #[test]
     fn startup_phase_records_without_environment_switch() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         trace_phase(StartupPhase::Restore, Some(std::time::Instant::now()));
         assert!(koushi_diagnostics::snapshot().records.iter().any(|record| {
             record.event.source == "core.startup" && record.event.stage == "restore"

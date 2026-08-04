@@ -87,6 +87,11 @@ describe("SessionVerificationGate interactions", () => {
       device_id: "D",
       method: "existingDeviceSas",
       flow_id: 370,
+      gate: {
+        methods: ["existingDeviceSas"],
+        account_kind: "existingIdentity",
+        failureKind: null
+      },
       sas_emojis: Array.from({ length: 7 }, (_, index) => ({
         symbol: "🐶",
         description: `emoji-${index}`

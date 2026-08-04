@@ -126,7 +126,7 @@ describe("Sidebar", () => {
     const snapshot = await api.selectSpace(null);
     snapshot.state.ui.room_list.readiness = {
       kind: "loading",
-      source: "syncService",
+      source: "live",
       generation: 7
     };
     snapshot.sidebar.space_rooms = [];
@@ -152,7 +152,7 @@ describe("Sidebar", () => {
 
     snapshot.state.ui.room_list.readiness = {
       kind: "ready",
-      source: "syncService",
+      source: "live",
       generation: 7
     };
     view.rerender(

@@ -768,6 +768,11 @@ export type MessageId =
   | "gate.cleanupRetryLocal"
   | "gate.cleanupCommandFailed"
   | "gate.signOut"
+  | "slidingSync.blockedTitle"
+  | "slidingSync.unsupported"
+  | "slidingSync.unreachable"
+  | "slidingSync.invalidResponse"
+  | "slidingSync.changeHomeserver"
   | "gate.failureCancelled"
   | "gate.failureForbidden"
   | "gate.failureNoProof"
@@ -1966,6 +1971,11 @@ const en: Catalog = {
   "gate.resetForNewDevice": "Reset local data and sign in as a new device",
   "gate.resetForNewDeviceConfirm": "Reset this session's local data and sign in again with a new device ID? This removes the local encrypted store, cached history, and saved credentials on this computer. It does not remove messages from the homeserver. This cannot be undone.",
   "gate.signOut": "Sign out",
+  "slidingSync.blockedTitle": "Simplified Sliding Sync is required",
+  "slidingSync.unsupported": "This homeserver does not support Simplified Sliding Sync.",
+  "slidingSync.unreachable": "Koushi could not reach this homeserver to verify Simplified Sliding Sync support.",
+  "slidingSync.invalidResponse": "This homeserver returned an invalid Simplified Sliding Sync capability response.",
+  "slidingSync.changeHomeserver": "Change homeserver",
   "gate.failureCancelled": "Verification was cancelled.",
   "gate.failureForbidden": "Verification was not permitted.",
   "gate.failureNoProof": "No proof method is available.",
@@ -3050,6 +3060,11 @@ const ja: Catalog = {
   "gate.cleanupRetryLocal": "ローカルデータの消去を再試行",
   "gate.cleanupCommandFailed": "デバイスのクリーンアップに失敗しました。もう一度お試しください。",
   "gate.signOut": "サインアウト",
+  "slidingSync.blockedTitle": "Simplified Sliding Sync が必要です",
+  "slidingSync.unsupported": "このホームサーバーは Simplified Sliding Sync に対応していません。",
+  "slidingSync.unreachable": "このホームサーバーに接続できず、Simplified Sliding Sync 対応を確認できませんでした。",
+  "slidingSync.invalidResponse": "このホームサーバーから Simplified Sliding Sync の無効な対応情報が返されました。",
+  "slidingSync.changeHomeserver": "ホームサーバーを変更",
   "gate.failureCancelled": "検証がキャンセルされました。",
   "gate.failureForbidden": "検証は許可されませんでした。",
   "gate.failureNoProof": "利用可能な証明方法がありません。",

@@ -261,6 +261,28 @@ pub async fn logout(
 }
 
 #[tauri::command]
+pub async fn retry_sliding_sync_capability(
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        build_retry_sliding_sync_capability_command(request_id),
+    )
+    .await?;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn change_homeserver(
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(state.inner(), build_change_homeserver_command(request_id)).await?;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn restart_sync(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,

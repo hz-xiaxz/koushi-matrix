@@ -3,6 +3,7 @@ use crate::{
     state::{
         AttachmentFilter, AttachmentScope, AttachmentSort, LoginAttemptId, RoomPreferencesState,
         SearchCrawlerSettings, SearchRoomFilter, SearchScope, SessionInfo, SettingsValues,
+        SlidingSyncAdmissionKind, SlidingSyncAdmissionSource, SlidingSyncCapabilityResult,
         VerificationCancelReason, VerificationMethod, VerificationTarget,
     },
 };
@@ -12,6 +13,25 @@ pub enum AppEffect {
     RestoreSession,
     DiscoverLogin {
         homeserver: String,
+    },
+    ContinueSlidingSyncAdmission {
+        account_epoch: u64,
+        request_id: u64,
+        admission: SlidingSyncAdmissionKind,
+        source: SlidingSyncAdmissionSource,
+    },
+    RetrySlidingSyncCapabilityDiscovery {
+        account_epoch: u64,
+        blocked_request_id: u64,
+        request_id: u64,
+    },
+    ScheduleSlidingSyncCapabilityRevalidation {
+        account_epoch: u64,
+    },
+    SettleSlidingSyncCapabilityRevalidation {
+        account_epoch: u64,
+        request_id: u64,
+        result: SlidingSyncCapabilityResult,
     },
     Login {
         attempt_id: LoginAttemptId,
@@ -147,7 +167,6 @@ pub enum UiEvent {
     SettingsChanged,
     LinkPreviewSettingsChanged,
     ProfileChanged,
-    SyncModeChanged,
     RoomListChanged,
     SpaceMembersChanged,
     TimelineChanged { room_id: String },

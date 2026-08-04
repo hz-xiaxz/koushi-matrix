@@ -22,7 +22,7 @@
 //!
 //! 1. HTTPS login to the homeserver -> pre-sync Ready snapshot (store bootstrap
 //!    invariant and reducer gate).
-//! 2. Sync lifecycle: Start -> Started{backend} -> Running (print backend).
+//! 2. Sync lifecycle: Start -> Started -> Running.
 //! 3. Recovery: after sync/account data flows in, require RecoveryRequired ->
 //!    SubmitRecovery -> RecoveryCompleted -> assert Ready.
 //! 4. Room list: wait non-empty or timeout; print COUNTS ONLY (rooms=N spaces=N dms=N).
@@ -62,7 +62,7 @@ use koushi_core::command::{
 };
 use koushi_core::event::{
     AccountEvent, CoreEvent, PaginationDirection, PaginationState, RoomEvent, SearchEvent,
-    SyncBackendKind, SyncEvent, TimelineEvent,
+    SyncEvent, TimelineEvent,
 };
 use koushi_core::failure::{CoreFailure, RecoveryFailureKind, TimelineFailureKind};
 use koushi_core::ids::{AccountKey, RequestId, TimelineKey};
@@ -563,14 +563,8 @@ async fn run_async_inner(
     .await
     .map_err(|e| format!("sync start command submit failed: {e}"))?;
 
-    let sync_backend =
-        wait_for_sync_started(&mut conn, sync_start_id, "sync start", SYNC_TIMEOUT).await?;
-
-    let backend_name = match sync_backend {
-        SyncBackendKind::SyncService => "SyncService",
-        SyncBackendKind::LegacySync => "LegacySync",
-    };
-    let line = format!("sync_backend={backend_name}");
+    wait_for_sync_started(&mut conn, sync_start_id, "sync start", SYNC_TIMEOUT).await?;
+    let line = "sync_started=ok".to_owned();
     transcript.push(line.clone());
     println!("{line}");
 
@@ -1018,13 +1012,8 @@ async fn run_async_inner(
         .await
         .map_err(|e| format!("sync start (restored) command submit failed: {e}"))?;
 
-    let sync2_backend =
-        wait_for_sync_started(&mut conn2, sync2_id, "sync start restored", SYNC_TIMEOUT).await?;
-    let backend2_name = match sync2_backend {
-        SyncBackendKind::SyncService => "SyncService",
-        SyncBackendKind::LegacySync => "LegacySync",
-    };
-    let line = format!("sync_backend_restored={backend2_name}");
+    wait_for_sync_started(&mut conn2, sync2_id, "sync start restored", SYNC_TIMEOUT).await?;
+    let line = "sync_started_restored=ok".to_owned();
     transcript.push(line.clone());
     println!("{line}");
 
@@ -1196,7 +1185,7 @@ async fn run_async_inner(
     let mut summary = format!(
         "Real homeserver QA OK. \
          login=ok recovery={recovery} \
-         sync_backend={backend} sync=ok \
+         sync=ok \
          rooms={rooms} spaces={spaces} dms={dms} \
          qa_room=created send_msg1=ok send_search=ok send_msg2=ok real_reply=ok \
          edit_msg1=ok redact_msg2=ok \
@@ -1205,7 +1194,6 @@ async fn run_async_inner(
          leave_room=ok forget_room=ok \
          logout=ok post_logout_restore=not_found",
         recovery = "completed",
-        backend = backend_name,
         rooms = rooms_count,
         spaces = spaces_count,
         dms = dms_count,
@@ -1615,7 +1603,7 @@ async fn wait_for_sync_started(
     request_id: RequestId,
     label: &str,
     timeout: Duration,
-) -> Result<SyncBackendKind, String> {
+) -> Result<(), String> {
     loop {
         let event = tokio::time::timeout(timeout, conn.recv_event())
             .await
@@ -1625,10 +1613,7 @@ async fn wait_for_sync_started(
         match event {
             CoreEvent::Sync(SyncEvent::Started {
                 request_id: Some(ev_id),
-                backend,
-            }) if ev_id == request_id => {
-                return Ok(backend);
-            }
+            }) if ev_id == request_id => return Ok(()),
             CoreEvent::OperationFailed {
                 request_id: ev_id,
                 failure,

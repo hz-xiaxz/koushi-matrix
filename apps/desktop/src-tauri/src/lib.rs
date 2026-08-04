@@ -1280,6 +1280,8 @@ pub fn run() {
             commands::session::submit_device_cleanup_uia,
             commands::session::erase_local_data_anyway,
             commands::session::logout,
+            commands::session::retry_sliding_sync_capability,
+            commands::session::change_homeserver,
             commands::session::restart_sync,
             commands::settings::update_settings,
             commands::settings::rebuild_search_index,
@@ -2383,7 +2385,7 @@ mod tests {
             ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule, RoomMemberRole,
             RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot, RoomTagKind, SasEmoji,
             SearchCrawlerFailureKind, SearchCrawlerRoomState, SessionAuthenticationMethod,
-            SubmissionId, SyncMode, UserTrustState, VerificationFlowState, VerificationTarget,
+            SubmissionId, UserTrustState, VerificationFlowState, VerificationTarget,
         };
         use serde_json::json;
 
@@ -3231,10 +3233,10 @@ mod tests {
                 kind: koushi_core::event::ReportKind::Event,
             }))
             .expect("serialize room report completed event");
-        let sync_mode_changed = serialize_core_event(&CoreEvent::Sync(SyncEvent::ModeChanged {
-            mode: SyncMode::Simplified,
+        let sync_started = serialize_core_event(&CoreEvent::Sync(SyncEvent::Started {
+            request_id: Some(request_id),
         }))
-        .expect("serialize sync mode changed");
+        .expect("serialize sync started");
         let directory_query_completed =
             serialize_core_event(&CoreEvent::Room(RoomEvent::DirectoryQueryCompleted {
                 request_id,
@@ -3746,7 +3748,7 @@ mod tests {
             "roomSettingsLoaded": room_settings_loaded,
             "roomTagRemoved": room_tag_removed,
             "roomTagSet": room_tag_set,
-            "syncModeChanged": sync_mode_changed,
+            "syncStarted": sync_started,
             "timelineDisplayLabelsUpdated": display_labels_updated,
             "timelineDisplayPolicyUpdated": display_policy_updated,
             "timelineInitialItems": initial,
@@ -3892,7 +3894,7 @@ mod tests {
             "searchCrawlFailed",
             "searchCrawlProgress",
             "stateDeltaSearchCrawlerQueued",
-            "syncModeChanged",
+            "syncStarted",
             "threadsListOpened",
             "timelineDisplayLabelsUpdated",
             "timelineDisplayPolicyUpdated",

@@ -540,9 +540,15 @@ use thiserror::Error;
 use url::Url;
 use zeroize::Zeroizing;
 
+mod sliding_sync_discovery;
+
+pub use sliding_sync_discovery::{
+    DiscoveryResponseFailureKind, DiscoverySource, DiscoveryTransportFailureKind, HttpStatusClass,
+    SlidingSyncDiscoveryResult, discover_sliding_sync_support,
+};
+
 const LOGIN_DISCOVERY_PATH: &str = "_matrix/client/v3/login";
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
-const RESTRICTED_VERIFICATION_SYNC_SERVER_TIMEOUT: Duration = Duration::from_secs(3);
 const SYNC_INVITE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const SYNC_INVITE_PROBE_CONNECTION_ID: &str = "koushi-invite";
 const SYNC_INVITE_PROBE_LIST_KEY: &str = "koushi_invites";
@@ -1670,6 +1676,68 @@ fn delete_devices_auth_data(
 }
 
 #[cfg(test)]
+mod provisional_encryption_sync_tests {
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use serde_json::json;
+    use wiremock::{
+        Mock, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    use super::SessionInfo;
+
+    #[tokio::test]
+    async fn uses_simplified_sliding_sync_without_room_lists() {
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let session = super::MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: server.uri(),
+                user_id: "@provisional:example.invalid".to_owned(),
+                device_id: "PROVISIONAL".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        );
+        Mock::given(method("POST"))
+            .and(path(
+                "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "pos": "0" })))
+            .expect(1)
+            .mount(&server.server())
+            .await;
+
+        super::provisional_encryption_sync_loop(
+            &session,
+            super::new_encryption_sync_permit_owner(),
+            || async { super::MatrixSyncLoopControl::Stop },
+        )
+        .await
+        .expect("one provisional encryption response");
+
+        let requests = server.received_requests().await.expect("captured requests");
+        let request = requests
+            .iter()
+            .find(|request| {
+                request.url.path() == "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+            })
+            .expect("simplified sliding sync request");
+        let body: serde_json::Value = serde_json::from_slice(&request.body).expect("JSON body");
+        assert_eq!(body["conn_id"], "encryption");
+        assert_eq!(body["extensions"]["e2ee"]["enabled"], true);
+        assert_eq!(body["extensions"]["to_device"]["enabled"], true);
+        assert!(body.get("lists").is_none());
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.url.path() != "/_matrix/client/v3/sync"),
+            "provisional encryption must not issue classic /sync"
+        );
+    }
+}
+
+#[cfg(test)]
 mod device_cleanup_tests {
     use matrix_sdk::ruma::api::error::{ErrorKind, UnknownTokenErrorData};
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -2470,8 +2538,7 @@ mod e2ee_trust_tests {
         map_sdk_sas_emojis_to_desktop, map_sdk_verification_state, map_verification_method_facts,
         mismatch_sas_verification, observe_incoming_verification_requests, rename_device,
         request_device_verification, reset_identity, restore_key_backup, restore_session,
-        restricted_verification_sync_filter, start_sas_verification,
-        write_recovery_key_if_requested,
+        start_sas_verification, write_recovery_key_if_requested,
     };
 
     const MATRIX_KEY_EXPORT_HEADER: &str = "-----BEGIN MEGOLM SESSION DATA-----";
@@ -3038,15 +3105,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
     }
 
     #[test]
-    fn restricted_sync_filter_suppresses_rooms_and_presence_but_keeps_account_data() {
-        let filter = restricted_verification_sync_filter();
-        let json = serde_json::to_value(filter).expect("filter serializes");
-        assert_eq!(json["presence"]["types"], serde_json::json!([]));
-        assert_eq!(json["room"]["rooms"], serde_json::json!([]));
-        assert!(json.get("account_data").is_none());
-    }
-
-    #[test]
     fn key_backup_state_maps_to_private_data_free_desktop_status() {
         assert_eq!(
             map_backup_state_to_desktop(BackupState::Unknown),
@@ -3539,89 +3597,11 @@ pub struct MatrixRoomSubscriptionCheckpoint {
     inserted_gap: Option<matrix_sdk::event_cache::RoomTimelineGapDescriptor>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MatrixCommittedRoomTimelineBackend {
-    SyncService,
-    LegacySync,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MatrixCommittedRoomTimelineOrigin {
-    RoomUpdate,
-    RoomAbsent,
-}
-
-/// Token-free summary of one SDK room-updates response after event-cache
-/// topology mutation has committed.
-#[derive(Clone, Eq, PartialEq)]
-pub struct MatrixCommittedRoomUpdatesResponse {
-    inner: matrix_sdk::event_cache::CommittedRoomUpdatesResponse,
-}
-
-impl MatrixCommittedRoomUpdatesResponse {
-    pub fn from_sdk(response: &matrix_sdk::event_cache::CommittedRoomUpdatesResponse) -> Self {
-        Self {
-            inner: response.clone(),
-        }
-    }
-
-    pub fn generation(&self) -> u64 {
-        self.inner.response_sequence()
-    }
-
-    pub fn joined_room_count(&self) -> usize {
-        self.inner.joined_room_count()
-    }
-
-    pub fn left_room_count(&self) -> usize {
-        self.inner.left_room_count()
-    }
-
-    pub fn invited_room_count(&self) -> usize {
-        self.inner.invited_room_count()
-    }
-
-    /// Return token-free provenance for one room in this exact committed
-    /// response. Only a genuinely omitted room receives a RoomAbsent
-    /// checkpoint; left, invited, and joined updates that failed before commit
-    /// do not authorize fallback repair.
-    pub fn room_checkpoint(
-        &self,
-        room_id: &matrix_sdk::ruma::RoomId,
-    ) -> Option<MatrixCommittedRoomTimelineCheckpoint> {
-        use matrix_sdk::event_cache::CommittedRoomUpdateMembership;
-
-        match self.inner.room_membership(room_id) {
-            CommittedRoomUpdateMembership::Joined => self
-                .inner
-                .room_timeline_observation(room_id)
-                .map(MatrixCommittedRoomTimelineCheckpoint::from_committed_observation),
-            CommittedRoomUpdateMembership::Absent => {
-                MatrixCommittedRoomTimelineCheckpoint::from_legacy_room_absent(self, room_id)
-            }
-            CommittedRoomUpdateMembership::Left | CommittedRoomUpdateMembership::Invited => None,
-        }
-    }
-}
-
-impl std::fmt::Debug for MatrixCommittedRoomUpdatesResponse {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("MatrixCommittedRoomUpdatesResponse")
-            .field("generation", &self.generation())
-            .field("joined_room_count", &self.joined_room_count())
-            .field("left_room_count", &self.left_room_count())
-            .field("invited_room_count", &self.invited_room_count())
-            .finish()
-    }
-}
-
 /// Backend-neutral, token-free room timeline provenance committed by the SDK.
 #[derive(Clone)]
 pub struct MatrixCommittedRoomTimelineCheckpoint {
-    backend: MatrixCommittedRoomTimelineBackend,
-    origin: MatrixCommittedRoomTimelineOrigin,
     generation: u64,
+    response_sequence: u64,
     observation_sequence: Option<u64>,
     room_id: matrix_sdk::ruma::OwnedRoomId,
     has_timeline_update: bool,
@@ -3634,9 +3614,8 @@ impl MatrixCommittedRoomTimelineCheckpoint {
     ) -> Self {
         let timeline = checkpoint.timeline();
         Self {
-            backend: MatrixCommittedRoomTimelineBackend::SyncService,
-            origin: MatrixCommittedRoomTimelineOrigin::RoomUpdate,
             generation: checkpoint.subscription_generation().get(),
+            response_sequence: checkpoint.response_sequence(),
             observation_sequence: timeline.map(|observation| observation.sequence()),
             room_id: checkpoint.room_id().to_owned(),
             has_timeline_update: timeline.is_some(),
@@ -3644,51 +3623,17 @@ impl MatrixCommittedRoomTimelineCheckpoint {
         }
     }
 
-    pub fn from_committed_observation(
-        observation: &matrix_sdk::event_cache::CommittedRoomTimelineObservation,
-    ) -> Self {
-        Self {
-            backend: MatrixCommittedRoomTimelineBackend::LegacySync,
-            origin: MatrixCommittedRoomTimelineOrigin::RoomUpdate,
-            generation: observation.response_sequence(),
-            observation_sequence: Some(observation.sequence()),
-            room_id: observation.room_id().to_owned(),
-            has_timeline_update: observation.has_timeline_update(),
-            inserted_gap: observation.inserted_gap().cloned(),
-        }
-    }
-
-    pub fn from_legacy_room_absent(
-        response: &MatrixCommittedRoomUpdatesResponse,
-        room_id: &matrix_sdk::ruma::RoomId,
-    ) -> Option<Self> {
-        if response.inner.room_membership(room_id)
-            != matrix_sdk::event_cache::CommittedRoomUpdateMembership::Absent
-        {
-            return None;
-        }
-        Some(Self {
-            backend: MatrixCommittedRoomTimelineBackend::LegacySync,
-            origin: MatrixCommittedRoomTimelineOrigin::RoomAbsent,
-            generation: response.generation(),
-            observation_sequence: None,
-            room_id: room_id.to_owned(),
-            has_timeline_update: false,
-            inserted_gap: None,
-        })
-    }
-
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn from_gap_for_testing(
         generation: u64,
+        response_sequence: u64,
         observation_sequence: u64,
         gap: &MatrixTimelineGapHandle,
     ) -> Self {
         Self {
-            backend: MatrixCommittedRoomTimelineBackend::SyncService,
-            origin: MatrixCommittedRoomTimelineOrigin::RoomUpdate,
             generation,
+            response_sequence,
             observation_sequence: Some(observation_sequence),
             room_id: gap.room_id.clone(),
             has_timeline_update: true,
@@ -3696,51 +3641,16 @@ impl MatrixCommittedRoomTimelineCheckpoint {
         }
     }
 
-    #[cfg(feature = "test-hooks")]
-    #[doc(hidden)]
-    pub fn from_legacy_gap_for_testing(generation: u64, gap: &MatrixTimelineGapHandle) -> Self {
-        Self {
-            backend: MatrixCommittedRoomTimelineBackend::LegacySync,
-            origin: MatrixCommittedRoomTimelineOrigin::RoomUpdate,
-            generation,
-            observation_sequence: Some(generation),
-            room_id: gap.room_id.clone(),
-            has_timeline_update: true,
-            inserted_gap: Some(gap.descriptor.clone()),
-        }
-    }
-
-    #[cfg(feature = "test-hooks")]
-    #[doc(hidden)]
-    pub fn from_legacy_room_absent_for_testing(
-        generation: u64,
-        room_id: &matrix_sdk::ruma::RoomId,
-    ) -> Self {
-        Self {
-            backend: MatrixCommittedRoomTimelineBackend::LegacySync,
-            origin: MatrixCommittedRoomTimelineOrigin::RoomAbsent,
-            generation,
-            observation_sequence: None,
-            room_id: room_id.to_owned(),
-            has_timeline_update: false,
-            inserted_gap: None,
-        }
-    }
-
-    pub fn backend(&self) -> MatrixCommittedRoomTimelineBackend {
-        self.backend
-    }
-
-    pub fn origin(&self) -> MatrixCommittedRoomTimelineOrigin {
-        self.origin
-    }
-
-    pub fn is_room_absent(&self) -> bool {
-        self.origin == MatrixCommittedRoomTimelineOrigin::RoomAbsent
-    }
-
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub fn response_sequence(&self) -> u64 {
+        self.response_sequence
+    }
+
+    pub fn observation_sequence(&self) -> Option<u64> {
+        self.observation_sequence
     }
 
     pub fn room_id(&self) -> &str {
@@ -3773,12 +3683,9 @@ impl MatrixCommittedRoomTimelineCheckpoint {
     }
 
     pub fn same_response_as(&self, other: &Self) -> bool {
-        self.backend == other.backend
-            && self.origin == other.origin
-            && self.generation == other.generation
+        self.generation == other.generation
             && self.room_id == other.room_id
-            && (self.backend == MatrixCommittedRoomTimelineBackend::LegacySync
-                || self.observation_sequence == other.observation_sequence)
+            && self.response_sequence == other.response_sequence
     }
 }
 
@@ -3786,9 +3693,9 @@ impl std::fmt::Debug for MatrixCommittedRoomTimelineCheckpoint {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("MatrixCommittedRoomTimelineCheckpoint")
-            .field("backend", &self.backend)
-            .field("origin", &self.origin)
             .field("generation", &self.generation)
+            .field("response_sequence", &self.response_sequence)
+            .field("observation_sequence", &self.observation_sequence)
             .field("has_timeline_update", &self.has_timeline_update)
             .field("has_inserted_gap", &self.inserted_gap.is_some())
             .finish()
@@ -3800,36 +3707,53 @@ mod committed_room_timeline_checkpoint_tests {
     use super::*;
 
     #[test]
-    fn room_absent_checkpoint_is_debugged_without_private_data() {
+    fn checkpoint_identity_is_engine_neutral_and_debug_is_private_safe() {
         let room_id = matrix_sdk::ruma::room_id!("!private-room:example.org");
         let checkpoint = MatrixCommittedRoomTimelineCheckpoint {
-            backend: MatrixCommittedRoomTimelineBackend::LegacySync,
-            origin: MatrixCommittedRoomTimelineOrigin::RoomAbsent,
             generation: 41,
-            observation_sequence: None,
+            response_sequence: 11,
+            observation_sequence: Some(7),
             room_id: room_id.to_owned(),
-            has_timeline_update: false,
+            has_timeline_update: true,
             inserted_gap: None,
         };
+        let same_response = checkpoint.clone();
+        let different_observation = MatrixCommittedRoomTimelineCheckpoint {
+            observation_sequence: Some(8),
+            ..checkpoint.clone()
+        };
+        let different_response = MatrixCommittedRoomTimelineCheckpoint {
+            response_sequence: 12,
+            ..checkpoint.clone()
+        };
+        let different_generation = MatrixCommittedRoomTimelineCheckpoint {
+            generation: 42,
+            ..checkpoint.clone()
+        };
+        let different_room = MatrixCommittedRoomTimelineCheckpoint {
+            room_id: matrix_sdk::ruma::room_id!("!other-room:example.org").to_owned(),
+            ..checkpoint.clone()
+        };
 
-        assert_eq!(
-            checkpoint.backend(),
-            MatrixCommittedRoomTimelineBackend::LegacySync
-        );
-        assert_eq!(
-            checkpoint.origin(),
-            MatrixCommittedRoomTimelineOrigin::RoomAbsent
-        );
-        assert!(checkpoint.is_room_absent());
         assert_eq!(checkpoint.generation(), 41);
+        assert_eq!(checkpoint.response_sequence(), 11);
+        assert_eq!(checkpoint.observation_sequence(), Some(7));
         assert_eq!(checkpoint.room_id(), room_id.as_str());
-        assert!(!checkpoint.has_timeline_update());
+        assert!(checkpoint.has_timeline_update());
         assert!(!checkpoint.has_inserted_gap());
+        assert!(checkpoint.same_response_as(&same_response));
+        assert!(checkpoint.same_response_as(&different_observation));
+        assert!(!checkpoint.same_response_as(&different_response));
+        assert!(!checkpoint.same_response_as(&different_generation));
+        assert!(!checkpoint.same_response_as(&different_room));
         let debug = format!("{checkpoint:?}");
-        assert!(debug.contains("origin: RoomAbsent"));
         assert!(debug.contains("generation: 41"));
-        assert!(debug.contains("has_timeline_update: false"));
+        assert!(debug.contains("response_sequence: 11"));
+        assert!(debug.contains("observation_sequence: Some(7)"));
+        assert!(debug.contains("has_timeline_update: true"));
         assert!(debug.contains("has_inserted_gap: false"));
+        assert!(!debug.contains("backend"));
+        assert!(!debug.contains("origin"));
         assert!(!debug.contains(room_id.as_str()));
         assert!(!debug.contains("private-token"));
     }
@@ -4342,6 +4266,7 @@ impl MatrixClientSession {
                     user_session: oauth_session.user,
                     client_id: oauth_session.client_id,
                 },
+                sliding_sync_positive_evidence: None,
             });
         }
 
@@ -4353,6 +4278,7 @@ impl MatrixClientSession {
         Ok(PersistableMatrixSession {
             info: self.info.clone(),
             session: PersistableSessionKind::Matrix(session),
+            sliding_sync_positive_evidence: None,
         })
     }
 
@@ -4838,6 +4764,7 @@ pub enum MatrixEventCacheError {
 pub struct PersistableMatrixSession {
     pub info: SessionInfo,
     session: PersistableSessionKind,
+    sliding_sync_positive_evidence: Option<koushi_state::SlidingSyncPositiveEvidence>,
 }
 
 #[derive(Clone)]
@@ -4863,6 +4790,7 @@ impl PersistableMatrixSession {
                     auth_kind: PersistableSessionJsonKind::Password,
                     homeserver: self.info.homeserver.clone(),
                     authentication_method: self.info.authentication_method,
+                    sliding_sync_positive_evidence: self.sliding_sync_positive_evidence.clone(),
                     session: session.clone(),
                 })
                 .map_err(|error| PasswordLoginError::Serialization(error.to_string()))
@@ -4873,6 +4801,7 @@ impl PersistableMatrixSession {
             } => serde_json::to_string(&SerializedOauthPersistableMatrixSession {
                 auth_kind: PersistableSessionJsonKind::OAuth,
                 homeserver: self.info.homeserver.clone(),
+                sliding_sync_positive_evidence: self.sliding_sync_positive_evidence.clone(),
                 user_session: user_session.clone(),
                 client_id: client_id.clone(),
             })
@@ -4903,6 +4832,7 @@ impl PersistableMatrixSession {
                     user_session: serialized.user_session,
                     client_id: serialized.client_id,
                 },
+                sliding_sync_positive_evidence: serialized.sliding_sync_positive_evidence,
             });
         }
 
@@ -4918,7 +4848,22 @@ impl PersistableMatrixSession {
         Ok(Self {
             info,
             session: PersistableSessionKind::Matrix(session),
+            sliding_sync_positive_evidence: serialized.sliding_sync_positive_evidence,
         })
+    }
+
+    pub fn sliding_sync_positive_evidence(
+        &self,
+    ) -> Option<koushi_state::SlidingSyncPositiveEvidence> {
+        self.sliding_sync_positive_evidence.clone()
+    }
+
+    pub fn with_sliding_sync_positive_evidence(
+        mut self,
+        evidence: koushi_state::SlidingSyncPositiveEvidence,
+    ) -> Self {
+        self.sliding_sync_positive_evidence = Some(evidence);
+        self
     }
 
     pub fn matrix_session(&self) -> Option<MatrixSession> {
@@ -4962,6 +4907,8 @@ struct SerializedPersistableMatrixSession {
     homeserver: String,
     #[serde(default)]
     authentication_method: koushi_state::SessionAuthenticationMethod,
+    #[serde(default)]
+    sliding_sync_positive_evidence: Option<koushi_state::SlidingSyncPositiveEvidence>,
     #[serde(flatten)]
     session: MatrixSession,
 }
@@ -4971,6 +4918,8 @@ struct SerializedTaggedMatrixSession {
     auth_kind: PersistableSessionJsonKind,
     homeserver: String,
     authentication_method: koushi_state::SessionAuthenticationMethod,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sliding_sync_positive_evidence: Option<koushi_state::SlidingSyncPositiveEvidence>,
     #[serde(flatten)]
     session: MatrixSession,
 }
@@ -4979,6 +4928,8 @@ struct SerializedTaggedMatrixSession {
 struct SerializedOauthPersistableMatrixSession {
     auth_kind: PersistableSessionJsonKind,
     homeserver: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sliding_sync_positive_evidence: Option<koushi_state::SlidingSyncPositiveEvidence>,
     user_session: UserSession,
     client_id: ClientId,
 }
@@ -6210,6 +6161,7 @@ pub fn logout_blocking(session: &MatrixClientSession) -> Result<(), PasswordLogi
     runtime.block_on(logout(session))
 }
 
+#[cfg(any(test, feature = "test-hooks", feature = "smoke"))]
 pub fn sync_once_blocking(session: &MatrixClientSession) -> Result<(), MatrixSyncError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -8726,6 +8678,7 @@ pub async fn room_timeline_visible_items(
     Ok(items)
 }
 
+#[cfg(any(test, feature = "test-hooks", feature = "smoke"))]
 pub async fn sync_once(session: &MatrixClientSession) -> Result<(), MatrixSyncError> {
     session
         .client()
@@ -8746,48 +8699,53 @@ pub async fn close_session_stores(session: &MatrixClientSession) -> Result<(), M
         .map_err(|_| MatrixSyncError::Sdk)
 }
 
-fn restricted_verification_sync_filter() -> matrix_sdk::ruma::api::client::filter::FilterDefinition
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("provisional encryption sync failed")]
+pub enum ProvisionalEncryptionSyncError {
+    Sdk,
+}
+
+pub type EncryptionSyncPermitOwner =
+    Arc<tokio::sync::Mutex<matrix_sdk_ui::encryption_sync_service::EncryptionSyncPermit>>;
+
+pub fn new_encryption_sync_permit_owner() -> EncryptionSyncPermitOwner {
+    Arc::new(tokio::sync::Mutex::new(
+        matrix_sdk_ui::encryption_sync_service::EncryptionSyncPermit::new(),
+    ))
+}
+
+/// Runs the encryption-only Simplified Sliding Sync owner used while a newly
+/// authenticated session is waiting for trust admission.
+///
+/// The callback runs after every committed encryption response. Dropping this
+/// future drops the SDK stream and its exclusive permit before normal sync is
+/// allowed to start.
+pub async fn provisional_encryption_sync_loop<F, C>(
+    session: &MatrixClientSession,
+    permit: EncryptionSyncPermitOwner,
+    mut on_successful_sync: F,
+) -> Result<(), ProvisionalEncryptionSyncError>
+where
+    F: FnMut() -> C,
+    C: Future<Output = MatrixSyncLoopControl>,
 {
-    let mut filter = matrix_sdk::ruma::api::client::filter::FilterDefinition::default();
-    filter.presence = matrix_sdk::ruma::api::client::filter::Filter::ignore_all();
-    filter.room = matrix_sdk::ruma::api::client::filter::RoomFilter::ignore_all();
-    filter
-}
+    use matrix_sdk_ui::encryption_sync_service::EncryptionSyncService;
 
-fn restricted_verification_sync_settings() -> matrix_sdk::config::SyncSettings {
-    matrix_sdk::config::SyncSettings::new()
-        .token(matrix_sdk::config::SyncToken::NoToken)
-        .save_sync_token(false)
-        .timeout(RESTRICTED_VERIFICATION_SYNC_SERVER_TIMEOUT)
-        .filter(
-            matrix_sdk::ruma::api::client::sync::sync_events::v3::Filter::FilterDefinition(
-                restricted_verification_sync_filter(),
-            ),
-        )
-}
-
-pub async fn restricted_verification_sync_once(
-    session: &MatrixClientSession,
-) -> Result<(), MatrixSyncError> {
-    restricted_verification_sync_once_with_token(session, None)
+    let permit = permit.lock_owned().await;
+    let service = EncryptionSyncService::new(session.client().clone(), None)
         .await
-        .map(|_| ())
-}
+        .map_err(|_| ProvisionalEncryptionSyncError::Sdk)?;
+    let stream = service.sync(permit);
+    futures_util::pin_mut!(stream);
 
-pub async fn restricted_verification_sync_once_with_token(
-    session: &MatrixClientSession,
-    token: Option<String>,
-) -> Result<String, MatrixSyncError> {
-    let mut settings = restricted_verification_sync_settings();
-    if let Some(token) = token {
-        settings = settings.token(token);
+    while let Some(result) = stream.next().await {
+        result.map_err(|_| ProvisionalEncryptionSyncError::Sdk)?;
+        if on_successful_sync().await == MatrixSyncLoopControl::Stop {
+            return Ok(());
+        }
     }
-    session
-        .client()
-        .sync_once(settings)
-        .await
-        .map(|response| response.next_batch)
-        .map_err(|_| MatrixSyncError::Sdk)
+
+    Err(ProvisionalEncryptionSyncError::Sdk)
 }
 
 pub async fn sync_loop<F, C>(

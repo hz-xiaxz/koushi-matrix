@@ -17,6 +17,44 @@ use koushi_state::{
 mod support;
 use support::*;
 
+const FORBIDDEN_TIMELINE_SYNC_TOKENS: [&str; 4] = [
+    "/_matrix/client/v3/sync",
+    "LegacyResponseCommitted",
+    "MatrixCommittedRoomTimelineBackend",
+    "RoomAbsent",
+];
+
+fn classic_sync_or_legacy_checkpoint_tokens(source: &str) -> Result<(), Vec<&'static str>> {
+    let found = FORBIDDEN_TIMELINE_SYNC_TOKENS
+        .into_iter()
+        .filter(|token| source.contains(token))
+        .collect::<Vec<_>>();
+    if found.is_empty() { Ok(()) } else { Err(found) }
+}
+
+fn assert_no_classic_sync_or_legacy_checkpoint_path(source: &str) {
+    if let Err(found) = classic_sync_or_legacy_checkpoint_tokens(source) {
+        panic!("forbidden production timeline sync tokens: {found:?}");
+    }
+}
+
+#[test]
+fn production_timeline_has_no_classic_sync_or_legacy_checkpoint_path() {
+    let source = include_str!("../src/timeline.rs");
+    assert_no_classic_sync_or_legacy_checkpoint_path(source);
+}
+
+#[test]
+fn production_inventory_covers_code_after_cfg_test_modules() {
+    let synthetic = r#"
+fn before_tests() {}
+#[cfg(test)]
+mod tests {}
+fn timeline_actor() { let _ = LegacyResponseCommitted; }
+"#;
+    assert!(classic_sync_or_legacy_checkpoint_tokens(synthetic).is_err());
+}
+
 fn draft_account() -> SessionKeyId {
     let info = session_info();
     SessionKeyId {
@@ -1036,6 +1074,7 @@ impl CorruptComposerLoadFixture {
 #[tokio::test]
 async fn corrupt_load_attempts_once_per_session() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
     let mut fixture = CorruptComposerLoadFixture::start().await;
     let benign_room = "!benign:example.test";
     let mut unexpected_reload = fixture
@@ -1065,6 +1104,7 @@ async fn corrupt_load_attempts_once_per_session() {
 #[tokio::test]
 async fn revision_commands_fail_while_composer_load_failed() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
     let mut fixture = CorruptComposerLoadFixture::start().await;
     let before = fixture.connection.snapshot();
     let set_request_id = fixture.connection.next_request_id();
@@ -1115,6 +1155,7 @@ async fn revision_commands_fail_while_composer_load_failed() {
 #[tokio::test]
 async fn lock_unlock_retries_repaired_composer_payload() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
     let mut fixture = CorruptComposerLoadFixture::start().await;
     std::fs::write(&fixture.payload_path, &fixture.valid_payload)
         .expect("install repaired valid encrypted payload");

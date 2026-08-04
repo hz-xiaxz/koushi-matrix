@@ -1,5 +1,13 @@
 # Headless Basic Operations QA
 
+> Current contract (Issue #412, 2026-08-04): this document is retained as a
+> historical record for the older multi-backend QA design. The active runner
+> uses one Element X-compatible Simplified Sliding Sync engine only. Use
+> `--server=tuwunel`, `--server=synapse`, or `--server=both`; `conduit`,
+> `--core-backend`, `KOUSHI_QA_FORCE_SYNC_BACKEND`, and legacy fallback
+> scenarios are rejected. For current commands, use the package scripts and
+> `scripts/lib/local-homeserver-qa.test.mjs` contract.
+
 This contract covers three lanes:
 
 - Local headless QA, verified through `CoreCommand`/`CoreEvent` only.

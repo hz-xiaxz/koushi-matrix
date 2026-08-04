@@ -25,6 +25,9 @@ The current Koushi-required SDK topic stack is:
 - `fix(timeline): publish gap barrier in visible suffix`
 - `fix(crypto): ignore replayed SAS starts`
 - `fix(room-list): expand own-member state key`
+- `feat(room-list): expose committed all-rooms response`
+- `feat(room-list): expose authoritative all-rooms readiness`
+- `feat(room-list): correlate response checkpoints`
 - `fix(crypto): harden async delivery ownership`
 - `fix: avoid identity query Olm lock deadlock`
 - `Handle stale order tracker readers`
@@ -63,29 +66,35 @@ or SDK boundary without logging private Matrix payloads.
   small, additive, no behavior change — good candidate for an upstream PR
   alongside (or independent of) the search-index patch.
 
-- Committed per-room sync-response provenance (2026-07-17, issue #275):
+- Historical/superseded committed per-room sync-response provenance
+  (2026-07-17, issue #275):
   `EventCache` retains a private-safe `CommittedRoomTimelineObservation` for
   each joined room after timeline topology persistence. It distinguishes a
   response with no timeline mutation from one that inserted an exact opaque
   gap, and late subscribers receive the latest observation. Ancillary
   post-processing failures cannot erase already-committed provenance. Why:
-  clients using legacy `/sync` need the same exact, generation-fenced
-  live-catchup anchor that SyncService exposes through room-subscription
+  this was introduced so clients using legacy `/sync` could obtain the same
+  exact, generation-fenced live-catchup anchor that SyncService exposes through room-subscription
   checkpoints; otherwise a newly received live event can coexist with an
   unrepaired offline interval. Upstreaming intent: propose the retained
   backend-neutral observation API upstream after the #275 production proof,
   keeping room IDs, event IDs, pagination tokens, and raw errors out of Debug
-  output.
+  output. Issue #412 removed the desktop Legacy Sync adapter and no production
+  Koushi path consumes this API now.
 
-- Committed sync-response fence (2026-07-17, issue #275): `EventCache` also
+- Historical/superseded committed sync-response fence (2026-07-17, issue
+  #275): `EventCache` also
   retains one `CommittedRoomUpdatesResponse` only after all joined/left room
   topology work for that response has completed. Its monotonic response
   sequence and aggregate room counts let consumers distinguish an unchanged,
   omitted room from a response that has not committed yet. This closes the
   legacy `/sync` ambiguity without exposing room IDs, event IDs, pagination
-  tokens, message bodies, or raw errors. The desktop adapter uses an omitted
-  room only as a bounded signal to inspect and repair its newest persisted
-  live-edge gap after restart.
+  tokens, message bodies, or raw errors. The former desktop adapter used an
+  omitted room only as a bounded signal to inspect and repair its newest
+  persisted live-edge gap after restart. Issue #412 removed that adapter.
+  Current omission repair uses the exact response-correlated
+  `RoomListService` room checkpoint plus its matching global committed
+  all-rooms sequence.
 
 - Idempotent remote SAS-start replay (2026-07-20, issue #285 hardening): a
   repeated `m.key.verification.start` from the same peer, device, and flow no
@@ -132,6 +141,42 @@ or SDK boundary without logging private Matrix payloads.
   command passed `1/1` with exit `0`. No request-builder production change was
   necessary, and this test-only guard does not justify a wholesale SDK rebase
   or upgrade.
+
+- Committed all-rooms response and projection readiness (2026-08-04, issue #412
+  runtime):
+  `RoomListService` exposes a read-only latest-value observable that advances
+  only after a successful `all_rooms` Sliding Sync response has completed
+  client processing, including the event-cache commit. Its public payload is
+  limited to a process-local monotonic sequence, `pos_present`, and coarse
+  complete-range readiness; it contains no room IDs and never exposes the
+  position value. The SDK separately retains the top-level response room IDs
+  behind `RoomList`, excluding extension-only updates, so its public
+  `current_entries_snapshot()` can correlate filtered entries with the same
+  response sequence without exposing the ID set. Active-room subscription
+  checkpoints carry that exact response sequence as token-free provenance,
+  including responses with no timeline update, and are published before the
+  matching global latest value. This lets callers distinguish an included room
+  from a room omitted by that exact incremental response without treating
+  omission as leave. Before the first response of
+  a sync/recovery cycle the snapshot remains provisional cache data; afterwards
+  dynamic entries reset to the observed response set, so a cache-only omitted
+  room cannot survive an authoritative full-range projection. Failed requests
+  leave the committed value unchanged, while a later successful reconnect
+  advances it. Why: callers need to distinguish `SyncService::State::Running`
+  from a complete response and must reconcile that exact SDK-owned projection
+  before declaring connectivity. Upstreaming intent: propose the lifecycle
+  observable, range readiness, and response-correlated snapshot as additive
+  room-list APIs independently of Koushi product state; they add no second sync
+  loop or application policy to the SDK.
+
+- Shared encryption-sync permit injection (2026-08-04, issue #412 runtime):
+  `EncryptionSyncPermit` has a production constructor and `SyncServiceBuilder`
+  accepts an application-owned permit. Koushi uses one permit across the
+  provisional verification owner and the normal `SyncService`, stopping and
+  joining the former before starting the latter. Why: the previous public API
+  could not express a lifecycle handoff without using a test-only constructor
+  or creating unrelated permits. Upstreaming intent: propose the additive
+  constructor and builder injection as an explicit single-owner contract.
 
 - Non-blocking own-user identity query (2026-07-30, issue #375):
   `Encryption::request_user_identity` clones the current `OlmMachine` and
@@ -219,6 +264,9 @@ Current SDK-only patch area:
 - `vendor/matrix-rust-sdk/crates/matrix-sdk-crypto/src/machine/tests/interactive_verification.rs`
 - `vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/mod.rs`
 - `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/src/room_list_service/mod.rs`
+- `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/src/room_list_service/all_rooms.rs`
+- `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/src/encryption_sync_service.rs`
+- `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/src/sync_service.rs`
 - `vendor/matrix-rust-sdk/crates/matrix-sdk-ui/tests/integration/room_list_service.rs`
 
 ## API Questions
@@ -293,6 +341,7 @@ Current SDK-only patch area:
 - `cargo test --manifest-path vendor/matrix-rust-sdk/crates/matrix-sdk-ui/Cargo.toml room_list_service`
 - `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui all_rooms_request_matches_element_x_26_07_28)`
 - `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui test_all_rooms_are_declared)`
+- `(cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-ui committed_all_rooms_response_observable)`
 - `git -C vendor/matrix-rust-sdk diff --check`
 
 ## Remaining Before Upstream PR
