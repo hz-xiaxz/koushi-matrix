@@ -35651,6 +35651,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn diagnostics_producer_paths_run_without_trace_environment() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         for variable in [
             "KOUSHI_SUBSCRIBE_TRACE",
             "KOUSHI_TIMELINE_ITEM_TRACE",

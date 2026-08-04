@@ -1648,11 +1648,26 @@ impl RoomActor {
         };
         match koushi_sdk::join_room_by_id(session, &room_id).await {
             Ok(joined_room_id) => {
+                koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.room_operation",
+                    "accept_join_returned",
+                ));
                 self.refresh_room_list_for_room(&joined_room_id);
+                koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.room_operation",
+                    "accept_event_emit_started",
+                ));
                 self.emit(CoreEvent::Room(RoomEvent::InviteAccepted {
                     request_id,
                     room_id: joined_room_id,
                 }));
+                koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.room_operation",
+                    "accept_event_emit_completed",
+                ));
                 self.refresh_room_list();
             }
             Err(error) => {
@@ -1690,11 +1705,21 @@ impl RoomActor {
         };
         match koushi_sdk::start_direct_message(session, &user_id).await {
             Ok(room_id) => {
+                koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.room_operation",
+                    "start_dm_returned",
+                ));
                 let room_id_for_projection = room_id.clone();
                 self.emit(CoreEvent::Room(RoomEvent::DirectMessageStarted {
                     request_id,
                     room_id,
                 }));
+                koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.room_operation",
+                    "start_dm_event_emit_completed",
+                ));
                 self.refresh_room_list_for_room(&room_id_for_projection);
             }
             Err(error) => {
