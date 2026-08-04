@@ -44,10 +44,13 @@ from room ID to direct-message targets and a source marker:
 - `sliding_sync_event`: replaced by a typed `DirectEvent`;
 - `unavailable`: no explicit mapping has been observed yet.
 
-Every room-list projection receives this snapshot explicitly. The SDK
-normalizer first checks the explicit mapping and then uses the room's
-`direct_targets`/SDK direct-room fallback for provisional classification. It
-must not fetch global account data from the network in the projection hot path.
+Every room-list projection receives this snapshot explicitly. When a cached or
+event-delivered `m.direct` map is available, it is the authoritative DM
+classification: absence from that complete map means the room is not a DM.
+Only while `m.direct` itself is unavailable may the SDK normalizer use the
+room's `direct_targets`/SDK direct-room fallback for provisional
+classification. It must not fetch global account data from the network in the
+projection hot path.
 
 ### Race-free initialization
 
@@ -69,8 +72,9 @@ map changed, it replaces the snapshot and reprojects the current RoomListService
 entries. That single projection feeds both Home and Space DM lists. If the map
 did not change, no projection is performed.
 
-Removal from `m.direct` is also an update: a room is re-evaluated using its
-current SDK fallback state. Koushi does not retain stale explicit DM status.
+Removal from `m.direct` is also an authoritative update: a room absent from the
+new complete map is no longer classified as a DM, even if an older
+`RoomInfo.dm_targets` cache has not caught up yet.
 
 The DirectEvent stream is auxiliary metadata. If it ends, Room observation and
 room display continue with the last known snapshot, and diagnostics record the
@@ -82,9 +86,10 @@ loss of live DM-classification updates.
 
 - Expose a local-only loader for the normalized cached `m.direct` map.
 - Expose normalization from `DirectEventContent` to room-to-target mapping.
-- Add a room-list normalization entry point that accepts an explicit direct map.
+- Add a room-list normalization entry point that accepts either an authoritative
+  direct map or an unavailable marker.
 - Preserve fallback classification through `Room::direct_targets()` and the
-  existing SDK direct-room predicate when the explicit map has no entry.
+  existing SDK direct-room predicate only while the direct map is unavailable.
 - Do not add a network fallback to this path.
 
 ### `koushi-core` Room observer
@@ -138,8 +143,8 @@ identify this failure class.
    Home and Space-derived DM projections.
 3. Missing account data does not suppress normal rooms or spaces.
 4. Repeating equivalent DirectEvent content does not trigger another projection.
-5. Removing a room from `m.direct` causes reclassification and removes stale
-   explicit DM status.
+5. Removing a room from an available `m.direct` map causes reclassification to
+   non-DM even when the room's older `dm_targets` cache is still populated.
 6. Initial subscription plus cached read covers events on both sides of startup
    ordering.
 7. Diagnostics expose only counts, source markers, and bounded error classes.
