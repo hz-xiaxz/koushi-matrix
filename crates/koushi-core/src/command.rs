@@ -5,13 +5,13 @@ use std::{fmt, path::PathBuf};
 
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentScope, AttachmentSort,
-    ComposerDraftRevision, DirectoryQuery, DisplayPlatform, FilesViewScope, FormattedMessageDraft,
-    IdentityResetAuthRequest, ImageUploadCompressionMode, InviteScopeSelection,
-    JapaneseCatalogProfile, LocalEncryptionHealth, LoginRequest, MentionIntent,
-    NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState, PresenceKind,
-    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomSettingChange, RoomTagKind,
-    SearchRoomFilter, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, SubmissionId,
-    TimelineScrollAnchor, VerificationCancelReason, VerificationTarget,
+    ComposerDocument, ComposerDraftRevision, DirectoryQuery, DisplayPlatform, FilesViewScope,
+    FormattedMessageDraft, IdentityResetAuthRequest, ImageUploadCompressionMode,
+    InviteScopeSelection, JapaneseCatalogProfile, LocalEncryptionHealth, LoginRequest,
+    MentionIntent, NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState,
+    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomSettingChange,
+    RoomTagKind, SearchRoomFilter, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem,
+    SubmissionId, TimelineScrollAnchor, VerificationCancelReason, VerificationTarget,
 };
 use serde::{Deserialize, Serialize};
 
@@ -386,7 +386,7 @@ pub enum AppCommand {
         request_id: RequestId,
         expected_account: koushi_key::SessionKeyId,
         room_id: String,
-        draft: String,
+        document: ComposerDocument,
         revision: ComposerDraftRevision,
     },
     SetThreadComposerDraft {
@@ -394,7 +394,7 @@ pub enum AppCommand {
         expected_account: koushi_key::SessionKeyId,
         room_id: String,
         root_event_id: String,
-        draft: String,
+        document: ComposerDocument,
         revision: ComposerDraftRevision,
     },
     AcceptComposerDraft {

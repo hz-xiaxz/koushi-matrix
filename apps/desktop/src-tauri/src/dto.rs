@@ -2101,6 +2101,19 @@ mod tests {
         composer
             .accepted_submission_ids
             .push_back(koushi_state::SubmissionId::new("accepted-contract"));
+        composer.document = koushi_state::ComposerDocument::new(vec![
+            koushi_state::ComposerInline::Text {
+                text: "Hello ".to_owned(),
+            },
+            koushi_state::ComposerInline::Mention {
+                target: koushi_state::MentionTarget::User {
+                    user_id: "@fixture:example.invalid".to_owned(),
+                    display_label: "Fixture User".to_owned(),
+                },
+                display_label: "Fixture User".to_owned(),
+            },
+        ]);
+        composer.draft = composer.document.plain_body();
         composer.draft_revision = koushi_state::ComposerDraftRevision::MAX;
         composer.last_accepted_clear_revision = koushi_state::ComposerDraftRevision::MAX;
         state.timeline = TimelinePaneState {
@@ -2147,6 +2160,18 @@ mod tests {
             intent: koushi_state::ThreadOpenIntent::NewThreadDraft,
             is_subscribed: true,
             composer: koushi_state::ComposerState {
+                draft: "Thread @room".to_owned(),
+                document: koushi_state::ComposerDocument::new(vec![
+                    koushi_state::ComposerInline::Text {
+                        text: "Thread ".to_owned(),
+                    },
+                    koushi_state::ComposerInline::Mention {
+                        target: koushi_state::MentionTarget::RoomMention {
+                            display_label: "room".to_owned(),
+                        },
+                        display_label: "room".to_owned(),
+                    },
+                ]),
                 draft_revision: koushi_state::ComposerDraftRevision::MAX,
                 last_accepted_clear_revision: koushi_state::ComposerDraftRevision::MAX,
                 ..koushi_state::ComposerState::default()

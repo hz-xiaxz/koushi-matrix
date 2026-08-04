@@ -31,14 +31,14 @@ use koushi_core::{
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
-    ComposerDraftRevision, ComposerKeyEvent, ComposerResolvedAction, ComposerResolverContext,
-    ComposerSurface, DirectoryQuery, DisplayPlatform, FilesViewScope, FocusedContextState,
-    IdentityResetAuthRequest, ImageUploadCompressionMode, InviteScopeSelection, LoginRequest,
-    MentionIntent, MentionSurface, PresenceKind, RecoveryRequest, RoomListFilter,
-    RoomModerationAction, RoomNotificationMode, RoomSettingChange, RoomTagKind, SessionInfo,
-    SessionState, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
-    SubmissionId, ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor,
-    VerificationCancelReason, build_formatted_message_draft,
+    ComposerDocument, ComposerDraftRevision, ComposerKeyEvent, ComposerResolvedAction,
+    ComposerResolverContext, ComposerSurface, DirectoryQuery, DisplayPlatform, FilesViewScope,
+    FocusedContextState, IdentityResetAuthRequest, ImageUploadCompressionMode,
+    InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
+    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
+    RoomTagKind, SessionInfo, SessionState, SettingsPatch, StagedUploadCompressionChoice,
+    StagedUploadItem, StagedUploadKind, SubmissionId, ThreadOpenIntent, ThreadsListScope,
+    TimelineScrollAnchor, VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(any(debug_assertions, test))]
@@ -3101,7 +3101,7 @@ pub(crate) fn build_set_thread_composer_draft_command(
     expected_account: koushi_key::SessionKeyId,
     room_id: String,
     root_event_id: String,
-    draft: String,
+    document: ComposerDocument,
     revision: ComposerDraftRevision,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::SetThreadComposerDraft {
@@ -3109,7 +3109,7 @@ pub(crate) fn build_set_thread_composer_draft_command(
         expected_account,
         room_id,
         root_event_id,
-        draft,
+        document,
         revision,
     })
 }
@@ -3118,14 +3118,14 @@ pub(crate) fn build_set_composer_draft_command(
     request_id: koushi_core::RequestId,
     expected_account: koushi_key::SessionKeyId,
     room_id: String,
-    draft: String,
+    document: ComposerDocument,
     revision: ComposerDraftRevision,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::SetComposerDraft {
         request_id,
         expected_account,
         room_id,
-        draft,
+        document,
         revision,
     })
 }
@@ -6061,7 +6061,7 @@ mod tests {
             active_session_key.clone(),
             room_id.clone(),
             "$root".to_owned(),
-            "thread draft".to_owned(),
+            "thread draft".into(),
             9.into(),
         ) {
             CoreCommand::App(AppCommand::SetThreadComposerDraft {
@@ -6069,14 +6069,14 @@ mod tests {
                 expected_account,
                 room_id: command_room_id,
                 root_event_id,
-                draft,
+                document,
                 revision,
             }) => {
                 assert_eq!(request_id, fake_request_id(21));
                 assert_eq!(expected_account, active_session_key);
                 assert_eq!(command_room_id, room_id);
                 assert_eq!(root_event_id, "$root");
-                assert_eq!(draft, "thread draft");
+                assert_eq!(document.plain_body(), "thread draft");
                 assert_eq!(revision, 9.into());
             }
             other => panic!("unexpected command: {other:?}"),
@@ -6086,20 +6086,20 @@ mod tests {
             fake_request_id(22),
             active_session_key.clone(),
             room_id.clone(),
-            "room draft".to_owned(),
+            "room draft".into(),
             10.into(),
         ) {
             CoreCommand::App(AppCommand::SetComposerDraft {
                 request_id,
                 expected_account,
                 room_id: command_room_id,
-                draft,
+                document,
                 revision,
             }) => {
                 assert_eq!(request_id, fake_request_id(22));
                 assert_eq!(expected_account, active_session_key);
                 assert_eq!(command_room_id, room_id);
-                assert_eq!(draft, "room draft");
+                assert_eq!(document.plain_body(), "room draft");
                 assert_eq!(revision, 10.into());
             }
             other => panic!("unexpected command: {other:?}"),

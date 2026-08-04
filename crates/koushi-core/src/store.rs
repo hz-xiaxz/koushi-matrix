@@ -37,7 +37,7 @@ use koushi_state::{
 
 use crate::failure::CoreFailure;
 use composer_drafts::{
-    PersistedComposerDraftStoreV2, decode_payload_json as decode_composer_draft_payload_json,
+    PersistedComposerDraftStoreV3, decode_payload_json as decode_composer_draft_payload_json,
     encode_payload_json as encode_composer_draft_payload_json,
 };
 
@@ -240,7 +240,7 @@ impl StoreActor {
     pub(crate) fn save_composer_drafts(
         &self,
         key_id: &SessionKeyId,
-        drafts: &PersistedComposerDraftStoreV2,
+        drafts: &PersistedComposerDraftStoreV3,
     ) -> Result<(), CoreFailure> {
         #[cfg(any(test, feature = "test-hooks"))]
         self.wait_for_composer_draft_save_release_for_testing();
@@ -253,7 +253,7 @@ impl StoreActor {
     fn save_composer_drafts_inner(
         &self,
         key_id: &SessionKeyId,
-        drafts: &PersistedComposerDraftStoreV2,
+        drafts: &PersistedComposerDraftStoreV3,
     ) -> Result<(), CoreFailure> {
         let path = self.account_composer_drafts_file(key_id);
         if drafts.is_empty() {
@@ -783,7 +783,7 @@ fn save_read_state_outbox_generation_fenced(
 
 fn encrypt_composer_drafts_payload(
     secret: &LocalUnlockSecret,
-    drafts: &PersistedComposerDraftStoreV2,
+    drafts: &PersistedComposerDraftStoreV3,
 ) -> Result<Vec<u8>, CoreFailure> {
     let plaintext =
         encode_composer_draft_payload_json(drafts).map_err(|_| CoreFailure::StoreUnavailable)?;
@@ -1835,7 +1835,7 @@ mod tests {
         }
     }
 
-    fn persisted_composer_drafts(drafts: &ComposerDraftStore) -> PersistedComposerDraftStoreV2 {
+    fn persisted_composer_drafts(drafts: &ComposerDraftStore) -> PersistedComposerDraftStoreV3 {
         composer_drafts::persisted_projection(
             drafts,
             &koushi_state::ComposerDraftProtection::default(),
@@ -2543,8 +2543,8 @@ mod tests {
             loaded
                 .rooms
                 .get("!room:test.example.com")
-                .map(String::as_str),
-            Some(plaintext)
+                .map(koushi_state::ComposerDocument::plain_body),
+            Some(plaintext.to_owned())
         );
         assert_eq!(loaded.room_revision("!sent:test.example.com"), 8.into());
         assert!(!loaded.rooms.contains_key("!sent:test.example.com"));
@@ -3250,15 +3250,19 @@ mod tests {
             .expect("load bounded drafts");
 
         assert_eq!(
-            loaded.rooms.get("!z-active:test.example.com"),
-            Some(&"active room draft".to_owned())
+            loaded
+                .rooms
+                .get("!z-active:test.example.com")
+                .map(koushi_state::ComposerDocument::plain_body),
+            Some("active room draft".to_owned())
         );
         assert_eq!(
             loaded
                 .threads
                 .get("!thread-room:test.example.com")
-                .and_then(|threads| threads.get("$z-active")),
-            Some(&"active thread draft".to_owned())
+                .and_then(|threads| threads.get("$z-active"))
+                .map(koushi_state::ComposerDocument::plain_body),
+            Some("active thread draft".to_owned())
         );
     }
 

@@ -1061,11 +1061,11 @@ pub enum AppAction {
     },
     ComposerDraftChanged {
         room_id: String,
-        draft: String,
+        document: crate::ComposerDocument,
     },
     ComposerDraftChangedAtRevision {
         room_id: String,
-        draft: String,
+        document: crate::ComposerDocument,
         revision: ComposerDraftRevision,
     },
     SendTextSubmitted {
@@ -1115,12 +1115,12 @@ pub enum AppAction {
     ThreadComposerDraftChanged {
         room_id: String,
         root_event_id: String,
-        draft: String,
+        document: crate::ComposerDocument,
     },
     ThreadComposerDraftChangedAtRevision {
         room_id: String,
         root_event_id: String,
-        draft: String,
+        document: crate::ComposerDocument,
         revision: ComposerDraftRevision,
     },
     ThreadReplySubmitted {

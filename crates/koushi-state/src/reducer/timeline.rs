@@ -602,7 +602,7 @@ pub(crate) fn handle_composer_drafts_loaded(
 pub(crate) fn handle_composer_draft_changed(
     state: &mut AppState,
     room_id: String,
-    draft: String,
+    document: crate::ComposerDocument,
     revision: ComposerDraftRevision,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) || !state.rooms.iter().any(|room| room.room_id == room_id) {
@@ -612,13 +612,14 @@ pub(crate) fn handle_composer_draft_changed(
     if !matches!(
         state
             .composer_drafts
-            .apply_room_draft(room_id.clone(), draft.clone(), revision),
+            .apply_room_draft(room_id.clone(), document.clone(), revision),
         Ok(true)
     ) {
         return Vec::new();
     }
     if state.timeline.room_id.as_deref() == Some(room_id.as_str()) {
-        state.timeline.composer.draft = draft;
+        state.timeline.composer.draft = document.plain_body();
+        state.timeline.composer.document = document;
         state.timeline.composer.draft_revision = revision;
         vec![AppEffect::EmitUiEvent(UiEvent::TimelineChanged { room_id })]
     } else {
@@ -716,6 +717,7 @@ pub(crate) fn handle_send_text_submitted(
     };
     let accepted_composer = state.composer_drafts.composer_for_room(&room_id);
     state.timeline.composer.draft = accepted_composer.draft;
+    state.timeline.composer.document = accepted_composer.document;
     state.timeline.composer.draft_revision = accepted_revision;
     state.timeline.composer.last_accepted_clear_revision =
         accepted_composer.last_accepted_clear_revision;
@@ -793,6 +795,7 @@ pub(crate) fn handle_composer_submission_accepted(
     });
     let accepted_composer = state.composer_drafts.composer_for_room(&room_id);
     state.timeline.composer.draft = accepted_composer.draft;
+    state.timeline.composer.document = accepted_composer.document;
     state.timeline.composer.draft_revision = accepted_revision;
     state.timeline.composer.last_accepted_clear_revision =
         accepted_composer.last_accepted_clear_revision;

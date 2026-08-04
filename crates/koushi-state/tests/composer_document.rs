@@ -1,0 +1,97 @@
+use koushi_state::{ComposerDocument, ComposerInline, MentionTarget};
+
+fn user(user_id: &str, display_label: &str) -> MentionTarget {
+    MentionTarget::User {
+        user_id: user_id.to_owned(),
+        display_label: display_label.to_owned(),
+    }
+}
+
+#[test]
+fn composer_document_normalizes_text_without_losing_mention_occurrences() {
+    let alice = user("@alice:example.invalid", "Same Name");
+    let bob = user("@bob:example.invalid", "Same Name");
+    let document = ComposerDocument::new(vec![
+        ComposerInline::Text {
+            text: "hello ".into(),
+        },
+        ComposerInline::Text {
+            text: String::new(),
+        },
+        ComposerInline::Text {
+            text: "world ".into(),
+        },
+        ComposerInline::Mention {
+            target: alice.clone(),
+            display_label: "Same Name".into(),
+        },
+        ComposerInline::Mention {
+            target: alice.clone(),
+            display_label: "Same Name".into(),
+        },
+        ComposerInline::Mention {
+            target: bob.clone(),
+            display_label: "Same Name".into(),
+        },
+    ]);
+
+    assert_eq!(document.version, ComposerDocument::VERSION);
+    assert_eq!(document.inlines.len(), 4);
+    assert_eq!(
+        document.inlines[0],
+        ComposerInline::Text {
+            text: "hello world ".into()
+        }
+    );
+    assert_eq!(
+        document.plain_body(),
+        "hello world @Same Name@Same Name@Same Name"
+    );
+    assert_eq!(document.mention_intent().targets, vec![alice, bob]);
+}
+
+#[test]
+fn plain_text_never_fabricates_semantic_mentions() {
+    let document = ComposerDocument::from_plain_text("@Same Name and @room");
+
+    assert_eq!(document.plain_body(), "@Same Name and @room");
+    assert!(document.mention_intent().targets.is_empty());
+    assert_eq!(
+        serde_json::to_value(document).unwrap(),
+        serde_json::json!({
+            "version": 2,
+            "inlines": [{ "kind": "text", "text": "@Same Name and @room" }]
+        })
+    );
+}
+
+#[test]
+fn room_mentions_and_room_targets_are_deduplicated_by_identity() {
+    let room = MentionTarget::Room {
+        room_id: "!room:example.invalid".into(),
+        display_label: "Room".into(),
+    };
+    let room_mention = MentionTarget::RoomMention {
+        display_label: "room".into(),
+    };
+    let document = ComposerDocument::new(vec![
+        ComposerInline::Mention {
+            target: room.clone(),
+            display_label: "Room".into(),
+        },
+        ComposerInline::Mention {
+            target: room.clone(),
+            display_label: "Renamed room occurrence".into(),
+        },
+        ComposerInline::Mention {
+            target: room_mention.clone(),
+            display_label: "room".into(),
+        },
+        ComposerInline::Mention {
+            target: room_mention.clone(),
+            display_label: "room".into(),
+        },
+    ]);
+
+    assert_eq!(document.mention_intent().targets, vec![room, room_mention]);
+}

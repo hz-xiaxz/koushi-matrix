@@ -255,7 +255,7 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
             request_id: conn.next_request_id(),
             expected_account: draft_account(),
             room_id: room_id.clone(),
-            draft: "keep room draft".to_owned(),
+            document: "keep room draft".into(),
             revision: ComposerDraftRevision::MAX,
         }),
     )
@@ -268,7 +268,7 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
             expected_account: draft_account(),
             room_id: room_id.clone(),
             root_event_id: root_event_id.clone(),
-            draft: "keep thread draft".to_owned(),
+            document: "keep thread draft".into(),
             revision: ComposerDraftRevision::MAX,
         }),
     )
@@ -458,8 +458,8 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
             .composer_drafts
             .rooms
             .get("!room:example.test")
-            .map(String::as_str),
-        Some("keep room draft")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("keep room draft".to_owned())
     );
     assert_eq!(
         snapshot
@@ -467,8 +467,8 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
             .threads
             .get("!room:example.test")
             .and_then(|threads| threads.get("$root:example.test"))
-            .map(String::as_str),
-        Some("keep thread draft")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("keep thread draft".to_owned())
     );
     assert!(
         snapshot
@@ -661,7 +661,7 @@ async fn app_command_sets_open_thread_composer_draft() {
             expected_account: draft_account(),
             room_id: "!room:example.test".to_owned(),
             root_event_id: "$root:example.test".to_owned(),
-            draft: "thread draft".to_owned(),
+            document: "thread draft".into(),
             revision: 1.into(),
         }),
     )
@@ -716,7 +716,7 @@ async fn app_command_sets_selected_room_composer_draft() {
             request_id,
             expected_account: draft_account(),
             room_id: "!room:example.test".to_owned(),
-            draft: "room draft".to_owned(),
+            document: "room draft".into(),
             revision: 1.into(),
         }),
     )
@@ -773,7 +773,7 @@ async fn composer_draft_command_rejects_a_stale_account_owner() {
                 device_id: "STALE".to_owned(),
             },
             room_id: "!room:example.test".to_owned(),
-            draft: "must not cross accounts".to_owned(),
+            document: "must not cross accounts".into(),
             revision: 10.into(),
         }),
     )
@@ -785,7 +785,7 @@ async fn composer_draft_command_rejects_a_stale_account_owner() {
             request_id: conn.next_request_id(),
             expected_account: draft_account(),
             room_id: "!room:example.test".to_owned(),
-            draft: "current account draft".to_owned(),
+            document: "current account draft".into(),
             revision: 1.into(),
         }),
     )
@@ -814,7 +814,7 @@ async fn composer_draft_command_rejects_a_stale_account_owner() {
             request_id: conn.next_request_id(),
             expected_account: draft_account(),
             room_id: "!room:example.test".to_owned(),
-            draft: "current account draft after stale acceptance".to_owned(),
+            document: "current account draft after stale acceptance".into(),
             revision: 2.into(),
         }),
     )
@@ -831,7 +831,7 @@ async fn composer_draft_command_rejects_a_stale_account_owner() {
             },
             room_id: "!room:example.test".to_owned(),
             root_event_id: "$root:example.test".to_owned(),
-            draft: "must not cross thread accounts".to_owned(),
+            document: "must not cross thread accounts".into(),
             revision: 10.into(),
         }),
     )
@@ -844,7 +844,7 @@ async fn composer_draft_command_rejects_a_stale_account_owner() {
             expected_account: draft_account(),
             room_id: "!room:example.test".to_owned(),
             root_event_id: "$root:example.test".to_owned(),
-            draft: "current account thread draft".to_owned(),
+            document: "current account thread draft".into(),
             revision: 1.into(),
         }),
     )
@@ -875,7 +875,7 @@ async fn composer_draft_command_rejects_a_stale_account_owner() {
             expected_account: draft_account(),
             room_id: "!room:example.test".to_owned(),
             root_event_id: "$root:example.test".to_owned(),
-            draft: "current account thread draft after stale acceptance".to_owned(),
+            document: "current account thread draft after stale acceptance".into(),
             revision: 2.into(),
         }),
     )
@@ -940,7 +940,7 @@ async fn composer_drafts_persist_after_debounce_and_load_on_restart() {
                 request_id: conn.next_request_id(),
                 expected_account: draft_account(),
                 room_id: "!room:example.test".to_owned(),
-                draft: "survives restart".to_owned(),
+                document: "survives restart".into(),
                 revision: 1.into(),
             }),
         )
@@ -1046,7 +1046,7 @@ impl CorruptComposerLoadFixture {
                 .composer_drafts
                 .rooms
                 .get(room_id)
-                .map(String::as_str),
+                .map(koushi_state::ComposerDocument::plain_body),
             None
         );
         assert_eq!(
@@ -1127,7 +1127,7 @@ async fn revision_commands_fail_while_composer_load_failed() {
             request_id: set_request_id,
             expected_account: draft_account(),
             room_id: fixture.room_id.to_owned(),
-            draft: "must remain frontend-owned".to_owned(),
+            document: "must remain frontend-owned".into(),
             revision: 2.into(),
         }),
     )
@@ -1199,7 +1199,7 @@ async fn lock_unlock_retries_repaired_composer_payload() {
                 .composer_drafts
                 .rooms
                 .get(fixture.room_id)
-                .is_some_and(|body| body == "persisted before corruption")
+                .is_some_and(|document| document.plain_body() == "persisted before corruption")
     })
     .await;
     fixture.shutdown().await;
@@ -1370,7 +1370,7 @@ async fn same_key_debounce_preserves_nonlexical_lru_victim_across_restart() {
     runtime
         .inject_actions(vec![AppAction::ComposerDraftChangedAtRevision {
             room_id: active_room_id.to_owned(),
-            draft: "first debounced content".to_owned(),
+            document: "first debounced content".into(),
             revision: 1.into(),
         }])
         .await;
@@ -1381,7 +1381,7 @@ async fn same_key_debounce_preserves_nonlexical_lru_victim_across_restart() {
     runtime
         .inject_actions(vec![AppAction::ComposerDraftChangedAtRevision {
             room_id: active_room_id.to_owned(),
-            draft: "second debounced content".to_owned(),
+            document: "second debounced content".into(),
             revision: 2.into(),
         }])
         .await;
@@ -1408,7 +1408,7 @@ async fn same_key_debounce_preserves_nonlexical_lru_victim_across_restart() {
             .composer_drafts
             .rooms
             .get(active_room_id)
-            .is_some_and(|body| body == "second debounced content")
+            .is_some_and(|document| document.plain_body() == "second debounced content")
     })
     .await
     .composer_drafts;
@@ -1454,7 +1454,7 @@ async fn failed_same_key_permit_replacement_keeps_previous_pending_save() {
     runtime
         .inject_actions(vec![AppAction::ComposerDraftChangedAtRevision {
             room_id: room_id.to_owned(),
-            draft: "first pending save".to_owned(),
+            document: "first pending save".into(),
             revision: 1.into(),
         }])
         .await;
@@ -1466,7 +1466,7 @@ async fn failed_same_key_permit_replacement_keeps_previous_pending_save() {
     runtime
         .inject_actions(vec![AppAction::ComposerDraftChangedAtRevision {
             room_id: room_id.to_owned(),
-            draft: "replacement without permits".to_owned(),
+            document: "replacement without permits".into(),
             revision: 2.into(),
         }])
         .await;
@@ -1490,7 +1490,7 @@ async fn failed_same_key_permit_replacement_keeps_previous_pending_save() {
             .composer_drafts
             .rooms
             .get(room_id)
-            .is_some_and(|body| body == "first pending save")
+            .is_some_and(|document| document.plain_body() == "first pending save")
     })
     .await;
 }
@@ -1591,7 +1591,7 @@ async fn account_switch_flushes_old_composer_save_before_new_load() {
         .inject_actions(vec![
             AppAction::ComposerDraftChangedAtRevision {
                 room_id: "old-room".to_owned(),
-                draft: "latest old body".to_owned(),
+                document: "latest old body".into(),
                 revision: 2.into(),
             },
             AppAction::SwitchAccountRequested {
@@ -1682,7 +1682,7 @@ async fn same_account_unlock_flushes_preserved_composer_save_before_reload() {
         .inject_actions(vec![
             AppAction::ComposerDraftChangedAtRevision {
                 room_id: "same-account-room".to_owned(),
-                draft: "latest body".to_owned(),
+                document: "latest body".into(),
                 revision: 2.into(),
             },
             AppAction::SessionLocked,
@@ -1723,7 +1723,7 @@ async fn same_account_unlock_flushes_preserved_composer_save_before_reload() {
                 .composer_drafts
                 .rooms
                 .get("same-account-room")
-                .is_some_and(|body| body == "latest body")
+                .is_some_and(|document| document.plain_body() == "latest body")
     })
     .await;
 }
@@ -1776,7 +1776,7 @@ async fn ignored_stale_reset_completion_does_not_cancel_pending_composer_save() 
         .inject_actions(vec![
             AppAction::ComposerDraftChangedAtRevision {
                 room_id: "reset-stale-room".to_owned(),
-                draft: "latest body".to_owned(),
+                document: "latest body".into(),
                 revision: 2.into(),
             },
             AppAction::ResetLocalDataCompleted { request_id: 999 },
@@ -1862,7 +1862,7 @@ async fn cleared_composer_drafts_do_not_resurrect_on_restart() {
                 request_id: conn.next_request_id(),
                 expected_account: draft_account(),
                 room_id: "!room:example.test".to_owned(),
-                draft: "deleted before restart".to_owned(),
+                document: "deleted before restart".into(),
                 revision: 1.into(),
             }),
         )
@@ -1880,7 +1880,7 @@ async fn cleared_composer_drafts_do_not_resurrect_on_restart() {
                 request_id: conn.next_request_id(),
                 expected_account: draft_account(),
                 room_id: "!room:example.test".to_owned(),
-                draft: String::new(),
+                document: String::new().into(),
                 revision: 2.into(),
             }),
         )

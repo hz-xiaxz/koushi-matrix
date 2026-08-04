@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use koushi_state::{
-    ComposerDraftPersistenceEntry, ComposerDraftPersistenceProjection, ComposerDraftProtection,
-    ComposerDraftRevision, ComposerDraftStore, ComposerTarget,
+    ComposerDocument, ComposerDraftPersistenceEntry, ComposerDraftPersistenceProjection,
+    ComposerDraftProtection, ComposerDraftRevision, ComposerDraftStore, ComposerTarget,
 };
 use serde::{Deserialize, Serialize};
 
-const COMPOSER_DRAFT_PAYLOAD_SCHEMA_VERSION: u8 = 2;
+const COMPOSER_DRAFT_PAYLOAD_SCHEMA_VERSION: u8 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ComposerDraftPayloadError {
@@ -15,7 +15,7 @@ pub(crate) enum ComposerDraftPayloadError {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct PersistedComposerDraftStoreV2 {
+pub(crate) struct PersistedComposerDraftStoreV3 {
     schema_version: u8,
     rooms: BTreeMap<String, PersistedComposerDraftEntry>,
     threads: BTreeMap<String, BTreeMap<String, PersistedComposerDraftEntry>>,
@@ -25,7 +25,7 @@ pub(crate) struct PersistedComposerDraftStoreV2 {
     protected_empty_threads: Vec<(String, String)>,
 }
 
-impl PersistedComposerDraftStoreV2 {
+impl PersistedComposerDraftStoreV3 {
     pub(crate) fn is_empty(&self) -> bool {
         self.rooms.is_empty() && self.threads.is_empty()
     }
@@ -51,6 +51,26 @@ impl PersistedComposerDraftStoreV2 {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedComposerDraftEntry {
+    content: Option<ComposerDocument>,
+    revision: ComposerDraftRevision,
+    last_accepted_clear_revision: ComposerDraftRevision,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedComposerDraftStoreV2 {
+    schema_version: u8,
+    rooms: BTreeMap<String, PersistedComposerDraftEntryV2>,
+    threads: BTreeMap<String, BTreeMap<String, PersistedComposerDraftEntryV2>>,
+    quiescent_room_order: Vec<String>,
+    quiescent_thread_order: Vec<(String, String)>,
+    protected_empty_rooms: Vec<String>,
+    protected_empty_threads: Vec<(String, String)>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedComposerDraftEntryV2 {
     content: Option<String>,
     revision: ComposerDraftRevision,
     last_accepted_clear_revision: ComposerDraftRevision,
@@ -80,9 +100,9 @@ struct LegacyComposerDraftStoreV1 {
 pub(crate) fn persisted_projection(
     drafts: &ComposerDraftStore,
     protection: &ComposerDraftProtection,
-) -> PersistedComposerDraftStoreV2 {
+) -> PersistedComposerDraftStoreV3 {
     let projection = drafts.persisted_projection(protection);
-    PersistedComposerDraftStoreV2 {
+    PersistedComposerDraftStoreV3 {
         schema_version: COMPOSER_DRAFT_PAYLOAD_SCHEMA_VERSION,
         rooms: projection
             .rooms
@@ -110,7 +130,7 @@ pub(crate) fn persisted_projection(
 }
 
 pub(crate) fn encode_payload_json(
-    drafts: &PersistedComposerDraftStoreV2,
+    drafts: &PersistedComposerDraftStoreV3,
 ) -> Result<Vec<u8>, ComposerDraftPayloadError> {
     serde_json::to_vec(drafts).map_err(|_| ComposerDraftPayloadError::Corrupt)
 }
@@ -119,13 +139,20 @@ pub(crate) fn decode_payload_json(
     payload: &[u8],
 ) -> Result<ComposerDraftStore, ComposerDraftPayloadError> {
     let value = serde_json::from_slice::<serde_json::Value>(payload).map_err(|_| corrupt())?;
-    if value.get("schema_version").is_some() {
-        let persisted = serde_json::from_value::<PersistedComposerDraftStoreV2>(value)
-            .map_err(|_| corrupt())?;
-        if persisted.schema_version != COMPOSER_DRAFT_PAYLOAD_SCHEMA_VERSION {
-            return Err(corrupt());
-        }
-        ComposerDraftStore::from_persisted_projection(persisted.into()).map_err(|_| corrupt())
+    if let Some(schema_version) = value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+    {
+        let projection = match schema_version {
+            3 => serde_json::from_value::<PersistedComposerDraftStoreV3>(value)
+                .map(Into::into)
+                .map_err(|_| corrupt())?,
+            2 => serde_json::from_value::<PersistedComposerDraftStoreV2>(value)
+                .map(Into::into)
+                .map_err(|_| corrupt())?,
+            _ => return Err(corrupt()),
+        };
+        ComposerDraftStore::from_persisted_projection(projection).map_err(|_| corrupt())
     } else {
         let legacy =
             serde_json::from_value::<LegacyComposerDraftStoreV1>(value).map_err(|_| corrupt())?;
@@ -158,8 +185,8 @@ impl From<PersistedComposerDraftEntry> for ComposerDraftPersistenceEntry {
     }
 }
 
-impl From<PersistedComposerDraftStoreV2> for ComposerDraftPersistenceProjection {
-    fn from(persisted: PersistedComposerDraftStoreV2) -> Self {
+impl From<PersistedComposerDraftStoreV3> for ComposerDraftPersistenceProjection {
+    fn from(persisted: PersistedComposerDraftStoreV3) -> Self {
         Self {
             rooms: persisted
                 .rooms
@@ -175,6 +202,41 @@ impl From<PersistedComposerDraftStoreV2> for ComposerDraftPersistenceProjection 
                         room_threads
                             .into_iter()
                             .map(|(root_event_id, entry)| (root_event_id, entry.into()))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            quiescent_room_order: persisted.quiescent_room_order,
+            quiescent_thread_order: persisted.quiescent_thread_order,
+            protected_empty_rooms: persisted.protected_empty_rooms,
+            protected_empty_threads: persisted.protected_empty_threads,
+        }
+    }
+}
+
+impl From<PersistedComposerDraftStoreV2> for ComposerDraftPersistenceProjection {
+    fn from(persisted: PersistedComposerDraftStoreV2) -> Self {
+        debug_assert_eq!(persisted.schema_version, 2);
+        let convert = |entry: PersistedComposerDraftEntryV2| ComposerDraftPersistenceEntry {
+            content: entry.content.map(ComposerDocument::from_plain_text),
+            revision: entry.revision,
+            last_accepted_clear_revision: entry.last_accepted_clear_revision,
+        };
+        Self {
+            rooms: persisted
+                .rooms
+                .into_iter()
+                .map(|(room_id, entry)| (room_id, convert(entry)))
+                .collect(),
+            threads: persisted
+                .threads
+                .into_iter()
+                .map(|(room_id, room_threads)| {
+                    (
+                        room_id,
+                        room_threads
+                            .into_iter()
+                            .map(|(root_event_id, entry)| (root_event_id, convert(entry)))
                             .collect(),
                     )
                 })
@@ -208,7 +270,8 @@ impl TryFrom<LegacyComposerDraftStoreV1> for ComposerDraftPersistenceProjection 
                             .rooms
                             .get(room_id)
                             .filter(|content| !content.is_empty())
-                            .cloned(),
+                            .cloned()
+                            .map(ComposerDocument::from_plain_text),
                         revision: legacy
                             .room_revisions
                             .get(room_id)
@@ -269,7 +332,8 @@ impl TryFrom<LegacyComposerDraftStoreV1> for ComposerDraftPersistenceProjection 
                 .get(&room_id)
                 .and_then(|room_threads| room_threads.get(&root_event_id))
                 .filter(|content| !content.is_empty())
-                .cloned();
+                .cloned()
+                .map(ComposerDocument::from_plain_text);
             if content.is_none() {
                 empty_thread_targets.insert((room_id.clone(), root_event_id.clone()));
             }
@@ -328,6 +392,7 @@ fn merge_legacy_order<T: Clone + Ord>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use koushi_state::{ComposerInline, MentionTarget};
 
     const LARGE_LEGACY_REVISION: u64 = 9_007_199_254_740_993;
 
@@ -360,8 +425,11 @@ mod tests {
         .expect("encode v2");
         let reloaded = decode_payload_json(&encoded).expect("reload v2");
         assert_eq!(
-            reloaded.rooms.get("room-legacy").map(String::as_str),
-            Some("mutated")
+            reloaded
+                .rooms
+                .get("room-legacy")
+                .map(ComposerDocument::plain_body),
+            Some("mutated".to_owned())
         );
         assert_eq!(reloaded.room_revision("room-legacy"), 1.into());
         assert!(
@@ -501,11 +569,70 @@ mod tests {
     }
 
     #[test]
-    fn composer_draft_payload_v2_round_trips_bounded_empty_string_rooms() {
+    fn composer_draft_payload_v2_migrates_strings_as_text_without_mentions() {
+        let payload = br#"{
+            "schema_version":2,
+            "rooms":{"room":{"content":"@Same Name","revision":"1","last_accepted_clear_revision":"0"}},
+            "threads":{},"quiescent_room_order":[],"quiescent_thread_order":[],
+            "protected_empty_rooms":[],"protected_empty_threads":[]
+        }"#;
+
+        let drafts = decode_payload_json(payload).expect("migrate v2 document");
+        let composer = drafts.composer_for_room("room");
+        assert_eq!(composer.draft, "@Same Name");
+        assert_eq!(
+            composer.document,
+            ComposerDocument::from_plain_text("@Same Name")
+        );
+        assert!(composer.document.mention_intent().targets.is_empty());
+    }
+
+    #[test]
+    fn composer_draft_payload_v3_round_trips_structured_mention_identity() {
+        let target = MentionTarget::User {
+            user_id: "@alice:example.invalid".to_owned(),
+            display_label: "Same Name".to_owned(),
+        };
+        let document = ComposerDocument::new(vec![
+            ComposerInline::Text {
+                text: "hello ".to_owned(),
+            },
+            ComposerInline::Mention {
+                target: target.clone(),
+                display_label: "Same Name".to_owned(),
+            },
+        ]);
+        let mut drafts = ComposerDraftStore::default();
+        drafts.set_room_draft("room".to_owned(), document.clone());
+
+        let encoded = encode_payload_json(&persisted_projection(
+            &drafts,
+            &ComposerDraftProtection::default(),
+        ))
+        .expect("encode v3");
+        let json: serde_json::Value = serde_json::from_slice(&encoded).expect("parse v3");
+        assert_eq!(json["schema_version"], serde_json::json!(3));
+
+        let reloaded = decode_payload_json(&encoded).expect("reload v3");
+        assert_eq!(reloaded.composer_for_room("room").document, document);
+        assert_eq!(
+            reloaded
+                .composer_for_room("room")
+                .document
+                .mention_intent()
+                .targets,
+            vec![target]
+        );
+    }
+
+    #[test]
+    fn composer_draft_payload_v3_round_trips_bounded_empty_documents() {
         let mut drafts = ComposerDraftStore::default();
         for index in 0..(koushi_state::MAX_PERSISTED_COMPOSER_DRAFT_ROOM_COUNT + 2) {
             let room_id = format!("empty-room-{index:03}");
-            drafts.rooms.insert(room_id.clone(), String::new());
+            drafts
+                .rooms
+                .insert(room_id.clone(), ComposerDocument::default());
             drafts.room_revisions.insert(room_id, 1.into());
         }
 
@@ -513,8 +640,8 @@ mod tests {
             &drafts,
             &ComposerDraftProtection::default(),
         ))
-        .expect("encode bounded v2");
-        let decoded = decode_payload_json(&encoded).expect("self-encoded v2 must decode");
+        .expect("encode bounded v3");
+        let decoded = decode_payload_json(&encoded).expect("self-encoded v3 must decode");
 
         assert_eq!(
             decoded.room_revisions.len(),
@@ -526,31 +653,31 @@ mod tests {
     }
 
     #[test]
-    fn composer_draft_payload_v2_rejects_noncanonical_overflow_and_duplicate_order_entries() {
+    fn composer_draft_payload_rejects_noncanonical_overflow_and_duplicate_order_entries() {
         let cases = [
             br#"{
-                "schema_version":2,
+                "schema_version":3,
                 "rooms":{"room":{"content":null,"revision":"01","last_accepted_clear_revision":"0"}},
                 "threads":{},"quiescent_room_order":["room"],"quiescent_thread_order":[],
                 "protected_empty_rooms":[],"protected_empty_threads":[]
             }"#
             .as_slice(),
             br#"{
-                "schema_version":2,
+                "schema_version":3,
                 "rooms":{"room":{"content":null,"revision":"340282366920938463463374607431768211456","last_accepted_clear_revision":"0"}},
                 "threads":{},"quiescent_room_order":["room"],"quiescent_thread_order":[],
                 "protected_empty_rooms":[],"protected_empty_threads":[]
             }"#
             .as_slice(),
             br#"{
-                "schema_version":2,
+                "schema_version":3,
                 "rooms":{"room":{"content":null,"revision":"1","last_accepted_clear_revision":"0"}},
                 "threads":{},"quiescent_room_order":["room","room"],"quiescent_thread_order":[],
                 "protected_empty_rooms":[],"protected_empty_threads":[]
             }"#
             .as_slice(),
             br#"{
-                "schema_version":2,
+                "schema_version":3,
                 "rooms":{},
                 "threads":{"room":{"root":{"content":null,"revision":"1","last_accepted_clear_revision":"0"}}},
                 "quiescent_room_order":[],"quiescent_thread_order":[["room","root"],["room","root"]],
@@ -560,7 +687,7 @@ mod tests {
         ];
 
         for payload in cases {
-            let error = decode_payload_json(payload).expect_err("invalid v2 must be rejected");
+            let error = decode_payload_json(payload).expect_err("invalid v3 must be rejected");
             assert_eq!(error, ComposerDraftPayloadError::Corrupt);
             let debug = format!("{error:?}");
             assert_eq!(debug, "Corrupt");
