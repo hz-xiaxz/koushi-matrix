@@ -34,17 +34,6 @@ export default defineConfig({
     command: `npx vite --port ${HARNESS_PORT}`,
     url: `http://127.0.0.1:${HARNESS_PORT}/harness.html`,
     reuseExistingServer: false,
-    timeout: 30_000,
-    env: {
-      // #370 disables device-to-device (SAS) verification in the shipped UI.
-      // The gate specs here exercise that implementation — flow correlation,
-      // mismatch, cancellation, retry — so the harness build keeps it enabled.
-      //
-      // This tier therefore does NOT prove the production default. That is
-      // pinned by `SessionVerificationGate.test.tsx`, which asserts no SAS
-      // button, no confirm dialog, no emoji comparison, and that
-      // `startOwnUserSas` is never invoked when the flag is absent.
-      VITE_KOUSHI_ENABLE_DEVICE_VERIFICATION: "1"
-    }
+    timeout: 30_000
   }
 });

@@ -771,23 +771,6 @@ function qaTitleEnabled(): boolean {
   return import.meta.env.VITE_KOUSHI_QA_TITLE === "1";
 }
 
-/**
- * Device-to-device (SAS) verification is disabled in the end-user UI (#370).
- *
- * The flow works only intermittently, and a user who starts it can be left
- * behind the verification gate while an unverified device stays registered on
- * the homeserver, which then warns other Matrix clients. Recovery key is the
- * only supported path until the SAS flow and its settlement are demonstrably
- * reliable — see the re-enabling conditions in #370.
- *
- * The SDK/core implementation is deliberately untouched; this flag is the only
- * thing standing between it and the UI, so it stays testable and re-enabling is
- * a one-line decision rather than a rebuild.
- */
-export function deviceToDeviceVerificationEnabled(): boolean {
-  return import.meta.env.VITE_KOUSHI_ENABLE_DEVICE_VERIFICATION === "1";
-}
-
 function qaSendSmokeMessage(): string | null {
   return qaSendSmokeMessageFromEnv(import.meta.env.VITE_KOUSHI_QA_SEND_SMOKE_MESSAGE);
 }
@@ -1036,15 +1019,9 @@ export function SessionVerificationGate({
   const methods = session.gate?.methods ?? [];
   const awaiting = session.kind === "awaitingVerification";
   const canUseRecoverySecret = methods.includes("recoveryKey") || methods.includes("securityPhrase");
-  // #370: Rust may still report `existingDeviceSas` as an available method —
-  // that projection stays honest. The UI simply refuses to offer it, so the
-  // gate cannot start a flow it may not be able to settle.
-  const deviceVerificationAvailable =
-    deviceToDeviceVerificationEnabled() && methods.includes("existingDeviceSas");
+  const deviceVerificationAvailable = methods.includes("existingDeviceSas");
   const sasVerifying =
-    deviceToDeviceVerificationEnabled() &&
-    session.kind === "verifying" &&
-    session.method === "existingDeviceSas";
+    session.kind === "verifying" && session.method === "existingDeviceSas";
   const phaseKind = session.kind === "provisional" ? provisionalPhaseKind(session.phase) : null;
   const checking = phaseKind === "checkingTrust";
   const discovering = phaseKind === "discoveringMethods";
@@ -1120,10 +1097,7 @@ export function SessionVerificationGate({
     {operationError && !session.gate?.failureKind && !preparationFailure && <p role="alert">{operationError}</p>}
     {session.kind === "rejecting" && session.reason && <p role="alert">{gateRejectLabel(session.reason)}</p>}
     {awaiting && canUseRecoverySecret && <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const secret = recoveryRef.current?.value.trim() ?? ""; if (secret) void run("recovery", () => operations.submitRecovery(secret)); if (recoveryRef.current) recoveryRef.current.value = ""; }}><SecureImeTextField ref={recoveryRef} aria-label={t("gate.recoverySecret")} autoComplete="off"/><button className="dialog-button is-primary" disabled={gateOperation === "recovery"} type="submit">{t("gate.verifyRecoveryKey")}</button></ImeSafeForm>}
-    {/* #370: with device-to-device verification disabled, a user without
-        recovery material has no action left in this gate. Say so instead of
-        leaving a dead end, and keep them signed in — nothing is deleted here. */}
-    {awaiting && !canUseRecoverySecret && !methods.includes("bootstrap") && <div className="gate-no-recovery">
+    {awaiting && !canUseRecoverySecret && !deviceVerificationAvailable && !methods.includes("bootstrap") && <div className="gate-no-recovery">
       <h2>{t("gate.noRecoveryKeyTitle")}</h2>
       <p>{t("gate.noRecoveryKeyCopy")}</p>
     </div>}

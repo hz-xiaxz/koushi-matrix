@@ -1283,29 +1283,21 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   MSC4186 invite-list contract is complete; do not hard-code SyncService as the
   meaning of `probed`.
 
-## Device-to-Device Verification Is Disabled in the UI (#370)
+## Device-to-Device Verification Is Warning-Gated
 
-- SAS / device-to-device / QR verification is **not offered in the end-user UI**.
-  Recovery key is the only supported verification path. The flow works only
-  intermittently, and a user who starts it can be stranded behind the
-  verification gate while an unverified device stays registered on the
-  homeserver, which then makes other Matrix clients warn.
-- `deviceToDeviceVerificationEnabled()` in `App.tsx` is the single owner of that
-  decision (`VITE_KOUSHI_ENABLE_DEVICE_VERIFICATION=1` opts in). The SDK/core
-  implementation is deliberately untouched, so the flag is the only thing
-  between it and the UI: re-enabling is a decision, not a rebuild. Do not add a
-  second gate, and do not branch on `methods.includes("existingDeviceSas")`
-  without also consulting the flag.
-- Rust still projects `existingDeviceSas` in `gate.methods` when the homeserver
-  offers it. That projection stays honest — only the UI refuses it. Do not
-  "fix" this by removing the method from the Rust projection.
-- Tests that exercise the SAS implementation must opt in explicitly
-  (`vi.stubEnv`), and `SessionVerificationGate.test.tsx` also pins the
-  production default: no SAS button, no confirm dialog, no emoji comparison, and
-  `startOwnUserSas` never invoked. Remember `vi.unstubAllEnvs()` in `afterEach`.
-- With SAS gone, a user holding no recovery material has no action left in the
-  gate, so it renders explicit `gate.noRecoveryKey*` guidance instead of an
-  empty panel. Nothing is deleted there: the session stays signed in.
+- Rust-owned `VerificationGateState.methods` is the only availability source for
+  session verification. When it contains `existingDeviceSas`, the end-user UI
+  offers device-to-device SAS verification; do not add a second frontend or
+  build-time availability gate.
+- Starting SAS always requires the existing confirmation dialog. It warns that
+  the flow can be unreliable when the other device is offline, slow to sync, or
+  missing keys; recommends recovery-key verification when available; and does
+  not dispatch `start_own_user_sas` until the user explicitly continues.
+- A SAS-only gate remains actionable. Render `gate.noRecoveryKey*` guidance only
+  when recovery, bootstrap, and `existingDeviceSas` are all unavailable.
+- The seven emoji and match, mismatch, and cancel actions render only from the
+  Rust-owned verifying snapshot and use its `flow_id`; React must not infer SAS
+  progress or settlement locally.
 - The explicit `Cancel sign-in and remove this device…` path is Rust-owned
   `AppState.device_cleanup`. It is always remote-first: legacy sessions use
   password UIAA, OAuth/MAS sessions revoke through OAuth logout, and
