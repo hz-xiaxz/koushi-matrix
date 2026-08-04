@@ -30,7 +30,7 @@
 - Consumes: `session.gate.methods: VerificationMethodCapability[]`, including `existingDeviceSas`.
 - Produces: `deviceVerificationAvailable: boolean` derived solely from `methods.includes("existingDeviceSas")`; no new public interface.
 
-- [ ] **Step 1: Replace disabled-default assertions with failing enabled-default contracts**
+- [x] **Step 1: Replace disabled-default assertions with failing enabled-default contracts**
 
 Remove `enableDeviceVerificationForTest()` and environment stubbing. Replace the first three tests with contracts equivalent to:
 
@@ -80,7 +80,7 @@ test("SAS-only availability is actionable instead of a no-recovery dead end", as
 
 Remove every `enableDeviceVerificationForTest()` call from later SAS tests. Keep `afterEach(cleanup)`; no environment cleanup remains.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -90,7 +90,7 @@ npm --prefix apps/desktop test -- --run src/SessionVerificationGate.test.tsx
 
 Expected: FAIL because the production-default SAS button and emoji comparison are hidden and SAS-only state still renders no-recovery guidance.
 
-- [ ] **Step 3: Remove the frontend feature gate with the smallest production change**
+- [x] **Step 3: Remove the frontend feature gate with the smallest production change**
 
 Delete `deviceToDeviceVerificationEnabled()`. Replace the gated values with:
 
@@ -116,7 +116,7 @@ Change no-recovery guidance to:
 
 Keep the existing confirmation dialog and SAS action handlers unchanged.
 
-- [ ] **Step 4: Delete obsolete test/build configuration**
+- [x] **Step 4: Delete obsolete test/build configuration**
 
 Remove `webServer.env.VITE_KOUSHI_ENABLE_DEVICE_VERIFICATION` and its #370 comment from `apps/desktop/playwright.config.ts`. Confirm no source reference remains:
 
@@ -126,7 +126,7 @@ rg -n "VITE_KOUSHI_ENABLE_DEVICE_VERIFICATION|deviceToDeviceVerificationEnabled|
 
 Expected: no matches.
 
-- [ ] **Step 5: Update durable policy notes**
+- [x] **Step 5: Update durable policy notes**
 
 Rename the AGENTS section to `Device-to-Device Verification Is Warning-Gated` and record:
 
@@ -138,19 +138,19 @@ Rename the AGENTS section to `Device-to-Device Verification Is Warning-Gated` an
 
 Remove statements that SAS is disabled, that tests opt in, and that recovery is the only path.
 
-- [ ] **Step 6: Run focused GREEN checks**
+- [x] **Step 6: Run focused GREEN checks**
 
 Run each command directly and record its exit status:
 
 ```bash
 npm --prefix apps/desktop test -- --run src/SessionVerificationGate.test.tsx
-npm --prefix apps/desktop exec -- playwright test e2e/session-verification-gate.spec.ts --workers=1
+(cd apps/desktop && npx playwright test e2e/session-verification-gate.spec.ts --workers=1)
 npm --prefix apps/desktop test -- --run src/i18n/messages.test.ts
 ```
 
 Expected: all pass; Playwright exercises the default production policy without a build-time opt-in.
 
-- [ ] **Step 7: Review and commit the implementation**
+- [x] **Step 7: Review and commit the implementation**
 
 ```bash
 git diff --check
@@ -170,7 +170,7 @@ git commit -m "feat: re-enable SAS device verification"
 - Consumes: completed frontend policy change.
 - Produces: direct-exit local evidence suitable for the pull request.
 
-- [ ] **Step 1: Run frontend and IME gates**
+- [x] **Step 1: Run frontend and IME gates**
 
 ```bash
 npm --prefix apps/desktop test -- --run
@@ -184,7 +184,7 @@ npm --prefix apps/desktop run qa:secret-scan
 
 Expected: every command exits 0.
 
-- [ ] **Step 2: Run applicable Rust/Tauri and repository guards**
+- [x] **Step 2: Run applicable Rust/Tauri and repository guards**
 
 ```bash
 node scripts/check-sdk-submodule.mjs
@@ -196,15 +196,15 @@ git diff --check
 
 Expected: every command exits 0, allowing only documented stable-toolchain warnings from `cargo fmt`.
 
-- [ ] **Step 3: Run the full browser-headless gate once**
+- [x] **Step 3: Run the full browser-headless gate once**
 
 ```bash
-npm --prefix apps/desktop exec -- playwright test --workers=1
+(cd apps/desktop && npx playwright test --workers=1)
 ```
 
 Expected: all browser-headless tests pass with the serialized repository configuration.
 
-- [ ] **Step 4: Self-review the complete branch**
+- [x] **Step 4: Self-review the complete branch**
 
 ```bash
 git fetch origin
@@ -215,7 +215,7 @@ git status --short
 
 Confirm the diff contains only the design, plan, SAS policy/tests/config, and canon update; `HANDOFF.md` remains the only unrelated untracked file; no secrets, identifiers, stale flag references, generated drift, or unrelated changes exist.
 
-- [ ] **Step 5: Commit plan tracking updates if needed**
+- [x] **Step 5: Commit plan tracking updates if needed**
 
 ```bash
 git add docs/superpowers/plans/2026-08-04-reenable-device-sas-verification.md
