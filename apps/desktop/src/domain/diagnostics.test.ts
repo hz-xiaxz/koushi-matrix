@@ -19,6 +19,107 @@ test("creates a fixed private-data-free schema mismatch diagnostic", () => {
 });
 
 describe("diagnosticReport", () => {
+  test("renders the Rust-owned Sliding Sync snapshot in deterministic private-safe order", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.getSnapshot();
+    const report = diagnosticReport({
+      snapshot,
+      panelMode: "closed",
+      sendStatus: "idle",
+      timelineDiagnostics: {
+        visibleItems: 0,
+        downloadedItems: 0,
+        backfill: "Idle",
+        avatarMxcItems: 0,
+        avatarReadyItems: 0,
+        avatarPendingItems: 0,
+        avatarFailedItems: 0,
+        avatarMissingItems: 0,
+        avatarRenderedImages: 0,
+        avatarBrokenImages: 0
+      },
+      domDiagnostics: { screen: "timeline", rootChildren: 1, bodyTextLength: 0 },
+      uiLatencyDiagnostics: {
+        samples: 0,
+        lastFrameGapMs: 0,
+        averageFrameGapMs: 0,
+        maxFrameGapMs: 0,
+        longFrameCount: 0
+      },
+      slidingSyncDiagnostics: {
+        discoveryState: "supported",
+        advertised: true,
+        discoverySource: "versions",
+        lastProbeAgeBucket: "<1m",
+        lastHttpStatusClass: "success",
+        requestSchema: "element_x_all_rooms",
+        engine: "SyncService",
+        sdkSlidingSyncVersion: "native",
+        roomListSharePos: true,
+        encryptionSharePos: false,
+        encryptionConnectionProfile: "sdk_default_encryption",
+        encryptionExtensionProfile: "e2ee_to_device",
+        provisionalEncryptionStarted: true,
+        provisionalFirstResponseSeen: false,
+        provisionalStoppedBeforeFirstResponse: true,
+        provisionalToNormalHandoffBucket: "under100_milliseconds",
+        lifecycle: "reconnecting",
+        connectivityProven: false,
+        committedGeneration: 0,
+        lastSuccessAgeBucket: "never",
+        consecutiveFailureCount: 29,
+        lastFailureOrigin: "room_list",
+        lastFailureKind: "sync_failed_http",
+        lastFailureStage: "room_list_sliding_sync",
+        lastHttpErrorSource: "server_response",
+        lastHttpStatus: "unauthorized",
+        lastMatrixErrorKind: "unknown_token",
+        lastFailureRetryability: "permanent",
+        roomListTaskRunning: false,
+        encryptionTaskRunning: false,
+        posPresent: false
+      }
+    });
+
+    const expected = [
+      "Sliding Sync:",
+      "sliding_sync.discovery_state=supported",
+      "sliding_sync.advertised=true",
+      "sliding_sync.discovery_source=versions",
+      "sliding_sync.last_probe_age_bucket=<1m",
+      "sliding_sync.last_http_status_class=success",
+      "sliding_sync.request_schema=element_x_all_rooms",
+      "sync.engine=SyncService",
+      "sync.sdk_sliding_sync_version=native",
+      "sync.room_list_share_pos=true",
+      "sync.encryption_share_pos=false",
+      "sync.encryption_connection_profile=sdk_default_encryption",
+      "sync.encryption_extension_profile=e2ee_to_device",
+      "sync.provisional_encryption_started=true",
+      "sync.provisional_first_response_seen=false",
+      "sync.provisional_stopped_before_first_response=true",
+      "sync.provisional_to_normal_handoff_bucket=under100_milliseconds",
+      "sync.lifecycle=reconnecting",
+      "sync.connectivity_proven=false",
+      "sync.committed_generation=0",
+      "sync.last_success_age_bucket=never",
+      "sync.consecutive_failure_count=29",
+      "sync.last_failure_origin=room_list",
+      "sync.last_failure_kind=sync_failed_http",
+      "sync.last_failure_stage=room_list_sliding_sync",
+      "sync.last_http_error_source=server_response",
+      "sync.last_http_status=unauthorized",
+      "sync.last_matrix_error_kind=unknown_token",
+      "sync.last_failure_retryability=permanent",
+      "sync.room_list_task_running=false",
+      "sync.encryption_task_running=false",
+      "sync.pos_present=false"
+    ].join("\n");
+    expect(report).toContain(expected);
+    expect(report).not.toContain("https://");
+    expect(report).not.toContain("@alice:");
+  });
+
   test("summarizes sync, timeline, and crawler progress without private identifiers or message bodies", async () => {
     const api = createBrowserFakeApi();
     const snapshot = await api.getSnapshot();

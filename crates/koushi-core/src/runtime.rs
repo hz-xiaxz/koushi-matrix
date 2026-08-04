@@ -1059,6 +1059,7 @@ pub struct CoreRuntime {
     snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
     next_connection_id: AtomicU64,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
+    sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     // Internal action channel: actors project side-effect outcomes through
     // the reducer with this in later phases; tests inject through it today.
     #[cfg_attr(not(any(test, feature = "test-hooks")), allow(dead_code))]
@@ -1221,6 +1222,7 @@ impl CoreRuntime {
         let (composer_draft_test_tx, composer_draft_test_rx) = mpsc::channel(1);
         let settings_store = SettingsStore::new(&data_dir);
         let composer_draft_leases = Arc::new(ComposerDraftLeaseRegistry::new());
+        let sliding_sync_diagnostics = crate::SlidingSyncDiagnostics::default();
         let composer_draft_lease_changes = composer_draft_leases.subscribe();
         let (composer_draft_rejected_tx, composer_draft_rejected_rx) = mpsc::unbounded_channel();
 
@@ -1238,12 +1240,13 @@ impl CoreRuntime {
         });
 
         // Spawn AccountActor with shared channels.
-        let account_actor = crate::account::AccountActor::spawn(
+        let account_actor = crate::account::AccountActor::spawn_with_diagnostics(
             store_actor,
             action_tx.clone(),
             event_tx.clone(),
             crate::link_preview::LinkPreviewContext::from_settings(&initial_state.settings.values),
             Arc::clone(&composer_draft_leases),
+            sliding_sync_diagnostics.clone(),
         );
 
         #[cfg(any(test, feature = "test-hooks"))]
@@ -1303,6 +1306,7 @@ impl CoreRuntime {
             snapshot_rx,
             next_connection_id: AtomicU64::new(1),
             composer_draft_leases,
+            sliding_sync_diagnostics,
             action_tx,
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_test_tx,
@@ -1333,6 +1337,10 @@ impl CoreRuntime {
 
     pub fn media_preparation(&self) -> &crate::media_preparation::MediaPreparationService {
         &self.media_preparation
+    }
+
+    pub fn sliding_sync_diagnostics(&self) -> crate::SlidingSyncDiagnosticsSnapshot {
+        self.sliding_sync_diagnostics.snapshot()
     }
 
     /// Test hook: inject reducer actions as if an actor side effect produced
@@ -1451,6 +1459,7 @@ impl CoreRuntime {
             snapshot_rx: _,
             next_connection_id: _,
             composer_draft_leases: _,
+            sliding_sync_diagnostics: _,
             action_tx: _,
             #[cfg(any(test, feature = "test-hooks"))]
                 composer_draft_test_tx: _,

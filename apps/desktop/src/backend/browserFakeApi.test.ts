@@ -1011,7 +1011,40 @@ describe("BrowserFakeApi settings preview", () => {
 
     await expect(api.getDiagnosticSnapshot()).resolves.toEqual({
       entries: [],
-      droppedEntries: 0
+      droppedEntries: 0,
+      slidingSync: {
+        discoveryState: "not_started",
+        advertised: false,
+        discoverySource: "unknown",
+        lastProbeAgeBucket: "never",
+        lastHttpStatusClass: "unknown",
+        requestSchema: "element_x_all_rooms",
+        engine: "SyncService",
+        sdkSlidingSyncVersion: "unknown",
+        roomListSharePos: true,
+        encryptionSharePos: false,
+        encryptionConnectionProfile: "sdk_default_encryption",
+        encryptionExtensionProfile: "e2ee_to_device",
+        provisionalEncryptionStarted: false,
+        provisionalFirstResponseSeen: false,
+        provisionalStoppedBeforeFirstResponse: false,
+        provisionalToNormalHandoffBucket: "never",
+        lifecycle: "stopped",
+        connectivityProven: false,
+        committedGeneration: 0,
+        lastSuccessAgeBucket: "never",
+        consecutiveFailureCount: 0,
+        lastFailureOrigin: "none",
+        lastFailureKind: "none",
+        lastFailureStage: "none",
+        lastHttpErrorSource: "none",
+        lastHttpStatus: "none",
+        lastMatrixErrorKind: "none",
+        lastFailureRetryability: "none",
+        roomListTaskRunning: false,
+        encryptionTaskRunning: false,
+        posPresent: false
+      }
     });
   });
 

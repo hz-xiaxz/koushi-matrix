@@ -289,7 +289,11 @@ mod tests {
 
         let (action_tx, mut action_rx) = mpsc::channel(8);
         let (event_tx, _) = broadcast::channel(8);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
         assert!(
             handle
                 .send(RoomMessage::SessionEstablished {
@@ -381,7 +385,11 @@ mod tests {
 
         let (action_tx, mut action_rx) = mpsc::channel(8);
         let (event_tx, _) = broadcast::channel(8);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
         assert!(
             handle
                 .send(RoomMessage::SessionEstablished {
@@ -447,7 +455,11 @@ mod tests {
 
         let (action_tx, mut action_rx) = mpsc::channel(8);
         let (event_tx, _) = broadcast::channel(8);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
         assert!(
             handle
                 .send(RoomMessage::SessionEstablished {
@@ -521,7 +533,11 @@ mod tests {
 
         let (action_tx, mut action_rx) = mpsc::channel(16);
         let (event_tx, _) = broadcast::channel(8);
-        let handle = RoomActor::spawn(action_tx, event_tx);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
         assert!(
             handle
                 .send(RoomMessage::SessionEstablished {

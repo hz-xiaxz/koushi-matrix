@@ -1,4 +1,7 @@
 use serde::Serialize;
+use tauri::State;
+
+use crate::CoreRuntimeState;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,9 +16,13 @@ pub struct FrontendDiagnosticLogEntry {
 pub struct FrontendDiagnosticLogSnapshot {
     entries: Vec<FrontendDiagnosticLogEntry>,
     dropped_entries: u64,
+    sliding_sync: koushi_core::SlidingSyncDiagnosticsSnapshot,
 }
 
-fn map_snapshot(snapshot: koushi_diagnostics::DiagnosticSnapshot) -> FrontendDiagnosticLogSnapshot {
+fn map_snapshot(
+    snapshot: koushi_diagnostics::DiagnosticSnapshot,
+    sliding_sync: koushi_core::SlidingSyncDiagnosticsSnapshot,
+) -> FrontendDiagnosticLogSnapshot {
     FrontendDiagnosticLogSnapshot {
         entries: snapshot
             .records
@@ -27,12 +34,18 @@ fn map_snapshot(snapshot: koushi_diagnostics::DiagnosticSnapshot) -> FrontendDia
             })
             .collect(),
         dropped_entries: snapshot.dropped_records,
+        sliding_sync,
     }
 }
 
 #[tauri::command]
-pub fn get_diagnostic_snapshot() -> FrontendDiagnosticLogSnapshot {
-    map_snapshot(koushi_diagnostics::snapshot())
+pub fn get_diagnostic_snapshot(
+    state: State<'_, CoreRuntimeState>,
+) -> FrontendDiagnosticLogSnapshot {
+    map_snapshot(
+        koushi_diagnostics::snapshot(),
+        state.runtime.sliding_sync_diagnostics(),
+    )
 }
 
 #[cfg(test)]
@@ -57,7 +70,11 @@ mod tests {
             dropped_records: 7,
         };
 
-        let json = serde_json::to_value(map_snapshot(snapshot)).unwrap();
+        let json = serde_json::to_value(map_snapshot(
+            snapshot,
+            koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
+        ))
+        .unwrap();
         assert_eq!(
             json,
             serde_json::json!({
@@ -66,7 +83,40 @@ mod tests {
                     "source": "desktop.timeline",
                     "message": "stage=submit operation=send_reaction"
                 }],
-                "droppedEntries": 7
+                "droppedEntries": 7,
+                "slidingSync": {
+                    "discoveryState": "not_started",
+                    "advertised": false,
+                    "discoverySource": "unknown",
+                    "lastProbeAgeBucket": "never",
+                    "lastHttpStatusClass": "unknown",
+                    "requestSchema": "element_x_all_rooms",
+                    "engine": "SyncService",
+                    "sdkSlidingSyncVersion": "unknown",
+                    "roomListSharePos": true,
+                    "encryptionSharePos": false,
+                    "encryptionConnectionProfile": "sdk_default_encryption",
+                    "encryptionExtensionProfile": "e2ee_to_device",
+                    "provisionalEncryptionStarted": false,
+                    "provisionalFirstResponseSeen": false,
+                    "provisionalStoppedBeforeFirstResponse": false,
+                    "provisionalToNormalHandoffBucket": "never",
+                    "lifecycle": "stopped",
+                    "connectivityProven": false,
+                    "committedGeneration": 0,
+                    "lastSuccessAgeBucket": "never",
+                    "consecutiveFailureCount": 0,
+                    "lastFailureOrigin": "none",
+                    "lastFailureKind": "none",
+                    "lastFailureStage": "none",
+                    "lastHttpErrorSource": "none",
+                    "lastHttpStatus": "none",
+                    "lastMatrixErrorKind": "none",
+                    "lastFailureRetryability": "none",
+                    "roomListTaskRunning": false,
+                    "encryptionTaskRunning": false,
+                    "posPresent": false
+                }
             })
         );
     }
@@ -98,7 +148,11 @@ mod tests {
             }],
             dropped_records: 0,
         };
-        let serialized = serde_json::to_string(&map_snapshot(snapshot)).unwrap();
+        let serialized = serde_json::to_string(&map_snapshot(
+            snapshot,
+            koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
+        ))
+        .unwrap();
         for forbidden in [
             "!room:synthetic.invalid",
             "@user:synthetic.invalid",

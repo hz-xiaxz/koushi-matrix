@@ -34,6 +34,8 @@ pub(crate) mod scheduled_send;
 pub mod search;
 pub(crate) mod search_crawler;
 pub mod settings;
+mod direct_message_classification;
+mod sliding_sync_diagnostics;
 pub(crate) mod startup_trace;
 pub mod state_delta;
 pub mod store;
@@ -65,6 +67,7 @@ pub use failure::{
     CoreFailure, LoginFailureKind, ProfileFailureKind, RecoveryFailureKind, RoomFailureKind,
     SearchFailureKind, SyncFailureKind, TimelineFailureKind,
 };
+pub use direct_message_classification::DirectAccountDataSource;
 pub use ids::{
     AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey,
     TimelineKind,
@@ -73,5 +76,14 @@ pub use koushi_state::MediaTransferProgress;
 pub use runtime::{
     COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
     EVENT_QUEUE_CAPACITY, EventStreamLag,
+};
+pub use sliding_sync_diagnostics::{
+    DiagnosticAgeBucket, SlidingSyncDiagnostics, SlidingSyncDiagnosticsSnapshot,
+    SlidingSyncDiscoveryDiagnostic, SlidingSyncDiscoverySource, SlidingSyncDiscoveryState,
+    SlidingSyncEngine, SlidingSyncFailureDiagnostic, SlidingSyncFailureKind,
+    SlidingSyncFailureOrigin, SlidingSyncFailureRetryability, SlidingSyncFailureStage,
+    SlidingSyncHttpErrorSource, SlidingSyncHttpStatus, SlidingSyncHttpStatusClass,
+    SlidingSyncLifecycle, SlidingSyncMatrixErrorKind, SlidingSyncProvisionalHandoffBucket,
+    SlidingSyncRequestSchema, SlidingSyncSdkVersion,
 };
 pub use state_delta::{StateDelta, StateDeltaChangedSlices, build_state_delta};
