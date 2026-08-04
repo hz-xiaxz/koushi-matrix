@@ -1,10 +1,50 @@
 // @vitest-environment jsdom
 
+import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { MentionCandidate } from "../domain/projectionTypes";
+import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
+import type { ComposerDocument } from "../domain/types";
 import { Composer, ThreadComposer } from "./composer";
+import {
+  inlineMentionEditorSelection,
+  setInlineMentionEditorSelection
+} from "./ImeTextControl";
+
+function textChange(callback: (value: string) => void) {
+  return (document: ComposerDocument) => callback(plainBodyFromDocument(document));
+}
+
+function textSend(callback: (value: string) => void | Promise<void>) {
+  return (document: ComposerDocument) => callback(plainBodyFromDocument(document));
+}
+
+function changeEditorText(editor: Element, text: string) {
+  const control = editor as HTMLDivElement;
+  if (control.dataset.composing === "true") {
+    let textNode = control.querySelector<HTMLElement>("[data-composer-text]");
+    if (!textNode) {
+      textNode = document.createElement("span");
+      textNode.dataset.composerText = "";
+      control.append(textNode);
+    }
+    textNode.textContent = text;
+    fireEvent.input(control, { inputType: "insertCompositionText", isComposing: true });
+    return;
+  }
+  setInlineMentionEditorSelection(control, 0, control.textContent?.length ?? 0);
+  fireEvent(
+    control,
+    new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "insertText",
+      data: text
+    })
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -48,11 +88,11 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Direct room"
-        value=""
+        document={documentFromText("")}
         onAttachFiles={onAttachFiles}
         onCancelReply={() => undefined}
-        onSend={() => undefined}
-        onValueChange={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
     const pdf = new File(["pdf"], "document.pdf", { type: "application/pdf" });
@@ -66,7 +106,7 @@ describe("Composer", () => {
       types: ["Files"]
     };
     const targets = [
-      container.querySelector("textarea"),
+      container.querySelector(".composer-inline-editor"),
       container.querySelector(".composer-tools"),
       container.querySelector(".composer-footer"),
       container.querySelector(".composer")
@@ -90,11 +130,11 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Direct room"
-        value=""
+        document={documentFromText("")}
         onAttachFiles={onAttachFiles}
         onCancelReply={() => undefined}
-        onSend={() => undefined}
-        onValueChange={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
 
@@ -114,21 +154,21 @@ describe("Composer", () => {
       composerMode: { kind: "plain" as const },
       isSending: false,
       roomName: "Direct room",
-      value: "before",
+      document: documentFromText("before"),
       onCancelReply: () => undefined,
-      onSend: vi.fn(),
-      onValueChange: vi.fn()
+      onSend: textSend(vi.fn()),
+      onDocumentChange: textChange(vi.fn())
     };
     const { container, rerender } = render(<Composer {...props} />);
-    const textarea = container.querySelector("textarea")!;
+    const textarea = container.querySelector(".composer-inline-editor")!;
 
     fireEvent.compositionStart(textarea);
-    fireEvent.change(textarea, { target: { value: "日本語変換中" } });
-    textarea.setSelectionRange(3, 5);
-    rerender(<Composer {...props} value="stale parent draft" roomName="Renamed room" />);
+    changeEditorText(textarea, "日本語変換中" );
+    setInlineMentionEditorSelection(textarea as HTMLDivElement, 3, 5);
+    rerender(<Composer {...props} document={documentFromText("stale parent draft")} roomName="Renamed room" />);
 
-    expect(textarea.value).toBe("日本語変換中");
-    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([3, 5]);
+    expect(textarea.textContent).toBe("日本語変換中");
+    expect([inlineMentionEditorSelection(textarea as HTMLDivElement).start, inlineMentionEditorSelection(textarea as HTMLDivElement).end]).toEqual([3, 5]);
   });
 
   it("writes toolbar markdown replacements to the IME-owned textarea DOM", () => {
@@ -138,19 +178,19 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Direct room"
-        value=""
+        document={documentFromText("")}
         onCancelReply={() => undefined}
-        onSend={() => undefined}
-        onValueChange={onValueChange}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(onValueChange)}
       />
     );
-    const textarea = container.querySelector("textarea")!;
+    const textarea = container.querySelector(".composer-inline-editor")!;
 
-    fireEvent.change(textarea, { target: { value: "world" } });
-    textarea.setSelectionRange(0, 5);
+    changeEditorText(textarea, "world" );
+    setInlineMentionEditorSelection(textarea as HTMLDivElement, 0, 5);
     fireEvent.click(screen.getByRole("button", { name: /bold/i }));
 
-    expect(textarea.value).toBe("**world**");
+    expect(textarea.textContent).toBe("**world**");
     expect(onValueChange).toHaveBeenLastCalledWith("**world**");
   });
 
@@ -162,11 +202,11 @@ describe("Composer", () => {
         isSending={false}
         mathModeEnabled
         roomName="Direct room"
-        value=""
+        document={documentFromText("")}
         onCancelReply={() => undefined}
         onMathModeChange={onMathModeChange}
-        onSend={() => undefined}
-        onValueChange={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
 
@@ -181,11 +221,11 @@ describe("Composer", () => {
         isSending={false}
         mathModeEnabled={false}
         roomName="Direct room"
-        value=""
+        document={documentFromText("")}
         onCancelReply={() => undefined}
         onMathModeChange={onMathModeChange}
-        onSend={() => undefined}
-        onValueChange={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
     expect(
@@ -196,23 +236,23 @@ describe("Composer", () => {
   it("gives the thread textarea the same live conversion ownership", () => {
     const props = {
       canEdit: true,
-      draft: "before",
+      document: documentFromText("before"),
       draftKey: "!room-a:$root-a",
       isSending: false,
       resolveComposerKeyAction: vi.fn(async () => "noop" as const),
-      onDraftChange: vi.fn(),
-      onSend: vi.fn()
+      onDocumentChange: textChange(vi.fn()),
+      onSend: textSend(vi.fn())
     };
     const { rerender } = render(<ThreadComposer {...props} />);
-    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLTextAreaElement;
+    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLDivElement;
 
     fireEvent.compositionStart(textarea);
-    fireEvent.change(textarea, { target: { value: "日本語変換中" } });
-    textarea.setSelectionRange(3, 5);
-    rerender(<ThreadComposer {...props} draft="stale parent draft" isSending />);
+    changeEditorText(textarea, "日本語変換中" );
+    setInlineMentionEditorSelection(textarea as HTMLDivElement, 3, 5);
+    rerender(<ThreadComposer {...props} document={documentFromText("stale parent draft")} isSending />);
 
-    expect(textarea.value).toBe("日本語変換中");
-    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([3, 5]);
+    expect(textarea.textContent).toBe("日本語変換中");
+    expect([inlineMentionEditorSelection(textarea as HTMLDivElement).start, inlineMentionEditorSelection(textarea as HTMLDivElement).end]).toEqual([3, 5]);
   });
 
   it("reuses the full composer surface for thread formatting, attachments, and key resolution", async () => {
@@ -221,13 +261,13 @@ describe("Composer", () => {
     const { container } = render(
       <ThreadComposer
         canEdit
-        draft="thread body"
+        document={documentFromText("thread body")}
         draftKey="!room-a:$root-a"
         isSending={false}
         resolveComposerKeyAction={resolveComposerKeyAction}
         onAttachFiles={onAttachFiles}
-        onDraftChange={vi.fn()}
-        onSend={vi.fn()}
+        onDocumentChange={textChange(vi.fn())}
+        onSend={textSend(vi.fn())}
       />
     );
 
@@ -247,7 +287,7 @@ describe("Composer", () => {
     });
     await waitFor(() => expect(onAttachFiles).toHaveBeenCalledWith([file]));
 
-    fireEvent.keyDown(container.querySelector("textarea")!, {
+    fireEvent.keyDown(container.querySelector(".composer-inline-editor")!, {
       key: "Enter",
       code: "Enter",
       keyCode: 13
@@ -265,61 +305,46 @@ describe("Composer", () => {
     vi.useFakeTimers();
     const props = {
       canEdit: true,
-      draft: "thread A draft",
+      document: documentFromText("thread A draft"),
       draftKey: "!room-a:$root-a",
       isSending: false,
       resolveComposerKeyAction: vi.fn(async () => "noop" as const),
-      onDraftChange: vi.fn(),
-      onSend: vi.fn()
+      onDocumentChange: textChange(vi.fn()),
+      onSend: textSend(vi.fn())
     };
     const { rerender } = render(<ThreadComposer {...props} />);
-    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLTextAreaElement;
+    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLDivElement;
     fireEvent.compositionStart(textarea);
-    fireEvent.change(textarea, { target: { value: "private thread A conversion" } });
+    changeEditorText(textarea, "private thread A conversion");
     fireEvent.compositionEnd(textarea);
-
-    const valueDescriptor = Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      "value"
-    )!;
-    let imperativeWrites = 0;
-    Object.defineProperty(textarea, "value", {
-      configurable: true,
-      get: () => valueDescriptor.get!.call(textarea),
-      set: (value: string) => {
-        imperativeWrites += 1;
-        valueDescriptor.set!.call(textarea, value);
-      }
-    });
     rerender(
       <ThreadComposer
         {...props}
         draftKey="!room-b:$root-b"
-        draft="thread B draft"
+        document={documentFromText("thread B draft")}
       />
     );
     vi.runAllTimers();
 
-    expect(textarea.value).toBe("thread B draft");
-    expect(imperativeWrites).toBe(1);
+    expect(textarea.textContent).toBe("thread B draft");
   });
 
   it("sends the visible thread DOM draft after a stale parent rerender", () => {
     const onSend = vi.fn();
     const props = {
       canEdit: true,
-      draft: "",
+      document: documentFromText(""),
       draftKey: "!room-a:$root-a",
       isSending: false,
       resolveComposerKeyAction: vi.fn(async () => "send" as const),
-      onDraftChange: vi.fn(),
-      onSend
+      onDocumentChange: textChange(vi.fn()),
+      onSend: textSend(onSend)
     };
     const { rerender } = render(<ThreadComposer {...props} />);
-    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLTextAreaElement;
+    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLDivElement;
     fireEvent.compositionStart(textarea);
-    fireEvent.change(textarea, { target: { value: "visible reply" } });
-    rerender(<ThreadComposer {...props} draft="" />);
+    changeEditorText(textarea, "visible reply" );
+    rerender(<ThreadComposer {...props} document={documentFromText("")} />);
     fireEvent.compositionEnd(textarea);
     fireEvent.click(screen.getByRole("button", { name: /send/i }));
 
@@ -332,18 +357,18 @@ describe("Composer", () => {
     const onSend = vi.fn();
     const props = {
       canEdit: true,
-      draft: "",
+      document: documentFromText(""),
       draftKey: "!room-a:$root-a",
       isSending: false,
       resolveComposerKeyAction: vi.fn(async () => "send" as const),
-      onDraftChange: vi.fn(),
-      onSend
+      onDocumentChange: textChange(vi.fn()),
+      onSend: textSend(onSend)
     };
     const { rerender } = render(<ThreadComposer {...props} />);
-    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLTextAreaElement;
+    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLDivElement;
     fireEvent.compositionStart(textarea);
-    fireEvent.change(textarea, { target: { value: "visible keyboard reply" } });
-    rerender(<ThreadComposer {...props} draft="" />);
+    changeEditorText(textarea, "visible keyboard reply" );
+    rerender(<ThreadComposer {...props} document={documentFromText("")} />);
     fireEvent.compositionEnd(textarea);
     vi.runAllTimers();
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
@@ -362,21 +387,21 @@ describe("Composer", () => {
     render(
       <ThreadComposer
         canEdit
-        draft="captured"
+        document={documentFromText("captured")}
         draftKey="!room-a:$root-a"
         isSending={false}
         resolveComposerKeyAction={() => action}
-        onDraftChange={onDraftChange}
-        onSend={vi.fn()}
+        onDocumentChange={textChange(onDraftChange)}
+        onSend={textSend(vi.fn())}
       />
     );
-    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLTextAreaElement;
-    textarea.setSelectionRange(8, 8);
+    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLDivElement;
+    setInlineMentionEditorSelection(textarea as HTMLDivElement, 8, 8);
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
-    fireEvent.change(textarea, { target: { value: "newer input" } });
+    changeEditorText(textarea, "newer input" );
     await act(async () => resolveAction("insertNewline"));
 
-    expect(textarea.value).toBe("newer input");
+    expect(textarea.textContent).toBe("newer input");
     expect(onDraftChange).toHaveBeenCalledTimes(1);
     expect(onDraftChange).toHaveBeenLastCalledWith("newer input");
   });
@@ -392,20 +417,20 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Room"
-        value="captured"
+        document={documentFromText("captured")}
         resolveComposerKeyAction={() => action}
         onCancelReply={() => undefined}
-        onSend={vi.fn()}
-        onValueChange={onValueChange}
+        onSend={textSend(vi.fn())}
+        onDocumentChange={textChange(onValueChange)}
       />
     );
-    const textarea = container.querySelector("textarea")!;
-    textarea.setSelectionRange(8, 8);
+    const textarea = container.querySelector(".composer-inline-editor")!;
+    setInlineMentionEditorSelection(textarea as HTMLDivElement, 8, 8);
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
-    fireEvent.change(textarea, { target: { value: "newer input" } });
+    changeEditorText(textarea, "newer input" );
     await act(async () => resolveAction("insertNewline"));
 
-    expect(textarea.value).toBe("newer input");
+    expect(textarea.textContent).toBe("newer input");
     expect(onValueChange).toHaveBeenCalledTimes(1);
     expect(onValueChange).toHaveBeenLastCalledWith("newer input");
   });
@@ -421,16 +446,16 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Room"
-        value="intent snapshot"
+        document={documentFromText("intent snapshot")}
         resolveComposerKeyAction={() => action}
         onCancelReply={() => undefined}
-        onSend={onSend}
-        onValueChange={vi.fn()}
+        onSend={textSend(onSend)}
+        onDocumentChange={textChange(vi.fn())}
       />
     );
-    const textarea = container.querySelector("textarea")!;
+    const textarea = container.querySelector(".composer-inline-editor")!;
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
-    fireEvent.change(textarea, { target: { value: "later input" } });
+    changeEditorText(textarea, "later input" );
     await act(async () => resolveAction("send"));
 
     expect(onSend).toHaveBeenCalledWith("intent snapshot");
@@ -446,15 +471,15 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Room"
-        value={initial}
+        document={documentFromText(initial)}
         resolveComposerKeyAction={resolveComposerKeyAction}
         onCancelReply={() => undefined}
-        onSend={vi.fn()}
-        onValueChange={vi.fn()}
+        onSend={textSend(vi.fn())}
+        onDocumentChange={textChange(vi.fn())}
       />
     );
-    const textarea = container.querySelector("textarea")!;
-    textarea.value = visible;
+    const textarea = container.querySelector(".composer-inline-editor")!;
+    changeEditorText(textarea, visible);
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
     await Promise.resolve();
 
@@ -477,15 +502,15 @@ describe("Composer", () => {
       const { unmount } = render(
         <ThreadComposer
           canEdit
-          draft="captured"
+          document={documentFromText("captured")}
           draftKey="!room-a:$root-a"
           isSending={false}
           resolveComposerKeyAction={() => action}
-          onDraftChange={onDraftChange}
-          onSend={onSend}
+          onDocumentChange={textChange(onDraftChange)}
+          onSend={textSend(onSend)}
         />
       );
-      const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLTextAreaElement;
+      const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLDivElement;
       fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
       unmount();
       await act(async () => resolveAction(resolvedAction));
@@ -506,14 +531,14 @@ describe("Composer", () => {
         composerMode={{ kind: "reply", in_reply_to_event_id: "$reply" }}
         isSending={false}
         roomName="Room"
-        value="draft"
+        document={documentFromText("draft")}
         resolveComposerKeyAction={() => action}
         onCancelReply={onCancelReply}
-        onSend={vi.fn()}
-        onValueChange={vi.fn()}
+        onSend={textSend(vi.fn())}
+        onDocumentChange={textChange(vi.fn())}
       />
     );
-    fireEvent.keyDown(container.querySelector("textarea")!, {
+    fireEvent.keyDown(container.querySelector(".composer-inline-editor")!, {
       key: "Escape",
       code: "Escape",
       keyCode: 27
@@ -536,20 +561,20 @@ describe("Composer", () => {
         isSending={false}
         mentionCandidates={[mentionCandidates[2]!]}
         roomName="Room"
-        value="@a"
+        document={documentFromText("@a")}
         resolveComposerKeyAction={() => action}
         onCancelReply={() => undefined}
-        onSend={vi.fn()}
-        onValueChange={onValueChange}
+        onSend={textSend(vi.fn())}
+        onDocumentChange={textChange(onValueChange)}
       />
     );
-    const textarea = container.querySelector("textarea")!;
-    textarea.setSelectionRange(2, 2);
+    const textarea = container.querySelector(".composer-inline-editor")!;
+    setInlineMentionEditorSelection(textarea as HTMLDivElement, 2, 2);
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
-    fireEvent.change(textarea, { target: { value: "newer input" } });
+    changeEditorText(textarea, "newer input" );
     await act(async () => resolveAction("acceptAutocomplete"));
 
-    expect(textarea.value).toBe("newer input");
+    expect(textarea.textContent).toBe("newer input");
     expect(onValueChange).toHaveBeenCalledTimes(1);
   });
 
@@ -562,17 +587,17 @@ describe("Composer", () => {
     render(
       <ThreadComposer
         canEdit
-        draft="intent snapshot"
+        document={documentFromText("intent snapshot")}
         draftKey="!room-a:$root-a"
         isSending={false}
         resolveComposerKeyAction={() => action}
-        onDraftChange={vi.fn()}
-        onSend={onSend}
+        onDocumentChange={textChange(vi.fn())}
+        onSend={textSend(onSend)}
       />
     );
-    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLTextAreaElement;
+    const textarea = screen.getByRole("textbox", { name: /thread/i }) as HTMLDivElement;
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
-    fireEvent.change(textarea, { target: { value: "later input" } });
+    changeEditorText(textarea, "later input" );
     await act(async () => resolveAction("send"));
 
     expect(onSend).toHaveBeenCalledWith("intent snapshot");
@@ -587,15 +612,15 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Direct room"
-        value="日本語"
+        document={documentFromText("日本語")}
         resolveComposerKeyAction={resolveComposerKeyAction}
         onCancelReply={() => undefined}
-        onSend={onSend}
-        onValueChange={() => undefined}
+        onSend={textSend(onSend)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
 
-    const textarea = container.querySelector("textarea");
+    const textarea = container.querySelector(".composer-inline-editor");
     expect(textarea).not.toBeNull();
 
     fireEvent.compositionStart(textarea!);
@@ -620,14 +645,14 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Direct room"
-        value="日本語"
+        document={documentFromText("日本語")}
         resolveComposerKeyAction={resolveComposerKeyAction}
         onCancelReply={() => undefined}
-        onSend={onSend}
-        onValueChange={() => undefined}
+        onSend={textSend(onSend)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
-    const textarea = container.querySelector("textarea")!;
+    const textarea = container.querySelector(".composer-inline-editor")!;
 
     fireEvent.compositionStart(textarea);
     fireEvent.compositionEnd(textarea);
@@ -652,14 +677,14 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Room"
-        value="once"
+        document={documentFromText("once")}
         resolveComposerKeyAction={resolveComposerKeyAction}
         onCancelReply={() => undefined}
-        onSend={onSend}
-        onValueChange={vi.fn()}
+        onSend={textSend(onSend)}
+        onDocumentChange={textChange(vi.fn())}
       />
     );
-    const textarea = container.querySelector("textarea")!;
+    const textarea = container.querySelector(".composer-inline-editor")!;
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
     expect(resolveComposerKeyAction).toHaveBeenCalledTimes(1);
@@ -676,44 +701,30 @@ describe("Composer", () => {
       composerMode: { kind: "plain" as const },
       isSending: false,
       roomName: "Room A",
-      value: "old draft",
+      document: documentFromText("old draft"),
       draftKey: "room-a",
       resolveComposerKeyAction,
       onCancelReply: () => undefined,
-      onSend,
-      onValueChange
+      onSend: textSend(onSend),
+      onDocumentChange: textChange(onValueChange)
     };
     const { container, rerender } = render(<Composer {...props} />);
-    const textarea = container.querySelector("textarea")!;
+    const textarea = container.querySelector(".composer-inline-editor")!;
     fireEvent.compositionStart(textarea);
-    fireEvent.change(textarea, { target: { value: "旧変換中" } });
+    changeEditorText(textarea, "旧変換中" );
     fireEvent.compositionEnd(textarea);
 
-    const valueDescriptor = Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      "value"
-    )!;
-    let imperativeWrites = 0;
-    Object.defineProperty(textarea, "value", {
-      configurable: true,
-      get: () => valueDescriptor.get!.call(textarea),
-      set: (value: string) => {
-        imperativeWrites += 1;
-        valueDescriptor.set!.call(textarea, value);
-      }
-    });
     rerender(
       <Composer
         {...props}
         draftKey="room-b"
         roomName="Room B"
-        value="new room draft"
+        document={documentFromText("new room draft")}
       />
     );
 
-    expect(textarea.value).toBe("new room draft");
-    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([14, 14]);
-    expect(imperativeWrites).toBe(1);
+    expect(textarea.textContent).toBe("new room draft");
+    expect([inlineMentionEditorSelection(textarea as HTMLDivElement).start, inlineMentionEditorSelection(textarea as HTMLDivElement).end]).toEqual([14, 14]);
     expect(onValueChange).toHaveBeenCalledTimes(1);
 
     vi.runAllTimers();
@@ -721,7 +732,6 @@ describe("Composer", () => {
     await Promise.resolve();
     expect(resolveComposerKeyAction).toHaveBeenCalledTimes(1);
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(imperativeWrites).toBe(1);
     expect(onValueChange).toHaveBeenCalledTimes(1);
   });
 
@@ -734,20 +744,18 @@ describe("Composer", () => {
         composerMode={{ kind: "plain" }}
         isSending={false}
         roomName="Direct room"
-        value=""
+        document={documentFromText("")}
         onCancelReply={() => undefined}
-        onSend={onSend}
-        onValueChange={onValueChange}
+        onSend={textSend(onSend)}
+        onDocumentChange={textChange(onValueChange)}
       />
     );
 
-    const textarea = container.querySelector("textarea");
+    const textarea = container.querySelector(".composer-inline-editor");
     expect(textarea).not.toBeNull();
-    fireEvent.change(textarea!, {
-      target: { value: "pasted text that should appear immediately" }
-    });
+    changeEditorText(textarea!, "pasted text that should appear immediately" );
 
-    expect(textarea!.value).toBe("pasted text that should appear immediately");
+    expect(textarea!.textContent).toBe("pasted text that should appear immediately");
     expect(onValueChange).toHaveBeenCalledWith("pasted text that should appear immediately");
 
     fireEvent.click(screen.getByLabelText("Send"));
@@ -755,9 +763,44 @@ describe("Composer", () => {
     expect(onSend).toHaveBeenCalledWith("pasted text that should appear immediately");
   });
 
+  it("accepts a suggestion as the only inline mention entity without a duplicate pill", () => {
+    const onDocumentChange = vi.fn();
+    function Harness() {
+      const [document, setDocument] = useState<ComposerDocument>(documentFromText("@a"));
+      return (
+        <Composer
+          composerMode={{ kind: "plain" }}
+          document={document}
+          isSending={false}
+          mentionCandidates={[mentionCandidates[0]!]}
+          roomName="Direct room"
+          onCancelReply={() => undefined}
+          onDocumentChange={(next) => {
+            setDocument(next);
+            onDocumentChange(next);
+          }}
+          onSend={textSend(() => undefined)}
+        />
+      );
+    }
+    const { container } = render(<Harness />);
+
+    fireEvent.click(screen.getByRole("option", { name: /Alice/ }));
+
+    expect(onDocumentChange.mock.lastCall?.[0].inlines).toMatchObject([
+      {
+        kind: "mention",
+        target: { kind: "user", user_id: "@alice:example.invalid" },
+        display_label: "Alice"
+      },
+      { kind: "text", text: " " }
+    ]);
+    expect(container.querySelector(".composer-inline-mention")?.textContent).toBe("@Alice");
+    expect(container.querySelector(".composer-mention-pills")).toBeNull();
+  });
+
   it("moves the active mention row with arrows and accepts it with Tab", () => {
-    const onMentionIntentChange = vi.fn();
-    const onValueChange = vi.fn();
+    const onDocumentChange = vi.fn();
 
     const { container } = render(
       <Composer
@@ -765,34 +808,34 @@ describe("Composer", () => {
         isSending={false}
         mentionCandidates={mentionCandidates}
         roomName="Direct room"
-        value="@"
+        document={documentFromText("@")}
         onCancelReply={() => undefined}
-        onMentionIntentChange={onMentionIntentChange}
-        onSend={() => undefined}
-        onValueChange={onValueChange}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={onDocumentChange}
       />
     );
 
-    const textarea = container.querySelector("textarea");
-    expect(textarea).not.toBeNull();
+    const editor = container.querySelector(".composer-inline-editor");
+    expect(editor).not.toBeNull();
 
-    fireEvent.keyDown(textarea!, { key: "ArrowDown", code: "ArrowDown" });
+    fireEvent.keyDown(editor!, { key: "ArrowDown", code: "ArrowDown" });
     expect(
       screen.getByRole("option", { name: "Bob @bob:example.invalid" }).getAttribute("aria-selected")
     ).toBe("true");
 
-    fireEvent.keyDown(textarea!, { key: "Tab", code: "Tab" });
+    fireEvent.keyDown(editor!, { key: "Tab", code: "Tab" });
 
-    expect(onValueChange).toHaveBeenLastCalledWith("@Bob ");
-    expect(onMentionIntentChange).toHaveBeenCalledWith({
-      targets: [
-        {
+    expect(onDocumentChange.mock.lastCall?.[0].inlines).toMatchObject([
+      {
+        kind: "mention",
+        target: {
           kind: "user",
           user_id: "@bob:example.invalid",
           display_label: "Bob"
         }
-      ]
-    });
+      },
+      { kind: "text", text: " " }
+    ]);
   });
 
   it("requests Rust-owned mention results and renders their canonical order without local filtering", () => {
@@ -807,11 +850,11 @@ describe("Composer", () => {
         isSending={false}
         mentionCandidates={orderedCandidates}
         roomName="Direct room"
-        value="@alice"
+        document={documentFromText("@alice")}
         onCancelReply={() => undefined}
         onMentionQueryChange={onMentionQueryChange}
-        onSend={() => undefined}
-        onValueChange={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
 
@@ -830,10 +873,10 @@ describe("Composer", () => {
         mentionCandidates={[mentionCandidates[0]!]}
         mentionCandidatesLoading
         roomName="Direct room"
-        value="@"
+        document={documentFromText("@")}
         onCancelReply={() => undefined}
-        onSend={() => undefined}
-        onValueChange={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
 
@@ -849,15 +892,15 @@ describe("Composer", () => {
         isSending={false}
         mentionCandidates={mentionCandidates}
         roomName="Direct room"
-        value="@a"
+        document={documentFromText("@a")}
         resolveComposerKeyAction={resolveComposerKeyAction}
         onCancelReply={() => undefined}
-        onSend={() => undefined}
-        onValueChange={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
 
-    const textarea = container.querySelector("textarea");
+    const textarea = container.querySelector(".composer-inline-editor");
     expect(textarea).not.toBeNull();
     expect(screen.getByRole("listbox", { name: "Mention suggestions" })).toBeTruthy();
 
@@ -866,7 +909,7 @@ describe("Composer", () => {
       expect(screen.queryByRole("listbox", { name: "Mention suggestions" })).toBeNull()
     );
 
-    fireEvent.change(textarea!, { target: { value: "@al" } });
+    changeEditorText(textarea!, "@al" );
     expect(screen.getByRole("listbox", { name: "Mention suggestions" })).toBeTruthy();
   });
 
@@ -877,10 +920,10 @@ describe("Composer", () => {
         isSending={false}
         mentionCandidates={[mentionCandidates[2]!]}
         roomName="Direct room"
-        value="@room"
+        document={documentFromText("@room")}
         onCancelReply={() => undefined}
-        onSend={() => undefined}
-        onValueChange={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
       />
     );
 

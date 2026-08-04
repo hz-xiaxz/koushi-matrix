@@ -2,6 +2,7 @@
 // (and the `prelude`), not the module tree. Feature modules are crate-internal so
 // consumers depend on the stable root API rather than reaching into module internals.
 mod action;
+mod composer_document;
 mod composer_revision;
 mod composer_shortcuts;
 mod effect;
@@ -13,6 +14,7 @@ mod submission;
 mod typography_profile;
 
 pub use action::{AppAction, AuthSecret, IdentityResetAuthRequest, LoginRequest, RecoveryRequest};
+pub use composer_document::{ComposerDocument, ComposerInline};
 pub use composer_revision::{ComposerDraftRevision, ComposerDraftRevisionError};
 pub use composer_shortcuts::{
     ComposerFormattingOptions, ComposerKey, ComposerKeyEvent, ComposerKeyFacts,

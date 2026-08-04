@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserFakeApi } from "../backend/browserFakeApi";
 import { computeBrowserRoomListProjection } from "../backend/roomListProjection";
 import type { CurrentSessionStatusState, RoomSummary } from "../domain/types";
+import { elementAvatarColorIndex, elementAvatarInitial } from "../app/uiShared";
 import { EntityAvatar, Sidebar, TopBar, WorkspaceRail, avatarColorClass } from "./Shell";
 
 afterEach(() => {
@@ -17,6 +18,52 @@ afterEach(() => {
 });
 
 describe("EntityAvatar", () => {
+  it("matches Compound's first non-sigil grapheme without splitting Unicode clusters", () => {
+    expect(elementAvatarInitial("Research")).toBe("R");
+    expect(elementAvatarInitial("研究室")).toBe("研");
+    expect(elementAvatarInitial("#general")).toBe("g");
+    expect(elementAvatarInitial("+Physics")).toBe("P");
+    expect(elementAvatarInitial("@alice")).toBe("a");
+    expect(elementAvatarInitial("👩‍🔬 Lab")).toBe("👩‍🔬");
+    expect(elementAvatarInitial("👍🏽 team")).toBe("👍🏽");
+    expect(elementAvatarInitial("équipe")).toBe("é");
+    expect(elementAvatarInitial("#")).toBe("");
+    expect(elementAvatarInitial("")).toBe("");
+  });
+
+  it("matches Compound's six-bucket UTF-16 room-id color hash", () => {
+    expect(elementAvatarColorIndex("!abc:example.org")).toBe(2);
+    expect(elementAvatarColorIndex("!space:matrix.org")).toBe(1);
+    expect(elementAvatarColorIndex("!koushi:matrix.org")).toBe(4);
+  });
+
+  it("renders a Space-only Compound fallback without changing default avatar colors", () => {
+    const { rerender } = render(
+      <EntityAvatar
+        avatar={null}
+        className="workspace-button-avatar is-space"
+        colorSeed="!abc:example.org"
+        fallback="R"
+        fallbackMode="elementSpace"
+      />
+    );
+
+    const spaceFallback = screen.getByText("R");
+    expect(spaceFallback.classList.contains("element-space")).toBe(true);
+    expect(spaceFallback.classList.contains("compact-label")).toBe(false);
+    expect(spaceFallback.getAttribute("data-color")).toBe("2");
+
+    rerender(
+      <EntityAvatar
+        avatar={null}
+        className="room-avatar"
+        colorSeed="!abc:example.org"
+        fallback="R"
+      />
+    );
+    expect(screen.getByText("R").className).toContain(avatarColorClass("!abc:example.org"));
+  });
+
   it("maps stable avatar seeds to one of the eight palette classes", () => {
     expect(avatarColorClass("!alpha:example.invalid")).toMatch(/^avatar-c[1-8]$/);
     expect(avatarColorClass("!alpha:example.invalid")).toBe(
@@ -199,7 +246,7 @@ describe("Sidebar", () => {
     const titleRow = header?.querySelector<HTMLElement>(".workspace-header-title");
     const actionRow = header?.querySelector<HTMLElement>(".workspace-header-actions");
     expect(titleRow?.textContent).toContain("Synthetic Workspace");
-    expect(actionRow?.querySelectorAll("button")).toHaveLength(4);
+    expect(actionRow?.querySelectorAll("button")).toHaveLength(5);
     expect(titleRow?.contains(actionRow!)).toBe(false);
     expect(actionRow?.classList.contains("no-wrap")).toBe(true);
   });
@@ -619,6 +666,63 @@ describe("WorkspaceRail", () => {
     expect(screen.queryByRole("button", { name: "Activity" })).toBeNull();
   });
 
+  it("uses the effective Space name for one generated grapheme and preserves local icon precedence", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.getSnapshot();
+    const firstSpace = snapshot.sidebar.space_rail[0];
+    if (!firstSpace) {
+      throw new Error("expected fake snapshot to include a space");
+    }
+    firstSpace.display_name = "Original";
+
+    const view = render(
+      <WorkspaceRail
+        snapshot={snapshot}
+        spaceOverrides={{ [firstSpace.space_id]: { name: "👩‍🔬 Laboratory" } }}
+        onCreateSpace={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenUserSettings={() => undefined}
+        onReorderSpaces={() => undefined}
+        onSelectSpace={() => undefined}
+      />
+    );
+
+    const generated = within(screen.getByRole("button", { name: "👩‍🔬 Laboratory" })).getByText(
+      "👩‍🔬"
+    );
+    expect(generated.classList.contains("element-space")).toBe(true);
+    expect(generated.getAttribute("data-color")).toBe(
+      String(elementAvatarColorIndex(firstSpace.space_id))
+    );
+
+    view.rerender(
+      <WorkspaceRail
+        snapshot={snapshot}
+        spaceOverrides={{ [firstSpace.space_id]: { name: "Renamed", icon: "LOCAL" } }}
+        onCreateSpace={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenUserSettings={() => undefined}
+        onReorderSpaces={() => undefined}
+        onSelectSpace={() => undefined}
+      />
+    );
+    const local = within(screen.getByRole("button", { name: "Renamed" })).getByText("LOCAL");
+    expect(local.classList.contains("compact-label")).toBe(true);
+    expect(local.classList.contains("element-space")).toBe(false);
+  });
+
+  it("uses Compound Space geometry and light/dark/high-contrast decorative tokens", () => {
+    const css = readFileSync(join(process.cwd(), "src/styles.css"), "utf8");
+    expect(css).toMatch(/\.workspace-button-avatar\.is-space\s*\{[^}]*border-radius:\s*25%/s);
+    expect(css).toMatch(/\.avatar-fallback\.element-space\s*\{[^}]*text-transform:\s*uppercase/s);
+    for (let index = 1; index <= 6; index += 1) {
+      expect(css).toContain(`--space-avatar-bg-${index}:`);
+      expect(css).toContain(`--space-avatar-text-${index}:`);
+      expect(css).toContain(`.avatar-fallback.element-space[data-color="${index}"]`);
+    }
+    expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*\.avatar-fallback\.element-space/);
+  });
+
   it("does not render mention or online-style dots on space rail buttons", async () => {
     const api = createBrowserFakeApi();
     const snapshot = await api.getSnapshot();
@@ -668,9 +772,15 @@ describe("Space Members navigation", () => {
       />
     );
 
-    const members = screen.getByRole("button", { name: /Members/ });
-    expect(members.textContent).toContain("26 · +3");
-    expect(members.nextElementSibling?.classList.contains("room-list-controls")).toBe(true);
+    const members = screen.getByRole("button", {
+      name: "Members, 26 joined, 3 only in child rooms"
+    });
+    const actionRow = document.querySelector(".workspace-header-actions");
+    expect(actionRow?.firstElementChild).toBe(members);
+    expect(members.textContent).toBe("26 · +3");
+    expect(members.querySelector(".space-members-nav-warning")?.textContent).toBe(" · +3");
+    expect(document.querySelector(".sidebar-scroll .space-members-nav")).toBeNull();
+    expect(actionRow?.querySelectorAll("button")).toHaveLength(5);
     fireEvent.click(members);
     expect(onOpenSpaceMembers).toHaveBeenCalledTimes(1);
   });
@@ -697,8 +807,8 @@ describe("Space Members navigation", () => {
     );
 
     const members = screen.getByRole("button", { name: /Members/ });
-    expect(members.textContent).toContain("26");
-    expect(members.textContent).not.toContain("+0");
+    expect(members.textContent).toBe("26");
+    expect(members.querySelector(".space-members-nav-warning")).toBeNull();
   });
 
   it("does not show the Space-only Members entry on account Home", async () => {

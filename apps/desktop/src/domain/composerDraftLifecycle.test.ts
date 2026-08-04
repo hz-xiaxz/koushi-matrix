@@ -7,6 +7,7 @@ import {
   type ComposerDraftLifecycleBackend,
   type ComposerDraftScope
 } from "./composerDraftLifecycle";
+import { documentFromText } from "./composerDocument";
 import { parseComposerDraftRevision } from "./composerDraftRevision";
 
 function account(name: string) {
@@ -181,7 +182,7 @@ describe("composer draft lifecycle registry", () => {
       const scope = main(owner, "reserved-room");
       const registry = createComposerDraftLifecycleRegistry(backendAt("1"));
       const lease = await registry.activate(scope);
-      registry.setActiveOverlay(scope, "submitted", revision(1));
+      registry.setActiveOverlay(scope, documentFromText("submitted"), revision(1));
       const capture = registry.beginOperation(scope);
 
       expect(registry.reserveAcceptedRevision(capture, revision(1))).toBe("2");
@@ -205,20 +206,20 @@ describe("composer draft lifecycle registry", () => {
     const scope = main(owner, "accepted-clear-room");
     const registry = createComposerDraftLifecycleRegistry(backendAt("1"));
     const lease = await registry.activate(scope);
-    registry.setActiveOverlay(scope, "submitted", revision(1));
+    registry.setActiveOverlay(scope, documentFromText("submitted"), revision(1));
     const capture = registry.beginOperation(scope);
     expect(registry.reserveAcceptedRevision(capture, revision(1))).toBe("2");
     expect(registry.observe(scope, revision(2), revision(2), false)).toBe(true);
 
     const newerRevision = registry.nextDraft(scope);
-    registry.setActiveOverlay(scope, "newer input", newerRevision);
+    registry.setActiveOverlay(scope, documentFromText("newer input"), newerRevision);
 
     expect(newerRevision).toBe("3");
     expect(
       registry.settleOperationCompletion(capture, lease.leaseId, revision(1))
     ).toBe(false);
     expect(registry.activeOverlay(scope)).toEqual({
-      value: "newer input",
+      document: documentFromText("newer input"),
       revision: "3"
     });
     expect(registry.snapshot(scope)).toMatchObject({
@@ -232,7 +233,7 @@ describe("composer draft lifecycle registry", () => {
     const scope = main(owner, "overlay-room");
     const registry = createComposerDraftLifecycleRegistry(backendAt("1"));
     await registry.activate(scope);
-    registry.setActiveOverlay(scope, "submitted", revision(1));
+    registry.setActiveOverlay(scope, documentFromText("submitted"), revision(1));
     const capture = registry.beginOperation(scope);
     registry.reserveAcceptedRevision(capture, revision(1));
 
@@ -240,10 +241,10 @@ describe("composer draft lifecycle registry", () => {
     expect(registry.activeOverlay(scope)).toBeNull();
 
     const newerRevision = registry.nextDraft(scope);
-    registry.setActiveOverlay(scope, "newer", newerRevision);
+    registry.setActiveOverlay(scope, documentFromText("newer"), newerRevision);
     expect(registry.observe(scope, revision(3), revision(2), true)).toBe(false);
     expect(registry.activeOverlay(scope)).toEqual({
-      value: "newer",
+      document: documentFromText("newer"),
       revision: "3"
     });
   });
@@ -312,7 +313,7 @@ describe("composer draft lifecycle registry", () => {
     await registry.activate(protectedScopes[3]);
     registry.beginOperation(protectedScopes[3]);
     registry.observe(protectedScopes[4], revision(1), revision(0), false);
-    registry.setActiveOverlay(protectedScopes[4], "typed", revision(1));
+    registry.setActiveOverlay(protectedScopes[4], documentFromText("typed"), revision(1));
 
     for (let index = 0; index < 140; index += 1) {
       registry.observe(main(owner, `churn-main-${index}`), revision(0), revision(0), false);
@@ -422,7 +423,7 @@ describe("composer draft lifecycle registry", () => {
     const owner = account("retired");
     const registry = createComposerDraftLifecycleRegistry(backendAt("4", "3"));
     const scope = main(owner, "retired-room");
-    registry.setActiveOverlay(scope, "new input", revision(4));
+    registry.setActiveOverlay(scope, documentFromText("new input"), revision(4));
     await registry.activate(scope);
     const capture = registry.beginOperation(scope);
 
@@ -475,7 +476,7 @@ describe("composer draft lifecycle registry", () => {
     registry.observe(scope, revision(12), revision(11), false);
 
     const activation = registry.activate(scope);
-    registry.setActiveOverlay(scope, "typed during acquire", null);
+    registry.setActiveOverlay(scope, documentFromText("typed during acquire"), null);
     acquire.resolve({
       rendererGeneration: "1",
       leaseId: "lease",

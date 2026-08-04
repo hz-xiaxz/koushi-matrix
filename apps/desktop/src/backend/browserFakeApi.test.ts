@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { createBrowserFakeApi } from "./browserFakeApi";
+import { documentFromText, insertMention } from "../domain/composerDocument";
 import { parseComposerDraftRevision as revision } from "../domain/composerDraftRevision";
 import type { ComposerTarget, DesktopSnapshot, LiveReadReceipt } from "../domain/types";
 
@@ -525,7 +526,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       "submission-same",
       roomId,
-      "original"
+      documentFromText("original")
     );
     const replay = await api.sendText(
       account,
@@ -533,7 +534,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       "submission-same",
       roomId,
-      "changed"
+      documentFromText("changed")
     );
 
     expect(first.outcome).toBe("accepted");
@@ -542,6 +543,39 @@ describe("BrowserFakeApi settings preview", () => {
     expect(replay.snapshot.timeline.at(-1)?.body).toBe("original");
     expect(replay.snapshot.state.ui.timeline.composer.pending_submission_id).toBeNull();
     expect(replay.snapshot.state.ui.timeline.composer.accepted_submission_ids).toContain("submission-same");
+  });
+
+  test("draft snapshots retain structured mention identity instead of inferring display text", async () => {
+    const api = createBrowserFakeApi();
+    const roomId = "!room-alpha:example.invalid";
+    await api.selectRoom(roomId);
+    const account = await readyAccount(api);
+    const { generation, lease } = await beginComposerLease(api, account, {
+      kind: "main",
+      room_id: roomId
+    });
+    const target = {
+      kind: "user" as const,
+      user_id: "@alice:example.invalid",
+      display_label: "Same Name"
+    };
+    const document = insertMention(documentFromText("hello "), 6, 6, target, "Same Name");
+
+    const snapshot = await api.setComposerDraft(
+      account,
+      lease.leaseId,
+      generation,
+      roomId,
+      document,
+      revision("1")
+    );
+
+    expect(snapshot.state.ui.timeline.composer.draft).toBe("hello @Same Name");
+    expect(snapshot.state.ui.timeline.composer.document).toEqual(document);
+    expect(snapshot.state.ui.timeline.composer.document.inlines.at(-1)).toMatchObject({
+      kind: "mention",
+      target: { user_id: "@alice:example.invalid" }
+    });
   });
 
   test("leases preserve exact large revisions and expose the Rust-owned clear token", async () => {
@@ -568,7 +602,7 @@ describe("BrowserFakeApi settings preview", () => {
       lease.leaseId,
       rendererGeneration,
       roomId,
-      "captured",
+      documentFromText("captured"),
       captured
     );
     const response = await api.sendText(
@@ -577,8 +611,7 @@ describe("BrowserFakeApi settings preview", () => {
       rendererGeneration,
       "large-revision-send",
       roomId,
-      "captured",
-      { targets: [] },
+      documentFromText("captured"),
       captured
     );
 
@@ -614,7 +647,7 @@ describe("BrowserFakeApi settings preview", () => {
       mainLease.leaseId,
       generation,
       roomId,
-      "main accepted",
+      documentFromText("main accepted"),
       revision("1")
     );
     const sent = await api.sendText(
@@ -623,8 +656,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       "revision-main",
       roomId,
-      "main accepted",
-      { targets: [] },
+      documentFromText("main accepted"),
       revision("1")
     );
     expect(sent.outcome).toBe("accepted");
@@ -637,7 +669,7 @@ describe("BrowserFakeApi settings preview", () => {
       mainLease.leaseId,
       generation,
       roomId,
-      "main accepted",
+      documentFromText("main accepted"),
       revision("1")
     );
     expect(staleMain.state.ui.timeline.composer.draft).toBe("");
@@ -646,7 +678,7 @@ describe("BrowserFakeApi settings preview", () => {
       mainLease.leaseId,
       generation,
       roomId,
-      "immediate next",
+      documentFromText("immediate next"),
       revision("3")
     );
     expect(nextMain.state.ui.timeline.composer.draft).toBe("immediate next");
@@ -656,8 +688,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       "revision-main-late",
       roomId,
-      "main accepted",
-      { targets: [] },
+      documentFromText("main accepted"),
       revision("1")
     );
     expect(lateMainAcceptance.snapshot.state.ui.timeline.composer).toMatchObject({
@@ -679,7 +710,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       roomId,
       rootId,
-      "thread accepted",
+      documentFromText("thread accepted"),
       revision("5")
     );
     const threadSent = await api.sendThreadReply(
@@ -689,8 +720,7 @@ describe("BrowserFakeApi settings preview", () => {
       "revision-thread",
       roomId,
       rootId,
-      "thread accepted",
-      { targets: [] },
+      documentFromText("thread accepted"),
       revision("5")
     );
     expect(threadSent.outcome).toBe("accepted");
@@ -700,7 +730,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       roomId,
       rootId,
-      "thread accepted",
+      documentFromText("thread accepted"),
       revision("5")
     );
     expect(staleThread.state.ui.thread).toMatchObject({
@@ -713,7 +743,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       roomId,
       rootId,
-      "immediate thread next",
+      documentFromText("immediate thread next"),
       revision("7")
     );
     const lateThreadAcceptance = await api.sendThreadReply(
@@ -723,8 +753,7 @@ describe("BrowserFakeApi settings preview", () => {
       "revision-thread-late",
       roomId,
       rootId,
-      "thread accepted",
-      { targets: [] },
+      documentFromText("thread accepted"),
       revision("5")
     );
     expect(lateThreadAcceptance.snapshot.state.ui.thread).toMatchObject({
@@ -749,7 +778,7 @@ describe("BrowserFakeApi settings preview", () => {
       lease.leaseId,
       generation,
       roomId,
-      "captured reply",
+      documentFromText("captured reply"),
       revision("1")
     );
     await api.setComposerDraft(
@@ -757,7 +786,7 @@ describe("BrowserFakeApi settings preview", () => {
       lease.leaseId,
       generation,
       roomId,
-      "newer draft",
+      documentFromText("newer draft"),
       revision("2")
     );
     const response = await api.sendReply(
@@ -767,8 +796,7 @@ describe("BrowserFakeApi settings preview", () => {
       "late-reply-acceptance",
       roomId,
       rootId,
-      "captured reply",
-      { targets: [] },
+      documentFromText("captured reply"),
       revision("1")
     );
 
@@ -814,7 +842,7 @@ describe("BrowserFakeApi settings preview", () => {
         mainLease.leaseId,
         generation,
         roomId,
-        "must not cross accounts",
+        documentFromText("must not cross accounts"),
         revision("1")
       )
     ).rejects.toThrow("composer draft lease mismatch");
@@ -825,7 +853,7 @@ describe("BrowserFakeApi settings preview", () => {
         generation,
         roomId,
         rootId,
-        "must not cross accounts",
+        documentFromText("must not cross accounts"),
         revision("1")
       )
     ).rejects.toThrow("composer draft lease mismatch");
@@ -836,7 +864,7 @@ describe("BrowserFakeApi settings preview", () => {
         generation,
         "stale-main-send",
         roomId,
-        "must not send"
+        documentFromText("must not send")
       )
     ).rejects.toThrow("composer draft lease mismatch");
     await expect(
@@ -847,7 +875,7 @@ describe("BrowserFakeApi settings preview", () => {
         "stale-thread-send",
         roomId,
         rootId,
-        "must not send"
+        documentFromText("must not send")
       )
     ).rejects.toThrow("composer draft lease mismatch");
     await expect(
@@ -908,7 +936,7 @@ describe("BrowserFakeApi settings preview", () => {
       "reply-same",
       roomId,
       root.event_id,
-      "original"
+      documentFromText("original")
     );
     const replay = await api.sendReply(
       account,
@@ -917,7 +945,7 @@ describe("BrowserFakeApi settings preview", () => {
       "reply-same",
       roomId,
       root.event_id,
-      "changed"
+      documentFromText("changed")
     );
     expect(replay.snapshot.timeline.find((item) => item.event_id === root.event_id)?.reply_count).toBe(before + 1);
   });
@@ -941,7 +969,7 @@ describe("BrowserFakeApi settings preview", () => {
       "thread-unknown",
       roomId,
       rootId,
-      "original"
+      documentFromText("original")
     );
     const replay = await api.sendThreadReply(
       account,
@@ -950,7 +978,7 @@ describe("BrowserFakeApi settings preview", () => {
       "thread-unknown",
       roomId,
       rootId,
-      "edited"
+      documentFromText("edited")
     );
     expect(replay.transactionId).toBe(first.transactionId);
     const thread = replay.snapshot.state.ui.thread;
@@ -978,7 +1006,7 @@ describe("BrowserFakeApi settings preview", () => {
         generation,
         `bounded-${index}`,
         roomId,
-        `body-${index}`
+        documentFromText(`body-${index}`)
       );
     }
     const bounded = await api.getSnapshot();
@@ -992,7 +1020,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       "bounded-1",
       roomId,
-      "deduped"
+      documentFromText("deduped")
     );
     expect((await api.getSnapshot()).timeline).toHaveLength(before);
     await api.sendText(
@@ -1001,7 +1029,7 @@ describe("BrowserFakeApi settings preview", () => {
       generation,
       "bounded-0",
       roomId,
-      "evicted"
+      documentFromText("evicted")
     );
     expect((await api.getSnapshot()).timeline).toHaveLength(before + 1);
   });
@@ -2083,7 +2111,7 @@ describe("BrowserFakeApi settings preview", () => {
     const roomId = "!room-alpha:example.invalid";
     await api.selectRoom(roomId);
 
-    const edited = await api.editMessage(roomId, "$budget-file", "Edited caption.");
+    const edited = await api.editMessage(roomId, "$budget-file", documentFromText("Edited caption."));
 
     expect(
       edited.timeline.find((message) => message.event_id === "$budget-file")

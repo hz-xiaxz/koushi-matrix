@@ -40,7 +40,7 @@ async fn composer_revision_exhaustion_blocks_scheduled_send_before_store_or_matr
             request_id: conn.next_request_id(),
             expected_account: session_key(),
             room_id: "!room:example.test".to_owned(),
-            draft: "keep scheduled draft".to_owned(),
+            document: "keep scheduled draft".into(),
             revision: ComposerDraftRevision::MAX,
         }),
     )
@@ -184,7 +184,7 @@ async fn app_command_schedules_cancel_and_reschedules_local_fallback_send() {
             },
             AppAction::ComposerDraftChanged {
                 room_id: "!room:example.test".to_owned(),
-                draft: "scheduled body".to_owned(),
+                document: "scheduled body".into(),
             },
         ])
         .await;

@@ -9,9 +9,9 @@ use koushi_core::event::{AccountEvent, CoreEvent};
 use koushi_core::ids::{AccountKey, TimelineKey};
 use koushi_key::SessionKeyId;
 use koushi_state::{
-    AuthSecret, DisplayPlatform, IdentityResetAuthRequest, LoginRequest, MentionIntent,
-    PresenceKind, RecoveryRequest, RoomTagKind, TimelineScrollAnchor, TimelineScrollAnchorEdge,
-    VerificationCancelReason, VerificationTarget,
+    AuthSecret, ComposerDocument, ComposerInline, DisplayPlatform, IdentityResetAuthRequest,
+    LoginRequest, MentionTarget, PresenceKind, RecoveryRequest, RoomTagKind, TimelineScrollAnchor,
+    TimelineScrollAnchorEdge, VerificationCancelReason, VerificationTarget,
 };
 
 mod support;
@@ -61,8 +61,7 @@ fn secret_bearing_commands_redact_debug() {
         request_id: fake_request_id(),
         key: key.clone(),
         transaction_id: "txn-1".to_owned(),
-        body: BODY.to_owned(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(BODY.to_owned()),
     });
     let toggle_reaction = CoreCommand::Timeline(TimelineCommand::ToggleReaction {
         request_id: fake_request_id(),
@@ -87,8 +86,7 @@ fn secret_bearing_commands_redact_debug() {
         request_id: fake_request_id(),
         key: key.clone(),
         event_id: "$evt".to_owned(),
-        body: BODY.to_owned(),
-        mentions: koushi_state::MentionIntent::default(),
+        document: ComposerDocument::from_plain_text(BODY.to_owned()),
     });
     let search = CoreCommand::Search(SearchCommand::Query {
         request_id: fake_request_id(),
@@ -105,7 +103,18 @@ fn secret_bearing_commands_redact_debug() {
         },
         room_id: "!room:example.test".to_owned(),
         root_event_id: "$root".to_owned(),
-        draft: BODY.to_owned(),
+        document: ComposerDocument::new(vec![
+            ComposerInline::Text {
+                text: BODY.to_owned(),
+            },
+            ComposerInline::Mention {
+                target: MentionTarget::User {
+                    user_id: "@private-mention:example.test".to_owned(),
+                    display_label: "Private Mention".to_owned(),
+                },
+                display_label: "Private Mention".to_owned(),
+            },
+        ]),
         revision: 1.into(),
     });
     let scheduled_send = CoreCommand::App(AppCommand::ScheduleSend {
@@ -152,7 +161,15 @@ fn secret_bearing_commands_redact_debug() {
         (&redact_reaction, vec!["👍", "$evt", "$reaction"]),
         (&edit, vec![BODY]),
         (&search, vec![QUERY]),
-        (&thread_draft, vec![BODY, "$root"]),
+        (
+            &thread_draft,
+            vec![
+                BODY,
+                "$root",
+                "@private-mention:example.test",
+                "Private Mention",
+            ],
+        ),
         (
             &scheduled_send,
             vec![

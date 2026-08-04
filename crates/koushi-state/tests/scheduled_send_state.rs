@@ -63,8 +63,8 @@ fn scheduled_thread_send_clears_only_the_captured_thread_draft() {
             .composer_drafts
             .rooms
             .get("room-a")
-            .map(String::as_str),
-        Some("room draft")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("room draft".to_owned())
     );
     assert!(
         state
@@ -95,7 +95,7 @@ fn scheduled_send_acceptance_fences_delayed_draft_persistence() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "scheduled body".to_owned(),
+            document: "scheduled body".into(),
             revision: 4.into(),
         },
     );
@@ -111,7 +111,7 @@ fn scheduled_send_acceptance_fences_delayed_draft_persistence() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "scheduled body".to_owned(),
+            document: "scheduled body".into(),
             revision: 4.into(),
         },
     );
@@ -157,7 +157,7 @@ fn scheduled_send_create_clears_room_draft_and_projects_selected_room() {
         &mut state,
         AppAction::ComposerDraftChanged {
             room_id: "room-a".to_owned(),
-            draft: "scheduled body".to_owned(),
+            document: "scheduled body".into(),
         },
     );
 

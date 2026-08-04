@@ -5,9 +5,9 @@ use std::fmt;
 
 use koushi_state::{
     ActivityStream, ActivityTab, AppState, AttachmentResult, AvatarImage, AvatarThumbnailState,
-    CrossSigningStatus, DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary,
-    IdentityResetState, InviteDestinationResult, JapaneseCatalogProfile, KeyBackupStatus,
-    LocalEncryptionHealth, MediaTransferProgress, MentionIntent, NativeAttentionDispatchId,
+    ComposerDocument, CrossSigningStatus, DirectoryQuery, DirectoryRoomPreview,
+    DirectoryRoomSummary, IdentityResetState, InviteDestinationResult, JapaneseCatalogProfile,
+    KeyBackupStatus, LocalEncryptionHealth, MediaTransferProgress, NativeAttentionDispatchId,
     NativeAttentionSummary, OperationFailureKind, PinnedEvent, PresenceKind, ProfileState,
     ReplyQuote, RoomModerationAction, RoomSettingsSnapshot, RoomTagKind, SessionState,
     SpaceMemberInviteOutcome, SubmissionId, ThreadsListItem, VerificationFlowState,
@@ -1494,10 +1494,10 @@ pub struct TimelineMessageActions {
     pub can_view_source: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permalink: Option<String>,
-    /// Effective mention intent projected from the current event content for
-    /// edit composers. It is action metadata rather than rendered message text.
+    /// Identity-bearing document for the shared inline edit surface. Plain-only
+    /// legacy events remain text-only rather than guessing mention positions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub editable_mentions: Option<MentionIntent>,
+    pub editable_document: Option<ComposerDocument>,
 }
 
 impl fmt::Debug for TimelineMessageActions {
@@ -1513,11 +1513,11 @@ impl fmt::Debug for TimelineMessageActions {
                 &self.permalink.as_ref().map(|_| "Permalink(..)"),
             )
             .field(
-                "editable_mentions",
+                "editable_document",
                 &self
-                    .editable_mentions
+                    .editable_document
                     .as_ref()
-                    .map(|mentions| mentions.targets.len()),
+                    .map(|document| document.mention_intent().targets.len()),
             )
             .finish()
     }
@@ -1543,7 +1543,7 @@ pub fn message_actions_for_timeline_item(
         can_permalink: permalink.is_some(),
         can_view_source: !event_id.trim().is_empty(),
         permalink,
-        editable_mentions: None,
+        editable_document: None,
     }
 }
 

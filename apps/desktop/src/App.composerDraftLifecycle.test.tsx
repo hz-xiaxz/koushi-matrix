@@ -21,6 +21,11 @@ async function renderAppWithApi(api: DesktopApi) {
   return render(<App />);
 }
 
+function changeInlineEditorText(editor: HTMLElement, value: string): void {
+  editor.textContent = value;
+  fireEvent.input(editor);
+}
+
 async function clearProjectedSnapshot() {
   const { clearAppStoreSnapshot } = await import("./domain/appStore");
   clearAppStoreSnapshot();
@@ -51,16 +56,16 @@ describe("App composer draft lifecycle", () => {
     const composer = await screen.findByRole("textbox", { name: "Message composer" });
     await act(async () => {
       fireEvent.compositionStart(composer);
-      fireEvent.change(composer, { target: { value: "sent text" } });
+      changeInlineEditorText(composer, "sent text");
     });
-    expect((composer as HTMLTextAreaElement).value).toBe("sent text");
+    expect(composer.textContent).toBe("sent text");
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: "Send" }));
     });
 
     await waitFor(() =>
-      expect((screen.getByRole("textbox", { name: "Message composer" }) as HTMLTextAreaElement).value).toBe("")
+      expect(screen.getByRole("textbox", { name: "Message composer" }).textContent).toBe("")
     );
   });
 
@@ -88,7 +93,7 @@ describe("App composer draft lifecycle", () => {
       await renderAppWithApi(api);
       const composer = await screen.findByRole("textbox", { name: "Message composer" });
       await act(async () => {
-        fireEvent.change(composer, { target: { value: "9007199254740993" } });
+        changeInlineEditorText(composer, "9007199254740993");
       });
       const send = await screen.findByRole("button", { name: "Send" });
       await act(async () => {
@@ -105,12 +110,12 @@ describe("App composer draft lifecycle", () => {
         await act(async () => setAppStoreSnapshot(accepted.snapshot));
       }
       await act(async () => {
-        fireEvent.change(composer, { target: { value: "9007199254740994" } });
+        changeInlineEditorText(composer, "9007199254740994");
       });
       await act(async () => pending.resolve(accepted));
 
       await waitFor(() =>
-        expect((composer as HTMLTextAreaElement).value).toBe("9007199254740994")
+        expect(composer.textContent).toBe("9007199254740994")
       );
     }
   );

@@ -751,7 +751,24 @@
       "thread": {
         "composer": {
           "accepted_submission_ids": [],
-          "draft": "",
+          "document": {
+            "inlines": [
+              {
+                "kind": "text",
+                "text": "Thread "
+              },
+              {
+                "display_label": "room",
+                "kind": "mention",
+                "target": {
+                  "display_label": "room",
+                  "kind": "roomMention"
+                }
+              }
+            ],
+            "version": 2
+          },
+          "draft": "Thread @room",
           "draft_revision": "340282366920938463463374607431768211455",
           "last_accepted_clear_revision": "340282366920938463463374607431768211455",
           "mode": "Plain",
@@ -792,7 +809,25 @@
           "accepted_submission_ids": [
             "accepted-contract"
           ],
-          "draft": "",
+          "document": {
+            "inlines": [
+              {
+                "kind": "text",
+                "text": "Hello "
+              },
+              {
+                "display_label": "Fixture User",
+                "kind": "mention",
+                "target": {
+                  "display_label": "Fixture User",
+                  "kind": "user",
+                  "user_id": "@fixture:example.invalid"
+                }
+              }
+            ],
+            "version": 2
+          },
+          "draft": "Hello @Fixture User",
           "draft_revision": "340282366920938463463374607431768211455",
           "last_accepted_clear_revision": "340282366920938463463374607431768211455",
           "mode": "Plain",

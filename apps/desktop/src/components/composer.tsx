@@ -26,36 +26,30 @@ import {
 } from "lucide-react";
 import { t } from "../i18n/messages";
 import type {
+  ComposerDocument,
   ComposerSurface,
-  MentionIntent,
   ResolveComposerKeyAction
 } from "../domain/types";
 import {
   IS_MAC_PLATFORM,
   applyMacEmacsAction,
   composerKeyEventFromDom,
-  insertNewlineAtSelection,
   macEmacsActionFromEvent,
   shouldLetNativeImeHandleComposerKeyEvent,
   shouldResolveComposerKeyEvent
 } from "../domain/composerKeyEvents";
 import { EmojiPicker } from "./EmojiPicker";
-import { ImeOwnedTextArea, ImeSafeForm } from "./ImeTextControl";
 import {
-  canApplyResolvedComposerAction,
-  isComposerImeEnter,
-  useComposerKeyIntentSnapshot,
-  useCompositionOwnedTextarea
-} from "../domain/compositionLifecycle";
+  ImeInlineMentionEditor,
+  ImeSafeForm,
+  inlineMentionEditorSelection,
+  setInlineMentionEditorSelection
+} from "./ImeTextControl";
 import {
   ICON_SIZE,
-  EMPTY_MENTION_INTENT,
   ignoreComposerKeyAction,
   activeMentionQuery,
-  appendMentionTarget,
-  mentionDraftToken,
   mentionTargetKey,
-  mentionPillLabel,
   peopleFacingLabel,
   initials,
   defaultScheduleDateTimeValue,
@@ -69,6 +63,15 @@ import {
   filesFromAttachmentTransfer,
   ingestAttachmentFiles
 } from "../domain/attachmentIngestion";
+import {
+  copyDocumentRange,
+  documentLength,
+  insertMention,
+  pasteDocumentText,
+  plainBodyFromDocument,
+  replaceDocumentRange,
+  type DocumentSelection
+} from "../domain/composerDocument";
 
 export const Composer = memo(function Composer({
   surface = "main",
@@ -80,21 +83,20 @@ export const Composer = memo(function Composer({
   mathModeEnabled = true,
   mentionCandidates = [],
   mentionCandidatesLoading = false,
-  mentionIntent = EMPTY_MENTION_INTENT,
   resolveComposerKeyAction = ignoreComposerKeyAction,
   draftKey = "default",
   ariaLabel = t("composer.messageComposer"),
+  document,
   placeholder,
   roomName,
-  value,
+  onCancel,
   onCancelReply,
   onAttachFiles = async () => undefined,
-  onMentionIntentChange = () => undefined,
+  onDocumentChange,
   onMathModeChange = () => undefined,
   onMentionQueryChange = () => undefined,
   onScheduleSend,
-  onSend,
-  onValueChange
+  onSend
 }: {
   surface?: ComposerSurface;
   editorOnly?: boolean;
@@ -105,21 +107,20 @@ export const Composer = memo(function Composer({
   mathModeEnabled?: boolean;
   mentionCandidates?: MentionCandidate[];
   mentionCandidatesLoading?: boolean;
-  mentionIntent?: MentionIntent;
   resolveComposerKeyAction?: ResolveComposerKeyAction;
   draftKey?: string;
   ariaLabel?: string;
+  document: ComposerDocument;
   placeholder?: string;
   roomName: string;
-  value: string;
+  onCancel?: () => void;
   onCancelReply: () => void;
   onAttachFiles?: (files: File[]) => void | Promise<void>;
+  onDocumentChange: (document: ComposerDocument) => void;
   onMathModeChange?: (enabled: boolean) => void | Promise<void>;
-  onMentionIntentChange?: (intent: MentionIntent) => void;
   onMentionQueryChange?: (query: string | null) => void;
-  onScheduleSend?: (sendAtMs: number, body: string) => void | Promise<void>;
-  onSend: (body: string) => void | Promise<void>;
-  onValueChange: (value: string) => void;
+  onScheduleSend?: (sendAtMs: number, document: ComposerDocument) => void | Promise<void>;
+  onSend: (document: ComposerDocument) => void | Promise<void>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
@@ -129,15 +130,35 @@ export const Composer = memo(function Composer({
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [scheduleValue, setScheduleValue] = useState(() => defaultScheduleDateTimeValue());
-  const [localValue, setLocalValue] = useState(value);
+  const [localDocument, setLocalDocument] = useState(document);
+  const [localDraftKey, setLocalDraftKey] = useState(draftKey);
+  const [documentSelection, setDocumentSelection] = useState<DocumentSelection>(() => {
+    const end = documentLength(document);
+    return { start: end, end };
+  });
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
-  const imeTextControl = useCompositionOwnedTextarea(value, draftKey);
-  const { textareaRef, lifecycle: imeComposition } = imeTextControl;
-  const captureKeyIntent = useComposerKeyIntentSnapshot(imeComposition);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const documentEpochRef = useRef(0);
+  const keyResolutionPendingRef = useRef(false);
+  const mountedRef = useRef(true);
   const autocompleteListboxId = useId();
-  const activeMention = activeMentionQuery(localValue);
+  if (localDraftKey !== draftKey) {
+    const end = documentLength(document);
+    setLocalDraftKey(draftKey);
+    setLocalDocument(document);
+    setDocumentSelection({ start: end, end });
+    documentEpochRef.current += 1;
+  }
+  const localValue = plainBodyFromDocument(localDocument);
+  const mentionQueryText = localDocument.inlines
+    .map((inline) => (inline.kind === "text" ? inline.text : "\uFFFC"))
+    .join("");
+  const activeMention =
+    documentSelection.start === documentSelection.end
+      ? activeMentionQuery(mentionQueryText.slice(0, documentSelection.end))
+      : null;
   const activeMentionKey =
     activeMention === null ? null : `${activeMention.start}:${activeMention.query.toLowerCase()}`;
   const activeMentionSuggestions =
@@ -157,11 +178,18 @@ export const Composer = memo(function Composer({
       : undefined;
 
   useEffect(() => {
-    if (imeComposition.active()) {
-      return;
-    }
-    setLocalValue(value);
-  }, [draftKey, imeComposition, value]);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setLocalDocument(document);
+    const end = documentLength(document);
+    setDocumentSelection({ start: end, end });
+    documentEpochRef.current += 1;
+  }, [document]);
 
   useEffect(() => {
     setActiveMentionIndex(0);
@@ -179,13 +207,11 @@ export const Composer = memo(function Composer({
     );
   }, [activeMentionSuggestions.length]);
 
-  function updateLocalValue(nextValue: string) {
-    imeTextControl.recordLocalValue(nextValue);
-    if (textareaRef.current && textareaRef.current.value !== nextValue) {
-      textareaRef.current.value = nextValue;
-    }
-    setLocalValue(nextValue);
-    onValueChange(nextValue);
+  function updateLocalDocument(nextDocument: ComposerDocument, selection?: DocumentSelection) {
+    documentEpochRef.current += 1;
+    setLocalDocument(nextDocument);
+    if (selection) setDocumentSelection(selection);
+    onDocumentChange(nextDocument);
   }
 
   function replaceTextRange(
@@ -194,12 +220,17 @@ export const Composer = memo(function Composer({
     replacement: string,
     cursorOffset = replacement.length
   ) {
-    const nextValue = `${localValue.slice(0, start)}${replacement}${localValue.slice(end)}`;
+    const nextDocument = replaceDocumentRange(
+      localDocument,
+      start,
+      end,
+      replacement ? [{ kind: "text", text: replacement }] : []
+    );
     const cursor = start + cursorOffset;
-    updateLocalValue(nextValue);
+    updateLocalDocument(nextDocument, { start: cursor, end: cursor });
     requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(cursor, cursor);
+      editorRef.current?.focus();
+      if (editorRef.current) setInlineMentionEditorSelection(editorRef.current, cursor);
     });
   }
 
@@ -217,12 +248,10 @@ export const Composer = memo(function Composer({
     }
   }
 
-  function selectionRange(): { start: number; end: number } {
-    const textarea = textareaRef.current;
-    return {
-      start: textarea?.selectionStart ?? localValue.length,
-      end: textarea?.selectionEnd ?? localValue.length
-    };
+  function selectionRange(): DocumentSelection {
+    return editorRef.current
+      ? inlineMentionEditorSelection(editorRef.current)
+      : documentSelection;
   }
 
   function keepComposerFocus(event: MouseEvent<HTMLButtonElement>) {
@@ -231,7 +260,7 @@ export const Composer = memo(function Composer({
 
   function applyInlineMarkdown(prefix: string, suffix = prefix, placeholder = "") {
     const { start, end } = selectionRange();
-    const selected = localValue.slice(start, end) || placeholder;
+    const selected = copyDocumentRange(localDocument, start, end) || placeholder;
     replaceTextRange(
       start,
       end,
@@ -242,14 +271,14 @@ export const Composer = memo(function Composer({
 
   function applyLinkMarkdown() {
     const { start, end } = selectionRange();
-    const selected = localValue.slice(start, end) || "link";
+    const selected = copyDocumentRange(localDocument, start, end) || "link";
     const replacement = `[${selected}](https://)`;
     replaceTextRange(start, end, replacement, replacement.length - 1);
   }
 
   function applyListMarkdown() {
     const { start, end } = selectionRange();
-    const selected = localValue.slice(start, end);
+    const selected = copyDocumentRange(localDocument, start, end);
     if (!selected) {
       replaceTextRange(start, end, "- ", 2);
       return;
@@ -280,15 +309,24 @@ export const Composer = memo(function Composer({
       candidate.target.kind === "user"
         ? { ...candidate.target, display_label: displayLabel }
         : candidate.target;
-    const token = `${mentionDraftToken(target)} `;
-    updateLocalValue(
-      `${localValue.slice(0, activeMention.start)}${token}${localValue.slice(activeMention.end)}`
+    const withMention = insertMention(
+      localDocument,
+      activeMention.start,
+      activeMention.end,
+      target,
+      displayLabel
     );
-    onMentionIntentChange(appendMentionTarget(mentionIntent, target));
-    const cursor = activeMention.start + token.length;
+    const nextDocument = pasteDocumentText(
+      withMention,
+      activeMention.start + 1,
+      activeMention.start + 1,
+      " "
+    ).document;
+    const cursor = activeMention.start + 2;
+    updateLocalDocument(nextDocument, { start: cursor, end: cursor });
     requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(cursor, cursor);
+      editorRef.current?.focus();
+      if (editorRef.current) setInlineMentionEditorSelection(editorRef.current, cursor);
     });
   }
 
@@ -355,37 +393,44 @@ export const Composer = memo(function Composer({
     if (sendAtMs === null || !localValue.trim() || hasStagedUploads || isSending) {
       return;
     }
-    await onScheduleSend?.(sendAtMs, localValue);
+    await onScheduleSend?.(sendAtMs, localDocument);
     setScheduleOpen(false);
   }
 
-  function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (composerImeShouldHandleKeyEvent(event, imeComposition.active())) {
-      return;
-    }
-    // macOS native Emacs text-editing bindings (Ctrl+F/B/P/N/K/Y).
-    // Must not fire during IME composition.
-    if (IS_MAC_PLATFORM && !event.nativeEvent.isComposing && !imeComposition.active()) {
+  function onComposerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (IS_MAC_PLATFORM && !event.nativeEvent.isComposing) {
       const emacsAction = macEmacsActionFromEvent(event);
       if (emacsAction !== null) {
         event.preventDefault();
-        const ta = event.currentTarget;
+        const range = selectionRange();
+        if (emacsAction === "killToEol") {
+          const lineEnd = mentionQueryText.indexOf("\n", range.start);
+          const end = lineEnd === -1 ? documentLength(localDocument) : lineEnd;
+          macKillRingRef.current = copyDocumentRange(localDocument, range.start, end);
+          const next = replaceDocumentRange(localDocument, range.start, end, []);
+          updateLocalDocument(next, { start: range.start, end: range.start });
+          return;
+        }
+        if (emacsAction === "yank") {
+          const mutation = pasteDocumentText(
+            localDocument,
+            range.start,
+            range.end,
+            macKillRingRef.current
+          );
+          updateLocalDocument(mutation.document, mutation.selection);
+          return;
+        }
         const effect = applyMacEmacsAction(
           emacsAction,
-          localValue,
-          ta.selectionStart,
-          ta.selectionEnd,
+          mentionQueryText,
+          range.start,
+          range.end,
           macKillRingRef.current
         );
-        if (effect !== null) {
-          if (effect.newKillRing !== undefined) {
-            macKillRingRef.current = effect.newKillRing;
-          }
-          if (effect.newValue !== undefined) {
-            updateLocalValue(effect.newValue);
-          }
-          const pos = effect.newSelectionPos;
-          requestAnimationFrame(() => ta.setSelectionRange(pos, pos));
+        if (effect && editorRef.current) {
+          setInlineMentionEditorSelection(editorRef.current, effect.newSelectionPos);
+          setDocumentSelection({ start: effect.newSelectionPos, end: effect.newSelectionPos });
         }
         return;
       }
@@ -409,50 +454,41 @@ export const Composer = memo(function Composer({
       return;
     }
 
-    const textarea = event.currentTarget;
-    const intent = captureKeyIntent(textarea);
-    if (intent === null) {
-      event.preventDefault();
-      return;
-    }
-    const keyEvent = composerKeyEventFromDom(event, {
-      start: intent.selectionStart,
-      end: intent.selectionEnd
-    });
+    if (keyResolutionPendingRef.current) return;
+    const intentDocument = localDocument;
+    const intentValue = localValue;
+    const intentSelection = selectionRange();
+    const intentEpoch = documentEpochRef.current;
+    const keyEvent = composerKeyEventFromDom(event, intentSelection);
     const resolverOptions = {
       autocomplete_open: autocompleteOpen,
       // Text-only: staged attachments are sent from the staging panel, so
       // Enter must never dispatch them implicitly.
-      send_enabled: canEdit && !isSending && intent.value.trim().length > 0
+      send_enabled: canEdit && !isSending && intentValue.trim().length > 0
     };
     if (shouldLetNativeImeHandleComposerKeyEvent(keyEvent)) {
-      void resolveComposerKeyAction(surface, keyEvent, resolverOptions)
-        .catch(() => undefined)
-        .finally(intent.releaseResolution);
+      void resolveComposerKeyAction(surface, keyEvent, resolverOptions).catch(() => undefined);
       return;
     }
     event.preventDefault();
+    keyResolutionPendingRef.current = true;
 
     void resolveComposerKeyAction(surface, keyEvent, resolverOptions)
       .then((action) => {
-        if (!canApplyResolvedComposerAction(intent, action)) {
-          return;
-        }
+        if (!mountedRef.current) return;
         if (action === "send") {
-          void onSend(intent.value);
+          void onSend(intentDocument);
           return;
         }
+        if (documentEpochRef.current !== intentEpoch) return;
         if (action === "insertNewline") {
-          const nextValue = insertNewlineAtSelection(
-            intent.value,
-            intent.selectionStart,
-            intent.selectionEnd
+          const mutation = pasteDocumentText(
+            intentDocument,
+            intentSelection.start,
+            intentSelection.end,
+            "\n"
           );
-          updateLocalValue(nextValue.value);
-          requestAnimationFrame(() => {
-            textarea.selectionStart = nextValue.cursor;
-            textarea.selectionEnd = nextValue.cursor;
-          });
+          updateLocalDocument(mutation.document, mutation.selection);
           return;
         }
         if (action === "acceptAutocomplete") {
@@ -463,12 +499,15 @@ export const Composer = memo(function Composer({
           closeAutocompleteForCurrentQuery();
           return;
         }
-        if (action === "cancel" && composerMode.kind === "reply") {
-          onCancelReply();
+        if (action === "cancel") {
+          if (composerMode.kind === "reply") onCancelReply();
+          else onCancel?.();
         }
       })
       .catch(() => undefined)
-      .finally(intent.releaseResolution);
+      .finally(() => {
+        keyResolutionPendingRef.current = false;
+      });
   }
 
   return (
@@ -558,15 +597,6 @@ export const Composer = memo(function Composer({
           <span>{t("composer.mathMode")}</span>
         </button>
       </div>
-      {mentionIntent.targets.length ? (
-        <div className="composer-mention-pills" aria-label={t("composer.selectedMentions")}>
-          {mentionIntent.targets.map((target) => (
-            <span className="mention-pill" key={mentionTargetKey(target)} dir="auto">
-              {mentionPillLabel(target)}
-            </span>
-          ))}
-        </div>
-      ) : null}
       <MentionAutocomplete
         open={autocompleteOpen}
         listboxId={autocompleteListboxId}
@@ -577,12 +607,16 @@ export const Composer = memo(function Composer({
         onAccept={acceptMention}
         onMouseDown={keepComposerFocus}
       />
-      <ImeOwnedTextArea
-        ownership={imeTextControl}
+      <ImeInlineMentionEditor
+        ref={editorRef}
         aria-label={ariaLabel}
-        disabled={!canEdit}
-        value={localValue}
-        placeholder={placeholder ?? t("composer.placeholder", { roomName })}
+        className="composer-inline-editor"
+        data-placeholder={placeholder ?? t("composer.placeholder", { roomName })}
+        document={localDocument}
+        editable={canEdit}
+        syncKey={draftKey}
+        onDocumentChange={(nextDocument) => updateLocalDocument(nextDocument)}
+        onSelectionChange={setDocumentSelection}
         onKeyDown={onComposerKeyDown}
         onPaste={(event) => {
           const files = filesFromAttachmentTransfer(event.clipboardData);
@@ -591,7 +625,6 @@ export const Composer = memo(function Composer({
             void attachDroppedOrPastedFiles(files);
           }
         }}
-        onChange={(event) => updateLocalValue(event.target.value)}
       />
       {!editorOnly ? <div className="composer-footer">
         <div>
@@ -660,7 +693,7 @@ export const Composer = memo(function Composer({
           type="button"
           aria-label={isSending ? t("action.sending") : t("action.send")}
           disabled={!canEdit || isSending || !localValue.trim()}
-          onClick={() => onSend(localValue)}
+          onClick={() => onSend(localDocument)}
         >
           <Send size={ICON_SIZE.input} />
         </button>
@@ -792,38 +825,34 @@ function mentionOptionAriaLabel(candidate: MentionCandidate): string {
 
 function ThreadComposer({
   canEdit,
-  draft,
+  document,
   draftKey,
   hasStagedUploads = false,
   isSending,
   mentionCandidates = [],
   mentionCandidatesLoading = false,
-  mentionIntent = EMPTY_MENTION_INTENT,
   roomName = t("panel.thread"),
   resolveComposerKeyAction,
   onAttachFiles,
-  onDraftChange,
-  onMentionIntentChange,
+  onDocumentChange,
   onMentionQueryChange,
   onScheduleSend,
   onSend
 }: {
   canEdit: boolean;
-  draft: string;
+  document: ComposerDocument;
   draftKey: string;
   hasStagedUploads?: boolean;
   isSending: boolean;
   mentionCandidates?: MentionCandidate[];
   mentionCandidatesLoading?: boolean;
-  mentionIntent?: MentionIntent;
   roomName?: string;
   resolveComposerKeyAction: ResolveComposerKeyAction;
   onAttachFiles?: (files: File[]) => void | Promise<void>;
-  onDraftChange: (draft: string) => void;
-  onMentionIntentChange?: (intent: MentionIntent) => void;
+  onDocumentChange: (document: ComposerDocument) => void;
   onMentionQueryChange?: (query: string | null) => void;
-  onScheduleSend?: (sendAtMs: number, body: string) => void | Promise<void>;
-  onSend: (value: string) => void | Promise<void>;
+  onScheduleSend?: (sendAtMs: number, document: ComposerDocument) => void | Promise<void>;
+  onSend: (document: ComposerDocument) => void | Promise<void>;
 }) {
   return (
     <Composer
@@ -834,33 +863,20 @@ function ThreadComposer({
       isSending={isSending}
       mentionCandidates={mentionCandidates}
       mentionCandidatesLoading={mentionCandidatesLoading}
-      mentionIntent={mentionIntent}
       resolveComposerKeyAction={resolveComposerKeyAction}
       draftKey={draftKey}
       ariaLabel={t("timeline.threadComposer")}
+      document={document}
       placeholder={t("timeline.threadPlaceholder")}
       roomName={roomName}
-      value={draft}
       onAttachFiles={onAttachFiles}
       onCancelReply={() => undefined}
-      onMentionIntentChange={onMentionIntentChange}
+      onDocumentChange={onDocumentChange}
       onMentionQueryChange={onMentionQueryChange}
       onScheduleSend={onScheduleSend}
       onSend={onSend}
-      onValueChange={onDraftChange}
     />
   );
-}
-
-function composerImeShouldHandleKeyEvent(
-  event: KeyboardEvent<HTMLTextAreaElement>,
-  compositionActive: boolean
-): boolean {
-  return isComposerImeEnter(event.key, {
-    epochActive: compositionActive,
-    nativeIsComposing: event.nativeEvent.isComposing,
-    keyCode: event.keyCode
-  });
 }
 
 export { ThreadComposer };
@@ -918,16 +934,4 @@ export function MentionAutocomplete({
       ) : null}
     </div>
   );
-}
-
-export function MentionIntentPills({ mentionIntent }: { mentionIntent: MentionIntent }) {
-  return mentionIntent.targets.length ? (
-    <div className="composer-mention-pills" aria-label={t("composer.selectedMentions")}>
-      {mentionIntent.targets.map((target) => (
-        <span className="mention-pill" key={mentionTargetKey(target)} dir="auto">
-          {mentionPillLabel(target)}
-        </span>
-      ))}
-    </div>
-  ) : null;
 }

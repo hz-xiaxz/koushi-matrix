@@ -3,11 +3,11 @@ use std::{
     fmt,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::composer_shortcuts::FormattedMessageDraft;
 use crate::submission::{ComposerSubmissionTarget, ComposerTarget, SubmissionId};
-use crate::{ComposerDraftRevision, ComposerDraftRevisionError};
+use crate::{ComposerDocument, ComposerDraftRevision, ComposerDraftRevisionError};
 
 use super::composer_draft::{
     ComposerDraftProtection, MAX_LIVE_COMPOSER_ROOM_TOMBSTONES, MAX_LIVE_COMPOSER_THREAD_TOMBSTONES,
@@ -915,7 +915,7 @@ impl fmt::Debug for ScheduledSendStore {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct ComposerDraftPersistenceEntry {
-    pub content: Option<String>,
+    pub content: Option<ComposerDocument>,
     pub revision: ComposerDraftRevision,
     pub last_accepted_clear_revision: ComposerDraftRevision,
 }
@@ -937,10 +937,19 @@ pub enum ComposerDraftPersistenceImportError {
 
 #[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ComposerDraftStore {
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub rooms: std::collections::BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub threads: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::BTreeMap::is_empty",
+        deserialize_with = "deserialize_room_documents"
+    )]
+    pub rooms: std::collections::BTreeMap<String, ComposerDocument>,
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::BTreeMap::is_empty",
+        deserialize_with = "deserialize_thread_documents"
+    )]
+    pub threads:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, ComposerDocument>>,
     /// Monotonic causal fences. Empty-draft entries are retained so an accepted
     /// send remains newer than a delayed pre-acceptance write.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -964,6 +973,62 @@ pub struct ComposerDraftStore {
     quiescent_thread_lru: VecDeque<(String, String)>,
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ComposerDocumentWire {
+    Plain(String),
+    Structured(ComposerDocument),
+}
+
+impl ComposerDocumentWire {
+    fn into_document(self) -> ComposerDocument {
+        match self {
+            Self::Plain(text) => ComposerDocument::from_plain_text(text),
+            Self::Structured(document) => document,
+        }
+    }
+}
+
+fn deserialize_room_documents<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, ComposerDocument>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    BTreeMap::<String, ComposerDocumentWire>::deserialize(deserializer).map(|rooms| {
+        rooms
+            .into_iter()
+            .map(|(room_id, document)| (room_id, document.into_document()))
+            .collect()
+    })
+}
+
+fn deserialize_thread_documents<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, BTreeMap<String, ComposerDocument>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    BTreeMap::<String, BTreeMap<String, ComposerDocumentWire>>::deserialize(deserializer).map(
+        |rooms| {
+            rooms
+                .into_iter()
+                .map(|(room_id, threads)| {
+                    (
+                        room_id,
+                        threads
+                            .into_iter()
+                            .map(|(root_event_id, document)| {
+                                (root_event_id, document.into_document())
+                            })
+                            .collect(),
+                    )
+                })
+                .collect()
+        },
+    )
+}
+
 pub const MAX_PERSISTED_COMPOSER_DRAFT_BYTES: usize = 16 * 1024;
 pub const MAX_PERSISTED_COMPOSER_DRAFT_ROOM_COUNT: usize = 128;
 pub const MAX_PERSISTED_COMPOSER_DRAFT_THREAD_COUNT: usize = 256;
@@ -982,8 +1047,9 @@ impl ComposerDraftStore {
 
     pub fn composer_for_room(&self, room_id: &str) -> ComposerState {
         let mut composer = ComposerState::default();
-        if let Some(draft) = self.rooms.get(room_id) {
-            composer.draft = draft.clone();
+        if let Some(document) = self.rooms.get(room_id) {
+            composer.document = document.clone();
+            composer.draft = document.plain_body();
         }
         composer.draft_revision = self.room_revision(room_id);
         composer.last_accepted_clear_revision = self
@@ -994,14 +1060,15 @@ impl ComposerDraftStore {
         composer
     }
 
-    pub fn set_room_draft(&mut self, room_id: String, draft: String) {
+    pub fn set_room_draft(&mut self, room_id: String, document: impl Into<ComposerDocument>) {
+        let document = document.into();
         let Ok(revision) = ComposerDraftRevision::checked_successor(
             self.room_revision(&room_id),
             ComposerDraftRevision::ZERO,
         ) else {
             return;
         };
-        let _ = self.apply_room_draft(room_id, draft, revision);
+        let _ = self.apply_room_draft(room_id, document, revision);
     }
 
     pub fn room_revision(&self, room_id: &str) -> ComposerDraftRevision {
@@ -1014,18 +1081,19 @@ impl ComposerDraftStore {
     pub fn apply_room_draft(
         &mut self,
         room_id: String,
-        draft: String,
+        document: impl Into<ComposerDocument>,
         revision: ComposerDraftRevision,
     ) -> Result<bool, ComposerDraftRevisionError> {
+        let document = document.into();
         if revision <= self.room_revision(&room_id) {
             return Ok(false);
         }
         self.room_revisions.insert(room_id.clone(), revision);
-        if draft.is_empty() {
+        if document.is_empty() {
             self.rooms.remove(&room_id);
             self.touch_quiescent_room(&room_id);
         } else {
-            self.rooms.insert(room_id.clone(), draft);
+            self.rooms.insert(room_id.clone(), document);
             self.remove_room_from_lru(&room_id);
         }
         Ok(true)
@@ -1062,12 +1130,13 @@ impl ComposerDraftStore {
 
     pub fn composer_for_thread(&self, room_id: &str, root_event_id: &str) -> ComposerState {
         let mut composer = ComposerState::default();
-        if let Some(draft) = self
+        if let Some(document) = self
             .threads
             .get(room_id)
             .and_then(|room_threads| room_threads.get(root_event_id))
         {
-            composer.draft = draft.clone();
+            composer.document = document.clone();
+            composer.draft = document.plain_body();
         }
         composer.draft_revision = self.thread_revision(room_id, root_event_id);
         composer.last_accepted_clear_revision = self
@@ -1079,14 +1148,20 @@ impl ComposerDraftStore {
         composer
     }
 
-    pub fn set_thread_draft(&mut self, room_id: String, root_event_id: String, draft: String) {
+    pub fn set_thread_draft(
+        &mut self,
+        room_id: String,
+        root_event_id: String,
+        document: impl Into<ComposerDocument>,
+    ) {
+        let document = document.into();
         let Ok(revision) = ComposerDraftRevision::checked_successor(
             self.thread_revision(&room_id, &root_event_id),
             ComposerDraftRevision::ZERO,
         ) else {
             return;
         };
-        let _ = self.apply_thread_draft(room_id, root_event_id, draft, revision);
+        let _ = self.apply_thread_draft(room_id, root_event_id, document, revision);
     }
 
     pub fn thread_revision(&self, room_id: &str, root_event_id: &str) -> ComposerDraftRevision {
@@ -1101,9 +1176,10 @@ impl ComposerDraftStore {
         &mut self,
         room_id: String,
         root_event_id: String,
-        draft: String,
+        document: impl Into<ComposerDocument>,
         revision: ComposerDraftRevision,
     ) -> Result<bool, ComposerDraftRevisionError> {
+        let document = document.into();
         if revision <= self.thread_revision(&room_id, &root_event_id) {
             return Ok(false);
         }
@@ -1111,14 +1187,14 @@ impl ComposerDraftStore {
             .entry(room_id.clone())
             .or_default()
             .insert(root_event_id.clone(), revision);
-        if draft.is_empty() {
+        if document.is_empty() {
             self.remove_thread_content(&room_id, &root_event_id);
             self.touch_quiescent_thread(&room_id, &root_event_id);
         } else {
             self.threads
                 .entry(room_id.clone())
                 .or_default()
-                .insert(root_event_id.clone(), draft);
+                .insert(root_event_id.clone(), document);
             self.remove_thread_from_lru(&room_id, &root_event_id);
         }
         Ok(true)
@@ -1471,7 +1547,9 @@ impl ComposerDraftStore {
                 .rooms
                 .get(room_id)
                 .filter(|content| !content.is_empty())
-                .map(|content| truncate_utf8_bytes(content, MAX_PERSISTED_COMPOSER_DRAFT_BYTES)),
+                .map(|content| {
+                    content.truncated_to_plain_bytes(MAX_PERSISTED_COMPOSER_DRAFT_BYTES)
+                }),
             revision: self.room_revision(room_id),
             last_accepted_clear_revision: self
                 .room_last_accepted_clear_revisions
@@ -1567,7 +1645,9 @@ impl ComposerDraftStore {
                 .get(room_id)
                 .and_then(|threads| threads.get(root_event_id))
                 .filter(|content| !content.is_empty())
-                .map(|content| truncate_utf8_bytes(content, MAX_PERSISTED_COMPOSER_DRAFT_BYTES)),
+                .map(|content| {
+                    content.truncated_to_plain_bytes(MAX_PERSISTED_COMPOSER_DRAFT_BYTES)
+                }),
             revision: self.thread_revision(room_id, root_event_id),
             last_accepted_clear_revision: self
                 .thread_last_accepted_clear_revisions
@@ -1672,7 +1752,7 @@ impl ComposerDraftStore {
             if let Some(content) = entry.content {
                 drafts.rooms.insert(
                     room_id.clone(),
-                    truncate_utf8_bytes(&content, MAX_PERSISTED_COMPOSER_DRAFT_BYTES),
+                    content.truncated_to_plain_bytes(MAX_PERSISTED_COMPOSER_DRAFT_BYTES),
                 );
             } else if !retained_empty_rooms.contains(&room_id) {
                 continue;
@@ -1692,7 +1772,7 @@ impl ComposerDraftStore {
                 if let Some(content) = entry.content {
                     drafts.threads.entry(room_id.clone()).or_default().insert(
                         root_event_id.clone(),
-                        truncate_utf8_bytes(&content, MAX_PERSISTED_COMPOSER_DRAFT_BYTES),
+                        content.truncated_to_plain_bytes(MAX_PERSISTED_COMPOSER_DRAFT_BYTES),
                     );
                 } else if !retained_empty_threads.contains(&target) {
                     continue;
@@ -1745,7 +1825,10 @@ fn validate_persisted_projection(
         .iter()
         .filter_map(|(room_id, entry)| {
             if entry.last_accepted_clear_revision > entry.revision
-                || entry.content.as_ref().is_some_and(String::is_empty)
+                || entry
+                    .content
+                    .as_ref()
+                    .is_some_and(ComposerDocument::is_empty)
             {
                 return None;
             }
@@ -1754,7 +1837,10 @@ fn validate_persisted_projection(
         .collect::<BTreeSet<_>>();
     if projection.rooms.values().any(|entry| {
         entry.last_accepted_clear_revision > entry.revision
-            || entry.content.as_ref().is_some_and(String::is_empty)
+            || entry
+                .content
+                .as_ref()
+                .is_some_and(ComposerDocument::is_empty)
     }) {
         return Err(invalid());
     }
@@ -1787,7 +1873,10 @@ fn validate_persisted_projection(
         }
         for (root_event_id, entry) in room_threads {
             if entry.last_accepted_clear_revision > entry.revision
-                || entry.content.as_ref().is_some_and(String::is_empty)
+                || entry
+                    .content
+                    .as_ref()
+                    .is_some_and(ComposerDocument::is_empty)
             {
                 return Err(invalid());
             }
@@ -1847,17 +1936,6 @@ fn remove_nested_entry<T>(
     }
 }
 
-fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> String {
-    if value.len() <= max_bytes {
-        return value.to_owned();
-    }
-    let mut end = max_bytes;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value[..end].to_owned()
-}
-
 impl fmt::Debug for ComposerDraftStore {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let thread_count: usize = self
@@ -1887,6 +1965,8 @@ pub struct ComposerState {
     #[serde(default)]
     pub last_accepted_clear_revision: ComposerDraftRevision,
     pub draft: String,
+    #[serde(default)]
+    pub document: ComposerDocument,
     pub mode: ComposerMode,
 }
 

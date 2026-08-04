@@ -2043,10 +2043,11 @@ before GA. Do not open feature issues for these without re-deciding scope here.
   stay to private-data-free tokens and must not print Matrix aliases, room IDs,
   server names, pagination tokens, or raw SDK errors.
 - `local-composer` mention candidates must come from Rust-owned
-  `ProfileState.users`, which is projected from SDK room member profiles during
-  room-list observation. React may track selected draft mention pills and pass a
-  typed `MentionIntent`, but it must not synthesize Matrix `m.mentions`,
-  formatted HTML, slash command semantics, or fallback send behavior.
+  `AppState.mention_candidates`, projected from SDK room member profiles during
+  room-list observation. React may insert a selected candidate only as an atomic
+  `ComposerDocument` mention node; it must not keep parallel pills/mention
+  metadata or synthesize Matrix `m.mentions`, formatted HTML, slash command
+  semantics, or fallback send behavior.
   Timeline mention pills are display-only rendering over Rust-owned timeline
   body text plus `ProfileState.users`; they must not become a React-owned
   source of mention semantics.

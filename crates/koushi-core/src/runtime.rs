@@ -93,7 +93,7 @@ use crate::state_delta::build_state_delta;
 use crate::store::{
     StoreActor,
     composer_drafts::{
-        PersistedComposerDraftStoreV2, persisted_projection as persisted_composer_draft_projection,
+        PersistedComposerDraftStoreV3, persisted_projection as persisted_composer_draft_projection,
     },
     session_key_id_from_info,
 };
@@ -1859,7 +1859,7 @@ fn focused_navigation_outcome_after_reduce(
 
 struct PendingComposerDraftPersist {
     key_id: koushi_key::SessionKeyId,
-    drafts: PersistedComposerDraftStoreV2,
+    drafts: PersistedComposerDraftStoreV3,
     permits: Vec<ComposerDraftPersistencePermit>,
     deadline: Instant,
 }
@@ -3701,7 +3701,7 @@ impl AppActor {
                     request_id,
                     expected_account,
                     room_id,
-                    draft,
+                    document,
                     revision,
                 } => {
                     if !composer_draft_account_matches(&self.state, &expected_account) {
@@ -3710,7 +3710,7 @@ impl AppActor {
                     let effects = self
                         .reduce_app_action(AppAction::ComposerDraftChangedAtRevision {
                             room_id,
-                            draft,
+                            document,
                             revision,
                         })
                         .await;
@@ -3722,7 +3722,7 @@ impl AppActor {
                     expected_account,
                     room_id,
                     root_event_id,
-                    draft,
+                    document,
                     revision,
                 } => {
                     if !composer_draft_account_matches(&self.state, &expected_account) {
@@ -3732,7 +3732,7 @@ impl AppActor {
                         .reduce_app_action(AppAction::ThreadComposerDraftChangedAtRevision {
                             room_id,
                             root_event_id,
-                            draft,
+                            document,
                             revision,
                         })
                         .await;
@@ -6935,8 +6935,7 @@ mod tests {
             submission_id: SubmissionId::new("room-submission"),
             key: TimelineKey::room(account_key.clone(), room_id.clone()),
             transaction_id: "room-transaction".to_owned(),
-            body: "body".to_owned(),
-            mentions: Default::default(),
+            document: koushi_state::ComposerDocument::from_plain_text("body"),
             draft_revision: ComposerDraftRevision::MAX,
         };
         let thread = TimelineCommand::SubmitReply {
@@ -6952,8 +6951,7 @@ mod tests {
             },
             transaction_id: "thread-transaction".to_owned(),
             in_reply_to_event_id: root_event_id,
-            body: "reply".to_owned(),
-            mentions: Default::default(),
+            document: koushi_state::ComposerDocument::from_plain_text("reply"),
             draft_revision: ComposerDraftRevision::MAX,
         };
 
@@ -6970,7 +6968,7 @@ mod tests {
         state
             .composer_drafts
             .rooms
-            .insert("!room:example.invalid".to_owned(), "keep me".to_owned());
+            .insert("!room:example.invalid".to_owned(), "keep me".into());
         state.composer_drafts.room_revisions.insert(
             "!room:example.invalid".to_owned(),
             ComposerDraftRevision::MAX,
@@ -6986,8 +6984,8 @@ mod tests {
                 .composer_drafts
                 .rooms
                 .get("!room:example.invalid")
-                .map(String::as_str),
-            Some("keep me")
+                .map(koushi_state::ComposerDocument::plain_body),
+            Some("keep me".to_owned())
         );
         assert_eq!(
             state

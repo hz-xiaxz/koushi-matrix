@@ -227,8 +227,8 @@ const transport: TimelineTransport = {
   setTyping(roomId, isTyping) {
     return ipc.invoke("set_typing", { roomId, isTyping });
   },
-  editMessage(roomId, eventId, body, mentions = { targets: [] }) {
-    return ipc.invoke("edit_message", { roomId, eventId, body, mentions });
+  editMessage(roomId, eventId, document) {
+    return ipc.invoke("edit_message", { roomId, eventId, document });
   },
   redactMessage(roomId, eventId) {
     return ipc.invoke("redact_message", { roomId, eventId });

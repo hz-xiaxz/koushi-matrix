@@ -8,8 +8,8 @@ use koushi_core::runtime::CommandSubmitError;
 use koushi_core::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 use koushi_key::SessionKeyId;
 use koushi_state::{
-    AppAction, ComposerDraftProtection, ComposerDraftRevision, ComposerDraftStore, ComposerTarget,
-    MentionIntent, SubmissionId,
+    AppAction, ComposerDocument, ComposerDraftProtection, ComposerDraftRevision,
+    ComposerDraftStore, ComposerTarget, SubmissionId,
 };
 use tokio::sync::oneshot;
 
@@ -61,7 +61,7 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 request_id,
                 expected_account: account.clone(),
                 room_id: "scope-room".to_owned(),
-                draft: String::new(),
+                document: String::new().into(),
                 revision: 1.into(),
             }),
             main.clone(),
@@ -72,7 +72,7 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 expected_account: account.clone(),
                 room_id: "scope-room".to_owned(),
                 root_event_id: "scope-root".to_owned(),
-                draft: String::new(),
+                document: String::new().into(),
                 revision: 1.into(),
             }),
             thread.clone(),
@@ -126,9 +126,8 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 submission_id: SubmissionId::new("scope-plain"),
                 key: room_key.clone(),
                 transaction_id: "scope-plain-transaction".to_owned(),
-                body: String::new(),
+                document: ComposerDocument::from_plain_text(String::new()),
                 draft_revision: 1.into(),
-                mentions: MentionIntent::default(),
             }),
             main.clone(),
         ),
@@ -140,9 +139,8 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 key: room_key,
                 transaction_id: "scope-reply-transaction".to_owned(),
                 in_reply_to_event_id: "scope-reply-root".to_owned(),
-                body: String::new(),
+                document: ComposerDocument::from_plain_text(String::new()),
                 draft_revision: 1.into(),
-                mentions: MentionIntent::default(),
             }),
             main.clone(),
         ),
@@ -154,9 +152,8 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 key: thread_key,
                 transaction_id: "scope-thread-transaction".to_owned(),
                 in_reply_to_event_id: "scope-root".to_owned(),
-                body: String::new(),
+                document: ComposerDocument::from_plain_text(String::new()),
                 draft_revision: 1.into(),
-                mentions: MentionIntent::default(),
             }),
             thread,
         ),
@@ -372,7 +369,7 @@ async fn queued_stale_write_keeps_exact_target_protected() {
                 request_id: connection.next_request_id(),
                 expected_account: account.clone(),
                 room_id: "room-stale".to_owned(),
-                draft: "current body".to_owned(),
+                document: "current body".into(),
                 revision: ComposerDraftRevision::from_u64(7),
             }),
         )
@@ -396,7 +393,7 @@ async fn queued_stale_write_keeps_exact_target_protected() {
                     request_id: stale_request_id,
                     expected_account: account,
                     room_id: "room-stale".to_owned(),
-                    draft: "admitted stale body".to_owned(),
+                    document: "admitted stale body".into(),
                     revision: ComposerDraftRevision::from_u64(7),
                 }),
                 admitted,
@@ -454,13 +451,13 @@ async fn queued_stale_write_keeps_exact_target_protected() {
     let mut churn_actions = (0..=128)
         .map(|index| AppAction::ComposerDraftChangedAtRevision {
             room_id: format!("stale-churn-{index:03}"),
-            draft: String::new(),
+            document: String::new().into(),
             revision: ComposerDraftRevision::from_u64(1),
         })
         .collect::<Vec<_>>();
     churn_actions.push(AppAction::ComposerDraftChangedAtRevision {
         room_id: "room-current".to_owned(),
-        draft: "observation-fence".to_owned(),
+        document: "observation-fence".into(),
         revision: ComposerDraftRevision::from_u64(1),
     });
     runtime.inject_actions(churn_actions).await;
@@ -520,7 +517,7 @@ async fn revision_bearing_commands_cannot_bypass_lease_admission() {
             request_id: connection.next_request_id(),
             expected_account: session_key(),
             room_id: "room-admission".to_owned(),
-            draft: "must not enter the inbox".to_owned(),
+            document: "must not enter the inbox".into(),
             revision: ComposerDraftRevision::from_u64(1),
         }))
         .await

@@ -29,6 +29,7 @@ import {
   SNAPSHOT_SCHEMA_VERSION,
   type ActivityTab,
   type ComposerTarget,
+  type ComposerDocument,
   type ComposerKeyEvent,
   type ComposerResolverOptions,
   type ComposerResolvedAction,
@@ -48,6 +49,7 @@ import {
   type UploadStagingRequestItem
 } from "../domain/types";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
+import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
 import { computeBrowserRoomListProjection } from "../backend/roomListProjection";
 import { composeSidebar } from "../domain/desktopModel";
 import {
@@ -207,7 +209,7 @@ function readySnapshot(
         ui: {
           navigation: { active_space_id: activeSpaceId, active_room_id: ROOM_ID, space_order: spaces.map((space) => space.space_id), last_room_by_space_id: {} },
           room_list: computeBrowserRoomListProjection({ kind: "rooms" }, { kind: "activity" }, activeSpaceId, spaces, rooms, []),
-          timeline: { room_id: ROOM_ID, is_subscribed: true, is_paginating_backwards: false, composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", mode: composerMode }, submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] }, scheduled_send_capability: "unknown", scheduled_sends: [], staged_uploads: [], media_gallery: [], media_downloads: {}, continuity: { kind: "unknown" } },
+          timeline: { room_id: ROOM_ID, is_subscribed: true, is_paginating_backwards: false, composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", document: { version: 2, inlines: [] }, mode: composerMode }, submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] }, scheduled_send_capability: "unknown", scheduled_sends: [], staged_uploads: [], media_gallery: [], media_downloads: {}, continuity: { kind: "unknown" } },
           thread: { kind: "closed" }, threads_list: { kind: "closed" }, focused_context: { kind: "closed" },
           files_view: { kind: "closed" }, errors: [], basic_operation: basicOperation
         }
@@ -1061,6 +1063,7 @@ mock.setCommandResponse("select_room", ({ roomId }: { roomId: string }) => {
             draft_revision: COMPOSER_DRAFT_REVISION_ZERO,
             last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO,
             draft: "",
+            document: { version: 2, inlines: [] },
             mode: "Plain"
           }
         },
@@ -1957,14 +1960,14 @@ mock.setCommandResponse("set_composer_draft", ({
   accountUserId,
   accountDeviceId,
   roomId,
-  draft,
+  document,
   draftRevision
 }: {
   accountHomeserver: string;
   accountUserId: string;
   accountDeviceId: string;
   roomId: string;
-  draft: string;
+  document: ComposerDocument;
   draftRevision: ComposerDraftRevision;
 }) => {
   if (
@@ -1993,7 +1996,8 @@ mock.setCommandResponse("set_composer_draft", ({
         ...currentSnapshot.state.ui.timeline,
         composer: {
           ...currentSnapshot.state.ui.timeline.composer,
-          draft,
+          document,
+          draft: plainBodyFromDocument(document),
           draft_revision: draftRevision
         }
       }
@@ -2057,6 +2061,10 @@ for (const command of ["send_reply", "send_text"] as const) {
                 compareComposerDraftRevisions(composer.draft_revision, draftRevision) > 0
                   ? composer.draft
                   : "",
+              document:
+                compareComposerDraftRevisions(composer.draft_revision, draftRevision) > 0
+                  ? composer.document
+                  : documentFromText(""),
               draft_revision: nextComposerDraftRevision(
                 composer.draft_revision,
                 draftRevision
@@ -2101,6 +2109,7 @@ mock.setCommandResponse(
               draft_revision: COMPOSER_DRAFT_REVISION_ZERO,
               last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO,
               draft: "",
+              document: { version: 2, inlines: [] },
               mode: "Plain"
             }
           }
@@ -2130,7 +2139,7 @@ mock.setCommandResponse(
     accountDeviceId,
     roomId,
     rootEventId,
-    draft,
+    document,
     draftRevision
   }: {
     accountHomeserver: string;
@@ -2138,7 +2147,7 @@ mock.setCommandResponse(
     accountDeviceId: string;
     roomId: string;
     rootEventId: string;
-    draft: string;
+    document: ComposerDocument;
     draftRevision: ComposerDraftRevision;
   }) => {
     const thread = currentSnapshot.state.ui.thread;
@@ -2166,7 +2175,8 @@ mock.setCommandResponse(
           ...thread,
           composer: {
             ...thread.composer,
-            draft,
+            document,
+            draft: plainBodyFromDocument(document),
             draft_revision: draftRevision
           }
         }
@@ -2220,6 +2230,10 @@ mock.setCommandResponse(
               compareComposerDraftRevisions(thread.composer.draft_revision, draftRevision) > 0
                 ? thread.composer.draft
                 : "",
+            document:
+              compareComposerDraftRevisions(thread.composer.draft_revision, draftRevision) > 0
+                ? thread.composer.document
+                : documentFromText(""),
             draft_revision: nextComposerDraftRevision(
               thread.composer.draft_revision,
               draftRevision

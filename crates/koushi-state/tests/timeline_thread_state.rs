@@ -161,7 +161,7 @@ fn composer_draft_change_only_affects_active_room() {
         &mut state,
         AppAction::ComposerDraftChanged {
             room_id: "room-b".to_owned(),
-            draft: "ignored".to_owned(),
+            document: "ignored".into(),
         },
     );
     assert_eq!(effects, Vec::new());
@@ -171,7 +171,7 @@ fn composer_draft_change_only_affects_active_room() {
         &mut state,
         AppAction::ComposerDraftChanged {
             room_id: "room-a".to_owned(),
-            draft: "hello".to_owned(),
+            document: "hello".into(),
         },
     );
 
@@ -191,7 +191,7 @@ fn composer_draft_is_restored_when_switching_back_to_room() {
         &mut state,
         AppAction::ComposerDraftChanged {
             room_id: "room-a".to_owned(),
-            draft: "room a draft".to_owned(),
+            document: "room a draft".into(),
         },
     );
 
@@ -207,7 +207,7 @@ fn composer_draft_is_restored_when_switching_back_to_room() {
         &mut state,
         AppAction::ComposerDraftChanged {
             room_id: "room-b".to_owned(),
-            draft: "room b draft".to_owned(),
+            document: "room b draft".into(),
         },
     );
     reduce(
@@ -235,7 +235,7 @@ fn composer_draft_store_is_cleared_on_send_and_room_removal() {
         &mut state,
         AppAction::ComposerDraftChanged {
             room_id: "room-a".to_owned(),
-            draft: "send me".to_owned(),
+            document: "send me".into(),
         },
     );
     reduce(
@@ -264,7 +264,7 @@ fn composer_draft_store_is_cleared_on_send_and_room_removal() {
         &mut state,
         AppAction::ComposerDraftChanged {
             room_id: "room-a".to_owned(),
-            draft: "prune me".to_owned(),
+            document: "prune me".into(),
         },
     );
     reduce(
@@ -285,7 +285,7 @@ fn composer_draft_revision_fences_late_persist_after_accepted_send() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "sent text".to_owned(),
+            document: "sent text".into(),
             revision: 1.into(),
         },
     );
@@ -305,7 +305,7 @@ fn composer_draft_revision_fences_late_persist_after_accepted_send() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "sent text".to_owned(),
+            document: "sent text".into(),
             revision: 1.into(),
         },
     );
@@ -321,7 +321,7 @@ fn composer_draft_revision_keeps_immediate_next_input_over_old_completion() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "first message".to_owned(),
+            document: "first message".into(),
             revision: 1.into(),
         },
     );
@@ -338,7 +338,7 @@ fn composer_draft_revision_keeps_immediate_next_input_over_old_completion() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "next message".to_owned(),
+            document: "next message".into(),
             revision: 3.into(),
         },
     );
@@ -346,7 +346,7 @@ fn composer_draft_revision_keeps_immediate_next_input_over_old_completion() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "first message".to_owned(),
+            document: "first message".into(),
             revision: 1.into(),
         },
     );
@@ -357,8 +357,8 @@ fn composer_draft_revision_keeps_immediate_next_input_over_old_completion() {
             .composer_drafts
             .rooms
             .get("room-a")
-            .map(String::as_str),
-        Some("next message")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("next message".to_owned())
     );
 }
 
@@ -369,7 +369,7 @@ fn composer_draft_revision_keeps_next_input_when_it_persists_before_acceptance()
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "first message".to_owned(),
+            document: "first message".into(),
             revision: 1.into(),
         },
     );
@@ -377,7 +377,7 @@ fn composer_draft_revision_keeps_next_input_when_it_persists_before_acceptance()
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "next message".to_owned(),
+            document: "next message".into(),
             revision: 2.into(),
         },
     );
@@ -399,8 +399,8 @@ fn composer_draft_revision_keeps_next_input_when_it_persists_before_acceptance()
             .composer_drafts
             .rooms
             .get("room-a")
-            .map(String::as_str),
-        Some("next message")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("next message".to_owned())
     );
 }
 
@@ -417,7 +417,7 @@ fn composer_draft_revision_persists_captured_target_across_room_switch() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "room a draft".to_owned(),
+            document: "room a draft".into(),
             revision: 1.into(),
         },
     );
@@ -743,7 +743,7 @@ fn active_main_acceptance_projects_the_accepted_clear_revision() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "sent from room a".to_owned(),
+            document: "sent from room a".into(),
             revision: 1.into(),
         },
     );
@@ -774,7 +774,7 @@ fn offscreen_main_acceptance_advances_the_captured_room_draft_fence() {
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
-            draft: "sent from room a".to_owned(),
+            document: "sent from room a".into(),
             revision: 1.into(),
         },
     );
@@ -804,7 +804,7 @@ fn active_thread_acceptance_projects_the_accepted_clear_revision() {
         AppAction::ThreadComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
             root_event_id: "$root-a".to_owned(),
-            draft: "sent reply".to_owned(),
+            document: "sent reply".into(),
             revision: 1.into(),
         },
     );
@@ -835,7 +835,7 @@ fn offscreen_thread_acceptance_advances_fence_and_global_registry() {
         AppAction::ThreadComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
             root_event_id: "$root-a".to_owned(),
-            draft: "sent reply".to_owned(),
+            document: "sent reply".into(),
             revision: 1.into(),
         },
     );
@@ -1492,7 +1492,10 @@ fn open_thread_composer(state: &AppState) -> &ComposerState {
 
 fn set_open_thread_draft(state: &mut AppState, draft: &str) {
     match &mut state.thread {
-        ThreadPaneState::Open { composer, .. } => composer.draft = draft.to_owned(),
+        ThreadPaneState::Open { composer, .. } => {
+            composer.draft = draft.to_owned();
+            composer.document = draft.into();
+        }
         other => panic!("expected open thread, got {other:?}"),
     }
 }
@@ -1501,13 +1504,14 @@ fn set_open_thread_draft(state: &mut AppState, draft: &str) {
 fn thread_composer_draft_change_only_affects_matching_open_thread() {
     let mut state = open_thread_state("room-a", "$root");
     state.timeline.composer.draft = "main draft".to_owned();
+    state.timeline.composer.document = "main draft".into();
 
     let effects = reduce(
         &mut state,
         AppAction::ThreadComposerDraftChanged {
             room_id: "room-a".to_owned(),
             root_event_id: "$other".to_owned(),
-            draft: "ignored".to_owned(),
+            document: "ignored".into(),
         },
     );
     assert_eq!(effects, Vec::new());
@@ -1518,7 +1522,7 @@ fn thread_composer_draft_change_only_affects_matching_open_thread() {
         AppAction::ThreadComposerDraftChanged {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
-            draft: "thread draft".to_owned(),
+            document: "thread draft".into(),
         },
     );
 
@@ -1539,7 +1543,7 @@ fn thread_composer_draft_is_restored_when_thread_reopens() {
         AppAction::ThreadComposerDraftChanged {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
-            draft: "thread draft".to_owned(),
+            document: "thread draft".into(),
         },
     );
     reduce(&mut state, AppAction::CloseThread);
@@ -1572,7 +1576,7 @@ fn thread_composer_draft_store_is_cleared_on_reply_and_room_removal() {
         AppAction::ThreadComposerDraftChanged {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
-            draft: "reply me".to_owned(),
+            document: "reply me".into(),
         },
     );
     reduce(
@@ -1607,7 +1611,7 @@ fn thread_composer_draft_store_is_cleared_on_reply_and_room_removal() {
         AppAction::ThreadComposerDraftChanged {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
-            draft: "prune me".to_owned(),
+            document: "prune me".into(),
         },
     );
     reduce(
@@ -1629,7 +1633,7 @@ fn thread_composer_draft_revision_fences_late_persist_and_isolates_roots() {
         AppAction::ThreadComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
             root_event_id: "$root-a".to_owned(),
-            draft: "sent reply".to_owned(),
+            document: "sent reply".into(),
             revision: 1.into(),
         },
     );
@@ -1648,7 +1652,7 @@ fn thread_composer_draft_revision_fences_late_persist_and_isolates_roots() {
         AppAction::ThreadComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
             root_event_id: "$root-a".to_owned(),
-            draft: "next reply".to_owned(),
+            document: "next reply".into(),
             revision: 3.into(),
         },
     );
@@ -1657,7 +1661,7 @@ fn thread_composer_draft_revision_fences_late_persist_and_isolates_roots() {
         AppAction::ThreadComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
             root_event_id: "$root-a".to_owned(),
-            draft: "sent reply".to_owned(),
+            document: "sent reply".into(),
             revision: 1.into(),
         },
     );
@@ -1666,7 +1670,7 @@ fn thread_composer_draft_revision_fences_late_persist_and_isolates_roots() {
         AppAction::ThreadComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
             root_event_id: "$root-b".to_owned(),
-            draft: "other root".to_owned(),
+            document: "other root".into(),
             revision: 1.into(),
         },
     );
@@ -1678,8 +1682,8 @@ fn thread_composer_draft_revision_fences_late_persist_and_isolates_roots() {
             .threads
             .get("room-a")
             .and_then(|threads| threads.get("$root-a"))
-            .map(String::as_str),
-        Some("next reply")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("next reply".to_owned())
     );
     assert_eq!(
         state
@@ -1687,8 +1691,8 @@ fn thread_composer_draft_revision_fences_late_persist_and_isolates_roots() {
             .threads
             .get("room-a")
             .and_then(|threads| threads.get("$root-b"))
-            .map(String::as_str),
-        Some("other root")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("other root".to_owned())
     );
     assert_eq!(open_thread_composer(&state).draft, "next reply");
 }
@@ -1701,7 +1705,7 @@ fn thread_composer_draft_revision_keeps_next_input_persisted_before_acceptance()
         AppAction::ThreadComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
             root_event_id: "$root-a".to_owned(),
-            draft: "sent reply".to_owned(),
+            document: "sent reply".into(),
             revision: 1.into(),
         },
     );
@@ -1710,7 +1714,7 @@ fn thread_composer_draft_revision_keeps_next_input_persisted_before_acceptance()
         AppAction::ThreadComposerDraftChangedAtRevision {
             room_id: "room-a".to_owned(),
             root_event_id: "$root-a".to_owned(),
-            draft: "next reply".to_owned(),
+            document: "next reply".into(),
             revision: 2.into(),
         },
     );
@@ -1734,8 +1738,8 @@ fn thread_composer_draft_revision_keeps_next_input_persisted_before_acceptance()
             .threads
             .get("room-a")
             .and_then(|threads| threads.get("$root-a"))
-            .map(String::as_str),
-        Some("next reply")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("next reply".to_owned())
     );
 }
 
@@ -2197,6 +2201,7 @@ fn timeline_and_thread_actions_are_ignored_without_ready_session() {
                 draft_revision: 0.into(),
                 last_accepted_clear_revision: 0.into(),
                 draft: "draft".to_owned(),
+                document: "draft".into(),
                 mode: Default::default(),
             },
             submission_registry: Default::default(),
@@ -2225,7 +2230,7 @@ fn timeline_and_thread_actions_are_ignored_without_ready_session() {
         },
         AppAction::ComposerDraftChanged {
             room_id: "room-a".to_owned(),
-            draft: "changed".to_owned(),
+            document: "changed".into(),
         },
         AppAction::SendTextSubmitted {
             room_id: "room-a".to_owned(),

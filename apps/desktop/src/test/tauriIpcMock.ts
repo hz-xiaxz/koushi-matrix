@@ -268,6 +268,7 @@ function defaultSnapshotResponse() {
           draft_revision: "0",
           last_accepted_clear_revision: "0",
           draft: "",
+          document: { version: 2, inlines: [] },
           mode: "Plain"
         },
         submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] },

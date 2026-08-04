@@ -11475,8 +11475,7 @@ mod tests {
             submission_id: koushi_state::SubmissionId::new("submission-owner-fence"),
             key: TimelineKey::room(AccountKey(active.user_id.clone()), "!room:example.test"),
             transaction_id: "transaction-owner-fence".to_owned(),
-            body: "synthetic body".to_owned(),
-            mentions: koushi_state::MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text("synthetic body"),
             draft_revision: 1.into(),
         };
 

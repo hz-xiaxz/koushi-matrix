@@ -31,14 +31,14 @@ use koushi_core::{
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
-    ComposerDraftRevision, ComposerKeyEvent, ComposerResolvedAction, ComposerResolverContext,
-    ComposerSurface, DirectoryQuery, DisplayPlatform, FilesViewScope, FocusedContextState,
-    IdentityResetAuthRequest, ImageUploadCompressionMode, InviteScopeSelection, LoginRequest,
-    MentionIntent, MentionSurface, PresenceKind, RecoveryRequest, RoomListFilter,
-    RoomModerationAction, RoomNotificationMode, RoomSettingChange, RoomTagKind, SessionInfo,
-    SessionState, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
-    SubmissionId, ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor,
-    VerificationCancelReason, build_formatted_message_draft,
+    ComposerDocument, ComposerDraftRevision, ComposerKeyEvent, ComposerResolvedAction,
+    ComposerResolverContext, ComposerSurface, DirectoryQuery, DisplayPlatform, FilesViewScope,
+    FocusedContextState, IdentityResetAuthRequest, ImageUploadCompressionMode,
+    InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
+    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
+    RoomTagKind, SessionInfo, SessionState, SettingsPatch, StagedUploadCompressionChoice,
+    StagedUploadItem, StagedUploadKind, SubmissionId, ThreadOpenIntent, ThreadsListScope,
+    TimelineScrollAnchor, VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(any(debug_assertions, test))]
@@ -1892,18 +1892,16 @@ pub(crate) fn build_send_text_command(
     account_key: AccountKey,
     room_id: String,
     transaction_id: String,
-    body: String,
-    mentions: koushi_state::MentionIntent,
+    document: ComposerDocument,
 ) -> Option<CoreCommand> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return None;
     }
     Some(CoreCommand::Timeline(TimelineCommand::SendText {
         request_id,
         key: build_timeline_key(account_key, room_id),
         transaction_id,
-        body,
-        mentions,
+        document,
     }))
 }
 
@@ -1914,11 +1912,10 @@ pub(crate) fn build_submit_text_command(
     account_key: AccountKey,
     room_id: String,
     transaction_id: String,
-    body: String,
-    mentions: MentionIntent,
+    document: ComposerDocument,
     draft_revision: ComposerDraftRevision,
 ) -> Option<CoreCommand> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return None;
     }
     Some(CoreCommand::Timeline(TimelineCommand::SubmitText {
@@ -1927,8 +1924,7 @@ pub(crate) fn build_submit_text_command(
         submission_id,
         key: build_timeline_key(account_key, room_id),
         transaction_id,
-        body,
-        mentions,
+        document,
         draft_revision,
     }))
 }
@@ -2306,18 +2302,16 @@ pub(crate) fn build_edit_message_command(
     account_key: AccountKey,
     room_id: String,
     event_id: String,
-    body: String,
-    mentions: koushi_state::MentionIntent,
+    document: ComposerDocument,
 ) -> Option<CoreCommand> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return None;
     }
     Some(CoreCommand::Timeline(TimelineCommand::EditText {
         request_id,
         key: build_timeline_key(account_key, room_id),
         event_id,
-        body,
-        mentions,
+        document,
     }))
 }
 
@@ -3017,10 +3011,9 @@ pub(crate) fn build_send_reply_command(
     room_id: String,
     transaction_id: String,
     in_reply_to_event_id: String,
-    body: String,
-    mentions: koushi_state::MentionIntent,
+    document: ComposerDocument,
 ) -> Option<CoreCommand> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return None;
     }
     Some(CoreCommand::Timeline(TimelineCommand::SendReply {
@@ -3028,8 +3021,7 @@ pub(crate) fn build_send_reply_command(
         key: build_timeline_key(account_key, room_id),
         transaction_id,
         in_reply_to_event_id,
-        body,
-        mentions,
+        document,
     }))
 }
 
@@ -3041,11 +3033,10 @@ pub(crate) fn build_submit_reply_command(
     room_id: String,
     transaction_id: String,
     in_reply_to_event_id: String,
-    body: String,
-    mentions: MentionIntent,
+    document: ComposerDocument,
     draft_revision: ComposerDraftRevision,
 ) -> Option<CoreCommand> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return None;
     }
     Some(CoreCommand::Timeline(TimelineCommand::SubmitReply {
@@ -3055,8 +3046,7 @@ pub(crate) fn build_submit_reply_command(
         key: build_timeline_key(account_key, room_id),
         transaction_id,
         in_reply_to_event_id,
-        body,
-        mentions,
+        document,
         draft_revision,
     }))
 }
@@ -3101,7 +3091,7 @@ pub(crate) fn build_set_thread_composer_draft_command(
     expected_account: koushi_key::SessionKeyId,
     room_id: String,
     root_event_id: String,
-    draft: String,
+    document: ComposerDocument,
     revision: ComposerDraftRevision,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::SetThreadComposerDraft {
@@ -3109,7 +3099,7 @@ pub(crate) fn build_set_thread_composer_draft_command(
         expected_account,
         room_id,
         root_event_id,
-        draft,
+        document,
         revision,
     })
 }
@@ -3118,14 +3108,14 @@ pub(crate) fn build_set_composer_draft_command(
     request_id: koushi_core::RequestId,
     expected_account: koushi_key::SessionKeyId,
     room_id: String,
-    draft: String,
+    document: ComposerDocument,
     revision: ComposerDraftRevision,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::SetComposerDraft {
         request_id,
         expected_account,
         room_id,
-        draft,
+        document,
         revision,
     })
 }
@@ -3137,9 +3127,9 @@ pub(crate) fn build_send_thread_reply_command(
     room_id: String,
     root_event_id: String,
     transaction_id: String,
-    body: String,
+    document: ComposerDocument,
 ) -> Option<CoreCommand> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return None;
     }
     Some(CoreCommand::Timeline(TimelineCommand::SendReply {
@@ -3153,8 +3143,7 @@ pub(crate) fn build_send_thread_reply_command(
         },
         transaction_id,
         in_reply_to_event_id: root_event_id,
-        body,
-        mentions: koushi_state::MentionIntent::default(),
+        document,
     }))
 }
 
@@ -3166,11 +3155,10 @@ pub(crate) fn build_submit_thread_reply_command(
     room_id: String,
     root_event_id: String,
     transaction_id: String,
-    body: String,
-    mentions: MentionIntent,
+    document: ComposerDocument,
     draft_revision: ComposerDraftRevision,
 ) -> Option<CoreCommand> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return None;
     }
     Some(CoreCommand::Timeline(TimelineCommand::SubmitReply {
@@ -3186,8 +3174,7 @@ pub(crate) fn build_submit_thread_reply_command(
         },
         transaction_id,
         in_reply_to_event_id: root_event_id,
-        body,
-        mentions,
+        document,
         draft_revision,
     }))
 }
@@ -3793,7 +3780,7 @@ mod tests {
         LocaleSettings, SettingsPatch, TextDirectionPreference, ThemePreference,
     };
     use koushi_state::{
-        AppState, AuthSecret, IdentityResetAuthRequest, LoginRequest, MentionIntent, MentionTarget,
+        AppState, AuthSecret, ComposerDocument, IdentityResetAuthRequest, LoginRequest,
         SessionInfo, SessionState, ThreadOpenIntent, VerificationCancelReason,
     };
 
@@ -4562,13 +4549,7 @@ mod tests {
             active_account_key.clone(),
             room_id.clone(),
             transaction_id.clone(),
-            body.clone(),
-            MentionIntent {
-                targets: vec![MentionTarget::User {
-                    user_id: "@alice:example.invalid".to_owned(),
-                    display_label: "Alice".to_owned(),
-                }],
-            },
+            ComposerDocument::from_plain_text(body.clone()),
         )
         .expect("send_text should build a command")
         {
@@ -4576,19 +4557,9 @@ mod tests {
                 request_id,
                 key,
                 transaction_id: route_transaction_id,
-                body: route_body,
-                mentions,
+                document,
             }) => {
                 assert_eq!(request_id, fake_request_id(11));
-                assert_eq!(
-                    mentions,
-                    MentionIntent {
-                        targets: vec![MentionTarget::User {
-                            user_id: "@alice:example.invalid".to_owned(),
-                            display_label: "Alice".to_owned(),
-                        }],
-                    }
-                );
                 assert_eq!(key.account_key, active_account_key);
                 assert_eq!(
                     key.kind,
@@ -4597,7 +4568,7 @@ mod tests {
                     }
                 );
                 assert_eq!(route_transaction_id, transaction_id);
-                assert_eq!(route_body, body);
+                assert_eq!(document.plain_body(), body);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -5054,8 +5025,7 @@ mod tests {
             active_account_key.clone(),
             room_id.clone(),
             "$event".to_owned(),
-            edit_body.clone(),
-            koushi_state::MentionIntent::default(),
+            ComposerDocument::from_plain_text(edit_body.clone()),
         )
         .expect("edit_message should build a command")
         {
@@ -5063,8 +5033,7 @@ mod tests {
                 request_id,
                 key,
                 event_id,
-                body: route_body,
-                mentions,
+                document,
             }) => {
                 assert_eq!(request_id, fake_request_id(11));
                 assert_eq!(key.account_key, active_account_key);
@@ -5075,8 +5044,7 @@ mod tests {
                     }
                 );
                 assert_eq!(event_id, "$event");
-                assert_eq!(route_body, edit_body);
-                assert_eq!(mentions, koushi_state::MentionIntent::default());
+                assert_eq!(document.plain_body(), edit_body);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -5992,8 +5960,7 @@ mod tests {
             room_id.clone(),
             "desktop-reply-1".to_owned(),
             "$root".to_owned(),
-            "reply body".to_owned(),
-            MentionIntent::default(),
+            ComposerDocument::from_plain_text("reply body"),
         )
         .expect("send_reply should build a command")
         {
@@ -6002,11 +5969,9 @@ mod tests {
                 key,
                 transaction_id,
                 in_reply_to_event_id,
-                body,
-                mentions,
+                document,
             }) => {
                 assert_eq!(request_id, fake_request_id(23));
-                assert_eq!(mentions, koushi_state::MentionIntent::default());
                 assert_eq!(key.account_key, active_account_key);
                 assert_eq!(
                     key.kind,
@@ -6016,7 +5981,7 @@ mod tests {
                 );
                 assert_eq!(transaction_id, "desktop-reply-1");
                 assert_eq!(in_reply_to_event_id, "$root");
-                assert_eq!(body, "reply body");
+                assert_eq!(document.plain_body(), "reply body");
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -6027,7 +5992,7 @@ mod tests {
             room_id.clone(),
             "$root".to_owned(),
             "desktop-thread-reply-1".to_owned(),
-            "thread reply body".to_owned(),
+            ComposerDocument::from_plain_text("thread reply body"),
         )
         .expect("send_thread_reply should build a command")
         {
@@ -6036,11 +6001,9 @@ mod tests {
                 key,
                 transaction_id,
                 in_reply_to_event_id,
-                body,
-                mentions,
+                document,
             }) => {
                 assert_eq!(request_id, fake_request_id(24));
-                assert_eq!(mentions, koushi_state::MentionIntent::default());
                 assert_eq!(key.account_key, active_account_key);
                 assert_eq!(
                     key.kind,
@@ -6051,7 +6014,7 @@ mod tests {
                 );
                 assert_eq!(transaction_id, "desktop-thread-reply-1");
                 assert_eq!(in_reply_to_event_id, "$root");
-                assert_eq!(body, "thread reply body");
+                assert_eq!(document.plain_body(), "thread reply body");
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -6061,7 +6024,7 @@ mod tests {
             active_session_key.clone(),
             room_id.clone(),
             "$root".to_owned(),
-            "thread draft".to_owned(),
+            "thread draft".into(),
             9.into(),
         ) {
             CoreCommand::App(AppCommand::SetThreadComposerDraft {
@@ -6069,14 +6032,14 @@ mod tests {
                 expected_account,
                 room_id: command_room_id,
                 root_event_id,
-                draft,
+                document,
                 revision,
             }) => {
                 assert_eq!(request_id, fake_request_id(21));
                 assert_eq!(expected_account, active_session_key);
                 assert_eq!(command_room_id, room_id);
                 assert_eq!(root_event_id, "$root");
-                assert_eq!(draft, "thread draft");
+                assert_eq!(document.plain_body(), "thread draft");
                 assert_eq!(revision, 9.into());
             }
             other => panic!("unexpected command: {other:?}"),
@@ -6086,20 +6049,20 @@ mod tests {
             fake_request_id(22),
             active_session_key.clone(),
             room_id.clone(),
-            "room draft".to_owned(),
+            "room draft".into(),
             10.into(),
         ) {
             CoreCommand::App(AppCommand::SetComposerDraft {
                 request_id,
                 expected_account,
                 room_id: command_room_id,
-                draft,
+                document,
                 revision,
             }) => {
                 assert_eq!(request_id, fake_request_id(22));
                 assert_eq!(expected_account, active_session_key);
                 assert_eq!(command_room_id, room_id);
-                assert_eq!(draft, "room draft");
+                assert_eq!(document.plain_body(), "room draft");
                 assert_eq!(revision, 10.into());
             }
             other => panic!("unexpected command: {other:?}"),
@@ -6296,8 +6259,7 @@ mod tests {
                 account_key.clone(),
                 room_id.clone(),
                 "desktop-14".to_owned(),
-                "   ".to_owned(),
-                MentionIntent::default(),
+                ComposerDocument::from_plain_text("   "),
             )
             .is_none()
         );
@@ -6307,8 +6269,7 @@ mod tests {
                 account_key,
                 room_id,
                 "$event".to_owned(),
-                "\n\t ".to_owned(),
-                koushi_state::MentionIntent::default(),
+                ComposerDocument::from_plain_text("\n\t "),
             )
             .is_none()
         );
@@ -6347,7 +6308,7 @@ mod tests {
                 "!room:example.org".to_owned(),
                 "$root".to_owned(),
                 "desktop-16".to_owned(),
-                "\n\t ".to_owned(),
+                ComposerDocument::from_plain_text("\n\t "),
             )
             .is_none()
         );
@@ -8004,8 +7965,7 @@ mod tests {
             account_key.clone(),
             room_id.clone(),
             "desktop-18".to_owned(),
-            "sensitive body".to_owned(),
-            MentionIntent::default(),
+            ComposerDocument::from_plain_text("sensitive body"),
         )
         .expect("send_text should build a command");
         let edit = build_edit_message_command(
@@ -8013,8 +7973,7 @@ mod tests {
             account_key,
             room_id,
             "$event".to_owned(),
-            "sensitive edit body".to_owned(),
-            koushi_state::MentionIntent::default(),
+            ComposerDocument::from_plain_text("sensitive edit body"),
         )
         .expect("edit_message should build a command");
         let upload = build_upload_media_command(

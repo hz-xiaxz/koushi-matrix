@@ -74,10 +74,11 @@ use koushi_sdk::{
 use koushi_search::{AttachmentDocument, SensitiveString};
 use koushi_state::UserProfile;
 use koushi_state::{
-    ActivityRow, AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState,
-    ComposerFormattingOptions, ComposerSendIntent, FormattedMessageDraft, LiveEventReceipts,
-    LiveReadReceipt, MediaTransferProgress, MentionIntent, MentionTarget, OperationFailureKind,
-    ReplyQuote, ReplyQuoteCodeBlock, ReplyQuoteFormattedBody, ReplyQuoteState, SlashCommandIntent,
+    ActivityRow, AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState, ComposerDocument,
+    ComposerFormattingOptions, ComposerInline, ComposerSendIntent, FormattedMessageDraft,
+    LiveEventReceipts, LiveReadReceipt, MediaTransferProgress, MentionIntent, MentionTarget,
+    OperationFailureKind, ReplyQuote, ReplyQuoteCodeBlock, ReplyQuoteFormattedBody,
+    ReplyQuoteState, SlashCommandIntent,
     ThreadRootProjectionActivity as ThreadRootProjectionActivityState,
     TimelineContinuityInspection, TimelineGapRepairFailureKind, TimelineMediaDownloadState,
     TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
@@ -548,14 +549,12 @@ enum TimelineSendEnqueueContext {
 
 enum TimelineSendEnqueuePayload {
     Text {
-        body: String,
-        mentions: MentionIntent,
+        document: ComposerDocument,
         formatting_options: ComposerFormattingOptions,
     },
     Reply {
         in_reply_to_event_id: String,
-        body: String,
-        mentions: MentionIntent,
+        document: ComposerDocument,
         formatting_options: ComposerFormattingOptions,
     },
     Media {
@@ -1195,48 +1194,33 @@ where
     }
 }
 
-async fn enqueue_text_send(
+async fn enqueue_document_send(
     context: MatrixTimelineSendEnqueueContext,
-    body: String,
-    mentions: MentionIntent,
+    document: ComposerDocument,
     formatting_options: ComposerFormattingOptions,
 ) -> Result<SendEnqueueSuccess, TimelineFailureKind> {
-    let room_id = matrix_sdk::ruma::RoomId::parse(context.key.room_id())
-        .map_err(|_| TimelineFailureKind::Sdk)?;
-    if context.session.client().get_room(&room_id).is_none() {
-        return Err(TimelineFailureKind::Sdk);
-    }
-    let content = build_room_message_content_from_composer_body_with_options(
-        &body,
-        mentions,
+    let content = build_room_message_content_from_composer_document_with_options(
+        document,
         formatting_options,
     )?;
-    let content = matrix_sdk::ruma::events::AnyMessageLikeEventContent::RoomMessage(content);
     context
         .timeline
-        .send(content)
+        .send(content.into())
         .await
         .map(|handle| SendEnqueueSuccess::terminal_only(handle.transaction_id().to_string()))
         .map_err(|error| classify_timeline_send_error(&error))
 }
 
-async fn enqueue_reply_send(
+async fn enqueue_document_reply_send(
     context: MatrixTimelineSendEnqueueContext,
     in_reply_to_event_id: String,
-    body: String,
-    mentions: MentionIntent,
+    document: ComposerDocument,
     formatting_options: ComposerFormattingOptions,
 ) -> Result<SendEnqueueSuccess, TimelineFailureKind> {
-    let room_id = matrix_sdk::ruma::RoomId::parse(context.key.room_id())
-        .map_err(|_| TimelineFailureKind::Sdk)?;
     let reply_event_id = matrix_sdk::ruma::EventId::parse(&in_reply_to_event_id)
         .map_err(|_| TimelineFailureKind::Sdk)?;
-    if context.session.client().get_room(&room_id).is_none() {
-        return Err(TimelineFailureKind::Sdk);
-    }
-    let content = build_room_message_content_without_relation_from_composer_body_with_options(
-        &body,
-        mentions,
+    let content = build_room_message_content_without_relation_from_composer_document_with_options(
+        document,
         formatting_options,
     )?;
     let reply = Reply {
@@ -1315,21 +1299,18 @@ async fn enqueue_timeline_send(
     match context {
         TimelineSendEnqueueContext::Matrix(context) => match payload {
             TimelineSendEnqueuePayload::Text {
-                body,
-                mentions,
+                document,
                 formatting_options,
-            } => enqueue_text_send(context, body, mentions, formatting_options).await,
+            } => enqueue_document_send(context, document, formatting_options).await,
             TimelineSendEnqueuePayload::Reply {
                 in_reply_to_event_id,
-                body,
-                mentions,
+                document,
                 formatting_options,
             } => {
-                enqueue_reply_send(
+                enqueue_document_reply_send(
                     context,
                     in_reply_to_event_id,
-                    body,
-                    mentions,
+                    document,
                     formatting_options,
                 )
                 .await
@@ -4172,9 +4153,9 @@ impl TimelineManagerActor {
                 request_id,
                 key,
                 transaction_id,
-                body,
-                mentions,
+                document,
             } => {
+                let body = document.plain_body();
                 if let Err(kind) = validate_composer_body_for_timeline_send(&body) {
                     self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
                     return;
@@ -4186,8 +4167,7 @@ impl TimelineManagerActor {
                     body.clone(),
                     SendComposerProjection::for_send_text(&key),
                     TimelineSendEnqueuePayload::Text {
-                        body,
-                        mentions,
+                        document,
                         formatting_options: self.composer_formatting_options,
                     },
                 )
@@ -4198,11 +4178,11 @@ impl TimelineManagerActor {
                 submission_id,
                 key,
                 transaction_id,
-                body,
-                mentions,
+                document,
                 draft_revision,
                 ..
             } => {
+                let body = document.plain_body();
                 if let Err(kind) = validate_composer_body_for_timeline_send(&body) {
                     self.emit(CoreEvent::Timeline(TimelineEvent::SubmissionRejected {
                         request_id,
@@ -4221,8 +4201,7 @@ impl TimelineManagerActor {
                     draft_revision,
                     SendComposerProjection::for_send_text(&key),
                     TimelineSendEnqueuePayload::Text {
-                        body,
-                        mentions,
+                        document,
                         formatting_options: self.composer_formatting_options,
                     },
                     composer_permit.take(),
@@ -4234,9 +4213,9 @@ impl TimelineManagerActor {
                 key,
                 transaction_id,
                 in_reply_to_event_id,
-                body,
-                mentions,
+                document,
             } => {
+                let body = document.plain_body();
                 if let Err(kind) = validate_composer_body_for_timeline_send(&body) {
                     self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
                     return;
@@ -4249,8 +4228,7 @@ impl TimelineManagerActor {
                     SendComposerProjection::for_send_reply(&key),
                     TimelineSendEnqueuePayload::Reply {
                         in_reply_to_event_id,
-                        body,
-                        mentions,
+                        document,
                         formatting_options: self.composer_formatting_options,
                     },
                 )
@@ -4262,11 +4240,11 @@ impl TimelineManagerActor {
                 key,
                 transaction_id,
                 in_reply_to_event_id,
-                body,
-                mentions,
+                document,
                 draft_revision,
                 ..
             } => {
+                let body = document.plain_body();
                 if let Err(kind) = validate_composer_body_for_timeline_send(&body) {
                     self.emit(CoreEvent::Timeline(TimelineEvent::SubmissionRejected {
                         request_id,
@@ -4286,8 +4264,7 @@ impl TimelineManagerActor {
                     SendComposerProjection::for_send_reply(&key),
                     TimelineSendEnqueuePayload::Reply {
                         in_reply_to_event_id,
-                        body,
-                        mentions,
+                        document,
                         formatting_options: self.composer_formatting_options,
                     },
                     composer_permit.take(),
@@ -4413,8 +4390,7 @@ impl TimelineManagerActor {
                 request_id,
                 key,
                 event_id,
-                body,
-                mentions,
+                document,
             } => {
                 self.route_to_actor_or_fail(
                     request_id,
@@ -4422,8 +4398,7 @@ impl TimelineManagerActor {
                     TimelineActorMessage::EditText {
                         request_id,
                         event_id,
-                        body,
-                        mentions,
+                        document,
                     },
                 )
                 .await;
@@ -6146,6 +6121,51 @@ fn validate_composer_body_for_timeline_send(body: &str) -> Result<(), TimelineFa
     }
 }
 
+#[cfg(test)]
+pub(crate) fn build_room_message_content_from_composer_document(
+    document: ComposerDocument,
+) -> Result<RoomMessageEventContent, TimelineFailureKind> {
+    build_room_message_content_from_composer_document_with_options(
+        document,
+        ComposerFormattingOptions::default(),
+    )
+}
+
+fn build_room_message_content_from_composer_document_with_options(
+    document: ComposerDocument,
+    formatting_options: ComposerFormattingOptions,
+) -> Result<RoomMessageEventContent, TimelineFailureKind> {
+    build_room_message_content_without_relation_from_composer_document_with_options(
+        document,
+        formatting_options,
+    )
+    .map(|content| content.with_relation(None))
+}
+
+fn build_room_message_content_without_relation_from_composer_document_with_options(
+    document: ComposerDocument,
+    formatting_options: ComposerFormattingOptions,
+) -> Result<RoomMessageEventContentWithoutRelation, TimelineFailureKind> {
+    let body = document.plain_body();
+    if body.starts_with('/') {
+        return build_room_message_content_without_relation_from_composer_body_with_options(
+            &body,
+            document.mention_intent(),
+            formatting_options,
+        );
+    }
+    let mut content = match document.formatted_body_with_options(formatting_options) {
+        Some(formatted_body) => {
+            RoomMessageEventContentWithoutRelation::text_html(body, formatted_body)
+        }
+        None => RoomMessageEventContentWithoutRelation::text_plain(body),
+    };
+    if let Some(mentions) = ruma_mentions_from_intent(&document.mention_intent()) {
+        content = content.add_mentions(mentions);
+    }
+    Ok(content)
+}
+
 pub(crate) fn build_room_message_content_from_composer_body(
     body: &str,
     mentions: MentionIntent,
@@ -6372,8 +6392,7 @@ enum TimelineActorMessage {
     EditText {
         request_id: RequestId,
         event_id: String,
-        body: String,
-        mentions: MentionIntent,
+        document: ComposerDocument,
     },
     Redact {
         request_id: RequestId,
@@ -14757,11 +14776,9 @@ impl TimelineActor {
             TimelineActorMessage::EditText {
                 request_id,
                 event_id,
-                body,
-                mentions,
+                document,
             } => {
-                self.handle_edit_text(request_id, event_id, body, mentions)
-                    .await;
+                self.handle_edit_text(request_id, event_id, document).await;
             }
             TimelineActorMessage::Redact {
                 request_id,
@@ -17238,9 +17255,9 @@ impl TimelineActor {
         &mut self,
         request_id: RequestId,
         event_id: String,
-        body: String,
-        mentions: MentionIntent,
+        document: ComposerDocument,
     ) {
+        let body = document.plain_body();
         // Edits go through the SDK Timeline so the Set diff on the original
         // item is produced locally (send-queue local echo) instead of
         // depending on the server echoing the edit back through sync —
@@ -17285,7 +17302,7 @@ impl TimelineActor {
                 None,
                 None,
             );
-            let content = edited_content_for_edit_target(target, &body, &mentions);
+            let content = edited_document_content_for_edit_target(target, &document);
             trace_message_edit_target(target, &content);
             let (final_mention_count, revision_mention_count) =
                 mention_counts_for_edit(target, &content);
@@ -22049,16 +22066,22 @@ fn original_json_for_event_item(event_item: &EventTimelineItem) -> Option<serde_
         .and_then(|raw| serde_json::from_str(raw.json().get()).ok())
 }
 
-fn mention_intent_from_event_json(raw: &serde_json::Value) -> Option<MentionIntent> {
+fn effective_message_content(raw: &serde_json::Value) -> Option<&serde_json::Value> {
     let content = raw.get("content")?;
-    let effective_content = content
-        .get("m.relates_to")
-        .and_then(|relation| {
-            (relation.get("rel_type")?.as_str() == Some("m.replace"))
-                .then(|| relation.get("m.new_content"))
-        })
-        .flatten()
-        .unwrap_or(content);
+    Some(
+        content
+            .get("m.relates_to")
+            .and_then(|relation| {
+                (relation.get("rel_type")?.as_str() == Some("m.replace"))
+                    .then(|| relation.get("m.new_content"))
+            })
+            .flatten()
+            .unwrap_or(content),
+    )
+}
+
+fn mention_intent_from_event_json(raw: &serde_json::Value) -> Option<MentionIntent> {
+    let effective_content = effective_message_content(raw)?;
     let mentions = effective_content.get("m.mentions")?;
     let mut targets = mentions
         .get("user_ids")
@@ -22084,6 +22107,166 @@ fn mention_intent_from_event_json(raw: &serde_json::Value) -> Option<MentionInte
         });
     }
     (!targets.is_empty()).then_some(MentionIntent { targets })
+}
+
+fn composer_document_from_event_json(raw: &serde_json::Value) -> Option<ComposerDocument> {
+    let content = effective_message_content(raw)?;
+    let body = content.get("body")?.as_str()?;
+    let mentions = mention_intent_from_event_json(raw).unwrap_or_default();
+    let formatted_body = content.get("formatted_body")?.as_str()?;
+    let html = Html::parse(formatted_body);
+    let mut parsed = Vec::new();
+    collect_composer_inlines_from_nodes(html.children(), &mentions, &mut parsed);
+    let mut inlines = Vec::new();
+    let mut remaining = body;
+    for inline in parsed {
+        let ComposerInline::Mention {
+            target,
+            display_label,
+        } = inline
+        else {
+            continue;
+        };
+        let needle = format!("@{display_label}");
+        let offset = remaining.find(&needle)?;
+        if offset > 0 {
+            inlines.push(ComposerInline::Text {
+                text: remaining[..offset].to_owned(),
+            });
+        }
+        inlines.push(ComposerInline::Mention {
+            target,
+            display_label,
+        });
+        remaining = &remaining[offset + needle.len()..];
+    }
+    if !remaining.is_empty() {
+        inlines.push(ComposerInline::Text {
+            text: remaining.to_owned(),
+        });
+    }
+    let document = ComposerDocument::new(inlines);
+    (!document.mention_intent().targets.is_empty()).then_some(document)
+}
+
+fn collect_composer_inlines_from_nodes(
+    nodes: impl Iterator<Item = matrix_sdk::ruma::html::NodeRef>,
+    mentions: &MentionIntent,
+    out: &mut Vec<ComposerInline>,
+) {
+    for node in nodes {
+        if let Some(text) = node.as_text() {
+            out.push(ComposerInline::Text {
+                text: text.borrow().to_string(),
+            });
+            continue;
+        }
+        let Some(element) = node.as_element() else {
+            continue;
+        };
+        let attrs = element.attrs.borrow();
+        let href = attrs
+            .iter()
+            .find_map(|attr| (attr.name.local.as_ref() == "href").then(|| attr.value.to_string()));
+        let room_mention = attrs
+            .iter()
+            .any(|attr| attr.name.local.as_ref() == "data-mx-mention");
+        drop(attrs);
+
+        let mut label = String::new();
+        collect_plain_text_from_nodes(node.children(), &mut label);
+        let display_label = label.strip_prefix('@').unwrap_or(&label).to_owned();
+        if let Some(target) = href
+            .as_deref()
+            .and_then(matrix_to_mention_target)
+            .and_then(|target| allowed_editable_mention_target(target, mentions, &display_label))
+        {
+            out.push(ComposerInline::Mention {
+                target,
+                display_label,
+            });
+        } else if room_mention && mentions.mentions_room() {
+            out.push(ComposerInline::Mention {
+                target: MentionTarget::RoomMention {
+                    display_label: display_label.clone(),
+                },
+                display_label,
+            });
+        } else {
+            collect_composer_inlines_from_nodes(node.children(), mentions, out);
+        }
+    }
+}
+
+fn matrix_to_mention_target(href: &str) -> Option<MentionTarget> {
+    let url = url::Url::parse(href).ok()?;
+    if url.scheme() != "https" || url.host_str()? != "matrix.to" {
+        return None;
+    }
+    let encoded = url.fragment()?.strip_prefix('/')?.split('?').next()?;
+    let identifier = percent_decode_matrix_identifier(encoded)?;
+    if identifier.starts_with('@') {
+        Some(MentionTarget::User {
+            user_id: identifier,
+            display_label: String::new(),
+        })
+    } else if identifier.starts_with('!') || identifier.starts_with('#') {
+        Some(MentionTarget::Room {
+            room_id: identifier,
+            display_label: String::new(),
+        })
+    } else {
+        None
+    }
+}
+
+fn allowed_editable_mention_target(
+    target: MentionTarget,
+    mentions: &MentionIntent,
+    display_label: &str,
+) -> Option<MentionTarget> {
+    match target {
+        MentionTarget::User { user_id, .. } => mentions
+            .targets
+            .iter()
+            .any(|target| matches!(target, MentionTarget::User { user_id: existing, .. } if existing == &user_id))
+            .then(|| MentionTarget::User {
+                user_id,
+                display_label: display_label.to_owned(),
+            }),
+        MentionTarget::Room { room_id, .. } => Some(MentionTarget::Room {
+            room_id,
+            display_label: display_label.to_owned(),
+        }),
+        MentionTarget::RoomMention { .. } => None,
+    }
+}
+
+fn percent_decode_matrix_identifier(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = hex_value(*bytes.get(index + 1)?)?;
+            let low = hex_value(*bytes.get(index + 2)?)?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn timeline_item_should_be_hidden(has_renderable_content: bool, is_redacted: bool) -> bool {
@@ -22580,8 +22763,9 @@ fn sdk_item_to_timeline_item_with_send_states(
                 media.is_some(),
                 is_redacted,
             );
-            actions.editable_mentions = original_json_for_event_item(event_item)
-                .and_then(|raw| mention_intent_from_event_json(&raw));
+            if let Some(raw) = original_json_for_event_item(event_item) {
+                actions.editable_document = composer_document_from_event_json(&raw);
+            }
             let is_hidden = timeline_item_should_be_hidden_for_key(
                 key,
                 has_renderable_content,
@@ -23832,6 +24016,44 @@ fn edit_target_msgtype<'items>(
 /// therefore edit the caption in place; everything else keeps the plain-text
 /// replacement. This decision stays in core because the GUI submits only the new
 /// visible text and never sees the original Matrix content.
+fn edited_document_content_for_edit_target(
+    msgtype: Option<&MessageType>,
+    document: &ComposerDocument,
+) -> EditedContent {
+    let body = document.plain_body();
+    let formatted_body = document.formatted_body();
+    let mentions = document.mention_intent();
+    if msgtype.is_some_and(msgtype_carries_editable_caption) {
+        return EditedContent::MediaCaption {
+            caption: Some(body),
+            formatted_caption: formatted_body.map(FormattedBody::html),
+            mentions: ruma_mentions_from_intent(&mentions),
+        };
+    }
+
+    let mut content = match (msgtype, formatted_body) {
+        (Some(MessageType::Emote(_)), Some(formatted)) => {
+            RoomMessageEventContentWithoutRelation::emote_html(body, formatted)
+        }
+        (Some(MessageType::Notice(_)), Some(formatted)) => {
+            RoomMessageEventContentWithoutRelation::notice_html(body, formatted)
+        }
+        (_, Some(formatted)) => RoomMessageEventContentWithoutRelation::text_html(body, formatted),
+        (Some(MessageType::Emote(_)), None) => {
+            RoomMessageEventContentWithoutRelation::emote_plain(body)
+        }
+        (Some(MessageType::Notice(_)), None) => {
+            RoomMessageEventContentWithoutRelation::notice_plain(body)
+        }
+        (_, None) => RoomMessageEventContentWithoutRelation::text_plain(body),
+    };
+    if let Some(mentions) = ruma_mentions_from_intent(&mentions) {
+        content = content.add_mentions(mentions);
+    }
+    EditedContent::RoomMessage(content)
+}
+
+#[cfg(test)]
 fn edited_content_for_edit_target(
     msgtype: Option<&MessageType>,
     body: &str,
@@ -25111,8 +25333,8 @@ mod tests {
 
     use koushi_diagnostics::DiagnosticValue;
     use koushi_state::{
-        AppAction, MentionIntent, MentionTarget, SessionInfo, SessionState, SubmissionId,
-        TimelineMediaKind as GalleryTimelineMediaKind, UserProfile,
+        AppAction, ComposerDocument, ComposerInline, MentionIntent, MentionTarget, SessionInfo,
+        SessionState, SubmissionId, TimelineMediaKind as GalleryTimelineMediaKind, UserProfile,
     };
     use matrix_sdk::ruma::events::room::message::{
         EmoteMessageEventContent, MessageType, NoticeMessageEventContent, TextMessageEventContent,
@@ -25829,7 +26051,7 @@ mod tests {
             can_permalink: true,
             can_view_source: true,
             permalink: Some("https://example.invalid/#/room/$known-root:test".to_owned()),
-            editable_mentions: None,
+            editable_document: None,
         };
         let update = reconcile_replay_known_root_projections_after_navigation_update(
             &registry,
@@ -33582,9 +33804,8 @@ mod tests {
                     submission_id: submission_id.clone(),
                     key: key.clone(),
                     transaction_id: "txn-once".to_owned(),
-                    body: "body".to_owned(),
+                    document: ComposerDocument::from_plain_text("body"),
                     draft_revision: 1.into(),
-                    mentions: MentionIntent::default(),
                 })
                 .await;
         }
@@ -33594,7 +33815,7 @@ mod tests {
             .expect("one manager enqueue worker");
         assert!(matches!(
             request.payload,
-            TimelineSendEnqueuePayload::Text { ref body, .. } if body == "body"
+            TimelineSendEnqueuePayload::Text { ref document, .. } if document.plain_body() == "body"
         ));
         assert!(enqueue_rx.try_recv().is_err());
         assert!(matches!(
@@ -33623,9 +33844,8 @@ mod tests {
                 submission_id: rejected_id.clone(),
                 key: key.clone(),
                 transaction_id: "txn-rejected".to_owned(),
-                body: "body".to_owned(),
+                document: ComposerDocument::from_plain_text("body"),
                 draft_revision: 2.into(),
-                mentions: MentionIntent::default(),
             })
             .await;
         assert!(action_rx.try_recv().is_err());
@@ -33653,9 +33873,8 @@ mod tests {
                 submission_id: failed_id.clone(),
                 key: key.clone(),
                 transaction_id: "txn-reducer-closed".to_owned(),
-                body: "body".to_owned(),
+                document: ComposerDocument::from_plain_text("body"),
                 draft_revision: 3.into(),
-                mentions: MentionIntent::default(),
             })
             .await;
         manager.join_send_enqueue_workers().await;
@@ -33670,9 +33889,8 @@ mod tests {
                 submission_id: failed_id.clone(),
                 key,
                 transaction_id: "txn-replayed".to_owned(),
-                body: "changed".to_owned(),
+                document: ComposerDocument::from_plain_text("changed"),
                 draft_revision: 3.into(),
-                mentions: MentionIntent::default(),
             })
             .await;
         assert!(
@@ -34087,9 +34305,8 @@ mod tests {
                         submission_id: command_id,
                         key,
                         transaction_id: "txn-paused".to_owned(),
-                        body: "body".to_owned(),
+                        document: ComposerDocument::from_plain_text("body"),
                         draft_revision: 4.into(),
-                        mentions: MentionIntent::default(),
                     },
                     Some(forwarded_permit),
                 )
@@ -34143,7 +34360,7 @@ mod tests {
             .expect("accepted submission releases manager enqueue worker");
         assert!(matches!(
             request.payload,
-            TimelineSendEnqueuePayload::Text { ref body, .. } if body == "body"
+            TimelineSendEnqueuePayload::Text { ref document, .. } if document.plain_body() == "body"
         ));
         assert!(
             request
@@ -34660,6 +34877,105 @@ mod tests {
         );
 
         reactions
+    }
+
+    #[test]
+    fn editable_document_uses_formatted_links_for_duplicate_mention_identity() {
+        let document = composer_document_from_event_json(&serde_json::json!({
+            "content": {
+                "body": "**hello** @Same @Same typed @Same",
+                "format": "org.matrix.custom.html",
+                "formatted_body": "<strong>hello</strong> <a href=\"https://matrix.to/#/%40alice%3Aexample.test\">@Same</a> <a href=\"https://matrix.to/#/%40bob%3Aexample.test\">@Same</a> typed @Same",
+                "m.mentions": {
+                    "user_ids": ["@alice:example.test", "@bob:example.test"]
+                }
+            }
+        }))
+        .expect("structured document");
+
+        assert_eq!(document.plain_body(), "**hello** @Same @Same typed @Same");
+        assert_eq!(
+            document.mention_intent().user_ids(),
+            vec!["@alice:example.test", "@bob:example.test"]
+        );
+        assert!(
+            matches!(document.inlines.last(), Some(ComposerInline::Text { text }) if text.ends_with("typed @Same"))
+        );
+    }
+
+    #[test]
+    fn editable_document_keeps_room_link_identity_without_user_mentions_metadata() {
+        let document = composer_document_from_event_json(&serde_json::json!({
+            "content": {
+                "body": "visit **@Project**",
+                "format": "org.matrix.custom.html",
+                "formatted_body": "visit <strong><a href=\"https://matrix.to/#/%23project%3Aexample.test\">@Project</a></strong>"
+            }
+        }))
+        .expect("structured room mention");
+
+        assert_eq!(document.plain_body(), "visit **@Project**");
+        assert!(matches!(
+            &document.inlines[1],
+            ComposerInline::Mention {
+                target: MentionTarget::Room { room_id, .. },
+                ..
+            } if room_id == "#project:example.test"
+        ));
+    }
+
+    #[test]
+    fn editable_document_rejects_unsafe_links_even_when_labels_match() {
+        let document = composer_document_from_event_json(&serde_json::json!({
+            "content": {
+                "body": "@Same",
+                "format": "org.matrix.custom.html",
+                "formatted_body": "<a href=\"http://matrix.to/#/%40alice%3Aexample.test\">@Same</a>",
+                "m.mentions": { "user_ids": ["@alice:example.test"] }
+            }
+        }));
+
+        assert!(document.is_none());
+    }
+
+    #[test]
+    fn composer_document_builds_body_html_and_mentions_from_one_source() {
+        let content =
+            build_room_message_content_from_composer_document(ComposerDocument::new(vec![
+                ComposerInline::Text {
+                    text: "hello ".into(),
+                },
+                ComposerInline::Mention {
+                    target: MentionTarget::User {
+                        user_id: "@alice:example.test".into(),
+                        display_label: "Same Name".into(),
+                    },
+                    display_label: "Same Name".into(),
+                },
+            ]))
+            .expect("content");
+
+        let MessageType::Text(text) = &content.msgtype else {
+            panic!("expected text content")
+        };
+        assert_eq!(text.body, "hello @Same Name");
+        assert_eq!(
+            text.formatted
+                .as_ref()
+                .map(|formatted| formatted.body.as_str()),
+            Some("hello <a href=\"https://matrix.to/#/%40alice%3Aexample.test\">@Same Name</a>")
+        );
+        assert_eq!(
+            content
+                .mentions
+                .expect("mentions")
+                .user_ids
+                .iter()
+                .next()
+                .expect("user")
+                .as_str(),
+            "@alice:example.test"
+        );
     }
 
     #[test]
@@ -39320,8 +39636,7 @@ mod tests {
             request_id: rid,
             key: room_key(),
             transaction_id: "txn-unsubscribed".to_owned(),
-            body: "hello".to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text("hello".to_owned()),
         }))
         .await
         .expect("submit");
@@ -41570,6 +41885,50 @@ mod tests {
     }
 
     #[test]
+    fn structured_edit_preserves_final_mentions_and_formats_text_and_media_captions() {
+        let document = ComposerDocument::new(vec![
+            ComposerInline::Text {
+                text: "hello ".into(),
+            },
+            ComposerInline::Mention {
+                target: MentionTarget::User {
+                    user_id: "@alice:example.org".into(),
+                    display_label: "Alice".into(),
+                },
+                display_label: "Alice".into(),
+            },
+        ]);
+        let text = MessageType::Text(TextMessageEventContent::plain("old"));
+        let EditedContent::RoomMessage(content) =
+            edited_document_content_for_edit_target(Some(&text), &document)
+        else {
+            panic!("text edit must stay a room message")
+        };
+        let MessageType::Text(text) = content.msgtype else {
+            panic!("text edit must stay text")
+        };
+        assert_eq!(text.body, "hello @Alice");
+        assert_eq!(
+            text.formatted.map(|formatted| formatted.body),
+            Some("hello <a href=\"https://matrix.to/#/%40alice%3Aexample.org\">@Alice</a>".into())
+        );
+        assert_eq!(content.mentions.expect("final mentions").user_ids.len(), 1);
+
+        let media = media_msgtype_fixtures().pop().expect("media fixture");
+        let EditedContent::MediaCaption {
+            caption,
+            formatted_caption,
+            mentions,
+        } = edited_document_content_for_edit_target(Some(&media), &document)
+        else {
+            panic!("media edit must remain a caption edit")
+        };
+        assert_eq!(caption.as_deref(), Some("hello @Alice"));
+        assert!(formatted_caption.is_some());
+        assert_eq!(mentions.expect("caption mentions").user_ids.len(), 1);
+    }
+
+    #[test]
     fn edit_replacement_carries_final_mentions_and_sdk_filters_revision_mentions() {
         use matrix_sdk::ruma::events::room::message::ReplacementMetadata;
 
@@ -41683,8 +42042,9 @@ mod tests {
             request_id: fake_rid(1),
             key: room_key(),
             transaction_id: "txn-vis".to_owned(),
-            body: "very-private-body".to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(
+                "very-private-body".to_owned(),
+            ),
         };
         let debug = format!("{cmd:?}");
         assert!(

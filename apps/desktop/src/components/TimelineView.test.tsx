@@ -39,6 +39,35 @@ import {
 } from "./TimelineView";
 import type { LiveSignalsState, TimelineContinuityState } from "../domain/types";
 import type { MentionCandidate } from "../app/uiShared";
+import { documentFromText } from "../domain/composerDocument";
+import {
+  inlineMentionEditorSelection,
+  setInlineMentionEditorSelection
+} from "./ImeTextControl";
+
+function changeInlineEditorText(editor: HTMLDivElement, text: string) {
+  if (editor.dataset.composing === "true") {
+    let textNode = editor.querySelector<HTMLElement>("[data-composer-text]");
+    if (!textNode) {
+      textNode = document.createElement("span");
+      textNode.dataset.composerText = "";
+      editor.append(textNode);
+    }
+    textNode.textContent = text;
+    fireEvent.input(editor, { inputType: "insertCompositionText", isComposing: true });
+    return;
+  }
+  setInlineMentionEditorSelection(editor, 0, editor.textContent?.length ?? 0);
+  fireEvent(
+    editor,
+    new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "insertText",
+      data: text
+    })
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -344,14 +373,14 @@ describe("TimelineView", () => {
     const { rerender } = render(view(makeStore(editable)));
 
     fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
-    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLTextAreaElement;
+    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLDivElement;
     fireEvent.compositionStart(textarea);
-    fireEvent.change(textarea, { target: { value: "日本語変換中" } });
-    textarea.setSelectionRange(3, 5);
+    changeInlineEditorText(textarea, "日本語変換中");
+    setInlineMentionEditorSelection(textarea, 3, 5);
     rerender(view(makeStore({ ...editable, body: "stale timeline body", is_edited: true })));
 
-    expect(textarea.value).toBe("日本語変換中");
-    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([3, 5]);
+    expect(textarea.textContent).toBe("日本語変換中");
+    expect(inlineMentionEditorSelection(textarea)).toEqual({ start: 3, end: 5 });
   });
 
   it("discards a stale deferred edit newline after newer DOM input", async () => {
@@ -381,23 +410,25 @@ describe("TimelineView", () => {
       </TimelineStoreContext.Provider>
     );
     fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
-    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLTextAreaElement;
-    textarea.setSelectionRange(8, 8);
+    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLDivElement;
+    setInlineMentionEditorSelection(textarea, 8);
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
-    fireEvent.change(textarea, { target: { value: "newer edit input" } });
+    changeInlineEditorText(textarea, "newer edit input");
     await act(async () => resolveAction("insertNewline"));
     fireEvent.click(screen.getByRole("button", { name: /save edit/i }));
 
-    expect(textarea.value).toBe("newer edit input");
+    expect(textarea.textContent).toBe("newer edit input");
     expect(editMessage).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$edit-deferred",
-      "newer edit input",
-      { targets: [] }
+      documentFromText("newer edit input")
     );
   });
 
-  it("opens shared mention autocomplete in inline edit and submits structured intent", async () => {
+  it.each([
+    ["text", message("$edit-mention", "old body")],
+    ["media caption", { ...imageMessage("$edit-mention"), body: "old body" }]
+  ])("opens shared mention autocomplete in %s edit and submits a structured document", async (_surface, item) => {
     const editMessage = vi.fn(async () => undefined);
     const mentionCandidates: MentionCandidate[] = [
       {
@@ -411,22 +442,14 @@ describe("TimelineView", () => {
       }
     ];
     const editable = {
-      ...message("$edit-mention", "old body"),
+      ...item,
       can_edit: true,
       actions: {
         can_copy: true,
         can_forward: true,
         can_permalink: true,
         can_view_source: true,
-        editable_mentions: {
-          targets: [
-            {
-              kind: "user" as const,
-              user_id: "@alice:example.invalid",
-              display_label: "Alice"
-            }
-          ]
-        }
+        editable_document: documentFromText("old body")
       }
     };
     const store = applyTimelineEvent(createTimelineStore(), {
@@ -450,22 +473,27 @@ describe("TimelineView", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
-    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: "@" } });
+    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLDivElement;
+    changeInlineEditorText(textarea, "@");
     expect(await screen.findByRole("option", { name: "Alice @alice:example.invalid" })).toBeTruthy();
     fireEvent.click(screen.getByRole("option", { name: "Alice @alice:example.invalid" }));
-    expect(textarea.value).toBe("@Alice ");
+    expect(textarea.textContent).toBe("@Alice ");
+    expect(document.querySelector(".composer-mention-pills")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /save edit/i }));
     expect(editMessage).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$edit-mention",
-      "@Alice",
       {
-        targets: [
+        version: 2,
+        inlines: [
           {
-            kind: "user",
-            user_id: "@alice:example.invalid",
+            kind: "mention",
+            target: {
+              kind: "user",
+              user_id: "@alice:example.invalid",
+              display_label: "Alice"
+            },
             display_label: "Alice"
           }
         ]
@@ -483,12 +511,18 @@ describe("TimelineView", () => {
         can_forward: true,
         can_permalink: true,
         can_view_source: true,
-        editable_mentions: {
-          targets: [
+        editable_document: {
+          version: 2 as const,
+          inlines: [
+            { kind: "text" as const, text: "hello " },
             {
-              kind: "user" as const,
-              user_id: "@alice:example.invalid",
-              display_label: "alice:example.invalid"
+              kind: "mention" as const,
+              target: {
+                kind: "user" as const,
+                user_id: "@alice:example.invalid",
+                display_label: "alice:example.invalid"
+              },
+              display_label: "Alice"
             }
           ]
         }
@@ -519,16 +553,7 @@ describe("TimelineView", () => {
     expect(editMessage).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$edit-mention-fallback",
-      "hello @Alice",
-      {
-        targets: [
-          {
-            kind: "user",
-            user_id: "@alice:example.invalid",
-            display_label: "alice:example.invalid"
-          }
-        ]
-      }
+      editable.actions.editable_document
     );
   });
 
@@ -556,8 +581,8 @@ describe("TimelineView", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
-    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLTextAreaElement;
-    textarea.setSelectionRange(5, 5);
+    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLDivElement;
+    setInlineMentionEditorSelection(textarea, 5);
     fireEvent.keyDown(textarea, {
       key: "Enter",
       code: "Enter",
@@ -566,7 +591,7 @@ describe("TimelineView", () => {
     });
 
     await waitFor(() => {
-      expect(textarea.value).toBe("hello\nworld");
+      expect(textarea.textContent).toBe("hello\nworld");
     });
 
     fireEvent.click(screen.getByRole("button", { name: /save edit/i }));
@@ -574,8 +599,7 @@ describe("TimelineView", () => {
     expect(editMessage).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$edit-newline",
-      "hello\nworld",
-      { targets: [] }
+      documentFromText("hello\nworld")
     );
   });
 
@@ -606,16 +630,15 @@ describe("TimelineView", () => {
       </TimelineStoreContext.Provider>
     );
     fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
-    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLTextAreaElement;
+    const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLDivElement;
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter", keyCode: 13 });
-    fireEvent.change(textarea, { target: { value: "later edit input" } });
+    changeInlineEditorText(textarea, "later edit input");
     await act(async () => resolveAction("send"));
 
     expect(editMessage).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$edit-send-snapshot",
-      "intent snapshot",
-      { targets: [] }
+      documentFromText("intent snapshot")
     );
   });
 
