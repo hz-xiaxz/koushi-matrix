@@ -8890,8 +8890,10 @@ async fn wait_for_invite_accepted(
     expected_room_id: &str,
     label: &str,
 ) -> Result<(), String> {
+    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
     loop {
-        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+        let event = deadline
+            .recv(conn)
             .await
             .map_err(|_| format!("{label}: timed out waiting for RoomEvent::InviteAccepted"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
@@ -8923,8 +8925,10 @@ async fn wait_for_invite_declined(
     expected_room_id: &str,
     label: &str,
 ) -> Result<(), String> {
+    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
     loop {
-        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+        let event = deadline
+            .recv(conn)
             .await
             .map_err(|_| format!("{label}: timed out waiting for RoomEvent::InviteDeclined"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
@@ -8955,8 +8959,10 @@ async fn wait_for_direct_message_started(
     request_id: koushi_core::ids::RequestId,
     label: &str,
 ) -> Result<String, String> {
+    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
     loop {
-        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+        let event = deadline
+            .recv(conn)
             .await
             .map_err(|_| format!("{label}: timed out waiting for RoomEvent::DirectMessageStarted"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
