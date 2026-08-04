@@ -593,12 +593,12 @@ fn local_encryption_probe_command_is_correlated_ready_gated_and_redacted() {
 }
 
 #[test]
-fn reset_local_data_command_is_correlated_ready_gated_and_redacted() {
+fn reset_local_data_command_is_correlated_available_while_blocked_and_redacted() {
     let request_id = fake_request_id();
     let command = CoreCommand::Account(AccountCommand::ResetLocalData { request_id });
 
     assert_eq!(command.request_id(), request_id);
-    assert!(command.requires_ready_session());
+    assert!(!command.requires_ready_session());
     assert!(!format!("{command:?}").contains("@user-a:example.invalid"));
 }
 
