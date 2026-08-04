@@ -150,8 +150,11 @@ fn exhausted_acceptance_does_not_mutate_the_draft() {
         Err(ComposerDraftRevisionError::Exhausted)
     );
     assert_eq!(
-        drafts.rooms.get("room-a").map(String::as_str),
-        Some("keep me")
+        drafts
+            .rooms
+            .get("room-a")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("keep me".to_owned())
     );
 }
 
@@ -371,8 +374,11 @@ fn content_active_and_leased_targets_survive_tombstone_churn() {
     drafts.reconcile_lifecycle(&protection);
 
     assert_eq!(
-        drafts.rooms.get("protected-content").map(String::as_str),
-        Some("draft")
+        drafts
+            .rooms
+            .get("protected-content")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("draft".to_owned())
     );
     assert!(!drafts.room_revision("protected-active").is_zero());
     assert!(!drafts.room_revision("protected-leased").is_zero());
@@ -553,7 +559,7 @@ fn persisted_projection_classifies_empty_room_strings_as_quiescent() {
     let mut drafts = ComposerDraftStore::default();
     for index in 0..(MAX_LIVE_COMPOSER_ROOM_TOMBSTONES + 2) {
         let room_id = format!("empty-room-{index:03}");
-        drafts.rooms.insert(room_id.clone(), String::new());
+        drafts.rooms.insert(room_id.clone(), String::new().into());
         drafts.room_revisions.insert(room_id, 1.into());
     }
 
@@ -603,7 +609,13 @@ fn accepted_clear_token_changes_only_when_current_content_clears() {
             .expect("stale acceptance"),
         11.into()
     );
-    assert_eq!(drafts.rooms.get("room").map(String::as_str), Some("newer"));
+    assert_eq!(
+        drafts
+            .rooms
+            .get("room")
+            .map(koushi_state::ComposerDocument::plain_body),
+        Some("newer".to_owned())
+    );
     assert_eq!(
         drafts.room_last_accepted_clear_revisions.get("room"),
         Some(&ComposerDraftRevision::from_u64(8))

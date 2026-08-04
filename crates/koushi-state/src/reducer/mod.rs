@@ -1151,20 +1151,20 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::ComposerDraftsLoaded { drafts } => {
             timeline::handle_composer_drafts_loaded(state, drafts)
         }
-        AppAction::ComposerDraftChanged { room_id, draft } => {
+        AppAction::ComposerDraftChanged { room_id, document } => {
             let Ok(revision) = crate::ComposerDraftRevision::checked_successor(
                 state.composer_drafts.room_revision(&room_id),
                 crate::ComposerDraftRevision::ZERO,
             ) else {
                 return Vec::new();
             };
-            timeline::handle_composer_draft_changed(state, room_id, draft, revision)
+            timeline::handle_composer_draft_changed(state, room_id, document, revision)
         }
         AppAction::ComposerDraftChangedAtRevision {
             room_id,
-            draft,
+            document,
             revision,
-        } => timeline::handle_composer_draft_changed(state, room_id, draft, revision),
+        } => timeline::handle_composer_draft_changed(state, room_id, document, revision),
         AppAction::SendTextSubmitted {
             room_id,
             transaction_id,
@@ -1253,7 +1253,7 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::ThreadComposerDraftChanged {
             room_id,
             root_event_id,
-            draft,
+            document,
         } => {
             let Ok(revision) = crate::ComposerDraftRevision::checked_successor(
                 state
@@ -1267,20 +1267,20 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
                 state,
                 room_id,
                 root_event_id,
-                draft,
+                document,
                 revision,
             )
         }
         AppAction::ThreadComposerDraftChangedAtRevision {
             room_id,
             root_event_id,
-            draft,
+            document,
             revision,
         } => thread::handle_thread_composer_draft_changed(
             state,
             room_id,
             root_event_id,
-            draft,
+            document,
             revision,
         ),
         AppAction::ThreadReplySubmitted {

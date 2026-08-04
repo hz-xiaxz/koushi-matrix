@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { createBrowserFakeApi } from "../backend/browserFakeApi";
 import { computeBrowserRoomListProjection } from "../backend/roomListProjection";
 import { composeSidebar, projectRoomSummaries, roomListSections, visibleRooms } from "./desktopModel";
+import { documentFromText } from "./composerDocument";
 import type {
   ComposerTarget,
   DesktopSnapshot,
@@ -826,7 +827,7 @@ describe("desktop model", () => {
       rendererGeneration,
       "submission-test-send",
       roomId,
-      "Synthetic message from composer"
+      documentFromText("Synthetic message from composer")
     );
 
     expect(snapshot.snapshot.timeline.at(-1)).toMatchObject({
@@ -851,7 +852,7 @@ describe("desktop model", () => {
       rendererGeneration,
       "submission-test-edit",
       roomId,
-      "Synthetic message before edit"
+      documentFromText("Synthetic message before edit")
     );
     let snapshot = submission.snapshot;
     const eventId = snapshot.timeline.at(-1)?.event_id;
@@ -862,7 +863,7 @@ describe("desktop model", () => {
     snapshot = await api.editMessage(
       "!room-alpha:example.invalid",
       eventId,
-      "Synthetic message after edit"
+      documentFromText("Synthetic message after edit")
     );
 
     expect(snapshot.timeline.at(-1)).toMatchObject({
@@ -1080,7 +1081,7 @@ describe("desktop model", () => {
       "submission-test-reply",
       roomId,
       rootEventId,
-      "Synthetic reply message"
+      documentFromText("Synthetic reply message")
     );
     const snapshot = submission.snapshot;
 

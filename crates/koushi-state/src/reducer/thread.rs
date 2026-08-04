@@ -77,6 +77,7 @@ pub(crate) fn handle_thread_submission_accepted(
         in_reply_to_event_id: root_event_id,
     });
     composer.draft = accepted_composer.draft;
+    composer.document = accepted_composer.document;
     composer.draft_revision = accepted_revision;
     composer.last_accepted_clear_revision = accepted_composer.last_accepted_clear_revision;
     *intent = ThreadOpenIntent::ExistingThread;
@@ -87,7 +88,7 @@ pub(crate) fn handle_thread_composer_draft_changed(
     state: &mut AppState,
     room_id: String,
     root_event_id: String,
-    draft: String,
+    document: crate::ComposerDocument,
     revision: ComposerDraftRevision,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) || !state.rooms.iter().any(|room| room.room_id == room_id) {
@@ -97,7 +98,7 @@ pub(crate) fn handle_thread_composer_draft_changed(
         state.composer_drafts.apply_thread_draft(
             room_id.clone(),
             root_event_id.clone(),
-            draft.clone(),
+            document.clone(),
             revision,
         ),
         Ok(true)
@@ -112,7 +113,8 @@ pub(crate) fn handle_thread_composer_draft_changed(
             composer,
             ..
         } if open_room_id == &room_id && open_root_event_id == &root_event_id => {
-            composer.draft = draft;
+            composer.draft = document.plain_body();
+            composer.document = document;
             composer.draft_revision = revision;
             vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
         }
@@ -156,6 +158,7 @@ pub(crate) fn handle_thread_reply_submitted(
                 .composer_drafts
                 .composer_for_thread(&room_id, &root_event_id);
             composer.draft = accepted_composer.draft;
+            composer.document = accepted_composer.document;
             composer.draft_revision = accepted_revision;
             composer.last_accepted_clear_revision = accepted_composer.last_accepted_clear_revision;
             vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]

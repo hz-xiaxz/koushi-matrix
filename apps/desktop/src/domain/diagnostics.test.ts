@@ -192,6 +192,7 @@ describe("diagnosticReport", () => {
               composer: {
                 accepted_submission_ids: [],
                 draft: "",
+                document: { version: 2, inlines: [] },
                 pending_transaction_id: null,
                 draft_revision: COMPOSER_DRAFT_REVISION_ZERO,
                 last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO,

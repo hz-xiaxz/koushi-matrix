@@ -8,7 +8,7 @@ import type {
   AttachmentSort,
   DesktopSnapshot,
   FilesViewScope,
-  MentionIntent,
+  ComposerDocument,
   ResolveComposerKeyAction,
   RoomModerationAction,
   RoomNotificationMode,
@@ -34,6 +34,7 @@ import {
   threadReplyToTimelineMessage
 } from "../app/uiShared";
 import { selectMentionCandidates } from "../domain/appStore";
+import { documentFromText } from "../domain/composerDocument";
 import type { DisplayDensity, SpaceLocalOverrides } from "../app/localPresentation";
 import {
   roomOrSpaceForPeoplePanelScope,
@@ -165,11 +166,10 @@ export function ContextualRightPanel({
   onSetSpaceLocalOverride = () => undefined,
   spaceLocalOverrides = {},
   onTimelineDiagnosticLogEntry,
-  onThreadComposerDraftChange,
+  onThreadComposerDocumentChange,
   onThreadAttachFiles = () => undefined,
   onThreadClearUploadStaging = () => undefined,
   onThreadLoadStagedUploadPreview = async () => [],
-  onThreadMentionIntentChange = () => undefined,
   onThreadMentionQueryChange = () => undefined,
   onThreadRetryStagedUploadPreparation = () => undefined,
   onThreadReplySend,
@@ -178,9 +178,8 @@ export function ContextualRightPanel({
   onThreadSendStagedAttachments = () => undefined,
   onThreadUseOriginalStagedUpload = () => undefined,
   onThreadUpdateStagedUploadCaption = () => undefined,
-  threadComposerMentionIntents = {},
   threadComposerDraftImeKey,
-  threadComposerDraftOverride
+  threadComposerDocumentOverride
 }: {
   activeRoom: DesktopSnapshot["state"]["domain"]["rooms"][number] | null;
   activeSpace: DesktopSnapshot["state"]["domain"]["spaces"][number] | null;
@@ -306,7 +305,11 @@ export function ContextualRightPanel({
   onIgnoreUser?: (userId: string) => void;
   onUnignoreUser?: (userId: string) => void;
   onReportUser?: (userId: string) => void;
-  onThreadComposerDraftChange: (roomId: string, rootEventId: string, draft: string) => void;
+  onThreadComposerDocumentChange: (
+    roomId: string,
+    rootEventId: string,
+    document: ComposerDocument
+  ) => void;
   onThreadAttachFiles?: (roomId: string, rootEventId: string, files: File[]) => void;
   onThreadClearUploadStaging?: (roomId: string, rootEventId: string) => void;
   onThreadLoadStagedUploadPreview?: (
@@ -315,11 +318,6 @@ export function ContextualRightPanel({
     stagedId: string,
     variantId: string
   ) => Promise<number[]>;
-  onThreadMentionIntentChange?: (
-    roomId: string,
-    rootEventId: string,
-    mentions: MentionIntent
-  ) => void;
   onThreadMentionQueryChange?: (
     roomId: string,
     query: string | null
@@ -332,14 +330,13 @@ export function ContextualRightPanel({
   onThreadReplySend: (
     roomId: string,
     rootEventId: string,
-    body: string,
-    mentions: MentionIntent
+    document: ComposerDocument
   ) => void;
   onThreadScheduleSend?: (
     roomId: string,
     rootEventId: string,
     sendAtMs: number,
-    body: string
+    document: ComposerDocument
   ) => void;
   onThreadSelectStagedUploadOutput?: (
     roomId: string,
@@ -359,9 +356,8 @@ export function ContextualRightPanel({
     stagedId: string,
     caption: string
   ) => void;
-  threadComposerMentionIntents?: Record<string, MentionIntent>;
   threadComposerDraftImeKey?: string;
-  threadComposerDraftOverride?: string;
+  threadComposerDocumentOverride?: ComposerDocument;
 }) {
   const mediaDownloads = snapshot.state.ui.timeline.media_downloads ?? {};
 
@@ -768,15 +764,12 @@ export function ContextualRightPanel({
   const threadRoomId = threadState.room_id;
   const rootEventId = threadState.root_event_id;
   const threadComposer = threadState.kind === "open" ? threadState.composer : undefined;
-  const threadDraftKeyValue =
-    threadRoomId && rootEventId ? threadComposerDraftKey(threadRoomId, rootEventId) : null;
-  const threadDraft = threadComposerDraftOverride ?? threadComposer?.draft ?? "";
+  const threadDocument =
+    threadComposerDocumentOverride ??
+    threadComposer?.document ??
+    documentFromText(threadComposer?.draft ?? "");
   const threadSendPending = Boolean(threadComposer?.pending_transaction_id);
   const threadStagedUploads = threadState.kind === "open" ? threadState.staged_uploads ?? [] : [];
-  const threadMentionIntent =
-    (threadDraftKeyValue ? threadComposerMentionIntents[threadDraftKeyValue] : undefined) ?? {
-      targets: []
-    };
   const threadMentionCandidates = selectMentionCandidates(
     { snapshot },
     threadRoomId ?? null,
@@ -901,31 +894,25 @@ export function ContextualRightPanel({
         />
       ) : null}
       <ThreadComposer
-        draft={threadDraft}
+        document={threadDocument}
         draftKey={
           threadComposerDraftImeKey ??
-          `${threadDraftKeyValue ?? `${threadRoomId}:${rootEventId}`}\u00000`
+          `${threadRoomId ?? "no-room"}\u0000${rootEventId ?? "no-root"}\u00000`
         }
         isSending={threadSendPending}
         hasStagedUploads={threadStagedUploads.length > 0}
         mentionCandidates={threadMentionCandidates}
         mentionCandidatesLoading={threadMentionCandidatesLoading}
-        mentionIntent={threadMentionIntent}
         resolveComposerKeyAction={onResolveComposerKeyAction}
         canEdit={threadState.kind === "open" && Boolean(threadRoomId && rootEventId && threadComposer)}
-        onDraftChange={(draft) => {
+        onDocumentChange={(document) => {
           if (threadRoomId && rootEventId) {
-            onThreadComposerDraftChange(threadRoomId, rootEventId, draft);
+            onThreadComposerDocumentChange(threadRoomId, rootEventId, document);
           }
         }}
         onAttachFiles={(files) => {
           if (threadRoomId && rootEventId) {
             onThreadAttachFiles(threadRoomId, rootEventId, files);
-          }
-        }}
-        onMentionIntentChange={(mentions) => {
-          if (threadRoomId && rootEventId) {
-            onThreadMentionIntentChange(threadRoomId, rootEventId, mentions);
           }
         }}
         onMentionQueryChange={(query) => {
@@ -935,13 +922,13 @@ export function ContextualRightPanel({
         }}
         onScheduleSend={
           onThreadScheduleSend && threadRoomId && rootEventId
-            ? (sendAtMs, body) =>
-                onThreadScheduleSend(threadRoomId, rootEventId, sendAtMs, body)
+            ? (sendAtMs, document) =>
+                onThreadScheduleSend(threadRoomId, rootEventId, sendAtMs, document)
             : undefined
         }
-        onSend={(value) => {
+        onSend={(document) => {
           if (threadRoomId && rootEventId) {
-            onThreadReplySend(threadRoomId, rootEventId, value, threadMentionIntent);
+            onThreadReplySend(threadRoomId, rootEventId, document);
           }
         }}
       />
@@ -949,9 +936,6 @@ export function ContextualRightPanel({
   );
 }
 
-function threadComposerDraftKey(roomId: string, rootEventId: string): string {
-  return `${roomId}\u0000${rootEventId}`;
-}
 
 export function PanelHeader({
   title,

@@ -33,6 +33,7 @@ import {
 } from "./TimelineView";
 import { ImeSafeForm } from "./ImeTextControl";
 import { Composer } from "./composer";
+import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
 import {
   ICON_SIZE,
   formatUploadBytes,
@@ -314,11 +315,11 @@ function ScheduledMessagesList({
                     composerMode={{ kind: "plain" }}
                     draftKey={`scheduled:${item.scheduled_id}`}
                     isSending={false}
+                    document={documentFromText(editBody)}
                     roomName={t("scheduled.title")}
-                    value={editBody}
                     onCancelReply={() => undefined}
+                    onDocumentChange={(document) => setEditBody(plainBodyFromDocument(document))}
                     onSend={() => undefined}
-                    onValueChange={setEditBody}
                   />
                   <label className="scheduled-send-field">
                     <span>{t("scheduled.timeInput")}</span>

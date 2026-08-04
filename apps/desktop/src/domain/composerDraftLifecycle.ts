@@ -4,6 +4,7 @@ import {
   nextComposerDraftRevision
 } from "./composerDraftRevision";
 import type {
+  ComposerDocument,
   ComposerDraftAccountOwner,
   ComposerDraftRevision,
   ComposerTarget
@@ -47,7 +48,7 @@ export interface ComposerDraftLifecycleCounts {
 }
 
 export interface ComposerDraftActiveOverlay {
-  value: string;
+  document: ComposerDocument;
   revision: ComposerDraftRevision | null;
 }
 
@@ -75,7 +76,7 @@ export interface ComposerDraftLifecycleRegistry {
   clearDebounce(scope: ComposerDraftScope): void;
   setActiveOverlay(
     scope: ComposerDraftScope,
-    value: string | null,
+    document: ComposerDocument | null,
     revision: ComposerDraftRevision | null
   ): void;
   activeOverlay(scope: ComposerDraftScope): ComposerDraftActiveOverlay | null;
@@ -251,7 +252,7 @@ export function createComposerDraftLifecycleRegistry(
   function isProtected(entry: Entry): boolean {
     return (
       entry.hasAuthoritativeContent ||
-      (entry.activeOverlay !== null && entry.activeOverlay.value.length > 0) ||
+      (entry.activeOverlay !== null && entry.activeOverlay.document.inlines.length > 0) ||
       entry.active ||
       entry.debounce !== null ||
       entry.pendingOperations.size > 0 ||
@@ -457,11 +458,11 @@ export function createComposerDraftLifecycleRegistry(
 
   function setActiveOverlay(
     scope: ComposerDraftScope,
-    value: string | null,
+    document: ComposerDocument | null,
     revision: ComposerDraftRevision | null
   ): void {
     const entry = ensure(scope);
-    entry.activeOverlay = value === null ? null : { value, revision };
+    entry.activeOverlay = document === null ? null : { document, revision };
     reconcile(entry);
   }
 

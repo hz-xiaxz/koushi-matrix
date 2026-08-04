@@ -743,11 +743,20 @@
               "can_permalink": true,
               "can_view_source": true,
               "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1",
-              "editable_mentions": {
-                "targets": [
+              "editable_document": {
+                "version": 2,
+                "inlines": [
                   {
-                    "kind": "user",
-                    "user_id": "@mention:example.test",
+                    "kind": "text",
+                    "text": "Hello "
+                  },
+                  {
+                    "kind": "mention",
+                    "target": {
+                      "kind": "user",
+                      "user_id": "@mention:example.test",
+                      "display_label": "Mention User"
+                    },
                     "display_label": "Mention User"
                   }
                 ]
@@ -842,11 +851,17 @@
                   "can_permalink": true,
                   "can_view_source": true,
                   "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1",
-                  "editable_mentions": {
-                    "targets": [
+                  "editable_document": {
+                    "version": 2,
+                    "inlines": [
+                      { "kind": "text", "text": "Hello " },
                       {
-                        "kind": "user",
-                        "user_id": "@mention:example.test",
+                        "kind": "mention",
+                        "target": {
+                          "kind": "user",
+                          "user_id": "@mention:example.test",
+                          "display_label": "Mention User"
+                        },
                         "display_label": "Mention User"
                       }
                     ]

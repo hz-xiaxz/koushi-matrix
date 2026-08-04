@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { clearAppStoreSnapshot, getAppStoreSnapshot, setAppStoreSnapshot } from "../domain/appStore";
 import { COMPOSER_DRAFT_REVISION_ZERO } from "../domain/composerDraftRevision";
-import type { DesktopSnapshot, MentionIntent } from "../domain/types";
+import type { DesktopSnapshot } from "../domain/types";
 import { TimelinePane } from "./panes";
 import type { TimelineTransport } from "./TimelineView";
 
@@ -63,7 +63,6 @@ describe("TimelinePane render isolation", () => {
     const snapshot = makeSnapshot();
     const resolveComposerKeyAction = async (): Promise<"noop"> => "noop";
     const noop = () => undefined;
-    const mentionIntent: MentionIntent = { targets: [] };
     const emptySearchResults: never[] = [];
     const timelineTransport = noopTimelineTransport();
     setAppStoreSnapshot(snapshot);
@@ -71,9 +70,8 @@ describe("TimelinePane render isolation", () => {
     const renderPane = (currentSnapshot: DesktopSnapshot) =>
       createElement(TimelinePane, {
         activeRoomName: "Alpha Room",
-        composerDraft: currentSnapshot.state.ui.timeline.composer.draft,
+        composerDocument: currentSnapshot.state.ui.timeline.composer.document,
         composerMode: { kind: "plain" },
-        mentionIntent,
         resolveComposerKeyAction,
         searchQuery: "",
         searchResults: emptySearchResults,
@@ -89,8 +87,7 @@ describe("TimelinePane render isolation", () => {
         onSelectStagedUploadOutput: noop,
         onSendStagedAttachments: noop,
         onLoadStagedUploadPreview: async () => [],
-        onComposerDraftChange: noop,
-        onMentionIntentChange: noop,
+        onComposerDocumentChange: noop,
         onEditMessage: noop,
         onOpenContextMenu: noop,
         onOpenThread: noop,
@@ -220,9 +217,8 @@ describe("TimelinePane render isolation", () => {
     render(
       createElement(TimelinePane, {
         activeRoomName: "Alpha Room",
-        composerDraft: snapshot.state.ui.timeline.composer.draft,
+        composerDocument: snapshot.state.ui.timeline.composer.document,
         composerMode: { kind: "plain" },
-        mentionIntent: { targets: [] },
         resolveComposerKeyAction: async (): Promise<"noop"> => "noop",
         searchQuery: "",
         searchResults: [],
@@ -238,8 +234,7 @@ describe("TimelinePane render isolation", () => {
         onSelectStagedUploadOutput: noop,
         onSendStagedAttachments: noop,
         onLoadStagedUploadPreview: async () => [],
-        onComposerDraftChange: noop,
-        onMentionIntentChange: noop,
+        onComposerDocumentChange: noop,
         onEditMessage: noop,
         onOpenContextMenu: noop,
         onOpenThread: noop,
@@ -491,7 +486,7 @@ function makeSnapshot(): DesktopSnapshot {
           room_id: "!room-alpha:example.invalid",
           is_subscribed: true,
           is_paginating_backwards: false,
-          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "hello", mode: "Plain" },
+          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "hello", document: { version: 2, inlines: [{ kind: "text", text: "hello" }] }, mode: "Plain" },
           submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] },
           scheduled_send_capability: "unknown",
           scheduled_sends: [],
@@ -506,7 +501,7 @@ function makeSnapshot(): DesktopSnapshot {
           root_event_id: "$thread-root:example.invalid",
           intent: "existingThread",
           is_subscribed: true,
-          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", mode: "Plain" },
+          composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", document: { version: 2, inlines: [] }, mode: "Plain" },
           staged_uploads: []
         },
         focused_context: { kind: "closed" },

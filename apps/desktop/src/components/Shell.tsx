@@ -48,7 +48,8 @@ import {
   type OpenContextMenu,
   type PrimaryView,
   initials,
-  compactAvatarLabel,
+  elementAvatarColorIndex,
+  elementAvatarInitial,
   EMPTY_ROOM_TAGS
 } from "../app/uiShared";
 import { roomListSections } from "../domain/desktopModel";
@@ -658,8 +659,9 @@ export function WorkspaceRail({
               spaceOverrides
             );
             const localIcon = spaceOverrides[space.space_id]?.icon?.trim();
+            const fallbackName = displayName.trim() || space.space_id || "?";
             return (
-            <Tooltip label={displayName} key={space.space_id}>
+            <Tooltip label={fallbackName} key={space.space_id}>
               {(tooltipProps) => (
                 <button
                   className={`workspace-button workspace-space-button ${
@@ -670,7 +672,7 @@ export function WorkspaceRail({
                   data-count={space.unread_count || undefined}
                   draggable
                   type="button"
-                  aria-label={displayName}
+                  aria-label={fallbackName}
                   onClick={() => onSelectSpace(space.space_id)}
                   onDragStart={(event) => {
                     setDraggedSpaceId(space.space_id);
@@ -705,8 +707,8 @@ export function WorkspaceRail({
                     avatar={space.avatar}
                     className="workspace-button-avatar is-space"
                     colorSeed={space.space_id}
-                    fallback={localIcon || compactAvatarLabel(displayName)}
-                    fallbackMode="compactLabel"
+                    fallback={localIcon || elementAvatarInitial(fallbackName) || "?"}
+                    fallbackMode={localIcon ? "compactLabel" : "elementSpace"}
                   />
                 </button>
               )}
@@ -840,6 +842,13 @@ export function Sidebar({
           </div>
         </div>
         <div className="workspace-header-actions no-wrap">
+          {activeSpace ? (
+            <SpaceMembersNavButton
+              childOnlyCount={resolvedSpaceMemberCounts.childOnly}
+              joinedCount={resolvedSpaceMemberCounts.joined}
+              onClick={onOpenSpaceMembers}
+            />
+          ) : null}
           <button
             className="icon-button"
             type="button"
@@ -901,13 +910,6 @@ export function Sidebar({
               onClick={onOpenInvites}
             />
           </>
-        ) : null}
-        {activeSpace ? (
-          <SpaceMembersNavButton
-            childOnlyCount={resolvedSpaceMemberCounts.childOnly}
-            joinedCount={resolvedSpaceMemberCounts.joined}
-            onClick={onOpenSpaceMembers}
-          />
         ) : null}
         {!roomListReady ? (
           <div className="room-list-status" role="status">
@@ -1218,14 +1220,9 @@ function SpaceMembersNavButton({
   joinedCount: number;
   onClick: () => void;
 }) {
-  const countLabel =
-    childOnlyCount > 0
-      ? t("spaceMembers.navCount", { joined: joinedCount, childOnly: childOnlyCount })
-      : String(joinedCount);
-
   return (
     <button
-      className="nav-item space-members-nav"
+      className="icon-button space-members-nav"
       type="button"
       aria-label={t("spaceMembers.navAccessible", {
         joined: joinedCount,
@@ -1234,9 +1231,11 @@ function SpaceMembersNavButton({
       onClick={onClick}
     >
       <Users size={ICON_SIZE.control} aria-hidden="true" />
-      <span className="nav-label">{t("spaceMembers.navLabel")}</span>
-      <span className={`space-members-nav-count ${childOnlyCount > 0 ? "has-warning" : ""}`}>
-        {countLabel}
+      <span className="space-members-nav-count">
+        {joinedCount}
+        {childOnlyCount > 0 ? (
+          <span className="space-members-nav-warning"> · +{childOnlyCount}</span>
+        ) : null}
       </span>
     </button>
   );
@@ -1363,7 +1362,7 @@ export function EntityAvatar({
   className: string;
   colorSeed?: string | null;
   fallback: string;
-  fallbackMode?: "initials" | "compactLabel";
+  fallbackMode?: "initials" | "compactLabel" | "elementSpace";
 }) {
   const sourceUrl =
     avatar?.thumbnail.kind === "ready" ? mediaSourceUrl(avatar.thumbnail.source_url) : null;
@@ -1373,13 +1372,17 @@ export function EntityAvatar({
   const fallbackClassName =
     fallbackMode === "compactLabel"
       ? `avatar-fallback compact-label ${colorClassName}`
-      : `avatar-fallback ${colorClassName}`;
+      : fallbackMode === "elementSpace"
+        ? "avatar-fallback element-space"
+        : `avatar-fallback ${colorClassName}`;
   const fallbackStyle =
     fallbackMode === "compactLabel"
       ? ({
           "--avatar-label-length": Math.max(fallback.length, 1)
         } as CSSProperties)
       : undefined;
+  const elementColor =
+    fallbackMode === "elementSpace" ? elementAvatarColorIndex(colorSeed || fallback) : undefined;
   return (
     <span className={className} aria-hidden="true">
       {showImage ? (
@@ -1389,7 +1392,12 @@ export function EntityAvatar({
           onLoad={onImageLoad}
         />
       ) : (
-        <span className={fallbackClassName} dir="auto" style={fallbackStyle}>
+        <span
+          className={fallbackClassName}
+          data-color={elementColor}
+          dir="auto"
+          style={fallbackStyle}
+        >
           {fallback}
         </span>
       )}

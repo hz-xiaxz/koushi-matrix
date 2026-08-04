@@ -1,15 +1,74 @@
 // @vitest-environment jsdom
 
-import { createRef } from "react";
+import { createRef, useState } from "react";
 import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ImeInlineMentionEditor,
   ImeSafeForm,
   ImeTextArea,
   ImeTextField,
   SecureImeTextField
 } from "./ImeTextControl";
+import type { ComposerDocument } from "../domain/types";
+
+const EDITOR_LABEL = "message";
+
+const mentionDocument: ComposerDocument = {
+  version: 2,
+  inlines: [
+    { kind: "text", text: "A" },
+    {
+      kind: "mention",
+      target: { kind: "user", user_id: "@alice:example.invalid", display_label: "Alice" },
+      display_label: "Alice"
+    },
+    { kind: "text", text: "B" }
+  ]
+};
+
+function ControlledMentionEditor({
+  initial = mentionDocument,
+  onChange = () => undefined
+}: {
+  initial?: ComposerDocument;
+  onChange?: (document: ComposerDocument) => void;
+}) {
+  const [document, setDocument] = useState(initial);
+  return (
+    <ImeInlineMentionEditor
+      aria-label={EDITOR_LABEL}
+      document={document}
+      syncKey="message-a"
+      onDocumentChange={(next) => {
+        setDocument(next);
+        onChange(next);
+      }}
+    />
+  );
+}
+
+function setSelection(
+  startNode: Node,
+  startOffset: number,
+  endNode = startNode,
+  endOffset = startOffset
+) {
+  const range = document.createRange();
+  range.setStart(startNode, startOffset);
+  range.setEnd(endNode, endOffset);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function beforeInput(control: HTMLElement, inputType: string, data: string | null = null) {
+  fireEvent(
+    control,
+    new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType, data })
+  );
+}
 
 const fieldLabel = "field";
 const secretLabel = "secret";
@@ -84,6 +143,137 @@ describe("IME text controls", () => {
 
     expect(ref.current).toBe(control);
     expect(ref.current?.value).toBe("private value");
+  });
+
+  it("renders mention entities as non-editable inline atoms", () => {
+    render(<ControlledMentionEditor />);
+
+    const mention = screen.getByText("@Alice");
+    expect(mention.getAttribute("contenteditable")).toBe("false");
+    expect(mention.getAttribute("role")).toBe("link");
+    expect(mention.hasAttribute("data-composer-mention")).toBe(true);
+    expect(mention.getAttribute("aria-label")).toBe("Mention: Alice");
+  });
+
+  it("removes one emoji grapheme with Backspace", () => {
+    const emoji = "👩‍🔬";
+    render(
+      <ControlledMentionEditor
+        initial={{ version: 2, inlines: [{ kind: "text", text: `A${emoji}B` }] }}
+      />
+    );
+    const control = screen.getByRole("textbox", { name: "message" });
+    const text = control.firstChild?.firstChild;
+    if (!text) throw new Error("missing editor text");
+    setSelection(text, 1 + emoji.length);
+
+    beforeInput(control, "deleteContentBackward");
+
+    expect(control.textContent).toBe("AB");
+  });
+
+  it.each([
+    ["Backspace", "deleteContentBackward", 2],
+    ["Delete", "deleteContentForward", 1]
+  ] as const)("%s removes the whole adjacent mention and its metadata", (_key, inputType, caret) => {
+    const onChange = vi.fn();
+    render(<ControlledMentionEditor onChange={onChange} />);
+    const control = screen.getByRole("textbox", { name: "message" });
+    const [before, _mention, after] = Array.from(control.childNodes);
+    if (caret === 2) setSelection(after, 0);
+    else setSelection(before, 1);
+
+    beforeInput(control, inputType);
+
+    expect(control.textContent).toBe("AB");
+    expect(control.querySelector("[data-composer-mention]")).toBeNull();
+    expect(onChange.mock.lastCall?.[0].inlines).toEqual([{ kind: "text", text: "AB" }]);
+  });
+
+  it("range deletion and cut remove the selected mention atom", () => {
+    const clipboard = { setData: vi.fn() };
+    render(<ControlledMentionEditor />);
+    const control = screen.getByRole("textbox", { name: "message" });
+    let [before, _mention, after] = Array.from(control.childNodes);
+    setSelection(before, 1, after, 0);
+
+    fireEvent.cut(control, { clipboardData: clipboard });
+
+    expect(clipboard.setData).toHaveBeenCalledWith("text/plain", "@Alice");
+    expect(control.textContent).toBe("AB");
+    expect(control.querySelector("[data-composer-mention]")).toBeNull();
+  });
+
+  it("undo and redo restore mention text and identity together", () => {
+    render(<ControlledMentionEditor />);
+    const control = screen.getByRole("textbox", { name: "message" });
+    const [_before, _mention, after] = Array.from(control.childNodes);
+    setSelection(after, 0);
+    beforeInput(control, "deleteContentBackward");
+    expect(control.querySelector("[data-composer-mention]")).toBeNull();
+
+    beforeInput(control, "historyUndo");
+    expect(control.querySelector("[data-composer-mention]")?.textContent).toBe("@Alice");
+
+    beforeInput(control, "historyRedo");
+    expect(control.querySelector("[data-composer-mention]")).toBeNull();
+  });
+
+  it("ends composition ownership when the logical editor key changes", () => {
+    const onDocumentChange = vi.fn();
+    const { rerender } = render(
+      <ImeInlineMentionEditor
+        aria-label={EDITOR_LABEL}
+        document={mentionDocument}
+        syncKey="message-a"
+        onDocumentChange={onDocumentChange}
+      />
+    );
+    const control = screen.getByRole("textbox", { name: "message" });
+    fireEvent.compositionStart(control);
+    expect(control.dataset.composing).toBe("true");
+
+    rerender(
+      <ImeInlineMentionEditor
+        aria-label={EDITOR_LABEL}
+        document={{ version: 2, inlines: [{ kind: "text", text: "next" }] }}
+        syncKey="message-b"
+        onDocumentChange={onDocumentChange}
+      />
+    );
+
+    expect(control.dataset.composing).toBeUndefined();
+    expect(control.textContent).toBe("next");
+  });
+
+  it("keeps mention identity while composition updates neighboring text", () => {
+    const onChange = vi.fn();
+    render(<ControlledMentionEditor onChange={onChange} />);
+    const control = screen.getByRole("textbox", { name: "message" });
+    const before = control.firstChild;
+    if (!before) throw new Error("missing text node");
+
+    fireEvent.compositionStart(control);
+    before.textContent = "A日";
+    fireEvent.input(control, { inputType: "insertCompositionText", isComposing: true });
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({
+      inlines: [
+        { kind: "text", text: "A日" },
+        { kind: "mention", target: { user_id: "@alice:example.invalid" } },
+        { kind: "text", text: "B" }
+      ]
+    });
+    fireEvent.compositionEnd(control);
+
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({
+      inlines: [
+        { kind: "text", text: "A日" },
+        { kind: "mention", target: { user_id: "@alice:example.invalid" } },
+        { kind: "text", text: "B" }
+      ]
+    });
+    beforeInput(control, "historyUndo");
+    expect(control.textContent).toBe("A@AliceB");
   });
 
   it("suppresses IME-confirmation submit without preventing the native key default", () => {

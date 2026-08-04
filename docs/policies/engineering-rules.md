@@ -144,8 +144,10 @@ Rules:
    across restart, they must be account-scoped encrypted local data owned by
    `StoreActor`/`AppActor`, derived from a dedicated local-unlock-secret key
    domain, debounced, size-bounded, and excluded from general settings JSON,
-   logs, QA tokens, and full webview snapshots. React may render only the active
-   composer DTO and dispatch typed draft commands. Accepted sends must advance
+   logs, QA tokens, and full webview snapshots. The authoritative draft is a
+   versioned `ComposerDocument`; its plain `draft` field is derived, and legacy
+   persisted strings migrate only to text nodes. React may render only the active
+   composer DTO and dispatch typed document commands. Accepted sends must advance
    a target-keyed causal revision, persisting an empty-draft tombstone only
    when no newer target draft exists; newer content must be preserved at the
    advanced revision. Bounded persistence must prioritize targets with
@@ -842,9 +844,10 @@ GUI automation is a thin smoke layer, never the primary correctness gate.
    joined the named room plus an independently projected, permission-checked
    `@room` result. Rust owns membership eligibility, query normalization,
    Unicode/CJK matching, ordering, completeness, room-notification permission,
-   and stale-result fencing. React may render the popover/pills and loading
-   state and pass a typed `MentionIntent`, but it must not scan
-   `ProfileState.users`, filter or sort candidates, append `@room`, synthesize
+   and stale-result fencing. React may render the popover and loading state and
+   insert a selected candidate as one atomic `ComposerDocument` mention node,
+   but it must not keep parallel pills/mention metadata, scan `ProfileState.users`,
+   filter or sort candidates, append `@room`, synthesize
    Matrix `m.mentions`, formatted HTML, slash semantics, or fallback send
    behavior.
    Timeline mention pills are display-only decoration over Rust-owned
@@ -906,10 +909,11 @@ PTY handling, prompt line order) is documented in `AGENTS.md`.
 ## Desktop Text Input And IME Safety
 
 1. Text-entry components use `ImeTextField`, `SecureImeTextField`,
-   `ImeTextArea`, or the existing externally-owned `ImeOwnedTextArea` from
-   `apps/desktop/src/components/ImeTextControl.tsx`. Forms containing text
-   entry use `ImeSafeForm`. Do not duplicate composition handlers in feature
-   components.
+   `ImeTextArea`, `ImeOwnedTextArea`, or `ImeInlineMentionEditor` from
+   `apps/desktop/src/components/ImeTextControl.tsx`. The inline editor is the
+   only approved `contentEditable` owner and represents each semantic mention as
+   one non-editable document atom. Forms containing text entry use `ImeSafeForm`.
+   Do not duplicate composition handlers in feature components.
 2. While composing, and while a local edit has not been acknowledged, the DOM
    value and selection are authoritative. Snapshot-driven props may update the
    control only when they acknowledge the same value or when `syncKey` changes

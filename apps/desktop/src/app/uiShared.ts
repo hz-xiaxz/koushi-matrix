@@ -10,7 +10,6 @@ import type {
   ComposerMode,
   ImageUploadCompressionMode,
   ImageUploadCompressionPolicy,
-  MentionIntent,
   MentionTarget,
   OperationFailureKind,
   ResolveComposerKeyAction,
@@ -150,7 +149,6 @@ export type SyncPresentation = {
 
 export const EMPTY_ROOM_TAGS: RoomTags = { favourite: null, low_priority: null };
 
-export const EMPTY_MENTION_INTENT: MentionIntent = { targets: [] };
 export const ICON_SIZE = {
   micro: 14,
   compact: 15,
@@ -288,6 +286,19 @@ export function compactAvatarLabel(value: string): string {
   return normalized || initials(value);
 }
 
+const avatarGraphemeSegmenter = new Intl.Segmenter();
+
+export function elementAvatarInitial(name: string): string {
+  const value = ["@", "#", "+"].includes(name[0] ?? "") ? name.slice(1) : name;
+  const first = avatarGraphemeSegmenter.segment(value)[Symbol.iterator]().next();
+  return first.done ? "" : first.value.segment;
+}
+
+export function elementAvatarColorIndex(id: string): 1 | 2 | 3 | 4 | 5 | 6 {
+  const sum = id.split("").reduce((total, character) => total + character.charCodeAt(0), 0);
+  return ((sum % 6) + 1) as 1 | 2 | 3 | 4 | 5 | 6;
+}
+
 export function operationFailureLabel(kind: OperationFailureKind): string {
   switch (kind) {
     case "forbidden":
@@ -398,14 +409,6 @@ export function activeMentionQuery(value: string): { start: number; end: number;
   };
 }
 
-export function appendMentionTarget(intent: MentionIntent, target: MentionTarget): MentionIntent {
-  const targetKey = mentionTargetKey(target);
-  if (intent.targets.some((candidate) => mentionTargetKey(candidate) === targetKey)) {
-    return intent;
-  }
-  return { targets: [...intent.targets, target] };
-}
-
 export function mentionTargetKey(target: MentionTarget): string {
   switch (target.kind) {
     case "user":
@@ -415,36 +418,6 @@ export function mentionTargetKey(target: MentionTarget): string {
     case "roomMention":
       return "roomMention";
   }
-}
-
-export function mentionDraftToken(target: MentionTarget): string {
-  return `@${target.display_label}`;
-}
-
-export function mentionPillLabel(target: MentionTarget): string {
-  return mentionDraftToken(target);
-}
-
-function mentionDraftTokens(target: MentionTarget): string[] {
-  const tokens = [mentionDraftToken(target)];
-  if (target.kind === "user") {
-    const userId = target.user_id.trim();
-    const localpart = userId.startsWith("@")
-      ? userId.slice(1).split(":", 1)[0]
-      : userId.split(":", 1)[0];
-    if (localpart) {
-      tokens.push(`@${localpart}`);
-    }
-  }
-  return tokens;
-}
-
-export function pruneMentionIntentForDraft(intent: MentionIntent, draft: string): MentionIntent {
-  const normalizedDraft = draft.toLocaleLowerCase();
-  const targets = intent.targets.filter((target) =>
-    mentionDraftTokens(target).some((token) => normalizedDraft.includes(token.toLocaleLowerCase()))
-  );
-  return targets.length === intent.targets.length ? intent : { targets };
 }
 
 export function threadReplyToTimelineMessage(

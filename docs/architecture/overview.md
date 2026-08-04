@@ -103,15 +103,17 @@ Crate responsibilities:
   Composer key handling uses the pure Rust-owned resolver in
   `koushi-state`; GUI code supplies typed key facts and
   renders/dispatches the resolved action. Because the resolver may cross an
-  async transport boundary, GUI code captures key facts and textarea selection
+  async transport boundary, GUI code captures key facts and editor selection
   synchronously, prevents default only for resolver-owned keys, and applies
   newline/send/cancel only from the returned action. Resolver failures are
   no-ops; React must not fall back to local send semantics. Composition key
   events keep the native browser default so IME candidate commits are not
   blocked by the async resolver boundary; Rust still owns the returned product
   action (`CommitImeCandidate`). Composer send payload semantics are also owned
-  by Rust/core: intentional mentions are typed `MentionIntent` data,
-  markdown/html and `/me` emote conversion are built before SDK send, and
+  by Rust/core: the versioned `ComposerDocument` carries text and identity-bearing
+  atomic mention nodes, from which Core derives readable plain text, safe
+  `matrix.to` mention anchors, and Matrix `m.mentions`; markdown/html and `/me`
+  emote conversion are built before SDK send, and
   unsupported slash commands fail locally with structured private-data-free
   failure kinds. React does not construct `m.mentions`, formatted bodies, or
   slash-command dispatch.

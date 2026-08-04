@@ -41,7 +41,11 @@ import {
   type ComposerDraftOperationCapture,
   type ComposerDraftScope
 } from "./domain/composerDraftLifecycle";
-import type { ComposerDraftRevision, TimelinePaneState } from "./domain/types";
+import type { ComposerDocument, ComposerDraftRevision, TimelinePaneState } from "./domain/types";
+import {
+  documentFromText,
+  plainBodyFromDocument
+} from "./domain/composerDocument";
 import type { MatrixPermalinkTarget } from "./domain/matrixPermalink";
 import { resolveDirectorySubmission } from "./domain/directorySubmission";
 import { serverNameFromMatrixId } from "./domain/matrixPermalink";
@@ -164,7 +168,6 @@ import type {
   FilesViewScope,
   InviteScopeSelection,
   InviteWorkflowState,
-  MentionIntent,
   StagedUploadOutputSelection,
   ResolveComposerKeyAction,
   RoomModerationAction,
@@ -204,9 +207,7 @@ import { getTimelineTransportStats } from "./domain/timelineTransportStats";
 import { openExternalHttpUrl } from "./domain/externalLinks";
 
 import {
-  EMPTY_MENTION_INTENT,
   composerModeProp,
-  pruneMentionIntentForDraft,
   serverNameFromRoomId,
   type ActiveContextMenu,
   type ContextMenuTarget,
@@ -450,10 +451,9 @@ const tauriTimelineTransport: TimelineTransport | null = isTauriRuntime()
       async editMessage(
         roomId: string,
         eventId: string,
-        body: string,
-        mentions: MentionIntent = { targets: [] }
+        document: ComposerDocument
       ) {
-        await invoke("edit_message", { roomId, eventId, body, mentions });
+        await invoke("edit_message", { roomId, eventId, document });
       },
       async redactMessage(roomId: string, eventId: string) {
         await invoke("redact_message", { roomId, eventId });
@@ -1347,17 +1347,15 @@ export function App() {
     isDm: boolean;
   } | null>(null);
   const [roomLeaveInFlight, setRoomLeaveInFlight] = useState(false);
-  const [composerMentions, setComposerMentions] = useState<MentionIntent>(EMPTY_MENTION_INTENT);
-  const [threadComposerMentions, setThreadComposerMentions] = useState<Record<string, MentionIntent>>({});
   const mainComposerOverlayRef = useRef<{
     scope: ComposerDraftScope;
-    value: string;
+    document: ComposerDocument;
     revision: ComposerDraftRevision | null;
     debounceHandle: number | null;
   } | null>(null);
   const threadComposerOverlayRef = useRef<{
     scope: ComposerDraftScope;
-    value: string;
+    document: ComposerDocument;
     revision: ComposerDraftRevision | null;
     debounceHandle: number | null;
   } | null>(null);
@@ -1430,10 +1428,10 @@ export function App() {
             overlay.revision = composerDraftLifecycleRegistryRef.current!.nextDraft(scope);
             composerDraftLifecycleRegistryRef.current!.setActiveOverlay(
               scope,
-              overlay.value,
+              overlay.document,
               overlay.revision
             );
-            queueComposerDraftPersist(scope, overlay.value, overlay.revision);
+            queueComposerDraftPersist(scope, overlay.document, overlay.revision);
           }
         })
         .catch(() => undefined);
@@ -1465,10 +1463,10 @@ export function App() {
             overlay.revision = composerDraftLifecycleRegistryRef.current!.nextDraft(scope);
             composerDraftLifecycleRegistryRef.current!.setActiveOverlay(
               scope,
-              overlay.value,
+              overlay.document,
               overlay.revision
             );
-            queueThreadComposerDraftPersist(scope, overlay.value, overlay.revision);
+            queueThreadComposerDraftPersist(scope, overlay.document, overlay.revision);
           }
         })
         .catch(() => undefined);
@@ -1741,21 +1739,23 @@ export function App() {
       qaTitleToken: "unread=0 badge=0 notify=none"
     };
   const timelineRoomId = snapshot?.state.ui.timeline.room_id ?? null;
-  const snapshotComposerDraft = snapshot?.state.ui.timeline.composer.draft ?? "";
+  const snapshotComposerDocument =
+    snapshot?.state.ui.timeline.composer.document ??
+    documentFromText(snapshot?.state.ui.timeline.composer.draft ?? "");
   const currentComposerAccount = readyComposerDraftAccountOwner(snapshot);
   const accountOwnerKey = currentComposerAccount
     ? composerDraftAccountOwnerKey(currentComposerAccount)
     : "no-account";
   const mainComposerOverlay = mainComposerOverlayRef.current;
-  const composerDraft =
+  const composerDocument =
     timelineRoomId &&
     mainComposerOverlay?.scope.target.kind === "main" &&
     mainComposerOverlay.scope.target.room_id === timelineRoomId &&
     mainComposerOverlay.scope.account.homeserver === currentComposerAccount?.homeserver &&
     mainComposerOverlay.scope.account.user_id === currentComposerAccount?.userId &&
     mainComposerOverlay.scope.account.device_id === currentComposerAccount?.deviceId
-      ? mainComposerOverlay.value
-      : snapshotComposerDraft;
+      ? mainComposerOverlay.document
+      : snapshotComposerDocument;
   const mainComposerDraftImeKey = [accountOwnerKey, "main", timelineRoomId ?? "no-room",
     snapshot?.state.ui.timeline.composer.last_accepted_clear_revision ??
       COMPOSER_DRAFT_REVISION_ZERO
@@ -1776,11 +1776,11 @@ export function App() {
       ? composerDraftScope(currentComposerAccount, activeThreadTarget)
       : null;
   const threadComposerOverlay = threadComposerOverlayRef.current;
-  const threadComposerDraftOverride =
+  const threadComposerDocumentOverride =
     activeThreadScope &&
     threadComposerOverlay &&
     composerDraftScopesEqual(activeThreadScope, threadComposerOverlay.scope)
-      ? threadComposerOverlay.value
+      ? threadComposerOverlay.document
       : undefined;
   const threadComposerDraftImeKey =
     activeThreadState?.kind === "open" && activeThreadState.composer
@@ -2232,7 +2232,7 @@ export function App() {
     qaSendBaselineTimelineItems.current = snapshot.timeline.length;
     qaSendPending.current = true;
     setQaSendStatus("pending");
-    void sendText(message);
+    void sendText(documentFromText(message));
   }, [snapshot]);
 
   useEffect(() => {
@@ -3062,10 +3062,10 @@ export function App() {
       }
       while (true) {
         const activeOverlay = overlayForScope();
-        if (!activeOverlay || activeOverlay.value.length === 0) break;
+        if (!activeOverlay || activeOverlay.document.inlines.length === 0) break;
         const revision = activeOverlay.revision ?? registry.nextDraft(scope);
         activeOverlay.revision = revision;
-        registry.setActiveOverlay(scope, activeOverlay.value, revision);
+        registry.setActiveOverlay(scope, activeOverlay.document, revision);
         const admitted = beginComposerOperation(scope);
         if (!admitted) return false;
         const account = composerDraftApiAccount(scope);
@@ -3076,7 +3076,7 @@ export function App() {
               admitted.lease.leaseId,
               admitted.lease.rendererGeneration,
               scope.target.room_id,
-              activeOverlay.value,
+              activeOverlay.document,
               revision
             );
           } else {
@@ -3086,7 +3086,7 @@ export function App() {
               admitted.lease.rendererGeneration,
               scope.target.room_id,
               scope.target.root_event_id,
-              activeOverlay.value,
+              activeOverlay.document,
               revision
             );
           }
@@ -3966,15 +3966,15 @@ export function App() {
     if (accepted && !hasNewerDraft) {
       cancelComposerDraftPersist(scope);
       clearLocalComposerDraft(scope);
-      setComposerMentions(EMPTY_MENTION_INTENT);
       updateComposerTypingSignal(roomId, "");
     }
     setSnapshot(response.snapshot);
   }
 
-  async function sendText(bodyOverride?: string) {
+  async function sendText(documentOverride?: ComposerDocument) {
     const roomId = snapshot?.state.ui.timeline.room_id;
-    const body = bodyOverride ?? composerDraft;
+    const sendDocument = documentOverride ?? composerDocument;
+    const body = plainBodyFromDocument(sendDocument);
     const account = readyComposerDraftAccountOwner(snapshot);
     const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
     const target: ComposerTarget | null = roomId ? { kind: "main", room_id: roomId } : null;
@@ -3992,7 +3992,6 @@ export function App() {
       return;
     }
 
-    const mentions = pruneMentionIntentForDraft(composerMentions, body);
     if (submissionController.payload(submissionId) === undefined) {
       const scope = composerDraftScope(account, target);
       const draftRevision =
@@ -4002,7 +4001,7 @@ export function App() {
       submissionController.capture(submissionId, {
         roomId,
         body,
-        mentions,
+        document: sendDocument,
         composerMode,
         draftRevision,
         localRevisionAtSubmission,
@@ -4014,7 +4013,7 @@ export function App() {
     const captured = submissionController.payload<{
       roomId: string;
       body: string;
-      mentions: MentionIntent;
+      document: ComposerDocument;
       composerMode: typeof composerMode;
       draftRevision: ComposerDraftRevision;
       localRevisionAtSubmission: ComposerDraftRevision | null;
@@ -4053,8 +4052,7 @@ export function App() {
               admitted.lease.rendererGeneration,
               submissionId,
               captured.roomId,
-              captured.body,
-              captured.mentions,
+              captured.document,
               captured.draftRevision
             )
           : await api.sendReply(
@@ -4064,8 +4062,7 @@ export function App() {
               submissionId,
               captured.roomId,
               captured.composerMode.Reply.in_reply_to_event_id,
-              captured.body,
-              captured.mentions,
+              captured.document,
               captured.draftRevision
             );
       const canApply = composerOperationCanApply(admitted, captured.draftRevision);
@@ -4081,7 +4078,6 @@ export function App() {
       if (!hasNewerDraft) {
         cancelComposerDraftPersist(captured.scope);
         clearLocalComposerDraft(captured.scope);
-        setComposerMentions(EMPTY_MENTION_INTENT);
         updateComposerTypingSignal(roomId, "");
       }
       setSnapshot(nextSnapshot.snapshot);
@@ -4120,9 +4116,9 @@ export function App() {
     }
   }, [snapshot]);
 
-  async function scheduleSend(sendAtMs: number, bodyOverride?: string) {
+  async function scheduleSend(sendAtMs: number, documentOverride?: ComposerDocument) {
     const roomId = snapshot?.state.ui.timeline.room_id;
-    const body = bodyOverride ?? composerDraft;
+    const body = plainBodyFromDocument(documentOverride ?? composerDocument);
     const account = readyComposerDraftAccountOwner(snapshot);
     const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
     if (!roomId || !account || !accountOwner || !body.trim() || stagedUploads.length > 0) {
@@ -4155,7 +4151,6 @@ export function App() {
       if (accepted && !hasNewerDraft) {
         cancelComposerDraftPersist(scope);
         clearLocalComposerDraft(scope);
-        setComposerMentions(EMPTY_MENTION_INTENT);
         updateComposerTypingSignal(roomId, "");
       }
       setSnapshot(response.snapshot);
@@ -4181,7 +4176,8 @@ export function App() {
     }
   }
 
-  function updateComposerDraft(value: string) {
+  function updateComposerDraft(document: ComposerDocument) {
+    const value = plainBodyFromDocument(document);
     const roomId = snapshot?.state.ui.timeline.room_id;
     const account = readyComposerDraftAccountOwner(snapshot);
     if (!roomId || !account) return;
@@ -4193,13 +4189,13 @@ export function App() {
       : null;
     mainComposerOverlayRef.current = {
       scope,
-      value,
+      document,
       revision,
       debounceHandle: null
     };
-    composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, value, revision);
+    composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, document, revision);
     updateComposerTypingSignal(roomId, value);
-    if (revision) queueComposerDraftPersist(scope, value, revision);
+    if (revision) queueComposerDraftPersist(scope, document, revision);
   }
 
   function updateComposerTypingSignal(roomId: string, value: string) {
@@ -4224,7 +4220,7 @@ export function App() {
 
   function queueComposerDraftPersist(
     scope: ComposerDraftScope,
-    value: string,
+    document: ComposerDocument,
     revision: ComposerDraftRevision
   ) {
     if (scope.target.kind !== "main") return;
@@ -4244,7 +4240,7 @@ export function App() {
           admitted.lease.leaseId,
           admitted.lease.rendererGeneration,
           scope.target.room_id,
-          value,
+          document,
           revision
         )
         .then((nextSnapshot) => {
@@ -4255,7 +4251,7 @@ export function App() {
             submissionAccountOwnerRef.current !== composerDraftAccountOwnerKey(account) ||
             !currentOverlay ||
             !composerDraftScopesEqual(currentOverlay.scope, scope) ||
-            currentOverlay.value !== value ||
+            currentOverlay.document !== document ||
             currentOverlay.revision !== revision
           ) return;
           setSnapshot(nextSnapshot);
@@ -4368,7 +4364,9 @@ export function App() {
       return;
     }
 
-    setSnapshot(await api.editMessage(message.room_id, message.event_id, body));
+    setSnapshot(
+      await api.editMessage(message.room_id, message.event_id, documentFromText(body))
+    );
   }
 
   async function redactMessage(roomId: string, eventId: string) {
@@ -4524,7 +4522,7 @@ export function App() {
   function updateThreadComposerDraft(
     roomId: string,
     rootEventId: string,
-    draft: string
+    document: ComposerDocument
   ) {
     const account = readyComposerDraftAccountOwner(snapshot);
     if (!account) return;
@@ -4536,12 +4534,12 @@ export function App() {
       : null;
     threadComposerOverlayRef.current = {
       scope,
-      value: draft,
+      document,
       revision,
       debounceHandle: null
     };
-    composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, draft, revision);
-    if (revision) queueThreadComposerDraftPersist(scope, draft, revision);
+    composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, document, revision);
+    if (revision) queueThreadComposerDraftPersist(scope, document, revision);
   }
 
   async function stageThreadUploadFiles(
@@ -4622,7 +4620,6 @@ export function App() {
     if (accepted && !hasNewerDraft) {
       cancelThreadComposerDraftPersist(scope);
       clearLocalThreadComposerDraft(scope);
-      clearThreadComposerMentions(roomId, rootEventId);
     }
     setSnapshot(response.snapshot);
   }
@@ -4630,9 +4627,9 @@ export function App() {
   async function sendThreadReply(
     roomId: string,
     rootEventId: string,
-    body: string,
-    mentionIntent: MentionIntent
+    document: ComposerDocument
   ) {
+    const body = plainBodyFromDocument(document);
     const account = readyComposerDraftAccountOwner(snapshot);
     const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
     const target: ComposerTarget = { kind: "thread", room_id: roomId, root_event_id: rootEventId };
@@ -4647,7 +4644,6 @@ export function App() {
     if (submissionId === null) {
       return;
     }
-    const mentions = pruneMentionIntentForDraft(mentionIntent, body);
     if (submissionController.payload(submissionId) === undefined) {
       const scope = composerDraftScope(account, target);
       const draftRevision =
@@ -4658,7 +4654,7 @@ export function App() {
         roomId,
         rootEventId,
         body,
-        mentions,
+        document,
         draftRevision,
         localRevisionAtSubmission,
         account,
@@ -4670,7 +4666,7 @@ export function App() {
       roomId: string;
       rootEventId: string;
       body: string;
-      mentions: MentionIntent;
+      document: ComposerDocument;
       draftRevision: ComposerDraftRevision;
       localRevisionAtSubmission: ComposerDraftRevision | null;
       account: { homeserver: string; userId: string; deviceId: string };
@@ -4695,8 +4691,7 @@ export function App() {
         submissionId,
         captured.roomId,
         captured.rootEventId,
-        captured.body,
-        captured.mentions,
+        captured.document,
         captured.draftRevision
       );
     } catch (error) {
@@ -4725,29 +4720,10 @@ export function App() {
     if (!hasNewerDraft) {
       cancelThreadComposerDraftPersist(captured.scope);
       clearLocalThreadComposerDraft(captured.scope);
-      clearThreadComposerMentions(roomId, rootEventId);
     }
     setSnapshot(response.snapshot);
   }
 
-  function updateThreadComposerMentions(
-    roomId: string,
-    rootEventId: string,
-    mentions: MentionIntent
-  ) {
-    const key = threadComposerDraftKey(roomId, rootEventId);
-    setThreadComposerMentions((current) => ({ ...current, [key]: mentions }));
-  }
-
-  function clearThreadComposerMentions(roomId: string, rootEventId: string) {
-    const key = threadComposerDraftKey(roomId, rootEventId);
-    setThreadComposerMentions((current) => {
-      if (!(key in current)) return current;
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
-  }
 
   async function clearThreadUploadStaging(roomId: string, rootEventId: string) {
     const thread = snapshot?.state.ui.thread;
@@ -4844,8 +4820,9 @@ export function App() {
     roomId: string,
     rootEventId: string,
     sendAtMs: number,
-    body: string
+    document: ComposerDocument
   ) {
+    const body = plainBodyFromDocument(document);
     const thread = snapshot?.state.ui.thread;
     const account = readyComposerDraftAccountOwner(snapshot);
     const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
@@ -4896,14 +4873,13 @@ export function App() {
     if (accepted && !hasNewerDraft) {
       cancelThreadComposerDraftPersist(scope);
       clearLocalThreadComposerDraft(scope);
-      clearThreadComposerMentions(roomId, rootEventId);
     }
     setSnapshot(response.snapshot);
   }
 
   function queueThreadComposerDraftPersist(
     scope: ComposerDraftScope,
-    draft: string,
+    document: ComposerDocument,
     revision: ComposerDraftRevision
   ) {
     if (scope.target.kind !== "thread") return;
@@ -4925,7 +4901,7 @@ export function App() {
           admitted.lease.rendererGeneration,
           target.room_id,
           target.root_event_id,
-          draft,
+          document,
           revision
         )
         .then((nextSnapshot) => {
@@ -4937,7 +4913,7 @@ export function App() {
             !currentOverlay ||
             !composerDraftScopesEqual(currentOverlay.scope, scope) ||
             currentOverlay.revision !== revision ||
-            currentOverlay.value !== draft
+            currentOverlay.document !== document
           ) return;
           setSnapshot(nextSnapshot);
         })
@@ -4965,10 +4941,6 @@ export function App() {
     if (!overlay || !composerDraftScopesEqual(overlay.scope, scope)) return;
     threadComposerOverlayRef.current = null;
     composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, null, null);
-  }
-
-  function threadComposerDraftKey(roomId: string, rootEventId: string): string {
-    return `${roomId}\u0000${rootEventId}`;
   }
 
   function focusedContextVisibleForMode(mode: RightPanelMode): boolean {
@@ -5807,10 +5779,9 @@ export function App() {
         ) : (
           <TimelinePane
             activeRoomName={activeRoom?.display_label ?? t("room.noRoomSelected")}
-            composerDraft={composerDraft}
+            composerDocument={composerDocument}
             composerDraftKey={mainComposerDraftImeKey}
             composerMode={composerModeProp(snapshot.state.ui.timeline.composer.mode)}
-            mentionIntent={composerMentions}
             resolveComposerKeyAction={resolveComposerKeyAction}
             searchQuery={searchHighlightQuery}
             searchResults={searchResults}
@@ -5849,13 +5820,12 @@ export function App() {
             onUseOriginalStagedUpload={(stagedId) => {
               void useOriginalStagedUpload(stagedId);
             }}
-            onComposerDraftChange={(value) => {
-              void updateComposerDraft(value);
+            onComposerDocumentChange={(document) => {
+              void updateComposerDraft(document);
             }}
             onComposerMathModeChange={(enabled) => {
               void updateSettings({ composer: { math_mode: enabled } });
             }}
-            onMentionIntentChange={setComposerMentions}
             onMentionQueryChange={(roomId, query) => {
               if (query !== null) {
                 void applyLatestTextSnapshot(`mention-main:${roomId}`, async () => {
@@ -6088,15 +6058,11 @@ export function App() {
           onSwitchAccount={(session) => {
             void switchAccount(session);
           }}
-          onThreadComposerDraftChange={(roomId, rootEventId, draft) => {
-            updateThreadComposerDraft(roomId, rootEventId, draft);
+          onThreadComposerDocumentChange={(roomId, rootEventId, document) => {
+            updateThreadComposerDraft(roomId, rootEventId, document);
           }}
           threadComposerDraftImeKey={threadComposerDraftImeKey}
-          threadComposerDraftOverride={threadComposerDraftOverride}
-          threadComposerMentionIntents={threadComposerMentions}
-          onThreadMentionIntentChange={(roomId, rootEventId, mentions) => {
-            updateThreadComposerMentions(roomId, rootEventId, mentions);
-          }}
+          threadComposerDocumentOverride={threadComposerDocumentOverride}
           onThreadMentionQueryChange={(roomId, query) => {
             if (query !== null) {
               void applyLatestTextSnapshot(`mention-thread:${roomId}`, async () => {
@@ -6127,11 +6093,11 @@ export function App() {
           onThreadUseOriginalStagedUpload={(roomId, rootEventId, stagedId) => {
             void useOriginalThreadStagedUpload(roomId, rootEventId, stagedId);
           }}
-          onThreadScheduleSend={(roomId, rootEventId, sendAtMs, body) => {
-            void scheduleThreadSend(roomId, rootEventId, sendAtMs, body);
+          onThreadScheduleSend={(roomId, rootEventId, sendAtMs, document) => {
+            void scheduleThreadSend(roomId, rootEventId, sendAtMs, document);
           }}
-          onThreadReplySend={(roomId, rootEventId, body, mentions) => {
-            void sendThreadReply(roomId, rootEventId, body, mentions);
+          onThreadReplySend={(roomId, rootEventId, document) => {
+            void sendThreadReply(roomId, rootEventId, document);
           }}
           onTimelineDiagnosticLogEntry={appendDiagnosticLog}
           onResolveComposerKeyAction={resolveComposerKeyAction}

@@ -87,6 +87,7 @@ export type MessageId =
   | "composer.mathModeOff"
   | "composer.mathModeOn"
   | "composer.mention"
+  | "composer.inlineMention"
   | "composer.mentionLoading"
   | "composer.mentionRoomNotification"
   | "composer.mentionRoomNotificationDescription"
@@ -102,7 +103,6 @@ export type MessageId =
   | "composer.replying"
   | "composer.removeAttachment"
   | "composer.cancelReply"
-  | "composer.selectedMentions"
   | "upload.captionForFile"
   | "upload.ask"
   | "upload.clear"
@@ -1267,6 +1267,7 @@ const en: Catalog = {
   "composer.mathModeOff": "Math formatting off",
   "composer.mathModeOn": "Math formatting on",
   "composer.mention": "Mention",
+  "composer.inlineMention": "Mention: {label}",
   "composer.mentionLoading": "Loading people…",
   "composer.mentionRoomNotification": "Room Notification",
   "composer.mentionRoomNotificationDescription": "Notify the whole room",
@@ -1282,7 +1283,6 @@ const en: Catalog = {
   "composer.replying": "Replying",
   "composer.removeAttachment": "Remove attachment",
   "composer.cancelReply": "Cancel reply",
-  "composer.selectedMentions": "Selected mentions",
   "upload.captionForFile": "Caption for {filename}",
   "upload.ask": "Ask",
   "upload.clear": "Clear upload staging",
@@ -2356,6 +2356,7 @@ const ja: Catalog = {
   "composer.mathModeOff": "数式モード: OFF",
   "composer.mathModeOn": "数式モード: ON",
   "composer.mention": "メンション",
+  "composer.inlineMention": "メンション: {label}",
   "composer.mentionLoading": "メンバーを読み込み中…",
   "composer.mentionRoomNotification": "ルーム通知",
   "composer.mentionRoomNotificationDescription": "ルーム全体に通知",
@@ -2366,7 +2367,6 @@ const ja: Catalog = {
   "composer.replying": "返信中",
   "composer.removeAttachment": "添付を削除",
   "composer.cancelReply": "返信をキャンセル",
-  "composer.selectedMentions": "選択中のメンション",
   "composer.imageCompressionCompressed": "圧縮済み",
   "composer.imageCompressionOriginal": "元の画像",
   "composer.imageCompressionPreviewAlt": "圧縮後の画像プレビュー",
