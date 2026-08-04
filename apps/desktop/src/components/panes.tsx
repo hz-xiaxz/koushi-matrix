@@ -29,7 +29,7 @@ import type {
   ActivityTab,
   DesktopSnapshot,
   DirectoryRoomSummary,
-  MentionIntent,
+  ComposerDocument,
   ResolveComposerKeyAction,
   SearchResult
 } from "../domain/types";
@@ -687,10 +687,9 @@ export function SummaryTile({ label, value }: { label: string; value: string }) 
 
 export function TimelinePane({
   activeRoomName,
-  composerDraft,
+  composerDocument,
   composerDraftKey,
   composerMode,
-  mentionIntent,
   resolveComposerKeyAction,
   searchQuery,
   searchResults,
@@ -707,9 +706,8 @@ export function TimelinePane({
   onLoadStagedUploadPreview,
   onRetryStagedUploadPreparation = () => undefined,
   onUseOriginalStagedUpload = () => undefined,
-  onComposerDraftChange,
+  onComposerDocumentChange,
   onComposerMathModeChange,
-  onMentionIntentChange,
   onMentionQueryChange,
   onEditMessage,
   onOpenContextMenu,
@@ -732,10 +730,9 @@ export function TimelinePane({
   onTimelineDiagnosticLogEntry
 }: {
   activeRoomName: string;
-  composerDraft: string;
+  composerDocument: ComposerDocument;
   composerDraftKey?: string;
   composerMode: ComposerModeProp;
-  mentionIntent: MentionIntent;
   resolveComposerKeyAction: ResolveComposerKeyAction;
   searchQuery: string;
   searchResults: SearchResult[];
@@ -755,9 +752,8 @@ export function TimelinePane({
   onLoadStagedUploadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
   onRetryStagedUploadPreparation?: (stagedId: string) => void | Promise<void>;
   onUseOriginalStagedUpload?: (stagedId: string) => void | Promise<void>;
-  onComposerDraftChange: (value: string) => void;
+  onComposerDocumentChange: (document: ComposerDocument) => void;
   onComposerMathModeChange: (enabled: boolean) => void | Promise<void>;
-  onMentionIntentChange: (intent: MentionIntent) => void;
   onMentionQueryChange?: (roomId: string, query: string | null) => void;
   onEditMessage: (message: { body: string | null; room_id: string; event_id: string }) => void;
   onOpenContextMenu: OpenContextMenu;
@@ -767,8 +763,8 @@ export function TimelinePane({
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
   onRescheduleScheduledSend: (scheduledId: string, body: string, sendAtMs: number) => void;
   onResultSelect: (roomId: string, eventId: string) => void;
-  onScheduleSend: (sendAtMs: number, body: string) => void;
-  onSendText: (body: string) => void;
+  onScheduleSend: (sendAtMs: number, document: ComposerDocument) => void;
+  onSendText: (document: ComposerDocument) => void;
   onSetLocalUserAlias: (userId: string, alias: string | null) => void;
   /** Kept for fixture compatibility; pinned unpin actions live in the panel. */
   onUnpinPinnedEvent?: (roomId: string, eventId: string) => void;
@@ -860,9 +856,8 @@ export function TimelinePane({
   const onLoadStagedUploadPreviewStable = useStableEvent(onLoadStagedUploadPreview);
   const onRetryStagedUploadPreparationStable = useStableEvent(onRetryStagedUploadPreparation);
   const onUseOriginalStagedUploadStable = useStableEvent(onUseOriginalStagedUpload);
-  const onComposerDraftChangeStable = useStableEvent(onComposerDraftChange);
+  const onComposerDocumentChangeStable = useStableEvent(onComposerDocumentChange);
   const onComposerMathModeChangeStable = useStableEvent(onComposerMathModeChange);
-  const onMentionIntentChangeStable = useStableEvent(onMentionIntentChange);
   const onMentionQueryChangeStable = useStableEvent((query: string | null) => {
     if (timelineRoomId) {
       onMentionQueryChange?.(timelineRoomId, query);
@@ -1083,19 +1078,17 @@ export function TimelinePane({
         mathModeEnabled={snapshot.state.domain.settings.values.composer?.math_mode ?? true}
         mentionCandidates={mentionCandidates}
         mentionCandidatesLoading={mentionCandidatesLoading}
-        mentionIntent={mentionIntent}
         resolveComposerKeyAction={resolveComposerKeyActionStable}
+        document={composerDocument}
         draftKey={composerDraftKey ?? timelineRoomId ?? "no-room"}
         roomName={activeRoomName}
-        value={composerDraft}
         onCancelReply={onCancelReplyStable}
         onAttachFiles={onAttachFilesStable}
+        onDocumentChange={onComposerDocumentChangeStable}
         onMathModeChange={onComposerMathModeChangeStable}
-        onMentionIntentChange={onMentionIntentChangeStable}
         onMentionQueryChange={onMentionQueryChangeStable}
         onScheduleSend={onScheduleSendStable}
         onSend={onSendTextStable}
-        onValueChange={onComposerDraftChangeStable}
       />
       {viewerIndex !== null && mediaGallery[viewerIndex] ? (
         <MediaViewer

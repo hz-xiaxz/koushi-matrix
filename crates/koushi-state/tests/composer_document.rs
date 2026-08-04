@@ -66,6 +66,60 @@ fn plain_text_never_fabricates_semantic_mentions() {
 }
 
 #[test]
+fn formatted_body_links_each_mention_identity_without_inferring_plain_text() {
+    let document = ComposerDocument::new(vec![
+        ComposerInline::Text {
+            text: "**hello** @Same & Name ".into(),
+        },
+        ComposerInline::Mention {
+            target: user("@alice:example.invalid", "Same & Name"),
+            display_label: "Same & Name".into(),
+        },
+        ComposerInline::Text {
+            text: " and ".into(),
+        },
+        ComposerInline::Mention {
+            target: user("@bob:example.invalid", "Same & Name"),
+            display_label: "Same & Name".into(),
+        },
+        ComposerInline::Text {
+            text: " typed @Same & Name".into(),
+        },
+    ]);
+
+    assert_eq!(
+        document.formatted_body(),
+        Some(
+            "<strong>hello</strong> @Same &amp; Name <a href=\"https://matrix.to/#/%40alice%3Aexample.invalid\">@Same &amp; Name</a> and <a href=\"https://matrix.to/#/%40bob%3Aexample.invalid\">@Same &amp; Name</a> typed @Same &amp; Name".into()
+        )
+    );
+}
+
+#[test]
+fn formatted_mentions_escape_cjk_labels_and_debug_redacts_content_and_identity() {
+    let document = ComposerDocument::new(vec![
+        ComposerInline::Text {
+            text: "秘密 ".into(),
+        },
+        ComposerInline::Mention {
+            target: user("@alice:example.invalid", "研究 <&>"),
+            display_label: "研究 <&>".into(),
+        },
+    ]);
+
+    assert_eq!(
+        document.formatted_body().as_deref(),
+        Some(
+            "秘密 <a href=\"https://matrix.to/#/%40alice%3Aexample.invalid\">@研究 &lt;&amp;&gt;</a>"
+        )
+    );
+    let debug = format!("{document:?}");
+    assert!(!debug.contains("秘密"));
+    assert!(!debug.contains("alice"));
+    assert!(!debug.contains("研究"));
+}
+
+#[test]
 fn room_mentions_and_room_targets_are_deduplicated_by_identity() {
     let room = MentionTarget::Room {
         room_id: "!room:example.invalid".into(),
@@ -94,4 +148,10 @@ fn room_mentions_and_room_targets_are_deduplicated_by_identity() {
     ]);
 
     assert_eq!(document.mention_intent().targets, vec![room, room_mention]);
+    assert_eq!(
+        document.formatted_body().as_deref(),
+        Some(
+            "<a href=\"https://matrix.to/#/%21room%3Aexample.invalid\">@Room</a><a href=\"https://matrix.to/#/%21room%3Aexample.invalid\">@Renamed room occurrence</a><span data-mx-mention>@room</span><span data-mx-mention>@room</span>"
+        )
+    );
 }

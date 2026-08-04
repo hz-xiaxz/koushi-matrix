@@ -19,7 +19,6 @@ import type {
   ComposerDraftRevision,
   ComposerDraftAcceptanceResponse,
   DirectoryQuery,
-  MentionIntent,
   MentionSurface,
   OidcAuthorization,
   PresenceKind,
@@ -359,8 +358,7 @@ class TauriDesktopApi implements DesktopApi {
     rendererGeneration: string,
     submissionId: string,
     roomId: string,
-    body: string,
-    mentions: MentionIntent = { targets: [] },
+    document: ComposerDocument,
     draftRevision: ComposerDraftRevision = COMPOSER_DRAFT_REVISION_ZERO
   ): Promise<SubmissionResponse> {
     return invoke<SubmissionResponse>("send_text", {
@@ -371,8 +369,7 @@ class TauriDesktopApi implements DesktopApi {
       rendererGeneration,
       submissionId,
       roomId,
-      body,
-      mentions,
+      document,
       draftRevision
     });
   }
@@ -588,10 +585,9 @@ class TauriDesktopApi implements DesktopApi {
   async editMessage(
     roomId: string,
     eventId: string,
-    body: string,
-    mentions: MentionIntent = { targets: [] }
+    document: ComposerDocument
   ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("edit_message", { roomId, eventId, body, mentions });
+    return invoke<DesktopSnapshot>("edit_message", { roomId, eventId, document });
   }
 
   async redactMessage(roomId: string, eventId: string): Promise<DesktopSnapshot> {
@@ -827,8 +823,7 @@ class TauriDesktopApi implements DesktopApi {
     submissionId: string,
     roomId: string,
     rootEventId: string,
-    body: string,
-    mentions?: MentionIntent,
+    document: ComposerDocument,
     draftRevision: ComposerDraftRevision = COMPOSER_DRAFT_REVISION_ZERO
   ): Promise<SubmissionResponse> {
     return invoke<SubmissionResponse>("send_thread_reply", {
@@ -840,8 +835,7 @@ class TauriDesktopApi implements DesktopApi {
       submissionId,
       roomId,
       rootEventId,
-      body,
-      mentions,
+      document,
       draftRevision
     });
   }
@@ -1045,8 +1039,7 @@ class TauriDesktopApi implements DesktopApi {
     submissionId: string,
     roomId: string,
     inReplyToEventId: string,
-    body: string,
-    mentions: MentionIntent = { targets: [] },
+    document: ComposerDocument,
     draftRevision: ComposerDraftRevision = COMPOSER_DRAFT_REVISION_ZERO
   ): Promise<SubmissionResponse> {
     return invoke<SubmissionResponse>("send_reply", {
@@ -1058,8 +1051,7 @@ class TauriDesktopApi implements DesktopApi {
       submissionId,
       roomId,
       inReplyToEventId,
-      body,
-      mentions,
+      document,
       draftRevision
     });
   }

@@ -207,6 +207,7 @@ async function gotoSignedOutAuth(page: Page): Promise<void> {
               accepted_submission_ids: [],
               pending_transaction_id: null,
               draft: "",
+              document: { version: 2, inlines: [] },
               draft_revision: "0",
               last_accepted_clear_revision: "0",
               mode: "Plain"
@@ -2738,9 +2739,22 @@ test("room mention candidates stay Rust-owned and send typed mention intent", as
   await expect(page.getByRole("option", { name: "Alice @alice:example.invalid" })).toBeVisible();
   await expect(page.getByRole("option", { name: /Account Global Only/ })).toHaveCount(0);
   await page.getByRole("option", { name: "Alice @alice:example.invalid" }).click();
-  await expect(
-    page.getByLabel("Selected mentions").getByText("@Alice", { exact: true })
-  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Mention: Alice" })).toHaveText("@Alice");
+  await expect(page.locator(".composer-mention-pills")).toHaveCount(0);
+
+  await composer.press("Backspace");
+  await composer.press("Backspace");
+  await expect(page.getByRole("link", { name: "Mention: Alice" })).toHaveCount(0);
+  await composer.evaluate((element) =>
+    element.dispatchEvent(
+      new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "historyUndo"
+      })
+    )
+  );
+  await expect(page.getByRole("link", { name: "Mention: Alice" })).toHaveText("@Alice");
 
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
@@ -2752,12 +2766,16 @@ test("room mention candidates stay Rust-owned and send typed mention intent", as
       accountUserId: "@harness-user:example.invalid",
       accountDeviceId: "HARNESSDEVICE",
       roomId: HARNESS_ROOM_ID,
-      body: "@Alice ",
-      mentions: {
-        targets: [
+      document: {
+        version: 2,
+        inlines: [
           {
-            kind: "user",
-            user_id: "@alice:example.invalid",
+            kind: "mention",
+            target: {
+              kind: "user",
+              user_id: "@alice:example.invalid",
+              display_label: "Alice"
+            },
             display_label: "Alice"
           }
         ]
@@ -2794,6 +2812,10 @@ test("room mention candidates keep main and thread composer targets independent"
   await expect(
     mainSuggestions.getByRole("option", { name: "Alice @alice:example.invalid" })
   ).toBeVisible();
+  await threadSuggestions
+    .getByRole("option", { name: "Bob @bob:example.invalid" })
+    .click();
+  await expect(threadComposer.getByRole("link", { name: "Mention: Bob" })).toHaveText("@Bob");
   await expect
     .poll(async () =>
       page.evaluate(() => {
@@ -2899,7 +2921,7 @@ test("markdown toolbar and slash composer input dispatch Rust-owned send bodies"
   await composer.fill("world");
   await composer.selectText();
   await page.getByRole("button", { name: "Bold" }).click();
-  await expect(composer).toHaveValue("**world**");
+  await expect(composer).toHaveText("**world**");
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
   await expect
@@ -2909,8 +2931,10 @@ test("markdown toolbar and slash composer input dispatch Rust-owned send bodies"
       accountUserId: "@harness-user:example.invalid",
       accountDeviceId: "HARNESSDEVICE",
       roomId: HARNESS_ROOM_ID,
-      body: "**world**",
-      mentions: { targets: [] }
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: "**world**" }]
+      }
     });
 
   await page.evaluate(() => window.__harness.clearInvocations());
@@ -2923,8 +2947,10 @@ test("markdown toolbar and slash composer input dispatch Rust-owned send bodies"
       accountUserId: "@harness-user:example.invalid",
       accountDeviceId: "HARNESSDEVICE",
       roomId: HARNESS_ROOM_ID,
-      body: "/me waves",
-      mentions: { targets: [] }
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: "/me waves" }]
+      }
   });
 });
 
@@ -2963,7 +2989,10 @@ test("eligible unverified peer devices do not gate ordinary sends", async ({ pag
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("send_text")[0]?.args))
     .toMatchObject({
       roomId: HARNESS_ROOM_ID,
-      body: "peer trust remains non-blocking"
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: "peer trust remains non-blocking" }]
+      }
     });
   await expect(page.locator(".trust-verification-dialog")).toHaveCount(0);
   await expect(page.getByText(/send anyway/i)).toHaveCount(0);
@@ -2985,6 +3014,10 @@ test("composer string revision stays exact above Number.MAX_SAFE_INTEGER", async
             composer: {
               ...current.state.ui.timeline.composer,
               draft: "exact Rust baseline",
+              document: {
+                version: 2,
+                inlines: [{ kind: "text", text: "exact Rust baseline" }]
+              },
               draft_revision: exactRevision,
               last_accepted_clear_revision: exactRevision
             }
@@ -2997,14 +3030,17 @@ test("composer string revision stays exact above Number.MAX_SAFE_INTEGER", async
   });
 
   const composer = page.getByRole("textbox", { name: "Message composer" });
-  await expect(composer).toHaveValue("exact Rust baseline");
+  await expect(composer).toHaveText("exact Rust baseline");
   await composer.fill("exact revision");
   await expect
     .poll(() =>
       page.evaluate(() => window.__harness.invocationsOf("set_composer_draft").at(-1)?.args)
     )
     .toMatchObject({
-      draft: "exact revision",
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: "exact revision" }]
+      },
       draftRevision: "9007199254740994"
     });
 });
@@ -3066,6 +3102,12 @@ test("main composer delayed write survives churn then rejects stale completion",
                 accepted_submission_ids: [],
                 pending_transaction_id: null,
                 draft: draftByRoom[roomId] ?? "",
+                document: {
+                  version: 2,
+                  inlines: draftByRoom[roomId]
+                    ? [{ kind: "text", text: draftByRoom[roomId] }]
+                    : []
+                },
                 draft_revision: revisionByRoom[roomId] ?? "0",
                 last_accepted_clear_revision: "0",
                 mode: "Plain"
@@ -3088,14 +3130,17 @@ test("main composer delayed write survives churn then rejects stale completion",
       "set_composer_draft",
       ({
         roomId,
-        draft,
+        document,
         draftRevision
       }: {
         roomId: string;
-        draft: string;
+        document: { inlines: Array<{ kind: string; text?: string; display_label?: string }> };
         draftRevision: string;
       }) => {
         const normalizedRoomId = String(roomId);
+        const draft = document.inlines
+          .map((inline) => inline.kind === "text" ? inline.text ?? "" : `@${inline.display_label ?? ""}`)
+          .join("");
         if (BigInt(draftRevision) <= BigInt(revisionByRoom[normalizedRoomId] ?? "0")) {
           return projectRoom(
             window.__harness.currentSnapshot().state.ui.timeline.room_id ?? primaryRoomId
@@ -3123,15 +3168,15 @@ test("main composer delayed write survives churn then rejects stale completion",
 
   const composer = page.getByRole("textbox", { name: "Message composer" });
   await composer.fill("Room A draft");
-  await expect(composer).toHaveValue("Room A draft");
+  await expect(composer).toHaveText("Room A draft");
   // Switch before the debounce expires: persistence timers are target-owned,
   // so editing room B must not cancel room A's pending encrypted-store write.
   await page
     .getByRole("button", { name: "Draft Room B" })
     .evaluate((button: HTMLButtonElement) => button.click());
-  await expect(composer).toHaveValue("");
+  await expect(composer).toHaveText("");
   await composer.fill("Room B draft");
-  await expect(composer).toHaveValue("Room B draft");
+  await expect(composer).toHaveText("Room B draft");
   await expect
     .poll(async () =>
       page.evaluate(() =>
@@ -3146,7 +3191,7 @@ test("main composer delayed write survives churn then rejects stale completion",
         accountUserId: "@harness-user:example.invalid",
         accountDeviceId: "HARNESSDEVICE",
         roomId: HARNESS_ROOM_ID,
-        draft: "Room A draft",
+        document: { version: 2, inlines: [{ kind: "text", text: "Room A draft" }] },
         draftRevision: "1"
       },
       {
@@ -3154,15 +3199,15 @@ test("main composer delayed write survives churn then rejects stale completion",
         accountUserId: "@harness-user:example.invalid",
         accountDeviceId: "HARNESSDEVICE",
         roomId: "!draft-room-b:example.invalid",
-        draft: "Room B draft",
+        document: { version: 2, inlines: [{ kind: "text", text: "Room B draft" }] },
         draftRevision: "1"
       }
     ]);
 
   await page.getByRole("button", { name: "Harness Room" }).click();
-  await expect(composer).toHaveValue("Room A draft");
+  await expect(composer).toHaveText("Room A draft");
   await page.getByRole("button", { name: "Draft Room B" }).click();
-  await expect(composer).toHaveValue("Room B draft");
+  await expect(composer).toHaveText("Room B draft");
 });
 
 test("room selection keeps a newer StateDelta when the command returns a stale snapshot", async ({
@@ -3463,7 +3508,11 @@ test("main composer keeps an emptied local draft across stale snapshot refresh",
             room_id: roomId,
             composer: {
               ...current.state.ui.timeline.composer,
-              draft: "stale draft from Rust"
+              draft: "stale draft from Rust",
+              document: {
+                version: 2,
+                inlines: [{ kind: "text", text: "stale draft from Rust" }]
+              }
             }
           }
         }
@@ -3472,7 +3521,13 @@ test("main composer keeps an emptied local draft across stale snapshot refresh",
     window.__harness.setSnapshot(staleDraftSnapshot);
     window.__harness.setCommandResponse(
       "set_composer_draft",
-      ({ draft, draftRevision }: { draft: string; draftRevision: string }) => {
+      ({ document, draftRevision }: {
+        document: { version: 2; inlines: Array<{ kind: string; text?: string; display_label?: string }> };
+        draftRevision: string;
+      }) => {
+        const draft = document.inlines
+          .map((inline) => inline.kind === "text" ? inline.text ?? "" : `@${inline.display_label ?? ""}`)
+          .join("");
         const snapshot = window.__harness.currentSnapshot();
         return {
           ...snapshot,
@@ -3485,6 +3540,7 @@ test("main composer keeps an emptied local draft across stale snapshot refresh",
                 composer: {
                   ...snapshot.state.ui.timeline.composer,
                   draft,
+                  document,
                   draft_revision: draftRevision
                 }
               }
@@ -3498,12 +3554,12 @@ test("main composer keeps an emptied local draft across stale snapshot refresh",
   });
 
   const composer = page.getByRole("textbox", { name: "Message composer" });
-  await expect(composer).toHaveValue("stale draft from Rust");
+  await expect(composer).toHaveText("stale draft from Rust");
   await composer.fill("typed then removed");
-  await expect(composer).toHaveValue("typed then removed");
+  await expect(composer).toHaveText("typed then removed");
 
   await composer.fill("");
-  await expect(composer).toHaveValue("");
+  await expect(composer).toHaveText("");
   await expect
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("set_composer_draft").at(-1)?.args)
@@ -3513,14 +3569,14 @@ test("main composer keeps an emptied local draft across stale snapshot refresh",
       accountUserId: "@harness-user:example.invalid",
       accountDeviceId: "HARNESSDEVICE",
       roomId: HARNESS_ROOM_ID,
-      draft: "",
+      document: { version: 2, inlines: [] },
       draftRevision: "2"
     });
 
   await page.evaluate(() => {
     window.__harness.pushStateChanged();
   });
-  await expect(composer).toHaveValue("");
+  await expect(composer).toHaveText("");
 });
 
 for (const completionOrder of ["accepted-first", "persist-first"] as const) {
@@ -3548,13 +3604,16 @@ for (const completionOrder of ["accepted-first", "persist-first"] as const) {
       window.__harness.setCommandResponse(
         "set_composer_draft",
         async ({
-          draft,
+          document,
           draftRevision
         }: {
           roomId: string;
-          draft: string;
+          document: { version: 2; inlines: Array<{ kind: string; text?: string; display_label?: string }> };
           draftRevision: string;
         }) => {
+          const draft = document.inlines
+            .map((inline) => inline.kind === "text" ? inline.text ?? "" : `@${inline.display_label ?? ""}`)
+            .join("");
           if (draftRevision === "1") {
             await persistGate;
           }
@@ -3575,6 +3634,7 @@ for (const completionOrder of ["accepted-first", "persist-first"] as const) {
                   composer: {
                     ...current.state.ui.timeline.composer,
                     draft,
+                    document,
                     draft_revision: draftRevision
                   }
                 }
@@ -3620,6 +3680,10 @@ for (const completionOrder of ["accepted-first", "persist-first"] as const) {
                         BigInt(currentComposer.draft_revision) > BigInt(draftRevision)
                           ? currentComposer.draft
                           : "",
+                      document:
+                        BigInt(currentComposer.draft_revision) > BigInt(draftRevision)
+                          ? currentComposer.document
+                          : { version: 2, inlines: [] },
                       draft_revision:
                         acceptedRevision,
                       last_accepted_clear_revision: acceptedRevision
@@ -3665,7 +3729,7 @@ for (const completionOrder of ["accepted-first", "persist-first"] as const) {
       );
     }
 
-    await expect(composer).toHaveValue("immediate next input");
+    await expect(composer).toHaveText("immediate next input");
     await expect
       .poll(async () =>
         page.evaluate(
@@ -3673,7 +3737,7 @@ for (const completionOrder of ["accepted-first", "persist-first"] as const) {
         )
       )
       .toBe("3");
-    await expect(composer).toHaveValue("immediate next input");
+    await expect(composer).toHaveText("immediate next input");
   });
 }
 
@@ -3716,6 +3780,7 @@ test("account switch revokes unresolved composer lifecycle", async ({
                   composer: {
                     ...previousAccountSnapshot.state.ui.timeline.composer,
                     draft: "",
+                    document: { version: 2, inlines: [] },
                     draft_revision: (BigInt(draftRevision) + 1n).toString()
                   }
                 }
@@ -3756,6 +3821,10 @@ test("account switch revokes unresolved composer lifecycle", async ({
             composer: {
               ...current.state.ui.timeline.composer,
               draft: "next account draft",
+              document: {
+                version: 2,
+                inlines: [{ kind: "text", text: "next account draft" }]
+              },
               draft_revision: "1"
             }
           }
@@ -3764,13 +3833,13 @@ test("account switch revokes unresolved composer lifecycle", async ({
     });
     window.__harness.pushStateChanged();
   });
-  await expect(composer).toHaveValue("next account draft");
+  await expect(composer).toHaveText("next account draft");
 
   await page.evaluate(() =>
     (window as Window & { __resolvePreviousAccountSend?: () => void })
       .__resolvePreviousAccountSend?.()
   );
-  await expect(composer).toHaveValue("next account draft");
+  await expect(composer).toHaveText("next account draft");
 });
 
 for (const failure of ["rejected", "timeout"] as const) {
@@ -3799,7 +3868,7 @@ for (const failure of ["rejected", "timeout"] as const) {
     await page.getByRole("button", { name: "Send", exact: true }).click();
 
     await expect.poll(() => invocationCount(page, "send_text")).toBe(1);
-    await expect(composer).toHaveValue("draft retained after failure");
+    await expect(composer).toHaveText("draft retained after failure");
     await expect
       .poll(async () =>
         page.evaluate(() => window.__harness.invocationsOf("send_text")[0]?.args.draftRevision)
@@ -3954,6 +4023,10 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
                 composer: {
                   ...current.state.ui.timeline.composer,
                   draft,
+                  document: {
+                    version: 2,
+                    inlines: draft ? [{ kind: "text", text: draft }] : []
+                  },
                   draft_revision: draftRevision,
                   last_accepted_clear_revision: lastAcceptedClearRevision
                 }
@@ -3977,7 +4050,13 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
       window.__harness.setSnapshot(projectScheduled([], ""));
       window.__harness.setCommandResponse(
         "set_composer_draft",
-        ({ draft, draftRevision }: { draft: string; draftRevision: string }) => {
+        ({ document, draftRevision }: {
+          document: { inlines: Array<{ kind: string; text?: string; display_label?: string }> };
+          draftRevision: string;
+        }) => {
+          const draft = document.inlines
+            .map((inline) => inline.kind === "text" ? inline.text ?? "" : `@${inline.display_label ?? ""}`)
+            .join("");
           const next = projectScheduled([], draft, draftRevision);
           window.__harness.setSnapshot(next);
           return next;
@@ -4046,11 +4125,11 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
       page.evaluate(() => window.__harness.currentSnapshot().state.ui.timeline.composer)
     )
     .toMatchObject({ draft: "", draft_revision: "2" });
-  await expect(page.getByRole("textbox", { name: "Message composer" })).toHaveValue("");
+  await expect(page.getByRole("textbox", { name: "Message composer" })).toHaveText("");
 
   await page.getByRole("button", { name: "Edit scheduled send" }).click();
   const scheduledBody = page.getByRole("textbox", { name: "Scheduled message" });
-  await expect(scheduledBody).toHaveValue("Phase B scheduled body");
+  await expect(scheduledBody).toHaveText("Phase B scheduled body");
   await scheduledBody.fill("Phase B edited scheduled body");
   await page.getByLabel("Scheduled send time").fill("2030-01-03T04:05");
   await page.getByRole("button", { name: "Save scheduled send" }).click();
@@ -4168,7 +4247,7 @@ test("main composer composing Enter never sends or accepts mention autocomplete"
   expect(await invocationCount(page, "resolve_composer_key_action")).toBe(0);
   expect(await invocationCount(page, "send_text")).toBe(0);
   await expect(page.getByRole("listbox", { name: "Mention suggestions" })).toBeVisible();
-  await expect(composer).toHaveValue("@a");
+  await expect(composer).toHaveText("@a");
 });
 
 test("thread and edit composers composing Enter never send through GUI", async ({
@@ -4191,7 +4270,7 @@ test("thread and edit composers composing Enter never send through GUI", async (
 
   expect(await invocationCount(page, "resolve_composer_key_action")).toBe(0);
   expect(await invocationCount(page, "send_thread_reply")).toBe(0);
-  await expect(threadComposer).toHaveValue("スレッド変換中");
+  await expect(threadComposer).toHaveText("スレッド変換中");
 
   const row = page.locator('[data-event-id="$seed-event:example.invalid"]');
   await row
@@ -4207,7 +4286,7 @@ test("thread and edit composers composing Enter never send through GUI", async (
 
   expect(await invocationCount(page, "resolve_composer_key_action")).toBe(0);
   expect(await invocationCount(page, "edit_message")).toBe(0);
-  await expect(editBody).toHaveValue("編集変換中");
+  await expect(editBody).toHaveText("編集変換中");
 });
 
 test("send queue rows dispatch retry and cancel commands from Rust-owned send state", async ({
@@ -5053,9 +5132,9 @@ test("paste/drop upload UX stages ordinary files for the captured main composer 
     });
     const data = new DataTransfer();
     data.items.add(file);
-    const textarea = document.querySelector('textarea[aria-label="Message composer"]');
-    if (!textarea) throw new Error("composer textarea not found");
-    textarea.dispatchEvent(
+    const editor = document.querySelector('[contenteditable="true"][aria-label="Message composer"]');
+    if (!editor) throw new Error("composer editor not found");
+    editor.dispatchEvent(
       new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data })
     );
   });
@@ -5651,8 +5730,10 @@ test("editing a message invokes edit_message and renders the edited marker", asy
     .toEqual({
       roomId: "!harness-room:example.invalid",
       eventId: "$seed-event:example.invalid",
-      body: "Edited seed message",
-      mentions: { targets: [] }
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: "Edited seed message" }]
+      }
     });
 
   await page.evaluate(({ key, roomId }) => {
@@ -5718,8 +5799,10 @@ test("editing a message invokes edit_message and renders the edited marker", asy
     .toEqual({
       roomId: "!harness-room:example.invalid",
       eventId: "$seed-event:example.invalid",
-      body: "Re-edited seed message",
-      mentions: { targets: [] }
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: "Re-edited seed message" }]
+      }
     });
 });
 
@@ -6148,7 +6231,10 @@ test("thread composer delayed write is root isolated across churn", async ({
       accountDeviceId: "HARNESSDEVICE",
       roomId: "!harness-room:example.invalid",
       rootEventId: "$seed-event:example.invalid",
-      draft: threadReplyBody,
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: threadReplyBody }]
+      },
       draftRevision: "1"
     });
 
@@ -6179,8 +6265,10 @@ test("thread composer delayed write is root isolated across churn", async ({
       accountDeviceId: "HARNESSDEVICE",
       roomId: "!harness-room:example.invalid",
       rootEventId: "$seed-event:example.invalid",
-      body: threadReplyBody,
-      mentions: { targets: [] },
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: threadReplyBody }]
+      },
       draftRevision: "1"
     });
   expect(await invocationCount(page, "send_text")).toBe(0);
@@ -7678,8 +7766,10 @@ test("edit composer respects the Rust-owned composer shortcut resolver", async (
     .toEqual({
       roomId: "!harness-room:example.invalid",
       eventId: "$seed-event:example.invalid",
-      body: editedBody,
-      mentions: { targets: [] }
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: editedBody }]
+      }
   });
 });
 

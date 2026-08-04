@@ -8,8 +8,8 @@ use koushi_core::runtime::CommandSubmitError;
 use koushi_core::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 use koushi_key::SessionKeyId;
 use koushi_state::{
-    AppAction, ComposerDraftProtection, ComposerDraftRevision, ComposerDraftStore, ComposerTarget,
-    MentionIntent, SubmissionId,
+    AppAction, ComposerDocument, ComposerDraftProtection, ComposerDraftRevision,
+    ComposerDraftStore, ComposerTarget, SubmissionId,
 };
 use tokio::sync::oneshot;
 
@@ -126,9 +126,8 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 submission_id: SubmissionId::new("scope-plain"),
                 key: room_key.clone(),
                 transaction_id: "scope-plain-transaction".to_owned(),
-                body: String::new(),
+                document: ComposerDocument::from_plain_text(String::new()),
                 draft_revision: 1.into(),
-                mentions: MentionIntent::default(),
             }),
             main.clone(),
         ),
@@ -140,9 +139,8 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 key: room_key,
                 transaction_id: "scope-reply-transaction".to_owned(),
                 in_reply_to_event_id: "scope-reply-root".to_owned(),
-                body: String::new(),
+                document: ComposerDocument::from_plain_text(String::new()),
                 draft_revision: 1.into(),
-                mentions: MentionIntent::default(),
             }),
             main.clone(),
         ),
@@ -154,9 +152,8 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 key: thread_key,
                 transaction_id: "scope-thread-transaction".to_owned(),
                 in_reply_to_event_id: "scope-root".to_owned(),
-                body: String::new(),
+                document: ComposerDocument::from_plain_text(String::new()),
                 draft_revision: 1.into(),
-                mentions: MentionIntent::default(),
             }),
             thread,
         ),

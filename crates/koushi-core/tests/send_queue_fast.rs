@@ -17,7 +17,7 @@ use koushi_core::event::{
 };
 use koushi_core::ids::{AccountKey, RequestId, TimelineKey};
 use koushi_core::runtime::{CoreConnection, CoreRuntime};
-use koushi_state::{AuthSecret, ComposerTarget, MentionIntent, SessionState, SubmissionId};
+use koushi_state::{AuthSecret, ComposerDocument, ComposerTarget, SessionState, SubmissionId};
 use matrix_sdk::{
     ruma::{event_id, room_id},
     test_utils::mocks::MatrixMockServer,
@@ -1201,8 +1201,7 @@ async fn send_fast_send_queue_text_expect_local_echo(
             request_id,
             key: key.clone(),
             transaction_id: client_transaction_id.to_owned(),
-            body: body.to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(body.to_owned()),
         })),
     )
     .await
@@ -1987,8 +1986,9 @@ async fn run_fast_send_queue_feedback() {
             request_id: initial_request_id,
             key: key.clone(),
             transaction_id: "fast-initial-client".to_owned(),
-            body: "fast initial body".to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(
+                "fast initial body".to_owned(),
+            ),
         })),
     )
     .await
@@ -2065,8 +2065,9 @@ async fn run_fast_send_queue_feedback() {
                 submission_id: unsubscribe_submission_id.clone(),
                 key: key.clone(),
                 transaction_id: "fast-unsubscribe-client".to_owned(),
-                body: "fast unsubscribe terminal body".to_owned(),
-                mentions: MentionIntent::default(),
+                document: ComposerDocument::from_plain_text(
+                    "fast unsubscribe terminal body".to_owned(),
+                ),
                 draft_revision: 0.into(),
             }),
         ),

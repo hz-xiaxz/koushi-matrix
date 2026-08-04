@@ -844,10 +844,14 @@ stateDiagram-v2
   transaction ID, and correlated snapshot. Timeout and disconnect are typed
   failures whose diagnostics contain no message body or raw Matrix identifier.
 - Main-composer drafts are backed by a Rust-owned keyed draft store outside the
-  transient `TimelinePaneState`. `ComposerDraftChanged` writes the selected
-  room's draft through to that store, `SelectRoom` hydrates the active composer
-  from it, and `SendTextSubmitted` clears the selected room's stored draft.
-  Each room and thread-root target has a monotonic `draft_revision`. It is a
+  transient `TimelinePaneState`. The authoritative value is a versioned
+  `ComposerDocument` whose text and identity-bearing mention nodes are normalized
+  together; `draft` is only its derived plain-text projection. V1/V2 persisted
+  strings migrate to text-only V3 documents and never fabricate mention identity.
+  `ComposerDraftChanged` writes the selected room's document through to that
+  store, `SelectRoom` hydrates the active composer from it, and
+  `SendTextSubmitted` clears the selected room's stored document. Each room and
+  thread-root target has a monotonic `draft_revision`. It is a
   checked Rust `u128` and an opaque canonical decimal string on every wire
   boundary; JavaScript numeric conversion, wrapping, and saturation are
   forbidden. A draft
@@ -3187,18 +3191,20 @@ stateDiagram-v2
   fails. Because the resolver crosses async IPC, GUI handlers must not prevent
   the native browser default for `is_composing` key events; candidate commit is
   the platform/editor default, while Rust still owns the app-level action.
-- Composer send intent is also Rust-owned. GUI code may pass typed draft,
-  mention, and selection facts only; Rust builds the final message content:
-  `MentionIntent` becomes Matrix `m.mentions`, supported markdown becomes a
-  plain body plus safe HTML formatted body, `||spoiler||` becomes a Matrix
+- Composer send intent is also Rust-owned. GUI code passes one normalized
+  `ComposerDocument` plus typed selection facts; Rust derives readable text,
+  safe identity-bearing `matrix.to` anchors, and Matrix `m.mentions` from the
+  same immutable document. Supported markdown becomes a plain body plus safe
+  HTML formatted body, `||spoiler||` becomes a Matrix
   spoiler span in `formatted_body`, `/me` becomes an emote message, and
   unsupported slash commands fail locally as `UnsupportedSlashCommand` before a
   submitted composer transaction clears draft state.
 - Mention autocomplete candidates are Rust-owned room/surface DTOs from
-  `AppState.mention_candidates`. React may show the popover, track selected
-  draft pills, render partial/loading state, and pass a typed `MentionIntent`;
-  it must not scan `ProfileState.users`, infer membership, normalize or rank
-  candidates, append `@room`, synthesize Matrix mention content, or repair send
+  `AppState.mention_candidates`. React may show the popover, insert the selected
+  candidate as one non-editable inline mention node, and render partial/loading
+  state; it must not keep parallel mention pills/metadata, scan
+  `ProfileState.users`, infer membership, normalize or rank candidates, append
+  `@room`, synthesize Matrix mention content, or repair send
   behavior if the Rust resolver returns `noop`/failure.
 - Timeline mention pills are presentation over Rust-owned timeline body text
   and Rust-owned `ProfileState.users`. They do not create, modify, or infer

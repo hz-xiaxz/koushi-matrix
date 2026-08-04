@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { clearAppStoreSnapshot, getAppStoreSnapshot, setAppStoreSnapshot } from "../domain/appStore";
 import { COMPOSER_DRAFT_REVISION_ZERO } from "../domain/composerDraftRevision";
-import type { DesktopSnapshot, MentionIntent } from "../domain/types";
+import type { DesktopSnapshot } from "../domain/types";
 import { TimelinePane } from "./panes";
 import type { TimelineTransport } from "./TimelineView";
 
@@ -63,7 +63,6 @@ describe("TimelinePane render isolation", () => {
     const snapshot = makeSnapshot();
     const resolveComposerKeyAction = async (): Promise<"noop"> => "noop";
     const noop = () => undefined;
-    const mentionIntent: MentionIntent = { targets: [] };
     const emptySearchResults: never[] = [];
     const timelineTransport = noopTimelineTransport();
     setAppStoreSnapshot(snapshot);
@@ -71,9 +70,8 @@ describe("TimelinePane render isolation", () => {
     const renderPane = (currentSnapshot: DesktopSnapshot) =>
       createElement(TimelinePane, {
         activeRoomName: "Alpha Room",
-        composerDraft: currentSnapshot.state.ui.timeline.composer.draft,
+        composerDocument: currentSnapshot.state.ui.timeline.composer.document,
         composerMode: { kind: "plain" },
-        mentionIntent,
         resolveComposerKeyAction,
         searchQuery: "",
         searchResults: emptySearchResults,
@@ -89,8 +87,7 @@ describe("TimelinePane render isolation", () => {
         onSelectStagedUploadOutput: noop,
         onSendStagedAttachments: noop,
         onLoadStagedUploadPreview: async () => [],
-        onComposerDraftChange: noop,
-        onMentionIntentChange: noop,
+        onComposerDocumentChange: noop,
         onEditMessage: noop,
         onOpenContextMenu: noop,
         onOpenThread: noop,
@@ -220,9 +217,8 @@ describe("TimelinePane render isolation", () => {
     render(
       createElement(TimelinePane, {
         activeRoomName: "Alpha Room",
-        composerDraft: snapshot.state.ui.timeline.composer.draft,
+        composerDocument: snapshot.state.ui.timeline.composer.document,
         composerMode: { kind: "plain" },
-        mentionIntent: { targets: [] },
         resolveComposerKeyAction: async (): Promise<"noop"> => "noop",
         searchQuery: "",
         searchResults: [],
@@ -238,8 +234,7 @@ describe("TimelinePane render isolation", () => {
         onSelectStagedUploadOutput: noop,
         onSendStagedAttachments: noop,
         onLoadStagedUploadPreview: async () => [],
-        onComposerDraftChange: noop,
-        onMentionIntentChange: noop,
+        onComposerDocumentChange: noop,
         onEditMessage: noop,
         onOpenContextMenu: noop,
         onOpenThread: noop,

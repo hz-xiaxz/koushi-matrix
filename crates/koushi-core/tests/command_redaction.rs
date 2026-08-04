@@ -10,8 +10,8 @@ use koushi_core::ids::{AccountKey, TimelineKey};
 use koushi_key::SessionKeyId;
 use koushi_state::{
     AuthSecret, ComposerDocument, ComposerInline, DisplayPlatform, IdentityResetAuthRequest,
-    LoginRequest, MentionIntent, MentionTarget, PresenceKind, RecoveryRequest, RoomTagKind,
-    TimelineScrollAnchor, TimelineScrollAnchorEdge, VerificationCancelReason, VerificationTarget,
+    LoginRequest, MentionTarget, PresenceKind, RecoveryRequest, RoomTagKind, TimelineScrollAnchor,
+    TimelineScrollAnchorEdge, VerificationCancelReason, VerificationTarget,
 };
 
 mod support;
@@ -61,8 +61,7 @@ fn secret_bearing_commands_redact_debug() {
         request_id: fake_request_id(),
         key: key.clone(),
         transaction_id: "txn-1".to_owned(),
-        body: BODY.to_owned(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(BODY.to_owned()),
     });
     let toggle_reaction = CoreCommand::Timeline(TimelineCommand::ToggleReaction {
         request_id: fake_request_id(),
@@ -87,8 +86,7 @@ fn secret_bearing_commands_redact_debug() {
         request_id: fake_request_id(),
         key: key.clone(),
         event_id: "$evt".to_owned(),
-        body: BODY.to_owned(),
-        mentions: koushi_state::MentionIntent::default(),
+        document: ComposerDocument::from_plain_text(BODY.to_owned()),
     });
     let search = CoreCommand::Search(SearchCommand::Query {
         request_id: fake_request_id(),

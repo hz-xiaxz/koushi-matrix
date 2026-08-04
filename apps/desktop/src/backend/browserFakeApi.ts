@@ -62,7 +62,6 @@ import type {
   LocaleDisplayProfile,
   LiveEventReceiptSummary,
   LiveReadReceipt,
-  MentionIntent,
   MentionSurface,
   OidcAuthorization,
   SpaceSummary,
@@ -195,8 +194,7 @@ export interface DesktopApi {
     rendererGeneration: string,
     submissionId: string,
     roomId: string,
-    body: string,
-    mentions?: MentionIntent,
+    document: ComposerDocument,
     draftRevision?: ComposerDraftRevision
   ): Promise<SubmissionResponse>;
   scheduleSend(
@@ -272,8 +270,7 @@ export interface DesktopApi {
   editMessage(
     roomId: string,
     eventId: string,
-    body: string,
-    mentions?: MentionIntent
+    document: ComposerDocument
   ): Promise<DesktopSnapshot>;
   redactMessage(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   loadMessageSource(roomId: string, eventId: string): Promise<DesktopSnapshot>;
@@ -337,8 +334,7 @@ export interface DesktopApi {
     submissionId: string,
     roomId: string,
     rootEventId: string,
-    body: string,
-    mentions?: MentionIntent,
+    document: ComposerDocument,
     draftRevision?: ComposerDraftRevision
   ): Promise<SubmissionResponse>;
   submitSearch(query: string, scope: SearchScopeKind): Promise<DesktopSnapshot>;
@@ -404,8 +400,7 @@ export interface DesktopApi {
     submissionId: string,
     roomId: string,
     inReplyToEventId: string,
-    body: string,
-    mentions?: MentionIntent,
+    document: ComposerDocument,
     draftRevision?: ComposerDraftRevision
   ): Promise<SubmissionResponse>;
   setRoomListProjection(projection: RoomListProjection): void;
@@ -1614,17 +1609,16 @@ class BrowserFakeApi implements DesktopApi {
     rendererGeneration: string,
     submissionId: string,
     roomId: string,
-    body: string,
-    mentions: MentionIntent = emptyMentionIntent(),
+    document: ComposerDocument,
     draftRevision: ComposerDraftRevision = COMPOSER_DRAFT_REVISION_ZERO
   ): Promise<SubmissionResponse> {
+    const body = plainBodyFromDocument(document);
     this.requireComposerLease(
       account,
       { kind: "main", room_id: roomId },
       leaseId,
       rendererGeneration
     );
-    void mentions;
     const replay = this.replaySubmission(submissionId);
     if (replay) return replay;
     const session = this.snapshot.state.domain.session;
@@ -2179,9 +2173,9 @@ class BrowserFakeApi implements DesktopApi {
   async editMessage(
     roomId: string,
     eventId: string,
-    body: string,
-    _mentions: MentionIntent = { targets: [] }
+    document: ComposerDocument
   ): Promise<DesktopSnapshot> {
+    const body = plainBodyFromDocument(document);
     if (!this.isReady() || body.trim().length === 0) {
       return this.getSnapshot();
     }
@@ -2483,10 +2477,10 @@ class BrowserFakeApi implements DesktopApi {
     submissionId: string,
     roomId: string,
     rootEventId: string,
-    body: string,
-    _mentions?: MentionIntent,
+    document: ComposerDocument,
     draftRevision: ComposerDraftRevision = COMPOSER_DRAFT_REVISION_ZERO
   ): Promise<SubmissionResponse> {
+    const body = plainBodyFromDocument(document);
     this.requireComposerLease(
       account,
       { kind: "thread", room_id: roomId, root_event_id: rootEventId },
@@ -3919,17 +3913,16 @@ class BrowserFakeApi implements DesktopApi {
     submissionId: string,
     roomId: string,
     inReplyToEventId: string,
-    body: string,
-    mentions: MentionIntent = emptyMentionIntent(),
+    document: ComposerDocument,
     draftRevision: ComposerDraftRevision = COMPOSER_DRAFT_REVISION_ZERO
   ): Promise<SubmissionResponse> {
+    const body = plainBodyFromDocument(document);
     this.requireComposerLease(
       account,
       { kind: "main", room_id: roomId },
       leaseId,
       rendererGeneration
     );
-    void mentions;
     const replay = this.replaySubmission(submissionId);
     if (replay) return replay;
     const session = this.snapshot.state.domain.session;
@@ -5922,9 +5915,6 @@ function emptyRoomTags(): RoomTags {
   };
 }
 
-function emptyMentionIntent(): MentionIntent {
-  return { targets: [] };
-}
 
 function uniqueNonBlank(values: Array<string | null | undefined>): string[] {
   const terms: string[] = [];

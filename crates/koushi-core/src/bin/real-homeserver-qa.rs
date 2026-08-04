@@ -70,7 +70,7 @@ use koushi_core::ids::{AccountKey, RequestId, TimelineKey};
 use koushi_core::runtime::EventStreamLag;
 use koushi_core::runtime::{CoreConnection, CoreRuntime};
 use koushi_state::{
-    AppState, AuthSecret, LoginRequest, MentionIntent, RecoveryRequest, SessionState,
+    AppState, AuthSecret, ComposerDocument, LoginRequest, RecoveryRequest, SessionState,
 };
 
 // ---------------------------------------------------------------------------
@@ -759,8 +759,7 @@ async fn run_async_inner(
         request_id: send1_id,
         key: timeline_key.clone(),
         transaction_id: txn1,
-        body: message_plan.msg1_body.clone(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(message_plan.msg1_body.clone()),
     }))
     .await
     .map_err(|e| format!("send message 1 command submit failed: {e}"))?;
@@ -778,8 +777,9 @@ async fn run_async_inner(
         request_id: send_search_id,
         key: timeline_key.clone(),
         transaction_id: txn_search,
-        body: message_plan.search_probe_body.clone(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(
+            message_plan.search_probe_body.clone(),
+        ),
     }))
     .await
     .map_err(|e| format!("send search probe command submit failed: {e}"))?;
@@ -802,8 +802,7 @@ async fn run_async_inner(
         request_id: send2_id,
         key: timeline_key.clone(),
         transaction_id: txn2,
-        body: message_plan.msg2_body.clone(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(message_plan.msg2_body.clone()),
     }))
     .await
     .map_err(|e| format!("send message 2 command submit failed: {e}"))?;
@@ -825,8 +824,7 @@ async fn run_async_inner(
         key: timeline_key.clone(),
         transaction_id: txn_reply,
         in_reply_to_event_id: event1_id.clone(),
-        body: message_plan.reply_body.clone(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(message_plan.reply_body.clone()),
     }))
     .await
     .map_err(|e| format!("send reply command submit failed: {e}"))?;
@@ -842,8 +840,7 @@ async fn run_async_inner(
         request_id: edit1_id,
         key: timeline_key.clone(),
         event_id: event1_id.clone(),
-        body: message_plan.edited_body.clone(),
-        mentions: MentionIntent::default(),
+        document: ComposerDocument::from_plain_text(message_plan.edited_body.clone()),
     }))
     .await
     .map_err(|e| format!("edit message 1 command submit failed: {e}"))?;

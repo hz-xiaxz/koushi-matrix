@@ -440,7 +440,9 @@ test("re-edit submits edit_message command with updated body", async ({ page }) 
   const args = await page.evaluate(
     () => window.__harness.invocationsOf("edit_message")[0]?.args
   );
-  expect(args).toMatchObject({ body: "Second edit body" });
+  expect(args).toMatchObject({
+    document: { version: 2, inlines: [{ kind: "text", text: "Second edit body" }] }
+  });
 });
 
 test("message edit Shift+Enter shows and saves a newline", async ({ page }) => {
@@ -456,21 +458,18 @@ test("message edit Shift+Enter shows and saves a newline", async ({ page }) => {
   const editTextarea = article.getByRole("textbox", { name: t("timeline.editBody") });
   await expect(editTextarea).toBeVisible();
   await editTextarea.evaluate((element) => {
-    const textarea = element as HTMLTextAreaElement;
-    textarea.setSelectionRange("Line one".length, "Line one".length);
+    const text = element.querySelector("[data-composer-text]")?.firstChild;
+    if (!text) throw new Error("edit text node missing");
+    const range = document.createRange();
+    range.setStart(text, "Line one".length);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
   });
   await editTextarea.press("Shift+Enter");
 
-  await expect(editTextarea).toHaveValue("Line one\nLine two");
-  await expect
-    .poll(() =>
-      editTextarea.evaluate((element) => {
-        const textarea = element as HTMLTextAreaElement;
-        return [textarea.selectionStart, textarea.selectionEnd];
-      })
-    )
-    .toEqual(["Line one\n".length, "Line one\n".length]);
-
+  await expect(editTextarea).toHaveText("Line one\nLine two");
   await article.getByRole("button", { name: t("timeline.saveEdit") }).click();
 
   await expect
@@ -479,7 +478,9 @@ test("message edit Shift+Enter shows and saves a newline", async ({ page }) => {
   const args = await page.evaluate(
     () => window.__harness.invocationsOf("edit_message")[0]?.args
   );
-  expect(args).toMatchObject({ body: "Line one\nLine two" });
+  expect(args).toMatchObject({
+    document: { version: 2, inlines: [{ kind: "text", text: "Line one\nLine two" }] }
+  });
 });
 
 // ---------------------------------------------------------------------------

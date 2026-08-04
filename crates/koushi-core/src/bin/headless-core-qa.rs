@@ -64,7 +64,7 @@ use koushi_core::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 use koushi_core::runtime::{CoreConnection, CoreRuntime, EventStreamLag};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityRowKind, ActivityState, AppAction, AppState, AuthSecret,
-    ComposerKey, ComposerKeyEvent, ComposerKeyModifiers, ComposerResolvedAction,
+    ComposerDocument, ComposerKey, ComposerKeyEvent, ComposerKeyModifiers, ComposerResolvedAction,
     ComposerResolverContext, ComposerSelection, ComposerSendShortcut, ComposerSurface,
     ComposerTarget, CurrentSessionStatusState, CurrentSessionSyncState, DeviceCleanupLocalMode,
     DeviceCleanupState, DirectoryQuery, DirectoryRoomSummary, DisplaySettings,
@@ -2209,7 +2209,7 @@ async fn run_room_people_projection_stage(
     }
     println!("room_people_alias_search=ok");
 
-    let main_target = query_mention_candidates(
+    let _main_target = query_mention_candidates(
         conn_a,
         account_key_a,
         room_id,
@@ -2320,7 +2320,23 @@ async fn run_room_people_projection_stage(
     )
     .await?;
 
-    let body = "Room people structured mention QA";
+    let display_label = thread_target.candidates[0]
+        .display_label
+        .clone()
+        .unwrap_or_else(|| "Unknown user".to_owned());
+    let document = koushi_state::ComposerDocument::new(vec![
+        koushi_state::ComposerInline::Text {
+            text: "Room people structured mention QA ".to_owned(),
+        },
+        koushi_state::ComposerInline::Mention {
+            target: MentionTarget::User {
+                user_id: user_b_id.clone(),
+                display_label: display_label.clone(),
+            },
+            display_label,
+        },
+    ]);
+    let body = document.plain_body();
     let transaction_id = "qa-room-people-mention";
     let send_id = conn_a.next_request_id();
     conn_a
@@ -2328,16 +2344,7 @@ async fn run_room_people_projection_stage(
             request_id: send_id,
             key: key.clone(),
             transaction_id: transaction_id.to_owned(),
-            body: body.to_owned(),
-            mentions: MentionIntent {
-                targets: vec![MentionTarget::User {
-                    user_id: user_b_id.clone(),
-                    display_label: thread_target.candidates[0]
-                        .display_label
-                        .clone()
-                        .unwrap_or_else(|| "Unknown user".to_owned()),
-                }],
-            },
+            document,
         }))
         .await
         .map_err(|e| format!("room people: submit structured mention failed: {e}"))?;
@@ -2346,14 +2353,14 @@ async fn run_room_people_projection_stage(
         send_id,
         &key,
         transaction_id,
-        body,
+        &body,
         "room people structured mention",
     )
     .await?;
     let received = wait_for_item_with_body(
         conn_b,
         &key_b,
-        body,
+        &body,
         "room people receiver structured mention",
     )
     .await?;
@@ -3729,8 +3736,7 @@ async fn run_timeline_stress_room_messages(
                 request_id: send_id,
                 key: sender_key.clone(),
                 transaction_id: transaction_id.clone(),
-                body: body.clone(),
-                mentions: MentionIntent::default(),
+                document: koushi_state::ComposerDocument::from_plain_text(body.clone()),
             }))
             .await
             .map_err(|e| format!("timeline_stress: submit stress send failed: {e}"))?;
@@ -4264,8 +4270,9 @@ async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), String> {
                 request_id: send_id,
                 key: key.clone(),
                 transaction_id: txn.clone(),
-                body: format!("cache_restore fixture r{room_idx} m{msg_idx}"),
-                mentions: MentionIntent::default(),
+                document: koushi_state::ComposerDocument::from_plain_text(format!(
+                    "cache_restore fixture r{room_idx} m{msg_idx}"
+                )),
             }))
             .await
             .map_err(|e| format!("cache_restore: submit send failed: {e}"))?;
@@ -4439,8 +4446,9 @@ async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), String> {
             request_id: send_id,
             key: shallow_key.clone(),
             transaction_id: txn.clone(),
-            body: format!("cache_restore shallow m{msg_idx}"),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(format!(
+                "cache_restore shallow m{msg_idx}"
+            )),
         }))
         .await
         .map_err(|e| format!("cache_restore shallow: send failed: {e}"))?;
@@ -5336,8 +5344,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
             request_id: seed_send_id,
             key: key_b.clone(),
             transaction_id: seed_txn.to_owned(),
-            body: seed_body.to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(seed_body.to_owned()),
         }))
         .await
         .map_err(|e| format!("timeline_reconnect: submit seed failed: {e}"))?;
@@ -5378,8 +5385,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
                 request_id: send_b_id,
                 key: key_b.clone(),
                 transaction_id: txn.clone(),
-                body: body.clone(),
-                mentions: MentionIntent::default(),
+                document: koushi_state::ComposerDocument::from_plain_text(body.clone()),
             }))
             .await
             .map_err(|e| format!("timeline_reconnect: submit B offline send failed: {e}"))?;
@@ -5415,8 +5421,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
                     request_id: send_b_id,
                     key: key_b.clone(),
                     transaction_id: txn.clone(),
-                    body: body.clone(),
-                    mentions: MentionIntent::default(),
+                    document: koushi_state::ComposerDocument::from_plain_text(body.clone()),
                 }))
                 .await
                 .map_err(|e| {
@@ -6810,8 +6815,9 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             request_id: send1_id,
             key: key_a.clone(),
             transaction_id: txn1.clone(),
-            body: "Phase 5 QA message 1".to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(
+                "Phase 5 QA message 1".to_owned(),
+            ),
         }))
         .await
         .map_err(|e| format!("submit send1: {e}"))?;
@@ -6838,8 +6844,9 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             request_id: send2_id,
             key: key_a.clone(),
             transaction_id: txn2.clone(),
-            body: "Phase 5 QA message 2".to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(
+                "Phase 5 QA message 2".to_owned(),
+            ),
         }))
         .await
         .map_err(|e| format!("submit send2: {e}"))?;
@@ -6942,8 +6949,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             request_id: edit1_id,
             key: key_a.clone(),
             event_id: event1_id.clone(),
-            body: "Phase 5 QA message 1 EDITED".to_owned(),
-            mentions: MentionIntent::default(),
+            document: ComposerDocument::from_plain_text("Phase 5 QA message 1 EDITED"),
         }))
         .await
         .map_err(|e| format!("submit edit msg1: {e}"))?;
@@ -7026,8 +7032,9 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
                 key: key_b.clone(),
                 transaction_id: txn_b_reply.clone(),
                 in_reply_to_event_id: event1_id.clone(),
-                body: "Phase 5 QA reply from B".to_owned(),
-                mentions: MentionIntent::default(),
+                document: koushi_state::ComposerDocument::from_plain_text(
+                    "Phase 5 QA reply from B".to_owned(),
+                ),
             }))
             .await
             .map_err(|e| format!("submit B reply: {e}"))?;
@@ -7148,8 +7155,9 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
                 key: thread_key_b.clone(),
                 transaction_id: txn_b_thread_reply.clone(),
                 in_reply_to_event_id: event1_id.clone(),
-                body: THREAD_REPLY_BODY.to_owned(),
-                mentions: MentionIntent::default(),
+                document: koushi_state::ComposerDocument::from_plain_text(
+                    THREAD_REPLY_BODY.to_owned(),
+                ),
             }))
             .await
             .map_err(|e| format!("submit B thread reply: {e}"))?;
@@ -7371,8 +7379,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             request_id: send_search_id,
             key: key_a_search.clone(),
             transaction_id: txn_search.clone(),
-            body: SEARCH_BODY.to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(SEARCH_BODY.to_owned()),
         }))
         .await
         .map_err(|e| format!("submit search send: {e}"))?;
@@ -7406,8 +7413,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
             request_id: edit_search_id,
             key: key_a_search.clone(),
             event_id: search_event_id.clone(),
-            body: EDITED_BODY.to_owned(),
-            mentions: MentionIntent::default(),
+            document: ComposerDocument::from_plain_text(EDITED_BODY),
         }))
         .await
         .map_err(|e| format!("submit edit search msg: {e}"))?;
@@ -11208,8 +11214,7 @@ async fn run_activity_stage(
             request_id: send_id,
             key: key_b.clone(),
             transaction_id: txn.clone(),
-            body: activity_body.to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(activity_body.to_owned()),
         }))
         .await
         .map_err(|e| format!("activity: submit unread seed failed: {e}"))?;
@@ -11315,8 +11320,9 @@ async fn seed_encrypted_room_key_for_qa(
         request_id: send_id,
         key: key.clone(),
         transaction_id: transaction_id.clone(),
-        body: E2EE_KEY_BACKUP_SEED_BODY.to_owned(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(
+            E2EE_KEY_BACKUP_SEED_BODY.to_owned(),
+        ),
     }))
     .await
     .map_err(|e| format!("{label}: submit encrypted backup seed send failed: {e}"))?;
@@ -11829,8 +11835,9 @@ async fn verify_second_device_room_key_delivery_for_qa(
             request_id: send_id,
             key: key_a.clone(),
             transaction_id: transaction_id.clone(),
-            body: E2EE_SECOND_DEVICE_BODY.to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(
+                E2EE_SECOND_DEVICE_BODY.to_owned(),
+            ),
         }))
         .await
         .map_err(|e| format!("second-device decrypt: submit encrypted send failed: {e}"))?;
@@ -12053,8 +12060,9 @@ async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
                 request_id: send_id,
                 key: key_a.clone(),
                 transaction_id: transaction_id.clone(),
-                body: E2EE_MULTI_USER_MULTI_DEVICE_BODY.to_owned(),
-                mentions: MentionIntent::default(),
+                document: koushi_state::ComposerDocument::from_plain_text(
+                    E2EE_MULTI_USER_MULTI_DEVICE_BODY.to_owned(),
+                ),
             }))
             .await
             .map_err(|e| format!("e2ee multi-device: submit encrypted send failed: {e}"))?;
@@ -12137,8 +12145,7 @@ async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
                 request_id: blocked_send,
                 key: key_a.clone(),
                 transaction_id: blocked_txn.clone(),
-                body: blocked_body.to_owned(),
-                mentions: MentionIntent::default(),
+                document: koushi_state::ComposerDocument::from_plain_text(blocked_body.to_owned()),
             }))
             .await
             .map_err(|_| "blocked QA Core send submit failed".to_owned())?;
@@ -14059,8 +14066,7 @@ async fn send_text_expect_local_echo(
         request_id,
         key: key.clone(),
         transaction_id: client_transaction_id.to_owned(),
-        body: body.to_owned(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(body.to_owned()),
     }))
     .await
     .map_err(|e| format!("{label}: submit SendText failed: {e}"))?;
@@ -14945,19 +14951,25 @@ async fn run_composer_stage(
     }
 
     let mention_txn = "qa-composer-mention-txn";
-    let mention_body = "Composer mention QA";
+    let mention_document = koushi_state::ComposerDocument::new(vec![
+        koushi_state::ComposerInline::Text {
+            text: "Composer mention QA ".to_owned(),
+        },
+        koushi_state::ComposerInline::Mention {
+            target: MentionTarget::User {
+                user_id: mentioned_user_id.to_owned(),
+                display_label: "Synthetic mention".to_owned(),
+            },
+            display_label: "Synthetic mention".to_owned(),
+        },
+    ]);
+    let mention_body = mention_document.plain_body();
     let mention_id = conn.next_request_id();
     conn.command(CoreCommand::Timeline(TimelineCommand::SendText {
         request_id: mention_id,
         key: key.clone(),
         transaction_id: mention_txn.to_owned(),
-        body: mention_body.to_owned(),
-        mentions: MentionIntent {
-            targets: vec![MentionTarget::User {
-                user_id: mentioned_user_id.to_owned(),
-                display_label: "Synthetic mention".to_owned(),
-            }],
-        },
+        document: mention_document,
     }))
     .await
     .map_err(|e| format!("composer mention send submit failed: {e}"))?;
@@ -14966,7 +14978,7 @@ async fn run_composer_stage(
         mention_id,
         key,
         mention_txn,
-        mention_body,
+        &mention_body,
         "composer mention send",
     )
     .await?;
@@ -14979,8 +14991,7 @@ async fn run_composer_stage(
         request_id: markdown_id,
         key: key.clone(),
         transaction_id: markdown_txn.to_owned(),
-        body: markdown_body.to_owned(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(markdown_body.to_owned()),
     }))
     .await
     .map_err(|e| format!("composer markdown send submit failed: {e}"))?;
@@ -15001,8 +15012,9 @@ async fn run_composer_stage(
         request_id: slash_id,
         key: key.clone(),
         transaction_id: slash_txn.to_owned(),
-        body: "/me composer slash command".to_owned(),
-        mentions: MentionIntent::default(),
+        document: koushi_state::ComposerDocument::from_plain_text(
+            "/me composer slash command".to_owned(),
+        ),
     }))
     .await
     .map_err(|e| format!("composer slash send submit failed: {e}"))?;
@@ -15185,8 +15197,7 @@ async fn run_media_stage(
             request_id: edit_caption_id,
             key: key_a.clone(),
             event_id: media_event_id.clone(),
-            body: MEDIA_CAPTION_EDITED.to_owned(),
-            mentions: MentionIntent::default(),
+            document: ComposerDocument::from_plain_text(MEDIA_CAPTION_EDITED),
         }))
         .await
         .map_err(|e| format!("submit media caption edit: {e}"))?;
@@ -15277,8 +15288,7 @@ async fn run_link_preview_stage(
             request_id: send_id,
             key: key_a.clone(),
             transaction_id: txn.clone(),
-            body: URL_MESSAGE_BODY.to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(URL_MESSAGE_BODY.to_owned()),
         }))
         .await
         .map_err(|e| format!("submit link preview message: {e}"))?;
@@ -15500,8 +15510,7 @@ async fn run_link_preview_stage(
             request_id: enc_send_id,
             key: enc_key_a.clone(),
             transaction_id: enc_txn.clone(),
-            body: URL_MESSAGE_BODY.to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(URL_MESSAGE_BODY.to_owned()),
         }))
         .await
         .map_err(|e| format!("submit encrypted room URL message: {e}"))?;

@@ -8,8 +8,8 @@ use koushi_core::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 use koushi_core::runtime::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, CoreRuntime};
 use koushi_key::SessionKeyId;
 use koushi_state::{
-    AppAction, ComposerDraftRevision, ComposerDraftStore, ComposerMode, ComposerTarget,
-    CurrentDeviceTrustState, MentionIntent, PreparedUploadFormat, PreparedUploadVariant,
+    AppAction, ComposerDocument, ComposerDraftRevision, ComposerDraftStore, ComposerMode,
+    ComposerTarget, CurrentDeviceTrustState, PreparedUploadFormat, PreparedUploadVariant,
     SessionInfo, SessionState, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
     StagedUploadPreparation, SubmissionId, ThreadOpenIntent, ThreadPaneState,
 };
@@ -389,8 +389,7 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
                 submission_id: SubmissionId::new("maximum-plain"),
                 key: room_key.clone(),
                 transaction_id: "maximum-plain-transaction".to_owned(),
-                body: "plain".to_owned(),
-                mentions: MentionIntent::default(),
+                document: ComposerDocument::from_plain_text("plain".to_owned()),
                 draft_revision: ComposerDraftRevision::MAX,
             },
         ),
@@ -403,8 +402,7 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
                 key: room_key,
                 transaction_id: "maximum-reply-transaction".to_owned(),
                 in_reply_to_event_id: root_event_id.clone(),
-                body: "reply".to_owned(),
-                mentions: MentionIntent::default(),
+                document: ComposerDocument::from_plain_text("reply".to_owned()),
                 draft_revision: ComposerDraftRevision::MAX,
             },
         ),
@@ -417,8 +415,7 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
                 key: thread_key,
                 transaction_id: "maximum-thread-transaction".to_owned(),
                 in_reply_to_event_id: root_event_id,
-                body: "thread".to_owned(),
-                mentions: MentionIntent::default(),
+                document: ComposerDocument::from_plain_text("thread".to_owned()),
                 draft_revision: ComposerDraftRevision::MAX,
             },
         ),
@@ -523,8 +520,9 @@ async fn submitted_text_rejects_a_stale_full_session_owner_before_timeline_routi
                 "!room:example.test",
             ),
             transaction_id: "stale-owner-transaction".to_owned(),
-            body: "must not reach another account".to_owned(),
-            mentions: MentionIntent::default(),
+            document: ComposerDocument::from_plain_text(
+                "must not reach another account".to_owned(),
+            ),
             draft_revision: 1.into(),
         }),
     )

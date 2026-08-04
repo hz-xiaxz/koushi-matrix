@@ -69,11 +69,11 @@ describe("ContextualRightPanel", () => {
       <Composer
         composerMode={{ kind: "plain" }}
         isSending={true}
+        document={documentFromText("hello")}
         roomName="Room Alpha"
-        value="hello"
         onCancelReply={() => undefined}
+        onDocumentChange={() => undefined}
         onSend={() => undefined}
-        onValueChange={() => undefined}
       />
     );
 
@@ -150,11 +150,11 @@ describe("ContextualRightPanel", () => {
       <Composer
         composerMode={{ kind: "reply", in_reply_to_event_id: "$root" }}
         isSending={false}
+        document={documentFromText("reply")}
         roomName="QA Room"
-        value="reply"
         onCancelReply={() => undefined}
+        onDocumentChange={() => undefined}
         onSend={() => undefined}
-        onValueChange={() => undefined}
       />
     );
 
@@ -170,11 +170,11 @@ describe("ContextualRightPanel", () => {
       <Composer
         composerMode={{ kind: "plain" }}
         isSending={false}
+        document={documentFromText("")}
         roomName="Room Alpha"
-        value=""
         onCancelReply={() => undefined}
+        onDocumentChange={() => undefined}
         onSend={() => undefined}
-        onValueChange={() => undefined}
       />
     );
 
@@ -845,7 +845,7 @@ describe("ContextualRightPanel", () => {
         onSubmitRecovery={(event) => event.preventDefault()}
         onSwitchAccount={() => undefined}
         {...trustPanelHandlers}
-        onThreadComposerDraftChange={() => undefined}
+        onThreadComposerDocumentChange={() => undefined}
         onThreadReplySend={() => undefined}
       />
     );
@@ -900,7 +900,7 @@ describe("ContextualRightPanel", () => {
         onSubmitRecovery={(event) => event.preventDefault()}
         onSwitchAccount={() => undefined}
         {...trustPanelHandlers}
-        onThreadComposerDraftChange={() => undefined}
+        onThreadComposerDocumentChange={() => undefined}
         onThreadReplySend={() => undefined}
       />
     );
@@ -979,7 +979,7 @@ describe("ContextualRightPanel", () => {
         onSubmitRecovery={(event) => event.preventDefault()}
         onSwitchAccount={() => undefined}
         {...trustPanelHandlers}
-        onThreadComposerDraftChange={() => undefined}
+        onThreadComposerDocumentChange={() => undefined}
         onThreadReplySend={() => undefined}
       />
     );
@@ -1053,7 +1053,7 @@ describe("ContextualRightPanel", () => {
         onSubmitRecovery={(event) => event.preventDefault()}
         onSwitchAccount={() => undefined}
         {...trustPanelHandlers}
-        onThreadComposerDraftChange={() => undefined}
+        onThreadComposerDocumentChange={() => undefined}
         onThreadReplySend={() => undefined}
       />
     );
@@ -1143,7 +1143,7 @@ describe("ContextualRightPanel", () => {
         onSubmitRecovery={(event) => event.preventDefault()}
         onSwitchAccount={() => undefined}
         {...trustPanelHandlers}
-        onThreadComposerDraftChange={() => undefined}
+        onThreadComposerDocumentChange={() => undefined}
         onThreadReplySend={() => undefined}
       />
     );
@@ -1203,13 +1203,13 @@ describe("ContextualRightPanel", () => {
         onSubmitRecovery={(event) => event.preventDefault()}
         onSwitchAccount={() => undefined}
         {...trustPanelHandlers}
-        onThreadComposerDraftChange={() => undefined}
+        onThreadComposerDocumentChange={() => undefined}
         onThreadReplySend={() => undefined}
       />
     );
 
     expect(markup).toContain('aria-label="Thread composer"');
-    expect(markup).toContain("Rust-owned draft");
+    expect(markup).toContain('contentEditable="true"');
     expect(markup).toContain('aria-label="Send"');
     expect(markup).not.toContain('aria-label="Sending"');
   });
@@ -1263,7 +1263,7 @@ describe("ContextualRightPanel", () => {
         onSubmitRecovery={(event) => event.preventDefault()}
         onSwitchAccount={() => undefined}
         {...trustPanelHandlers}
-        onThreadComposerDraftChange={() => undefined}
+        onThreadComposerDocumentChange={() => undefined}
         onThreadReplySend={() => undefined}
       />
     );
@@ -1347,7 +1347,7 @@ describe("ContextualRightPanel", () => {
     expect(source).toContain("deactivate(scope)");
     expect(source).toContain("revokeRendererGeneration()");
     expect(source).toContain("window.setTimeout");
-    expect(source).toContain("async function sendText(bodyOverride?: string)");
+    expect(source).toContain("async function sendText(documentOverride?: ComposerDocument)");
     expect(source).toContain("rendererGeneration");
     expect(source).toContain("leaseId");
     expect(source).toContain("beginOperation(scope)");
@@ -1397,7 +1397,7 @@ describe("ContextualRightPanel", () => {
         onSubmitRecovery={(event) => event.preventDefault()}
         onSwitchAccount={() => undefined}
         {...trustPanelHandlers}
-        onThreadComposerDraftChange={() => undefined}
+        onThreadComposerDocumentChange={() => undefined}
         onThreadReplySend={() => undefined}
       />
     );

@@ -8,10 +8,10 @@ use koushi_state::{
     ComposerDocument, ComposerDraftRevision, DirectoryQuery, DisplayPlatform, FilesViewScope,
     FormattedMessageDraft, IdentityResetAuthRequest, ImageUploadCompressionMode,
     InviteScopeSelection, JapaneseCatalogProfile, LocalEncryptionHealth, LoginRequest,
-    MentionIntent, NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState,
-    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomSettingChange,
-    RoomTagKind, SearchRoomFilter, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem,
-    SubmissionId, TimelineScrollAnchor, VerificationCancelReason, VerificationTarget,
+    NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState, PresenceKind,
+    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomSettingChange, RoomTagKind,
+    SearchRoomFilter, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, SubmissionId,
+    TimelineScrollAnchor, VerificationCancelReason, VerificationTarget,
 };
 use serde::{Deserialize, Serialize};
 
@@ -2610,8 +2610,7 @@ pub enum TimelineCommand {
         request_id: RequestId,
         key: TimelineKey,
         transaction_id: String,
-        body: String,
-        mentions: MentionIntent,
+        document: ComposerDocument,
     },
     SubmitText {
         request_id: RequestId,
@@ -2619,8 +2618,7 @@ pub enum TimelineCommand {
         submission_id: SubmissionId,
         key: TimelineKey,
         transaction_id: String,
-        body: String,
-        mentions: MentionIntent,
+        document: ComposerDocument,
         draft_revision: ComposerDraftRevision,
     },
     SendReply {
@@ -2628,8 +2626,7 @@ pub enum TimelineCommand {
         key: TimelineKey,
         transaction_id: String,
         in_reply_to_event_id: String,
-        body: String,
-        mentions: MentionIntent,
+        document: ComposerDocument,
     },
     SubmitReply {
         request_id: RequestId,
@@ -2638,8 +2635,7 @@ pub enum TimelineCommand {
         key: TimelineKey,
         transaction_id: String,
         in_reply_to_event_id: String,
-        body: String,
-        mentions: MentionIntent,
+        document: ComposerDocument,
         draft_revision: ComposerDraftRevision,
     },
     ForwardMessage {
@@ -2686,8 +2682,7 @@ pub enum TimelineCommand {
         request_id: RequestId,
         key: TimelineKey,
         event_id: String,
-        body: String,
-        mentions: MentionIntent,
+        document: ComposerDocument,
     },
     Redact {
         request_id: RequestId,
@@ -2888,8 +2883,7 @@ impl fmt::Debug for TimelineCommand {
                 .field("submission_id", submission_id)
                 .field("key", &"TimelineKey(..)")
                 .field("transaction_id", transaction_id)
-                .field("body", &"MessageBody(..)")
-                .field("mentions", &"MentionIntent(..)")
+                .field("document", &"ComposerDocument(..)")
                 .finish(),
             Self::SubmitReply {
                 request_id,
@@ -2903,8 +2897,7 @@ impl fmt::Debug for TimelineCommand {
                 .field("key", &"TimelineKey(..)")
                 .field("transaction_id", transaction_id)
                 .field("in_reply_to_event_id", &"EventId(..)")
-                .field("body", &"MessageBody(..)")
-                .field("mentions", &"MentionIntent(..)")
+                .field("document", &"ComposerDocument(..)")
                 .finish(),
             Self::ForwardMessage { request_id, .. } => formatter
                 .debug_struct("ForwardMessage")
@@ -2982,7 +2975,7 @@ impl fmt::Debug for TimelineCommand {
                 .field("request_id", request_id)
                 .field("key", key)
                 .field("event_id", event_id)
-                .field("body", &"MessageBody(..)")
+                .field("document", &"ComposerDocument(..)")
                 .finish(),
             Self::Redact {
                 request_id, key, ..
@@ -3286,13 +3279,18 @@ mod tests {
             request_id: fake_rid(6),
             key: TimelineKey::room(AccountKey("@a:test".to_owned()), "!room:test"),
             transaction_id: "txn-text".to_owned(),
-            body: "secret text body".to_owned(),
-            mentions: MentionIntent {
-                targets: vec![MentionTarget::User {
-                    user_id: "@alice:example.test".to_owned(),
+            document: ComposerDocument::new(vec![
+                koushi_state::ComposerInline::Text {
+                    text: "secret text body ".to_owned(),
+                },
+                koushi_state::ComposerInline::Mention {
+                    target: MentionTarget::User {
+                        user_id: "@alice:example.test".to_owned(),
+                        display_label: "Alice".to_owned(),
+                    },
                     display_label: "Alice".to_owned(),
-                }],
-            },
+                },
+            ]),
         };
 
         let debug = format!("{command:?}");
@@ -3310,8 +3308,9 @@ mod tests {
             key: TimelineKey::room(AccountKey("@a:test".to_owned()), "!room:test"),
             transaction_id: "txn-reply".to_owned(),
             in_reply_to_event_id: "$event:test".to_owned(),
-            body: "secret reply body".to_owned(),
-            mentions: MentionIntent::default(),
+            document: koushi_state::ComposerDocument::from_plain_text(
+                "secret reply body".to_owned(),
+            ),
         };
 
         let debug = format!("{command:?}");

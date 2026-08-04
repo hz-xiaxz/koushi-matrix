@@ -233,6 +233,54 @@ describe("TauriDesktopApi", () => {
     });
   });
 
+  test("passes structured mention identity to send and edit commands without parallel text metadata", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const api = createDesktopApi();
+    const account = {
+      homeserver: "https://example.invalid",
+      userId: "@user:example.invalid",
+      deviceId: "DEVICE"
+    };
+    const document = {
+      version: 2 as const,
+      inlines: [
+        {
+          kind: "mention" as const,
+          target: {
+            kind: "user" as const,
+            user_id: "@alice:example.invalid",
+            display_label: "Same Name"
+          },
+          display_label: "Same Name"
+        }
+      ]
+    };
+
+    await api.sendText(
+      account,
+      "lease",
+      "renderer",
+      "submission",
+      "!room:example.invalid",
+      document,
+      parseComposerDraftRevision("1")
+    );
+    await api.editMessage("!room:example.invalid", "$event", document);
+
+    expect(invoke).toHaveBeenCalledWith(
+      "send_text",
+      expect.objectContaining({ document })
+    );
+    expect(invoke).toHaveBeenCalledWith("edit_message", {
+      roomId: "!room:example.invalid",
+      eventId: "$event",
+      document
+    });
+    expect(
+      vi.mocked(invoke).mock.calls.flatMap(([, args]) => Object.keys(args ?? {}))
+    ).not.toContain("mentions");
+  });
+
   test("passes E2EE trust actions to Rust-owned commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 

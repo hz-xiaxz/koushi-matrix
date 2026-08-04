@@ -6935,8 +6935,7 @@ mod tests {
             submission_id: SubmissionId::new("room-submission"),
             key: TimelineKey::room(account_key.clone(), room_id.clone()),
             transaction_id: "room-transaction".to_owned(),
-            body: "body".to_owned(),
-            mentions: Default::default(),
+            document: koushi_state::ComposerDocument::from_plain_text("body"),
             draft_revision: ComposerDraftRevision::MAX,
         };
         let thread = TimelineCommand::SubmitReply {
@@ -6952,8 +6951,7 @@ mod tests {
             },
             transaction_id: "thread-transaction".to_owned(),
             in_reply_to_event_id: root_event_id,
-            body: "reply".to_owned(),
-            mentions: Default::default(),
+            document: koushi_state::ComposerDocument::from_plain_text("reply"),
             draft_revision: ComposerDraftRevision::MAX,
         };
 

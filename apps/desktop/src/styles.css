@@ -3631,25 +3631,6 @@ button:disabled {
   margin-top: 6px;
 }
 
-.message-edit-body {
-  width: 100%;
-  min-height: 88px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--text);
-  background: var(--surface);
-  line-height: 1.45;
-  resize: vertical;
-  box-sizing: border-box;
-}
-
-.message-edit-body:focus {
-  outline: 0;
-  border-color: var(--brand);
-  box-shadow: 0 0 0 2px rgb(45 111 239 / 18%);
-}
-
 .message-edit-actions {
   display: inline-flex;
   flex-wrap: wrap;
@@ -4575,14 +4556,6 @@ mark {
   background: var(--brand);
 }
 
-.composer-mention-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-height: 32px;
-  padding: 7px 10px 0;
-}
-
 .composer-attachment-preview {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -4610,23 +4583,6 @@ mark {
   overflow: hidden;
   color: var(--text);
   font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mention-pill {
-  display: inline-flex;
-  align-items: center;
-  max-width: 180px;
-  height: 24px;
-  padding: 0 8px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--brand);
-  background: var(--surface-hover);
-  font-size: 12px;
-  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4868,19 +4824,52 @@ mark {
   font-size: 12px;
 }
 
-.composer textarea,
-.thread-composer textarea {
+.composer-inline-editor {
   display: block;
-  width: 100%;
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-block-size: 82px;
+  max-block-size: min(240px, 30vh);
+  padding: 12px 14px;
+  overflow: auto;
   border: 0;
   outline: none;
-  resize: none;
   color: var(--text);
+  font-family: var(--font-message);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.composer textarea {
-  height: 82px;
-  padding: 12px 14px;
+.composer-inline-editor:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--brand) 45%, transparent);
+}
+
+.composer-inline-editor:empty::before {
+  color: var(--text-faint);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+.composer-inline-editor[aria-disabled="true"] {
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.composer-inline-mention {
+  display: inline-block;
+  max-inline-size: 100%;
+  margin-inline: 0.08em;
+  padding-inline: 0.4em;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--line));
+  border-radius: 999px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface));
+  font-weight: 650;
+  text-overflow: ellipsis;
+  vertical-align: text-bottom;
+  white-space: nowrap;
 }
 
 .composer-footer {
@@ -5676,17 +5665,10 @@ mark {
   padding: 10px;
 }
 
-.thread-composer textarea {
-  height: 78px;
-  min-width: 0;
+.thread-composer .composer-inline-editor {
+  min-block-size: 78px;
+  min-inline-size: 0;
   padding: 2px;
-  border: 0;
-  resize: vertical;
-}
-
-.thread-composer textarea:disabled {
-  color: var(--text-muted);
-  background: transparent;
 }
 
 .thread-composer-footer {

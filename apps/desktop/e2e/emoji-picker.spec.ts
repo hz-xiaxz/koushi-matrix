@@ -97,7 +97,7 @@ test("selecting an emoji by mouse inserts it into the composer draft", async ({ 
 
   // The emoji appears in the composer textarea
   const composer = page.getByRole("textbox", { name: t("composer.messageComposer") });
-  await expect(composer).toHaveValue(emojiChar ?? "");
+  await expect(composer).toHaveText(emojiChar ?? "");
 });
 
 test("typing a search term filters the emoji grid", async ({ page }) => {
@@ -273,7 +273,7 @@ test("grid density matches the keyboard column step", async ({ page }) => {
 
   await page.keyboard.press("Enter");
   const composer = page.getByRole("textbox", { name: t("composer.messageComposer") });
-  await expect(composer).toHaveValue(steppedEmoji ?? "");
+  await expect(composer).toHaveText(steppedEmoji ?? "");
 });
 
 test("arrow key navigation then Enter inserts the highlighted emoji", async ({ page }) => {
@@ -308,5 +308,5 @@ test("arrow key navigation then Enter inserts the highlighted emoji", async ({ p
 
   // The emoji at position 2 appears in the composer textarea
   const composer = page.getByRole("textbox", { name: t("composer.messageComposer") });
-  await expect(composer).toHaveValue(thirdEmojiChar ?? "");
+  await expect(composer).toHaveText(thirdEmojiChar ?? "");
 });

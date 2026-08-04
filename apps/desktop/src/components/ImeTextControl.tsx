@@ -5,12 +5,15 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   type ChangeEventHandler,
+  type ClipboardEventHandler,
   type CompositionEventHandler,
   type FormHTMLAttributes,
   type ForwardedRef,
+  type HTMLAttributes,
   type InputHTMLAttributes,
   type KeyboardEventHandler,
   type Ref,
@@ -23,6 +26,23 @@ import {
   type CompositionLifecycle,
   type TextControlElement
 } from "../domain/compositionLifecycle";
+import {
+  commitDocument,
+  copyDocumentRange,
+  createDocumentHistory,
+  deleteDocumentBackward,
+  deleteDocumentForward,
+  documentLength,
+  normalizeDocument,
+  pasteDocumentText,
+  redoDocument,
+  undoDocument,
+  type DocumentHistory,
+  type DocumentMutation,
+  type DocumentSelection
+} from "../domain/composerDocument";
+import type { ComposerDocument, ComposerInline } from "../domain/types";
+import { t } from "../i18n/messages";
 
 interface ImeSubmitFence {
   consume(): boolean;
@@ -241,6 +261,386 @@ export const SecureImeTextField = forwardRef<HTMLInputElement, SecureImeTextFiel
     );
   }
 );
+
+export interface ImeInlineMentionEditorProps
+  extends Omit<HTMLAttributes<HTMLDivElement>, "children" | "contentEditable" | "onChange"> {
+  document: ComposerDocument;
+  editable?: boolean;
+  onDocumentChange(document: ComposerDocument): void;
+  onSelectionChange?(selection: DocumentSelection): void;
+  syncKey: string;
+}
+
+export const ImeInlineMentionEditor = forwardRef<HTMLDivElement, ImeInlineMentionEditorProps>(
+  function ImeInlineMentionEditor(
+    {
+      document,
+      editable = true,
+      onDocumentChange,
+      onCompositionEnd,
+      onCompositionStart,
+      onInput,
+      onKeyDown,
+      onPaste,
+      onSelectionChange,
+      syncKey,
+      ...props
+    },
+    forwardedRef
+  ) {
+    const controlRef = useRef<HTMLDivElement | null>(null);
+    const documentRef = useRef(document);
+    const historyRef = useRef<DocumentHistory>(createDocumentHistory(document));
+    const historyKeyRef = useRef(syncKey);
+    const composingRef = useRef(false);
+    const pendingSelectionRef = useRef<DocumentSelection | null>(null);
+    const renderedKeyRef = useRef<string | null>(null);
+    const submitFence = useContext(ImeSubmitFenceContext);
+
+    if (historyKeyRef.current !== syncKey) {
+      historyKeyRef.current = syncKey;
+      historyRef.current = createDocumentHistory(document);
+    } else if (!composingRef.current && !documentsEqual(historyRef.current.present, document)) {
+      historyRef.current = createDocumentHistory(document);
+    }
+    documentRef.current = document;
+
+    const bindRef = useCallback(
+      (node: HTMLDivElement | null) => {
+        controlRef.current = node;
+        assignRef(forwardedRef, node);
+      },
+      [forwardedRef]
+    );
+
+    useLayoutEffect(() => {
+      const control = controlRef.current;
+      if (!control) return;
+      const keyChanged = renderedKeyRef.current !== syncKey;
+      if (keyChanged) {
+        composingRef.current = false;
+        delete control.dataset.composing;
+      }
+      if (keyChanged || !composingRef.current) {
+        renderEditorDocument(control, document);
+        renderedKeyRef.current = syncKey;
+      }
+      const selection = keyChanged
+        ? { start: documentLength(document), end: documentLength(document) }
+        : pendingSelectionRef.current;
+      if (!selection || composingRef.current) return;
+      pendingSelectionRef.current = null;
+      restoreDocumentSelection(control, selection);
+    }, [document, syncKey]);
+
+    const publish = useCallback(
+      (mutation: DocumentMutation) => {
+        const changed = !documentsEqual(documentRef.current, mutation.document);
+        historyRef.current = commitDocument(historyRef.current, mutation.document);
+        documentRef.current = mutation.document;
+        pendingSelectionRef.current = mutation.selection;
+        onSelectionChange?.(mutation.selection);
+        if (changed) onDocumentChange(mutation.document);
+      },
+      [onDocumentChange, onSelectionChange]
+    );
+
+    const publishHistory = useCallback(
+      (history: DocumentHistory) => {
+        if (history === historyRef.current) return;
+        historyRef.current = history;
+        documentRef.current = history.present;
+        const caret = documentLength(history.present);
+        pendingSelectionRef.current = { start: caret, end: caret };
+        onSelectionChange?.({ start: caret, end: caret });
+        onDocumentChange(history.present);
+      },
+      [onDocumentChange, onSelectionChange]
+    );
+
+    const selection = useCallback(() => {
+      const control = controlRef.current;
+      return control ? documentSelectionFromDom(control) : { start: 0, end: 0 };
+    }, []);
+
+    const publishDom = useCallback(
+      (commitHistory = true) => {
+        const control = controlRef.current;
+        if (!control) return;
+        const next = documentFromEditorDom(control, documentRef.current);
+        const nextSelection = documentSelectionFromDom(control);
+        if (commitHistory) {
+          publish({ document: next, selection: nextSelection });
+          return;
+        }
+        documentRef.current = next;
+        onSelectionChange?.(nextSelection);
+        onDocumentChange(next);
+      },
+      [onDocumentChange, onSelectionChange, publish]
+    );
+
+    const handleBeforeInput = useCallback(
+      (event: InputEvent) => {
+        if (composingRef.current || event.isComposing) return;
+        const range = selection();
+        let mutation: DocumentMutation | null = null;
+        switch (event.inputType) {
+          case "deleteContentBackward":
+            mutation = deleteDocumentBackward(documentRef.current, range.start, range.end);
+            break;
+          case "deleteContentForward":
+            mutation = deleteDocumentForward(documentRef.current, range.start, range.end);
+            break;
+          case "insertText":
+          case "insertReplacementText":
+            mutation = pasteDocumentText(
+              documentRef.current,
+              range.start,
+              range.end,
+              event.data ?? ""
+            );
+            break;
+          case "insertLineBreak":
+          case "insertParagraph":
+            mutation = pasteDocumentText(documentRef.current, range.start, range.end, "\n");
+            break;
+          case "historyUndo":
+            event.preventDefault();
+            publishHistory(undoDocument(historyRef.current));
+            return;
+          case "historyRedo":
+            event.preventDefault();
+            publishHistory(redoDocument(historyRef.current));
+            return;
+          default:
+            if (range.start !== range.end && event.inputType.startsWith("delete")) {
+              mutation = deleteDocumentBackward(documentRef.current, range.start, range.end);
+            }
+        }
+        if (!mutation) return;
+        event.preventDefault();
+        publish(mutation);
+      },
+      [publish, publishHistory, selection]
+    );
+
+    useEffect(() => {
+      const control = controlRef.current;
+      if (!control) return;
+      control.addEventListener("beforeinput", handleBeforeInput);
+      return () => control.removeEventListener("beforeinput", handleBeforeInput);
+    }, [handleBeforeInput]);
+
+    const handleCopy: ClipboardEventHandler<HTMLDivElement> = (event) => {
+      const range = selection();
+      if (range.start === range.end) return;
+      event.clipboardData.setData(
+        "text/plain",
+        copyDocumentRange(documentRef.current, range.start, range.end)
+      );
+      event.preventDefault();
+    };
+    const handleCut: ClipboardEventHandler<HTMLDivElement> = (event) => {
+      const range = selection();
+      if (range.start === range.end) return;
+      event.clipboardData.setData(
+        "text/plain",
+        copyDocumentRange(documentRef.current, range.start, range.end)
+      );
+      event.preventDefault();
+      publish(deleteDocumentBackward(documentRef.current, range.start, range.end));
+    };
+    const handlePaste: ClipboardEventHandler<HTMLDivElement> = (event) => {
+      onPaste?.(event);
+      if (event.defaultPrevented) return;
+      const range = selection();
+      event.preventDefault();
+      publish(
+        pasteDocumentText(
+          documentRef.current,
+          range.start,
+          range.end,
+          event.clipboardData.getData("text/plain")
+        )
+      );
+    };
+
+    return (
+      <div
+        {...props}
+        ref={bindRef}
+        role="textbox"
+        aria-multiline="true"
+        aria-disabled={!editable || undefined}
+        contentEditable={editable}
+        suppressContentEditableWarning
+        onCompositionStart={(event) => {
+          composingRef.current = true;
+          event.currentTarget.dataset.composing = "true";
+          onCompositionStart?.(event);
+        }}
+        onCompositionEnd={(event) => {
+          composingRef.current = false;
+          delete event.currentTarget.dataset.composing;
+          publishDom();
+          onCompositionEnd?.(event);
+        }}
+        onCopy={handleCopy}
+        onCut={handleCut}
+        onInput={(event) => {
+          publishDom(!composingRef.current && !event.nativeEvent.isComposing);
+          onInput?.(event);
+        }}
+        onKeyDown={(event) => {
+          if (
+            isComposerImeEnter(event.key, {
+              epochActive: composingRef.current,
+              nativeIsComposing: event.nativeEvent.isComposing,
+              keyCode: event.keyCode
+            })
+          ) {
+            submitFence?.mark();
+            return;
+          }
+          onKeyDown?.(event);
+        }}
+        onPaste={handlePaste}
+        onSelect={() => onSelectionChange?.(selection())}
+        onKeyUp={() => onSelectionChange?.(selection())}
+        onMouseUp={() => onSelectionChange?.(selection())}
+      />
+    );
+  }
+);
+
+function renderEditorDocument(control: HTMLDivElement, document: ComposerDocument) {
+  const nodes = document.inlines.map((inline, index) => {
+    const span = control.ownerDocument.createElement("span");
+    if (inline.kind === "text") {
+      span.dataset.composerText = "";
+      span.textContent = inline.text;
+    } else {
+      span.className = "composer-inline-mention";
+      span.setAttribute("contenteditable", "false");
+      span.setAttribute("role", "link");
+      span.dataset.composerMention = String(index);
+      span.setAttribute("aria-label", t("composer.inlineMention", { label: inline.display_label }));
+      span.textContent = `@${inline.display_label}`;
+    }
+    return span;
+  });
+  control.replaceChildren(...nodes);
+}
+
+export function inlineMentionEditorSelection(control: HTMLDivElement): DocumentSelection {
+  return documentSelectionFromDom(control);
+}
+
+export function setInlineMentionEditorSelection(
+  control: HTMLDivElement,
+  start: number,
+  end = start
+) {
+  restoreDocumentSelection(control, { start, end });
+}
+
+function documentSelectionFromDom(control: HTMLDivElement): DocumentSelection {
+  const selection = control.ownerDocument.getSelection();
+  if (!selection || selection.rangeCount === 0) return { start: 0, end: 0 };
+  const range = selection.getRangeAt(0);
+  if (!control.contains(range.startContainer) || !control.contains(range.endContainer)) {
+    const end = documentLength(documentFromEditorDom(control, { version: 2, inlines: [] }));
+    return { start: end, end };
+  }
+  const start = documentOffsetFromDomPoint(control, range.startContainer, range.startOffset);
+  const end = documentOffsetFromDomPoint(control, range.endContainer, range.endOffset);
+  return { start: Math.min(start, end), end: Math.max(start, end) };
+}
+
+function documentOffsetFromDomPoint(
+  control: HTMLDivElement,
+  container: Node,
+  offset: number
+): number {
+  if (container === control) {
+    return Array.from(control.childNodes)
+      .slice(0, offset)
+      .reduce((total, child) => total + editorNodeLength(child), 0);
+  }
+  const child = Array.from(control.childNodes).find(
+    (candidate) => candidate === container || candidate.contains?.(container)
+  );
+  if (!child) return 0;
+  const before = Array.from(control.childNodes)
+    .slice(0, Array.from(control.childNodes).indexOf(child))
+    .reduce((total, node) => total + editorNodeLength(node), 0);
+  if (child instanceof HTMLElement && child.hasAttribute("data-composer-mention")) {
+    return before + (offset > 0 ? 1 : 0);
+  }
+  const textLength = child.textContent?.length ?? 0;
+  if (container.nodeType === Node.TEXT_NODE) return before + Math.min(textLength, offset);
+  return before + (offset > 0 ? textLength : 0);
+}
+
+function editorNodeLength(node: Node): number {
+  return node instanceof HTMLElement && node.hasAttribute("data-composer-mention")
+    ? 1
+    : (node.textContent?.length ?? 0);
+}
+
+function documentFromEditorDom(
+  control: HTMLDivElement,
+  current: ComposerDocument
+): ComposerDocument {
+  const inlines: ComposerInline[] = [];
+  for (const node of control.childNodes) {
+    if (node instanceof HTMLElement && node.hasAttribute("data-composer-mention")) {
+      const index = Number(node.dataset.composerMention);
+      const mention = current.inlines[index];
+      if (mention?.kind === "mention") inlines.push(mention);
+      continue;
+    }
+    const text = node.textContent ?? "";
+    if (text) inlines.push({ kind: "text", text });
+  }
+  return normalizeDocument({ version: 2, inlines });
+}
+
+function restoreDocumentSelection(control: HTMLDivElement, selection: DocumentSelection) {
+  const start = domPointFromDocumentOffset(control, selection.start);
+  const end = domPointFromDocumentOffset(control, selection.end);
+  const range = control.ownerDocument.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  const domSelection = control.ownerDocument.getSelection();
+  domSelection?.removeAllRanges();
+  domSelection?.addRange(range);
+}
+
+function domPointFromDocumentOffset(control: HTMLDivElement, rawOffset: number) {
+  let remaining = Math.max(0, rawOffset);
+  for (const child of control.childNodes) {
+    const length = editorNodeLength(child);
+    if (remaining <= length) {
+      if (child instanceof HTMLElement && child.hasAttribute("data-composer-mention")) {
+        const index = Array.from(control.childNodes).indexOf(child);
+        return { node: control as Node, offset: index + (remaining === 0 ? 0 : 1) };
+      }
+      const text = child.firstChild;
+      if (text?.nodeType === Node.TEXT_NODE) {
+        return { node: text, offset: Math.min(remaining, text.textContent?.length ?? 0) };
+      }
+      return { node: child, offset: 0 };
+    }
+    remaining -= length;
+  }
+  return { node: control as Node, offset: control.childNodes.length };
+}
+
+function documentsEqual(left: ComposerDocument, right: ComposerDocument) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 export interface ImeTextAreaProps
   extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "defaultValue" | "value"> {

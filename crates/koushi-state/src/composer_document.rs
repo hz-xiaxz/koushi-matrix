@@ -2,7 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, de};
 
-use crate::{MentionIntent, MentionTarget};
+use crate::composer_shortcuts::format_markdown_subset_html;
+use crate::{ComposerFormattingOptions, MentionIntent, MentionTarget};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
@@ -66,6 +67,37 @@ impl ComposerDocument {
             }
         }
         body
+    }
+
+    pub fn formatted_body(&self) -> Option<String> {
+        self.formatted_body_with_options(ComposerFormattingOptions::default())
+    }
+
+    pub fn formatted_body_with_options(
+        &self,
+        options: ComposerFormattingOptions,
+    ) -> Option<String> {
+        let marker_prefix = mention_marker_prefix(self);
+        let mut source = String::new();
+        let mut mentions = Vec::new();
+        for inline in &self.inlines {
+            match inline {
+                ComposerInline::Text { text } => source.push_str(text),
+                ComposerInline::Mention {
+                    target,
+                    display_label,
+                } => {
+                    let marker = format!("{marker_prefix}{};", mentions.len());
+                    source.push_str(&marker);
+                    mentions.push((marker, target, display_label));
+                }
+            }
+        }
+        let (mut html, markdown_changed) = format_markdown_subset_html(&source, options);
+        for (marker, target, display_label) in &mentions {
+            html = html.replace(marker, &mention_html(target, display_label));
+        }
+        (markdown_changed || !mentions.is_empty()).then_some(html)
     }
 
     pub fn mention_intent(&self) -> MentionIntent {
@@ -137,6 +169,64 @@ impl ComposerDocument {
         }
         Self::new(inlines)
     }
+}
+
+fn mention_marker_prefix(document: &ComposerDocument) -> String {
+    let mut prefix = "\u{fdd0}koushi-mention-".to_owned();
+    while document.inlines.iter().any(|inline| match inline {
+        ComposerInline::Text { text } => text.contains(&prefix),
+        ComposerInline::Mention { display_label, .. } => display_label.contains(&prefix),
+    }) {
+        prefix.push('x');
+    }
+    prefix
+}
+
+fn mention_html(target: &MentionTarget, display_label: &str) -> String {
+    let mut label = String::from("@");
+    label.push_str(display_label);
+    let escaped_label = escaped_html(&label);
+    match target {
+        MentionTarget::User { user_id, .. } => format!(
+            "<a href=\"https://matrix.to/#/{}\">{escaped_label}</a>",
+            percent_encode_matrix_identifier(user_id)
+        ),
+        MentionTarget::Room { room_id, .. } => format!(
+            "<a href=\"https://matrix.to/#/{}\">{escaped_label}</a>",
+            percent_encode_matrix_identifier(room_id)
+        ),
+        MentionTarget::RoomMention { .. } => {
+            format!("<span data-mx-mention>{escaped_label}</span>")
+        }
+    }
+}
+
+fn percent_encode_matrix_identifier(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            use std::fmt::Write as _;
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
+
+fn escaped_html(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 impl Default for ComposerDocument {

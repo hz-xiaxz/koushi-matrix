@@ -275,6 +275,14 @@ fn resolve_enter_key(
 }
 
 fn format_markdown_subset(body: &str, options: ComposerFormattingOptions) -> Option<String> {
+    let (html, changed) = format_markdown_subset_html(body, options);
+    changed.then_some(html)
+}
+
+pub(crate) fn format_markdown_subset_html(
+    body: &str,
+    options: ComposerFormattingOptions,
+) -> (String, bool) {
     let mut html = String::with_capacity(body.len());
     let mut changed = false;
     let lines = body.split('\n').collect::<Vec<_>>();
@@ -314,7 +322,7 @@ fn format_markdown_subset(body: &str, options: ComposerFormattingOptions) -> Opt
         line_index += 1;
     }
 
-    changed.then_some(html)
+    (html, changed)
 }
 
 fn unordered_list_item_body(line: &str) -> Option<&str> {

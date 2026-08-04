@@ -513,13 +513,12 @@ pub async fn send_text(
     renderer_generation: String,
     submission_id: String,
     room_id: String,
-    body: String,
-    mentions: Option<koushi_state::MentionIntent>,
+    document: koushi_state::ComposerDocument,
     draft_revision: koushi_state::ComposerDraftRevision,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<SubmissionResponse, SubmissionFailure> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return Err(SubmissionFailure::Invalid);
     }
 
@@ -560,8 +559,7 @@ pub async fn send_text(
         account_key,
         room_id,
         transaction_id,
-        body,
-        mentions.unwrap_or_default(),
+        document,
         draft_revision,
     ) {
         event_conn
@@ -1891,24 +1889,18 @@ pub async fn forward_message(
 pub async fn edit_message(
     room_id: String,
     event_id: String,
-    body: String,
-    mentions: Option<koushi_state::MentionIntent>,
+    document: koushi_state::ComposerDocument,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return current_snapshot(state.inner()).await;
     }
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) = build_edit_message_command(
-        request_id,
-        account_key,
-        room_id,
-        event_id,
-        body,
-        mentions.unwrap_or_default(),
-    ) {
+    if let Some(command) =
+        build_edit_message_command(request_id, account_key, room_id, event_id, document)
+    {
         submit_core_command(state.inner(), command).await?;
     }
     update_qa_window_title_from_state(&app, state.inner()).await;
@@ -2178,13 +2170,12 @@ pub async fn send_reply(
     submission_id: String,
     room_id: String,
     in_reply_to_event_id: String,
-    body: String,
-    mentions: Option<koushi_state::MentionIntent>,
+    document: koushi_state::ComposerDocument,
     draft_revision: koushi_state::ComposerDraftRevision,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<SubmissionResponse, SubmissionFailure> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return Err(SubmissionFailure::Invalid);
     }
 
@@ -2226,8 +2217,7 @@ pub async fn send_reply(
         room_id,
         transaction_id,
         in_reply_to_event_id,
-        body,
-        mentions.unwrap_or_default(),
+        document,
         draft_revision,
     ) {
         event_conn
@@ -2250,13 +2240,12 @@ pub async fn send_thread_reply(
     submission_id: String,
     room_id: String,
     root_event_id: String,
-    body: String,
-    mentions: Option<koushi_state::MentionIntent>,
+    document: koushi_state::ComposerDocument,
     draft_revision: koushi_state::ComposerDraftRevision,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<SubmissionResponse, SubmissionFailure> {
-    if body.trim().is_empty() {
+    if document.plain_body().trim().is_empty() {
         return Err(SubmissionFailure::Invalid);
     }
 
@@ -2299,8 +2288,7 @@ pub async fn send_thread_reply(
         room_id,
         root_event_id,
         transaction_id,
-        body,
-        mentions.unwrap_or_default(),
+        document,
         draft_revision,
     ) {
         event_conn

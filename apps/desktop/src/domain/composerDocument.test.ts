@@ -15,6 +15,7 @@ import {
   pasteDocumentText,
   plainBodyFromDocument,
   redoDocument,
+  trimDocument,
   replaceDocumentRange,
   undoDocument,
   type ComposerDocument
@@ -108,6 +109,29 @@ describe("composerDocument", () => {
     expect(moveDocumentCaret(document, documentLength(document), "forward")).toBe(
       documentLength(document)
     );
+  });
+
+  it("trims boundary text without changing mention identity", () => {
+    const document = insertMention(documentFromText("  hello @a  "), 8, 10, alice, "Same Name");
+
+    expect(trimDocument(document)).toEqual({
+      version: 2,
+      inlines: [
+        { kind: "text", text: "hello " },
+        { kind: "mention", target: alice, display_label: "Same Name" }
+      ]
+    });
+  });
+
+  it("moves across and deletes an emoji grapheme as one text unit", () => {
+    const emoji = "👩‍🔬";
+    const document = documentFromText(`A${emoji}B`);
+    const afterEmoji = 1 + emoji.length;
+
+    expect(moveDocumentCaret(document, 1, "forward")).toBe(afterEmoji);
+    expect(moveDocumentCaret(document, afterEmoji, "backward")).toBe(1);
+    expect(plainBodyFromDocument(deleteDocumentBackward(document, afterEmoji, afterEmoji).document)).toBe("AB");
+    expect(plainBodyFromDocument(deleteDocumentForward(document, 1, 1).document)).toBe("AB");
   });
 
   it("keeps CJK, emoji, multiline text, and manually matching labels as plain text", () => {

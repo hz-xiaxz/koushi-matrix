@@ -2374,18 +2374,19 @@ mod tests {
         };
         use koushi_state::{
             ActivityRow, ActivityStream, ActivityTab, AppState, AttachmentKind, AttachmentResult,
-            AvatarThumbnailState, CurrentSessionBackupState, CurrentSessionStatusDetails,
-            CurrentSessionStatusState, CurrentSessionSyncState, DeviceCleanupOfferReason,
-            DeviceCleanupState, DirectoryPreviewJoinability, DirectoryPreviewMembership,
-            DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary, IdentityResetAuthType,
-            IdentityResetState, JapaneseCatalogProfile, LocalEncryptionHealth,
-            MediaTransferProgress, MentionIntent, MentionTarget, NativeAttentionCapabilities,
-            NativeAttentionCapability, NativeAttentionSummary, OwnIdentityVerification,
-            PresenceKind, ReplyQuote, ReplyQuoteCodeBlock, ReplyQuoteFormattedBody,
-            ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule, RoomMemberRole,
-            RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot, RoomTagKind, SasEmoji,
-            SearchCrawlerFailureKind, SearchCrawlerRoomState, SessionAuthenticationMethod,
-            SubmissionId, UserTrustState, VerificationFlowState, VerificationTarget,
+            AvatarThumbnailState, ComposerDocument, ComposerInline, CurrentSessionBackupState,
+            CurrentSessionStatusDetails, CurrentSessionStatusState, CurrentSessionSyncState,
+            DeviceCleanupOfferReason, DeviceCleanupState, DirectoryPreviewJoinability,
+            DirectoryPreviewMembership, DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary,
+            IdentityResetAuthType, IdentityResetState, JapaneseCatalogProfile,
+            LocalEncryptionHealth, MediaTransferProgress, MentionTarget,
+            NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionSummary,
+            OwnIdentityVerification, PresenceKind, ReplyQuote, ReplyQuoteCodeBlock,
+            ReplyQuoteFormattedBody, ReplyQuoteState, RoomHistoryVisibility, RoomJoinRule,
+            RoomMemberRole, RoomModerationAction, RoomPermissionFacts, RoomSettingsSnapshot,
+            RoomTagKind, SasEmoji, SearchCrawlerFailureKind, SearchCrawlerRoomState,
+            SessionAuthenticationMethod, SubmissionId, UserTrustState, VerificationFlowState,
+            VerificationTarget,
         };
         use serde_json::json;
 
@@ -2454,12 +2455,16 @@ mod tests {
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24e1".to_owned()),
-                editable_mentions: Some(MentionIntent {
-                    targets: vec![MentionTarget::User {
-                        user_id: "@mention:example.test".to_owned(),
-                        display_label: "Mention User".to_owned(),
-                    }],
-                }),
+                editable_document: Some(ComposerDocument::new(vec![
+                    ComposerInline::Text { text: "Hello ".into() },
+                    ComposerInline::Mention {
+                        target: MentionTarget::User {
+                            user_id: "@mention:example.test".into(),
+                            display_label: "Mention User".into(),
+                        },
+                        display_label: "Mention User".into(),
+                    },
+                ])),
             },
             send_state: None,
             unable_to_decrypt: None,
@@ -2520,7 +2525,7 @@ mod tests {
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24media1".to_owned()),
-                editable_mentions: None,
+                editable_document: None,
             },
             send_state: None,
             unable_to_decrypt: None,
@@ -2605,7 +2610,7 @@ mod tests {
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24reply1".to_owned()),
-                editable_mentions: None,
+                editable_document: None,
             },
             send_state: None,
             unable_to_decrypt: None,
@@ -2664,7 +2669,7 @@ mod tests {
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24linkpreview1".to_owned()),
-                editable_mentions: None,
+                editable_document: None,
             },
             send_state: None,
             unable_to_decrypt: None,
@@ -2746,12 +2751,20 @@ mod tests {
                     "can_permalink": true,
                     "can_view_source": true,
                     "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1",
-                    "editable_mentions": {
-                        "targets": [{
-                            "kind": "user",
-                            "user_id": "@mention:example.test",
-                            "display_label": "Mention User"
-                        }]
+                    "editable_document": {
+                        "version": 2,
+                        "inlines": [
+                            { "kind": "text", "text": "Hello " },
+                            {
+                                "kind": "mention",
+                                "target": {
+                                    "kind": "user",
+                                    "user_id": "@mention:example.test",
+                                    "display_label": "Mention User"
+                                },
+                                "display_label": "Mention User"
+                            }
+                        ]
                     }
                 },
                 "reactions": [

@@ -7,6 +7,8 @@ import type {
 
 export type { ComposerDocument, ComposerInline } from "./types";
 
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 export interface DocumentSelection {
   start: number;
   end: number;
@@ -65,6 +67,20 @@ export function plainBodyFromDocument(document: ComposerDocument): string {
     .join("");
 }
 
+export function trimDocument(document: ComposerDocument): ComposerDocument {
+  const normalized = normalizeDocument(document);
+  const inlines = normalized.inlines.map((inline) =>
+    inline.kind === "mention"
+      ? inline
+      : { kind: "text" as const, text: inline.text }
+  );
+  const first = inlines[0];
+  if (first?.kind === "text") first.text = first.text.trimStart();
+  const last = inlines.at(-1);
+  if (last?.kind === "text") last.text = last.text.trimEnd();
+  return normalizeDocument({ version: 2, inlines });
+}
+
 export function mentionIntentFromDocument(document: ComposerDocument): MentionIntent {
   const targets: MentionTarget[] = [];
   for (const inline of document.inlines) {
@@ -108,7 +124,10 @@ export function deleteDocumentBackward(
   end: number
 ): DocumentMutation {
   const range = normalizedRange(document, start, end);
-  const deletionStart = range.start === range.end ? Math.max(0, range.start - 1) : range.start;
+  const deletionStart =
+    range.start === range.end
+      ? adjacentDocumentBoundary(document, range.start, "backward")
+      : range.start;
   return {
     document: replaceDocumentRange(document, deletionStart, range.end, []),
     selection: { start: deletionStart, end: deletionStart }
@@ -123,7 +142,7 @@ export function deleteDocumentForward(
   const range = normalizedRange(document, start, end);
   const deletionEnd =
     range.start === range.end
-      ? Math.min(documentLength(document), range.end + 1)
+      ? adjacentDocumentBoundary(document, range.end, "forward")
       : range.end;
   return {
     document: replaceDocumentRange(document, range.start, deletionEnd, []),
@@ -161,8 +180,32 @@ export function moveDocumentCaret(
   caret: number,
   direction: "backward" | "forward"
 ): number {
-  const length = documentLength(document);
-  return Math.max(0, Math.min(length, caret + (direction === "forward" ? 1 : -1)));
+  return adjacentDocumentBoundary(document, caret, direction);
+}
+
+function adjacentDocumentBoundary(
+  document: ComposerDocument,
+  rawOffset: number,
+  direction: "backward" | "forward"
+): number {
+  const offset = Math.max(0, Math.min(documentLength(document), rawOffset));
+  const boundaries = [0];
+  let position = 0;
+  for (const inline of document.inlines) {
+    if (inline.kind === "mention") {
+      position += 1;
+      boundaries.push(position);
+      continue;
+    }
+    for (const { segment } of graphemeSegmenter.segment(inline.text)) {
+      position += segment.length;
+      boundaries.push(position);
+    }
+  }
+  if (direction === "backward") {
+    return boundaries.findLast((boundary) => boundary < offset) ?? 0;
+  }
+  return boundaries.find((boundary) => boundary > offset) ?? position;
 }
 
 export function createDocumentHistory(document: ComposerDocument): DocumentHistory {
