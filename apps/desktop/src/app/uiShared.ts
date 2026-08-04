@@ -288,6 +288,19 @@ export function compactAvatarLabel(value: string): string {
   return normalized || initials(value);
 }
 
+const avatarGraphemeSegmenter = new Intl.Segmenter();
+
+export function elementAvatarInitial(name: string): string {
+  const value = ["@", "#", "+"].includes(name[0] ?? "") ? name.slice(1) : name;
+  const first = avatarGraphemeSegmenter.segment(value)[Symbol.iterator]().next();
+  return first.done ? "" : first.value.segment;
+}
+
+export function elementAvatarColorIndex(id: string): 1 | 2 | 3 | 4 | 5 | 6 {
+  const sum = id.split("").reduce((total, character) => total + character.charCodeAt(0), 0);
+  return ((sum % 6) + 1) as 1 | 2 | 3 | 4 | 5 | 6;
+}
+
 export function operationFailureLabel(kind: OperationFailureKind): string {
   switch (kind) {
     case "forbidden":
