@@ -110,8 +110,9 @@ pub use space_members::{
 pub(crate) use room::compare_conversation_activity;
 pub use room::{
     ConversationActivity, ConversationActivitySource, InvitePreview, RoomAttentionKind,
-    RoomAttentionSummary, RoomLatestEventSummary, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags,
-    SpaceSummary, room_activity_unread_count, room_attention_kind, room_attention_summary,
+    RoomAttentionProjection, RoomAttentionSummary, RoomLatestEventSummary, RoomSummary,
+    RoomTagInfo, RoomTagKind, RoomTags, SpaceSummary, room_activity_unread_count,
+    room_attention_kind, room_attention_projection, room_attention_summary,
 };
 
 // ── Re-exports: invite_workflow ─────────────────────────────────────────────

@@ -451,9 +451,11 @@ stateDiagram-v2
   projection. Success/failure settles may normalize matching in-flight request
   bookkeeping outside Ready, but must not recreate room projections after the
   session has left Ready.
-- `RoomMarkedAsUnreadSucceeded { unread: true }` sets `marked_unread` and bumps
-  `unread_count` to at least 1 when it was zero, then recomputes the projection.
-  `unread: false` clears the flag and resets `unread_count`.
+- `RoomMarkedAsUnreadSucceeded` changes only the explicit `marked_unread` flag
+  and recomputes the projection. It must not fabricate an unread-message count
+  for the native badge; `unread: false` likewise leaves server-reported message
+  counts untouched. `RoomMarkedAsReadSucceeded` remains the operation that
+  clears all counters after the SDK confirms the read marker.
 - Requested mark-read/unread actions are accepted only for known rooms in a
   Ready session and emit `RoomListChanged`.
 
@@ -462,8 +464,9 @@ stateDiagram-v2
 Unread state crosses three Matrix concepts that must not be collapsed into one
 local flag:
 
-- `RoomSummary.unread_count`, `notification_count`, `highlight_count`, and
-  `marked_unread` are SDK/server observations. They can arrive later than a
+- `RoomSummary.unread_count` is the raw unread-message count; notification and
+  mention counts are separate SDK/server observations, as is `marked_unread`.
+  They can arrive later than a
   local command response, and historical Matrix Rust SDK releases have had
   unread-count/read-receipt convergence bugs (for example
   matrix-rust-sdk#6211, fixed upstream by matrix-rust-sdk#6406). Koushi must

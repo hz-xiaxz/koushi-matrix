@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
-use koushi_state::RoomSummary;
+use koushi_state::{RoomNotificationMode, RoomSummary, room_attention_projection};
 
 fn unread_stage_token(value: &str) -> &'static str {
     match value {
@@ -36,9 +36,17 @@ fn unread_reason_token(value: &str) -> &'static str {
 fn record_room_metrics(
     stage: &str,
     room: &RoomSummary,
+    mode: Option<RoomNotificationMode>,
     emitted: Option<bool>,
     reason: Option<&str>,
 ) {
+    let projection = room_attention_projection(room, mode);
+    let mode = match mode {
+        Some(RoomNotificationMode::All) => "all",
+        Some(RoomNotificationMode::Mentions) => "mentions",
+        Some(RoomNotificationMode::Mute) => "mute",
+        None => "unknown",
+    };
     let mut event = DiagnosticEvent::new(
         DiagnosticLevel::Debug,
         "core.unread",
@@ -54,6 +62,24 @@ fn record_room_metrics(
         "marked_unread",
         room.marked_unread,
     ))
+    .field(DiagnosticField::token("notification_mode", mode))
+    .field(DiagnosticField::count(
+        "display_count",
+        projection.display_count,
+    ))
+    .field(DiagnosticField::boolean(
+        "has_unread_content",
+        projection.has_unread_content,
+    ))
+    .field(DiagnosticField::boolean(
+        "is_attention_highlighted",
+        projection.is_attention_highlighted,
+    ))
+    .field(DiagnosticField::boolean(
+        "has_unread_mention",
+        projection.has_unread_mention,
+    ))
+    .field(DiagnosticField::boolean("is_muted", projection.is_muted))
     .field(DiagnosticField::boolean(
         "latest_event_present",
         room.latest_event.is_some(),
@@ -79,21 +105,29 @@ fn room_has_unread_metrics(room: &RoomSummary) -> bool {
 
 pub(crate) struct RoomListAppliedTraceInput {
     raw_unread_room_ids: BTreeSet<String>,
+    notification_modes: BTreeMap<String, RoomNotificationMode>,
 }
 
-pub(crate) fn capture_room_list_applied(rooms: &[RoomSummary]) -> RoomListAppliedTraceInput {
+pub(crate) fn capture_room_list_applied(
+    rooms: &[RoomSummary],
+    room_notification_settings: &HashMap<String, koushi_state::RoomNotificationSettings>,
+) -> RoomListAppliedTraceInput {
     RoomListAppliedTraceInput {
         raw_unread_room_ids: rooms
             .iter()
             .filter(|room| room_has_unread_metrics(room))
             .map(|room| room.room_id.clone())
             .collect(),
+        notification_modes: room_notification_settings
+            .iter()
+            .map(|(room_id, settings)| (room_id.clone(), settings.mode))
+            .collect(),
     }
 }
 
 pub(crate) fn trace_room_list_snapshot(rooms: &[RoomSummary]) {
     for room in rooms.iter().filter(|room| room_has_unread_metrics(room)) {
-        record_room_metrics("room_list_snapshot", room, None, None);
+        record_room_metrics("room_list_snapshot", room, None, None, None);
     }
 }
 
@@ -104,18 +138,27 @@ pub(crate) fn trace_room_list_applied(
     for room in applied_rooms.iter().filter(|room| {
         input.raw_unread_room_ids.contains(room.room_id.as_str()) || room_has_unread_metrics(room)
     }) {
-        record_room_metrics("room_list_applied", room, None, None);
+        record_room_metrics(
+            "room_list_applied",
+            room,
+            input.notification_modes.get(&room.room_id).copied(),
+            None,
+            None,
+        );
     }
 }
 
-pub(crate) fn trace_activity_room(stage: &str, room: &RoomSummary, emitted: bool, reason: &str) {
+pub(crate) fn trace_activity_room(
+    stage: &str,
+    room: &RoomSummary,
+    mode: Option<RoomNotificationMode>,
+    emitted: bool,
+    reason: &str,
+) {
     if !room_has_unread_metrics(room) {
         return;
     }
-    if !emitted && reason == "plain_unread_only" {
-        return;
-    }
-    record_room_metrics(stage, room, Some(emitted), Some(reason));
+    record_room_metrics(stage, room, mode, Some(emitted), Some(reason));
 }
 
 pub(crate) fn trace_mark_read(stage: &str, request_id: u64, room_id: &str, event_id: Option<&str>) {
@@ -141,6 +184,7 @@ pub(crate) fn trace_mark_read(stage: &str, request_id: u64, room_id: &str, event
 mod tests {
     use super::*;
     use koushi_state::{RoomLatestEventSummary, RoomTags};
+    use std::collections::HashMap;
 
     fn private_room() -> RoomSummary {
         RoomSummary {
@@ -180,9 +224,9 @@ mod tests {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let room = private_room();
         trace_room_list_snapshot(std::slice::from_ref(&room));
-        let input = capture_room_list_applied(std::slice::from_ref(&room));
+        let input = capture_room_list_applied(std::slice::from_ref(&room), &HashMap::new());
         trace_room_list_applied(&input, std::slice::from_ref(&room));
-        trace_activity_room("activity_recent_event", &room, true, "unread");
+        trace_activity_room("activity_recent_event", &room, None, true, "unread");
         trace_mark_read(
             "mark_read_success",
             77,
@@ -209,7 +253,7 @@ mod tests {
             "latest_event_read",
             "room_metrics",
         ] {
-            trace_activity_room("activity_recent_event", &room, true, reason);
+            trace_activity_room("activity_recent_event", &room, None, true, reason);
         }
 
         let records = koushi_diagnostics::snapshot().records;
@@ -261,20 +305,27 @@ mod tests {
     }
 
     #[test]
-    fn activity_plain_unread_non_candidates_are_suppressed() {
+    fn activity_plain_unread_non_candidates_are_traced() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let room = private_room();
 
-        trace_activity_room("activity_recent_event", &room, false, "plain_unread_only");
-        trace_activity_room("activity_placeholder", &room, false, "plain_unread_only");
+        trace_activity_room(
+            "activity_recent_event",
+            &room,
+            None,
+            false,
+            "plain_unread_only",
+        );
+        trace_activity_room(
+            "activity_placeholder",
+            &room,
+            None,
+            false,
+            "plain_unread_only",
+        );
 
-        // The contract is that a non-candidate (emitted == false)
-        // plain-unread-only trace is never recorded at all, so no record with
-        // that exact signature may exist. Asserting on the shared diagnostics
-        // buffer LENGTH instead is racy: parallel tests append concurrently
-        // and a before/after count can differ by unrelated records.
         let records = koushi_diagnostics::snapshot().records;
-        let suppressed = records
+        let traced = records
             .iter()
             .filter(|record| {
                 record.event.source == "core.unread"
@@ -294,9 +345,9 @@ mod tests {
                     })
             })
             .count();
-        assert_eq!(
-            suppressed, 0,
-            "plain-unread-only activity non-candidates are high-volume noise"
+        assert!(
+            traced >= 2,
+            "plain-unread-only activity diagnostics are required"
         );
     }
 }

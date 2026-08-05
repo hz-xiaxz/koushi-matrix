@@ -151,7 +151,10 @@ pub enum AppEffect {
     RecordNativeAttentionRecomputed {
         observation: crate::NativeAttentionObservationKind,
         unread_count: u64,
+        notification_count: u64,
         badge_count: u64,
+        badge_room_count: u64,
+        badge_excluded_room_count: u64,
         candidate: Option<crate::RoomAttentionKind>,
         suppression: Option<crate::NativeAttentionSuppressionReason>,
         window_focused: bool,

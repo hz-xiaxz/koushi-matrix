@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::locale_profile::DisplayPlatform;
 
 use super::errors::OperationFailureKind;
-use super::room::{
-    RoomAttentionKind, RoomSummary, room_activity_unread_count, room_attention_summary,
-};
+use super::room::{RoomAttentionKind, RoomSummary, room_attention_summary};
 use super::settings::RoomNotificationMode;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -100,6 +98,7 @@ pub enum NativeAttentionObservationKind {
 
 #[derive(Clone, Copy, Debug)]
 pub struct NativeAttentionProjectionInput<'a> {
+    /// Joined, non-space rooms only; spaces and invites are separate state.
     pub rooms: &'a [RoomSummary],
     pub active_room_id: Option<&'a str>,
     pub muted_room_ids: &'a [String],
@@ -115,6 +114,9 @@ pub struct NativeAttentionProjectionInput<'a> {
 pub struct NativeAttentionProjection {
     pub state: NativeAttentionState,
     pub active_room_match: bool,
+    pub notification_count: u64,
+    pub badge_room_count: u64,
+    pub badge_excluded_room_count: u64,
 }
 
 struct NativeAttentionCandidateEntry<'a> {
@@ -133,10 +135,22 @@ pub fn native_attention_projection_from_rooms(
 ) -> NativeAttentionProjection {
     let mut unread_count = 0;
     let mut highlight_count = 0;
+    let mut notification_count = 0;
+    let mut badge_count = 0;
+    let mut badge_room_count = 0;
+    let mut badge_excluded_room_count = 0;
+    let mut seen_room_ids = BTreeSet::new();
     let mut candidates = Vec::new();
 
     for room in input.rooms {
-        if room.tags.low_priority.is_some()
+        if !seen_room_ids.insert(room.room_id.as_str()) {
+            badge_excluded_room_count += 1;
+            continue;
+        }
+        badge_room_count += 1;
+        badge_count += room.unread_count;
+
+        let excluded_from_attention = room.tags.low_priority.is_some()
             || input
                 .muted_room_ids
                 .iter()
@@ -145,8 +159,8 @@ pub fn native_attention_projection_from_rooms(
                 && room
                     .dm_user_ids
                     .iter()
-                    .any(|user_id| input.ignored_user_ids.contains(user_id)))
-        {
+                    .any(|user_id| input.ignored_user_ids.contains(user_id)));
+        if excluded_from_attention {
             continue;
         }
 
@@ -159,7 +173,7 @@ pub fn native_attention_projection_from_rooms(
             continue;
         }
 
-        let activity_unread_count = room_activity_unread_count(room);
+        let activity_unread_count = room_notification_unread_count(room);
         let effective_unread_count =
             if mode == RoomNotificationMode::Mentions && room.highlight_count == 0 {
                 0
@@ -173,6 +187,7 @@ pub fn native_attention_projection_from_rooms(
         };
 
         unread_count += effective_unread_count;
+        notification_count += effective_notification_count;
         highlight_count += room.highlight_count;
 
         if mode == RoomNotificationMode::Mentions && room.highlight_count == 0 {
@@ -235,7 +250,7 @@ pub fn native_attention_projection_from_rooms(
 
     let badge_count = match input.capabilities.badge {
         NativeAttentionCapability::Unavailable => 0,
-        NativeAttentionCapability::Available | NativeAttentionCapability::Unknown => unread_count,
+        NativeAttentionCapability::Available | NativeAttentionCapability::Unknown => badge_count,
     };
 
     NativeAttentionProjection {
@@ -250,6 +265,20 @@ pub fn native_attention_projection_from_rooms(
             dispatch,
         },
         active_room_match,
+        notification_count,
+        badge_room_count,
+        badge_excluded_room_count,
+    }
+}
+
+fn room_notification_unread_count(room: &RoomSummary) -> u64 {
+    let count = room.notification_count.max(room.highlight_count);
+    if count > 0 {
+        count
+    } else if room.marked_unread {
+        1
+    } else {
+        0
     }
 }
 

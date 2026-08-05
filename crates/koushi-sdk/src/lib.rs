@@ -9930,8 +9930,10 @@ async fn matrix_room_list_snapshot_from_rooms(
         let highlight_count = unread_notifications.highlight_count.into();
         let is_marked_unread = room.is_marked_unread();
         let unread_messages = room.num_unread_messages();
-        let unread_count =
-            room_attention_unread_count(notification_count, unread_messages, is_marked_unread);
+        // Keep raw unread messages separate from notification and manual-unread
+        // projections. The state layer derives activity from all four fields;
+        // a manual mark must not fabricate a Dock badge count.
+        let unread_count = unread_messages;
 
         let parent_space_ids = matrix_parent_space_ids(&room).await;
         let tags = matrix_room_tags(&room).await;
@@ -10180,7 +10182,7 @@ fn matrix_room_list_room_from_counts(
     tags: MatrixRoomTags,
     notification_count: u64,
     highlight_count: u64,
-    unread_count: u64,
+    unread_messages: u64,
     marked_unread: bool,
     recency_stamp: Option<u64>,
     conversation_activity: Option<MatrixConversationActivity>,
@@ -10199,7 +10201,7 @@ fn matrix_room_list_room_from_counts(
     let (unread_count, notification_count, highlight_count) = if marker_covers_latest {
         (0, 0, 0)
     } else {
-        (unread_count, notification_count, highlight_count)
+        (unread_messages, notification_count, highlight_count)
     };
     MatrixRoomListRoom {
         room_id,
@@ -12282,7 +12284,7 @@ mod tests {
             MatrixRoomTags::default(),
             4,
             2,
-            4,
+            2,
             false,
             None,
             None,
@@ -12296,9 +12298,36 @@ mod tests {
 
         assert_eq!(room.notification_count, 4);
         assert_eq!(room.highlight_count, 2);
-        assert_eq!(room.unread_count, 4);
+        assert_eq!(room.unread_count, 2);
         assert_eq!(room.joined_members, 2);
         assert!(room.is_dm);
+    }
+
+    #[test]
+    fn room_list_room_from_counts_does_not_turn_manual_unread_into_messages() {
+        let room = matrix_room_list_room_from_counts(
+            "!room:example.invalid".to_owned(),
+            "Room".to_owned(),
+            None,
+            false,
+            Vec::new(),
+            MatrixRoomTags::default(),
+            0,
+            0,
+            0,
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+            vec![],
+            false,
+            0,
+        );
+
+        assert_eq!(room.unread_count, 0);
+        assert!(room.marked_unread);
     }
 
     #[test]

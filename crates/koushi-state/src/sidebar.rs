@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::state::{
     AvatarImage, RoomNotificationMode, RoomNotificationSettings, RoomSummary, RoomTags,
     SpaceSummary, compare_conversation_activity, room_activity_unread_count,
+    room_attention_projection,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -59,6 +60,18 @@ pub struct RoomListItem {
     pub tags: RoomTags,
     pub unread_count: u64,
     pub highlight_count: u64,
+    #[serde(default)]
+    pub notification_count: u64,
+    #[serde(default)]
+    pub display_count: u64,
+    #[serde(default)]
+    pub has_unread_content: bool,
+    #[serde(default)]
+    pub is_attention_highlighted: bool,
+    #[serde(default)]
+    pub has_unread_mention: bool,
+    #[serde(default)]
+    pub is_muted: bool,
 }
 
 /// Compose the sidebar from room/space facts alone.
@@ -124,14 +137,14 @@ pub fn compose_sidebar_with_account_facts(
                 .iter()
                 .filter_map(|room_id| rooms_by_id.get(room_id.as_str()).copied())
                 .filter(|room| !room.is_dm)
-                .map(room_list_item)
+                .map(|room| room_list_item(room, room_notification_settings))
                 .collect()
         })
         .unwrap_or_else(|| {
             rooms
                 .iter()
                 .filter(|room| !room.is_dm)
-                .map(room_list_item)
+                .map(|room| room_list_item(room, room_notification_settings))
                 .collect()
         });
 
@@ -149,7 +162,10 @@ pub fn compose_sidebar_with_account_facts(
         })
         .collect();
     global_dm_rooms.sort_by(|left, right| compare_conversation_activity(Some(*left), Some(*right)));
-    let global_dms: Vec<_> = global_dm_rooms.into_iter().map(room_list_item).collect();
+    let global_dms: Vec<_> = global_dm_rooms
+        .into_iter()
+        .map(|room| room_list_item(room, room_notification_settings))
+        .collect();
 
     SidebarModel {
         active_space_id: active_space_id.map(str::to_owned),
@@ -195,14 +211,27 @@ fn space_highlight_count(
         .sum()
 }
 
-fn room_list_item(room: &RoomSummary) -> RoomListItem {
+fn room_list_item(
+    room: &RoomSummary,
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+) -> RoomListItem {
+    let mode = room_notification_settings
+        .get(&room.room_id)
+        .map(|settings| settings.mode);
+    let projection = room_attention_projection(room, mode);
     RoomListItem {
         room_id: room.room_id.clone(),
         display_name: room.display_label.clone(),
         avatar: room.avatar.clone(),
         tags: room.tags.clone(),
-        unread_count: room_activity_unread_count(room),
-        highlight_count: room.highlight_count,
+        unread_count: projection.unread_count,
+        highlight_count: projection.highlight_count,
+        notification_count: projection.notification_count,
+        display_count: projection.display_count,
+        has_unread_content: projection.has_unread_content,
+        is_attention_highlighted: projection.is_attention_highlighted,
+        has_unread_mention: projection.has_unread_mention,
+        is_muted: projection.is_muted,
     }
 }
 

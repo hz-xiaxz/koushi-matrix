@@ -355,6 +355,49 @@ describe("Sidebar", () => {
     expect(selectedTotalRule).not.toContain("color: var(--mention)");
   });
 
+  it("renders plain unread content as a dot and notifications as a number", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const plain = snapshot.state.domain.rooms.find((room) => room.room_id === "!room-alpha:example.invalid");
+    const notified = snapshot.state.domain.rooms.find(
+      (room) => room.room_id === "!room-planning:example.invalid"
+    );
+    if (!plain || !notified) {
+      throw new Error("expected fake room fixtures");
+    }
+    plain.unread_count = 3;
+    plain.notification_count = 0;
+    plain.highlight_count = 0;
+    plain.marked_unread = false;
+    notified.unread_count = 3;
+    notified.notification_count = 2;
+    notified.highlight_count = 0;
+    notified.marked_unread = false;
+
+    render(
+      <Sidebar
+        activeRoomId={snapshot.state.ui.navigation.active_room_id}
+        activeView="timeline"
+        snapshot={snapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onSelectRoom={() => undefined}
+      />
+    );
+
+    const plainButton = screen.getByRole("button", { name: "synthetic-room" });
+    expect(plainButton.querySelector(".room-unread-dot")).not.toBeNull();
+    expect(plainButton.querySelector(".room-count")).toBeNull();
+    const notifiedButton = screen.getByRole("button", { name: "planning-room" });
+    expect(notifiedButton.querySelector(".room-count")?.textContent).toBe("2");
+    expect(notifiedButton.querySelector(".room-count")?.className).toContain("is-attention");
+  });
+
   it("does not render unresolved child room ids as not joined rooms", async () => {
     const api = createBrowserFakeApi();
     const snapshot = await api.selectSpace("!space-alpha:example.invalid");
