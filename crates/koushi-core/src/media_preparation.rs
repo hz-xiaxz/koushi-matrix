@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt};
 
 use koushi_media::{
     ImageOutputFormat, ImageOutputRequest, ImagePreparationPolicy, ImageResizeScale,
-    PreparedImageFormat, PreparedImageVariant, prepare_image_output,
+    PreparedImageFormat, PreparedImageVariant, heif_mime_type, prepare_image_output,
 };
 use koushi_state::{
     ComposerTarget, ImageUploadCompressionPolicy, MediaPreparationFailureKind,
@@ -206,7 +206,7 @@ impl MediaPreparationRegistry {
     ) -> Option<(PreparedUploadVariant, Vec<u8>)> {
         let request = ImageOutputRequest {
             resize: image_resize_scale(selection.resize),
-            format: image_output_format(selection.format),
+            format: image_output_format_for_source(&source.bytes, selection),
         };
         let variant = prepare_image_output(
             &source.bytes,
@@ -408,9 +408,17 @@ impl MediaPreparationRegistry {
         input: StageUploadBytesInput,
         policy: ImageUploadCompressionPolicy,
     ) -> StagedUploadItem {
+        let detected_heif = heif_mime_type(&input.bytes);
+        let mut input = input;
+        if let Some(mime_type) = detected_heif {
+            input.mime_type = mime_type.to_owned();
+        }
         self.sources
             .insert((target.clone(), input.staged_id.clone()), input.clone());
         let byte_count = u64::try_from(input.bytes.len()).unwrap_or(u64::MAX);
+        if let Some(mime_type) = detected_heif {
+            return self.prepare_heif_one(target, input, policy, mime_type);
+        }
         let image_candidate = matches!(
             input.mime_type.to_ascii_lowercase().as_str(),
             "image/png" | "image/jpeg" | "image/webp" | "image/gif"
@@ -545,6 +553,105 @@ impl MediaPreparationRegistry {
     }
 }
 
+impl MediaPreparationRegistry {
+    fn prepare_heif_one(
+        &mut self,
+        target: &ComposerTarget,
+        input: StageUploadBytesInput,
+        policy: ImageUploadCompressionPolicy,
+        mime_type: &'static str,
+    ) -> StagedUploadItem {
+        let byte_count = u64::try_from(input.bytes.len()).unwrap_or(u64::MAX);
+        let encode_policy = ImagePreparationPolicy {
+            target_long_edge: u32::try_from(policy.target_long_edge).unwrap_or(u32::MAX),
+            quality_percent: policy.quality_percent,
+        };
+        let selected = StagedUploadOutputSelection {
+            resize: StagedUploadResizeChoice::Original,
+            format: StagedUploadFormatChoice::Jpeg,
+        };
+        let Ok(converted) = prepare_image_output(
+            &input.bytes,
+            &input.filename,
+            ImageOutputRequest {
+                resize: ImageResizeScale::Original,
+                format: ImageOutputFormat::Jpeg,
+            },
+            &encode_policy,
+        ) else {
+            return staged_failure(
+                target,
+                input,
+                byte_count,
+                MediaPreparationFailureKind::Decode,
+            );
+        };
+        let original_selection = StagedUploadOutputSelection::default();
+        let original = PreparedUploadVariant {
+            variant_id: Self::output_identity(original_selection),
+            resize: original_selection.resize,
+            format_choice: original_selection.format,
+            filename: normalized_heif_filename(&input.filename, mime_type),
+            mime_type: mime_type.to_owned(),
+            byte_count: u64::try_from(input.bytes.len()).unwrap_or(u64::MAX),
+            width: Some(u64::from(converted.dimensions.0)),
+            height: Some(u64::from(converted.dimensions.1)),
+            format: PreparedUploadFormat::Original,
+            savings_percent: 0,
+            metadata_stripped: false,
+            thumbnail_refreshed: false,
+        };
+        let converted_descriptor =
+            descriptor_from_image_variant(&converted, input.bytes.len(), selected);
+        self.variants.insert(
+            (
+                target.clone(),
+                input.staged_id.clone(),
+                original.variant_id.clone(),
+            ),
+            CachedVariant {
+                descriptor: original.clone(),
+                bytes: input.bytes,
+            },
+        );
+        self.variants.insert(
+            (
+                target.clone(),
+                input.staged_id.clone(),
+                converted_descriptor.variant_id.clone(),
+            ),
+            CachedVariant {
+                descriptor: converted_descriptor.clone(),
+                bytes: converted.bytes,
+            },
+        );
+        self.selected.insert(
+            (target.clone(), input.staged_id.clone()),
+            converted_descriptor.variant_id.clone(),
+        );
+        StagedUploadItem {
+            staged_id: input.staged_id,
+            room_id: target.room_id().to_owned(),
+            position: input.position,
+            filename: converted_descriptor.filename.clone(),
+            mime_type: converted_descriptor.mime_type.clone(),
+            byte_count: converted_descriptor.byte_count,
+            kind: StagedUploadKind::Image {
+                width: converted_descriptor.width,
+                height: converted_descriptor.height,
+            },
+            caption: None,
+            compression_choice: StagedUploadCompressionChoice::Original,
+            preparation: StagedUploadPreparation::Ready {
+                variants: vec![original, converted_descriptor],
+                selected,
+                pending: None,
+                generation: 0,
+            },
+        }
+    }
+}
+
 enum SessionAccountObservation<'a> {
     Stable(Option<&'a str>),
     Transitional,
@@ -626,6 +733,21 @@ fn image_output_format(format: StagedUploadFormatChoice) -> ImageOutputFormat {
     }
 }
 
+fn image_output_format_for_source(
+    source: &[u8],
+    selection: StagedUploadOutputSelection,
+) -> ImageOutputFormat {
+    if heif_mime_type(source).is_some()
+        && selection.format == StagedUploadFormatChoice::Keep
+        && selection.resize != StagedUploadResizeChoice::Original
+    {
+        // HEIF is decode-only. A resized "Keep" selection is the compatible
+        // JPEG conversion; the unscaled Original/Keep pair remains exact.
+        return ImageOutputFormat::Jpeg;
+    }
+    image_output_format(selection.format)
+}
+
 /// Project one encoded output, tagged with the pair it was prepared for.
 ///
 /// `savings_percent` and the reported dimensions describe these exact bytes, so
@@ -654,7 +776,9 @@ fn descriptor_from_image_variant(
             PreparedImageFormat::Png => PreparedUploadFormat::Png,
             PreparedImageFormat::Jpeg => PreparedUploadFormat::Jpeg,
             PreparedImageFormat::WebP => PreparedUploadFormat::Webp,
-            PreparedImageFormat::Gif | PreparedImageFormat::Other => PreparedUploadFormat::Original,
+            PreparedImageFormat::Gif | PreparedImageFormat::Heif | PreparedImageFormat::Other => {
+                PreparedUploadFormat::Original
+            }
         },
         savings_percent,
         metadata_stripped: variant.metadata_stripped,
@@ -671,9 +795,26 @@ fn normalized_mime(mime_type: &str) -> String {
     }
 }
 
+fn normalized_heif_filename(filename: &str, mime_type: &str) -> String {
+    let extension = if mime_type == "image/heic" {
+        "heic"
+    } else {
+        "heif"
+    };
+    let filename = filename.trim();
+    if filename.is_empty() {
+        return format!("attachment.{extension}");
+    }
+    match filename.rfind('.') {
+        Some(index) if index > 0 => format!("{}.{}", &filename[..index], extension),
+        _ => format!("{filename}.{extension}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::GenericImageView;
 
     fn target(root: Option<&str>) -> ComposerTarget {
         match root {
@@ -714,6 +855,104 @@ mod tests {
             mime_type: "image/png".to_owned(),
             bytes: bytes.into_inner(),
         }
+    }
+
+    fn heif_input(id: &str) -> StageUploadBytesInput {
+        StageUploadBytesInput {
+            staged_id: id.to_owned(),
+            position: 1,
+            filename: "camera.png".to_owned(),
+            mime_type: "image/png".to_owned(),
+            bytes: include_bytes!("../../koushi-media/tests/fixtures/heif/opaque.heic").to_vec(),
+        }
+    }
+
+    #[test]
+    fn heif_staging_defaults_to_jpeg_but_retains_exact_original_bytes() {
+        let target = target(None);
+        let mut registry = MediaPreparationRegistry::default();
+        let source = heif_input("heif-1");
+        let original_bytes = source.bytes.clone();
+        let item = registry
+            .prepare_items(
+                &target,
+                vec![source],
+                ImageUploadCompressionPolicy::default(),
+            )
+            .pop()
+            .expect("one staged HEIF image");
+
+        assert!(matches!(
+            item.kind,
+            StagedUploadKind::Image {
+                width: Some(64),
+                height: Some(64)
+            }
+        ));
+        let StagedUploadPreparation::Ready {
+            variants, selected, ..
+        } = &item.preparation
+        else {
+            panic!("HEIF should expose converted image choices");
+        };
+        assert_eq!(
+            *selected,
+            StagedUploadOutputSelection {
+                resize: StagedUploadResizeChoice::Original,
+                format: StagedUploadFormatChoice::Jpeg
+            }
+        );
+        assert!(variants.iter().any(|variant| {
+            variant.resize == StagedUploadResizeChoice::Original
+                && variant.format_choice == StagedUploadFormatChoice::Keep
+                && variant.mime_type == "image/heic"
+        }));
+
+        let converted = registry
+            .selected_upload(&target, "heif-1")
+            .expect("default converted bytes");
+        assert_eq!(converted.descriptor.mime_type, "image/jpeg");
+        assert_eq!(converted.descriptor.width, Some(64));
+        assert_eq!(converted.descriptor.height, Some(64));
+        assert_eq!(
+            converted.bytes.len() as u64,
+            converted.descriptor.byte_count
+        );
+        assert_eq!(
+            image::load_from_memory(&converted.bytes)
+                .unwrap()
+                .dimensions(),
+            (64, 64)
+        );
+
+        let source = registry
+            .source_input(&target, "heif-1")
+            .expect("source bytes retained for lazy output");
+        let (resized_keep, resized_bytes) = MediaPreparationRegistry::encode_output(
+            &source,
+            StagedUploadOutputSelection {
+                resize: StagedUploadResizeChoice::Half,
+                format: StagedUploadFormatChoice::Keep,
+            },
+            ImageUploadCompressionPolicy::default(),
+        )
+        .expect("resized HEIF Keep should use the compatible JPEG path");
+        assert_eq!(resized_keep.mime_type, "image/jpeg");
+        assert_eq!(resized_keep.width, Some(32));
+        assert_eq!(resized_keep.height, Some(32));
+        assert_eq!(resized_keep.byte_count, resized_bytes.len() as u64);
+
+        let original = registry
+            .use_original(&target, "heif-1")
+            .expect("the exact source remains selectable");
+        assert_eq!(original.mime_type, "image/heic");
+        assert_eq!(
+            registry
+                .selected_upload(&target, "heif-1")
+                .expect("original bytes")
+                .bytes,
+            original_bytes
+        );
     }
 
     /// #305 regression guard: after a lazily encoded pair is selected, the send

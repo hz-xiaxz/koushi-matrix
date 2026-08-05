@@ -2,7 +2,7 @@ use std::io::Cursor;
 
 use image::{
     DynamicImage, ExtendedColorType, GenericImageView, ImageEncoder, ImageFormat, ImageReader,
-    Limits,
+    Limits, RgbaImage,
     codecs::{jpeg::JpegEncoder, png::PngEncoder, webp::WebPEncoder},
     imageops::FilterType,
 };
@@ -31,6 +31,7 @@ pub enum PreparedImageFormat {
     Jpeg,
     WebP,
     Gif,
+    Heif,
     Other,
 }
 
@@ -141,18 +142,28 @@ pub fn prepare_image_output(
     if source.is_empty() {
         return Err(ImagePreparationError::Empty);
     }
+    let heif = probe_heif(source);
     let guessed = image::guess_format(source).ok();
-    let source_format = prepared_format(guessed);
-    let decodable = matches!(
-        source_format,
-        PreparedImageFormat::Png | PreparedImageFormat::Jpeg | PreparedImageFormat::WebP
-    ) && !animated_webp(source)
-        && !animated_png(source);
+    let source_format = if heif.is_some() {
+        PreparedImageFormat::Heif
+    } else {
+        prepared_format(guessed)
+    };
+    let decodable = match source_format {
+        PreparedImageFormat::Heif => true,
+        PreparedImageFormat::Png | PreparedImageFormat::Jpeg | PreparedImageFormat::WebP => {
+            !animated_webp(source) && !animated_png(source)
+        }
+        PreparedImageFormat::Gif | PreparedImageFormat::Other => false,
+    };
     if !decodable {
         return Err(ImagePreparationError::Decode);
     }
-    let decoded = decode_with_limits(source, guessed.expect("recognized image format"))
-        .map_err(|_| ImagePreparationError::Decode)?;
+    let decoded = match source_format {
+        PreparedImageFormat::Heif => decode_heif(source, heif.expect("recognized HEIF"))?,
+        _ => decode_with_limits(source, guessed.expect("recognized image format"))
+            .map_err(|_| ImagePreparationError::Decode)?,
+    };
     let target_format = match request.format {
         ImageOutputFormat::Keep => source_format,
         ImageOutputFormat::Png => PreparedImageFormat::Png,
@@ -189,18 +200,25 @@ fn scale_linearly(image: &DynamicImage, resize: ImageResizeScale) -> DynamicImag
 pub fn prepare_image_variants(
     source: &[u8],
     filename: &str,
-    declared_mime: &str,
+    _declared_mime: &str,
     policy: &ImagePreparationPolicy,
 ) -> Result<Vec<PreparedImageVariant>, ImagePreparationError> {
     if source.is_empty() {
         return Err(ImagePreparationError::Empty);
     }
 
+    let heif = probe_heif(source);
     let guessed = image::guess_format(source).ok();
-    let format = prepared_format(guessed);
-    let _ = declared_mime;
-    let mime_type = actual_mime(format);
+    let format = if heif.is_some() {
+        PreparedImageFormat::Heif
+    } else {
+        prepared_format(guessed)
+    };
+    let mime_type = heif
+        .map(|probe| probe.mime_type)
+        .unwrap_or_else(|| actual_mime(format));
     let decoded = match format {
+        PreparedImageFormat::Heif => decode_heif(source, heif.expect("recognized HEIF")).ok(),
         PreparedImageFormat::Png | PreparedImageFormat::Jpeg | PreparedImageFormat::WebP
             if !animated_webp(source) && !animated_png(source) =>
         {
@@ -214,7 +232,7 @@ pub fn prepare_image_variants(
         .unwrap_or((0, 0));
     let mut variants = vec![PreparedImageVariant {
         id: "original".to_owned(),
-        filename: normalized_filename(filename, extension(format)),
+        filename: normalized_filename(filename, extension(format, Some(mime_type))),
         mime_type: mime_type.to_owned(),
         format,
         bytes: source.to_vec(),
@@ -269,6 +287,29 @@ pub fn prepare_image_variants(
             &resized,
             policy.quality_percent,
         )?),
+        PreparedImageFormat::Heif => {
+            variants.push(encoded_variant(
+                "resized-jpeg",
+                filename,
+                PreparedImageFormat::Jpeg,
+                &resized,
+                policy.quality_percent,
+            )?);
+            variants.push(encoded_variant(
+                "resized-webp",
+                filename,
+                PreparedImageFormat::WebP,
+                &resized,
+                policy.quality_percent,
+            )?);
+            variants.push(encoded_variant(
+                "resized-png",
+                filename,
+                PreparedImageFormat::Png,
+                &resized,
+                policy.quality_percent,
+            )?);
+        }
         PreparedImageFormat::Gif | PreparedImageFormat::Other => {}
     }
 
@@ -312,13 +353,13 @@ fn encoded_variant(
                 .write_image(&rgba, width, height, ExtendedColorType::Rgba8)
                 .map_err(|_| ImagePreparationError::Encode)?;
         }
-        PreparedImageFormat::Gif | PreparedImageFormat::Other => {
+        PreparedImageFormat::Gif | PreparedImageFormat::Heif | PreparedImageFormat::Other => {
             return Err(ImagePreparationError::Encode);
         }
     }
     Ok(PreparedImageVariant {
         id: id.to_owned(),
-        filename: normalized_filename(source_filename, extension(format)),
+        filename: normalized_filename(source_filename, extension(format, None)),
         mime_type: actual_mime(format).to_owned(),
         format,
         bytes,
@@ -357,16 +398,24 @@ fn actual_mime(format: PreparedImageFormat) -> &'static str {
         PreparedImageFormat::Jpeg => "image/jpeg",
         PreparedImageFormat::WebP => "image/webp",
         PreparedImageFormat::Gif => "image/gif",
+        PreparedImageFormat::Heif => "image/heif",
         PreparedImageFormat::Other => "application/octet-stream",
     }
 }
 
-fn extension(format: PreparedImageFormat) -> &'static str {
+fn extension(format: PreparedImageFormat, mime_type: Option<&str>) -> &'static str {
     match format {
         PreparedImageFormat::Png => "png",
         PreparedImageFormat::Jpeg => "jpg",
         PreparedImageFormat::WebP => "webp",
         PreparedImageFormat::Gif => "gif",
+        PreparedImageFormat::Heif => {
+            if mime_type == Some("image/heic") {
+                "heic"
+            } else {
+                "heif"
+            }
+        }
         PreparedImageFormat::Other => "bin",
     }
 }
@@ -422,4 +471,115 @@ fn decode_with_limits(
     limits.max_alloc = Some(MAX_DECODED_ALLOCATION);
     reader.limits(limits);
     reader.decode()
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HeifProbe {
+    mime_type: &'static str,
+    dimensions: Option<(u32, u32)>,
+}
+
+/// Return the normalized MIME for a recognized HEIF/HEIC `ftyp` box.
+pub fn heif_mime_type(source: &[u8]) -> Option<&'static str> {
+    probe_heif(source).map(|probe| probe.mime_type)
+}
+
+fn probe_heif(source: &[u8]) -> Option<HeifProbe> {
+    let size = u32::from_be_bytes(source.get(0..4)?.try_into().ok()?) as usize;
+    if size < 16 || size > source.len() || &source[4..8] != b"ftyp" {
+        return None;
+    }
+    let major = source.get(8..12)?;
+    let compatible = source.get(16..size).unwrap_or_default();
+    let is_heic = [b"heic", b"heix", b"hevc", b"hevx"]
+        .iter()
+        .any(|brand| major == *brand || compatible.chunks_exact(4).any(|item| item == *brand));
+    let is_heif = major == b"mif1" || compatible.chunks_exact(4).any(|item| item == b"mif1");
+    if !is_heic && !is_heif {
+        return None;
+    }
+    Some(HeifProbe {
+        mime_type: if is_heic { "image/heic" } else { "image/heif" },
+        dimensions: find_ispe_dimensions(source),
+    })
+}
+
+fn find_ispe_dimensions(source: &[u8]) -> Option<(u32, u32)> {
+    let mut dimensions: Option<(u32, u32)> = None;
+    for (type_offset, window) in source.windows(4).enumerate() {
+        if window != b"ispe" || type_offset < 4 {
+            continue;
+        }
+        let box_start = type_offset - 4;
+        let Some(size_bytes) = source.get(box_start..type_offset) else {
+            continue;
+        };
+        let Ok(size_bytes) = size_bytes.try_into() else {
+            continue;
+        };
+        let size = u32::from_be_bytes(size_bytes) as usize;
+        if size < 20 || box_start.checked_add(size)? > source.len() {
+            continue;
+        }
+        let Some(width_bytes) = source.get(type_offset + 8..type_offset + 12) else {
+            continue;
+        };
+        let Some(height_bytes) = source.get(type_offset + 12..type_offset + 16) else {
+            continue;
+        };
+        let Ok(width_bytes) = width_bytes.try_into() else {
+            continue;
+        };
+        let Ok(height_bytes) = height_bytes.try_into() else {
+            continue;
+        };
+        let width = u32::from_be_bytes(width_bytes);
+        let height = u32::from_be_bytes(height_bytes);
+        if width > 0 && height > 0 {
+            dimensions = Some(match dimensions {
+                Some((old_width, old_height)) => (old_width.max(width), old_height.max(height)),
+                None => (width, height),
+            });
+        }
+    }
+    dimensions
+}
+
+fn decode_heif(source: &[u8], probe: HeifProbe) -> Result<DynamicImage, ImagePreparationError> {
+    let (width, height) = probe.dimensions.ok_or(ImagePreparationError::Decode)?;
+    let allocation = u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(ImagePreparationError::Decode)?;
+    if width > MAX_DECODED_DIMENSION
+        || height > MAX_DECODED_DIMENSION
+        || allocation > MAX_DECODED_ALLOCATION
+    {
+        return Err(ImagePreparationError::Decode);
+    }
+    let decoded = heif_oxide::decode_bytes(source).map_err(|_| ImagePreparationError::Decode)?;
+    if decoded
+        .color
+        .nclx
+        .is_some_and(|nclx| matches!(nclx.transfer, 16 | 18))
+        || source
+            .windows(b"gainmap".len())
+            .any(|window| window == b"gainmap")
+    {
+        return Err(ImagePreparationError::Decode);
+    }
+    let decoded_allocation = u64::from(decoded.width)
+        .checked_mul(u64::from(decoded.height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(ImagePreparationError::Decode)?;
+    if decoded.width > MAX_DECODED_DIMENSION
+        || decoded.height > MAX_DECODED_DIMENSION
+        || decoded_allocation > MAX_DECODED_ALLOCATION
+    {
+        return Err(ImagePreparationError::Decode);
+    }
+    let pixels = decoded.to_rgba8();
+    let image = RgbaImage::from_raw(decoded.width, decoded.height, pixels)
+        .ok_or(ImagePreparationError::Decode)?;
+    Ok(DynamicImage::ImageRgba8(image))
 }

@@ -48,6 +48,121 @@ fn synthetic_apng() -> Vec<u8> {
     bytes
 }
 
+fn heif_fixture() -> &'static [u8] {
+    include_bytes!("fixtures/heif/opaque.heic")
+}
+
+fn oversized_heif_fixture() -> Vec<u8> {
+    let mut source = heif_fixture().to_vec();
+    let type_offset = source
+        .windows(4)
+        .position(|window| window == b"ispe")
+        .expect("fixture dimensions");
+    source[type_offset + 8..type_offset + 12].copy_from_slice(&20_000u32.to_be_bytes());
+    source
+}
+
+#[test]
+fn heif_magic_overrides_declared_mime_and_converts_to_jpeg() {
+    let output = prepare_image_output(
+        heif_fixture(),
+        "camera.png",
+        ImageOutputRequest {
+            resize: ImageResizeScale::Original,
+            format: ImageOutputFormat::Jpeg,
+        },
+        &ImagePreparationPolicy::default(),
+    )
+    .expect("HEIF still image should be decoded");
+
+    assert_eq!(output.mime_type, "image/jpeg");
+    assert_eq!(output.filename, "camera.jpg");
+    assert_eq!(output.dimensions, (64, 64));
+    assert_eq!(
+        image::load_from_memory(&output.bytes).unwrap().dimensions(),
+        (64, 64)
+    );
+
+    for (format, mime, extension) in [
+        (ImageOutputFormat::Png, "image/png", "camera.png"),
+        (ImageOutputFormat::WebP, "image/webp", "camera.webp"),
+    ] {
+        let output = prepare_image_output(
+            heif_fixture(),
+            "camera.heic",
+            ImageOutputRequest {
+                resize: ImageResizeScale::Half,
+                format,
+            },
+            &ImagePreparationPolicy::default(),
+        )
+        .expect("HEIF conversion format should be supported");
+        assert_eq!(output.mime_type, mime);
+        assert_eq!(output.filename, extension);
+        assert_eq!(output.dimensions, (32, 32));
+        assert_eq!(
+            image::load_from_memory(&output.bytes).unwrap().dimensions(),
+            (32, 32)
+        );
+    }
+}
+
+#[test]
+fn heif_variants_preserve_original_and_offer_converted_outputs() {
+    let variants = prepare_image_variants(
+        heif_fixture(),
+        "camera.heic",
+        "image/heic",
+        &ImagePreparationPolicy {
+            target_long_edge: 32,
+            quality_percent: 82,
+        },
+    )
+    .expect("HEIF still image should retain a fallback");
+
+    assert_eq!(variants[0].format, PreparedImageFormat::Heif);
+    assert_eq!(variants[0].mime_type, "image/heic");
+    assert_eq!(variants[0].bytes, heif_fixture());
+    assert!(variants.iter().any(|variant| {
+        variant.format == PreparedImageFormat::Jpeg && variant.dimensions == (32, 32)
+    }));
+}
+
+#[test]
+fn malformed_heif_fails_without_dropping_the_original_contract() {
+    let truncated = &heif_fixture()[..32];
+    assert_eq!(
+        prepare_image_output(
+            truncated,
+            "camera.heic",
+            ImageOutputRequest {
+                resize: ImageResizeScale::Original,
+                format: ImageOutputFormat::Jpeg,
+            },
+            &ImagePreparationPolicy::default(),
+        )
+        .unwrap_err(),
+        ImagePreparationError::Decode
+    );
+}
+
+#[test]
+fn oversized_heif_is_rejected_before_decode_allocation() {
+    assert_eq!(
+        prepare_image_output(
+            &oversized_heif_fixture(),
+            "camera.heic",
+            ImageOutputRequest {
+                resize: ImageResizeScale::Original,
+                format: ImageOutputFormat::Jpeg,
+            },
+            &ImagePreparationPolicy::default(),
+        )
+        .unwrap_err(),
+        ImagePreparationError::Decode
+    );
+}
+
 #[test]
 fn png_offers_original_resized_png_and_alpha_preserving_webp() {
     let source = synthetic_png(96, 64);
