@@ -8,7 +8,8 @@ use super::{
     avatar::{collect_known_avatar_thumbnails, preserve_avatar_thumbnail},
     clear_active_room_for_navigation, has_session_projection_context, is_complete_space_order,
     is_session_ready, preferred_room_id_in_space, recompute_room_list_projection,
-    remember_active_room_for_current_space, select_active_room_for_navigation,
+    reconcile_space_order, remember_active_room_for_current_space,
+    select_active_room_for_navigation,
 };
 
 const MAX_ROOM_SCROLL_ANCHORS: usize = 200;
@@ -39,6 +40,8 @@ pub(crate) fn handle_navigation_loaded(
 
     let previous_active_space_id = state.navigation.active_space_id.clone();
     state.navigation = normalize_navigation_state(navigation);
+    reconcile_space_order(&mut state.navigation.space_order, &state.spaces);
+    apply_space_order(&mut state.spaces, &state.navigation.space_order);
     let space_members_changed = previous_active_space_id != state.navigation.active_space_id
         && super::space_members::handle_selected(state, state.navigation.active_space_id.clone());
     recompute_room_list_projection(state);
