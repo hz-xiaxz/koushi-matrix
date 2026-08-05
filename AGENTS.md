@@ -59,6 +59,34 @@ dependencies. If it rejects submodule status, update the checkout to the
 recorded gitlink; do not work around the failure by adding a remote SDK
 revision.
 
+## npm Dependency Security Gate
+
+Before running any npm-backed build, validate the checked-in lockfile against
+the current npm advisory database:
+
+```bash
+npm --prefix apps/desktop audit --package-lock-only --audit-level=high
+```
+
+If npm reports any `high` or `critical` vulnerability, stop before running
+`npm run build`, Tauri, a DMG build, or any other packaging command. Do not
+waive the finding and do not use `npm audit fix --force`. Resolve the vulnerable
+dependency to a compatible fixed version in `apps/desktop/package-lock.json`,
+then recreate the local dependency tree and verify both the complete and
+runtime-only graphs:
+
+```bash
+npm --prefix apps/desktop ci
+npm --prefix apps/desktop audit --audit-level=high
+npm --prefix apps/desktop audit --omit=dev --audit-level=high
+```
+
+Proceed with the build only when all three audit commands exit successfully.
+The lockfile is the reproducible security boundary: changing only an existing
+`node_modules` tree is not a fix. Commit dependency-security changes on an
+isolated branch so other developers and `origin/main` are unaffected until the
+change is reviewed and merged.
+
 ## Signed macOS DMG
 
 Build signed, notarized macOS artifacts only in an attended `zsh` session on a
