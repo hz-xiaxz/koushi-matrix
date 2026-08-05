@@ -120,7 +120,10 @@ pub(crate) fn recompute_native_attention_from_rooms(
     let diagnostic = AppEffect::RecordNativeAttentionRecomputed {
         observation,
         unread_count: projection.state.summary.unread_count,
+        notification_count: projection.notification_count,
         badge_count: projection.state.summary.badge_count,
+        badge_room_count: projection.badge_room_count,
+        badge_excluded_room_count: projection.badge_excluded_room_count,
         candidate: projection
             .state
             .summary

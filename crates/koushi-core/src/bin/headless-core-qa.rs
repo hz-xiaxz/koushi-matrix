@@ -11117,7 +11117,7 @@ async fn run_native_attention_stage(conn: &mut CoreConnection) -> Result<(), Str
     });
     if with_modes.summary.unread_count != 1
         || with_modes.summary.highlight_count != 1
-        || with_modes.summary.badge_count != 1
+        || with_modes.summary.badge_count != 12
         || with_modes
             .summary
             .candidate

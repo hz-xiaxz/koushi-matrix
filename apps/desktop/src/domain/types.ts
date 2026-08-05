@@ -2059,6 +2059,14 @@ export interface RoomListItem {
   tags: RoomTags;
   unread_count: number;
   highlight_count: number;
+  /** Rust-owned notification count selected for the row's display mode. */
+  notification_count?: number;
+  /** Numeric badge value; zero means the row may render the unread dot. */
+  display_count?: number;
+  has_unread_content?: boolean;
+  is_attention_highlighted?: boolean;
+  has_unread_mention?: boolean;
+  is_muted?: boolean;
 }
 
 export interface TimelineMessage {

@@ -896,7 +896,10 @@ fn mark_as_unread_sets_unread_flag_and_recomputes_room_list_projection() {
         .find(|r| r.room_id == "!room1:example.invalid")
         .unwrap();
     assert!(room.marked_unread);
-    assert_eq!(room.unread_count, 1);
+    assert_eq!(
+        room.unread_count, 0,
+        "manual unread must not fabricate a raw message count"
+    );
     assert_eq!(state.room_list.items.len(), 1);
 }
 
@@ -924,7 +927,10 @@ fn mark_as_unread_clear_resets_unread_state() {
         .find(|r| r.room_id == "!room1:example.invalid")
         .unwrap();
     assert!(!room.marked_unread);
-    assert_eq!(room.unread_count, 0);
+    assert_eq!(
+        room.unread_count, 5,
+        "clearing manual unread must preserve server-reported messages"
+    );
 }
 
 #[test]

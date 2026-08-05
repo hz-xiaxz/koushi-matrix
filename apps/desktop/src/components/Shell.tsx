@@ -788,7 +788,8 @@ export function Sidebar({
     snapshot.state.ui.navigation.active_space_id,
     snapshot.state.domain.spaces,
     snapshot.state.domain.rooms,
-    snapshot.state.domain.invites
+    snapshot.state.domain.invites,
+    snapshot.state.domain.room_notification_settings
   );
   const roomListReadiness = snapshot.state.ui.room_list.readiness;
   const roomListReady = roomListReadiness.kind === "ready";
@@ -1357,7 +1358,10 @@ function RoomButton({
       ? dmUserIds[0]
       : null;
   const isOnlineDm = dmUserId ? presence[dmUserId] === "online" : false;
-  const mentionCount = room.highlight_count ?? 0;
+  const hasUnreadContent = room.has_unread_content ?? room.unread_count > 0;
+  const displayCount = room.display_count ?? room.unread_count;
+  const mentionCount = room.highlight_count ?? (room.has_unread_mention ? 1 : 0);
+  const attentionHighlighted = room.is_attention_highlighted ?? mentionCount;
   return (
     <button
       className={`room-item ${room.room_id === activeRoomId ? "is-active" : ""}`}
@@ -1406,7 +1410,14 @@ function RoomButton({
       <span className="room-name" dir="auto">{room.display_name}</span>
       <span className="room-trailing">
         {mentionCount ? <span className="room-mention-dot" aria-hidden="true" /> : null}
-        <span className="room-count">{room.unread_count || ""}</span>
+        {hasUnreadContent && displayCount === 0 ? (
+          <span className="room-unread-dot" aria-hidden="true" />
+        ) : null}
+        {displayCount > 0 ? (
+          <span className={`room-count ${attentionHighlighted ? "is-attention" : ""}`}>
+            {displayCount}
+          </span>
+        ) : null}
       </span>
     </button>
   );

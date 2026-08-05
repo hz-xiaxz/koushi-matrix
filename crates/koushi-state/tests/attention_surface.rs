@@ -165,7 +165,7 @@ fn native_attention_candidate_prioritizes_mentions_dm_then_messages_and_badges()
 }
 
 #[test]
-fn native_attention_ignores_plain_unread_counts_absent_from_activity_unread() {
+fn native_attention_includes_plain_unread_counts_in_content_and_badge_totals() {
     let rooms = vec![
         room("!plain:example.invalid", "Plain", false, 1, 0, 0),
         room("!notified:example.invalid", "Notified", false, 4, 2, 0),
@@ -184,7 +184,7 @@ fn native_attention_ignores_plain_unread_counts_absent_from_activity_unread() {
     });
 
     assert_eq!(state.summary.unread_count, 2);
-    assert_eq!(state.summary.badge_count, 2);
+    assert_eq!(state.summary.badge_count, 5);
     assert_eq!(
         state.summary.candidate,
         Some(NativeAttentionCandidate {
@@ -194,6 +194,67 @@ fn native_attention_ignores_plain_unread_counts_absent_from_activity_unread() {
             highlight_count: 0,
         })
     );
+}
+
+#[test]
+fn native_attention_tracks_plain_unread_count_transitions() {
+    for unread_count in [1, 2, 3] {
+        let rooms = vec![room(
+            "!plain:example.invalid",
+            "Plain",
+            false,
+            unread_count,
+            0,
+            0,
+        )];
+        let state = native_attention_state_from_rooms(NativeAttentionProjectionInput {
+            rooms: &rooms,
+            active_room_id: None,
+            muted_room_ids: &[],
+            room_notification_modes: &std::collections::HashMap::new(),
+            ignored_user_ids: &std::collections::BTreeSet::new(),
+            window_focused: false,
+            observation: NativeAttentionObservationKind::Live,
+            previous_candidate: None,
+            capabilities: available_capabilities(),
+        });
+
+        assert_eq!(state.summary.unread_count, 0);
+        assert_eq!(state.summary.badge_count, unread_count);
+        assert_eq!(state.summary.candidate, None);
+    }
+}
+
+#[test]
+fn native_attention_badge_deduplicates_rooms_and_excludes_manual_marks() {
+    let mut marked = room("!marked:example.invalid", "Marked", false, 0, 0, 0);
+    marked.marked_unread = true;
+    let rooms = vec![
+        room("!duplicate:example.invalid", "Duplicate", false, 3, 0, 0),
+        room(
+            "!duplicate:example.invalid",
+            "Duplicate copy",
+            false,
+            9,
+            0,
+            0,
+        ),
+        marked,
+    ];
+
+    let state = native_attention_state_from_rooms(NativeAttentionProjectionInput {
+        rooms: &rooms,
+        active_room_id: None,
+        muted_room_ids: &[],
+        room_notification_modes: &std::collections::HashMap::new(),
+        ignored_user_ids: &std::collections::BTreeSet::new(),
+        window_focused: false,
+        observation: NativeAttentionObservationKind::Live,
+        previous_candidate: None,
+        capabilities: available_capabilities(),
+    });
+
+    assert_eq!(state.summary.badge_count, 3);
 }
 
 #[test]
@@ -305,7 +366,7 @@ fn native_attention_suppresses_initial_backfill_self_and_focused_room() {
 }
 
 #[test]
-fn native_attention_excludes_low_priority_and_muted_rooms_and_clears_badge_at_zero() {
+fn native_attention_excludes_low_priority_and_muted_rooms_from_alerts_but_keeps_badge() {
     let mut low_priority = room("!low:example.invalid", "Low", false, 5, 5, 1);
     low_priority.tags.low_priority = Some(RoomTagInfo {
         order: Some("0.9".to_owned()),
@@ -326,7 +387,7 @@ fn native_attention_excludes_low_priority_and_muted_rooms_and_clears_badge_at_ze
 
     assert_eq!(state.summary.unread_count, 0);
     assert_eq!(state.summary.highlight_count, 0);
-    assert_eq!(state.summary.badge_count, 0);
+    assert_eq!(state.summary.badge_count, 9);
     assert_eq!(state.summary.candidate, None);
     assert_eq!(state.dispatch, NativeAttentionDispatchState::Idle);
 }

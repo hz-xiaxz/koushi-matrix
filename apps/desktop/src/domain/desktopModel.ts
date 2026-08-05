@@ -57,9 +57,15 @@ export function roomListSections(
   activeSpaceId: string | null,
   spaces: SpaceSummary[],
   rooms: RoomSummary[],
-  invites: InvitePreview[]
+  invites: InvitePreview[],
+  roomNotificationSettings: Record<string, RoomNotificationSettings> = {}
 ): RoomListSections {
-  const fullSections = roomListSectionsFromSidebar(activeSpaceId, spaces, rooms);
+  const fullSections = roomListSectionsFromSidebar(
+    activeSpaceId,
+    spaces,
+    rooms,
+    roomNotificationSettings
+  );
   if (roomList.items === null) {
     return fullSections;
   }
@@ -69,7 +75,8 @@ export function roomListSections(
     activeSpaceId,
     spaces,
     rooms,
-    invites
+    invites,
+    roomNotificationSettings
   );
   switch (roomList.active_filter.kind) {
     case "rooms":
@@ -88,9 +95,10 @@ export function roomListSections(
 function roomListSectionsFromSidebar(
   activeSpaceId: string | null,
   spaces: SpaceSummary[],
-  rooms: RoomSummary[]
+  rooms: RoomSummary[],
+  roomNotificationSettings: Record<string, RoomNotificationSettings>
 ): RoomListSections {
-  const sidebar = composeSidebar(activeSpaceId, spaces, rooms);
+  const sidebar = composeSidebar(activeSpaceId, spaces, rooms, roomNotificationSettings);
   return {
     favourites: sidebar.space_rooms.filter((room) => room.tags.favourite !== null),
     invites: [],
@@ -108,7 +116,8 @@ function roomListSectionsFromProjection(
   activeSpaceId: string | null,
   spaces: SpaceSummary[],
   rooms: RoomSummary[],
-  invites: InvitePreview[]
+  invites: InvitePreview[],
+  roomNotificationSettings: Record<string, RoomNotificationSettings>
 ): RoomListSections {
   const roomById = new Map(rooms.map((room) => [room.room_id, room]));
   const inviteById = new Map(invites.map((invite) => [invite.room_id, invite]));
@@ -150,7 +159,7 @@ function roomListSectionsFromProjection(
       continue;
     }
 
-    const listItem = roomListItem(room);
+    const listItem = roomListItem(room, roomNotificationSettings);
     if (room.is_dm) {
       people.push(listItem);
     } else if (room.tags.favourite !== null) {
@@ -229,10 +238,10 @@ export function composeSidebar(
     ? activeSpace
         ?.child_room_ids.map((roomId) => roomById.get(roomId))
         .filter(roomExists)
-        .map(roomListItem) ?? []
+        .map((room) => roomListItem(room, roomNotificationSettings)) ?? []
     : rooms
         .filter((room) => !room.is_dm)
-        .map(roomListItem);
+        .map((room) => roomListItem(room, roomNotificationSettings));
 
   const notJoinedSpaceRooms: RoomListItem[] = [];
 
@@ -241,7 +250,7 @@ export function composeSidebar(
       (room) =>
         room.is_dm && (activeSpaceId === null || room.dm_space_ids.includes(activeSpaceId))
     )
-    .map(roomListItem);
+    .map((room) => roomListItem(room, roomNotificationSettings));
 
   return {
     active_space_id: activeSpaceId,
@@ -325,21 +334,48 @@ export function textRangeUtf16(haystack: string, needle: string) {
   };
 }
 
-function roomListItem(room: RoomSummary): RoomListItem {
+function roomListItem(
+  room: RoomSummary,
+  roomNotificationSettings: Record<string, RoomNotificationSettings> = {}
+): RoomListItem {
+  const mode = roomNotificationSettings[room.room_id]?.mode.kind;
+  const isMuted = mode === "mute";
+  const hasUnreadContent =
+    room.unread_count > 0 ||
+    (room.notification_count ?? 0) > 0 ||
+    (room.highlight_count ?? 0) > 0 ||
+    Boolean(room.marked_unread);
+  const unreadCount = roomActivityUnreadCount(room);
+  const hasUnreadMention = !isMuted && (room.highlight_count ?? 0) > 0;
+  const isAttentionHighlighted =
+    !isMuted &&
+    ((room.notification_count ?? 0) > 0 ||
+      (room.highlight_count ?? 0) > 0 ||
+      Boolean(room.marked_unread));
+  const notificationCount =
+    isMuted || (mode === "mentions" && (room.highlight_count ?? 0) === 0)
+      ? 0
+      : room.notification_count ?? room.unread_count;
   return {
     room_id: room.room_id,
     display_name: room.display_label ?? room.display_name,
     avatar: room.avatar,
     tags: room.tags,
-    unread_count: roomActivityUnreadCount(room),
-    highlight_count: room.highlight_count ?? 0
+    unread_count: unreadCount,
+    highlight_count: isMuted ? 0 : room.highlight_count ?? 0,
+    notification_count: notificationCount,
+    display_count: isMuted ? room.unread_count : notificationCount,
+    has_unread_content: hasUnreadContent,
+    is_attention_highlighted: isAttentionHighlighted,
+    has_unread_mention: hasUnreadMention,
+    is_muted: isMuted
   };
 }
 
 function roomActivityUnreadCount(room: RoomSummary): number {
-  const notificationCount = room.notification_count ?? room.unread_count;
+  const notificationCount = room.notification_count ?? 0;
   const highlightCount = room.highlight_count ?? 0;
-  const count = Math.max(notificationCount, highlightCount);
+  const count = Math.max(room.unread_count, notificationCount, highlightCount);
   if (count > 0) {
     return count;
   }

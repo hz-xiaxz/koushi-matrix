@@ -3,6 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::profile::AvatarImage;
+use super::settings::RoomNotificationMode;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SpaceSummary {
@@ -271,13 +272,67 @@ pub fn room_attention_kind(
 }
 
 pub fn room_activity_unread_count(room: &RoomSummary) -> u64 {
-    let count = room.notification_count.max(room.highlight_count);
+    let count = room
+        .unread_count
+        .max(room.notification_count)
+        .max(room.highlight_count);
     if count > 0 {
         count
     } else if room.marked_unread {
         1
     } else {
         0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RoomAttentionProjection {
+    pub unread_count: u64,
+    pub notification_count: u64,
+    pub highlight_count: u64,
+    pub has_unread_content: bool,
+    pub is_attention_highlighted: bool,
+    pub has_unread_mention: bool,
+    pub is_muted: bool,
+    pub display_count: u64,
+}
+
+pub fn room_attention_projection(
+    room: &RoomSummary,
+    mode: Option<RoomNotificationMode>,
+) -> RoomAttentionProjection {
+    let is_muted = mode == Some(RoomNotificationMode::Mute);
+    let has_unread_content = room.unread_count > 0
+        || room.notification_count > 0
+        || room.highlight_count > 0
+        || room.marked_unread;
+    let unread_count = room_activity_unread_count(room);
+    let highlight_count = if is_muted { 0 } else { room.highlight_count };
+    let has_unread_mention = !is_muted && room.highlight_count > 0;
+    let is_attention_highlighted = !is_muted
+        && (room.notification_count > 0 || room.highlight_count > 0 || room.marked_unread);
+    let notification_count = if is_muted
+        || (mode == Some(RoomNotificationMode::Mentions) && room.highlight_count == 0)
+    {
+        0
+    } else {
+        room.notification_count
+    };
+    let display_count = if is_muted {
+        room.unread_count
+    } else {
+        notification_count
+    };
+
+    RoomAttentionProjection {
+        unread_count,
+        notification_count,
+        highlight_count,
+        has_unread_content,
+        is_attention_highlighted,
+        has_unread_mention,
+        is_muted,
+        display_count,
     }
 }
 

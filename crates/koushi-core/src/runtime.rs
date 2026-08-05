@@ -28,7 +28,6 @@ use koushi_state::{
     SpaceMemberEntry, SpaceMemberMembership, SpaceMembersCommandRejection, SpaceSummary,
     SubmissionId, ThreadPaneState, UiEvent, UserProfile, admit_space_member_cancellation,
     admit_space_member_invite, admit_space_members_load, reduce, resolve_people_label,
-    room_activity_unread_count,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -570,9 +569,9 @@ fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Ve
     let room_list_trace = match &action {
         AppAction::RoomListUpdated { rooms, .. }
         | AppAction::RoomListSnapshotProvisional { rooms, .. }
-        | AppAction::RoomListSnapshotAuthoritative { rooms, .. } => {
-            Some(unread_trace::capture_room_list_applied(rooms))
-        }
+        | AppAction::RoomListSnapshotAuthoritative { rooms, .. } => Some(
+            unread_trace::capture_room_list_applied(rooms, &state.room_notification_settings),
+        ),
         _ => None,
     };
     if let Some(event) = live_receipt_profile_diagnostic_event(state, &action) {
@@ -595,7 +594,10 @@ fn record_native_attention_recomputed(effect: &AppEffect) {
     let AppEffect::RecordNativeAttentionRecomputed {
         observation,
         unread_count,
+        notification_count,
         badge_count,
+        badge_room_count,
+        badge_excluded_room_count,
         candidate,
         suppression,
         window_focused,
@@ -635,7 +637,23 @@ fn record_native_attention_recomputed(effect: &AppEffect) {
         DiagnosticEvent::new(DiagnosticLevel::Debug, "native.attention", "recomputed")
             .field(DiagnosticField::token("observation", observation))
             .field(DiagnosticField::count("unread_count", *unread_count))
+            .field(DiagnosticField::count(
+                "notification_count",
+                *notification_count,
+            ))
             .field(DiagnosticField::count("badge_count", *badge_count))
+            .field(DiagnosticField::token(
+                "badge_source",
+                "raw_unread_messages",
+            ))
+            .field(DiagnosticField::count(
+                "badge_room_count",
+                *badge_room_count,
+            ))
+            .field(DiagnosticField::count(
+                "badge_excluded_room_count",
+                *badge_excluded_room_count,
+            ))
             .field(DiagnosticField::token("candidate", candidate))
             .field(DiagnosticField::token("suppression", suppression))
             .field(DiagnosticField::boolean("window_focused", *window_focused))
@@ -2266,6 +2284,7 @@ impl ActivityProjection {
                 unread_trace::trace_activity_room(
                     "activity_recent_event",
                     room,
+                    mode,
                     unread_row,
                     reason,
                 );
@@ -2311,6 +2330,7 @@ impl ActivityProjection {
                 unread_trace::trace_activity_room(
                     "activity_placeholder",
                     room,
+                    mode,
                     false,
                     "plain_unread_only",
                 );
@@ -2331,6 +2351,7 @@ impl ActivityProjection {
                 unread_trace::trace_activity_room(
                     "activity_placeholder",
                     room,
+                    mode,
                     false,
                     "latest_event_read",
                 );
@@ -2340,6 +2361,7 @@ impl ActivityProjection {
                 unread_trace::trace_activity_room(
                     "activity_placeholder",
                     room,
+                    mode,
                     false,
                     "cleared_local",
                 );
@@ -2369,7 +2391,13 @@ impl ActivityProjection {
                 context_label,
                 ..placeholder
             };
-            unread_trace::trace_activity_room("activity_placeholder", room, true, "room_metrics");
+            unread_trace::trace_activity_room(
+                "activity_placeholder",
+                room,
+                mode,
+                true,
+                "room_metrics",
+            );
             unread.push(placeholder);
         }
 
@@ -2477,7 +2505,14 @@ fn room_activity_unread_count_for_mode(
     if matches!(mode, Some(RoomNotificationMode::Mentions)) && room.highlight_count == 0 {
         0
     } else {
-        room_activity_unread_count(room)
+        let count = room.notification_count.max(room.highlight_count);
+        if count > 0 {
+            count
+        } else if room.marked_unread {
+            1
+        } else {
+            0
+        }
     }
 }
 
@@ -7579,6 +7614,30 @@ mod tests {
                     koushi_diagnostics::DiagnosticValue::Boolean(true),
                 ),
                 (
+                    "notification_mode",
+                    koushi_diagnostics::DiagnosticValue::Token("unknown"),
+                ),
+                (
+                    "display_count",
+                    koushi_diagnostics::DiagnosticValue::Count(2)
+                ),
+                (
+                    "has_unread_content",
+                    koushi_diagnostics::DiagnosticValue::Boolean(true),
+                ),
+                (
+                    "is_attention_highlighted",
+                    koushi_diagnostics::DiagnosticValue::Boolean(true),
+                ),
+                (
+                    "has_unread_mention",
+                    koushi_diagnostics::DiagnosticValue::Boolean(true),
+                ),
+                (
+                    "is_muted",
+                    koushi_diagnostics::DiagnosticValue::Boolean(false),
+                ),
+                (
                     "latest_event_present",
                     koushi_diagnostics::DiagnosticValue::Boolean(false),
                 ),
@@ -7700,7 +7759,23 @@ mod tests {
                     "unread_count",
                     koushi_diagnostics::DiagnosticValue::Count(1),
                 ),
+                (
+                    "notification_count",
+                    koushi_diagnostics::DiagnosticValue::Count(1),
+                ),
                 ("badge_count", koushi_diagnostics::DiagnosticValue::Count(1),),
+                (
+                    "badge_source",
+                    koushi_diagnostics::DiagnosticValue::Token("raw_unread_messages"),
+                ),
+                (
+                    "badge_room_count",
+                    koushi_diagnostics::DiagnosticValue::Count(1),
+                ),
+                (
+                    "badge_excluded_room_count",
+                    koushi_diagnostics::DiagnosticValue::Count(0),
+                ),
                 (
                     "candidate",
                     koushi_diagnostics::DiagnosticValue::Token("message"),

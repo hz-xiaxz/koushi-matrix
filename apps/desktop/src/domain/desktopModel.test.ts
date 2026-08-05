@@ -124,7 +124,7 @@ describe("desktop model", () => {
     expect(sidebar.dm_unread_count).toBe(3);
   });
 
-  test("sidebar badges ignore plain unread counts that are absent from activity unread", () => {
+  test("sidebar badges include plain unread counts and project display semantics", () => {
     const spaces: SpaceSummary[] = [
       {
         space_id: "!space-a:example.invalid",
@@ -168,14 +168,27 @@ describe("desktop model", () => {
       markedDm
     ]);
 
-    expect(sidebar.account_home.unread_count).toBe(3);
-    expect(sidebar.space_rail[0]?.unread_count).toBe(2);
-    expect(activeSpaceSidebar.space_unread_count).toBe(2);
+    expect(sidebar.account_home.unread_count).toBe(6);
+    expect(sidebar.space_rail[0]?.unread_count).toBe(5);
+    expect(activeSpaceSidebar.space_unread_count).toBe(5);
     expect(sidebar.dm_unread_count).toBe(1);
-    expect(
-      activeSpaceSidebar.space_rooms.find((room) => room.room_id === plainUnread.room_id)
-        ?.unread_count
-    ).toBe(0);
+    const plain = activeSpaceSidebar.space_rooms.find(
+      (room) => room.room_id === plainUnread.room_id
+    );
+    expect(plain?.unread_count).toBe(1);
+    expect(plain?.display_count).toBe(0);
+    expect(plain?.has_unread_content).toBe(true);
+    expect(plain?.is_attention_highlighted).toBe(false);
+
+    const notifiedItem = activeSpaceSidebar.space_rooms.find(
+      (room) => room.room_id === notified.room_id
+    );
+    expect(notifiedItem?.display_count).toBe(2);
+    expect(notifiedItem?.is_attention_highlighted).toBe(true);
+
+    const markedItem = sidebar.global_dms.find((room) => room.room_id === markedDm.room_id);
+    expect(markedItem?.display_count).toBe(0);
+    expect(markedItem?.has_unread_content).toBe(true);
   });
 
   test("active space global_dms shows only DMs whose dm_space_ids includes that space", () => {

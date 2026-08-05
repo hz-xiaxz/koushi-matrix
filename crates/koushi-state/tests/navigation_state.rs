@@ -122,11 +122,18 @@ fn search_crawler_settings_standard() -> SearchCrawlerSettings {
     SearchCrawlerSettings::default()
 }
 
-fn initial_attention_diagnostic(unread_count: u64, active_room_match: bool) -> AppEffect {
+fn initial_attention_diagnostic(
+    unread_count: u64,
+    badge_room_count: u64,
+    active_room_match: bool,
+) -> AppEffect {
     AppEffect::RecordNativeAttentionRecomputed {
         observation: NativeAttentionObservationKind::InitialSync,
         unread_count,
+        notification_count: unread_count,
         badge_count: unread_count,
+        badge_room_count,
+        badge_excluded_room_count: 0,
         candidate: None,
         suppression: (unread_count > 0).then_some(NativeAttentionSuppressionReason::InitialSync),
         window_focused: true,
@@ -513,7 +520,7 @@ fn room_list_update_replaces_state_and_emits_room_list_event() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
-            initial_attention_diagnostic(10, false),
+            initial_attention_diagnostic(10, 3, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
@@ -570,7 +577,7 @@ fn room_list_update_selects_first_room_when_no_room_is_active() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
-            initial_attention_diagnostic(10, false),
+            initial_attention_diagnostic(10, 3, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
@@ -661,7 +668,7 @@ fn room_list_update_clears_missing_active_space_and_room() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
-            initial_attention_diagnostic(0, false),
+            initial_attention_diagnostic(0, 1, false),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec!["global-room".to_owned()],
                 settings: search_crawler_settings_standard(),
@@ -822,7 +829,7 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
-            initial_attention_diagnostic(7, true),
+            initial_attention_diagnostic(7, 2, true),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec!["room-a".to_owned(), "room-b".to_owned()],
@@ -932,7 +939,7 @@ fn room_list_update_moves_active_room_when_it_disappears_from_selected_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
-            initial_attention_diagnostic(2, false),
+            initial_attention_diagnostic(2, 1, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec!["room-b".to_owned()],
@@ -999,7 +1006,7 @@ fn room_list_update_keeps_active_dm_global_with_selected_space() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
-            initial_attention_diagnostic(10, false),
+            initial_attention_diagnostic(10, 3, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
@@ -1219,7 +1226,7 @@ fn room_list_update_keeps_empty_selected_space_empty() {
         effects,
         vec![
             AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
-            initial_attention_diagnostic(10, false),
+            initial_attention_diagnostic(10, 3, false),
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
             AppEffect::NotifySearchCrawlerRoomsAvailable {
                 room_ids: vec![
@@ -1388,15 +1395,21 @@ fn sidebar_aggregate_badges_ignore_muted_rooms_but_room_items_keep_counts() {
     let sidebar =
         compose_sidebar_with_account_facts(None, &spaces(), &rooms(), &notification_settings, 0);
 
+    let muted = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "room-a")
+        .expect("muted room should remain in the room list");
     assert_eq!(
-        sidebar
-            .space_rooms
-            .iter()
-            .find(|room| room.room_id == "room-a")
-            .map(|room| room.unread_count),
-        Some(5),
-        "muted rooms still show their own unread count"
+        muted.unread_count, 5,
+        "muted rooms keep their activity count"
     );
+    assert_eq!(
+        muted.display_count, 5,
+        "muted rows display raw unread messages"
+    );
+    assert!(muted.is_muted);
+    assert!(!muted.is_attention_highlighted);
     assert_eq!(sidebar.account_home.unread_count, 5);
     assert_eq!(sidebar.account_home.highlight_count, 0);
     assert_eq!(sidebar.space_rail[0].unread_count, 0);
@@ -1483,7 +1496,7 @@ fn compose_sidebar_without_invites_reports_no_pending_invites() {
 }
 
 #[test]
-fn sidebar_badges_ignore_plain_unread_counts_absent_from_activity_unread() {
+fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
     let spaces = vec![SpaceSummary {
         space_id: "space-a".to_owned(),
         display_name: "Space A".to_owned(),
@@ -1558,18 +1571,60 @@ fn sidebar_badges_ignore_plain_unread_counts_absent_from_activity_unread() {
 
     let sidebar = compose_sidebar(None, &spaces, &rooms);
 
-    assert_eq!(sidebar.account_home.unread_count, 3);
-    assert_eq!(sidebar.space_rail[0].unread_count, 2);
-    assert_eq!(sidebar.space_unread_count, 2);
+    assert_eq!(sidebar.account_home.unread_count, 6);
+    assert_eq!(sidebar.space_rail[0].unread_count, 5);
+    assert_eq!(sidebar.space_unread_count, 5);
     assert_eq!(sidebar.dm_unread_count, 1);
-    assert_eq!(
-        sidebar
-            .space_rooms
-            .iter()
-            .find(|room| room.room_id == "plain")
-            .map(|room| room.unread_count),
-        Some(0)
+    let plain = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "plain")
+        .expect("plain room should be projected");
+    assert_eq!(plain.unread_count, 1);
+    assert_eq!(plain.display_count, 0);
+    assert!(plain.has_unread_content);
+    assert!(!plain.is_attention_highlighted);
+    assert!(!plain.has_unread_mention);
+
+    let notified = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "notified")
+        .expect("notified room should be projected");
+    assert_eq!(notified.display_count, 2);
+    assert!(notified.is_attention_highlighted);
+
+    let marked = sidebar
+        .global_dms
+        .iter()
+        .find(|room| room.room_id == "marked-dm")
+        .expect("marked DM should be projected");
+    assert_eq!(marked.display_count, 0);
+    assert!(marked.has_unread_content);
+}
+
+#[test]
+fn marking_a_room_unread_does_not_fabricate_an_unread_message_count() {
+    let mut state = ready_state();
+    let mut room = rooms().remove(0);
+    room.unread_count = 0;
+    room.notification_count = 0;
+    room.highlight_count = 0;
+    state.rooms = vec![room];
+
+    reduce(
+        &mut state,
+        AppAction::RoomMarkedAsUnreadSucceeded {
+            request_id: 1,
+            room_id: "room-a".to_owned(),
+            unread: true,
+        },
     );
+
+    let room = state.rooms.first().expect("room should remain projected");
+    assert!(room.marked_unread);
+    assert_eq!(room.unread_count, 0);
+    assert_eq!(state.native_attention.summary.badge_count, 0);
 }
 
 #[test]

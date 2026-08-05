@@ -815,12 +815,6 @@ pub(crate) fn handle_room_marked_as_unread_succeeded(
     let _ = request_id;
     if let Some(room) = state.rooms.iter_mut().find(|room| room.room_id == room_id) {
         room.marked_unread = unread;
-        if unread && room.unread_count == 0 {
-            room.unread_count = 1;
-        }
-        if !unread {
-            room.unread_count = 0;
-        }
         recompute_room_list_projection(state);
     }
     vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
