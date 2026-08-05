@@ -23,7 +23,8 @@ import {
   RefreshCw,
   Search,
   Settings,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { t } from "../i18n/messages";
 import type {
@@ -80,6 +81,13 @@ function sortedSidebarRooms(
     });
     return nameOrder || left.room_id.localeCompare(right.room_id);
   });
+}
+
+function filterSidebarRooms(rooms: RoomListItem[], query: string): RoomListItem[] {
+  const normalized = query.trim().toLocaleLowerCase();
+  return normalized.length === 0
+    ? rooms
+    : rooms.filter((room) => room.display_name.toLocaleLowerCase().includes(normalized));
 }
 
 /**
@@ -800,8 +808,11 @@ export function Sidebar({
   const presence = snapshot.state.domain.live_signals.presence;
   const [roomCategory, setRoomCategory] = useState<SidebarRoomCategory>(readSidebarRoomCategory);
   const [roomSort, setRoomSort] = useState<SidebarRoomSort>(readSidebarRoomSort);
+  const [roomFilter, setRoomFilter] = useState("");
+  const activeSpaceId = snapshot.state.ui.navigation.active_space_id;
   const roomCategoryRooms = roomCategory === "dms" ? snapshot.sidebar.global_dms : sections.rooms;
-  const visibleCategoryRooms = sortedSidebarRooms(roomCategoryRooms, roomSort);
+  const sortedCategoryRooms = sortedSidebarRooms(roomCategoryRooms, roomSort);
+  const visibleCategoryRooms = filterSidebarRooms(sortedCategoryRooms, roomFilter);
   const visibleNotJoinedRooms =
     accountHomeActive || roomCategory !== "rooms"
       ? []
@@ -815,8 +826,13 @@ export function Sidebar({
     childOnly: snapshot.state.domain.space_members.child_room_only.length
   };
 
+  useEffect(() => {
+    setRoomFilter("");
+  }, [activeSpaceId]);
+
   function selectRoomCategory(category: SidebarRoomCategory) {
     setRoomCategory(category);
+    setRoomFilter("");
     writeSidebarRoomCategory(category);
   }
 
@@ -926,6 +942,13 @@ export function Sidebar({
             roomHighlights={snapshot.sidebar.space_highlight_count}
             selectedCategory={roomCategory}
             selectedSort={roomSort}
+            filter={roomFilter}
+            filterPlaceholder={
+              roomCategory === "dms"
+                ? t("roomList.filterDmsPlaceholder")
+                : t("roomList.filterRoomsPlaceholder")
+            }
+            onFilterChange={setRoomFilter}
             onSelectCategory={selectRoomCategory}
             onSelectSort={selectRoomSort}
           />
@@ -945,6 +968,11 @@ export function Sidebar({
             onSelectRoom={onSelectRoom}
             onToggleCollapsed={() => toggleSection("not-joined")}
           />
+        ) : null}
+        {roomCategoryRooms.length > 0 && visibleCategoryRooms.length === 0 ? (
+          <div className="room-list-no-matches" role="status">
+            {t(roomCategory === "dms" ? "roomList.noMatchingDms" : "roomList.noMatchingRooms")}
+          </div>
         ) : null}
         <RoomSection
           activeRoomId={activeRoomId}
@@ -1004,6 +1032,9 @@ function RoomListControls({
   roomHighlights,
   selectedCategory,
   selectedSort,
+  filter,
+  filterPlaceholder,
+  onFilterChange,
   onSelectCategory,
   onSelectSort
 }: {
@@ -1015,6 +1046,9 @@ function RoomListControls({
   roomHighlights: number;
   selectedCategory: SidebarRoomCategory;
   selectedSort: SidebarRoomSort;
+  filter: string;
+  filterPlaceholder: string;
+  onFilterChange: (value: string) => void;
   onSelectCategory: (category: SidebarRoomCategory) => void;
   onSelectSort: (sort: SidebarRoomSort) => void;
 }) {
@@ -1086,6 +1120,33 @@ function RoomListControls({
         >
           {t("roomList.sortName")}
         </button>
+      </div>
+      <div className="room-list-filter">
+        <Search size={ICON_SIZE.input} aria-hidden="true" />
+        <ImeTextField
+          aria-label={filterPlaceholder}
+          className="room-list-filter-input"
+          type="search"
+          value={filter}
+          onChange={(event) => onFilterChange(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && filter.length > 0) {
+              event.preventDefault();
+              onFilterChange("");
+            }
+          }}
+          placeholder={filterPlaceholder}
+        />
+        {filter.length > 0 ? (
+          <button
+            className="icon-button room-list-filter-clear"
+            type="button"
+            aria-label={t("roomList.clearFilter")}
+            onClick={() => onFilterChange("")}
+          >
+            <X size={ICON_SIZE.input} aria-hidden="true" />
+          </button>
+        ) : null}
       </div>
     </div>
   );

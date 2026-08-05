@@ -1483,6 +1483,42 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.room-list-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text-faint);
+  background: var(--surface);
+}
+
+.room-list-filter-input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  padding: 2px 0;
+  color: var(--text);
+  background: transparent;
+  outline: none;
+}
+
+.room-list-filter-clear {
+  flex: 0 0 auto;
+  inline-size: 22px;
+  block-size: 22px;
+  padding: 0;
+}
+
+.room-list-no-matches {
+  margin: 8px 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .room-list-chip {
   display: inline-flex;
   align-items: center;

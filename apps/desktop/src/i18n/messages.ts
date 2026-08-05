@@ -444,6 +444,11 @@ export type MessageId =
   | "roomList.filterPeople"
   | "roomList.filterFavourites"
   | "roomList.filterInvites"
+  | "roomList.filterDmsPlaceholder"
+  | "roomList.filterRoomsPlaceholder"
+  | "roomList.clearFilter"
+  | "roomList.noMatchingDms"
+  | "roomList.noMatchingRooms"
   | "roomList.sort"
   | "roomList.sortLabel"
   | "roomList.sortActive"
@@ -1633,6 +1638,11 @@ const en: Catalog = {
   "roomList.filterPeople": "Direct Messages",
   "roomList.filterFavourites": "Favourites",
   "roomList.filterInvites": "Invites",
+  "roomList.filterDmsPlaceholder": "Filter direct messages",
+  "roomList.filterRoomsPlaceholder": "Filter rooms",
+  "roomList.clearFilter": "Clear room list filter",
+  "roomList.noMatchingDms": "No matching direct messages",
+  "roomList.noMatchingRooms": "No matching rooms",
   "roomList.sort": "Room list sort",
   "roomList.sortLabel": "Sort",
   "roomList.sortActive": "Active",
@@ -2722,6 +2732,11 @@ const ja: Catalog = {
   "roomList.filterPeople": "Direct Messages",
   "roomList.filterFavourites": "お気に入り",
   "roomList.filterInvites": "招待",
+  "roomList.filterDmsPlaceholder": "DMを絞り込む",
+  "roomList.filterRoomsPlaceholder": "ルームを絞り込む",
+  "roomList.clearFilter": "ルームリストの絞り込みをクリア",
+  "roomList.noMatchingDms": "一致するDMがありません",
+  "roomList.noMatchingRooms": "一致するルームがありません",
   "roomList.sort": "ルームリストの並び順",
   "roomList.sortLabel": "並び順",
   "roomList.sortActive": "アクティブ",
