@@ -764,7 +764,7 @@ fn descriptor_from_image_variant(
         100 - i64::try_from(variant.bytes.len().saturating_mul(100) / original_len).unwrap_or(100)
     };
     PreparedUploadVariant {
-        variant_id: variant.id.clone(),
+        variant_id: MediaPreparationRegistry::output_identity(selection),
         resize: selection.resize,
         format_choice: selection.format,
         filename: variant.filename.clone(),
@@ -937,6 +937,7 @@ mod tests {
             ImageUploadCompressionPolicy::default(),
         )
         .expect("resized HEIF Keep should use the compatible JPEG path");
+        assert_eq!(resized_keep.variant_id, "half-keep");
         assert_eq!(resized_keep.mime_type, "image/jpeg");
         assert_eq!(resized_keep.width, Some(32));
         assert_eq!(resized_keep.height, Some(32));
