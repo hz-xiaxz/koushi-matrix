@@ -592,6 +592,7 @@ describe("TimelineView", () => {
 
     await waitFor(() => {
       expect(textarea.textContent).toBe("hello\nworld");
+      expect(inlineMentionEditorSelection(textarea)).toEqual({ start: 6, end: 6 });
     });
 
     fireEvent.click(screen.getByRole("button", { name: /save edit/i }));

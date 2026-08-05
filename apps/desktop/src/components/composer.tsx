@@ -41,9 +41,8 @@ import {
 import { EmojiPicker } from "./EmojiPicker";
 import {
   ImeInlineMentionEditor,
+  type ImeInlineMentionEditorHandle,
   ImeSafeForm,
-  inlineMentionEditorSelection,
-  setInlineMentionEditorSelection
 } from "./ImeTextControl";
 import {
   ICON_SIZE,
@@ -139,7 +138,7 @@ export const Composer = memo(function Composer({
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
-  const editorRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<ImeInlineMentionEditorHandle>(null);
   const documentEpochRef = useRef(0);
   const keyResolutionPendingRef = useRef(false);
   const mountedRef = useRef(true);
@@ -214,6 +213,14 @@ export const Composer = memo(function Composer({
     onDocumentChange(nextDocument);
   }
 
+  function commitEditorMutation(mutation: { document: ComposerDocument; selection: DocumentSelection }) {
+    if (editorRef.current) {
+      editorRef.current.commit(mutation);
+      return;
+    }
+    updateLocalDocument(mutation.document, mutation.selection);
+  }
+
   function replaceTextRange(
     start: number,
     end: number,
@@ -227,10 +234,9 @@ export const Composer = memo(function Composer({
       replacement ? [{ kind: "text", text: replacement }] : []
     );
     const cursor = start + cursorOffset;
-    updateLocalDocument(nextDocument, { start: cursor, end: cursor });
+    commitEditorMutation({ document: nextDocument, selection: { start: cursor, end: cursor } });
     requestAnimationFrame(() => {
       editorRef.current?.focus();
-      if (editorRef.current) setInlineMentionEditorSelection(editorRef.current, cursor);
     });
   }
 
@@ -249,9 +255,7 @@ export const Composer = memo(function Composer({
   }
 
   function selectionRange(): DocumentSelection {
-    return editorRef.current
-      ? inlineMentionEditorSelection(editorRef.current)
-      : documentSelection;
+    return editorRef.current?.selection() ?? documentSelection;
   }
 
   function keepComposerFocus(event: MouseEvent<HTMLButtonElement>) {
@@ -323,10 +327,9 @@ export const Composer = memo(function Composer({
       " "
     ).document;
     const cursor = activeMention.start + 2;
-    updateLocalDocument(nextDocument, { start: cursor, end: cursor });
+    commitEditorMutation({ document: nextDocument, selection: { start: cursor, end: cursor } });
     requestAnimationFrame(() => {
       editorRef.current?.focus();
-      if (editorRef.current) setInlineMentionEditorSelection(editorRef.current, cursor);
     });
   }
 
@@ -408,7 +411,10 @@ export const Composer = memo(function Composer({
           const end = lineEnd === -1 ? documentLength(localDocument) : lineEnd;
           macKillRingRef.current = copyDocumentRange(localDocument, range.start, end);
           const next = replaceDocumentRange(localDocument, range.start, end, []);
-          updateLocalDocument(next, { start: range.start, end: range.start });
+          commitEditorMutation({
+            document: next,
+            selection: { start: range.start, end: range.start }
+          });
           return;
         }
         if (emacsAction === "yank") {
@@ -418,7 +424,7 @@ export const Composer = memo(function Composer({
             range.end,
             macKillRingRef.current
           );
-          updateLocalDocument(mutation.document, mutation.selection);
+          commitEditorMutation(mutation);
           return;
         }
         const effect = applyMacEmacsAction(
@@ -429,7 +435,10 @@ export const Composer = memo(function Composer({
           macKillRingRef.current
         );
         if (effect && editorRef.current) {
-          setInlineMentionEditorSelection(editorRef.current, effect.newSelectionPos);
+          editorRef.current.setSelection({
+            start: effect.newSelectionPos,
+            end: effect.newSelectionPos
+          });
           setDocumentSelection({ start: effect.newSelectionPos, end: effect.newSelectionPos });
         }
         return;
@@ -488,7 +497,7 @@ export const Composer = memo(function Composer({
             intentSelection.end,
             "\n"
           );
-          updateLocalDocument(mutation.document, mutation.selection);
+          commitEditorMutation(mutation);
           return;
         }
         if (action === "acceptAutocomplete") {

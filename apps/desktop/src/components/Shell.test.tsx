@@ -532,6 +532,128 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("region", { name: "Direct Messages" })).toBeNull();
   });
 
+  it("filters direct messages by trimmed display name without changing category totals", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.selectSpace(null);
+    const dmRows = snapshot.sidebar.global_dms.slice(0, 2);
+    if (dmRows.length < 2) {
+      throw new Error("expected at least two fake direct messages");
+    }
+    dmRows[0].display_name = "Alice Example";
+    dmRows[1].display_name = "Bob Example";
+
+    render(
+      <Sidebar
+        activeRoomId={snapshot.state.ui.navigation.active_room_id}
+        activeView="activity"
+        snapshot={snapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onSelectRoom={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /DMs/ }));
+    const total = snapshot.sidebar.global_dms.length;
+    const filter = screen.getByRole("searchbox", { name: "Filter direct messages" });
+    fireEvent.change(filter, { target: { value: "  ALICE  " } });
+
+    expect(screen.getByRole("button", { name: "Alice Example" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Bob Example" })).toBeNull();
+    expect(screen.getByRole("button", { name: new RegExp(`DMs.*${total}`) })).toBeTruthy();
+  });
+
+  it("shows a distinct no-match state and clears the query with Escape or the clear button", async () => {
+    const api = createBrowserFakeApi();
+    const snapshot = await api.selectSpace(null);
+    snapshot.sidebar.global_dms = snapshot.sidebar.global_dms.slice(0, 2).map((room, index) => ({
+      ...room,
+      display_name: index === 0 ? "Alice Example" : "Bob Example"
+    }));
+
+    render(
+      <Sidebar
+        activeRoomId={snapshot.state.ui.navigation.active_room_id}
+        activeView="activity"
+        snapshot={snapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onSelectRoom={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /DMs/ }));
+    const filter = screen.getByRole("searchbox", { name: "Filter direct messages" });
+    fireEvent.change(filter, { target: { value: "missing" } });
+    expect(screen.getByRole("status").textContent).toBe("No matching direct messages");
+
+    fireEvent.keyDown(filter, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Alice Example" })).toBeTruthy();
+
+    fireEvent.change(filter, { target: { value: "bob" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clear room list filter" }));
+    expect(screen.getByRole("button", { name: "Alice Example" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Bob Example" })).toBeTruthy();
+  });
+
+  it("clears the filter when switching categories or active spaces", async () => {
+    const api = createBrowserFakeApi();
+    const homeSnapshot = await api.selectSpace(null);
+    const view = render(
+      <Sidebar
+        activeRoomId={homeSnapshot.state.ui.navigation.active_room_id}
+        activeView="activity"
+        snapshot={homeSnapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onSelectRoom={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /DMs/ }));
+    const dmFilter = screen.getByRole("searchbox", { name: "Filter direct messages" });
+    fireEvent.change(dmFilter, { target: { value: "alice" } });
+    fireEvent.click(screen.getByRole("button", { name: /Rooms/ }));
+    const roomFilter = screen.getByRole("searchbox", { name: "Filter rooms" });
+    expect((roomFilter as HTMLInputElement).value).toBe("");
+
+    fireEvent.change(roomFilter, { target: { value: "room" } });
+    const spaceSnapshot = await api.selectSpace("!space-alpha:example.invalid");
+    view.rerender(
+      <Sidebar
+        activeRoomId={spaceSnapshot.state.ui.navigation.active_room_id}
+        activeView="activity"
+        snapshot={spaceSnapshot}
+        onCreateRoom={() => undefined}
+        onNewDm={() => undefined}
+        onOpenContextMenu={() => undefined}
+        onOpenActivity={() => undefined}
+        onOpenExplore={() => undefined}
+        onOpenInvites={() => undefined}
+        onOpenSpaceInfo={() => undefined}
+        onSelectRoom={() => undefined}
+      />
+    );
+    expect(
+      (screen.getByRole("searchbox", { name: "Filter rooms" }) as HTMLInputElement).value
+    ).toBe("");
+  });
+
   it("shows online presence only on Direct Messages rows", async () => {
     const api = createBrowserFakeApi();
     const snapshot = await api.selectSpace(null);

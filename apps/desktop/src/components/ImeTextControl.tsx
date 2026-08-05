@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -271,7 +272,17 @@ export interface ImeInlineMentionEditorProps
   syncKey: string;
 }
 
-export const ImeInlineMentionEditor = forwardRef<HTMLDivElement, ImeInlineMentionEditorProps>(
+export interface ImeInlineMentionEditorHandle {
+  commit(mutation: DocumentMutation): void;
+  focus(): void;
+  selection(): DocumentSelection;
+  setSelection(selection: DocumentSelection): void;
+}
+
+export const ImeInlineMentionEditor = forwardRef<
+  ImeInlineMentionEditorHandle,
+  ImeInlineMentionEditorProps
+>(
   function ImeInlineMentionEditor(
     {
       document,
@@ -308,9 +319,8 @@ export const ImeInlineMentionEditor = forwardRef<HTMLDivElement, ImeInlineMentio
     const bindRef = useCallback(
       (node: HTMLDivElement | null) => {
         controlRef.current = node;
-        assignRef(forwardedRef, node);
       },
-      [forwardedRef]
+      []
     );
 
     useLayoutEffect(() => {
@@ -362,6 +372,20 @@ export const ImeInlineMentionEditor = forwardRef<HTMLDivElement, ImeInlineMentio
       const control = controlRef.current;
       return control ? documentSelectionFromDom(control) : { start: 0, end: 0 };
     }, []);
+
+    useImperativeHandle(
+      forwardedRef,
+      () => ({
+        commit: publish,
+        focus: () => controlRef.current?.focus(),
+        selection,
+        setSelection: (nextSelection) => {
+          const control = controlRef.current;
+          if (control) restoreDocumentSelection(control, nextSelection);
+        }
+      }),
+      [publish, selection]
+    );
 
     const publishDom = useCallback(
       (commitHistory = true) => {

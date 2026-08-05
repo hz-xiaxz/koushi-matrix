@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 image.workspace = true
+heif-oxide.workspace = true
 thiserror = "2"
 
 [dev-dependencies]

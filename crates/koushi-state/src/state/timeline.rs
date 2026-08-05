@@ -262,8 +262,9 @@ pub enum StagedUploadResizeChoice {
     Eighth,
 }
 
-/// Encoding the user chose for the upload. `Keep` re-encodes in the source
-/// format.
+/// Encoding the user chose for the upload. `Keep` preserves the source format;
+/// for decode-only HEIF, only the unscaled Original/Keep pair is exact and a
+/// resized Keep request is prepared as a compatible JPEG.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StagedUploadFormatChoice {
