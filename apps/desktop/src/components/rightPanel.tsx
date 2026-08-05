@@ -1,4 +1,4 @@
-import { type FormEvent, type RefObject } from "react";
+import { type FormEvent, type RefObject, useMemo } from "react";
 import { MoreHorizontal, X } from "lucide-react";
 import { t } from "../i18n/messages";
 import type {
@@ -64,6 +64,7 @@ import { MessageArticle, PinnedEventsList, SearchResults } from "./mediaLists";
 import { ThreadComposer } from "./composer";
 import { UploadStagingDialog } from "./dialogs";
 import type { OpenContextMenu } from "../app/uiShared";
+import { useStableEvent } from "./useStableEvent";
 
 export function ContextualRightPanel({
   activeRoom,
@@ -360,6 +361,20 @@ export function ContextualRightPanel({
   threadComposerDocumentOverride?: ComposerDocument;
 }) {
   const mediaDownloads = snapshot.state.ui.timeline.media_downloads ?? {};
+  const loadThreadPreview = useStableEvent(onThreadLoadStagedUploadPreview);
+  const threadTarget = snapshot.state.ui.thread ?? { kind: "closed" as const };
+  const threadPreviewRoomId =
+    threadTarget.kind === "opening" || threadTarget.kind === "open" ? threadTarget.room_id : null;
+  const threadPreviewRootEventId =
+    threadTarget.kind === "opening" || threadTarget.kind === "open"
+      ? threadTarget.root_event_id
+      : null;
+  const threadPreviewLoader = useMemo(() => {
+    return (stagedId: string, variantId: string) =>
+      threadPreviewRoomId && threadPreviewRootEventId
+        ? loadThreadPreview(threadPreviewRoomId, threadPreviewRootEventId, stagedId, variantId)
+        : Promise.resolve([]);
+  }, [loadThreadPreview, threadPreviewRoomId, threadPreviewRootEventId]);
 
   if (mode === "closed") {
     return <aside className="thread-pane" aria-label={t("panel.context")} />;
@@ -883,14 +898,7 @@ export function ContextualRightPanel({
           onUseOriginal={(stagedId) =>
             onThreadUseOriginalStagedUpload(threadRoomId, rootEventId, stagedId)
           }
-          loadPreview={(stagedId, variantId) =>
-            onThreadLoadStagedUploadPreview(
-              threadRoomId,
-              rootEventId,
-              stagedId,
-              variantId
-            )
-          }
+          loadPreview={threadPreviewLoader}
         />
       ) : null}
       <ThreadComposer

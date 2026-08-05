@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type {
@@ -11,6 +11,7 @@ import type {
   SpaceMemberEntry,
   SpaceMembersState,
   SpaceSummary,
+  StagedUploadItem,
   UserProfile
 } from "../domain/types";
 import { ContextualRightPanel } from "./rightPanel";
@@ -152,6 +153,87 @@ const snapshot = {
     ui: { timeline: { media_downloads: {} } }
   }
 } as unknown as DesktopSnapshot;
+
+function stagedThreadImage(caption: string): StagedUploadItem {
+  return {
+    staged_id: "staged-thread-image",
+    room_id: room.room_id,
+    position: 0,
+    filename: "thread-image.png",
+    mime_type: "image/png",
+    byte_count: 128,
+    kind: { kind: "image", width: 16, height: 16 },
+    caption: caption
+      ? { plain_body: caption, formatted_body: null, mentions: { targets: [] } }
+      : null,
+    compression_choice: { kind: "original" },
+    preparation: {
+      kind: "ready",
+      variants: [
+        {
+          variant_id: "original-keep",
+          resize: "original",
+          format_choice: "keep",
+          filename: "thread-image.png",
+          mime_type: "image/png",
+          byte_count: 128,
+          width: 16,
+          height: 16,
+          format: "original",
+          savings_percent: 0,
+          metadata_stripped: false,
+          thumbnail_refreshed: false
+        }
+      ],
+      selected: { resize: "original", format: "keep" },
+      pending: null,
+      generation: 1
+    }
+  };
+}
+
+function threadSnapshot(caption: string): DesktopSnapshot {
+  return {
+    ...snapshot,
+    state: {
+      ...snapshot.state,
+      domain: {
+        ...snapshot.state.domain,
+        live_signals: { presence: {} },
+        mention_candidates: { targets: [] },
+        settings: {
+          values: {
+            timeline: { auto_load_older_messages: false },
+            display: { code_block_wrap: false }
+          }
+        },
+        profile: { ignored_user_ids: [], users: {} },
+        room_interactions: {},
+        session: { user_id: "@current:example.invalid" }
+      },
+      ui: {
+        ...snapshot.state.ui,
+        thread: {
+          kind: "open",
+          room_id: room.room_id,
+          root_event_id: "$root:example.invalid",
+          intent: "existingThread",
+          is_subscribed: true,
+          composer: {
+            accepted_submission_ids: [],
+            pending_transaction_id: null,
+            draft_revision: "0",
+            last_accepted_clear_revision: "0",
+            draft: "",
+            document: { version: 2, inlines: [] },
+            mode: "Plain"
+          },
+          staged_uploads: [stagedThreadImage(caption)]
+        }
+      }
+    }
+  } as unknown as DesktopSnapshot;
+}
 
 type RightPanelProps = Parameters<typeof ContextualRightPanel>[0];
 
@@ -449,5 +531,43 @@ describe("ContextualRightPanel people composition", () => {
 
     expect(screen.getByText("In 1 child room")).toBeTruthy();
     expect(screen.queryByText(identifierRoomId)).toBeNull();
+  });
+});
+
+describe("ContextualRightPanel thread upload previews", () => {
+  test("does not reload an unchanged preview for caption-only snapshots", async () => {
+    const loadPreview = vi.fn(async () => [1, 2, 3]);
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:thread-preview");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const { rerender } = renderPanel({
+      mode: "thread",
+      snapshot: threadSnapshot("before"),
+      onThreadLoadStagedUploadPreview: loadPreview
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "Prepared attachment preview" })).toBeTruthy()
+    );
+    expect(loadPreview).toHaveBeenCalledTimes(1);
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ContextualRightPanel
+        {...defaultProps}
+        mode="thread"
+        snapshot={threadSnapshot("after")}
+        onThreadLoadStagedUploadPreview={loadPreview}
+      />
+    );
+
+    expect(loadPreview).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole("img", { name: "Prepared attachment preview" }).getAttribute("src")
+    ).toBe(
+      "blob:thread-preview"
+    );
+    expect(revokeObjectURL).not.toHaveBeenCalled();
   });
 });

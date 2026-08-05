@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -66,6 +65,7 @@ import {
 import { Composer } from "./composer";
 import { UploadStagingDialog } from "./dialogs";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
+import { useStableEvent } from "./useStableEvent";
 
 const EMPTY_PINNED_EVENTS: DesktopSnapshot["state"]["domain"]["room_interactions"][string]["pinned_events"] = [];
 
@@ -82,16 +82,6 @@ function activityTimestamp(timestampMs: number): string {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(timestampMs));
-}
-
-function useStableEvent<T extends (...args: any[]) => unknown>(handler: T): T {
-  const handlerRef = useRef(handler);
-
-  useEffect(() => {
-    handlerRef.current = handler;
-  }, [handler]);
-
-  return useCallback(((...args: any[]) => handlerRef.current(...args)) as T, []);
 }
 
 export function ActivityPane({
