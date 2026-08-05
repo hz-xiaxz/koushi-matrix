@@ -715,6 +715,30 @@ fn qa_window_visibility_mode_enabled() -> bool {
     matches!(std::env::var("KOUSHI_QA_TITLE").ok().as_deref(), Some("1"))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MacosCloseRequestedAction {
+    Hide,
+    ExitFullscreenAndHide,
+}
+
+fn macos_close_requested_action(is_fullscreen: Option<bool>) -> MacosCloseRequestedAction {
+    if is_fullscreen == Some(true) {
+        MacosCloseRequestedAction::ExitFullscreenAndHide
+    } else {
+        MacosCloseRequestedAction::Hide
+    }
+}
+
+impl MacosCloseRequestedAction {
+    #[cfg(target_os = "macos")]
+    fn diagnostic_token(self) -> &'static str {
+        match self {
+            Self::Hide => "hide",
+            Self::ExitFullscreenAndHide => "exit_fullscreen_and_hide",
+        }
+    }
+}
+
 fn persisted_window_state_from_window<R: tauri::Runtime>(
     window: &tauri::Window<R>,
 ) -> Result<PersistedWindowState, String> {
@@ -1243,7 +1267,11 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     let _ = persist_current_window_state(window);
+                    let action = macos_close_requested_action(window.is_fullscreen().ok());
                     api.prevent_close();
+                    if matches!(action, MacosCloseRequestedAction::ExitFullscreenAndHide) {
+                        let _ = window.set_fullscreen(false);
+                    }
                     let _ = window.hide();
                     koushi_diagnostics::record(
                         DiagnosticEvent::new(
@@ -1251,7 +1279,11 @@ pub fn run() {
                             "desktop.lifecycle",
                             "close_requested",
                         )
-                        .field(DiagnosticField::token("action", "hide")),
+                        .field(DiagnosticField::token("action", action.diagnostic_token()))
+                        .field(DiagnosticField::boolean(
+                            "was_fullscreen",
+                            matches!(action, MacosCloseRequestedAction::ExitFullscreenAndHide),
+                        )),
                     );
                     return;
                 }
@@ -1474,14 +1506,14 @@ mod tests {
         forwarded_webview_events_for_lag_resync, serialize_core_event,
     };
     use super::{
-        PersistedWindowState, WindowWorkArea, desktop_menu_items, desktop_standard_menu_items,
-        load_window_state_with_base, next_native_window_focus_generation,
-        observed_native_window_focus, persist_window_state_with_base,
-        persisted_window_state_from_geometry, persisted_window_state_is_restorable,
-        qa_control_pipe_path_from_env_value, qa_login_pipe_path_from_env_value,
-        restore_session_enabled_from_env_value, restored_window_geometry,
-        saved_sessions_disabled_from_env_value, window_event_should_persist,
-        window_event_should_stop_background_tasks, window_state_path,
+        MacosCloseRequestedAction, PersistedWindowState, WindowWorkArea, desktop_menu_items,
+        desktop_standard_menu_items, load_window_state_with_base, macos_close_requested_action,
+        next_native_window_focus_generation, observed_native_window_focus,
+        persist_window_state_with_base, persisted_window_state_from_geometry,
+        persisted_window_state_is_restorable, qa_control_pipe_path_from_env_value,
+        qa_login_pipe_path_from_env_value, restore_session_enabled_from_env_value,
+        restored_window_geometry, saved_sessions_disabled_from_env_value,
+        window_event_should_persist, window_event_should_stop_background_tasks, window_state_path,
     };
     use crate::commands::parse_qa_login_pipe_payload;
 
@@ -2239,6 +2271,39 @@ mod tests {
             .expect("CloseRequested handler should be explicit before persistence handling");
         assert!(close_handler.contains("prevent_close()"));
         assert!(close_handler.contains(".hide()"));
+    }
+
+    #[test]
+    fn macos_close_requested_exits_fullscreen_before_hiding() {
+        assert_eq!(
+            macos_close_requested_action(Some(true)),
+            MacosCloseRequestedAction::ExitFullscreenAndHide
+        );
+        assert_eq!(
+            macos_close_requested_action(Some(false)),
+            MacosCloseRequestedAction::Hide
+        );
+        assert_eq!(
+            macos_close_requested_action(None),
+            MacosCloseRequestedAction::Hide
+        );
+
+        let source = include_str!("lib.rs");
+        let close_handler = source
+            .split("tauri::WindowEvent::CloseRequested")
+            .nth(1)
+            .and_then(|rest| rest.split("if window_event_should_persist").next())
+            .expect("CloseRequested handler should be explicit before persistence handling");
+        assert!(close_handler.contains("window.is_fullscreen()"));
+        assert!(close_handler.contains("window.set_fullscreen(false)"));
+        assert!(
+            close_handler
+                .find("window.set_fullscreen(false)")
+                .expect("fullscreen close should exit fullscreen")
+                < close_handler
+                    .find("window.hide()")
+                    .expect("close should hide the window")
+        );
     }
 
     #[test]
