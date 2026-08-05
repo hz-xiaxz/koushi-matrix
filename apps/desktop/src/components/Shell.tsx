@@ -1360,7 +1360,7 @@ function RoomButton({
   const isOnlineDm = dmUserId ? presence[dmUserId] === "online" : false;
   const hasUnreadContent = room.has_unread_content ?? room.unread_count > 0;
   const displayCount = room.display_count ?? room.unread_count;
-  const mentionCount = room.has_unread_mention ?? (room.highlight_count ?? 0) > 0;
+  const mentionCount = room.highlight_count ?? (room.has_unread_mention ? 1 : 0);
   const attentionHighlighted = room.is_attention_highlighted ?? mentionCount;
   return (
     <button
