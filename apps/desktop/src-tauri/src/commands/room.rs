@@ -391,31 +391,37 @@ pub async fn repair_room_timeline(
 #[tauri::command]
 pub async fn reshare_room_key(
     room_id: String,
-    app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<RoomKeyReshareOutcome, String> {
     let mut event_conn = state.runtime.attach();
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_reshare_room_key_command(request_id, room_id))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
-        &mut event_conn,
-        request_id,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::RoomKeyReshared { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "room key reshare did not complete",
-        "room key reshare failed",
-    )
-    .await?;
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
+            .await
+            .map_err(|_| "room key reshare did not complete".to_owned())?;
+        match event {
+            Ok(CoreEvent::Room(RoomEvent::RoomKeyReshared {
+                request_id: event_request_id,
+                outcome,
+                ..
+            })) if event_request_id == request_id => return Ok(outcome),
+            Ok(CoreEvent::OperationFailed {
+                request_id: event_request_id,
+                failure,
+            }) if event_request_id == request_id => {
+                return Err(invoke_error_from_core_failure(
+                    "room key reshare failed",
+                    failure,
+                ));
+            }
+            Ok(_) | Err(_) => {}
+        }
+    }
 }
 
 #[tauri::command]

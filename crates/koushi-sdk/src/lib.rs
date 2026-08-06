@@ -7007,10 +7007,91 @@ pub async fn get_room_settings_snapshot(
 pub async fn reshare_room_key(
     session: &MatrixClientSession,
     room_id: &str,
-) -> Result<(), MatrixRoomOperationError> {
+) -> Result<MatrixRoomKeyReshareOutcome, MatrixRoomOperationError> {
+    force_reshare_room_key(
+        session,
+        room_id,
+        None,
+        MatrixRoomKeyReshareTarget::AllEligible,
+    )
+    .await
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct MatrixOutboundGroupSessionToken(matrix_sdk::room::OutboundGroupSessionToken);
+
+impl fmt::Debug for MatrixOutboundGroupSessionToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("MatrixOutboundGroupSessionToken(<redacted>)")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixRoomKeyReshareTarget {
+    OwnOtherDevices,
+    PeerDevices,
+    AllEligible,
+}
+
+impl From<MatrixRoomKeyReshareTarget> for matrix_sdk::room::RoomKeyReshareTarget {
+    fn from(value: MatrixRoomKeyReshareTarget) -> Self {
+        match value {
+            MatrixRoomKeyReshareTarget::OwnOtherDevices => Self::OwnOtherDevices,
+            MatrixRoomKeyReshareTarget::PeerDevices => Self::PeerDevices,
+            MatrixRoomKeyReshareTarget::AllEligible => Self::AllEligible,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixRoomKeyReshareOutcome {
+    Sent {
+        request_count: usize,
+        recipient_count: usize,
+    },
+    NoSession,
+    NoRecipients,
+    StaleSession,
+}
+
+pub async fn current_outbound_group_session_token(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<Option<MatrixOutboundGroupSessionToken>, MatrixRoomOperationError> {
     let room = matrix_room(session, room_id)?;
-    room.reshare_room_key()
+    room.current_outbound_group_session_token()
         .await
+        .map(|token| token.map(MatrixOutboundGroupSessionToken))
+        .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
+pub async fn force_reshare_room_key(
+    session: &MatrixClientSession,
+    room_id: &str,
+    expected: Option<&MatrixOutboundGroupSessionToken>,
+    target: MatrixRoomKeyReshareTarget,
+) -> Result<MatrixRoomKeyReshareOutcome, MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    room.force_reshare_room_key(expected.map(|token| &token.0), target.into())
+        .await
+        .map(|outcome| match outcome {
+            matrix_sdk::room::RoomKeyReshareResult::Sent {
+                request_count,
+                recipient_count,
+            } => MatrixRoomKeyReshareOutcome::Sent {
+                request_count,
+                recipient_count,
+            },
+            matrix_sdk::room::RoomKeyReshareResult::NoSession => {
+                MatrixRoomKeyReshareOutcome::NoSession
+            }
+            matrix_sdk::room::RoomKeyReshareResult::NoRecipients => {
+                MatrixRoomKeyReshareOutcome::NoRecipients
+            }
+            matrix_sdk::room::RoomKeyReshareResult::StaleSession => {
+                MatrixRoomKeyReshareOutcome::StaleSession
+            }
+        })
         .map_err(MatrixRoomOperationError::from_sdk_error)
 }
 

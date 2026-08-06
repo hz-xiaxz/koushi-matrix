@@ -88,6 +88,43 @@ afterEach(() => {
 });
 
 describe("RoomInfoPanel", () => {
+  test.each([
+    [{ kind: "sent", request_count: 1, recipient_count: 2 } as const, "Room keys were resent."],
+    [{ kind: "no_session" } as const, "No active room key is available to reshare."],
+    [{ kind: "no_recipients" } as const, "No eligible devices need this room key."],
+    [{ kind: "stale_session" } as const, "The active room key changed. Try again."]
+  ])("renders the manual reshare outcome %#", async (outcome, expected) => {
+    render(
+      <RoomInfoPanel
+        room={{ ...baseRoom, is_encrypted: true }}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        onReshareRoomKey={async () => outcome}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reshare room keys" }));
+
+    expect(await screen.findByText(expected)).toBeTruthy();
+  });
+
+  test("renders a reshare transport failure separately", async () => {
+    render(
+      <RoomInfoPanel
+        room={{ ...baseRoom, is_encrypted: true }}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        onReshareRoomKey={async () => {
+          throw new Error("offline");
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reshare room keys" }));
+
+    expect(await screen.findByText("Could not reshare room keys.")).toBeTruthy();
+  });
+
   test("saves join rule and history visibility independently", () => {
     const onUpdateRoomSetting = vi.fn();
     render(

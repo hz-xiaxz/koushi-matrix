@@ -25,6 +25,7 @@ import type {
   RoomManagementState,
   RoomNotificationMode,
   RoomNotificationSettings,
+  RoomKeyReshareOutcome,
   RoomSettingChange,
   RoomSummary,
   LinkPreviewSettingsState,
@@ -60,7 +61,7 @@ export function RoomInfoPanel({
   onInvitePeople?: () => void;
   onOpenFiles?: () => void;
   onSetRoomNotificationMode?: (roomId: string, mode: RoomNotificationMode) => void;
-  onReshareRoomKey?: (roomId: string) => void | Promise<void>;
+  onReshareRoomKey?: (roomId: string) => RoomKeyReshareOutcome | Promise<RoomKeyReshareOutcome>;
   onUpdateRoomSetting?: (roomId: string, change: RoomSettingChange) => void;
   onSetRoomUrlPreviewOverride?: (roomId: string, enabled: boolean) => void;
   onOpenPeople?: () => void;
@@ -101,7 +102,9 @@ export function RoomInfoPanel({
   );
   const [historyVisibilityDraft, setHistoryVisibilityDraft] =
     useState<RoomHistoryVisibility>(settings?.history_visibility ?? "shared");
-  const [reshareState, setReshareState] = useState<"idle" | "pending" | "success" | "error">("idle");
+  const [reshareState, setReshareState] = useState<
+    "idle" | "pending" | "error" | RoomKeyReshareOutcome
+  >("idle");
 
   useEffect(() => {
     setNameDraft(settings?.name ?? roomName);
@@ -129,8 +132,7 @@ export function RoomInfoPanel({
     }
     setReshareState("pending");
     try {
-      await onReshareRoomKey(roomId);
-      setReshareState("success");
+      setReshareState(await onReshareRoomKey(roomId));
     } catch {
       setReshareState("error");
     }
@@ -244,8 +246,18 @@ export function RoomInfoPanel({
               </span>
             </button>
             <p className="profile-settings-hint">{t("room.reshareRoomKeysHint")}</p>
-            {reshareState === "success" ? (
-              <p className="profile-settings-hint success">{t("room.reshareRoomKeysSuccess")}</p>
+            {typeof reshareState === "object" ? (
+              <p className="profile-settings-hint success">
+                {t(
+                  reshareState.kind === "sent"
+                    ? "room.reshareRoomKeysSuccess"
+                    : reshareState.kind === "no_session"
+                      ? "room.reshareRoomKeysNoSession"
+                      : reshareState.kind === "no_recipients"
+                        ? "room.reshareRoomKeysNoRecipients"
+                        : "room.reshareRoomKeysStaleSession"
+                )}
+              </p>
             ) : reshareState === "error" ? (
               <p className="profile-settings-hint error">{t("room.reshareRoomKeysError")}</p>
             ) : null}

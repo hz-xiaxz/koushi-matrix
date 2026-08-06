@@ -2871,12 +2871,13 @@ export function App() {
       message: "operation=manual_reshare stage=request"
     });
     try {
-      setSnapshot(await api.reshareRoomKey(roomId));
+      const outcome = await api.reshareRoomKey(roomId);
       appendDiagnosticLog({
         timestampMs: Date.now(),
         source: "e2ee.room_key",
-        message: "operation=manual_reshare stage=completed"
+        message: `operation=manual_reshare stage=completed outcome=${outcome.kind}`
       });
+      return outcome;
     } catch (error) {
       appendDiagnosticLog({
         timestampMs: Date.now(),

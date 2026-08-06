@@ -724,6 +724,7 @@ pub enum RoomEvent {
     RoomKeyReshared {
         request_id: RequestId,
         room_id: String,
+        outcome: RoomKeyReshareOutcome,
     },
     MarkedAsRead {
         request_id: RequestId,
@@ -739,6 +740,18 @@ pub enum RoomEvent {
         request_id: RequestId,
         kind: ReportKind,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RoomKeyReshareOutcome {
+    Sent {
+        request_count: usize,
+        recipient_count: usize,
+    },
+    NoSession,
+    NoRecipients,
+    StaleSession,
 }
 
 impl fmt::Debug for RoomEvent {
@@ -916,10 +929,15 @@ impl fmt::Debug for RoomEvent {
                 .field("target_user_id", &"UserId(..)")
                 .field("power_level", power_level)
                 .finish(),
-            Self::RoomKeyReshared { request_id, .. } => formatter
+            Self::RoomKeyReshared {
+                request_id,
+                outcome,
+                ..
+            } => formatter
                 .debug_struct("RoomKeyReshared")
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
+                .field("outcome", outcome)
                 .finish(),
             Self::MarkedAsRead { request_id, .. } => formatter
                 .debug_struct("MarkedAsRead")
@@ -3612,5 +3630,50 @@ mod tests {
             "{debug}"
         );
         assert!(debug.contains("AvatarImage"), "{debug}");
+    }
+
+    #[test]
+    fn room_key_reshare_outcomes_serialize_without_session_identifiers() {
+        let request_id = RequestId {
+            connection_id: crate::ids::RuntimeConnectionId(4),
+            sequence: 9,
+        };
+        for (outcome, expected) in [
+            (
+                RoomKeyReshareOutcome::Sent {
+                    request_count: 2,
+                    recipient_count: 3,
+                },
+                serde_json::json!({"kind": "sent", "request_count": 2, "recipient_count": 3}),
+            ),
+            (
+                RoomKeyReshareOutcome::NoSession,
+                serde_json::json!({"kind": "no_session"}),
+            ),
+            (
+                RoomKeyReshareOutcome::NoRecipients,
+                serde_json::json!({"kind": "no_recipients"}),
+            ),
+            (
+                RoomKeyReshareOutcome::StaleSession,
+                serde_json::json!({"kind": "stale_session"}),
+            ),
+        ] {
+            let event = RoomEvent::RoomKeyReshared {
+                request_id,
+                room_id: "!room:example.invalid".to_owned(),
+                outcome,
+            };
+            assert_eq!(
+                serde_json::to_value(event).unwrap(),
+                serde_json::json!({
+                    "RoomKeyReshared": {
+                        "request_id": {"connection_id": 4, "sequence": 9},
+                        "room_id": "!room:example.invalid",
+                        "outcome": expected
+                    }
+                })
+            );
+        }
     }
 }
