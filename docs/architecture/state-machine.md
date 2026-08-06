@@ -1340,7 +1340,7 @@ Message action affordances are also Rust-owned timeline projections.
 `TimelineItem.actions` carries `can_copy`, `can_forward`, `can_reply`,
 `can_permalink`, `can_view_source`, and an optional `permalink`. Rust sets
 `can_reply` only for a non-redacted stable event that is a replyable message
-target, proven by a non-empty projected body or a projected media attachment;
+target, proven by a projected body or a projected media attachment;
 state/non-message events and local echoes remain non-replyable. The permalink
 is generated in Rust from the owning `TimelineKey` room id plus the event id as a
 `https://matrix.to/#/<room>/<event>` URL. React may render or copy this value

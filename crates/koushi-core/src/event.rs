@@ -1543,7 +1543,7 @@ pub fn message_actions_for_timeline_item(
     TimelineMessageActions {
         can_copy: has_body && !is_redacted,
         can_forward: has_body && !is_redacted,
-        can_reply: !is_redacted && !event_id.trim().is_empty() && (has_body || has_media),
+        can_reply: !is_redacted && !event_id.trim().is_empty() && (body.is_some() || has_media),
         can_permalink: permalink.is_some(),
         can_view_source: !event_id.trim().is_empty(),
         permalink,
@@ -2949,6 +2949,21 @@ mod tests {
         );
 
         assert!(!actions.can_reply);
+    }
+
+    #[test]
+    fn message_actions_allow_reply_for_empty_text_body() {
+        let actions = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$empty-text:test".to_owned(),
+            },
+            Some(""),
+            false,
+            false,
+        );
+
+        assert!(actions.can_reply);
     }
 
     #[test]
