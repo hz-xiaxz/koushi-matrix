@@ -38,6 +38,7 @@ import type {
   RoomListProjection,
   RoomModerationAction,
   RoomNotificationMode,
+  RoomKeyReshareOutcome,
   RoomNotificationSettings,
   InviteTargetCandidate,
   InviteHistoryPolicy,
@@ -295,7 +296,7 @@ export interface DesktopApi {
   removeRoomTag(roomId: string, tag: RoomTagKind): Promise<DesktopSnapshot>;
   pinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   unpinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  reshareRoomKey(roomId: string): Promise<DesktopSnapshot>;
+  reshareRoomKey(roomId: string): Promise<RoomKeyReshareOutcome>;
   openActivity(): Promise<DesktopSnapshot>;
   closeActivity(): Promise<DesktopSnapshot>;
   setActivityTab(tab: ActivityTab): Promise<DesktopSnapshot>;
@@ -3050,8 +3051,8 @@ class BrowserFakeApi implements DesktopApi {
         .concat(target);
   }
 
-  async reshareRoomKey(_roomId: string): Promise<DesktopSnapshot> {
-    return this.getSnapshot();
+  async reshareRoomKey(_roomId: string): Promise<RoomKeyReshareOutcome> {
+    return { kind: "sent", request_count: 1, recipient_count: 1 };
   }
 
   async repairRoomTimeline(_roomId: string): Promise<DesktopSnapshot> {

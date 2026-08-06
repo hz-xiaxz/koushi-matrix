@@ -412,6 +412,9 @@ export type MessageId =
   | "room.reshareRoomKeysHint"
   | "room.reshareRoomKeysPending"
   | "room.reshareRoomKeysSuccess"
+  | "room.reshareRoomKeysNoSession"
+  | "room.reshareRoomKeysNoRecipients"
+  | "room.reshareRoomKeysStaleSession"
   | "room.reshareRoomKeysError"
   | "room.saveAccess"
   | "room.saveHistoryVisibility"
@@ -1605,6 +1608,9 @@ const en: Catalog = {
   "room.reshareRoomKeysHint": "Send this room's known decryption keys again to eligible, unblocked devices.",
   "room.reshareRoomKeysPending": "Resharing keys…",
   "room.reshareRoomKeysSuccess": "Room keys were resent.",
+  "room.reshareRoomKeysNoSession": "No active room key is available to reshare.",
+  "room.reshareRoomKeysNoRecipients": "No eligible devices need this room key.",
+  "room.reshareRoomKeysStaleSession": "The active room key changed. Try again.",
   "room.reshareRoomKeysError": "Could not reshare room keys.",
   "room.saveAccess": "Save access",
   "room.saveHistoryVisibility": "Save history visibility",
@@ -2699,6 +2705,9 @@ const ja: Catalog = {
   "room.reshareRoomKeysHint": "このルームで保持している復号鍵を、対象となるブロックされていないデバイスへ再送します。",
   "room.reshareRoomKeysPending": "鍵を再共有中…",
   "room.reshareRoomKeysSuccess": "ルーム鍵を再送しました。",
+  "room.reshareRoomKeysNoSession": "再共有できる有効なルーム鍵がありません。",
+  "room.reshareRoomKeysNoRecipients": "このルーム鍵を必要とする対象デバイスはありません。",
+  "room.reshareRoomKeysStaleSession": "有効なルーム鍵が変わりました。もう一度お試しください。",
   "room.reshareRoomKeysError": "ルーム鍵を再共有できませんでした。",
   "room.saveAccess": "アクセス設定を保存",
   "room.saveHistoryVisibility": "履歴の表示範囲を保存",

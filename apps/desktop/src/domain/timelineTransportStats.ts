@@ -13,6 +13,7 @@
 export interface TimelineTransportStats {
   received: number;
   keyMismatchDropped: number;
+  keyMismatchGroups: Record<string, number>;
   initialItemsApplied: number;
   lastInitialItemsCount: number;
   /**
@@ -28,6 +29,7 @@ function zeroed(): TimelineTransportStats {
   return {
     received: 0,
     keyMismatchDropped: 0,
+    keyMismatchGroups: {},
     initialItemsApplied: 0,
     lastInitialItemsCount: 0,
     resync: 0
@@ -35,13 +37,31 @@ function zeroed(): TimelineTransportStats {
 }
 
 let stats: TimelineTransportStats = zeroed();
+let lastMismatchSummaryMs: number | null = null;
+const MISMATCH_SUMMARY_INTERVAL_MS = 30_000;
 
 export function recordTimelineEventReceived(): void {
   stats.received += 1;
 }
 
-export function recordTimelineKeyMismatch(): void {
+export function recordTimelineKeyMismatch(
+  currentKind: string,
+  eventKind: string,
+  accountMatch: boolean,
+  roomMatch: boolean,
+  nowMs = Date.now()
+): boolean {
   stats.keyMismatchDropped += 1;
+  const group = `${currentKind}:${eventKind}:${accountMatch ? "account_match" : "account_mismatch"}:${roomMatch ? "room_match" : "room_mismatch"}`;
+  stats.keyMismatchGroups[group] = (stats.keyMismatchGroups[group] ?? 0) + 1;
+  if (
+    lastMismatchSummaryMs !== null &&
+    nowMs - lastMismatchSummaryMs < MISMATCH_SUMMARY_INTERVAL_MS
+  ) {
+    return false;
+  }
+  lastMismatchSummaryMs = nowMs;
+  return true;
 }
 
 export function recordTimelineInitialItems(count: number): void {
@@ -54,9 +74,10 @@ export function recordTimelineResync(): void {
 }
 
 export function getTimelineTransportStats(): TimelineTransportStats {
-  return { ...stats };
+  return { ...stats, keyMismatchGroups: { ...stats.keyMismatchGroups } };
 }
 
 export function resetTimelineTransportStats(): void {
   stats = zeroed();
+  lastMismatchSummaryMs = null;
 }

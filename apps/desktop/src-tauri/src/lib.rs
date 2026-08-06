@@ -2424,15 +2424,15 @@ mod tests {
                 EventCacheFailureReasonClass, EventCacheSubscribeStatus, IntentNoOpReason,
                 IntentOutcome, LinkPreview, LinkPreviewImage, LinkPreviewState, LiveSignalsEvent,
                 LocalEncryptionEvent, NativeAttentionEvent, PaginationDirection, PaginationState,
-                ReactionGroup, RoomEvent, SearchEvent, SyncEvent, ThreadRootProjectionDto,
-                ThreadRootProjectionStateDto, ThreadSummaryDto, ThreadsListEvent,
-                TimelineAnchorRestoreStatus, TimelineCodeBlock, TimelineDisplayLabelUpdate,
-                TimelineEvent, TimelineFormattedBody, TimelineGapId, TimelineGapPosition,
-                TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind,
-                TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions,
-                TimelineMessageKind, TimelineMessageSource, TimelineNavigationSnapshot,
-                TimelineResyncReason, TimelineSendFailureReason, TimelineSendState,
-                TimelineSpoilerSpan, TimelineUnreadPosition,
+                ReactionGroup, RoomEvent, RoomKeyReshareOutcome, SearchEvent, SyncEvent,
+                ThreadRootProjectionDto, ThreadRootProjectionStateDto, ThreadSummaryDto,
+                ThreadsListEvent, TimelineAnchorRestoreStatus, TimelineCodeBlock,
+                TimelineDisplayLabelUpdate, TimelineEvent, TimelineFormattedBody, TimelineGapId,
+                TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia,
+                TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail,
+                TimelineMessageActions, TimelineMessageKind, TimelineMessageSource,
+                TimelineNavigationSnapshot, TimelineResyncReason, TimelineSendFailureReason,
+                TimelineSendState, TimelineSpoilerSpan, TimelineUnreadPosition,
             },
             failure::{CoreFailure, TimelineFailureKind},
             ids::{RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration},
@@ -3267,6 +3267,16 @@ mod tests {
             room_left["event"]["RoomLeft"]["room_id"],
             json!("!r:example.test")
         );
+        let room_key_reshared =
+            serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyReshared {
+                request_id,
+                room_id: "!r:example.test".to_owned(),
+                outcome: RoomKeyReshareOutcome::Sent {
+                    request_count: 2,
+                    recipient_count: 3,
+                },
+            }))
+            .expect("serialize room key reshare outcome");
 
         let room_invite_accepted =
             serialize_core_event(&CoreEvent::Room(RoomEvent::InviteAccepted {
@@ -3822,6 +3832,7 @@ mod tests {
             "roomInviteAccepted": room_invite_accepted,
             "roomInviteDeclined": room_invite_declined,
             "roomLeft": room_left,
+            "roomKeyReshared": room_key_reshared,
             "roomMarkedAsRead": room_marked_as_read,
             "roomMarkedAsUnread": room_marked_as_unread,
             "roomReportCompleted": room_report_completed,
@@ -3962,6 +3973,7 @@ mod tests {
             "roomInviteAccepted",
             "roomInviteDeclined",
             "roomLeft",
+            "roomKeyReshared",
             "roomMarkedAsRead",
             "roomMarkedAsUnread",
             "roomMemberModerated",

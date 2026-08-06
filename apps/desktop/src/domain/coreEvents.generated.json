@@ -372,6 +372,23 @@
     },
     "kind": "Room"
   },
+  "roomKeyReshared": {
+    "event": {
+      "RoomKeyReshared": {
+        "outcome": {
+          "kind": "sent",
+          "recipient_count": 3,
+          "request_count": 2
+        },
+        "request_id": {
+          "connection_id": 3,
+          "sequence": 7
+        },
+        "room_id": "!r:example.test"
+      }
+    },
+    "kind": "Room"
+  },
   "roomMarkedAsRead": {
     "event": {
       "MarkedAsRead": {

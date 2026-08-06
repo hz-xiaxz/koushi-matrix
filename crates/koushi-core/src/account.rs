@@ -1889,12 +1889,13 @@ impl AccountActor {
         let data_dir = store_actor.data_dir().to_path_buf();
         // Spawn RoomActor once at AccountActor creation. It starts with no
         // session and waits for RoomMessage::SyncStarted.
-        let room_actor = crate::room::RoomActor::spawn(
+        let account_work = crate::account_work::AccountWorkScheduler::default();
+        let room_actor = crate::room::RoomActor::spawn_with_account_work(
             action_tx.clone(),
             event_tx.clone(),
             sliding_sync_diagnostics.clone(),
+            account_work.clone(),
         );
-        let account_work = crate::account_work::AccountWorkScheduler::default();
         let (navigation_projection, navigation_projection_rx) =
             NavigationProjectionIngress::channel();
         // Spawn TimelineManagerActor. It starts with no session; the session
@@ -17420,12 +17421,13 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let (self_tx, command_rx) = mpsc::channel(16);
         let data_dir_path = store.data_dir().to_path_buf();
-        let room_actor = crate::room::RoomActor::spawn(
+        let account_work = crate::account_work::AccountWorkScheduler::default();
+        let room_actor = crate::room::RoomActor::spawn_with_account_work(
             action_tx.clone(),
             event_tx.clone(),
             crate::SlidingSyncDiagnostics::default(),
+            account_work.clone(),
         );
-        let account_work = crate::account_work::AccountWorkScheduler::default();
         let (navigation_projection, navigation_projection_rx) =
             NavigationProjectionIngress::channel();
         let timeline_manager = crate::timeline::TimelineManagerActor::spawn(

@@ -22,11 +22,11 @@ use koushi_core::{
     CoreFailure, CreateRoomOptions, EventStreamLag, ImageUploadCompressionPolicy,
     ImageUploadCompressionState, ImageUploadDimensions, ImageUploadVariantKind, IntentNoOpReason,
     IntentOutcome, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand, RoomEvent,
-    RoomKeyExportRequest, RoomKeyImportRequest, SearchCommand, SearchEvent, SearchScope,
-    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
-    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
-    TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind, UploadMediaRequest,
-    UploadMediaThumbnail,
+    RoomKeyExportRequest, RoomKeyImportRequest, RoomKeyReshareOutcome, SearchCommand, SearchEvent,
+    SearchScope, SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
+    SyncCommand, TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId,
+    TimelineGeneration, TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind,
+    UploadMediaRequest, UploadMediaThumbnail,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{

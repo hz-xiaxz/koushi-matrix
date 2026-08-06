@@ -26,6 +26,7 @@ import type {
   RoomListFilter,
   RoomModerationAction,
   RoomNotificationMode,
+  RoomKeyReshareOutcome,
   RoomSettingChange,
   RoomTagKind,
   SavedSessionInfo,
@@ -654,8 +655,8 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("unpin_event", { roomId, eventId });
   }
 
-  async reshareRoomKey(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("reshare_room_key", { roomId });
+  async reshareRoomKey(roomId: string): Promise<RoomKeyReshareOutcome> {
+    return invoke<RoomKeyReshareOutcome>("reshare_room_key", { roomId });
   }
 
   async loadRoomSettings(roomId: string): Promise<DesktopSnapshot> {

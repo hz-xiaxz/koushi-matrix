@@ -11,6 +11,7 @@ import type {
   ComposerDocument,
   ResolveComposerKeyAction,
   RoomModerationAction,
+  RoomKeyReshareOutcome,
   RoomNotificationMode,
   RoomSettingChange,
   SavedSessionInfo,
@@ -122,7 +123,7 @@ export function ContextualRightPanel({
   onSetRoomNotificationMode = () => undefined,
   onStartDirectMessage = () => undefined,
   onUpdateMemberRole = () => undefined,
-  onReshareRoomKey = () => undefined,
+  onReshareRoomKey,
   onRecoverySecretPresenceChange,
   onReply,
   onResultSelect,
@@ -251,7 +252,7 @@ export function ContextualRightPanel({
     targetUserId: string,
     powerLevel: number
   ) => void;
-  onReshareRoomKey?: (roomId: string) => void;
+  onReshareRoomKey?: (roomId: string) => Promise<RoomKeyReshareOutcome>;
   onRecoverySecretPresenceChange: (value: boolean) => void;
   onReply: TimelineRowActionHandlers["onReply"];
   onResultSelect: (roomId: string, eventId: string) => void;

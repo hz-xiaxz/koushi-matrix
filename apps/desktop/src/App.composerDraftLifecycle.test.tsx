@@ -40,7 +40,7 @@ afterEach(async () => {
 });
 
 describe("App composer draft lifecycle", () => {
-  test("clears a dirty composition-owned main composer after accepted clear", async () => {
+  test("clears a committed IME draft after accepted clear", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
     await api.selectRoom(roomId);
@@ -57,6 +57,7 @@ describe("App composer draft lifecycle", () => {
     await act(async () => {
       fireEvent.compositionStart(composer);
       changeInlineEditorText(composer, "sent text");
+      fireEvent.compositionEnd(composer);
     });
     expect(composer.textContent).toBe("sent text");
 

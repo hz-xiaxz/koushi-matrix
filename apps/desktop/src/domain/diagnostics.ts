@@ -188,13 +188,35 @@ export interface SecurityDiagnostics {
   avatarBrokenImages: number;
 }
 
-export function appendDiagnosticLogEntry(
-  entries: readonly DiagnosticLogEntry[],
-  entry: DiagnosticLogEntry,
+export function createDiagnosticLogBuffer(
   limit = DEFAULT_DIAGNOSTIC_LOG_LIMIT
-): DiagnosticLogEntry[] {
+): {
+  append(entry: DiagnosticLogEntry): void;
+  snapshot(): Pick<DiagnosticLogSnapshot, "entries" | "droppedEntries">;
+} {
   const normalizedLimit = Math.max(1, Math.trunc(limit));
-  return [...entries, entry].slice(-normalizedLimit);
+  const entries = new Array<DiagnosticLogEntry>(normalizedLimit);
+  let start = 0;
+  let size = 0;
+  let droppedEntries = 0;
+  return {
+    append(entry) {
+      if (size < normalizedLimit) {
+        entries[(start + size) % normalizedLimit] = entry;
+        size += 1;
+        return;
+      }
+      entries[start] = entry;
+      start = (start + 1) % normalizedLimit;
+      droppedEntries += 1;
+    },
+    snapshot() {
+      return {
+        entries: Array.from({ length: size }, (_, index) => entries[(start + index) % normalizedLimit]),
+        droppedEntries
+      };
+    }
+  };
 }
 
 export interface DiagnosticReportInput {
@@ -264,7 +286,7 @@ export function diagnosticReport({
       : []),
     ...(timelineTransportStats
       ? [
-          `Timeline transport: received=${timelineTransportStats.received} key_dropped=${timelineTransportStats.keyMismatchDropped} initial_applied=${timelineTransportStats.initialItemsApplied} last_initial_items=${timelineTransportStats.lastInitialItemsCount} resync=${timelineTransportStats.resync}`
+          `Timeline transport: received=${timelineTransportStats.received} key_dropped=${timelineTransportStats.keyMismatchDropped} mismatch_groups=${formatCountGroups(timelineTransportStats.keyMismatchGroups)} initial_applied=${timelineTransportStats.initialItemsApplied} last_initial_items=${timelineTransportStats.lastInitialItemsCount} resync=${timelineTransportStats.resync}`
         ]
       : []),
     `Search crawler running=${crawler.running} queued=${crawler.queued}: processed=${crawler.processed} indexed=${crawler.indexed}`,
@@ -303,6 +325,7 @@ export function diagnosticReport({
       ? [
           `timeline_evt_received=${timelineTransportStats.received}`,
           `timeline_evt_key_dropped=${timelineTransportStats.keyMismatchDropped}`,
+          `timeline_evt_key_mismatch_groups=${formatCountGroups(timelineTransportStats.keyMismatchGroups)}`,
           `timeline_initial_applied=${timelineTransportStats.initialItemsApplied}`,
           `timeline_last_initial_items=${timelineTransportStats.lastInitialItemsCount}`,
           `timeline_resync=${timelineTransportStats.resync}`
@@ -366,6 +389,13 @@ function formatSlidingSyncDiagnostics(sync: SlidingSyncDiagnostics | undefined):
 
 function normalizedCount(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
+function formatCountGroups(groups: Record<string, number>): string {
+  const entries = Object.entries(groups).sort(([left], [right]) => left.localeCompare(right));
+  return entries.length === 0
+    ? "none"
+    : entries.map(([key, count]) => `${safeLogToken(key)}:${normalizedCount(count)}`).join(",");
 }
 
 function formatSecurityDiagnostics(security: SecurityDiagnostics | undefined): string[] {

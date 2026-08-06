@@ -40,6 +40,7 @@ import {
 import type { LiveSignalsState, TimelineContinuityState } from "../domain/types";
 import type { MentionCandidate } from "../app/uiShared";
 import { documentFromText } from "../domain/composerDocument";
+import { resetTimelineTransportStats } from "../domain/timelineTransportStats";
 import {
   inlineMentionEditorSelection,
   setInlineMentionEditorSelection
@@ -2308,6 +2309,7 @@ describe("TimelineView", () => {
   });
 
   it("emits privacy-safe focused store lookup and event-key mismatch diagnostics", async () => {
+    resetTimelineTransportStats();
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onDiagnosticLogEntry = vi.fn();
     const focusedKey = focusedTimelineKey(
@@ -2367,7 +2369,7 @@ describe("TimelineView", () => {
         expect.objectContaining({
           source: "timeline.key",
           message: expect.stringContaining(
-            "stage=event_dropped current_kind=focused event_kind=focused"
+            "stage=event_dropped_summary current_kind=focused event_kind=focused"
           ) as unknown as string
         })
       );
@@ -2375,8 +2377,8 @@ describe("TimelineView", () => {
     const diagnostics = onDiagnosticLogEntry.mock.calls
       .map(([entry]) => `${entry.source} ${entry.message}`)
       .join("\n");
-    expect(diagnostics).toContain("current_key=");
-    expect(diagnostics).toContain("event_key=");
+    expect(diagnostics).toContain("account_match=true");
+    expect(diagnostics).toContain("room_match=true");
     expect(diagnostics).not.toContain("@alice:example.invalid");
     expect(diagnostics).not.toContain("!room:example.invalid");
     expect(diagnostics).not.toContain("$target:example.invalid");

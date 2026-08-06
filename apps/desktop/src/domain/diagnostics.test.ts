@@ -3,7 +3,7 @@ import { COMPOSER_DRAFT_REVISION_ZERO } from "./composerDraftRevision";
 
 import { createBrowserFakeApi } from "../backend/browserFakeApi";
 import {
-  appendDiagnosticLogEntry,
+  createDiagnosticLogBuffer,
   DEFAULT_DIAGNOSTIC_LOG_LIMIT,
   diagnosticReport,
   schemaMismatchDiagnosticEntry,
@@ -508,6 +508,7 @@ describe("diagnosticReport", () => {
       timelineTransportStats: {
         received: 9,
         keyMismatchDropped: 9,
+        keyMismatchGroups: { "room:thread:account_match:room_match": 9 },
         initialItemsApplied: 0,
         lastInitialItemsCount: 0,
         resync: 3
@@ -521,7 +522,7 @@ describe("diagnosticReport", () => {
     expect(report).toContain("state_delta_stale_ignored=340");
     expect(report).toContain("state_delta_gap_refresh=2");
     expect(report).toContain(
-      "Timeline transport: received=9 key_dropped=9 initial_applied=0 last_initial_items=0 resync=3"
+      "Timeline transport: received=9 key_dropped=9 mismatch_groups=room:thread:account_match:room_match:9 initial_applied=0 last_initial_items=0 resync=3"
     );
     expect(report).toContain("timeline_evt_received=9");
     expect(report).toContain("timeline_evt_key_dropped=9");
@@ -573,19 +574,14 @@ describe("diagnosticReport", () => {
 
   test("bounds diagnostic log entries while preserving chronological append order", () => {
     expect(DEFAULT_DIAGNOSTIC_LOG_LIMIT).toBeGreaterThanOrEqual(10_000);
+    const buffer = createDiagnosticLogBuffer(2);
+    buffer.append({ timestampMs: 1, source: "timeline", message: "old" });
+    buffer.append({ timestampMs: 2, source: "timeline", message: "middle" });
+    buffer.append({ timestampMs: 3, source: "timeline", message: "new" });
 
-    const entries = appendDiagnosticLogEntry(
-      [
-        { timestampMs: 1, source: "timeline", message: "old" },
-        { timestampMs: 2, source: "timeline", message: "middle" }
-      ],
-      { timestampMs: 3, source: "timeline", message: "new" },
-      2
-    );
-
-    expect(entries).toEqual([
+    expect(buffer.snapshot()).toEqual({ entries: [
       { timestampMs: 2, source: "timeline", message: "middle" },
       { timestampMs: 3, source: "timeline", message: "new" }
-    ]);
+    ], droppedEntries: 1 });
   });
 });

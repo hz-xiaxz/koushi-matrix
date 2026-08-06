@@ -81,9 +81,10 @@ use koushi_state::{ProfileResolutionInput, ProfileResolutionSource, resolve_peop
 use matrix_sdk::ruma::events::direct::DirectEvent;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
 use crate::direct_message_classification::{DirectAccountDataSource, DirectClassificationState};
-use crate::event::{CoreEvent, ReportKind, RoomEvent};
+use crate::event::{CoreEvent, ReportKind, RoomEvent, RoomKeyReshareOutcome};
 use crate::executor;
 use crate::failure::{CoreFailure, RoomFailureKind};
 use crate::ids::{RequestId, RuntimeConnectionId};
@@ -98,6 +99,52 @@ const CREATE_SPACE_FAILED_MESSAGE: &str = "Space creation failed";
 const LINK_SPACE_CHILD_FAILED_MESSAGE: &str = "Linking the room to the space failed";
 
 type SpaceChildLinkKey = (String, String);
+
+fn room_key_reshare_outcome_from_sdk(
+    outcome: koushi_sdk::MatrixRoomKeyReshareOutcome,
+) -> RoomKeyReshareOutcome {
+    match outcome {
+        koushi_sdk::MatrixRoomKeyReshareOutcome::Sent {
+            request_count,
+            recipient_count,
+        } => RoomKeyReshareOutcome::Sent {
+            request_count,
+            recipient_count,
+        },
+        koushi_sdk::MatrixRoomKeyReshareOutcome::NoSession => RoomKeyReshareOutcome::NoSession,
+        koushi_sdk::MatrixRoomKeyReshareOutcome::NoRecipients => {
+            RoomKeyReshareOutcome::NoRecipients
+        }
+        koushi_sdk::MatrixRoomKeyReshareOutcome::StaleSession => {
+            RoomKeyReshareOutcome::StaleSession
+        }
+    }
+}
+
+fn record_manual_room_key_reshare(outcome: &koushi_sdk::MatrixRoomKeyReshareOutcome) {
+    let (token, request_count, recipient_count) = match outcome {
+        koushi_sdk::MatrixRoomKeyReshareOutcome::Sent {
+            request_count,
+            recipient_count,
+        } => ("sent", *request_count, *recipient_count),
+        koushi_sdk::MatrixRoomKeyReshareOutcome::NoSession => ("no_session", 0, 0),
+        koushi_sdk::MatrixRoomKeyReshareOutcome::NoRecipients => ("no_recipients", 0, 0),
+        koushi_sdk::MatrixRoomKeyReshareOutcome::StaleSession => ("cancelled", 0, 0),
+    };
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
+            .field(DiagnosticField::token("trigger", "manual"))
+            .field(DiagnosticField::token("outcome", token))
+            .field(DiagnosticField::count(
+                "request_count",
+                request_count.try_into().unwrap_or(u64::MAX),
+            ))
+            .field(DiagnosticField::count(
+                "recipient_count",
+                recipient_count.try_into().unwrap_or(u64::MAX),
+            )),
+    );
+}
 
 const SPACE_MEMBER_REFRESH_CONNECTION_ID: RuntimeConnectionId = RuntimeConnectionId(0);
 const ROOM_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
@@ -320,6 +367,7 @@ pub struct RoomActor {
     sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     self_tx: mpsc::Sender<RoomMessage>,
     command_rx: mpsc::Receiver<RoomMessage>,
+    account_work: AccountWorkScheduler,
 }
 
 #[derive(Clone)]
@@ -351,6 +399,20 @@ impl RoomActor {
         event_tx: broadcast::Sender<CoreEvent>,
         sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     ) -> RoomActorHandle {
+        Self::spawn_with_account_work(
+            action_tx,
+            event_tx,
+            sliding_sync_diagnostics,
+            AccountWorkScheduler::default(),
+        )
+    }
+
+    pub(crate) fn spawn_with_account_work(
+        action_tx: mpsc::Sender<Vec<AppAction>>,
+        event_tx: broadcast::Sender<CoreEvent>,
+        sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+        account_work: AccountWorkScheduler,
+    ) -> RoomActorHandle {
         let (tx, command_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let actor = RoomActor {
             session: None,
@@ -377,6 +439,7 @@ impl RoomActor {
             sliding_sync_diagnostics,
             self_tx: tx.clone(),
             command_rx,
+            account_work,
         };
         let task = executor::spawn(actor.run());
         RoomActorHandle {
@@ -1960,14 +2023,31 @@ impl RoomActor {
             return;
         };
 
+        let _interactive = self
+            .account_work
+            .begin_interactive(AccountWorkKind::UserRoomOperation);
         match koushi_sdk::reshare_room_key(session, &room_id).await {
-            Ok(()) => {
+            Ok(outcome) => {
+                record_manual_room_key_reshare(&outcome);
                 self.emit(CoreEvent::Room(RoomEvent::RoomKeyReshared {
                     request_id,
                     room_id,
+                    outcome: room_key_reshare_outcome_from_sdk(outcome),
                 }));
             }
             Err(error) => {
+                let outcome = if error.failure_kind()
+                    == Some(koushi_sdk::MatrixRoomOperationFailureKind::Http)
+                {
+                    "network_error"
+                } else {
+                    "sdk_error"
+                };
+                record(
+                    DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
+                        .field(DiagnosticField::token("trigger", "manual"))
+                        .field(DiagnosticField::token("outcome", outcome)),
+                );
                 let kind = classify_room_error(&error);
                 self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
             }

@@ -819,6 +819,12 @@ export interface RoomTags {
   low_priority: RoomTagInfo | null;
 }
 
+export type RoomKeyReshareOutcome =
+  | { kind: "sent"; request_count: number; recipient_count: number }
+  | { kind: "no_session" }
+  | { kind: "no_recipients" }
+  | { kind: "stale_session" };
+
 export interface RoomSummary {
   room_id: string;
   display_name: string;
