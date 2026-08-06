@@ -3901,6 +3901,14 @@ async fn run_live_room_list_observation_with_sources(
                     );
                     break;
                 };
+                // #446: a room-store snapshot may drive ONE projection and
+                // reconciliation decision, but it must never become the ordered
+                // accumulator that later index-based diffs address. Keep it in a
+                // separate one-shot vector so `current` stays owned by the
+                // dynamic-adapter diff stream.
+                let mut observed_snapshot: Option<
+                    eyeball_im::Vector<matrix_sdk_ui::room_list_service::RoomListItem>,
+                > = None;
                 match command {
                     RoomListObservationCommand::Refresh => {
                         // Read through the same live service that owns the
@@ -3943,18 +3951,15 @@ async fn run_live_room_list_observation_with_sources(
                         if let Some(range_fully_loaded) = snapshot.range_fully_loaded() {
                             reconciliation.report_range_fully_loaded(range_fully_loaded);
                         }
-                        // #446: this store snapshot is one-shot inspection only,
-                        // and its scalar metadata above is safe to report. Its
-                        // ENTRIES are not: they come from
+                        // #446: project these entries once, but do NOT assign
+                        // them to `current`. They come from
                         // `client.rooms_stream()`, which is not the
-                        // filtered/sorted/paged order that owns `current`.
-                        // Assigning them here let the next index-based
-                        // `Set`/`Move` overwrite the wrong entry, producing one
-                        // duplicate room id, one silently lost room, and a joined
-                        // Space vanishing from the sidebar. The dynamic adapter
-                        // reads the same room store, so the invite this refresh
-                        // was chasing arrives as an ordered diff on the entries
-                        // stream; the pending acknowledgement waits for it.
+                        // filtered/sorted/paged order the diff indices refer to,
+                        // so making them the accumulator let the next
+                        // `Set`/`Move` overwrite the wrong entry: one duplicate
+                        // room id, one silently lost room, and a joined Space
+                        // vanishing from the sidebar.
+                        observed_snapshot = Some(snapshot.into_entries());
                     }
                     RoomListObservationCommand::RefreshRoom { room_id } => {
                         let requested_room_id =
@@ -3992,10 +3997,9 @@ async fn run_live_room_list_observation_with_sources(
                         if let Some(range_fully_loaded) = snapshot.range_fully_loaded() {
                             reconciliation.report_range_fully_loaded(range_fully_loaded);
                         }
-                        // #446: inspection only. `remember_room_id` above is the
-                        // correlated way to bring this room into the ordered
-                        // adapter stream; replacing the accumulator from the
-                        // room store corrupts the next index-based diff.
+                        // #446: one-shot observation only; the ordered accumulator
+                        // stays owned by the adapter's diff stream.
+                        observed_snapshot = Some(snapshot.into_entries());
                     }
                     RoomListObservationCommand::Reconcile {
                         backend_generation,
@@ -4038,10 +4042,9 @@ async fn run_live_room_list_observation_with_sources(
                         }
                         reconciliation.report_maximum(maximum_number_of_rooms);
                         reconciliation.report_range_fully_loaded(true);
-                        // #446: never replace the ordered accumulator here. The
-                        // pending acknowledgement waits for the adapter's own
-                        // diff or Reset, which is the only correctly ordered
-                        // source for an index-based diff stream.
+                        // #446: reconcile from this authoritative observation
+                        // without poisoning the ordered accumulator.
+                        observed_snapshot = Some(snapshot.into_entries());
                         reconciliation.begin(
                             backend_generation,
                             snapshot_sequence
@@ -4054,7 +4057,7 @@ async fn run_live_room_list_observation_with_sources(
                 project_live_entries_and_ack_if_reconciled(
                     &mut reconciliation,
                     &session,
-                    &current,
+                    observed_snapshot.as_ref().unwrap_or(&current),
                     &direct_state,
                     &known_room_ids,
                     &room_tx,
