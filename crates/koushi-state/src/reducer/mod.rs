@@ -5,8 +5,9 @@ use crate::{
         AccountManagementCapabilities, AccountManagementState, ActivityState, AppState,
         DeviceSessionListState, DirectoryState, E2eeKeyManagementState, E2eeTrustState,
         FilesViewState, FocusedContextState, LocalEncryptionState, NavigationState, QrLoginState,
-        SearchState, SessionState, SoftLogoutReauthState, ThreadAttentionState, ThreadPaneState,
-        ThreadsListState, TimelinePaneState, VerificationFlowState, compute_room_list_projection,
+        SearchState, SessionState, SoftLogoutReauthState, SpaceConversationSurface,
+        SpaceNavigationSelection, ThreadAttentionState, ThreadPaneState, ThreadsListState,
+        TimelinePaneState, VerificationFlowState, compute_room_list_projection,
     },
 };
 
@@ -1919,28 +1920,54 @@ pub(crate) fn room_exists(state: &AppState, room_id: &str) -> bool {
     state.rooms.iter().any(|room| room.room_id == room_id)
 }
 
-pub(crate) fn retain_navigation_room_memory(state: &mut AppState) {
-    let valid_pairs = state
+pub(crate) fn retain_navigation_room_memory(state: &mut AppState, authoritative: bool) {
+    // #445: a provisional or incomplete Sliding Sync projection is not evidence
+    // that a remembered conversation is gone. Pruning on one erased a valid
+    // selection during the window before the authoritative projection landed,
+    // so only an authoritative projection may invalidate memory here.
+    if !authoritative {
+        return;
+    }
+
+    let known_space_ids = state
         .spaces
         .iter()
-        .flat_map(|space| {
-            space
-                .child_room_ids
-                .iter()
-                .map(|room_id| (space.space_id.clone(), room_id.clone()))
-        })
-        .filter(|(_, room_id)| {
-            state
-                .rooms
-                .iter()
-                .any(|room| room.room_id == *room_id && !room.is_dm)
-        })
+        .map(|space| space.space_id.clone())
         .collect::<BTreeSet<_>>();
 
-    state
+    let retained_legacy = state
         .navigation
         .last_room_by_space_id
-        .retain(|space_id, room_id| valid_pairs.contains(&(space_id.clone(), room_id.clone())));
+        .iter()
+        .filter(|(space_id, room_id)| room_belongs_to_space(state, room_id, space_id))
+        .map(|(space_id, room_id)| (space_id.clone(), room_id.clone()))
+        .collect::<BTreeMap<_, _>>();
+
+    let retained_selections = state
+        .navigation
+        .last_selection_by_space_id
+        .iter()
+        .filter(|(space_id, _)| known_space_ids.contains(space_id.as_str()))
+        .map(|(space_id, selection)| {
+            // A Space the user still has keeps its surface memory even when the
+            // remembered conversation itself became inaccessible.
+            let room_id = selection
+                .room_id
+                .as_deref()
+                .filter(|room_id| room_belongs_to_space(state, room_id, space_id))
+                .map(str::to_owned);
+            (
+                space_id.clone(),
+                SpaceNavigationSelection {
+                    surface: selection.surface,
+                    room_id,
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    state.navigation.last_room_by_space_id = retained_legacy;
+    state.navigation.last_selection_by_space_id = retained_selections;
 }
 
 pub(crate) fn active_room_left_selected_space(state: &AppState, active_room_id: &str) -> bool {
@@ -2209,7 +2236,28 @@ pub(crate) fn remember_active_room_for_current_space(state: &mut AppState) {
     let Some(room_id) = state.navigation.active_room_id.clone() else {
         return;
     };
-    if room_belongs_to_space(state, &room_id, &space_id) {
+    if !room_belongs_to_space(state, &room_id, &space_id) {
+        return;
+    }
+    let is_dm = state
+        .rooms
+        .iter()
+        .any(|room| room.room_id == room_id && room.is_dm);
+    let surface = if is_dm {
+        SpaceConversationSurface::Dms
+    } else {
+        SpaceConversationSurface::Rooms
+    };
+    state.navigation.last_selection_by_space_id.insert(
+        space_id.clone(),
+        SpaceNavigationSelection {
+            surface,
+            room_id: Some(room_id.clone()),
+        },
+    );
+    if !is_dm {
+        // Keep the legacy map non-DM-only so an older build reading the same
+        // persisted `navigation.v1` payload behaves exactly as it did before.
         state
             .navigation
             .last_room_by_space_id
@@ -2217,14 +2265,63 @@ pub(crate) fn remember_active_room_for_current_space(state: &mut AppState) {
     }
 }
 
-fn preferred_room_id_in_space(state: &AppState, space_id: &str) -> Option<String> {
-    state
+/// The remembered selection for a Space, validated against what that Space can
+/// currently show, with a deterministic fallback (#445).
+pub(crate) fn preferred_selection_in_space(
+    state: &AppState,
+    space_id: &str,
+) -> SpaceNavigationSelection {
+    if let Some(selection) = state.navigation.last_selection_by_space_id.get(space_id) {
+        if let Some(room_id) = selection.room_id.as_deref()
+            && room_belongs_to_space(state, room_id, space_id)
+        {
+            return selection.clone();
+        }
+        if selection.surface == SpaceConversationSurface::Dms {
+            // The remembered DM is no longer visible here, but the surface is
+            // still valid memory: fall back inside that surface rather than
+            // silently switching the user back to Rooms.
+            return SpaceNavigationSelection {
+                surface: SpaceConversationSurface::Dms,
+                room_id: first_dm_room_id_in_space(state, space_id),
+            };
+        }
+    }
+    if let Some(room_id) = state
         .navigation
         .last_room_by_space_id
         .get(space_id)
         .filter(|room_id| room_belongs_to_space(state, room_id, space_id))
-        .cloned()
-        .or_else(|| first_room_id_in_space(state, space_id))
+    {
+        // Migration path: a payload persisted before `last_selection_by_space_id`
+        // existed only ever recorded non-DM rooms.
+        return SpaceNavigationSelection {
+            surface: SpaceConversationSurface::Rooms,
+            room_id: Some(room_id.clone()),
+        };
+    }
+    SpaceNavigationSelection {
+        surface: SpaceConversationSurface::Rooms,
+        room_id: first_room_id_in_space(state, space_id),
+    }
+}
+
+fn preferred_room_id_in_space(state: &AppState, space_id: &str) -> Option<String> {
+    preferred_selection_in_space(state, space_id).room_id
+}
+
+fn first_dm_room_id_in_space(state: &AppState, space_id: &str) -> Option<String> {
+    state
+        .rooms
+        .iter()
+        .find(|room| {
+            room.is_dm
+                && room
+                    .dm_space_ids
+                    .iter()
+                    .any(|candidate| candidate == space_id)
+        })
+        .map(|room| room.room_id.clone())
 }
 
 fn first_room_id_in_active_space(state: &AppState) -> Option<String> {
@@ -2255,7 +2352,15 @@ fn room_belongs_to_space(state: &AppState, room_id: &str, space_id: &str) -> boo
         return false;
     };
     if room.is_dm {
-        return false;
+        // #445: a DM is not a Matrix child room of a Space, but every Space has
+        // a DMs surface showing a Space-filtered DM list, so for navigation
+        // memory a DM belongs to the Spaces whose DM projection shows it.
+        // Returning `false` unconditionally here is why a DM selection could
+        // never be remembered or restored.
+        return room
+            .dm_space_ids
+            .iter()
+            .any(|candidate| candidate == space_id);
     }
 
     state

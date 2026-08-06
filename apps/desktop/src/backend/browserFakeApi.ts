@@ -65,6 +65,7 @@ import type {
   LiveReadReceipt,
   MentionSurface,
   OidcAuthorization,
+  SpaceNavigationSelection,
   SpaceSummary,
   SubmissionResponse,
   StagedUploadCompressionChoice,
@@ -868,10 +869,23 @@ class BrowserFakeApi implements DesktopApi {
       };
     }
     this.snapshot.state.ui.navigation.active_space_id = nextSpaceId;
+    // #445: restore this Space's surface before projecting its room list, and
+    // only when the Space actually has remembered state — a Space with no memory
+    // must leave the current filter alone.
+    const restoredSelection = nextSpaceId ? this.preferredSelectionInSpace(nextSpaceId) : null;
+    if (
+      nextSpaceId &&
+      restoredSelection &&
+      this.snapshot.state.ui.navigation.last_selection_by_space_id?.[nextSpaceId]
+    ) {
+      this.snapshot.state.ui.room_list.active_filter = {
+        kind: restoredSelection.surface === "dms" ? "people" : "rooms"
+      };
+    }
     this.refreshRoomListProjection();
     this.refreshSidebar();
 
-    const targetRoomId = nextSpaceId ? this.preferredRoomIdInSpace(nextSpaceId) : null;
+    const targetRoomId = restoredSelection?.room_id ?? null;
     if (targetRoomId && targetRoomId !== this.snapshot.state.ui.navigation.active_room_id) {
       await this.selectRoom(targetRoomId);
     } else if (!targetRoomId) {
@@ -4170,8 +4184,15 @@ class BrowserFakeApi implements DesktopApi {
 
   private roomBelongsToSpace(roomId: string, spaceId: string): boolean {
     const room = this.snapshot.state.domain.rooms.find((candidate) => candidate.room_id === roomId);
-    if (!room || room.is_dm) {
+    if (!room) {
       return false;
+    }
+    if (room.is_dm) {
+      // #445: mirrors the Rust reducer — a DM is not a Matrix child room of a
+      // Space, but every Space has a DMs surface showing a Space-filtered DM
+      // list, so for navigation memory a DM belongs to the Spaces whose DM
+      // projection shows it.
+      return room.dm_space_ids?.includes(spaceId) ?? false;
     }
     return (
       this.snapshot.state.domain.spaces
@@ -4186,34 +4207,91 @@ class BrowserFakeApi implements DesktopApi {
     if (!spaceId || !roomId || !this.roomBelongsToSpace(roomId, spaceId)) {
       return;
     }
-    this.snapshot.state.ui.navigation.last_room_by_space_id = {
-      ...(this.snapshot.state.ui.navigation.last_room_by_space_id ?? {}),
-      [spaceId]: roomId
+    const isDm =
+      this.snapshot.state.domain.rooms.find((candidate) => candidate.room_id === roomId)?.is_dm ??
+      false;
+    this.snapshot.state.ui.navigation.last_selection_by_space_id = {
+      ...(this.snapshot.state.ui.navigation.last_selection_by_space_id ?? {}),
+      [spaceId]: { surface: isDm ? "dms" : "rooms", room_id: roomId }
     };
+    if (!isDm) {
+      // The legacy map stays non-DM-only, exactly as the Rust reducer keeps it.
+      this.snapshot.state.ui.navigation.last_room_by_space_id = {
+        ...(this.snapshot.state.ui.navigation.last_room_by_space_id ?? {}),
+        [spaceId]: roomId
+      };
+    }
   }
 
-  private retainNavigationRoomMemory(): void {
+  private retainNavigationRoomMemory(authoritative: boolean): void {
+    // #445: a provisional or incomplete projection is not evidence that a
+    // remembered conversation is gone.
+    if (!authoritative) {
+      return;
+    }
     const rememberedRooms = Object.entries(
       this.snapshot.state.ui.navigation.last_room_by_space_id ?? {}
     ).filter(([spaceId, roomId]) => this.roomBelongsToSpace(roomId, spaceId));
     this.snapshot.state.ui.navigation.last_room_by_space_id =
       Object.fromEntries(rememberedRooms);
+
+    const knownSpaceIds = new Set(
+      this.snapshot.state.domain.spaces.map((space) => space.space_id)
+    );
+    const rememberedSelections = Object.entries(
+      this.snapshot.state.ui.navigation.last_selection_by_space_id ?? {}
+    )
+      .filter(([spaceId]) => knownSpaceIds.has(spaceId))
+      .map(([spaceId, selection]) => {
+        // A Space the user still has keeps its surface memory even when the
+        // remembered conversation became inaccessible.
+        const roomId =
+          selection.room_id && this.roomBelongsToSpace(selection.room_id, spaceId)
+            ? selection.room_id
+            : null;
+        return [spaceId, { surface: selection.surface, room_id: roomId }] as const;
+      });
+    this.snapshot.state.ui.navigation.last_selection_by_space_id =
+      Object.fromEntries(rememberedSelections);
   }
 
   private firstRoomIdInSpace(spaceId: string): string | null {
     const space = this.snapshot.state.domain.spaces.find((candidate) => candidate.space_id === spaceId);
     return (
-      space?.child_room_ids.find((roomId) => this.roomBelongsToSpace(roomId, spaceId)) ?? null
+      space?.child_room_ids.find((roomId) => {
+        const room = this.snapshot.state.domain.rooms.find(
+          (candidate) => candidate.room_id === roomId
+        );
+        return Boolean(room) && !room?.is_dm && this.roomBelongsToSpace(roomId, spaceId);
+      }) ?? null
     );
   }
 
-  private preferredRoomIdInSpace(spaceId: string): string | null {
-    const rememberedRoomId = this.snapshot.state.ui.navigation.last_room_by_space_id?.[spaceId];
-    if (rememberedRoomId && this.roomBelongsToSpace(rememberedRoomId, spaceId)) {
-      return rememberedRoomId;
-    }
-    return this.firstRoomIdInSpace(spaceId);
+  private firstDmRoomIdInSpace(spaceId: string): string | null {
+    return (
+      this.snapshot.state.domain.rooms.find(
+        (room) => room.is_dm && (room.dm_space_ids?.includes(spaceId) ?? false)
+      )?.room_id ?? null
+    );
   }
+
+  private preferredSelectionInSpace(spaceId: string): SpaceNavigationSelection {
+    const remembered = this.snapshot.state.ui.navigation.last_selection_by_space_id?.[spaceId];
+    if (remembered) {
+      if (remembered.room_id && this.roomBelongsToSpace(remembered.room_id, spaceId)) {
+        return remembered;
+      }
+      if (remembered.surface === "dms") {
+        return { surface: "dms", room_id: this.firstDmRoomIdInSpace(spaceId) };
+      }
+    }
+    const legacyRoomId = this.snapshot.state.ui.navigation.last_room_by_space_id?.[spaceId];
+    if (legacyRoomId && this.roomBelongsToSpace(legacyRoomId, spaceId)) {
+      return { surface: "rooms", room_id: legacyRoomId };
+    }
+    return { surface: "rooms", room_id: this.firstRoomIdInSpace(spaceId) };
+  }
+
 
   private clearActiveRoomSelection(): void {
     this.snapshot.state.ui.navigation.active_room_id = null;
@@ -4388,7 +4466,8 @@ class BrowserFakeApi implements DesktopApi {
       ...space,
       child_room_ids: space.child_room_ids.filter((childRoomId) => childRoomId !== roomId)
     }));
-    this.retainNavigationRoomMemory();
+    // Leaving/forgetting a room is positive evidence of removal.
+    this.retainNavigationRoomMemory(true);
     if (this.snapshot.state.ui.navigation.active_room_id === roomId) {
       this.snapshot.state.ui.navigation.active_room_id = null;
       this.snapshot.state.ui.timeline.room_id = null;

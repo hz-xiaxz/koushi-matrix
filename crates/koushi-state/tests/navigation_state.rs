@@ -1324,6 +1324,152 @@ fn selecting_space_restores_last_non_dm_room_for_that_space() {
 }
 
 #[test]
+fn selecting_space_restores_last_dm_and_dms_surface_for_that_space() {
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        spaces: spaces(),
+        rooms: rooms(),
+        navigation: koushi_state::NavigationState {
+            active_space_id: Some("space-a".to_owned()),
+            active_room_id: Some("room-a".to_owned()),
+            ..Default::default()
+        },
+        ..AppState::default()
+    };
+
+    // Settle on a DM inside Space A. `room_belongs_to_space` used to return
+    // `false` for every DM, so this was never recorded and never restored (#445).
+    reduce(
+        &mut state,
+        AppAction::SelectRoom {
+            room_id: "dm-a".to_owned(),
+        },
+    );
+    assert_eq!(
+        state.navigation.last_selection_by_space_id.get("space-a"),
+        Some(&koushi_state::SpaceNavigationSelection {
+            surface: koushi_state::SpaceConversationSurface::Dms,
+            room_id: Some("dm-a".to_owned()),
+        }),
+        "a DM selection must be remembered against the Space whose DM list shows it"
+    );
+    assert_eq!(
+        state.navigation.last_room_by_space_id.get("space-a"),
+        Some(&"room-a".to_owned()),
+        "the legacy map stays non-DM-only, so it still holds the last non-DM room \
+         and an older build reading the same payload behaves unchanged"
+    );
+
+    // Leave for Home, then come back.
+    reduce(&mut state, AppAction::SelectSpace { space_id: None });
+    reduce(
+        &mut state,
+        AppAction::SelectSpace {
+            space_id: Some("space-a".to_owned()),
+        },
+    );
+
+    assert_eq!(state.navigation.active_space_id.as_deref(), Some("space-a"));
+    assert_eq!(state.navigation.active_room_id.as_deref(), Some("dm-a"));
+    assert_eq!(state.timeline.room_id.as_deref(), Some("dm-a"));
+    assert_eq!(
+        state.room_list.active_filter,
+        RoomListFilter::People,
+        "the DMs surface must be restored with the conversation"
+    );
+}
+
+#[test]
+fn provisional_room_list_projection_preserves_navigation_memory() {
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        spaces: spaces(),
+        rooms: rooms(),
+        navigation: koushi_state::NavigationState {
+            active_space_id: Some("space-a".to_owned()),
+            active_room_id: Some("room-a".to_owned()),
+            ..Default::default()
+        },
+        ..AppState::default()
+    };
+    reduce(
+        &mut state,
+        AppAction::SelectRoom {
+            room_id: "dm-a".to_owned(),
+        },
+    );
+    let remembered = state
+        .navigation
+        .last_selection_by_space_id
+        .get("space-a")
+        .cloned()
+        .expect("selection remembered");
+
+    // An incomplete Sliding Sync projection is not evidence that the DM is gone.
+    reduce(
+        &mut state,
+        AppAction::RoomListSnapshotProvisional {
+            generation: 1,
+            source: koushi_state::RoomListSource::Live,
+            spaces: Vec::new(),
+            rooms: Vec::new(),
+            invites: Vec::new(),
+        },
+    );
+
+    assert_eq!(
+        state.navigation.last_selection_by_space_id.get("space-a"),
+        Some(&remembered),
+        "a provisional projection must not erase per-Space navigation memory"
+    );
+}
+
+#[test]
+fn authoritative_room_list_projection_invalidates_removed_selection() {
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        spaces: spaces(),
+        rooms: rooms(),
+        navigation: koushi_state::NavigationState {
+            active_space_id: Some("space-a".to_owned()),
+            active_room_id: Some("room-a".to_owned()),
+            ..Default::default()
+        },
+        ..AppState::default()
+    };
+    reduce(
+        &mut state,
+        AppAction::SelectRoom {
+            room_id: "dm-a".to_owned(),
+        },
+    );
+
+    // Authoritative removal of the DM: the Space survives, so its surface memory
+    // survives, but the conversation itself must be invalidated rather than kept
+    // pointing at something the Space can no longer show.
+    let remaining_rooms = rooms()
+        .into_iter()
+        .filter(|room| room.room_id != "dm-a")
+        .collect::<Vec<_>>();
+    reduce(
+        &mut state,
+        AppAction::RoomListUpdated {
+            spaces: spaces(),
+            rooms: remaining_rooms,
+        },
+    );
+
+    assert_eq!(
+        state.navigation.last_selection_by_space_id.get("space-a"),
+        Some(&koushi_state::SpaceNavigationSelection {
+            surface: koushi_state::SpaceConversationSurface::Dms,
+            room_id: None,
+        }),
+        "authoritative removal clears the conversation but keeps the surface"
+    );
+}
+
+#[test]
 fn room_list_update_reopens_restored_active_room_timeline() {
     let mut state = ready_state();
     state.navigation.active_room_id = Some("room-a".to_owned());
@@ -2104,6 +2250,13 @@ fn navigation_state_round_trips_scroll_anchors_through_serde() {
         last_room_by_space_id: BTreeMap::from([(
             "!space:test.example.com".to_owned(),
             "!room:test.example.com".to_owned(),
+        )]),
+        last_selection_by_space_id: BTreeMap::from([(
+            "!space:test.example.com".to_owned(),
+            koushi_state::SpaceNavigationSelection {
+                surface: koushi_state::SpaceConversationSurface::Dms,
+                room_id: Some("!dm:test.example.com".to_owned()),
+            },
         )]),
         room_scroll_anchors: BTreeMap::from([(
             "!room:test.example.com".to_owned(),

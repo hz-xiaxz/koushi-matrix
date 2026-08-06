@@ -136,8 +136,9 @@ pub use room_interactions::{
 pub use navigation::{
     FocusedContextState, MainTimelineAnchor, NavigationState, RoomListEntryKind,
     RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListProjectionItem,
-    RoomListReadiness, RoomListSort, RoomListSource, TimelineScrollAnchor,
-    TimelineScrollAnchorEdge, compute_room_list_projection,
+    RoomListReadiness, RoomListSort, RoomListSource, SpaceConversationSurface,
+    SpaceNavigationSelection, TimelineScrollAnchor, TimelineScrollAnchorEdge,
+    compute_room_list_projection,
 };
 
 // ── Re-exports: activity ────────────────────────────────────────────────────

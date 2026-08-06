@@ -35,7 +35,7 @@ pub(crate) fn handle_room_list_updated(
             generation: 0,
         };
     }
-    handle_room_list_updated_with_crawler(state, spaces, rooms, true)
+    handle_room_list_updated_with_crawler(state, spaces, rooms, true, true)
 }
 
 fn handle_room_list_updated_with_crawler(
@@ -43,6 +43,11 @@ fn handle_room_list_updated_with_crawler(
     spaces: Vec<crate::state::SpaceSummary>,
     rooms: Vec<crate::state::RoomSummary>,
     admit_crawler: bool,
+    // #445: only an authoritative projection may invalidate per-Space navigation
+    // memory. Kept separate from `admit_crawler` even though the current callers
+    // pass the same value: conflating "may notify the search crawler" with "is
+    // trustworthy enough to forget a user's selection" is how memory got erased.
+    authoritative: bool,
 ) -> Vec<AppEffect> {
     if !has_session_projection_context(state) {
         return Vec::new();
@@ -68,7 +73,7 @@ fn handle_room_list_updated_with_crawler(
     apply_space_order(&mut spaces, &state.navigation.space_order);
     state.spaces = spaces;
     state.rooms = rooms;
-    retain_navigation_room_memory(state);
+    retain_navigation_room_memory(state, authoritative);
     recompute_room_list_projection(state);
     state.composer_drafts.retain_rooms(&retained_room_ids);
     state.scheduled_sends.retain_rooms(&retained_room_ids);
@@ -269,7 +274,8 @@ pub(crate) fn handle_room_list_snapshot_provisional(
             merged_rooms.push(room);
         }
     }
-    let effects = handle_room_list_updated_with_crawler(state, merged_spaces, merged_rooms, false);
+    let effects =
+        handle_room_list_updated_with_crawler(state, merged_spaces, merged_rooms, false, false);
     if state.room_list.active_filter == RoomListFilter::Invites {
         recompute_room_list_projection(state);
     }
@@ -289,7 +295,7 @@ pub(crate) fn handle_room_list_snapshot_authoritative(
     }
     state.room_list.readiness = RoomListReadiness::Ready { source, generation };
     state.invites = invites;
-    let effects = handle_room_list_updated_with_crawler(state, spaces, rooms, true);
+    let effects = handle_room_list_updated_with_crawler(state, spaces, rooms, true, true);
     if state.room_list.active_filter == RoomListFilter::Invites {
         recompute_room_list_projection(state);
     }
