@@ -1530,7 +1530,7 @@ pub fn message_actions_for_timeline_item(
     room_id: &str,
     item_id: &TimelineItemId,
     body: Option<&str>,
-    _has_media: bool,
+    has_media: bool,
     is_redacted: bool,
 ) -> TimelineMessageActions {
     let TimelineItemId::Event { event_id } = item_id else {
@@ -1543,7 +1543,7 @@ pub fn message_actions_for_timeline_item(
     TimelineMessageActions {
         can_copy: has_body && !is_redacted,
         can_forward: has_body && !is_redacted,
-        can_reply: !is_redacted && !event_id.trim().is_empty(),
+        can_reply: !is_redacted && !event_id.trim().is_empty() && (has_body || has_media),
         can_permalink: permalink.is_some(),
         can_view_source: !event_id.trim().is_empty(),
         permalink,
@@ -2934,6 +2934,21 @@ mod tests {
             false,
         );
         assert!(!local_echo.can_reply);
+    }
+
+    #[test]
+    fn message_actions_reject_stable_non_message_events() {
+        let actions = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$state-event:test".to_owned(),
+            },
+            None,
+            false,
+            false,
+        );
+
+        assert!(!actions.can_reply);
     }
 
     #[test]
