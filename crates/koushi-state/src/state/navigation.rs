@@ -32,14 +32,44 @@ pub struct MainTimelineAnchor {
     pub event_id: String,
 }
 
+/// Which conversation surface a Space was last showing.
+///
+/// Every Space in this product has a DMs surface and a Rooms surface, so a
+/// remembered conversation is only meaningful together with the surface it was
+/// selected on (#445).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SpaceConversationSurface {
+    #[default]
+    Rooms,
+    Dms,
+}
+
+/// The remembered navigation selection for one Space.
+///
+/// `room_id` is `None` for a Space that has been visited without ever settling
+/// on a conversation; the surface is still remembered in that case.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SpaceNavigationSelection {
+    #[serde(default)]
+    pub surface: SpaceConversationSurface,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NavigationState {
     pub active_space_id: Option<String>,
     pub active_room_id: Option<String>,
     #[serde(default)]
     pub space_order: Vec<String>,
+    /// Legacy non-DM-only memory. Retained so an older build and already
+    /// persisted `navigation.v1` payloads keep working; superseded by
+    /// `last_selection_by_space_id`.
     #[serde(default)]
     pub last_room_by_space_id: BTreeMap<String, String>,
+    #[serde(default)]
+    pub last_selection_by_space_id: BTreeMap<String, SpaceNavigationSelection>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub room_scroll_anchors: BTreeMap<String, TimelineScrollAnchor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

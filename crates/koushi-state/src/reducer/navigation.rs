@@ -1,13 +1,16 @@
 use crate::{
     effect::{AppEffect, UiEvent},
-    state::{AppState, NavigationState, RoomListFilter, SearchScope, SearchState},
+    state::{
+        AppState, NavigationState, RoomListFilter, SearchScope, SearchState,
+        SpaceConversationSurface,
+    },
 };
 
 use super::{
     apply_space_order,
     avatar::{collect_known_avatar_thumbnails, preserve_avatar_thumbnail},
     clear_active_room_for_navigation, has_session_projection_context, is_complete_space_order,
-    is_session_ready, preferred_room_id_in_space, recompute_room_list_projection,
+    is_session_ready, preferred_selection_in_space, recompute_room_list_projection,
     reconcile_space_order, remember_active_room_for_current_space,
     select_active_room_for_navigation,
 };
@@ -199,6 +202,24 @@ pub(crate) fn handle_select_space(
     state.navigation.active_space_id =
         space_id.filter(|space_id| state.spaces.iter().any(|space| space.space_id == *space_id));
     let selected_space_id = state.navigation.active_space_id.clone();
+    // #445: restore the surface this Space was last on BEFORE projecting its room
+    // list, so the projection is computed for the surface the user left rather
+    // than whatever surface the previous Space happened to be showing. Only an
+    // actual remembered entry may move the filter; a Space with no memory leaves
+    // the current filter alone.
+    let restored_selection = selected_space_id.as_deref().map(|space_id| {
+        let remembered = state
+            .navigation
+            .last_selection_by_space_id
+            .contains_key(space_id);
+        (preferred_selection_in_space(state, space_id), remembered)
+    });
+    if let Some((selection, true)) = restored_selection.as_ref() {
+        state.room_list.active_filter = match selection.surface {
+            SpaceConversationSurface::Dms => RoomListFilter::People,
+            SpaceConversationSurface::Rooms => RoomListFilter::Rooms,
+        };
+    }
     let space_members_changed = super::space_members::handle_selected(state, selected_space_id);
     recompute_room_list_projection(state);
     if state.navigation.active_space_id.is_none() {
@@ -212,10 +233,7 @@ pub(crate) fn handle_select_space(
         }
         return effects;
     }
-    let target_room_id = match state.navigation.active_space_id.as_deref() {
-        Some(space_id) => preferred_room_id_in_space(state, space_id),
-        None => None,
-    };
+    let target_room_id = restored_selection.and_then(|(selection, _)| selection.room_id);
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
     if space_members_changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));

@@ -735,7 +735,15 @@
       "navigation": {
         "active_room_id": "!room:example.invalid",
         "active_space_id": "!space:example.invalid",
-        "last_room_by_space_id": {},
+        "last_room_by_space_id": {
+          "!space:example.invalid": "!room:example.invalid"
+        },
+        "last_selection_by_space_id": {
+          "!space:example.invalid": {
+            "room_id": "!dm:example.invalid",
+            "surface": "dms"
+          }
+        },
         "space_order": [
           "!space:example.invalid"
         ]
