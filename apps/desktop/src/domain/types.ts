@@ -647,11 +647,23 @@ export interface RoomNotificationSettings {
   operation: RoomNotificationModeOperation;
 }
 
+// #445: which conversation surface a Space was last showing. Every Space has a
+// DMs surface and a Rooms surface, so a remembered conversation only means
+// something together with its surface.
+export type SpaceConversationSurface = "rooms" | "dms";
+
+export interface SpaceNavigationSelection {
+  surface: SpaceConversationSurface;
+  room_id?: string | null;
+}
+
 export interface NavigationState {
   active_space_id: string | null;
   active_room_id: string | null;
   space_order?: string[];
+  /** Legacy non-DM-only memory, superseded by `last_selection_by_space_id`. */
   last_room_by_space_id?: Record<string, string>;
+  last_selection_by_space_id?: Record<string, SpaceNavigationSelection>;
   room_scroll_anchors?: Record<string, TimelineScrollAnchor>;
   // #161: when set, the main pane renders the focused timeline anchored to this
   // event (jump-to-date), not the live timeline; the right panel is not opened.

@@ -2911,6 +2911,13 @@ mod tests {
                 "!space:test.example.com".to_owned(),
                 "!room:test.example.com".to_owned(),
             )]),
+            last_selection_by_space_id: std::collections::BTreeMap::from([(
+                "!space:test.example.com".to_owned(),
+                koushi_state::SpaceNavigationSelection {
+                    surface: koushi_state::SpaceConversationSurface::Dms,
+                    room_id: Some("!dm:test.example.com".to_owned()),
+                },
+            )]),
             room_scroll_anchors: std::collections::BTreeMap::new(),
             main_timeline_anchor: None,
         };
@@ -2960,6 +2967,13 @@ mod tests {
                 "!space:test.example.com".to_owned(),
                 "!room:test.example.com".to_owned(),
             )]),
+            last_selection_by_space_id: std::collections::BTreeMap::from([(
+                "!space:test.example.com".to_owned(),
+                koushi_state::SpaceNavigationSelection {
+                    surface: koushi_state::SpaceConversationSurface::Dms,
+                    room_id: Some("!dm:test.example.com".to_owned()),
+                },
+            )]),
             room_scroll_anchors: std::collections::BTreeMap::new(),
             main_timeline_anchor: None,
         };
@@ -3004,6 +3018,7 @@ mod tests {
             active_room_id: Some("!room:test.example.com".to_owned()),
             space_order: Vec::new(),
             last_room_by_space_id: std::collections::BTreeMap::new(),
+            last_selection_by_space_id: std::collections::BTreeMap::new(),
             room_scroll_anchors: std::collections::BTreeMap::new(),
             main_timeline_anchor: None,
         };
@@ -3046,6 +3061,13 @@ mod tests {
             last_room_by_space_id: std::collections::BTreeMap::from([(
                 "!space:test.example.com".to_owned(),
                 "!room:test.example.com".to_owned(),
+            )]),
+            last_selection_by_space_id: std::collections::BTreeMap::from([(
+                "!space:test.example.com".to_owned(),
+                koushi_state::SpaceNavigationSelection {
+                    surface: koushi_state::SpaceConversationSurface::Rooms,
+                    room_id: Some("!room:test.example.com".to_owned()),
+                },
             )]),
             room_scroll_anchors: std::collections::BTreeMap::from([(
                 "!room:test.example.com".to_owned(),
