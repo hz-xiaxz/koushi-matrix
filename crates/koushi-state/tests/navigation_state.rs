@@ -2658,6 +2658,24 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
         vec!["ordinary", "notification", "mention", "selected"]
     );
 
+    let read_effects = reduce(
+        &mut state,
+        AppAction::RoomMarkedAsReadSucceeded {
+            request_id: 3,
+            room_id: "ordinary".to_owned(),
+        },
+    );
+    assert!(read_effects.contains(&AppEffect::EmitUiEvent(UiEvent::RoomListChanged)));
+    assert_eq!(
+        state
+            .room_list
+            .items
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["notification", "mention", "selected", "ordinary"]
+    );
+
     let sidebar = compose_sidebar_with_account_facts(
         None,
         &state.spaces,
@@ -2671,7 +2689,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["ordinary", "notification", "mention", "selected"]
+        vec!["notification", "mention", "selected", "ordinary"]
     );
     assert_eq!(state.navigation.active_room_id.as_deref(), Some("selected"));
 }

@@ -452,11 +452,13 @@ stateDiagram-v2
   `display_label` and finally `room_id`, so a newly joined DM cannot outrank an
   existing conversation merely because its SDK recency stamp is newer. React
   renders this order and must not re-sort room projections.
-- `RoomMarkedAsReadSucceeded` clears `marked_unread`, `unread_count`,
-  `notification_count`, and `highlight_count` for the room and recomputes the
-  projection. Success/failure settles may normalize matching in-flight request
-  bookkeeping outside Ready, but must not recreate room projections after the
-  session has left Ready.
+- Notification-mode and room-preference-load changes recompute the projection,
+  emit `UiEvent::RoomListChanged`, and preserve the active selection.
+  `RoomMarkedAsReadSucceeded` likewise reorders through its existing room-state
+  recompute while clearing `marked_unread`, `unread_count`, `notification_count`,
+  and `highlight_count`. Success/failure settles may normalize matching
+  in-flight request bookkeeping outside Ready, but must not recreate room
+  projections after the session has left Ready.
 - `RoomMarkedAsUnreadSucceeded` changes only the explicit `marked_unread` flag
   and recomputes the projection. It must not fabricate an unread-message count
   for the native badge; `unread: false` likewise leaves server-reported message
