@@ -233,9 +233,11 @@ pub(crate) fn handle_room_preferences_loaded(
         effects.push(AppEffect::EmitUiEvent(UiEvent::LinkPreviewSettingsChanged));
     }
     if state.room_notification_settings != previous_room_notification_settings {
+        recompute_room_list_projection(state);
         effects.push(AppEffect::EmitUiEvent(
             UiEvent::RoomNotificationSettingsChanged,
         ));
+        effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));
     }
     effects
 }
@@ -254,12 +256,16 @@ pub(crate) fn handle_room_notification_mode_set(
     if !known {
         return Vec::new();
     }
-    let entry = state.room_notification_settings.entry(room_id).or_default();
-    entry.mode = mode;
-    entry.operation = RoomNotificationModeOperation::Pending { request_id };
-    vec![AppEffect::EmitUiEvent(
-        UiEvent::RoomNotificationSettingsChanged,
-    )]
+    {
+        let entry = state.room_notification_settings.entry(room_id).or_default();
+        entry.mode = mode;
+        entry.operation = RoomNotificationModeOperation::Pending { request_id };
+    }
+    recompute_room_list_projection(state);
+    vec![
+        AppEffect::EmitUiEvent(UiEvent::RoomNotificationSettingsChanged),
+        AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+    ]
 }
 
 fn update_room_notification_preference(

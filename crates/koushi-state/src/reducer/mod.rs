@@ -65,6 +65,7 @@ pub(crate) fn recompute_room_list_projection(state: &mut AppState) {
         state.navigation.active_space_id.as_deref(),
         &state.spaces,
         &state.rooms,
+        &state.room_notification_settings,
         &visible_invites,
     );
     state.room_list.readiness = readiness;

@@ -436,18 +436,22 @@ stateDiagram-v2
   current `active_filter`. They are applied only for the current Ready session;
   updates delivered after provisional entry, trust loss, logout, or account
   switching are stale and must not repopulate cleared normal projections.
-- Activity and Recent-first ordering consume only the Rust-owned
+- Activity ordering first ranks the Rust-owned `room_attention_projection`
+  under each room's effective notification mode: unmuted mention, positive
+  projected notification, remaining unread content, then read/no attention.
+  Ties, and all Recent-first ordering, consume only the Rust-owned
   `RoomSummary.conversation_activity` projection. The projection records an
   actual message, undecryptable encrypted message, or thread reply timestamp;
   it is independent from preview-oriented `latest_event` and the SDK's opaque
   `recency_stamp`. Membership/state events, reactions, edits/replacements,
   redactions, receipts, typing, and presence never create conversation
   activity.
-- Rooms with conversation activity sort before rooms without it, then by
-  descending conversation timestamp. Equal or absent timestamps fall back to
-  case-folded `display_label` and finally `room_id`, so a newly joined DM cannot
-  outrank an existing conversation merely because its SDK recency stamp is
-  newer. React renders this order and must not re-sort room projections.
+- Within an Activity attention rank, and for Recent-first ordering, rooms with
+  conversation activity sort before rooms without it, then by descending
+  conversation timestamp. Equal or absent timestamps fall back to case-folded
+  `display_label` and finally `room_id`, so a newly joined DM cannot outrank an
+  existing conversation merely because its SDK recency stamp is newer. React
+  renders this order and must not re-sort room projections.
 - `RoomMarkedAsReadSucceeded` clears `marked_unread`, `unread_count`,
   `notification_count`, and `highlight_count` for the room and recomputes the
   projection. Success/failure settles may normalize matching in-flight request

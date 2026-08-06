@@ -706,6 +706,7 @@ fn room_list_rooms_filter_excludes_favourites_and_low_priority_rooms() {
         None,
         &[],
         &rooms,
+        &std::collections::HashMap::new(),
         &[],
     );
 
@@ -758,6 +759,7 @@ fn mark_as_read_clears_unread_state_and_recomputes_room_list_projection() {
         state.navigation.active_space_id.as_deref(),
         &state.spaces,
         &state.rooms,
+        &state.room_notification_settings,
         &state.invites,
     );
     assert_eq!(state.room_list.items.len(), 1);
@@ -809,6 +811,7 @@ fn mark_as_read_success_is_ignored_while_session_is_locked() {
         state.navigation.active_space_id.as_deref(),
         &state.spaces,
         &state.rooms,
+        &state.room_notification_settings,
         &state.invites,
     );
     state.session = SessionState::Locked(session_info());
@@ -860,6 +863,7 @@ fn mark_as_unread_sets_unread_flag_and_recomputes_room_list_projection() {
         state.navigation.active_space_id.as_deref(),
         &state.spaces,
         &state.rooms,
+        &state.room_notification_settings,
         &state.invites,
     );
     assert!(state.room_list.items.is_empty());
