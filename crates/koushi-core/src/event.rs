@@ -1490,6 +1490,8 @@ pub enum TimelineSendFailureReason {
 pub struct TimelineMessageActions {
     pub can_copy: bool,
     pub can_forward: bool,
+    #[serde(default)]
+    pub can_reply: bool,
     pub can_permalink: bool,
     pub can_view_source: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1506,6 +1508,7 @@ impl fmt::Debug for TimelineMessageActions {
             .debug_struct("TimelineMessageActions")
             .field("can_copy", &self.can_copy)
             .field("can_forward", &self.can_forward)
+            .field("can_reply", &self.can_reply)
             .field("can_permalink", &self.can_permalink)
             .field("can_view_source", &self.can_view_source)
             .field(
@@ -1527,7 +1530,7 @@ pub fn message_actions_for_timeline_item(
     room_id: &str,
     item_id: &TimelineItemId,
     body: Option<&str>,
-    _has_media: bool,
+    has_media: bool,
     is_redacted: bool,
 ) -> TimelineMessageActions {
     let TimelineItemId::Event { event_id } = item_id else {
@@ -1540,6 +1543,7 @@ pub fn message_actions_for_timeline_item(
     TimelineMessageActions {
         can_copy: has_body && !is_redacted,
         can_forward: has_body && !is_redacted,
+        can_reply: !is_redacted && !event_id.trim().is_empty() && (body.is_some() || has_media),
         can_permalink: permalink.is_some(),
         can_view_source: !event_id.trim().is_empty(),
         permalink,
@@ -2841,6 +2845,7 @@ mod tests {
             json!({
                 "can_copy": true,
                 "can_forward": true,
+                "can_reply": true,
                 "can_permalink": true,
                 "can_view_source": true,
                 "permalink": "https://matrix.to/#/!room%3Atest/%24event%3Atest"
@@ -2890,6 +2895,75 @@ mod tests {
             false,
         );
         assert_eq!(local_echo, TimelineMessageActions::default());
+    }
+
+    #[test]
+    fn message_actions_allow_reply_for_captionless_stable_events() {
+        for media_kind in ["file", "image", "audio", "video"] {
+            let actions = message_actions_for_timeline_item(
+                "!room:test",
+                &TimelineItemId::Event {
+                    event_id: format!("${media_kind}:test"),
+                },
+                None,
+                true,
+                false,
+            );
+
+            assert!(actions.can_reply, "{media_kind} event should be replyable");
+        }
+
+        let redacted = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$redacted:test".to_owned(),
+            },
+            None,
+            true,
+            true,
+        );
+        assert!(!redacted.can_reply);
+
+        let local_echo = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Transaction {
+                transaction_id: "txn:test".to_owned(),
+            },
+            None,
+            true,
+            false,
+        );
+        assert!(!local_echo.can_reply);
+    }
+
+    #[test]
+    fn message_actions_reject_stable_non_message_events() {
+        let actions = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$state-event:test".to_owned(),
+            },
+            None,
+            false,
+            false,
+        );
+
+        assert!(!actions.can_reply);
+    }
+
+    #[test]
+    fn message_actions_allow_reply_for_empty_text_body() {
+        let actions = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$empty-text:test".to_owned(),
+            },
+            Some(""),
+            false,
+            false,
+        );
+
+        assert!(actions.can_reply);
     }
 
     #[test]

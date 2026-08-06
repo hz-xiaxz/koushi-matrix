@@ -95,7 +95,14 @@ function message(eventId: string, body: string): TimelineItem {
     can_redact: false,
     is_edited: false,
     can_edit: false,
-    reactions: []
+    reactions: [],
+    actions: {
+      can_copy: false,
+      can_forward: false,
+      can_reply: true,
+      can_permalink: false,
+      can_view_source: false
+    }
   };
 }
 
@@ -447,6 +454,7 @@ describe("TimelineView", () => {
       actions: {
         can_copy: true,
         can_forward: true,
+        can_reply: true,
         can_permalink: true,
         can_view_source: true,
         editable_document: documentFromText("old body")
@@ -509,6 +517,7 @@ describe("TimelineView", () => {
       actions: {
         can_copy: true,
         can_forward: true,
+        can_reply: true,
         can_permalink: true,
         can_view_source: true,
         editable_document: {
@@ -826,6 +835,7 @@ describe("TimelineView", () => {
             actions: {
               can_copy: true,
               can_forward: false,
+              can_reply: true,
               can_permalink: false,
               can_view_source: false
             }
@@ -1153,7 +1163,7 @@ describe("TimelineView", () => {
     expect(quote?.textContent).not.toContain("fallback preview");
   });
 
-  it("does not expose reply actions for redacted, hidden, or bodyless rows", () => {
+  it("does not expose reply actions for redacted, hidden, or non-replyable rows", () => {
     const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
       InitialItems: {
         request_id: null,
@@ -1162,7 +1172,17 @@ describe("TimelineView", () => {
         items: [
           { ...message("$reply-redacted", "Redacted reply"), is_redacted: true },
           { ...message("$reply-hidden", "Hidden reply"), is_hidden: true },
-          { ...message("$reply-bodyless", "Bodyless reply"), body: null }
+          {
+            ...message("$reply-bodyless", "Bodyless reply"),
+            body: null,
+            actions: {
+              can_copy: false,
+              can_forward: false,
+              can_reply: false,
+              can_permalink: false,
+              can_view_source: false
+            }
+          }
         ]
       }
     });
@@ -1188,6 +1208,66 @@ describe("TimelineView", () => {
       expect(within(row!).queryByRole("button", { name: "Reply to message" })).toBeNull();
       expect(within(row!).queryByRole("button", { name: "Reply in thread" })).toBeNull();
     }
+  });
+
+  it("uses the Rust reply capability for captionless media rows", () => {
+    const replyableActions = {
+      can_copy: false,
+      can_forward: false,
+      can_permalink: false,
+      can_view_source: false,
+      can_reply: true
+    };
+    const nonReplyableActions = { ...replyableActions, can_reply: false };
+    const onReply = vi.fn();
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [
+          {
+            ...fileMessage("$captionless-media-reply"),
+            body: null,
+            actions: replyableActions
+          },
+          {
+            ...fileMessage("$captionless-media-no-reply"),
+            body: null,
+            actions: nonReplyableActions
+          }
+        ]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={onReply}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const replyableRow = document.querySelector<HTMLElement>(
+      'article[data-content-event-id="$captionless-media-reply"]'
+    );
+    const nonReplyableRow = document.querySelector<HTMLElement>(
+      'article[data-content-event-id="$captionless-media-no-reply"]'
+    );
+    expect(replyableRow).not.toBeNull();
+    expect(nonReplyableRow).not.toBeNull();
+
+    fireEvent.click(within(replyableRow!).getByRole("button", { name: "Reply to message" }));
+    expect(onReply).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$captionless-media-reply"
+    );
+    expect(
+      within(nonReplyableRow!).queryByRole("button", { name: "Reply to message" })
+    ).toBeNull();
   });
 
   it("autosaves sender aliases from the message action menu", () => {
@@ -6885,6 +6965,7 @@ describe("TimelineView", () => {
                 actions: {
                   can_copy: false,
                   can_forward: true,
+                  can_reply: true,
                   can_permalink: false,
                   can_view_source: true
                 }

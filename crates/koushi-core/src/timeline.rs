@@ -26048,6 +26048,7 @@ mod tests {
         revised_root.actions = TimelineMessageActions {
             can_copy: false,
             can_forward: false,
+            can_reply: false,
             can_permalink: true,
             can_view_source: true,
             permalink: Some("https://example.invalid/#/room/$known-root:test".to_owned()),
@@ -35416,6 +35417,42 @@ mod tests {
         assert_eq!(formatted.code_blocks.len(), 1);
         assert_eq!(formatted.code_blocks[0].language.as_deref(), Some("rust"));
         assert_eq!(formatted.code_blocks[0].body, "fn main() {}");
+    }
+
+    #[test]
+    fn captionless_media_projections_can_reply_and_keep_filename_reply_quotes() {
+        for msgtype in media_msgtype_fixtures() {
+            let projection = message_projection_from_msgtype(&msgtype, "ignored fallback body");
+            let filename = projection
+                .media
+                .as_ref()
+                .expect("media fixture projects media")
+                .filename
+                .clone();
+
+            assert!(
+                projection.body.is_none(),
+                "media fixture must be captionless"
+            );
+
+            let actions = message_actions_for_timeline_item(
+                "!room:test",
+                &TimelineItemId::Event {
+                    event_id: "$captionless-media:test".to_owned(),
+                },
+                projection.body.as_deref(),
+                projection.media.is_some(),
+                false,
+            );
+            assert!(actions.can_reply, "{filename} should be replyable");
+
+            let quote = reply_quote_from_message_projection(
+                "$captionless-media:test",
+                None,
+                Some(projection),
+            );
+            assert_eq!(quote.body_preview.as_deref(), Some(filename.as_str()));
+        }
     }
 
     #[test]

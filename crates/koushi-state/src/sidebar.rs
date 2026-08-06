@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{
     AvatarImage, RoomNotificationMode, RoomNotificationSettings, RoomSummary, RoomTags,
-    SpaceSummary, compare_conversation_activity, room_activity_unread_count,
-    room_attention_projection,
+    SpaceSummary, room_activity_unread_count, room_attention_projection,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -129,7 +128,7 @@ pub fn compose_sidebar_with_account_facts(
         is_active: active_space_id.is_none(),
     };
 
-    let space_rooms: Vec<_> = active_space_id
+    let mut space_rooms: Vec<_> = active_space_id
         .and_then(|space_id| spaces.iter().find(|space| space.space_id == space_id))
         .map(|space| {
             space
@@ -137,16 +136,25 @@ pub fn compose_sidebar_with_account_facts(
                 .iter()
                 .filter_map(|room_id| rooms_by_id.get(room_id.as_str()).copied())
                 .filter(|room| !room.is_dm)
-                .map(|room| room_list_item(room, room_notification_settings))
                 .collect()
         })
-        .unwrap_or_else(|| {
-            rooms
-                .iter()
-                .filter(|room| !room.is_dm)
-                .map(|room| room_list_item(room, room_notification_settings))
-                .collect()
-        });
+        .unwrap_or_else(|| rooms.iter().filter(|room| !room.is_dm).collect());
+    space_rooms.sort_by(|left, right| {
+        RoomSummary::compare_attention_activity(
+            Some(*left),
+            room_notification_settings
+                .get(left.room_id.as_str())
+                .map(|settings| settings.mode),
+            Some(*right),
+            room_notification_settings
+                .get(right.room_id.as_str())
+                .map(|settings| settings.mode),
+        )
+    });
+    let space_rooms: Vec<_> = space_rooms
+        .into_iter()
+        .map(|room| room_list_item(room, room_notification_settings))
+        .collect();
 
     let not_joined_space_rooms = Vec::new();
 
@@ -161,7 +169,18 @@ pub fn compose_sidebar_with_account_facts(
                         .any(|space_id| Some(space_id.as_str()) == active_space_id))
         })
         .collect();
-    global_dm_rooms.sort_by(|left, right| compare_conversation_activity(Some(*left), Some(*right)));
+    global_dm_rooms.sort_by(|left, right| {
+        RoomSummary::compare_attention_activity(
+            Some(*left),
+            room_notification_settings
+                .get(left.room_id.as_str())
+                .map(|settings| settings.mode),
+            Some(*right),
+            room_notification_settings
+                .get(right.room_id.as_str())
+                .map(|settings| settings.mode),
+        )
+    });
     let global_dms: Vec<_> = global_dm_rooms
         .into_iter()
         .map(|room| room_list_item(room, room_notification_settings))

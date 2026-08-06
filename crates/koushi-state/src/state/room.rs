@@ -101,6 +101,19 @@ impl fmt::Debug for ConversationActivity {
     }
 }
 
+impl RoomSummary {
+    pub(crate) fn compare_attention_activity(
+        left: Option<&Self>,
+        left_mode: Option<RoomNotificationMode>,
+        right: Option<&Self>,
+        right_mode: Option<RoomNotificationMode>,
+    ) -> std::cmp::Ordering {
+        room_attention_sort_rank(left, left_mode)
+            .cmp(&room_attention_sort_rank(right, right_mode))
+            .then_with(|| compare_conversation_activity(left, right))
+    }
+}
+
 pub(crate) fn compare_conversation_activity(
     left: Option<&RoomSummary>,
     right: Option<&RoomSummary>,
@@ -333,6 +346,23 @@ pub fn room_attention_projection(
         has_unread_mention,
         is_muted,
         display_count,
+    }
+}
+
+fn room_attention_sort_rank(room: Option<&RoomSummary>, mode: Option<RoomNotificationMode>) -> u8 {
+    let Some(room) = room else {
+        return 3;
+    };
+    let projection = room_attention_projection(room, mode);
+
+    if projection.has_unread_mention {
+        0
+    } else if projection.notification_count > 0 {
+        1
+    } else if projection.has_unread_content {
+        2
+    } else {
+        3
     }
 }
 

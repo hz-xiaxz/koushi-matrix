@@ -1,7 +1,8 @@
 use koushi_state::{
-    AppAction, AppEffect, AppState, NotificationSettings, OperationFailureKind,
-    RoomNotificationMode, RoomNotificationModeOperation, RoomPreference, RoomPreferencesState,
-    RoomSummary, SessionInfo, SessionState, SettingsPatch, SettingsValues, UiEvent, reduce,
+    AppAction, AppEffect, AppState, ConversationActivity, ConversationActivitySource,
+    NotificationSettings, OperationFailureKind, RoomNotificationMode,
+    RoomNotificationModeOperation, RoomPreference, RoomPreferencesState, RoomSummary, SessionInfo,
+    SessionState, SettingsPatch, SettingsValues, UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -205,6 +206,98 @@ fn room_preferences_loaded_restores_room_notification_modes() {
         effect,
         AppEffect::EmitUiEvent(UiEvent::RoomNotificationSettingsChanged)
     )));
+}
+
+#[test]
+fn loaded_notification_preferences_recompute_activity_projection_with_effective_modes() {
+    let mut state = ready_state();
+    state.navigation.active_room_id = Some("selected".to_owned());
+    let room = |room_id: &str, timestamp_ms: u64| RoomSummary {
+        room_id: room_id.to_owned(),
+        display_name: room_id.to_owned(),
+        display_label: room_id.to_owned(),
+        original_display_label: room_id.to_owned(),
+        avatar: None,
+        is_dm: false,
+        dm_user_ids: Vec::new(),
+        tags: Default::default(),
+        unread_count: 0,
+        notification_count: 0,
+        highlight_count: 0,
+        marked_unread: false,
+        recency_stamp: Some(timestamp_ms),
+        conversation_activity: Some(ConversationActivity {
+            timestamp_ms,
+            source: ConversationActivitySource::Message,
+        }),
+        latest_event: None,
+        parent_space_ids: Vec::new(),
+        dm_space_ids: Vec::new(),
+        is_encrypted: false,
+        joined_members: 0,
+    };
+    let mut mention = room("mention", 100);
+    mention.highlight_count = 1;
+    let mut notification = room("notification", 900);
+    notification.notification_count = 1;
+    let mut ordinary = room("ordinary", 950);
+    ordinary.unread_count = 1;
+    state.rooms = vec![room("selected", 1_000), notification, ordinary, mention];
+
+    let settings = state.settings.values.clone();
+    reduce(&mut state, AppAction::SettingsLoaded { values: settings });
+    assert_eq!(
+        state
+            .room_list
+            .items
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["mention", "notification", "ordinary", "selected"]
+    );
+
+    let preferences = RoomPreferencesState {
+        rooms: std::collections::BTreeMap::from([
+            (
+                "mention".to_owned(),
+                RoomPreference {
+                    notification_mode: Some(RoomNotificationMode::Mute),
+                    ..RoomPreference::default()
+                },
+            ),
+            (
+                "notification".to_owned(),
+                RoomPreference {
+                    notification_mode: Some(RoomNotificationMode::Mentions),
+                    ..RoomPreference::default()
+                },
+            ),
+        ]),
+    };
+    let preference_effects = reduce(&mut state, AppAction::RoomPreferencesLoaded { preferences });
+    assert!(preference_effects.contains(&AppEffect::EmitUiEvent(UiEvent::RoomListChanged)));
+    assert_eq!(
+        state
+            .room_list
+            .items
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ordinary", "notification", "mention", "selected"]
+    );
+
+    let settings = state.settings.values.clone();
+    reduce(&mut state, AppAction::SettingsLoaded { values: settings });
+    assert_eq!(
+        state
+            .room_list
+            .items
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ordinary", "notification", "mention", "selected"]
+    );
+    assert_eq!(state.navigation.active_room_id.as_deref(), Some("selected"));
 }
 
 #[test]

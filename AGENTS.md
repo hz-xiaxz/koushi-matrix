@@ -213,6 +213,15 @@ Follow the normative design-simplicity rules in
 `docs/policies/engineering-rules.md`: do not add defensive machinery without a
 reproduced failure or named invariant.
 
+Operationally, all agents—including `gpt-5.6-sol`, which tends to
+overcompensate with defensive machinery—must add no defensive machinery absent
+a reproduced failure or named invariant. Retry loops, persisted incident
+buffers, fallback services, classification state machines, and speculative
+diagnostics require that evidence; put the smallest guard at the authoritative
+boundary. This is agent guidance, not a product contract, and never weakens
+required security, privacy, trust-boundary validation, data-loss prevention,
+accessibility, or explicitly approved requirements.
+
 ## Account Work Scheduler Notes
 
 - App-owned work that competes for the homeserver goes through the Rust-owned

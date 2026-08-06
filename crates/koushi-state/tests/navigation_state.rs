@@ -2329,6 +2329,7 @@ fn room_list_activity_sort_uses_latest_message_timestamp_before_status_activity(
         None,
         &[],
         &rooms,
+        &HashMap::new(),
         &[],
     );
 
@@ -2398,6 +2399,7 @@ fn room_list_activity_sort_keeps_a_messaged_dm_ahead_of_a_newer_join_only_dm() {
         None,
         &[],
         &rooms,
+        &HashMap::new(),
         &[],
     );
 
@@ -2441,6 +2443,7 @@ fn room_list_activity_sort_uses_labels_then_room_ids_as_a_stable_fallback() {
         None,
         &[],
         &rooms,
+        &HashMap::new(),
         &[],
     );
 
@@ -2452,6 +2455,282 @@ fn room_list_activity_sort_uses_labels_then_room_ids_as_a_stable_fallback() {
             .collect::<Vec<_>>(),
         vec!["room-d", "room-c", "room-z", "room-a", "room-b"]
     );
+}
+
+#[test]
+fn active_sort_prioritizes_attention_before_newer_activity_and_keeps_stable_fallbacks() {
+    let mut mention = active_sort_room("mention", false, &[], &[], Some(10));
+    mention.highlight_count = 1;
+    mention.notification_count = 1;
+
+    let mut notification = active_sort_room("notification", false, &[], &[], Some(900));
+    notification.notification_count = 1;
+
+    let mut ordinary = active_sort_room("ordinary", false, &[], &[], Some(800));
+    ordinary.unread_count = 1;
+
+    let mut manual = active_sort_room("manual", false, &[], &[], Some(700));
+    manual.marked_unread = true;
+
+    let rooms = vec![
+        active_sort_room("read-newest", false, &[], &[], Some(1_000)),
+        notification,
+        ordinary,
+        manual,
+        mention,
+        active_sort_room("same-b", false, &[], &[], Some(42)),
+        active_sort_room("same-a", false, &[], &[], Some(42)),
+        active_sort_room("missing-b", false, &[], &[], None),
+        active_sort_room("missing-a", false, &[], &[], None),
+    ];
+
+    let projection = compute_room_list_projection(
+        RoomListFilter::Rooms,
+        RoomListSort::Activity,
+        None,
+        &[],
+        &rooms,
+        &HashMap::new(),
+        &[],
+    );
+
+    assert_eq!(
+        projection
+            .items
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "mention",
+            "notification",
+            "ordinary",
+            "manual",
+            "read-newest",
+            "same-a",
+            "same-b",
+            "missing-a",
+            "missing-b",
+        ]
+    );
+}
+
+#[test]
+fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
+    let spaces = vec![SpaceSummary {
+        space_id: "space-a".to_owned(),
+        display_name: "Space A".to_owned(),
+        avatar: None,
+        child_room_ids: vec![
+            "space-read".to_owned(),
+            "space-notification".to_owned(),
+            "space-mention".to_owned(),
+        ],
+    }];
+    let mut space_mention = active_sort_room("space-mention", false, &["space-a"], &[], Some(10));
+    space_mention.highlight_count = 1;
+    let mut space_notification =
+        active_sort_room("space-notification", false, &["space-a"], &[], Some(900));
+    space_notification.notification_count = 1;
+    let mut home_ordinary = active_sort_room("home-ordinary", false, &[], &[], Some(800));
+    home_ordinary.unread_count = 1;
+    let mut dm_mention = active_sort_room("dm-mention", true, &[], &["space-a"], Some(10));
+    dm_mention.highlight_count = 1;
+    let mut dm_notification =
+        active_sort_room("dm-notification", true, &[], &["space-a"], Some(900));
+    dm_notification.notification_count = 1;
+
+    let rooms = vec![
+        active_sort_room("space-read", false, &["space-a"], &[], Some(1_000)),
+        space_notification,
+        space_mention,
+        home_ordinary,
+        active_sort_room("dm-read", true, &[], &["space-a"], Some(1_000)),
+        dm_notification,
+        dm_mention,
+        active_sort_room("dm-outside", true, &[], &[], Some(950)),
+    ];
+
+    let home = compose_sidebar(None, &spaces, &rooms);
+    assert_eq!(
+        home.space_rooms
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "space-mention",
+            "space-notification",
+            "home-ordinary",
+            "space-read",
+        ]
+    );
+    assert_eq!(
+        home.global_dms
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["dm-mention", "dm-notification", "dm-read", "dm-outside"]
+    );
+
+    let active_space = compose_sidebar(Some("space-a"), &spaces, &rooms);
+    assert_eq!(
+        active_space
+            .space_rooms
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["space-mention", "space-notification", "space-read"]
+    );
+    assert_eq!(
+        active_space
+            .global_dms
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["dm-mention", "dm-notification", "dm-read"]
+    );
+}
+
+#[test]
+fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_selection() {
+    let mut state = ready_state();
+    state.navigation.active_room_id = Some("selected".to_owned());
+
+    let mut mention = active_sort_room("mention", false, &[], &[], Some(100));
+    mention.highlight_count = 1;
+    let mut notification = active_sort_room("notification", false, &[], &[], Some(900));
+    notification.notification_count = 1;
+    let mut ordinary = active_sort_room("ordinary", false, &[], &[], Some(950));
+    ordinary.unread_count = 1;
+    state.rooms = vec![
+        active_sort_room("selected", false, &[], &[], Some(1_000)),
+        notification,
+        ordinary,
+        mention,
+    ];
+
+    let settings = state.settings.values.clone();
+    reduce(&mut state, AppAction::SettingsLoaded { values: settings });
+    assert_eq!(
+        state
+            .room_list
+            .items
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["mention", "notification", "ordinary", "selected"]
+    );
+
+    let mute_effects = reduce(
+        &mut state,
+        AppAction::RoomNotificationModeSet {
+            request_id: 1,
+            room_id: "mention".to_owned(),
+            mode: RoomNotificationMode::Mute,
+        },
+    );
+    assert!(mute_effects.contains(&AppEffect::EmitUiEvent(UiEvent::RoomListChanged)));
+    assert_eq!(
+        state
+            .room_list
+            .items
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["notification", "ordinary", "mention", "selected"]
+    );
+
+    let mentions_effects = reduce(
+        &mut state,
+        AppAction::RoomNotificationModeSet {
+            request_id: 2,
+            room_id: "notification".to_owned(),
+            mode: RoomNotificationMode::Mentions,
+        },
+    );
+    assert!(mentions_effects.contains(&AppEffect::EmitUiEvent(UiEvent::RoomListChanged)));
+    assert_eq!(
+        state
+            .room_list
+            .items
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ordinary", "notification", "mention", "selected"]
+    );
+
+    let read_effects = reduce(
+        &mut state,
+        AppAction::RoomMarkedAsReadSucceeded {
+            request_id: 3,
+            room_id: "ordinary".to_owned(),
+        },
+    );
+    assert!(read_effects.contains(&AppEffect::EmitUiEvent(UiEvent::RoomListChanged)));
+    assert_eq!(
+        state
+            .room_list
+            .items
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["notification", "mention", "selected", "ordinary"]
+    );
+
+    let sidebar = compose_sidebar_with_account_facts(
+        None,
+        &state.spaces,
+        &state.rooms,
+        &state.room_notification_settings,
+        0,
+    );
+    assert_eq!(
+        sidebar
+            .space_rooms
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["notification", "mention", "selected", "ordinary"]
+    );
+    assert_eq!(state.navigation.active_room_id.as_deref(), Some("selected"));
+}
+
+fn active_sort_room(
+    room_id: &str,
+    is_dm: bool,
+    parent_space_ids: &[&str],
+    dm_space_ids: &[&str],
+    activity_timestamp_ms: Option<u64>,
+) -> RoomSummary {
+    RoomSummary {
+        room_id: room_id.to_owned(),
+        display_name: room_id.to_owned(),
+        display_label: room_id.to_owned(),
+        original_display_label: room_id.to_owned(),
+        avatar: None,
+        is_dm,
+        dm_user_ids: Vec::new(),
+        tags: RoomTags::default(),
+        unread_count: 0,
+        notification_count: 0,
+        highlight_count: 0,
+        marked_unread: false,
+        recency_stamp: activity_timestamp_ms,
+        conversation_activity: activity_timestamp_ms.map(|timestamp_ms| ConversationActivity {
+            timestamp_ms,
+            source: ConversationActivitySource::Message,
+        }),
+        latest_event: None,
+        parent_space_ids: parent_space_ids
+            .iter()
+            .map(|space_id| (*space_id).to_owned())
+            .collect(),
+        dm_space_ids: dm_space_ids
+            .iter()
+            .map(|space_id| (*space_id).to_owned())
+            .collect(),
+        is_encrypted: false,
+        joined_members: 0,
+    }
 }
 
 #[test]

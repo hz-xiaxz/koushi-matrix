@@ -382,9 +382,11 @@ stateDiagram-v2
   monotonically increasing backend generation. It contains no Matrix IDs or
   raw SDK errors.
 - Bootstrap start changes readiness to `Loading` and retains the last usable
-  room/space/invite snapshot. A non-empty provisional cache or observer snapshot
-  may remain visible while loading, but an unproven empty snapshot does not
-  replace it.
+  room/space/invite snapshot. A current-generation provisional observation
+  merges observed Spaces and rooms by stable ID, refreshing or appending them
+  while retaining entries absent from that observation; a known Space wins over
+  an ordinary-room entry with the same ID. An unproven empty snapshot does not
+  replace the retained snapshot.
 - Only an authoritative snapshot from the current generation changes readiness
   to `Ready`. That snapshot may legitimately contain zero rooms and replaces the
   retained snapshot. A current-generation failure changes readiness to `Failed`
@@ -434,23 +436,29 @@ stateDiagram-v2
   current `active_filter`. They are applied only for the current Ready session;
   updates delivered after provisional entry, trust loss, logout, or account
   switching are stale and must not repopulate cleared normal projections.
-- Activity and Recent-first ordering consume only the Rust-owned
+- Activity ordering first ranks the Rust-owned `room_attention_projection`
+  under each room's effective notification mode: unmuted mention, positive
+  projected notification, remaining unread content, then read/no attention.
+  Ties, and all Recent-first ordering, consume only the Rust-owned
   `RoomSummary.conversation_activity` projection. The projection records an
   actual message, undecryptable encrypted message, or thread reply timestamp;
   it is independent from preview-oriented `latest_event` and the SDK's opaque
   `recency_stamp`. Membership/state events, reactions, edits/replacements,
   redactions, receipts, typing, and presence never create conversation
   activity.
-- Rooms with conversation activity sort before rooms without it, then by
-  descending conversation timestamp. Equal or absent timestamps fall back to
-  case-folded `display_label` and finally `room_id`, so a newly joined DM cannot
-  outrank an existing conversation merely because its SDK recency stamp is
-  newer. React renders this order and must not re-sort room projections.
-- `RoomMarkedAsReadSucceeded` clears `marked_unread`, `unread_count`,
-  `notification_count`, and `highlight_count` for the room and recomputes the
-  projection. Success/failure settles may normalize matching in-flight request
-  bookkeeping outside Ready, but must not recreate room projections after the
-  session has left Ready.
+- Within an Activity attention rank, and for Recent-first ordering, rooms with
+  conversation activity sort before rooms without it, then by descending
+  conversation timestamp. Equal or absent timestamps fall back to case-folded
+  `display_label` and finally `room_id`, so a newly joined DM cannot outrank an
+  existing conversation merely because its SDK recency stamp is newer. React
+  renders this order and must not re-sort room projections.
+- Notification-mode and room-preference-load changes recompute the projection,
+  emit `UiEvent::RoomListChanged`, and preserve the active selection.
+  `RoomMarkedAsReadSucceeded` likewise reorders through its existing room-state
+  recompute while clearing `marked_unread`, `unread_count`, `notification_count`,
+  and `highlight_count`. Success/failure settles may normalize matching
+  in-flight request bookkeeping outside Ready, but must not recreate room
+  projections after the session has left Ready.
 - `RoomMarkedAsUnreadSucceeded` changes only the explicit `marked_unread` flag
   and recomputes the projection. It must not fabricate an unread-message count
   for the native badge; `unread: false` likewise leaves server-reported message
@@ -1329,13 +1337,17 @@ projections. `TimelineItem.reply_quote` is projected in
 not resolve reply bodies, classify redactions, or repair missing quote state.
 
 Message action affordances are also Rust-owned timeline projections.
-`TimelineItem.actions` carries `can_copy`, `can_forward`, `can_permalink`,
-`can_view_source`, and an optional `permalink`. The permalink is generated in
-Rust from the owning `TimelineKey` room id plus the event id as a
+`TimelineItem.actions` carries `can_copy`, `can_forward`, `can_reply`,
+`can_permalink`, `can_view_source`, and an optional `permalink`. Rust sets
+`can_reply` only for a non-redacted stable event that is a replyable message
+target, proven by a projected body or a projected media attachment;
+state/non-message events and local echoes remain non-replyable. The permalink
+is generated in Rust from the owning `TimelineKey` room id plus the event id as a
 `https://matrix.to/#/<room>/<event>` URL. React may render or copy this value
-only when the DTO says it is available; it must not build Matrix permalinks,
-infer action eligibility from `TimelineItemId`, body/media fields, or redaction
-flags, or invent forward/source behavior.
+only when the DTO says it is available; it must use `can_reply` for reply
+eligibility and must not build Matrix permalinks, infer action eligibility from
+`TimelineItemId`, body/media fields, or redaction flags, or invent
+forward/source behavior.
 
 `TimelineCommand::LoadMessageSource` loads a Rust-owned
 `TimelineMessageSource` safe DTO for a subscribed event. It contains the

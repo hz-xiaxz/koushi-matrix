@@ -146,6 +146,7 @@ function makeImageItem(eventId: string): Record<string, unknown> {
     },
     actions: {
       can_copy: false,
+      can_reply: true,
       can_permalink: false,
       permalink: null,
       can_view_source: false,
@@ -183,6 +184,7 @@ function makeFileItem(eventId: string): Record<string, unknown> {
     },
     actions: {
       can_copy: false,
+      can_reply: true,
       can_permalink: false,
       permalink: null,
       can_view_source: false,

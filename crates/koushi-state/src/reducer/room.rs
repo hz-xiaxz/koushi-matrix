@@ -237,15 +237,39 @@ pub(crate) fn handle_room_list_snapshot_provisional(
         return Vec::new();
     }
     state.invites = invites;
-    let (spaces, rooms) = if rooms.is_empty() {
-        // A provisional invite/space-only observation is not proof that the
-        // joined-room projection is empty. Keep the cached joined rooms until
-        // an authoritative snapshot settles that question.
-        (state.spaces.clone(), state.rooms.clone())
-    } else {
-        (spaces, rooms)
-    };
-    let effects = handle_room_list_updated_with_crawler(state, spaces, rooms, false);
+    let mut merged_spaces = state.spaces.clone();
+    for space in spaces {
+        if let Some(existing) = merged_spaces
+            .iter_mut()
+            .find(|existing| existing.space_id == space.space_id)
+        {
+            *existing = space;
+        } else {
+            merged_spaces.push(space);
+        }
+    }
+    let mut merged_rooms = state.rooms.clone();
+    merged_rooms.retain(|room| {
+        !merged_spaces
+            .iter()
+            .any(|space| space.space_id == room.room_id)
+    });
+    for room in rooms {
+        if merged_spaces
+            .iter()
+            .any(|space| space.space_id == room.room_id)
+        {
+            merged_rooms.retain(|existing| existing.room_id != room.room_id);
+        } else if let Some(existing) = merged_rooms
+            .iter_mut()
+            .find(|existing| existing.room_id == room.room_id)
+        {
+            *existing = room;
+        } else {
+            merged_rooms.push(room);
+        }
+    }
+    let effects = handle_room_list_updated_with_crawler(state, merged_spaces, merged_rooms, false);
     if state.room_list.active_filter == RoomListFilter::Invites {
         recompute_room_list_projection(state);
     }

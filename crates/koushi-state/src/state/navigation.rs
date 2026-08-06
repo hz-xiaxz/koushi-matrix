@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -141,6 +141,7 @@ pub fn compute_room_list_projection(
     active_space_id: Option<&str>,
     spaces: &[super::room::SpaceSummary],
     rooms: &[super::room::RoomSummary],
+    room_notification_settings: &HashMap<String, super::RoomNotificationSettings>,
     invites: &[super::room::InvitePreview],
 ) -> RoomListProjection {
     let active_space_child_room_ids = active_space_id.and_then(|active_space_id| {
@@ -185,31 +186,37 @@ pub fn compute_room_list_projection(
 
     match sort {
         RoomListSort::Activity => {
-            let room_by_id: std::collections::HashMap<&str, &super::room::RoomSummary> = rooms
+            let room_by_id: HashMap<&str, &super::room::RoomSummary> = rooms
                 .iter()
                 .map(|room| (room.room_id.as_str(), room))
                 .collect();
             items.sort_by(|left, right| {
-                super::room::compare_conversation_activity(
+                super::room::RoomSummary::compare_attention_activity(
                     room_by_id.get(left.room_id.as_str()).copied(),
+                    room_notification_settings
+                        .get(left.room_id.as_str())
+                        .map(|settings| settings.mode),
                     room_by_id.get(right.room_id.as_str()).copied(),
+                    room_notification_settings
+                        .get(right.room_id.as_str())
+                        .map(|settings| settings.mode),
                 )
             });
         }
         RoomListSort::RecentFirst => {
-            let room_by_id: std::collections::HashMap<&str, &super::room::RoomSummary> = rooms
+            let room_by_id: HashMap<&str, &super::room::RoomSummary> = rooms
                 .iter()
                 .map(|room| (room.room_id.as_str(), room))
                 .collect();
             items.sort_by(|left, right| {
-                super::room::compare_conversation_activity(
+                super::compare_conversation_activity(
                     room_by_id.get(left.room_id.as_str()).copied(),
                     room_by_id.get(right.room_id.as_str()).copied(),
                 )
             });
         }
         RoomListSort::NormalLocale => {
-            let label_by_id: std::collections::HashMap<&str, &str> = rooms
+            let label_by_id: HashMap<&str, &str> = rooms
                 .iter()
                 .map(|room| (room.room_id.as_str(), room.display_label.as_str()))
                 .collect();
