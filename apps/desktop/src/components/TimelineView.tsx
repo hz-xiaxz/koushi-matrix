@@ -134,7 +134,6 @@ import {
   getMediaUploadProgress,
   getKeyState,
   getPaginationState,
-  timelineKeyDiagnosticFingerprint,
   timelineProjectionEvidence,
   timelineStoreLookupDiagnosticMessage,
   timelineStoreKeyId,
@@ -3291,20 +3290,23 @@ export const TimelineView = memo(function TimelineView({
                                       ? event.GapRepairReleased.key
                                       : event.ResyncRequired.key;
       if (!timelineKeyEquals(eventKey, timelineKeyRef.current)) {
-        recordTimelineKeyMismatch();
         const currentKey = timelineKeyRef.current;
-        emitDiagnosticLog(
-          "timeline.key",
-          [
-            "stage=event_dropped",
-            `current_kind=${timelineKindDiagnosticLabel(currentKey)}`,
-            `event_kind=${timelineKindDiagnosticLabel(eventKey)}`,
-            `current_key=${timelineKeyDiagnosticFingerprint(currentKey)}`,
-            `event_key=${timelineKeyDiagnosticFingerprint(eventKey)}`,
-            `account_match=${currentKey.account_key === eventKey.account_key}`,
-            `room_match=${timelineKeyRoomId(currentKey) === timelineKeyRoomId(eventKey)}`
-          ].join(" ")
-        );
+        const currentKind = timelineKindDiagnosticLabel(currentKey);
+        const eventKind = timelineKindDiagnosticLabel(eventKey);
+        const accountMatch = currentKey.account_key === eventKey.account_key;
+        const roomMatch = timelineKeyRoomId(currentKey) === timelineKeyRoomId(eventKey);
+        if (recordTimelineKeyMismatch(currentKind, eventKind, accountMatch, roomMatch)) {
+          emitDiagnosticLog(
+            "timeline.key",
+            [
+              "stage=event_dropped_summary",
+              `current_kind=${currentKind}`,
+              `event_kind=${eventKind}`,
+              `account_match=${accountMatch}`,
+              `room_match=${roomMatch}`
+            ].join(" ")
+          );
+        }
         return;
       }
       emitTimelineEventDiagnosticLog(event, eventKey, emitDiagnosticLog);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { createRef, useState } from "react";
+import { createRef, useState, type FormEventHandler } from "react";
 import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -30,10 +30,12 @@ const mentionDocument: ComposerDocument = {
 
 function ControlledMentionEditor({
   initial = mentionDocument,
-  onChange = () => undefined
+  onChange = () => undefined,
+  onInput = () => undefined
 }: {
   initial?: ComposerDocument;
   onChange?: (document: ComposerDocument) => void;
+  onInput?: FormEventHandler<HTMLDivElement>;
 }) {
   const [document, setDocument] = useState(initial);
   return (
@@ -41,6 +43,7 @@ function ControlledMentionEditor({
       aria-label={EDITOR_LABEL}
       document={document}
       syncKey="message-a"
+      onInput={onInput}
       onDocumentChange={(next) => {
         setDocument(next);
         onChange(next);
@@ -248,7 +251,8 @@ describe("IME text controls", () => {
 
   it("keeps mention identity while composition updates neighboring text", () => {
     const onChange = vi.fn();
-    render(<ControlledMentionEditor onChange={onChange} />);
+    const onInput = vi.fn();
+    render(<ControlledMentionEditor onChange={onChange} onInput={onInput} />);
     const control = screen.getByRole("textbox", { name: "message" });
     const before = control.firstChild;
     if (!before) throw new Error("missing text node");
@@ -256,18 +260,16 @@ describe("IME text controls", () => {
     fireEvent.compositionStart(control);
     before.textContent = "A日";
     fireEvent.input(control, { inputType: "insertCompositionText", isComposing: true });
-    expect(onChange.mock.lastCall?.[0]).toMatchObject({
-      inlines: [
-        { kind: "text", text: "A日" },
-        { kind: "mention", target: { user_id: "@alice:example.invalid" } },
-        { kind: "text", text: "B" }
-      ]
-    });
+    before.textContent = "A日本";
+    fireEvent.input(control, { inputType: "insertCompositionText", isComposing: true });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onInput).not.toHaveBeenCalled();
     fireEvent.compositionEnd(control);
 
+    expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange.mock.lastCall?.[0]).toMatchObject({
       inlines: [
-        { kind: "text", text: "A日" },
+        { kind: "text", text: "A日本" },
         { kind: "mention", target: { user_id: "@alice:example.invalid" } },
         { kind: "text", text: "B" }
       ]

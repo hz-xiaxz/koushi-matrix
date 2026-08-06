@@ -127,10 +127,9 @@ import {
   type QaTimelineDiagnostics
 } from "./domain/qaTitle";
 import {
-  appendDiagnosticLogEntry,
+  createDiagnosticLogBuffer,
   diagnosticReport,
   schemaMismatchDiagnosticEntry,
-  type DiagnosticLogEntry,
   type DiagnosticLogSnapshot,
   type SecurityDiagnostics
 } from "./domain/diagnostics";
@@ -1269,6 +1268,9 @@ function composerDraftApiAccount(scope: ComposerDraftScope): {
 export function App() {
   const snapshot = useAppStore(selectSnapshot);
   const snapshotRef = useRef(snapshot);
+  const diagnosticLogBufferRef = useRef<ReturnType<typeof createDiagnosticLogBuffer> | null>(null);
+  const diagnosticLogBuffer =
+    diagnosticLogBufferRef.current ?? (diagnosticLogBufferRef.current = createDiagnosticLogBuffer());
   snapshotRef.current = snapshot;
   const initialAccount = readyComposerDraftAccountOwner(snapshot);
   const submissionAccountOwnerRef = useRef<string | null>(
@@ -1288,9 +1290,7 @@ export function App() {
   // self-healing rather than latching the app into the recovery screen.
   const setSnapshot = useCallback((next: DesktopSnapshot | null) => {
     if (next && next.state.schema_version !== SNAPSHOT_SCHEMA_VERSION) {
-      setDiagnosticLogEntries((current) =>
-        appendDiagnosticLogEntry(current, schemaMismatchDiagnosticEntry(Date.now()))
-      );
+      diagnosticLogBuffer.append(schemaMismatchDiagnosticEntry(Date.now()));
       setSchemaMismatchVersion(next.state.schema_version ?? -1);
       return;
     }
@@ -1300,7 +1300,7 @@ export function App() {
       : null;
     setSchemaMismatchVersion(null);
     setAppStoreSnapshot(next);
-  }, []);
+  }, [diagnosticLogBuffer]);
   const latestTextOperationQueueRef = useRef(createLatestAsyncOperationQueue<string>());
 
   async function applyLatestTextSnapshot(
@@ -1461,7 +1461,6 @@ export function App() {
   const [timelineDiagnostics, setTimelineDiagnostics] =
     useState<QaTimelineDiagnostics>(INITIAL_TIMELINE_DIAGNOSTICS);
   const timelineDiagnosticsRef = useRef<QaTimelineDiagnostics>(INITIAL_TIMELINE_DIAGNOSTICS);
-  const [diagnosticLogEntries, setDiagnosticLogEntries] = useState<DiagnosticLogEntry[]>([]);
   const [spaceMembersCancelFailure, setSpaceMembersCancelFailure] =
     useState<SpaceMemberFence | null>(null);
   const [savedSessions, setSavedSessions] = useState<SavedSessionInfo[]>([]);
@@ -1632,8 +1631,8 @@ export function App() {
     };
   }, []);
   const appendDiagnosticLog = useCallback((entry: TimelineDiagnosticLogEntry) => {
-    setDiagnosticLogEntries((current) => appendDiagnosticLogEntry(current, entry));
-  }, []);
+    diagnosticLogBuffer.append(entry);
+  }, [diagnosticLogBuffer]);
   const updateTimelineDiagnostics = useCallback((diagnostics: TimelineDiagnostics) => {
     if (timelineDiagnosticsEqual(timelineDiagnosticsRef.current, diagnostics)) {
       return;
@@ -6304,8 +6303,9 @@ export function App() {
           }}
         />
       ) : null}
-      {diagnosticsOpen ? (
-        <DiagnosticDialog
+      {diagnosticsOpen ? (() => {
+        const localDiagnosticSnapshot = diagnosticLogBuffer.snapshot();
+        return <DiagnosticDialog
           report={diagnosticReport({
             snapshot,
             panelMode: effectiveRightPanelMode,
@@ -6316,14 +6316,18 @@ export function App() {
             stateDeltaStats: getAppStoreDeltaStats(),
             timelineTransportStats: getTimelineTransportStats(),
             jsErrors: getRecentJsErrors(),
-            logEntries: [...diagnosticLogEntries, ...runtimeDiagnosticSnapshot.entries],
-            droppedLogEntries: runtimeDiagnosticSnapshot.droppedEntries,
+            logEntries: [
+              ...localDiagnosticSnapshot.entries,
+              ...runtimeDiagnosticSnapshot.entries
+            ],
+            droppedLogEntries:
+              localDiagnosticSnapshot.droppedEntries + runtimeDiagnosticSnapshot.droppedEntries,
             slidingSyncDiagnostics: runtimeDiagnosticSnapshot.slidingSync,
             securityDiagnostics: qaSecurityDiagnostics()
           })}
           onClose={() => setDiagnosticsOpen(false)}
-        />
-      ) : null}
+        />;
+      })() : null}
       </div>
     </TimelineStoreContext.Provider>
   );

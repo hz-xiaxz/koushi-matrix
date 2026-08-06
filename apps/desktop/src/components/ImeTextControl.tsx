@@ -513,7 +513,8 @@ export const ImeInlineMentionEditor = forwardRef<
         onCopy={handleCopy}
         onCut={handleCut}
         onInput={(event) => {
-          publishDom(!composingRef.current && !event.nativeEvent.isComposing);
+          if (composingRef.current || event.nativeEvent.isComposing) return;
+          publishDom();
           onInput?.(event);
         }}
         onKeyDown={(event) => {
