@@ -190,9 +190,11 @@ pub fn compute_room_list_projection(
                 .map(|room| (room.room_id.as_str(), room))
                 .collect();
             items.sort_by(|left, right| {
-                super::room::compare_conversation_activity(
+                super::room::RoomSummary::compare_attention_activity(
                     room_by_id.get(left.room_id.as_str()).copied(),
+                    None,
                     room_by_id.get(right.room_id.as_str()).copied(),
+                    None,
                 )
             });
         }
@@ -202,7 +204,7 @@ pub fn compute_room_list_projection(
                 .map(|room| (room.room_id.as_str(), room))
                 .collect();
             items.sort_by(|left, right| {
-                super::room::compare_conversation_activity(
+                super::compare_conversation_activity(
                     room_by_id.get(left.room_id.as_str()).copied(),
                     room_by_id.get(right.room_id.as_str()).copied(),
                 )
