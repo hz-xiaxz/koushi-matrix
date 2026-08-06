@@ -2517,6 +2517,7 @@ mod tests {
             actions: TimelineMessageActions {
                 can_copy: true,
                 can_forward: true,
+                can_reply: true,
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24e1".to_owned()),
@@ -2587,6 +2588,7 @@ mod tests {
             actions: TimelineMessageActions {
                 can_copy: true,
                 can_forward: true,
+                can_reply: true,
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24media1".to_owned()),
@@ -2672,6 +2674,7 @@ mod tests {
             actions: TimelineMessageActions {
                 can_copy: true,
                 can_forward: true,
+                can_reply: true,
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24reply1".to_owned()),
@@ -2731,6 +2734,7 @@ mod tests {
             actions: TimelineMessageActions {
                 can_copy: true,
                 can_forward: true,
+                can_reply: true,
                 can_permalink: true,
                 can_view_source: true,
                 permalink: Some("https://matrix.to/#/!r%3Aexample.test/%24linkpreview1".to_owned()),
@@ -2813,6 +2817,7 @@ mod tests {
                 "actions": {
                     "can_copy": true,
                     "can_forward": true,
+                    "can_reply": true,
                     "can_permalink": true,
                     "can_view_source": true,
                     "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1",

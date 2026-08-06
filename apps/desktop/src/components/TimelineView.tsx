@@ -6325,7 +6325,7 @@ export function TimelineItemRow({
   // thread, so a thread-pane row offers no reply-composition affordance. Rich
   // replies received from other clients still render their quoted context.
   const canComposeReply = presentationContext !== "thread";
-  const canShowReply = canShowActionButtons && item.body !== null && canComposeReply;
+  const canShowReply = canShowActionButtons && item.actions?.can_reply === true && canComposeReply;
   const canShowReplyInThread = canShowReply && presentationContext === "room";
   const canCopyMessage = Boolean(eventId && item.actions?.can_copy && item.body !== null);
   const canCopyPermalink = Boolean(

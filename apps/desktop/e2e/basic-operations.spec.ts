@@ -4797,6 +4797,7 @@ test("message action menu copies Rust-owned body and permalink values", async ({
       actions: {
         can_copy: true,
         can_forward: true,
+        can_reply: true,
         can_permalink: true,
         can_view_source: true,
         permalink: "https://matrix.to/#/!harness-room%3Aexample.invalid/%24actions-copy%3Aexample.invalid"
@@ -4844,6 +4845,7 @@ test("message action menu dispatches source and forward through typed Rust contr
       actions: {
         can_copy: true,
         can_forward: true,
+        can_reply: true,
         can_permalink: true,
         can_view_source: true,
         permalink: "https://matrix.to/#/!harness-room%3Aexample.invalid/%24actions-source%3Aexample.invalid"

@@ -148,6 +148,7 @@ export type TimelineSendState =
 export interface TimelineMessageActions {
   can_copy: boolean;
   can_forward: boolean;
+  can_reply: boolean;
   can_permalink: boolean;
   can_view_source: boolean;
   permalink?: string | null;
