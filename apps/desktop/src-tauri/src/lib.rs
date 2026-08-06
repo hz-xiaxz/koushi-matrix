@@ -3973,6 +3973,7 @@ mod tests {
             "roomInviteAccepted",
             "roomInviteDeclined",
             "roomLeft",
+            "roomKeyReshared",
             "roomMarkedAsRead",
             "roomMarkedAsUnread",
             "roomMemberModerated",
