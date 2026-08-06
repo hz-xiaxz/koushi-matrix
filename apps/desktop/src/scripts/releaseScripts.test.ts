@@ -3655,7 +3655,10 @@ fn test_only() {
   });
 
   test("linux GUI container docs use bash -c and the audited artifact lane", () => {
-    const agents = readFileSync(new URL("../../../../AGENTS.md", import.meta.url), "utf8");
+    const agents = readFileSync(
+      new URL("../../../../docs/agents/environment.md", import.meta.url),
+      "utf8"
+    );
 
     expect(agents).toContain("bash -c");
     expect(agents).not.toContain("bash -lc");
