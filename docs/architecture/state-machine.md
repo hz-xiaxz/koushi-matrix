@@ -382,9 +382,11 @@ stateDiagram-v2
   monotonically increasing backend generation. It contains no Matrix IDs or
   raw SDK errors.
 - Bootstrap start changes readiness to `Loading` and retains the last usable
-  room/space/invite snapshot. A non-empty provisional cache or observer snapshot
-  may remain visible while loading, but an unproven empty snapshot does not
-  replace it.
+  room/space/invite snapshot. A current-generation provisional observation
+  merges observed Spaces and rooms by stable ID, refreshing or appending them
+  while retaining entries absent from that observation; a known Space wins over
+  an ordinary-room entry with the same ID. An unproven empty snapshot does not
+  replace the retained snapshot.
 - Only an authoritative snapshot from the current generation changes readiness
   to `Ready`. That snapshot may legitimately contain zero rooms and replaces the
   retained snapshot. A current-generation failure changes readiness to `Failed`
