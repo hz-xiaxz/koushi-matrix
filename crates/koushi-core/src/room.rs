@@ -121,6 +121,31 @@ fn room_key_reshare_outcome_from_sdk(
     }
 }
 
+fn record_manual_room_key_reshare(outcome: &koushi_sdk::MatrixRoomKeyReshareOutcome) {
+    let (token, request_count, recipient_count) = match outcome {
+        koushi_sdk::MatrixRoomKeyReshareOutcome::Sent {
+            request_count,
+            recipient_count,
+        } => ("sent", *request_count, *recipient_count),
+        koushi_sdk::MatrixRoomKeyReshareOutcome::NoSession => ("no_session", 0, 0),
+        koushi_sdk::MatrixRoomKeyReshareOutcome::NoRecipients => ("no_recipients", 0, 0),
+        koushi_sdk::MatrixRoomKeyReshareOutcome::StaleSession => ("cancelled", 0, 0),
+    };
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
+            .field(DiagnosticField::token("trigger", "manual"))
+            .field(DiagnosticField::token("outcome", token))
+            .field(DiagnosticField::count(
+                "request_count",
+                request_count.try_into().unwrap_or(u64::MAX),
+            ))
+            .field(DiagnosticField::count(
+                "recipient_count",
+                recipient_count.try_into().unwrap_or(u64::MAX),
+            )),
+    );
+}
+
 const SPACE_MEMBER_REFRESH_CONNECTION_ID: RuntimeConnectionId = RuntimeConnectionId(0);
 const ROOM_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 const ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -2003,6 +2028,7 @@ impl RoomActor {
             .begin_interactive(AccountWorkKind::UserRoomOperation);
         match koushi_sdk::reshare_room_key(session, &room_id).await {
             Ok(outcome) => {
+                record_manual_room_key_reshare(&outcome);
                 self.emit(CoreEvent::Room(RoomEvent::RoomKeyReshared {
                     request_id,
                     room_id,
@@ -2010,6 +2036,18 @@ impl RoomActor {
                 }));
             }
             Err(error) => {
+                let outcome = if error.failure_kind()
+                    == Some(koushi_sdk::MatrixRoomOperationFailureKind::Http)
+                {
+                    "network_error"
+                } else {
+                    "sdk_error"
+                };
+                record(
+                    DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
+                        .field(DiagnosticField::token("trigger", "manual"))
+                        .field(DiagnosticField::token("outcome", outcome)),
+                );
                 let kind = classify_room_error(&error);
                 self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
             }

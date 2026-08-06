@@ -67,7 +67,8 @@ use koushi_sdk::MatrixUserProfile;
 use koushi_sdk::{
     MatrixClientSession, MatrixCommittedRoomTimelineCheckpoint as MatrixRoomSubscriptionCheckpoint,
     MatrixLiveTailRefreshCancellation, MatrixLiveTailRefreshDiagnostics,
-    MatrixLiveTailRefreshOutcome, MatrixLiveTailRefreshResult, MatrixTimelineContinuity,
+    MatrixLiveTailRefreshOutcome, MatrixLiveTailRefreshResult, MatrixOutboundGroupSessionToken,
+    MatrixRoomKeyReshareOutcome, MatrixRoomKeyReshareTarget, MatrixTimelineContinuity,
     MatrixTimelineGapError, MatrixTimelineGapHandle, MatrixTimelineGapInspection,
     MatrixTimelineGapRepairBudget, MatrixTimelineGapRepairOutcome, MatrixTimelineGapRepairResult,
 };
@@ -374,6 +375,13 @@ pub(crate) enum TimelineMessage {
         read_key: ReadStateKey,
         event_id: Option<String>,
     },
+    RunRoomKeyReshare {
+        key: TimelineKey,
+        actor_generation: u64,
+        expected_session: MatrixOutboundGroupSessionToken,
+        target: MatrixRoomKeyReshareTarget,
+        attempt: u8,
+    },
     #[cfg_attr(not(test), allow(dead_code))]
     Shutdown {
         acknowledged: Option<tokio::sync::oneshot::Sender<()>>,
@@ -617,9 +625,59 @@ async fn poll_global_send_completion_observer_once(
     .await
 }
 
+#[derive(Clone, Copy)]
+struct RoomKeyReshareAttempt {
+    delay: Duration,
+    number: u8,
+    target: MatrixRoomKeyReshareTarget,
+}
+
+const ROOM_KEY_RESHARE_ATTEMPTS: [RoomKeyReshareAttempt; 3] = [
+    RoomKeyReshareAttempt {
+        delay: Duration::from_secs(3),
+        number: 1,
+        target: MatrixRoomKeyReshareTarget::OwnOtherDevices,
+    },
+    RoomKeyReshareAttempt {
+        delay: Duration::from_secs(5),
+        number: 2,
+        target: MatrixRoomKeyReshareTarget::PeerDevices,
+    },
+    RoomKeyReshareAttempt {
+        delay: Duration::from_secs(15),
+        number: 3,
+        target: MatrixRoomKeyReshareTarget::OwnOtherDevices,
+    },
+];
+
+fn spawn_delayed_timeline_message<T: Send + 'static>(
+    tx: mpsc::Sender<T>,
+    delay: Duration,
+    message: T,
+) -> executor::JoinHandle<()> {
+    executor::spawn(async move {
+        executor::sleep(delay).await;
+        let _ = tx.send(message).await;
+    })
+}
+
+struct RoomKeyReshareSchedule {
+    session: MatrixOutboundGroupSessionToken,
+    tasks: Vec<executor::JoinHandle<()>>,
+}
+
+impl Drop for RoomKeyReshareSchedule {
+    fn drop(&mut self) {
+        for task in &self.tasks {
+            task.abort();
+        }
+    }
+}
+
 struct SendEnqueueWorkerSupervisor {
     tasks: FuturesUnordered<SendEnqueueWorkerFuture>,
     terminal_ingress: TimelineSendTerminalIngress,
+    room_key_reshares: HashMap<TimelineKey, RoomKeyReshareSchedule>,
 }
 
 impl SendEnqueueWorkerSupervisor {
@@ -627,11 +685,13 @@ impl SendEnqueueWorkerSupervisor {
         Self {
             tasks: FuturesUnordered::new(),
             terminal_ingress,
+            room_key_reshares: HashMap::new(),
         }
     }
 
     fn cancel_all(&mut self) {
         self.tasks = FuturesUnordered::new();
+        self.room_key_reshares.clear();
     }
 }
 
@@ -1668,7 +1728,6 @@ impl TimelineActorGenerationGate {
         })
     }
 
-    #[cfg(test)]
     fn current_generation(&self, key: &TimelineKey) -> Option<u64> {
         self.state
             .lock()
@@ -3135,6 +3194,22 @@ impl TimelineManagerActor {
                     )
                     .await;
                 }
+                TimelineMessage::RunRoomKeyReshare {
+                    key,
+                    actor_generation,
+                    expected_session,
+                    target,
+                    attempt,
+                } => {
+                    self.handle_room_key_reshare(
+                        key,
+                        actor_generation,
+                        expected_session,
+                        target,
+                        attempt,
+                    )
+                    .await;
+                }
                 TimelineMessage::Command(command) => {
                     self.handle_command(command).await;
                 }
@@ -3203,6 +3278,7 @@ impl TimelineManagerActor {
         // while the sole global terminal observer remains live. A worker may
         // still bind a durably saved SDK transaction during this phase.
         self.read_workers.cancel_all();
+        self.send_enqueue_workers.room_key_reshares.clear();
         self.read_workers.publish_persistence();
         let abandoned_read_waiters = self
             .read_workers
@@ -3323,18 +3399,162 @@ impl TimelineManagerActor {
             self.accepted_submissions.terminal(&submission_id);
         }
         if let Some(completion) = completion {
+            let key = completion.key.clone();
             self.emit(CoreEvent::Timeline(TimelineEvent::SendCompleted {
                 request_id: completion.request_id,
                 key: completion.key,
                 transaction_id: completion.transaction_id,
                 event_id: completion.event_id,
             }));
+            self.schedule_room_key_reshares(&key).await;
         }
         if let Some(failure) = failure {
             self.emit(CoreEvent::OperationFailed {
                 request_id: failure.request_id,
                 failure: failure.failure,
             });
+        }
+    }
+
+    async fn schedule_room_key_reshares(&mut self, key: &TimelineKey) {
+        if !matches!(key.kind, TimelineKind::Room { .. }) {
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let Some(actor_generation) = self.timeline_actor_generations.current_generation(key) else {
+            return;
+        };
+        let Ok(Some(outbound_session)) =
+            koushi_sdk::current_outbound_group_session_token(session, key.room_id()).await
+        else {
+            return;
+        };
+        if self
+            .send_enqueue_workers
+            .room_key_reshares
+            .get(key)
+            .is_some_and(|schedule| schedule.session == outbound_session)
+        {
+            return;
+        }
+
+        let tasks = ROOM_KEY_RESHARE_ATTEMPTS
+            .iter()
+            .map(|attempt| {
+                spawn_delayed_timeline_message(
+                    self.msg_tx.clone(),
+                    attempt.delay,
+                    TimelineMessage::RunRoomKeyReshare {
+                        key: key.clone(),
+                        actor_generation,
+                        expected_session: outbound_session.clone(),
+                        target: attempt.target,
+                        attempt: attempt.number,
+                    },
+                )
+            })
+            .collect();
+        self.send_enqueue_workers.room_key_reshares.insert(
+            key.clone(),
+            RoomKeyReshareSchedule {
+                session: outbound_session,
+                tasks,
+            },
+        );
+        record_room_key_reshare("new_outbound_session", "scheduled", 0, 0, 0);
+    }
+
+    async fn handle_room_key_reshare(
+        &mut self,
+        key: TimelineKey,
+        actor_generation: u64,
+        expected_session: MatrixOutboundGroupSessionToken,
+        target: MatrixRoomKeyReshareTarget,
+        attempt: u8,
+    ) {
+        let trigger = match attempt {
+            1 => "own_device_retry_1",
+            2 => "peer_device_retry",
+            _ => "own_device_retry_2",
+        };
+        let delay_seconds = ROOM_KEY_RESHARE_ATTEMPTS
+            .iter()
+            .find(|candidate| candidate.number == attempt)
+            .map_or(0, |candidate| candidate.delay.as_secs());
+        let current = self
+            .send_enqueue_workers
+            .room_key_reshares
+            .get(&key)
+            .is_some_and(|schedule| schedule.session == expected_session)
+            && self.timelines.contains_key(&key)
+            && self.timeline_actor_generations.current_generation(&key) == Some(actor_generation);
+        if !current {
+            record_room_key_reshare(trigger, "cancelled", delay_seconds, 0, 0);
+            return;
+        }
+        let Some(session) = self.session.as_ref().cloned() else {
+            record_room_key_reshare(trigger, "cancelled", delay_seconds, 0, 0);
+            return;
+        };
+
+        let _permit = self
+            .account_work
+            .acquire(AccountWorkKind::RoomKeyReshare)
+            .await;
+        let still_current = self
+            .send_enqueue_workers
+            .room_key_reshares
+            .get(&key)
+            .is_some_and(|schedule| schedule.session == expected_session)
+            && self.timelines.contains_key(&key)
+            && self.timeline_actor_generations.current_generation(&key) == Some(actor_generation);
+        if !still_current {
+            record_room_key_reshare(trigger, "cancelled", delay_seconds, 0, 0);
+            return;
+        }
+
+        let outcome = koushi_sdk::force_reshare_room_key(
+            &session,
+            key.room_id(),
+            Some(&expected_session),
+            target,
+        )
+        .await;
+        match outcome {
+            Ok(MatrixRoomKeyReshareOutcome::Sent {
+                request_count,
+                recipient_count,
+            }) => record_room_key_reshare(
+                trigger,
+                "sent",
+                delay_seconds,
+                request_count,
+                recipient_count,
+            ),
+            Ok(MatrixRoomKeyReshareOutcome::NoSession) => {
+                record_room_key_reshare(trigger, "no_session", delay_seconds, 0, 0);
+                self.send_enqueue_workers.room_key_reshares.remove(&key);
+            }
+            Ok(MatrixRoomKeyReshareOutcome::NoRecipients) => {
+                record_room_key_reshare(trigger, "no_recipients", delay_seconds, 0, 0)
+            }
+            Ok(MatrixRoomKeyReshareOutcome::StaleSession) => {
+                record_room_key_reshare(trigger, "cancelled", delay_seconds, 0, 0);
+                self.send_enqueue_workers.room_key_reshares.remove(&key);
+            }
+            Err(error) => record_room_key_reshare(
+                trigger,
+                if error.failure_kind() == Some(koushi_sdk::MatrixRoomOperationFailureKind::Http) {
+                    "network_error"
+                } else {
+                    "sdk_error"
+                },
+                delay_seconds,
+                0,
+                0,
+            ),
         }
     }
 
@@ -3880,6 +4100,7 @@ impl TimelineManagerActor {
         {
             Ok(handle) => {
                 self.emit_timeline_subscribed_action(&key).await;
+                self.send_enqueue_workers.room_key_reshares.remove(&key);
                 if let Some(previous) = self.timelines.insert(key.clone(), handle) {
                     previous.stop().await;
                 }
@@ -4050,6 +4271,7 @@ impl TimelineManagerActor {
             }
             TimelineCommand::Unsubscribe { request_id, key } => {
                 trace_timeline_route("manager_received", "unsubscribe", request_id, &key);
+                self.send_enqueue_workers.room_key_reshares.remove(&key);
                 // Drop the actor handle, which cancels its relay task and drops
                 // the SDK Timeline handle — no dedicated success event per spec.
                 if matches!(key.kind, TimelineKind::Room { .. }) {
@@ -4925,6 +5147,7 @@ impl TimelineManagerActor {
         {
             Ok(handle) => {
                 self.emit_timeline_subscribed_action(&key).await;
+                self.send_enqueue_workers.room_key_reshares.remove(&key);
                 if let Some(previous) = self.timelines.insert(key.clone(), handle) {
                     previous.stop().await;
                 }
@@ -5656,6 +5879,29 @@ fn record_read_admission(key: &ReadStateKey, diagnostic: ReadAdmissionDiagnostic
         waiter_count,
         superseded_operation_count,
         None,
+    );
+}
+
+fn record_room_key_reshare(
+    trigger: &'static str,
+    outcome: &'static str,
+    delay_seconds: u64,
+    request_count: usize,
+    recipient_count: usize,
+) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
+            .field(DiagnosticField::token("trigger", trigger))
+            .field(DiagnosticField::token("outcome", outcome))
+            .field(DiagnosticField::count("delay_seconds", delay_seconds))
+            .field(DiagnosticField::count(
+                "request_count",
+                request_count.try_into().unwrap_or(u64::MAX),
+            ))
+            .field(DiagnosticField::count(
+                "recipient_count",
+                recipient_count.try_into().unwrap_or(u64::MAX),
+            )),
     );
 }
 
@@ -25369,6 +25615,38 @@ mod tests {
             Poll::Ready(_) => panic!("{context} must be pending on its full channel"),
         })
         .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn room_key_reshare_wakes_only_at_the_three_bounded_delays() {
+        let (tx, mut rx) = mpsc::channel(3);
+        let tasks = ROOM_KEY_RESHARE_ATTEMPTS
+            .iter()
+            .map(|attempt| {
+                spawn_delayed_timeline_message(tx.clone(), attempt.delay, attempt.number)
+            })
+            .collect::<Vec<_>>();
+
+        for (advance, expected) in [(3, 1), (2, 2), (10, 3)] {
+            tokio::time::advance(Duration::from_secs(advance)).await;
+            assert_eq!(rx.recv().await, Some(expected));
+        }
+        assert!(rx.try_recv().is_err());
+        for task in tasks {
+            task.await.expect("timer task completed");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn delayed_room_key_reshare_wake_is_cancellable() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = spawn_delayed_timeline_message(tx, Duration::from_secs(3), ());
+        task.abort();
+
+        tokio::time::advance(Duration::from_secs(3)).await;
+
+        assert!(rx.try_recv().is_err());
+        assert!(task.await.expect_err("aborted timer").is_cancelled());
     }
 
     #[test]
