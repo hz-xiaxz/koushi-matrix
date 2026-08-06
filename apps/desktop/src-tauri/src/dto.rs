@@ -1952,7 +1952,19 @@ mod tests {
             active_room_id: Some("!room:example.invalid".to_owned()),
             active_space_id: Some("!space:example.invalid".to_owned()),
             space_order: vec!["!space:example.invalid".to_owned()],
-            last_room_by_space_id: BTreeMap::new(),
+            last_room_by_space_id: BTreeMap::from([(
+                "!space:example.invalid".to_owned(),
+                "!room:example.invalid".to_owned(),
+            )]),
+            // #445: exercise the real shape — a DMs-surface selection, which an
+            // empty map or a `None` room id would not prove.
+            last_selection_by_space_id: BTreeMap::from([(
+                "!space:example.invalid".to_owned(),
+                koushi_state::SpaceNavigationSelection {
+                    surface: koushi_state::SpaceConversationSurface::Dms,
+                    room_id: Some("!dm:example.invalid".to_owned()),
+                },
+            )]),
             room_scroll_anchors: BTreeMap::new(),
             main_timeline_anchor: None,
         };
