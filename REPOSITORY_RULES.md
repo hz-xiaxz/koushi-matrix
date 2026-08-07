@@ -21,9 +21,11 @@ Read these files before changing behavior:
    secrets, logging, GUI automation, async/runtime rules, and build gates.
 5. The relevant dated implementation plan under `docs/superpowers/plans/`.
 
-`AGENTS.md` is the operational entry file. It may contain local setup,
-troubleshooting, and known failure notes, but durable rules discovered there
-must be promoted into this file or `docs/policies/engineering-rules.md`.
+`AGENTS.md` is the operational entry file and stays small enough to load every
+session: it holds the current runtime/QA contract and routes to `docs/agents/`,
+which carries the setup, lane, ownership, troubleshooting, and historical detail.
+Durable rules discovered there must be promoted into this file or
+`docs/policies/engineering-rules.md`.
 
 When two normative documents appear to disagree, stop and reconcile the canon
 before changing code. The stricter privacy/security rule applies while the
@@ -573,8 +575,10 @@ To reduce conflicts on these files:
   record, or changelog entry that identifies the canon consulted, the files
   changed, and the verification run. This is required when changing state
   machines, security behavior, SDK fork surfaces, QA gates, or release gates.
-- Operational setup and failure notes stay in `AGENTS.md` until they become
-  durable prohibitions or design rules.
+- Operational setup and failure notes stay in the `AGENTS.md` / `docs/agents/`
+  tree until they become durable prohibitions or design rules. Add them to the
+  matching topic file, not to `AGENTS.md` itself; `scripts/check-agents-docs.mjs`
+  enforces that routing.
 
 ## Licensing
 
