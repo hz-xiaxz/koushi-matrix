@@ -2329,6 +2329,10 @@ impl RoomActor {
         };
         match koushi_sdk::leave_room(session, &room_id).await {
             Ok(left_room_id) => {
+                self.reduce_reliable(vec![AppAction::SpaceOrderPreferenceRemoved {
+                    space_id: left_room_id.clone(),
+                }])
+                .await;
                 self.emit(CoreEvent::Room(RoomEvent::RoomLeft {
                     request_id,
                     room_id: left_room_id,

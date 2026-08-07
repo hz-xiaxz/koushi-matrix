@@ -1283,6 +1283,7 @@ impl CoreRuntime {
             composer_draft_store_actor,
             composer_draft_load_status: ComposerDraftLoadStatus::Unloaded,
             navigation_loaded_for: None,
+            navigation_persistence_status: NavigationPersistenceStatus::Unloaded,
             scheduled_sends_loaded_for: None,
             room_preferences_loaded_for: None,
             state_generation: 0,
@@ -1764,6 +1765,13 @@ enum ComposerDraftLoadStatus {
     Failed(koushi_key::SessionKeyId),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum NavigationPersistenceStatus {
+    Unloaded,
+    Loaded(koushi_key::SessionKeyId),
+    LoadFailed(koushi_key::SessionKeyId),
+}
+
 struct AppActor {
     command_rx: mpsc::Receiver<CoreCommandEnvelope>,
     action_rx: mpsc::Receiver<Vec<AppAction>>,
@@ -1776,6 +1784,7 @@ struct AppActor {
     composer_draft_store_actor: StoreActor,
     composer_draft_load_status: ComposerDraftLoadStatus,
     navigation_loaded_for: Option<koushi_key::SessionKeyId>,
+    navigation_persistence_status: NavigationPersistenceStatus,
     scheduled_sends_loaded_for: Option<koushi_key::SessionKeyId>,
     room_preferences_loaded_for: Option<koushi_key::SessionKeyId>,
     state_generation: u64,
@@ -1908,7 +1917,7 @@ enum DeferredScheduledSendPersist {
 #[derive(Default)]
 struct DeferredReducerSideEffects {
     cancel_activity_resolution: bool,
-    navigation: Option<(koushi_key::SessionKeyId, NavigationState)>,
+    navigation: Option<(koushi_key::SessionKeyId, NavigationState, bool)>,
     composer_drafts: Option<(koushi_key::SessionKeyId, ComposerDraftStore)>,
     scheduled_sends: Option<DeferredScheduledSendPersist>,
 }
@@ -2712,6 +2721,13 @@ impl AppActor {
                         else {
                             continue;
                         };
+                        // Navigation must be loaded before any actor projection
+                        // can persist a derived room-list order. In particular,
+                        // a Sliding Sync snapshot may arrive in the same action
+                        // batch as session readiness.
+                        if !matches!(&action, AppAction::NavigationLoaded { .. }) {
+                            self.load_navigation_for_current_session().await;
+                        }
                         let action = guard_activity_resolution_completion(&self.state, action);
                         let composer_acceptance =
                             composer_acceptance_identity_for_action(&action);
@@ -3067,6 +3083,10 @@ impl AppActor {
         &mut self,
         action: AppAction,
     ) -> (Vec<AppEffect>, DeferredReducerSideEffects) {
+        let explicit_navigation_preference_mutation = matches!(
+            &action,
+            AppAction::ReorderSpaces { .. } | AppAction::SpaceOrderPreferenceRemoved { .. }
+        );
         let composer_draft_transition = composer_draft_transition_policy(&action);
         let destructive_state_before = (composer_draft_transition
             == ComposerDraftTransitionPolicy::Discard)
@@ -3080,6 +3100,48 @@ impl AppActor {
         let previous_scheduled_session = scheduled_send_session_key(&self.state);
         let previous_scheduled_sends = self.state.scheduled_sends.clone();
         let effects = reduce_with_unread_diagnostics(&mut self.state, action);
+        if previous_navigation.space_order != self.state.navigation.space_order
+            || explicit_navigation_preference_mutation
+        {
+            let visible_space_ids = self
+                .state
+                .spaces
+                .iter()
+                .map(|space| space.space_id.as_str())
+                .collect::<BTreeSet<_>>();
+            let missing_space_count = self
+                .state
+                .navigation
+                .space_order
+                .iter()
+                .filter(|space_id| !visible_space_ids.contains(space_id.as_str()))
+                .count();
+            let outcome = if explicit_navigation_preference_mutation {
+                if previous_navigation.space_order != self.state.navigation.space_order {
+                    "accepted"
+                } else {
+                    "rejected_or_noop"
+                }
+            } else {
+                "projected"
+            };
+            record(
+                DiagnosticEvent::new(DiagnosticLevel::Debug, "core.space_order", "projected")
+                    .field(DiagnosticField::token("outcome", outcome))
+                    .field(DiagnosticField::count(
+                        "ledger_entries",
+                        self.state.navigation.space_order.len() as u64,
+                    ))
+                    .field(DiagnosticField::count(
+                        "visible_spaces",
+                        self.state.spaces.len() as u64,
+                    ))
+                    .field(DiagnosticField::count(
+                        "missing_space_count",
+                        missing_space_count as u64,
+                    )),
+            );
+        }
         if destructive_state_before
             .as_ref()
             .is_some_and(|before| before != &self.state)
@@ -3101,7 +3163,11 @@ impl AppActor {
             let target_session =
                 navigation_session_key(&self.state).or(previous_navigation_session);
             if let Some(key_id) = target_session {
-                deferred.navigation = Some((key_id, self.state.navigation.clone()));
+                deferred.navigation = Some((
+                    key_id,
+                    self.state.navigation.clone(),
+                    explicit_navigation_preference_mutation,
+                ));
             }
         }
         if previous_drafts != self.state.composer_drafts {
@@ -3236,8 +3302,28 @@ impl AppActor {
                 .send(AccountMessage::CancelActivityResolution)
                 .await;
         }
-        if let Some((key_id, navigation)) = deferred.navigation {
-            self.persist_navigation(key_id, navigation).await;
+        if let Some((key_id, navigation, explicit_preference_mutation)) = deferred.navigation {
+            let load_failed = self.navigation_persistence_status
+                == NavigationPersistenceStatus::LoadFailed(key_id.clone());
+            if !load_failed || explicit_preference_mutation {
+                self.persist_navigation(key_id, navigation).await;
+            } else {
+                record(
+                    DiagnosticEvent::new(
+                        DiagnosticLevel::Warn,
+                        "core.space_order",
+                        "persistence_skipped_after_load_failure",
+                    )
+                    .field(DiagnosticField::count(
+                        "ledger_entries",
+                        navigation.space_order.len() as u64,
+                    ))
+                    .field(DiagnosticField::boolean(
+                        "explicit_preference_mutation",
+                        false,
+                    )),
+                );
+            }
         }
         if let Some((key_id, drafts)) = deferred.composer_drafts {
             self.schedule_composer_draft_persist(key_id, drafts).await;
@@ -3263,6 +3349,7 @@ impl AppActor {
     async fn load_navigation_for_current_session(&mut self) {
         let Some(key_id) = navigation_session_key(&self.state) else {
             self.navigation_loaded_for = None;
+            self.navigation_persistence_status = NavigationPersistenceStatus::Unloaded;
             return;
         };
         if self.navigation_loaded_for.as_ref() == Some(&key_id) {
@@ -3271,11 +3358,32 @@ impl AppActor {
 
         let store = self.composer_draft_store_actor.clone();
         let load_key_id = key_id.clone();
-        let navigation = executor::spawn_blocking(move || {
-            store.load_navigation(&load_key_id).unwrap_or_default()
-        })
-        .await
-        .unwrap_or_default();
+        let load_result =
+            executor::spawn_blocking(move || store.load_navigation(&load_key_id)).await;
+        let navigation = match load_result {
+            Ok(Ok(navigation)) => {
+                self.navigation_persistence_status =
+                    NavigationPersistenceStatus::Loaded(key_id.clone());
+                record(
+                    DiagnosticEvent::new(DiagnosticLevel::Info, "core.space_order", "loaded")
+                        .field(DiagnosticField::count(
+                            "ledger_entries",
+                            navigation.space_order.len() as u64,
+                        ))
+                        .field(DiagnosticField::token("result", "success")),
+                );
+                navigation
+            }
+            Ok(Err(_)) | Err(_) => {
+                self.navigation_persistence_status =
+                    NavigationPersistenceStatus::LoadFailed(key_id.clone());
+                record(
+                    DiagnosticEvent::new(DiagnosticLevel::Error, "core.space_order", "load_failed")
+                        .field(DiagnosticField::token("result", "failure")),
+                );
+                NavigationState::default()
+            }
+        };
         let effects = reduce(&mut self.state, AppAction::NavigationLoaded { navigation });
         self.navigation_loaded_for = Some(key_id);
         self.handle_ui_event_effects(&effects).await;
@@ -3385,8 +3493,35 @@ impl AppActor {
         key_id: koushi_key::SessionKeyId,
         navigation: NavigationState,
     ) {
+        let ledger_entries = navigation.space_order.len() as u64;
+        let status_key_id = key_id.clone();
         let store = self.composer_draft_store_actor.clone();
-        let _ = executor::spawn_blocking(move || store.save_navigation(&key_id, &navigation)).await;
+        let result =
+            executor::spawn_blocking(move || store.save_navigation(&key_id, &navigation)).await;
+        match result {
+            Ok(Ok(())) => {
+                self.navigation_persistence_status =
+                    NavigationPersistenceStatus::Loaded(status_key_id);
+                record(
+                    DiagnosticEvent::new(DiagnosticLevel::Info, "core.space_order", "persisted")
+                        .field(DiagnosticField::count("ledger_entries", ledger_entries))
+                        .field(DiagnosticField::token("result", "success")),
+                );
+            }
+            Ok(Err(_)) | Err(_) => {
+                self.navigation_persistence_status =
+                    NavigationPersistenceStatus::LoadFailed(status_key_id);
+                record(
+                    DiagnosticEvent::new(
+                        DiagnosticLevel::Error,
+                        "core.space_order",
+                        "persist_failed",
+                    )
+                    .field(DiagnosticField::count("ledger_entries", ledger_entries))
+                    .field(DiagnosticField::token("result", "failure")),
+                );
+            }
+        }
     }
 
     async fn persist_room_preferences(&mut self, preferences: &koushi_state::RoomPreferencesState) {
@@ -9709,6 +9844,7 @@ mod tests {
             composer_draft_store_actor: StoreActor::new(data_dir.path().to_owned()),
             composer_draft_load_status: ComposerDraftLoadStatus::Loaded(session_key.clone()),
             navigation_loaded_for: Some(session_key.clone()),
+            navigation_persistence_status: NavigationPersistenceStatus::Loaded(session_key.clone()),
             scheduled_sends_loaded_for: Some(session_key.clone()),
             room_preferences_loaded_for: Some(session_key),
             state_generation: 0,

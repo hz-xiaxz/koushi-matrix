@@ -11,13 +11,13 @@ use crate::{
 };
 
 use super::{
-    active_room_left_selected_space, apply_space_order,
+    active_room_left_selected_space, apply_space_order_preference,
     avatar::{collect_known_avatar_thumbnails, preserve_avatar_thumbnail},
     first_default_room_id, has_session_projection_context, is_session_ready,
-    preferred_room_id_in_active_space, recompute_room_list_projection, reconcile_space_order,
-    refresh_timeline_media_gallery, refresh_timeline_scheduled_sends,
-    refresh_timeline_upload_staging, retain_navigation_room_memory,
-    retarget_active_room_for_selected_space, room_exists,
+    merge_new_spaces_into_preference, preferred_room_id_in_active_space,
+    recompute_room_list_projection, refresh_timeline_media_gallery,
+    refresh_timeline_scheduled_sends, refresh_timeline_upload_staging,
+    retain_navigation_room_memory, retarget_active_room_for_selected_space, room_exists,
     select_active_room_after_room_list_update, session_user_id,
 };
 
@@ -69,8 +69,8 @@ fn handle_room_list_updated_with_crawler(
         .map(|room| room.room_id.clone())
         .collect::<BTreeSet<_>>();
     let had_active_room_before_update = state.navigation.active_room_id.is_some();
-    reconcile_space_order(&mut state.navigation.space_order, &spaces);
-    apply_space_order(&mut spaces, &state.navigation.space_order);
+    merge_new_spaces_into_preference(&mut state.navigation.space_order, &spaces);
+    apply_space_order_preference(&mut spaces, &state.navigation.space_order);
     state.spaces = spaces;
     state.rooms = rooms;
     retain_navigation_room_memory(state, authoritative);

@@ -1604,6 +1604,27 @@ describe("BrowserFakeApi settings preview", () => {
     ]);
   });
 
+  test("reorderSpaces preserves hidden Space preference slots", async () => {
+    const api = createBrowserFakeApi();
+    const mutable = api as unknown as { snapshot: DesktopSnapshot };
+    mutable.snapshot.state.ui.navigation.space_order = [
+      "!space-alpha:example.invalid",
+      "!space-hidden:example.invalid",
+      "!space-beta:example.invalid"
+    ];
+
+    const reordered = await api.reorderSpaces([
+      "!space-beta:example.invalid",
+      "!space-alpha:example.invalid"
+    ]);
+
+    expect(reordered.state.ui.navigation.space_order).toEqual([
+      "!space-beta:example.invalid",
+      "!space-hidden:example.invalid",
+      "!space-alpha:example.invalid"
+    ]);
+  });
+
   test("leaveRoom removes a Space without leaving its child rooms", async () => {
     const api = createBrowserFakeApi();
 
