@@ -7857,7 +7857,16 @@ kbd {
   cursor: pointer;
 }
 
-@media (max-width: 1180px) {
+/* #452: this breakpoint must meet the inline grid's own minimum, which is
+   --shell-rail-width (72) + --sidebar-width (318) + the timeline floor (420)
+   + --right-panel-width (390) = 1200px. It used to sit at 1180px, leaving
+   1181-1199px where the four-column grid stayed active below the width it
+   needs; with `.desktop { overflow: hidden }` the panel and its close control
+   were simply cut off the window. The fractional bound covers viewports that
+   report a non-integer width under zoom or fractional device pixel ratios.
+   `e2e/right-panel-clipping.spec.ts` measures the rendered geometry across this
+   boundary. */
+@media (max-width: 1199.98px) {
   .app-grid,
   .app-grid.thread-closed {
     grid-template-columns: var(--shell-rail-width) var(--sidebar-width) minmax(
@@ -7875,7 +7884,7 @@ kbd {
   }
 }
 
-@media (min-width: 761px) and (max-width: 1180px) {
+@media (min-width: 761px) and (max-width: 1199.98px) {
   .app-grid.right-panel-open .thread-pane {
     position: fixed;
     inset: 44px 0 0 auto;
