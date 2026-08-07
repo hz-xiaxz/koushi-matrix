@@ -44,8 +44,18 @@ design change, amend `architecture/overview.md` first.
 
 ## Operational notes
 
-- [`/AGENTS.md`](../AGENTS.md) (repo root) — environment-specific
-  troubleshooting for agents and QA automation (macOS permissions, process
-  cleanup, homeserver install caveats). Durable rules that emerge there must be
-  promoted to `../REPOSITORY_RULES.md` or `policies/engineering-rules.md`;
-  AGENTS.md keeps the operational how-to.
+- [`/AGENTS.md`](../AGENTS.md) (repo root) — the operational entry file: current
+  runtime/QA contract plus an index into `agents/`. Kept small because every
+  agent session loads it.
+- [`agents/`](agents/) — the operational detail, one topic per file:
+  [`environment.md`](agents/environment.md) (setup, toolchains, containers),
+  [`verification.md`](agents/verification.md) (how to prove a change),
+  [`qa-lanes.md`](agents/qa-lanes.md) (every lane, scenario, and evidence token),
+  [`state-ownership.md`](agents/state-ownership.md) (who owns which state, per
+  area), [`troubleshooting.md`](agents/troubleshooting.md) (known symptoms),
+  [`history.md`](agents/history.md) (superseded contracts), and
+  [`plans.md`](agents/plans.md) (dated plan index).
+
+  Durable rules that emerge there must be promoted to `../REPOSITORY_RULES.md` or
+  `policies/engineering-rules.md`; the tree keeps the operational how-to.
+  `scripts/check-agents-docs.mjs` guards the routing.
