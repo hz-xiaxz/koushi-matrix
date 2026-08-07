@@ -1024,6 +1024,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::ReorderSpaces { space_ids } => {
             navigation::handle_reorder_spaces(state, space_ids)
         }
+        AppAction::SpaceOrderPreferenceRemoved { space_id } => {
+            navigation::handle_space_order_preference_removed(state, space_id)
+        }
         AppAction::SelectRoom { room_id } => navigation::handle_select_room(state, room_id),
         AppAction::TimelineSubscribed { room_id } => {
             timeline::handle_timeline_subscribed(state, room_id)
@@ -2159,27 +2162,31 @@ pub(crate) fn refresh_timeline_media_gallery(state: &mut AppState) {
         .unwrap_or_default();
 }
 
-pub(crate) fn reconcile_space_order(
-    space_order: &mut Vec<String>,
-    spaces: &[crate::state::SpaceSummary],
-) {
-    let available_space_ids = spaces
-        .iter()
-        .map(|space| space.space_id.as_str())
-        .collect::<BTreeSet<_>>();
-    let mut retained_space_ids = BTreeSet::new();
-    space_order.retain(|space_id| {
-        available_space_ids.contains(space_id.as_str())
-            && retained_space_ids.insert(space_id.clone())
-    });
-    for space in spaces {
-        if retained_space_ids.insert(space.space_id.clone()) {
-            space_order.push(space.space_id.clone());
-        }
-    }
+pub(crate) fn normalize_space_order_preference(space_order: &mut Vec<String>) {
+    let mut seen_space_ids = BTreeSet::new();
+    space_order.retain(|space_id| seen_space_ids.insert(space_id.clone()));
 }
 
-pub(crate) fn apply_space_order(spaces: &mut [crate::state::SpaceSummary], space_order: &[String]) {
+pub(crate) fn merge_new_spaces_into_preference(
+    space_order: &mut Vec<String>,
+    spaces: &[crate::state::SpaceSummary],
+) -> bool {
+    normalize_space_order_preference(space_order);
+    let mut changed = false;
+    let mut known_space_ids = space_order.iter().cloned().collect::<BTreeSet<_>>();
+    for space in spaces {
+        if known_space_ids.insert(space.space_id.clone()) {
+            space_order.push(space.space_id.clone());
+            changed = true;
+        }
+    }
+    changed
+}
+
+pub(crate) fn apply_space_order_preference(
+    spaces: &mut [crate::state::SpaceSummary],
+    space_order: &[String],
+) {
     let position_by_space_id = space_order
         .iter()
         .enumerate()
@@ -2191,6 +2198,35 @@ pub(crate) fn apply_space_order(spaces: &mut [crate::state::SpaceSummary], space
             .copied()
             .unwrap_or(usize::MAX)
     });
+}
+
+pub(crate) fn reorder_visible_space_order(
+    space_order: &mut Vec<String>,
+    current_spaces: &[crate::state::SpaceSummary],
+    requested_space_ids: &[String],
+) -> bool {
+    if !is_complete_space_order(current_spaces, requested_space_ids) {
+        return false;
+    }
+
+    let mut next_space_order = space_order.clone();
+    merge_new_spaces_into_preference(&mut next_space_order, current_spaces);
+    let visible_space_ids = current_spaces
+        .iter()
+        .map(|space| space.space_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut requested_space_ids = requested_space_ids.iter();
+    for space_id in &mut next_space_order {
+        if visible_space_ids.contains(space_id.as_str()) {
+            *space_id = requested_space_ids
+                .next()
+                .expect("validated visible Space reorder length")
+                .clone();
+        }
+    }
+
+    *space_order = next_space_order;
+    true
 }
 
 pub(crate) fn is_complete_space_order(
@@ -2486,6 +2522,147 @@ mod tests {
             avatar: None,
             child_room_ids: Vec::new(),
         }
+    }
+
+    #[test]
+    fn space_order_preference_normalization_keeps_missing_ids_and_deduplicates() {
+        let mut space_order = vec![
+            "!space-a:example.invalid".to_owned(),
+            "!space-b:example.invalid".to_owned(),
+            "!space-a:example.invalid".to_owned(),
+        ];
+
+        normalize_space_order_preference(&mut space_order);
+
+        assert_eq!(
+            space_order,
+            vec!["!space-a:example.invalid", "!space-b:example.invalid",]
+        );
+    }
+
+    #[test]
+    fn reordering_visible_spaces_preserves_hidden_ledger_slots() {
+        let current_spaces = vec![
+            test_space("!space-a:example.invalid"),
+            test_space("!space-c:example.invalid"),
+        ];
+        let mut space_order = vec![
+            "!space-a:example.invalid".to_owned(),
+            "!space-hidden:example.invalid".to_owned(),
+            "!space-c:example.invalid".to_owned(),
+        ];
+
+        assert!(reorder_visible_space_order(
+            &mut space_order,
+            &current_spaces,
+            &[
+                "!space-c:example.invalid".to_owned(),
+                "!space-a:example.invalid".to_owned(),
+            ],
+        ));
+
+        assert_eq!(
+            space_order,
+            vec![
+                "!space-c:example.invalid",
+                "!space-hidden:example.invalid",
+                "!space-a:example.invalid",
+            ]
+        );
+    }
+
+    #[test]
+    fn room_list_updates_do_not_drop_persisted_spaces_before_the_first_snapshot() {
+        let mut state = ready_state();
+
+        reduce(
+            &mut state,
+            AppAction::NavigationLoaded {
+                navigation: NavigationState {
+                    space_order: vec![
+                        "!space-a:example.invalid".to_owned(),
+                        "!space-b:example.invalid".to_owned(),
+                    ],
+                    ..NavigationState::default()
+                },
+            },
+        );
+        assert!(state.spaces.is_empty());
+
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: vec![
+                    test_space("!space-b:example.invalid"),
+                    test_space("!space-c:example.invalid"),
+                ],
+                rooms: Vec::new(),
+            },
+        );
+
+        assert_eq!(
+            state.navigation.space_order,
+            vec![
+                "!space-a:example.invalid",
+                "!space-b:example.invalid",
+                "!space-c:example.invalid",
+            ]
+        );
+
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: vec![
+                    test_space("!space-a:example.invalid"),
+                    test_space("!space-b:example.invalid"),
+                    test_space("!space-c:example.invalid"),
+                ],
+                rooms: Vec::new(),
+            },
+        );
+
+        assert_eq!(
+            state
+                .spaces
+                .iter()
+                .map(|space| space.space_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "!space-a:example.invalid",
+                "!space-b:example.invalid",
+                "!space-c:example.invalid",
+            ]
+        );
+    }
+
+    #[test]
+    fn explicit_space_order_preference_removal_removes_only_the_requested_entry() {
+        let mut state = ready_state();
+        state.spaces = vec![
+            test_space("!space-a:example.invalid"),
+            test_space("!space-b:example.invalid"),
+        ];
+        state.navigation.space_order = vec![
+            "!space-a:example.invalid".to_owned(),
+            "!space-b:example.invalid".to_owned(),
+        ];
+
+        let effects = reduce(
+            &mut state,
+            AppAction::SpaceOrderPreferenceRemoved {
+                space_id: "!space-b:example.invalid".to_owned(),
+            },
+        );
+
+        assert_eq!(
+            effects,
+            vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
+        );
+        assert_eq!(
+            state.navigation.space_order,
+            vec!["!space-a:example.invalid"]
+        );
+        assert_eq!(state.spaces.len(), 2);
     }
 
     fn test_avatar(mxc_uri: &str) -> AvatarImage {

@@ -15,6 +15,7 @@
 pub(crate) mod composer_drafts;
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -56,6 +57,20 @@ static READ_STATE_OUTBOX_GENERATIONS: OnceLock<Mutex<HashMap<PathBuf, (u64, u64)
     OnceLock::new();
 static READ_STATE_OUTBOX_WRITERS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
     OnceLock::new();
+
+fn atomic_replace(path: &std::path::Path, payload: &[u8]) -> Result<(), CoreFailure> {
+    let temporary_path = path.with_extension("tmp");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&temporary_path)
+        .map_err(|_| CoreFailure::StoreUnavailable)?;
+    file.write_all(payload)
+        .and_then(|_| file.sync_all())
+        .map_err(|_| CoreFailure::StoreUnavailable)?;
+    std::fs::rename(&temporary_path, path).map_err(|_| CoreFailure::StoreUnavailable)
+}
 
 /// Env var for QA/debug file-based credential store override.
 /// Only honored in debug/test/qa-bin builds; production release builds ignore it.
@@ -438,7 +453,7 @@ impl StoreActor {
         }
         let payload =
             encrypt_navigation_payload(&self.load_or_create_unlock_secret(key_id)?, navigation)?;
-        std::fs::write(path, payload).map_err(|_| CoreFailure::StoreUnavailable)?;
+        atomic_replace(&path, &payload)?;
         match std::fs::remove_file(&legacy_path) {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -2928,6 +2943,7 @@ mod tests {
 
         let path = actor.account_navigation_file(&key_id);
         let bytes = std::fs::read(&path).expect("read encrypted navigation");
+        assert!(!path.with_extension("tmp").exists());
         for plaintext in ["!space:test.example.com", "!room:test.example.com"] {
             assert!(
                 !bytes

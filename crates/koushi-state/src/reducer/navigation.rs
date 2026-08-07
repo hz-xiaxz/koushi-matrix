@@ -7,11 +7,11 @@ use crate::{
 };
 
 use super::{
-    apply_space_order,
+    apply_space_order_preference,
     avatar::{collect_known_avatar_thumbnails, preserve_avatar_thumbnail},
     clear_active_room_for_navigation, has_session_projection_context, is_complete_space_order,
     is_session_ready, preferred_selection_in_space, recompute_room_list_projection,
-    reconcile_space_order, remember_active_room_for_current_space,
+    remember_active_room_for_current_space, reorder_visible_space_order,
     select_active_room_for_navigation,
 };
 
@@ -43,8 +43,8 @@ pub(crate) fn handle_navigation_loaded(
 
     let previous_active_space_id = state.navigation.active_space_id.clone();
     state.navigation = normalize_navigation_state(navigation);
-    reconcile_space_order(&mut state.navigation.space_order, &state.spaces);
-    apply_space_order(&mut state.spaces, &state.navigation.space_order);
+    super::normalize_space_order_preference(&mut state.navigation.space_order);
+    apply_space_order_preference(&mut state.spaces, &state.navigation.space_order);
     let space_members_changed = previous_active_space_id != state.navigation.active_space_id
         && super::space_members::handle_selected(state, state.navigation.active_space_id.clone());
     recompute_room_list_projection(state);
@@ -272,8 +272,31 @@ pub(crate) fn handle_reorder_spaces(
         return Vec::new();
     }
 
-    state.navigation.space_order = space_ids;
-    apply_space_order(&mut state.spaces, &state.navigation.space_order);
+    if !reorder_visible_space_order(&mut state.navigation.space_order, &state.spaces, &space_ids) {
+        return Vec::new();
+    }
+    apply_space_order_preference(&mut state.spaces, &state.navigation.space_order);
+    vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
+}
+
+pub(crate) fn handle_space_order_preference_removed(
+    state: &mut AppState,
+    space_id: String,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
+
+    let previous_len = state.navigation.space_order.len();
+    state
+        .navigation
+        .space_order
+        .retain(|candidate| candidate != &space_id);
+    if state.navigation.space_order.len() == previous_len {
+        return Vec::new();
+    }
+
+    apply_space_order_preference(&mut state.spaces, &state.navigation.space_order);
     vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
 }
 

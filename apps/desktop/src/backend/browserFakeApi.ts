@@ -901,8 +901,22 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
-    const positionBySpaceId = new Map(spaceIds.map((spaceId, index) => [spaceId, index]));
-    this.snapshot.state.ui.navigation.space_order = [...spaceIds];
+    const spaceOrder = [...(this.snapshot.state.ui.navigation.space_order ?? [])];
+    for (const space of this.snapshot.state.domain.spaces) {
+      if (!spaceOrder.includes(space.space_id)) {
+        spaceOrder.push(space.space_id);
+      }
+    }
+    const visibleSpaceIds = new Set(this.snapshot.state.domain.spaces.map((space) => space.space_id));
+    const requestedSpaceIds = [...spaceIds];
+    for (let index = 0; index < spaceOrder.length; index += 1) {
+      if (visibleSpaceIds.has(spaceOrder[index]!)) {
+        spaceOrder[index] = requestedSpaceIds.shift()!;
+      }
+    }
+
+    const positionBySpaceId = new Map(spaceOrder.map((spaceId, index) => [spaceId, index]));
+    this.snapshot.state.ui.navigation.space_order = spaceOrder;
     this.snapshot.state.domain.spaces = [...this.snapshot.state.domain.spaces].sort(
       (left, right) =>
         (positionBySpaceId.get(left.space_id) ?? Number.MAX_SAFE_INTEGER) -

@@ -949,6 +949,11 @@ pub enum AppAction {
     ReorderSpaces {
         space_ids: Vec<String>,
     },
+    /// Remove a Space from the local ordering ledger after an explicit,
+    /// successful leave. A transient room-list omission must not dispatch this.
+    SpaceOrderPreferenceRemoved {
+        space_id: String,
+    },
     SelectRoom {
         room_id: String,
     },
