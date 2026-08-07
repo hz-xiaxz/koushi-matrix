@@ -295,6 +295,7 @@ pub(crate) fn format_markdown_subset_html(
 
         if options.math_mode
             && let Some((block_body, closing_index)) = math_block_body(&lines, line_index)
+                .or_else(|| latex_display_block(&lines, line_index))
         {
             push_math_html(&mut html, "div", &block_body);
             changed = true;
@@ -350,6 +351,61 @@ fn math_block_body(lines: &[&str], start_index: usize) -> Option<(String, usize)
     ))
 }
 
+/// Byte index of the terminating `\<closing>` sequence in `value`.
+///
+/// `\\` is a LaTeX line break, so it is consumed as one unit. Scanning for a
+/// bare `\` would otherwise end a formula containing `x \\) y` on the line
+/// break instead of on its real delimiter.
+fn find_latex_close(value: &str, closing: char) -> Option<usize> {
+    let mut index = 0;
+    while index < value.len() {
+        let mut chars = value[index..].chars();
+        let ch = chars.next()?;
+        if ch != '\\' {
+            index += ch.len_utf8();
+            continue;
+        }
+        match chars.next() {
+            Some(next) if next == closing => return Some(index),
+            Some(next) => index += ch.len_utf8() + next.len_utf8(),
+            None => return None,
+        }
+    }
+    None
+}
+
+/// `\[ … \]` written as its own paragraph, either on a single line or fenced
+/// across lines. Returns the formula body and the index of its closing line.
+///
+/// A line that continues after `\]` is not a block: a `div` cannot be nested
+/// inside a paragraph, so that case falls through to the inline scanner and
+/// renders as a span instead (#455).
+fn latex_display_block(lines: &[&str], start_index: usize) -> Option<(String, usize)> {
+    let after = lines.get(start_index)?.trim().strip_prefix("\\[")?;
+    if let Some(end) = find_latex_close(after, ']') {
+        if !after.get(end + 2..)?.trim().is_empty() {
+            return None;
+        }
+        let body = &after[..end];
+        return (!body.trim().is_empty()).then(|| (body.to_owned(), start_index));
+    }
+    if !after.trim().is_empty() {
+        return None;
+    }
+    let closing_index = lines
+        .iter()
+        .enumerate()
+        .skip(start_index + 1)
+        .find_map(|(index, line)| (line.trim() == "\\]").then_some(index))?;
+    if closing_index == start_index + 1 {
+        return None;
+    }
+    Some((
+        lines[start_index + 1..closing_index].join("\n"),
+        closing_index,
+    ))
+}
+
 fn push_inline_markdown_subset(
     html: &mut String,
     body: &str,
@@ -373,6 +429,23 @@ fn push_inline_markdown_subset(
         if let Some(after) = rest.strip_prefix("\\$") {
             html.push('$');
             index += rest.len() - after.len();
+            changed = true;
+            continue;
+        }
+        // #455: LaTeX's own delimiters. `\(…\)` is inline. `\[…\]` is display, but
+        // a display block cannot be nested inside a paragraph, so mid-line it
+        // degrades to an inline span rather than falling through to literal text;
+        // on its own line `latex_display_block` has already made it a `div`.
+        if options.math_mode
+            && let Some((after, closing)) = rest
+                .strip_prefix("\\(")
+                .map(|after| (after, ')'))
+                .or_else(|| rest.strip_prefix("\\[").map(|after| (after, ']')))
+            && let Some(end) = find_latex_close(after, closing)
+            && !after[..end].trim().is_empty()
+        {
+            push_math_html(html, "span", &after[..end]);
+            index += 2 + end + 2;
             changed = true;
             continue;
         }

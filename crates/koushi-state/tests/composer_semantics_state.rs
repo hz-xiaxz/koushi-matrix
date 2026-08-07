@@ -130,6 +130,78 @@ fn composer_math_markdown_uses_matrix_math_html_by_default() {
 }
 
 #[test]
+fn composer_math_accepts_latex_paren_and_bracket_delimiters() {
+    // #455: `\(…\)` and `\[…\]` are what LaTeX itself defines and what people
+    // paste out of papers and Overleaf. Before this they were escaped and sent
+    // as literal characters with no error.
+    let draft = build_formatted_message_draft(
+        "Energy \\(E=mc^2\\)\n\\[ \\int_0^1 x dx \\]",
+        MentionIntent::default(),
+    );
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some(
+            "Energy <span data-mx-maths=\"E=mc^2\">E=mc^2</span>\n<div data-mx-maths=\" \\int_0^1 x dx \"> \\int_0^1 x dx </div>"
+        )
+    );
+}
+
+#[test]
+fn composer_math_accepts_fenced_latex_display_block() {
+    let draft =
+        build_formatted_message_draft("\\[\n\\int_0^1 x dx\n\\]", MentionIntent::default());
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<div data-mx-maths=\"\\int_0^1 x dx\">\\int_0^1 x dx</div>")
+    );
+}
+
+#[test]
+fn composer_math_renders_mid_sentence_bracket_delimiters_inline() {
+    // A display block cannot be nested inside a paragraph, so a `\[…\]` that is
+    // not alone on its line degrades to an inline span instead of rendering as
+    // literal text.
+    let draft = build_formatted_message_draft("see \\[x\\] here", MentionIntent::default());
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("see <span data-mx-maths=\"x\">x</span> here")
+    );
+}
+
+#[test]
+fn composer_math_latex_delimiters_survive_double_backslash_line_breaks() {
+    // `\\` is a LaTeX line break; scanning for a bare `\` would end the formula
+    // on it instead of on the real closing delimiter.
+    let draft = build_formatted_message_draft("\\(a \\\\ b\\)", MentionIntent::default());
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<span data-mx-maths=\"a \\\\ b\">a \\\\ b</span>")
+    );
+}
+
+#[test]
+fn composer_math_leaves_empty_latex_delimiters_literal() {
+    let draft = build_formatted_message_draft("\\(\\) and \\[\\]", MentionIntent::default());
+
+    assert_eq!(draft.formatted_body, None);
+}
+
+#[test]
+fn composer_math_mode_off_leaves_latex_delimiters_literal() {
+    let draft = build_formatted_message_draft_with_options(
+        "Energy \\(E=mc^2\\)\n\\[ x \\]",
+        MentionIntent::default(),
+        ComposerFormattingOptions { math_mode: false },
+    );
+
+    assert_eq!(draft.formatted_body, None);
+}
+
+#[test]
 fn composer_math_mode_off_leaves_dollar_delimiters_literal() {
     let draft = build_formatted_message_draft_with_options(
         "Energy $E=mc^2$",
