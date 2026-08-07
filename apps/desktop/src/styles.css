@@ -4579,11 +4579,20 @@ mark {
   background: var(--surface-hover);
 }
 
+/* #453: the math control is a switch, so its geometry is named rather than
+   repeated as bare px, and hover must never be mistaken for the ON state. */
+:root {
+  --composer-math-switch-inline-size: 26px;
+  --composer-math-switch-block-size: 15px;
+  --composer-math-switch-thumb-size: 9px;
+  --composer-math-switch-inset: 2px;
+  --composer-math-switch-travel: 11px;
+}
+
 .composer-math-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-inline-size: 74px;
+  gap: 6px;
   block-size: 28px;
   margin-inline-start: auto;
   padding: 0 8px;
@@ -4596,12 +4605,62 @@ mark {
   line-height: 1;
 }
 
+/* Hover and focus signal "actionable", never "on". Only aria-checked does that,
+   so the current state stays readable while the pointer is on the control. */
 .composer-math-toggle:hover,
-.composer-math-toggle:focus-visible,
-.composer-math-toggle.is-active {
-  color: var(--brand-contrast);
+.composer-math-toggle:focus-visible {
+  color: var(--text);
   border-color: var(--brand);
+  background: var(--surface-hover);
+}
+
+.composer-math-toggle[aria-checked="true"] {
+  color: var(--brand);
+  border-color: var(--brand);
+  background: var(--brand-weak);
+}
+
+.composer-math-switch-track {
+  position: relative;
+  flex: none;
+  inline-size: var(--composer-math-switch-inline-size);
+  block-size: var(--composer-math-switch-block-size);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-hover);
+}
+
+.composer-math-switch-thumb {
+  position: absolute;
+  inset-block-start: var(--composer-math-switch-inset);
+  inset-inline-start: var(--composer-math-switch-inset);
+  inline-size: var(--composer-math-switch-thumb-size);
+  block-size: var(--composer-math-switch-thumb-size);
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition:
+    transform 140ms ease,
+    background 140ms ease;
+}
+
+.composer-math-toggle[aria-checked="true"] .composer-math-switch-track {
+  border-color: var(--brand);
+  background: var(--brand-weak);
+}
+
+.composer-math-toggle[aria-checked="true"] .composer-math-switch-thumb {
+  transform: translateX(var(--composer-math-switch-travel));
   background: var(--brand);
+}
+
+[dir="rtl"] .composer-math-toggle[aria-checked="true"] .composer-math-switch-thumb {
+  transform: translateX(calc(-1 * var(--composer-math-switch-travel)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-math-switch-thumb {
+    transition: none;
+  }
 }
 
 .composer-attachment-preview {

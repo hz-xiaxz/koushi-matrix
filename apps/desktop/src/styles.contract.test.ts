@@ -518,6 +518,28 @@ describe("styles.css token system", () => {
     expect(appSource).toContain('aria-label={t("workspace.resizeRightPanel")}');
   });
 
+  test("the composer math switch never renders hover as the ON state", () => {
+    // #453: hover, :focus-visible and the checked state all shared one brand-fill
+    // rule, so pointing at an OFF switch made it look ON and the control read as
+    // an insert-LaTeX action instead of a toggle. Keep the two treatments apart.
+    const hoverBlock = selectorBlock(
+      ".composer-math-toggle:hover,\n.composer-math-toggle:focus-visible"
+    );
+    const checkedBlock = selectorBlock('.composer-math-toggle[aria-checked="true"]');
+    expect(hoverBlock).toBeTruthy();
+    expect(checkedBlock).toBeTruthy();
+    expect(hoverBlock).not.toEqual(checkedBlock);
+    // Only the checked state may claim the brand fill.
+    expect(hoverBlock).not.toContain("var(--brand-weak)");
+    expect(checkedBlock).toContain("var(--brand-weak)");
+    // The state must be visible at rest, not only through colour.
+    expect(css).toContain(".composer-math-switch-track");
+    expect(css).toContain(".composer-math-switch-thumb");
+    expect(css).toContain(
+      '.composer-math-toggle[aria-checked="true"] .composer-math-switch-thumb'
+    );
+  });
+
   test("fixed Lucide icon sizes stay centralized in ICON_SIZE", () => {
     expect(uiSharedSource).toContain("const ICON_SIZE");
     // No icon-rendering module may hard-code a numeric `size={N}`; all fixed sizes
