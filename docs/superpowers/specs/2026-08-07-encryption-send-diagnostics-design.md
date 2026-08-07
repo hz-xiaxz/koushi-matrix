@@ -14,14 +14,16 @@ The diagnostics must correlate one message send with the current outbound Megolm
 
 ### Send lifecycle
 
-Extend the existing `core.send` lifecycle trace with privacy-safe stages and fields:
+Extend the existing `core.send` lifecycle trace with privacy-safe evidence:
 
-- record whether the send is for an encrypted room;
-- record when SDK encryption readiness begins and finishes;
-- record whether an outbound session token exists before enqueue and after the send is accepted;
+- start a best-effort local crypto-store snapshot concurrently with SDK enqueue, so diagnostic reads never delay or reorder sends;
+- record the cached room encryption state and whether an outbound session token exists, without treating cached `unknown` as authoritative;
+- after a successful SDK terminal, record a second correlated local-store snapshot for every room, thread, and focused send, including outbound-session lookup outcome;
 - retain the existing correlation ID and elapsed timing fields.
 
 The session token is treated only as an existence marker. Its value is never serialized or logged.
+The snapshots are explicitly labelled best-effort. A successful SDK terminal proves that the event reached the homeserver, but the diagnostics do not claim direct visibility into the SDK's internal recipient list or encryption-readiness steps.
+Pre-enqueue observation is owned by the existing send worker and is cancelled when enqueue completes first. Post-terminal observations use a manager-owned, capacity-bounded task set that is cancelled during shutdown; capacity rejection is itself recorded.
 
 ### Room-key re-share lifecycle
 
@@ -37,13 +39,13 @@ The event remains bounded to the existing three attempts. No new retry behavior 
 
 ### Correlation
 
-The first re-share event for a completed send carries the existing send correlation where the current diagnostic API permits it. If the existing event API cannot carry that correlation without broadening unrelated interfaces, keep the stable room-level event and rely on its timing and room scope; do not add sensitive identifiers merely for correlation.
+The post-send `core.send` snapshot carries the existing send correlation. Re-share events remain room-level and contain only actual scheduled or executed attempts 1–3; session lookup is not represented as a synthetic attempt.
 
 ### Testing
 
 Add unit tests for the diagnostic projection/serialization boundary:
 
-1. encrypted-send diagnostics contain the readiness and session-presence fields;
+1. encrypted-send diagnostics contain cached encryption and session-presence evidence;
 2. session and message secrets are absent from serialized output;
 3. each re-share outcome retains target, attempt, delay, request count, and recipient count;
 4. existing diagnostic event names and outcome tokens remain compatible.
@@ -52,7 +54,7 @@ Run focused Rust tests first, then the repository's relevant format/check comman
 
 ## Acceptance criteria
 
-- A real diagnostic export can show whether encryption readiness completed before the first message was encrypted.
-- It can show whether Koushi recognized other eligible devices and whether later re-share attempts sent requests.
+- A real diagnostic export can show the cached device/session state around a successful SDK send without blocking that send.
+- It can show whether Koushi recognized other key-capable own devices and whether later re-share attempts sent requests. This aggregate is not an exact SDK recipient list.
 - It cannot reveal message content or cryptographic identifiers.
 - No production send or encryption behavior changes.

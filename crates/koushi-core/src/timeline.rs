@@ -218,6 +218,7 @@ struct TimelineSendCompletionDelivery {
     key: TimelineKey,
     transaction_id: String,
     event_id: String,
+    diagnostic_correlation: Option<u64>,
 }
 
 struct TimelineSendFailureDelivery {
@@ -540,6 +541,7 @@ struct MatrixTimelineSendEnqueueContext {
     timeline: Arc<Timeline>,
     session: Arc<MatrixClientSession>,
     cleanup: TimelineActorCleanupIngress,
+    diagnostic_trace: Option<SendLifecycleTrace>,
 }
 
 #[derive(Clone)]
@@ -553,6 +555,175 @@ enum TimelineSendEnqueueContext {
     CleanupProbe {
         cleanup: TimelineActorCleanupIngress,
     },
+}
+
+impl TimelineSendEnqueueContext {
+    fn set_diagnostic_trace(&mut self, trace: Option<SendLifecycleTrace>) {
+        match self {
+            Self::Matrix(context) => context.diagnostic_trace = trace,
+            #[cfg(test)]
+            Self::Synthetic { .. } | Self::CleanupProbe { .. } => {}
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RoomEncryptionDiagnosticState {
+    Encrypted,
+    NotEncrypted,
+    Unknown,
+}
+
+impl RoomEncryptionDiagnosticState {
+    fn token(self) -> &'static str {
+        match self {
+            Self::Encrypted => "encrypted",
+            Self::NotEncrypted => "not_encrypted",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum OwnUserTrackingDiagnosticState {
+    Tracked,
+    Untracked,
+    Unavailable,
+}
+
+impl OwnUserTrackingDiagnosticState {
+    fn token(self) -> &'static str {
+        match self {
+            Self::Tracked => "tracked",
+            Self::Untracked => "untracked",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+struct EncryptedSendDiagnosticSnapshot {
+    room_encryption: RoomEncryptionDiagnosticState,
+    outbound_session_present: Option<bool>,
+    own_user_tracking: OwnUserTrackingDiagnosticState,
+    own_device_present: Option<bool>,
+    known_own_device_count: Option<usize>,
+    known_own_other_device_count: Option<usize>,
+    key_capable_own_other_device_count: Option<usize>,
+    cross_signed_own_other_device_count: Option<usize>,
+    dehydrated_own_other_device_count: Option<usize>,
+    blacklisted_own_other_device_count: Option<usize>,
+}
+
+async fn encrypted_send_diagnostic_snapshot(
+    context: &MatrixTimelineSendEnqueueContext,
+) -> EncryptedSendDiagnosticSnapshot {
+    let room_encryption = match context.timeline.room().encryption_state() {
+        state if state.is_encrypted() => RoomEncryptionDiagnosticState::Encrypted,
+        state if state.is_unknown() => RoomEncryptionDiagnosticState::Unknown,
+        _ => RoomEncryptionDiagnosticState::NotEncrypted,
+    };
+    if !matches!(room_encryption, RoomEncryptionDiagnosticState::Encrypted) {
+        return EncryptedSendDiagnosticSnapshot {
+            room_encryption,
+            outbound_session_present: None,
+            own_user_tracking: OwnUserTrackingDiagnosticState::Unavailable,
+            own_device_present: None,
+            known_own_device_count: None,
+            known_own_other_device_count: None,
+            key_capable_own_other_device_count: None,
+            cross_signed_own_other_device_count: None,
+            dehydrated_own_other_device_count: None,
+            blacklisted_own_other_device_count: None,
+        };
+    }
+    let outbound_session_present =
+        koushi_sdk::current_outbound_group_session_token(&context.session, context.key.room_id())
+            .await
+            .ok()
+            .map(|session| session.is_some());
+
+    let client = context.session.client();
+    let Some(own_user_id) = client.user_id().map(ToOwned::to_owned) else {
+        return EncryptedSendDiagnosticSnapshot {
+            room_encryption,
+            outbound_session_present,
+            own_user_tracking: OwnUserTrackingDiagnosticState::Unavailable,
+            own_device_present: None,
+            known_own_device_count: None,
+            known_own_other_device_count: None,
+            key_capable_own_other_device_count: None,
+            cross_signed_own_other_device_count: None,
+            dehydrated_own_other_device_count: None,
+            blacklisted_own_other_device_count: None,
+        };
+    };
+    let own_device_id = client.device_id().map(ToOwned::to_owned);
+    let own_user_tracking = match client.encryption().tracked_users().await {
+        Ok(users) if users.contains(&own_user_id) => OwnUserTrackingDiagnosticState::Tracked,
+        Ok(_) => OwnUserTrackingDiagnosticState::Untracked,
+        Err(_) => OwnUserTrackingDiagnosticState::Unavailable,
+    };
+    let Ok(devices) = client.encryption().get_user_devices(&own_user_id).await else {
+        return EncryptedSendDiagnosticSnapshot {
+            room_encryption,
+            outbound_session_present,
+            own_user_tracking,
+            own_device_present: None,
+            known_own_device_count: None,
+            known_own_other_device_count: None,
+            key_capable_own_other_device_count: None,
+            cross_signed_own_other_device_count: None,
+            dehydrated_own_other_device_count: None,
+            blacklisted_own_other_device_count: None,
+        };
+    };
+
+    let known_own_device_count = devices.devices().count();
+    let own_device_present = own_device_id
+        .as_deref()
+        .map(|own_device_id| devices.get(own_device_id).is_some());
+    let mut known_own_other_device_count = 0;
+    let mut key_capable_own_other_device_count = 0;
+    let mut cross_signed_own_other_device_count = 0;
+    let mut dehydrated_own_other_device_count = 0;
+    let mut blacklisted_own_other_device_count = 0;
+    for device in devices.devices() {
+        if own_device_id
+            .as_deref()
+            .is_some_and(|own_device_id| device.device_id() == own_device_id)
+        {
+            continue;
+        }
+        known_own_other_device_count += 1;
+        let cross_signed = device.is_cross_signed_by_owner();
+        let dehydrated = device.is_dehydrated();
+        let blacklisted = device.is_blacklisted();
+        if device.curve25519_key().is_some() && !blacklisted {
+            key_capable_own_other_device_count += 1;
+        }
+        if cross_signed {
+            cross_signed_own_other_device_count += 1;
+        }
+        if dehydrated {
+            dehydrated_own_other_device_count += 1;
+        }
+        if blacklisted {
+            blacklisted_own_other_device_count += 1;
+        }
+    }
+
+    EncryptedSendDiagnosticSnapshot {
+        room_encryption,
+        outbound_session_present,
+        own_user_tracking,
+        own_device_present,
+        known_own_device_count: Some(known_own_device_count),
+        known_own_other_device_count: Some(known_own_other_device_count),
+        key_capable_own_other_device_count: Some(key_capable_own_other_device_count),
+        cross_signed_own_other_device_count: Some(cross_signed_own_other_device_count),
+        dehydrated_own_other_device_count: Some(dehydrated_own_other_device_count),
+        blacklisted_own_other_device_count: Some(blacklisted_own_other_device_count),
+    }
 }
 
 enum TimelineSendEnqueuePayload {
@@ -602,7 +773,9 @@ struct SendEnqueueWorkerCompletion;
 
 type SendEnqueueWorkerFuture =
     Pin<Box<dyn Future<Output = SendEnqueueWorkerCompletion> + Send + 'static>>;
+type SendDiagnosticFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 type GlobalSendCompletionObserverFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+const MAX_CONCURRENT_SEND_DIAGNOSTICS: usize = 32;
 
 async fn poll_global_send_completion_observer(
     observer: &mut Option<GlobalSendCompletionObserverFuture>,
@@ -676,6 +849,7 @@ impl Drop for RoomKeyReshareSchedule {
 
 struct SendEnqueueWorkerSupervisor {
     tasks: FuturesUnordered<SendEnqueueWorkerFuture>,
+    diagnostic_tasks: FuturesUnordered<SendDiagnosticFuture>,
     terminal_ingress: TimelineSendTerminalIngress,
     room_key_reshares: HashMap<TimelineKey, RoomKeyReshareSchedule>,
 }
@@ -684,6 +858,7 @@ impl SendEnqueueWorkerSupervisor {
     fn new(terminal_ingress: TimelineSendTerminalIngress) -> Self {
         Self {
             tasks: FuturesUnordered::new(),
+            diagnostic_tasks: FuturesUnordered::new(),
             terminal_ingress,
             room_key_reshares: HashMap::new(),
         }
@@ -691,7 +866,23 @@ impl SendEnqueueWorkerSupervisor {
 
     fn cancel_all(&mut self) {
         self.tasks = FuturesUnordered::new();
+        self.cancel_diagnostics();
         self.room_key_reshares.clear();
+    }
+
+    fn cancel_diagnostics(&mut self) {
+        self.diagnostic_tasks = FuturesUnordered::new();
+    }
+
+    fn spawn_diagnostic<F>(&mut self, correlation: u64, future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        if self.diagnostic_tasks.len() >= MAX_CONCURRENT_SEND_DIAGNOSTICS {
+            record_send_diagnostic_snapshot_skipped(correlation);
+            return;
+        }
+        self.diagnostic_tasks.push(Box::pin(future));
     }
 }
 
@@ -1357,30 +1548,52 @@ async fn enqueue_timeline_send(
     payload: TimelineSendEnqueuePayload,
 ) -> Result<SendEnqueueSuccess, TimelineFailureKind> {
     match context {
-        TimelineSendEnqueueContext::Matrix(context) => match payload {
-            TimelineSendEnqueuePayload::Text {
-                document,
-                formatting_options,
-            } => enqueue_document_send(context, document, formatting_options).await,
-            TimelineSendEnqueuePayload::Reply {
-                in_reply_to_event_id,
-                document,
-                formatting_options,
-            } => {
-                enqueue_document_reply_send(
-                    context,
-                    in_reply_to_event_id,
-                    document,
-                    formatting_options,
-                )
-                .await
+        TimelineSendEnqueueContext::Matrix(context) => {
+            let diagnostic_context = context.clone();
+            let diagnostic_trace = context.diagnostic_trace.clone();
+            let diagnostic = async move {
+                if let Some(trace) = diagnostic_trace {
+                    let snapshot = encrypted_send_diagnostic_snapshot(&diagnostic_context).await;
+                    trace.record_encryption_local_store_snapshot(&snapshot);
+                }
+            };
+            let enqueue = async move {
+                match payload {
+                    TimelineSendEnqueuePayload::Text {
+                        document,
+                        formatting_options,
+                    } => enqueue_document_send(context, document, formatting_options).await,
+                    TimelineSendEnqueuePayload::Reply {
+                        in_reply_to_event_id,
+                        document,
+                        formatting_options,
+                    } => {
+                        enqueue_document_reply_send(
+                            context,
+                            in_reply_to_event_id,
+                            document,
+                            formatting_options,
+                        )
+                        .await
+                    }
+                    TimelineSendEnqueuePayload::Media {
+                        request_id,
+                        client_transaction_id,
+                        request,
+                    } => {
+                        enqueue_media_send(context, request_id, client_transaction_id, request)
+                            .await
+                    }
+                }
+            };
+            tokio::pin!(diagnostic);
+            tokio::pin!(enqueue);
+            tokio::select! {
+                biased;
+                result = &mut enqueue => result,
+                () = &mut diagnostic => enqueue.await,
             }
-            TimelineSendEnqueuePayload::Media {
-                request_id,
-                client_transaction_id,
-                request,
-            } => enqueue_media_send(context, request_id, client_transaction_id, request).await,
-        },
+        }
         #[cfg(test)]
         TimelineSendEnqueueContext::Synthetic { requests } => {
             let (response, outcome) = oneshot::channel();
@@ -2866,7 +3079,7 @@ impl TimelineManagerActor {
 
     fn spawn_send_enqueue(
         &mut self,
-        context: TimelineSendEnqueueContext,
+        mut context: TimelineSendEnqueueContext,
         mut registration: SendCompletionRegistration,
         admission: Option<oneshot::Receiver<()>>,
         payload: TimelineSendEnqueuePayload,
@@ -2892,8 +3105,11 @@ impl TimelineManagerActor {
                     registration.hold_interactive_guard(interactive);
                     if let Some(trace) = registration.lifecycle_trace.as_mut() {
                         trace.stage("send_queue_worker_started");
+                    }
+                    if let Some(trace) = registration.lifecycle_trace.as_mut() {
                         trace.stage("sdk_enqueue_started");
                     }
+                    context.set_diagnostic_trace(registration.lifecycle_trace.as_ref().cloned());
                     enqueue_timeline_send(context, payload).await
                 }
                 .await;
@@ -3075,6 +3291,10 @@ impl TimelineManagerActor {
                     if let Some(completion) = worker {
                         self.handle_send_enqueue_worker_completion(completion);
                     }
+                    continue;
+                }
+                _ = self.send_enqueue_workers.diagnostic_tasks.next(),
+                    if !self.send_enqueue_workers.diagnostic_tasks.is_empty() => {
                     continue;
                 }
                 _ = poll_global_send_completion_observer(&mut self.global_send_completion_observer_future) => {
@@ -3279,6 +3499,7 @@ impl TimelineManagerActor {
         // still bind a durably saved SDK transaction during this phase.
         self.read_workers.cancel_all();
         self.send_enqueue_workers.room_key_reshares.clear();
+        self.send_enqueue_workers.cancel_diagnostics();
         self.read_workers.publish_persistence();
         let abandoned_read_waiters = self
             .read_workers
@@ -3400,12 +3621,14 @@ impl TimelineManagerActor {
         }
         if let Some(completion) = completion {
             let key = completion.key.clone();
+            let diagnostic_correlation = completion.diagnostic_correlation;
             self.emit(CoreEvent::Timeline(TimelineEvent::SendCompleted {
                 request_id: completion.request_id,
                 key: completion.key,
                 transaction_id: completion.transaction_id,
                 event_id: completion.event_id,
             }));
+            self.spawn_post_send_encryption_diagnostics(&key, diagnostic_correlation);
             self.schedule_room_key_reshares(&key).await;
         }
         if let Some(failure) = failure {
@@ -3414,6 +3637,52 @@ impl TimelineManagerActor {
                 failure: failure.failure,
             });
         }
+    }
+
+    fn spawn_post_send_encryption_diagnostics(
+        &mut self,
+        key: &TimelineKey,
+        diagnostic_correlation: Option<u64>,
+    ) {
+        let Some(correlation) = diagnostic_correlation else {
+            return;
+        };
+        let Some(session) = self.session.as_ref().cloned() else {
+            return;
+        };
+        let room_id = key.room_id().to_owned();
+        self.send_enqueue_workers
+            .spawn_diagnostic(correlation, async move {
+                let client = session.client();
+                let room_encryption = matrix_sdk::ruma::RoomId::parse(&room_id)
+                    .ok()
+                    .and_then(|room_id| client.get_room(&room_id))
+                    .map(|room| match room.encryption_state() {
+                        state if state.is_encrypted() => RoomEncryptionDiagnosticState::Encrypted,
+                        state if state.is_unknown() => RoomEncryptionDiagnosticState::Unknown,
+                        _ => RoomEncryptionDiagnosticState::NotEncrypted,
+                    })
+                    .unwrap_or(RoomEncryptionDiagnosticState::Unknown);
+                let lookup =
+                    if matches!(room_encryption, RoomEncryptionDiagnosticState::NotEncrypted) {
+                        OutboundSessionLookupDiagnostic::NotApplicable
+                    } else {
+                        match koushi_sdk::current_outbound_group_session_token(&session, &room_id)
+                            .await
+                        {
+                            Ok(Some(_)) => OutboundSessionLookupDiagnostic::Present,
+                            Ok(None) => OutboundSessionLookupDiagnostic::Absent,
+                            Err(error)
+                                if error.failure_kind()
+                                    == Some(koushi_sdk::MatrixRoomOperationFailureKind::Http) =>
+                            {
+                                OutboundSessionLookupDiagnostic::NetworkError
+                            }
+                            Err(_) => OutboundSessionLookupDiagnostic::SdkError,
+                        }
+                    };
+                record_post_send_encryption_snapshot(correlation, room_encryption, lookup);
+            });
     }
 
     async fn schedule_room_key_reshares(&mut self, key: &TimelineKey) {
@@ -3426,6 +3695,16 @@ impl TimelineManagerActor {
         let Some(actor_generation) = self.timeline_actor_generations.current_generation(key) else {
             return;
         };
+        let client = session.client();
+        let Ok(room_id) = matrix_sdk::ruma::RoomId::parse(key.room_id()) else {
+            return;
+        };
+        let Some(room) = client.get_room(&room_id) else {
+            return;
+        };
+        if !room.encryption_state().is_encrypted() {
+            return;
+        }
         let Ok(Some(outbound_session)) =
             koushi_sdk::current_outbound_group_session_token(session, key.room_id()).await
         else {
@@ -3463,7 +3742,17 @@ impl TimelineManagerActor {
                 tasks,
             },
         );
-        record_room_key_reshare("new_outbound_session", "scheduled", 0, 0, 0);
+        for attempt in ROOM_KEY_RESHARE_ATTEMPTS {
+            record_room_key_reshare(
+                "new_outbound_session",
+                "scheduled",
+                attempt.number,
+                attempt.target,
+                attempt.delay.as_secs(),
+                0,
+                0,
+            );
+        }
     }
 
     async fn handle_room_key_reshare(
@@ -3491,11 +3780,11 @@ impl TimelineManagerActor {
             && self.timelines.contains_key(&key)
             && self.timeline_actor_generations.current_generation(&key) == Some(actor_generation);
         if !current {
-            record_room_key_reshare(trigger, "cancelled", delay_seconds, 0, 0);
+            record_room_key_reshare(trigger, "cancelled", attempt, target, delay_seconds, 0, 0);
             return;
         }
         let Some(session) = self.session.as_ref().cloned() else {
-            record_room_key_reshare(trigger, "cancelled", delay_seconds, 0, 0);
+            record_room_key_reshare(trigger, "cancelled", attempt, target, delay_seconds, 0, 0);
             return;
         };
 
@@ -3511,7 +3800,7 @@ impl TimelineManagerActor {
             && self.timelines.contains_key(&key)
             && self.timeline_actor_generations.current_generation(&key) == Some(actor_generation);
         if !still_current {
-            record_room_key_reshare(trigger, "cancelled", delay_seconds, 0, 0);
+            record_room_key_reshare(trigger, "cancelled", attempt, target, delay_seconds, 0, 0);
             return;
         }
 
@@ -3529,19 +3818,35 @@ impl TimelineManagerActor {
             }) => record_room_key_reshare(
                 trigger,
                 "sent",
+                attempt,
+                target,
                 delay_seconds,
                 request_count,
                 recipient_count,
             ),
             Ok(MatrixRoomKeyReshareOutcome::NoSession) => {
-                record_room_key_reshare(trigger, "no_session", delay_seconds, 0, 0);
+                record_room_key_reshare(
+                    trigger,
+                    "no_session",
+                    attempt,
+                    target,
+                    delay_seconds,
+                    0,
+                    0,
+                );
                 self.send_enqueue_workers.room_key_reshares.remove(&key);
             }
-            Ok(MatrixRoomKeyReshareOutcome::NoRecipients) => {
-                record_room_key_reshare(trigger, "no_recipients", delay_seconds, 0, 0)
-            }
+            Ok(MatrixRoomKeyReshareOutcome::NoRecipients) => record_room_key_reshare(
+                trigger,
+                "no_recipients",
+                attempt,
+                target,
+                delay_seconds,
+                0,
+                0,
+            ),
             Ok(MatrixRoomKeyReshareOutcome::StaleSession) => {
-                record_room_key_reshare(trigger, "cancelled", delay_seconds, 0, 0);
+                record_room_key_reshare(trigger, "cancelled", attempt, target, delay_seconds, 0, 0);
                 self.send_enqueue_workers.room_key_reshares.remove(&key);
             }
             Err(error) => record_room_key_reshare(
@@ -3551,6 +3856,8 @@ impl TimelineManagerActor {
                 } else {
                     "sdk_error"
                 },
+                attempt,
+                target,
                 delay_seconds,
                 0,
                 0,
@@ -5885,6 +6192,8 @@ fn record_read_admission(key: &ReadStateKey, diagnostic: ReadAdmissionDiagnostic
 fn record_room_key_reshare(
     trigger: &'static str,
     outcome: &'static str,
+    attempt: u8,
+    target: MatrixRoomKeyReshareTarget,
     delay_seconds: u64,
     request_count: usize,
     recipient_count: usize,
@@ -5893,6 +6202,11 @@ fn record_room_key_reshare(
         DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
             .field(DiagnosticField::token("trigger", trigger))
             .field(DiagnosticField::token("outcome", outcome))
+            .field(DiagnosticField::count("attempt", u64::from(attempt)))
+            .field(DiagnosticField::token(
+                "target",
+                room_key_reshare_target_token(target),
+            ))
             .field(DiagnosticField::count("delay_seconds", delay_seconds))
             .field(DiagnosticField::count(
                 "request_count",
@@ -5903,6 +6217,78 @@ fn record_room_key_reshare(
                 recipient_count.try_into().unwrap_or(u64::MAX),
             )),
     );
+}
+
+#[derive(Clone, Copy)]
+enum OutboundSessionLookupDiagnostic {
+    Present,
+    Absent,
+    NotApplicable,
+    NetworkError,
+    SdkError,
+}
+
+impl OutboundSessionLookupDiagnostic {
+    fn token(self) -> &'static str {
+        match self {
+            Self::Present => "present",
+            Self::Absent => "absent",
+            Self::NotApplicable => "not_applicable",
+            Self::NetworkError => "network_error",
+            Self::SdkError => "sdk_error",
+        }
+    }
+}
+
+fn record_post_send_encryption_snapshot(
+    correlation: u64,
+    room_encryption: RoomEncryptionDiagnosticState,
+    outbound_session_lookup: OutboundSessionLookupDiagnostic,
+) {
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Info,
+            "core.send",
+            "post_send_encryption_snapshot",
+        )
+        .field(DiagnosticField::correlation("correlation", correlation))
+        .field(DiagnosticField::token(
+            "room_encryption_cached_after_send",
+            room_encryption.token(),
+        ))
+        .field(DiagnosticField::token(
+            "outbound_session_lookup",
+            outbound_session_lookup.token(),
+        ))
+        .field(DiagnosticField::token(
+            "snapshot_consistency",
+            "best_effort_post_terminal_local_store",
+        )),
+    );
+}
+
+fn record_send_diagnostic_snapshot_skipped(correlation: u64) {
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Warn,
+            "core.send",
+            "diagnostic_snapshot_skipped",
+        )
+        .field(DiagnosticField::correlation("correlation", correlation))
+        .field(DiagnosticField::token("outcome", "capacity_reached"))
+        .field(DiagnosticField::count(
+            "capacity",
+            MAX_CONCURRENT_SEND_DIAGNOSTICS as u64,
+        )),
+    );
+}
+
+fn room_key_reshare_target_token(target: MatrixRoomKeyReshareTarget) -> &'static str {
+    match target {
+        MatrixRoomKeyReshareTarget::OwnOtherDevices => "own_other_devices",
+        MatrixRoomKeyReshareTarget::PeerDevices => "peer_devices",
+        MatrixRoomKeyReshareTarget::AllEligible => "all_eligible",
+    }
 }
 
 fn record_read_completion(key: &ReadStateKey, diagnostic: ReadCompletionDiagnostic) {
@@ -14292,6 +14678,7 @@ impl TimelineActor {
                 timeline: Arc::clone(&timeline),
                 session: Arc::clone(&session),
                 cleanup: actor_cleanup_tx,
+                diagnostic_trace: None,
             });
         let (position_tx, position_rx) = watch::channel(Arc::new(
             TimelinePositionIndex::from_items(actor_generation, generation, &navigation_items),
@@ -24764,7 +25151,6 @@ impl SendLifecycleTrace {
         }
     }
 
-    #[cfg(test)]
     fn correlation(&self) -> u64 {
         self.state
             .lock()
@@ -24796,6 +25182,82 @@ impl SendLifecycleTrace {
         delivery_mode: Option<&'static str>,
     ) {
         self.stage_internal(stage, outcome, delivery_mode, true);
+    }
+
+    fn record_encryption_local_store_snapshot(&self, snapshot: &EncryptedSendDiagnosticSnapshot) {
+        let Ok(state) = self.state.lock() else {
+            return;
+        };
+        let now = Instant::now();
+        let mut event = DiagnosticEvent::new(
+            DiagnosticLevel::Info,
+            "core.send",
+            "encryption_local_store_snapshot",
+        )
+        .field(DiagnosticField::correlation(
+            "correlation",
+            state.correlation,
+        ))
+        .field(DiagnosticField::token("send_kind", state.kind))
+        .field(DiagnosticField::token("queue", "room_send_queue"))
+        .field(DiagnosticField::milliseconds(
+            "elapsed_since_submission_ms",
+            now.duration_since(state.submitted_at).as_millis(),
+        ))
+        .field(DiagnosticField::milliseconds(
+            "elapsed_since_previous_ms",
+            now.duration_since(state.previous_stage_at).as_millis(),
+        ))
+        .field(DiagnosticField::token(
+            "room_encryption",
+            snapshot.room_encryption.token(),
+        ))
+        .field(DiagnosticField::token("recipient_strategy", "all_devices"))
+        .field(DiagnosticField::token(
+            "snapshot_consistency",
+            "best_effort_concurrent_local_store",
+        ))
+        .field(DiagnosticField::token(
+            "own_user_tracking",
+            snapshot.own_user_tracking.token(),
+        ));
+        if let Some(value) = snapshot.outbound_session_present {
+            event = event.field(DiagnosticField::boolean("outbound_session_present", value));
+        }
+        if let Some(value) = snapshot.own_device_present {
+            event = event.field(DiagnosticField::boolean("own_device_present", value));
+        }
+        for (key, value) in [
+            ("known_own_device_count", snapshot.known_own_device_count),
+            (
+                "known_own_other_device_count",
+                snapshot.known_own_other_device_count,
+            ),
+            (
+                "key_capable_own_other_device_count",
+                snapshot.key_capable_own_other_device_count,
+            ),
+            (
+                "cross_signed_own_other_device_count",
+                snapshot.cross_signed_own_other_device_count,
+            ),
+            (
+                "dehydrated_own_other_device_count",
+                snapshot.dehydrated_own_other_device_count,
+            ),
+            (
+                "blacklisted_own_other_device_count",
+                snapshot.blacklisted_own_other_device_count,
+            ),
+        ] {
+            if let Some(value) = value {
+                event = event.field(DiagnosticField::count(
+                    key,
+                    value.try_into().unwrap_or(u64::MAX),
+                ));
+            }
+        }
+        record(event);
     }
 
     fn stage_internal(
@@ -25309,6 +25771,7 @@ impl SendCompletionCoordinator {
         match terminal {
             ObservedSendTerminal::Sent { event_id } => {
                 let mut pending = self.pending_sends.remove(correlation)?;
+                let diagnostic_correlation = pending.lifecycle_trace.correlation();
                 pending.lifecycle_trace.stage_with_outcome(
                     "sdk_terminal_observed",
                     Some("sent"),
@@ -25328,6 +25791,7 @@ impl SendCompletionCoordinator {
                     &pending.key,
                     pending.client_txn_id,
                     pending.submission_id,
+                    Some(diagnostic_correlation),
                     SendCompletionTerminal::Succeeded {
                         request_id: pending.request_id,
                         event_id,
@@ -25357,6 +25821,7 @@ impl SendCompletionCoordinator {
                     &pending.key,
                     pending.client_txn_id.clone(),
                     pending.submission_id.clone(),
+                    None,
                     SendCompletionTerminal::Failed {
                         settles_composer: pending.settles_composer,
                     },
@@ -25383,6 +25848,7 @@ impl SendCompletionCoordinator {
                     &pending.key,
                     pending.client_txn_id,
                     pending.submission_id,
+                    None,
                     SendCompletionTerminal::Cancelled { settles_composer },
                 ))
             }
@@ -25509,6 +25975,7 @@ fn timeline_send_terminal_handoff(
     key: &TimelineKey,
     client_transaction_id: String,
     submission_id: Option<koushi_state::SubmissionId>,
+    diagnostic_correlation: Option<u64>,
     terminal: SendCompletionTerminal,
 ) -> TimelineSendTerminalHandoff {
     let action = send_terminal_action(
@@ -25528,6 +25995,7 @@ fn timeline_send_terminal_handoff(
             key: key.clone(),
             transaction_id: client_transaction_id,
             event_id,
+            diagnostic_correlation,
         }),
         SendCompletionTerminal::Failed { .. } | SendCompletionTerminal::Cancelled { .. } => None,
     };
@@ -25553,6 +26021,7 @@ fn timeline_send_failure_handoff(
         &pending.key,
         pending.client_txn_id.clone(),
         pending.submission_id.clone(),
+        None,
         SendCompletionTerminal::Failed {
             settles_composer: pending.settles_composer,
         },
@@ -28423,6 +28892,7 @@ mod tests {
                     key,
                     transaction_id,
                     event_id: "$event-closed-reducer:test".to_owned(),
+                    diagnostic_correlation: None,
                 }),
                 failure: None,
             }),
@@ -40683,6 +41153,240 @@ mod tests {
         }
     }
 
+    #[test]
+    fn encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let key = room_key();
+        let trace = SendLifecycleTrace::new(&key, true);
+        let correlation = trace.correlation();
+
+        trace.record_encryption_local_store_snapshot(&EncryptedSendDiagnosticSnapshot {
+            room_encryption: RoomEncryptionDiagnosticState::Encrypted,
+            outbound_session_present: Some(true),
+            own_user_tracking: OwnUserTrackingDiagnosticState::Tracked,
+            own_device_present: Some(true),
+            known_own_device_count: Some(4),
+            known_own_other_device_count: Some(3),
+            key_capable_own_other_device_count: Some(2),
+            cross_signed_own_other_device_count: Some(2),
+            dehydrated_own_other_device_count: Some(1),
+            blacklisted_own_other_device_count: Some(1),
+        });
+        let diagnostics = koushi_diagnostics::snapshot();
+        let record = diagnostics.records[diagnostic_start..]
+            .iter()
+            .find(|record| {
+                record.event.source == "core.send"
+                    && record.event.stage == "encryption_local_store_snapshot"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "correlation"
+                            && field.value == DiagnosticValue::Correlation(correlation)
+                    })
+            })
+            .expect("encrypted-send snapshot diagnostic");
+
+        for (key, value) in [
+            ("room_encryption", DiagnosticValue::Token("encrypted")),
+            ("recipient_strategy", DiagnosticValue::Token("all_devices")),
+            (
+                "snapshot_consistency",
+                DiagnosticValue::Token("best_effort_concurrent_local_store"),
+            ),
+            ("outbound_session_present", DiagnosticValue::Boolean(true)),
+            ("own_user_tracking", DiagnosticValue::Token("tracked")),
+            ("own_device_present", DiagnosticValue::Boolean(true)),
+            ("known_own_device_count", DiagnosticValue::Count(4)),
+            ("known_own_other_device_count", DiagnosticValue::Count(3)),
+            (
+                "key_capable_own_other_device_count",
+                DiagnosticValue::Count(2),
+            ),
+            (
+                "cross_signed_own_other_device_count",
+                DiagnosticValue::Count(2),
+            ),
+            (
+                "dehydrated_own_other_device_count",
+                DiagnosticValue::Count(1),
+            ),
+            (
+                "blacklisted_own_other_device_count",
+                DiagnosticValue::Count(1),
+            ),
+        ] {
+            assert!(
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .any(|field| { field.key == key && field.value == value }),
+                "missing {key}"
+            );
+        }
+        assert!(record.event.fields.iter().all(|field| {
+            !matches!(
+                field.key,
+                "room_id"
+                    | "event_id"
+                    | "user_id"
+                    | "device_id"
+                    | "session_id"
+                    | "transaction_id"
+                    | "request_id"
+                    | "message"
+                    | "key"
+                    | "key_material"
+            )
+        }));
+    }
+
+    #[test]
+    fn post_send_encryption_diagnostics_keep_unknown_state_and_session_evidence_separate() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let correlation = 8_204;
+
+        record_post_send_encryption_snapshot(
+            correlation,
+            RoomEncryptionDiagnosticState::Unknown,
+            OutboundSessionLookupDiagnostic::Present,
+        );
+
+        let diagnostics = koushi_diagnostics::snapshot();
+        let record = diagnostics.records[diagnostic_start..]
+            .iter()
+            .find(|record| {
+                record.event.source == "core.send"
+                    && record.event.stage == "post_send_encryption_snapshot"
+            })
+            .expect("post-send encryption diagnostic");
+        for (key, value) in [
+            ("correlation", DiagnosticValue::Correlation(correlation)),
+            (
+                "room_encryption_cached_after_send",
+                DiagnosticValue::Token("unknown"),
+            ),
+            ("outbound_session_lookup", DiagnosticValue::Token("present")),
+            (
+                "snapshot_consistency",
+                DiagnosticValue::Token("best_effort_post_terminal_local_store"),
+            ),
+        ] {
+            assert!(
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .any(|field| { field.key == key && field.value == value }),
+                "missing {key}"
+            );
+        }
+        assert!(record.event.fields.iter().all(|field| {
+            !matches!(
+                field.key,
+                "room_id"
+                    | "event_id"
+                    | "user_id"
+                    | "device_id"
+                    | "session_id"
+                    | "transaction_id"
+                    | "request_id"
+                    | "message"
+                    | "key"
+                    | "key_material"
+            )
+        }));
+    }
+
+    #[test]
+    fn room_key_reshare_diagnostics_include_attempt_target_and_result() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+
+        record_room_key_reshare(
+            "own_device_retry_1",
+            "sent",
+            1,
+            MatrixRoomKeyReshareTarget::OwnOtherDevices,
+            3,
+            2,
+            5,
+        );
+
+        let diagnostics = koushi_diagnostics::snapshot();
+        let record = diagnostics.records[diagnostic_start..]
+            .iter()
+            .find(|record| {
+                record.event.source == "core.room_key_reshare" && record.event.stage == "attempt"
+            })
+            .expect("room-key reshare diagnostic");
+        for (key, value) in [
+            ("attempt", DiagnosticValue::Count(1)),
+            ("target", DiagnosticValue::Token("own_other_devices")),
+            ("delay_seconds", DiagnosticValue::Count(3)),
+            ("request_count", DiagnosticValue::Count(2)),
+            ("recipient_count", DiagnosticValue::Count(5)),
+        ] {
+            assert!(
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .any(|field| { field.key == key && field.value == value }),
+                "missing {key}"
+            );
+        }
+        assert!(record.event.fields.iter().all(|field| {
+            !matches!(
+                field.key,
+                "room_id"
+                    | "event_id"
+                    | "user_id"
+                    | "device_id"
+                    | "session_id"
+                    | "transaction_id"
+                    | "request_id"
+                    | "message"
+                    | "key"
+                    | "key_material"
+            )
+        }));
+    }
+
+    #[test]
+    fn send_diagnostic_tasks_are_capacity_bounded_and_cancellable() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let (terminal_ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
+        let mut supervisor = SendEnqueueWorkerSupervisor::new(terminal_ingress);
+
+        for correlation in 1..=(MAX_CONCURRENT_SEND_DIAGNOSTICS as u64 + 1) {
+            supervisor.spawn_diagnostic(correlation, futures_util::future::pending());
+        }
+
+        assert_eq!(
+            supervisor.diagnostic_tasks.len(),
+            MAX_CONCURRENT_SEND_DIAGNOSTICS
+        );
+        let diagnostics = koushi_diagnostics::snapshot();
+        assert!(
+            diagnostics.records[diagnostic_start..]
+                .iter()
+                .any(|record| {
+                    record.event.source == "core.send"
+                        && record.event.stage == "diagnostic_snapshot_skipped"
+                        && record.event.fields.iter().any(|field| {
+                            field.key == "outcome"
+                                && field.value == DiagnosticValue::Token("capacity_reached")
+                        })
+                })
+        );
+
+        supervisor.cancel_diagnostics();
+        assert!(supervisor.diagnostic_tasks.is_empty());
+    }
+
     #[tokio::test]
     async fn manager_coordinator_survives_unsubscribe_until_sdk_terminal() {
         let key = room_key();
@@ -40732,6 +41436,7 @@ mod tests {
                 key: delivered_key,
                 transaction_id,
                 event_id,
+                ..
             }) if delivered_request_id == request_id
                 && delivered_key == key
                 && transaction_id == "client-unsubscribe-unit"
@@ -41364,6 +42069,11 @@ mod tests {
             fake_rid(42),
             true,
         );
+        let diagnostic_correlation = registration
+            .lifecycle_trace
+            .as_ref()
+            .expect("send registration lifecycle trace")
+            .correlation();
         registration.activate();
         registration.bind("sdk-auto-generated-txn".to_owned());
 
@@ -41389,10 +42099,12 @@ mod tests {
                 request_id,
                 transaction_id,
                 event_id,
+                diagnostic_correlation: Some(delivered_correlation),
                 ..
             }) if request_id == fake_rid(42)
                 && transaction_id == "client-txn-42"
                 && event_id == "$event-42:test"
+                && delivered_correlation == diagnostic_correlation
         ));
     }
 
