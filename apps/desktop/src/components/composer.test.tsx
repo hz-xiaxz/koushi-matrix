@@ -210,8 +210,11 @@ describe("Composer", () => {
       />
     );
 
-    const toggle = screen.getByRole("button", { name: /math formatting on/i });
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    // #453: the control is a switch, not an insert-markup button, so it must
+    // expose switch semantics and a state a sighted user can read at rest.
+    const toggle = screen.getByRole("switch", { name: /math formatting on/i });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.querySelector(".composer-math-switch-track")).not.toBeNull();
     fireEvent.click(toggle);
     expect(onMathModeChange).toHaveBeenCalledWith(false);
 
@@ -229,7 +232,7 @@ describe("Composer", () => {
       />
     );
     expect(
-      screen.getByRole("button", { name: /math formatting off/i }).getAttribute("aria-pressed")
+      screen.getByRole("switch", { name: /math formatting off/i }).getAttribute("aria-checked")
     ).toBe("false");
   });
 

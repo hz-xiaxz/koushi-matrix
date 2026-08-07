@@ -591,11 +591,16 @@ export const Composer = memo(function Composer({
         >
           <Code2 size={ICON_SIZE.input} />
         </button>
+        {/* #453: this is an on/off switch for `SettingsValues.composer.math_mode`,
+            not an insert-markup action like the buttons beside it. It speaks the
+            same switch vocabulary as the settings panels so the state is
+            readable at rest. */}
         <button
-          className={`composer-math-toggle${mathModeEnabled ? " is-active" : ""}`}
+          className="composer-math-toggle"
           type="button"
+          role="switch"
+          aria-checked={mathModeEnabled}
           aria-label={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
-          aria-pressed={mathModeEnabled}
           title={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
           onMouseDown={keepComposerFocus}
           onClick={() => {
@@ -604,6 +609,9 @@ export const Composer = memo(function Composer({
         >
           <Sigma size={ICON_SIZE.input} aria-hidden="true" />
           <span>{t("composer.mathMode")}</span>
+          <span className="composer-math-switch-track" aria-hidden="true">
+            <span className="composer-math-switch-thumb" />
+          </span>
         </button>
       </div>
       <MentionAutocomplete
