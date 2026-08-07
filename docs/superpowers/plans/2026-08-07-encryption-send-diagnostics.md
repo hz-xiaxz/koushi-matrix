@@ -36,4 +36,4 @@
 
 - [x] Run focused tests, formatting, and a package check.
 - [x] Review the final diff for privacy and scope.
-- [ ] Commit, push `codex/encryption-send-diagnostics`, and open a draft pull request.
+- [x] Commit, push `codex/encryption-send-diagnostics`, and open a draft pull request.
