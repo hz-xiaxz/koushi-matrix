@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-07-19.
+Last amended: 2026-08-07.
 
 ## Read Order And Authority
 
@@ -113,6 +113,18 @@ conflict is being resolved.
   fallback selection are not supported product or QA paths. Local QA accepts
   only `--server=tuwunel`, `--server=synapse`, or `--server=both`; it rejects
   `--core-backend` and `KOUSHI_QA_FORCE_SYNC_BACKEND`.
+- An index-based `VectorDiff` accumulator may be advanced only by diffs from the
+  stream that owns it. Never replace it from an independently collected snapshot.
+  A room-store snapshot such as `current_entries_snapshot()` is not the
+  filtered, sorted and paged order the diff indices refer to, so the next
+  `Set`/`Move` overwrites the wrong entry and silently loses a room while the
+  length stays put (#446). Such a snapshot may supply one-shot inspection or
+  scalar metadata only; a fresh ordered checkpoint must come from the same
+  adapter that emits the diffs.
+- A projection derived from such an accumulator may claim authority only when its
+  entry count equals its distinct-identity count. Length equality alone never
+  establishes authority, and a projection that fails the check must preserve the
+  previously known state rather than publish a lossy one.
 - Before designing or implementing new user-visible Matrix functionality,
   inspect the corresponding Element Web and Element X Android/iOS behavior
   when those clients have an equivalent flow. Record the observed upstream

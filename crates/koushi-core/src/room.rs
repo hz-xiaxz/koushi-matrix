@@ -3304,6 +3304,32 @@ fn room_list_range_is_complete(
     }
 }
 
+/// Number of distinct room ids in the ordered accumulator.
+fn unique_room_id_count(
+    current: &eyeball_im::Vector<matrix_sdk_ui::room_list_service::RoomListItem>,
+) -> usize {
+    current
+        .iter()
+        .map(|item| item.room_id().to_owned())
+        .collect::<BTreeSet<_>>()
+        .len()
+}
+
+/// Authoritative admission fence for a live room-list projection.
+///
+/// The accumulator is maintained by applying index-based `VectorDiff`s, so a
+/// diff applied against a differently ordered vector overwrites the wrong entry
+/// and produces one duplicate room id plus one silently missing room while the
+/// length stays put (#446). Length equality alone therefore must never
+/// establish authority: every entry must also carry a distinct identity.
+fn room_list_projection_admits_authority(
+    reconciliation_is_complete: bool,
+    entries_count: usize,
+    distinct_identity_count: usize,
+) -> bool {
+    reconciliation_is_complete && entries_count == distinct_identity_count
+}
+
 fn room_stop_matches_generation(active_generation: Option<u64>, stopped_generation: u64) -> bool {
     active_generation == Some(stopped_generation)
 }
@@ -3387,7 +3413,26 @@ async fn project_live_entries_and_ack_if_reconciled(
     authoritative: &Arc<AtomicBool>,
     sliding_sync_diagnostics: &crate::SlidingSyncDiagnostics,
 ) {
-    let projection_is_authoritative = reconciliation.is_complete(current.len());
+    let entries_count = current.len();
+    let unique_ids = unique_room_id_count(current);
+    let reconciliation_is_complete = reconciliation.is_complete(entries_count);
+    let projection_is_authoritative =
+        room_list_projection_admits_authority(reconciliation_is_complete, entries_count, unique_ids);
+    if reconciliation_is_complete && !projection_is_authoritative {
+        record(
+            DiagnosticEvent::new(
+                DiagnosticLevel::Warn,
+                "core.room",
+                "room_list_integrity_rejected",
+            )
+            .field(DiagnosticField::token("reason", "duplicate_identity"))
+            .field(DiagnosticField::count("entries_count", entries_count as u64))
+            .field(DiagnosticField::count(
+                "unique_room_id_count",
+                unique_ids as u64,
+            )),
+        );
+    }
     authoritative.store(projection_is_authoritative, Ordering::Release);
     let delivered = normalize_and_project_entries(
         session,
@@ -3856,6 +3901,14 @@ async fn run_live_room_list_observation_with_sources(
                     );
                     break;
                 };
+                // #446: a room-store snapshot may drive ONE projection and
+                // reconciliation decision, but it must never become the ordered
+                // accumulator that later index-based diffs address. Keep it in a
+                // separate one-shot vector so `current` stays owned by the
+                // dynamic-adapter diff stream.
+                let mut observed_snapshot: Option<
+                    eyeball_im::Vector<matrix_sdk_ui::room_list_service::RoomListItem>,
+                > = None;
                 match command {
                     RoomListObservationCommand::Refresh => {
                         // Read through the same live service that owns the
@@ -3898,7 +3951,15 @@ async fn run_live_room_list_observation_with_sources(
                         if let Some(range_fully_loaded) = snapshot.range_fully_loaded() {
                             reconciliation.report_range_fully_loaded(range_fully_loaded);
                         }
-                        current = snapshot.into_entries();
+                        // #446: project these entries once, but do NOT assign
+                        // them to `current`. They come from
+                        // `client.rooms_stream()`, which is not the
+                        // filtered/sorted/paged order the diff indices refer to,
+                        // so making them the accumulator let the next
+                        // `Set`/`Move` overwrite the wrong entry: one duplicate
+                        // room id, one silently lost room, and a joined Space
+                        // vanishing from the sidebar.
+                        observed_snapshot = Some(snapshot.into_entries());
                     }
                     RoomListObservationCommand::RefreshRoom { room_id } => {
                         let requested_room_id =
@@ -3936,7 +3997,9 @@ async fn run_live_room_list_observation_with_sources(
                         if let Some(range_fully_loaded) = snapshot.range_fully_loaded() {
                             reconciliation.report_range_fully_loaded(range_fully_loaded);
                         }
-                        current = snapshot.into_entries();
+                        // #446: one-shot observation only; the ordered accumulator
+                        // stays owned by the adapter's diff stream.
+                        observed_snapshot = Some(snapshot.into_entries());
                     }
                     RoomListObservationCommand::Reconcile {
                         backend_generation,
@@ -3979,7 +4042,9 @@ async fn run_live_room_list_observation_with_sources(
                         }
                         reconciliation.report_maximum(maximum_number_of_rooms);
                         reconciliation.report_range_fully_loaded(true);
-                        current = snapshot.into_entries();
+                        // #446: reconcile from this authoritative observation
+                        // without poisoning the ordered accumulator.
+                        observed_snapshot = Some(snapshot.into_entries());
                         reconciliation.begin(
                             backend_generation,
                             snapshot_sequence
@@ -3992,7 +4057,7 @@ async fn run_live_room_list_observation_with_sources(
                 project_live_entries_and_ack_if_reconciled(
                     &mut reconciliation,
                     &session,
-                    &current,
+                    observed_snapshot.as_ref().unwrap_or(&current),
                     &direct_state,
                     &known_room_ids,
                     &room_tx,
@@ -7457,6 +7522,24 @@ pub mod tests {
             !room_list_range_is_complete(Some(250), 251),
             "a stale cache-only room must keep the projection provisional"
         );
+    }
+
+    #[test]
+    fn duplicate_room_identity_is_rejected_as_non_authoritative() {
+        // The 2026-08-06 incident: the accumulator kept 121 entries while one id
+        // was duplicated and another displaced, and the malformed projection was
+        // still admitted as authoritative because only the length was checked.
+        // A joined Space disappeared from the sidebar as a result (#446).
+        assert!(
+            !room_list_projection_admits_authority(true, 121, 120),
+            "a duplicated room identity must never be admitted as authoritative"
+        );
+        assert!(room_list_projection_admits_authority(true, 121, 121));
+        assert!(
+            !room_list_projection_admits_authority(false, 121, 121),
+            "an incomplete range stays provisional even with unique identities"
+        );
+        assert!(room_list_projection_admits_authority(true, 0, 0));
     }
 
     #[test]
