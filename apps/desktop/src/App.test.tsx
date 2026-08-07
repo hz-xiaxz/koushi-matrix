@@ -1422,7 +1422,10 @@ describe("desktop integration source guards", () => {
     expect(fallbackSource).toContain('className="message-fixture-list"');
     expect(fallbackSource).toContain("snapshot.timeline.map");
     expect(styles).toContain(".message-fixture-list");
-    expect(styles).toContain("@media (min-width: 761px) and (max-width: 1180px)");
+    // #452: the overlay must take over before the inline grid runs out of room.
+    // The grid minimum is 72 + 318 + 420 + 390 = 1200px, so this breakpoint moved
+    // up from 1180px, which had left 1181-1199px clipping the panel off-window.
+    expect(styles).toContain("@media (min-width: 761px) and (max-width: 1199.98px)");
     expect(styles).toContain(".app-grid.right-panel-open .thread-pane");
   });
 
