@@ -37,8 +37,15 @@ pub(crate) fn classify_send_failure(
 }
 
 fn classify_http_failure(error: &matrix_sdk::HttpError) -> &'static str {
-    let is_timeout = matches!(error, matrix_sdk::HttpError::Reqwest(error) if error.is_timeout());
-    http_failure_token(is_timeout)
+    http_failure_token(http_error_is_timeout(error))
+}
+
+fn http_error_is_timeout(error: &matrix_sdk::HttpError) -> bool {
+    match error {
+        matrix_sdk::HttpError::Reqwest(error) => error.is_timeout(),
+        matrix_sdk::HttpError::Cached(error) => http_error_is_timeout(error),
+        _ => false,
+    }
 }
 
 fn http_failure_token(is_timeout: bool) -> &'static str {
@@ -70,5 +77,10 @@ mod tests {
     fn distinguishes_http_timeouts_without_exposing_transport_details() {
         assert_eq!(http_failure_token(true), "timeout");
         assert_eq!(http_failure_token(false), "http");
+
+        let source = include_str!("send_diagnostics.rs");
+        assert!(
+            source.contains("matrix_sdk::HttpError::Cached(error) => http_error_is_timeout(error)")
+        );
     }
 }
