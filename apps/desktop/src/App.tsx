@@ -1310,9 +1310,11 @@ export function SessionVerificationGate({
           : t("gate.title");
   const secureBackupFailureKind = secureBackupGateFailure(secureBackupGate);
   const secureBackupNeedsSetup =
-    secureBackupGate.kind === "secureStorageIncomplete" ||
     secureBackupGate.kind === "setupRequired" ||
     secureBackupGate.kind === "recoveryKeyDeliveryRequired";
+  const secureBackupNeedsRecovery =
+    secureBackupGate.kind === "existingBackupNeedsRecovery" ||
+    secureBackupGate.kind === "secureStorageIncomplete";
   return <main className="session-verification-gate" aria-label={secureBackupGateRequired ? t("gate.secureBackupTitle") : heading}>
     <div
       className="session-verification-drag-region"
@@ -1328,7 +1330,7 @@ export function SessionVerificationGate({
     {secureBackupGateRequired && secureBackupGate.kind === "inactive" && (
       <p>{t("gate.secureBackupInactive")}</p>
     )}
-    {secureBackupGateRequired && secureBackupGate.kind === "existingBackupNeedsRecovery" && (
+    {secureBackupGateRequired && secureBackupNeedsRecovery && (
       <p>{t("gate.secureBackupNeedsRecovery")}</p>
     )}
     {secureBackupGateRequired && secureBackupFailureKind && (
@@ -1340,7 +1342,7 @@ export function SessionVerificationGate({
     {secureBackupGateRequired && secureBackupDestinationSelectionError && (
       <p role="alert">{t("gate.secureBackupDestinationSelectionFailed")}</p>
     )}
-    {secureBackupGateRequired && secureBackupGate.kind === "existingBackupNeedsRecovery" && (
+    {secureBackupGateRequired && secureBackupNeedsRecovery && (
       <ImeSafeForm
         onSubmit={(event) => {
           event.preventDefault();
@@ -6339,6 +6341,7 @@ export function App() {
           activeSpace={activeSpace ?? null}
           activeSpaceName={activeSpaceName}
           displayDensity={displayDensity}
+          encryptedComposerBlocked={encryptedComposerBlocked}
           isRecoveryBusy={isBusy}
           mode={effectiveRightPanelMode}
           threadsListScope={openThreadsListScope}
@@ -6541,6 +6544,7 @@ export function App() {
           }}
           onChooseRoomKeyExportDestination={chooseRoomKeyExportDestination}
           onChooseRoomKeyImportSource={chooseRoomKeyImportSource}
+          onChooseSecureBackupDestination={chooseSecureBackupDestination}
           onExportRoomKeys={(destinationPath, passphrase) => {
             void exportRoomKeys(destinationPath, passphrase);
           }}

@@ -3420,8 +3420,11 @@ async fn project_live_entries_and_ack_if_reconciled(
     let entries_count = current.len();
     let unique_ids = unique_room_id_count(current);
     let reconciliation_is_complete = reconciliation.is_complete(entries_count);
-    let projection_is_authoritative =
-        room_list_projection_admits_authority(reconciliation_is_complete, entries_count, unique_ids);
+    let projection_is_authoritative = room_list_projection_admits_authority(
+        reconciliation_is_complete,
+        entries_count,
+        unique_ids,
+    );
     if reconciliation_is_complete && !projection_is_authoritative {
         record(
             DiagnosticEvent::new(
@@ -3430,7 +3433,10 @@ async fn project_live_entries_and_ack_if_reconciled(
                 "room_list_integrity_rejected",
             )
             .field(DiagnosticField::token("reason", "duplicate_identity"))
-            .field(DiagnosticField::count("entries_count", entries_count as u64))
+            .field(DiagnosticField::count(
+                "entries_count",
+                entries_count as u64,
+            ))
             .field(DiagnosticField::count(
                 "unique_room_id_count",
                 unique_ids as u64,

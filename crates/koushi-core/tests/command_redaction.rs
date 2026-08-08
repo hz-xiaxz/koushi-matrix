@@ -459,6 +459,7 @@ fn secure_backup_commands_are_correlated_ready_gated_and_redacted() {
             request: SecureBackupSetupRequest {
                 passphrase: Some(AuthSecret::new(setup_phrase)),
                 recovery_key_destination_path: Some(destination.clone()),
+                explicit_reenable_confirmed: false,
             },
         }),
         CoreCommand::Account(AccountCommand::ChangeSecureBackupPassphrase {

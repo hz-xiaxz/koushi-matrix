@@ -40392,7 +40392,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_on_unsubscribed_key_returns_not_subscribed() {
+    async fn send_without_authoritative_account_session_fails_closed() {
         let runtime = CoreRuntime::start();
         let mut conn = runtime.attach();
 
@@ -40435,12 +40435,7 @@ mod tests {
                     request_id,
                     failure,
                 } if request_id == rid => {
-                    assert_eq!(
-                        failure,
-                        CoreFailure::TimelineOperationFailed {
-                            kind: TimelineFailureKind::NotSubscribed
-                        }
-                    );
+                    assert_eq!(failure, CoreFailure::SessionRequired);
                     return;
                 }
                 _ => continue,

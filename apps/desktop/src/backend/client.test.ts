@@ -346,8 +346,9 @@ describe("TauriDesktopApi", () => {
 
     const api = createDesktopApi();
     await api.recoverSecureBackup("secure-backup-recovery-key");
-    await api.setupSecureBackup("secure-backup-passphrase", "/tmp/recovery.txt");
-    await api.reenableSecureBackup("reenable-passphrase", "/tmp/reenable-recovery.txt");
+    const { setupSecureBackup, reenableSecureBackup } = api;
+    await setupSecureBackup("secure-backup-passphrase", "/tmp/recovery.txt");
+    await reenableSecureBackup("reenable-passphrase", "/tmp/reenable-recovery.txt");
     await api.retrySecureBackupInspection();
 
     expect(invoke).toHaveBeenCalledWith("recover_secure_backup", {
@@ -357,7 +358,7 @@ describe("TauriDesktopApi", () => {
       passphrase: "secure-backup-passphrase",
       recoveryKeyDestinationPath: "/tmp/recovery.txt"
     });
-    expect(invoke).toHaveBeenCalledWith("bootstrap_secure_backup", {
+    expect(invoke).toHaveBeenCalledWith("reenable_secure_backup", {
       passphrase: "reenable-passphrase",
       recoveryKeyDestinationPath: "/tmp/reenable-recovery.txt"
     });

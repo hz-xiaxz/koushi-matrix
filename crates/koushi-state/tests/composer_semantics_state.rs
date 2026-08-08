@@ -149,8 +149,7 @@ fn composer_math_accepts_latex_paren_and_bracket_delimiters() {
 
 #[test]
 fn composer_math_accepts_fenced_latex_display_block() {
-    let draft =
-        build_formatted_message_draft("\\[\n\\int_0^1 x dx\n\\]", MentionIntent::default());
+    let draft = build_formatted_message_draft("\\[\n\\int_0^1 x dx\n\\]", MentionIntent::default());
 
     assert_eq!(
         draft.formatted_body.as_deref(),

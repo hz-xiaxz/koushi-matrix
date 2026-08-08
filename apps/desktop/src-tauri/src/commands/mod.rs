@@ -1560,12 +1560,14 @@ pub(crate) fn build_bootstrap_secure_backup_command(
     request_id: koushi_core::RequestId,
     passphrase: Option<AuthSecret>,
     recovery_key_destination_path: Option<String>,
+    explicit_reenable_confirmed: bool,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
         request_id,
         request: SecureBackupSetupRequest {
             passphrase,
             recovery_key_destination_path: recovery_key_destination_path.map(PathBuf::from),
+            explicit_reenable_confirmed,
         },
     })
 }
@@ -1666,6 +1668,7 @@ pub(crate) fn build_start_session_bootstrap_command(
         request: SecureBackupSetupRequest {
             passphrase,
             recovery_key_destination_path: Some(PathBuf::from(recovery_key_destination_path)),
+            explicit_reenable_confirmed: false,
         },
     })
 }
@@ -4391,6 +4394,7 @@ mod tests {
             fake_request_id(35),
             Some(AuthSecret::new("backup-setup-phrase")),
             Some("/tmp/recovery-artifact.txt".to_owned()),
+            false,
         ) {
             CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
                 request_id,
@@ -7048,6 +7052,11 @@ mod tests {
                 "commands::e2ee::bootstrap_secure_backup",
             ),
             (
+                "pub async fn reenable_secure_backup",
+                "build_bootstrap_secure_backup_command",
+                "commands::e2ee::reenable_secure_backup",
+            ),
+            (
                 "pub async fn change_secure_backup_passphrase",
                 "build_change_secure_backup_passphrase_command",
                 "commands::e2ee::change_secure_backup_passphrase",
@@ -8039,6 +8048,7 @@ mod tests {
             fake_request_id(25),
             Some(AuthSecret::new("backup-setup-phrase")),
             Some("/tmp/private-recovery-artifact.txt".to_owned()),
+            false,
         );
         let secure_backup_change = build_change_secure_backup_passphrase_command(
             fake_request_id(26),

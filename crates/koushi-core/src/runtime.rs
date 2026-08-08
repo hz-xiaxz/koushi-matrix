@@ -5216,26 +5216,6 @@ impl AppActor {
                 state_changed
             }
             CoreCommand::Timeline(timeline_command) => {
-                if let Some(target) = encrypted_user_content_target(&timeline_command)
-                    && encrypted_user_content_is_blocked(&self.state, target.room_id)
-                {
-                    if let Some((key, submission_id)) = target.submission {
-                        self.emit(CoreEvent::Timeline(TimelineEvent::SubmissionRejected {
-                            request_id: target.request_id,
-                            key: key.clone(),
-                            submission_id: submission_id.clone(),
-                            kind: TimelineFailureKind::SecureBackupRequired,
-                        }));
-                    } else {
-                        self.emit(CoreEvent::OperationFailed {
-                            request_id: target.request_id,
-                            failure: CoreFailure::TimelineOperationFailed {
-                                kind: TimelineFailureKind::SecureBackupRequired,
-                            },
-                        });
-                    }
-                    return false;
-                }
                 if let Some((request_id, expected_account)) =
                     timeline_command.composer_account_fence()
                     && !composer_draft_account_matches(&self.state, expected_account)
@@ -6190,13 +6170,13 @@ impl AppActor {
     }
 }
 
-struct EncryptedUserContentTarget<'a> {
-    request_id: RequestId,
-    room_id: &'a str,
-    submission: Option<(&'a TimelineKey, &'a koushi_state::SubmissionId)>,
+pub(crate) struct EncryptedUserContentTarget<'a> {
+    pub(crate) request_id: RequestId,
+    pub(crate) room_id: &'a str,
+    pub(crate) submission: Option<(&'a TimelineKey, &'a koushi_state::SubmissionId)>,
 }
 
-fn encrypted_user_content_target(
+pub(crate) fn encrypted_user_content_target(
     command: &TimelineCommand,
 ) -> Option<EncryptedUserContentTarget<'_>> {
     match command {
@@ -6246,14 +6226,6 @@ fn encrypted_user_content_target(
         }),
         _ => None,
     }
-}
-
-fn encrypted_user_content_is_blocked(state: &AppState, room_id: &str) -> bool {
-    state
-        .rooms
-        .iter()
-        .any(|room| room.room_id == room_id && room.is_encrypted)
-        && !koushi_state::encrypted_messaging_is_admitted(state)
 }
 
 fn unsubscribe_replaced_thread_timeline_key(
@@ -6805,38 +6777,6 @@ mod tests {
         RoomNotificationSettings, RoomSummary, RoomTags, SessionInfo, SettingsPatch,
         SpaceMemberEntry, SpaceMemberMembership, SpaceMembersProjection, UserProfile, reduce,
     };
-
-    #[test]
-    fn secure_backup_gate_blocks_only_encrypted_user_content_targets() {
-        let mut encrypted = unread_diagnostic_room("!encrypted:example.invalid");
-        encrypted.is_encrypted = true;
-        let unencrypted = unread_diagnostic_room("!plain:example.invalid");
-        let mut state = AppState {
-            session: SessionState::Ready(SessionInfo {
-                homeserver: "https://example.invalid".to_owned(),
-                user_id: "@fixture:example.invalid".to_owned(),
-                device_id: "DEVICE".to_owned(),
-                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
-            }),
-            secure_backup_gate: koushi_state::SecureBackupGateState::Checking,
-            rooms: vec![encrypted, unencrypted],
-            ..AppState::default()
-        };
-
-        assert!(encrypted_user_content_is_blocked(
-            &state,
-            "!encrypted:example.invalid"
-        ));
-        assert!(!encrypted_user_content_is_blocked(
-            &state,
-            "!plain:example.invalid"
-        ));
-        state.secure_backup_gate = koushi_state::SecureBackupGateState::Ready;
-        assert!(!encrypted_user_content_is_blocked(
-            &state,
-            "!encrypted:example.invalid"
-        ));
-    }
 
     fn closed_forward_space_member_entry(
         user_id: &str,
@@ -10569,6 +10509,7 @@ mod tests {
                     recovery_key_destination_path: Some(std::path::PathBuf::from(
                         "/private/recovery-key.txt",
                     )),
+                    explicit_reenable_confirmed: false,
                 },
             }
         );

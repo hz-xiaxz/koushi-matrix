@@ -1341,6 +1341,7 @@ pub fn run() {
             commands::e2ee::confirm_session_bootstrap_saved,
             commands::e2ee::enable_key_backup,
             commands::e2ee::bootstrap_secure_backup,
+            commands::e2ee::reenable_secure_backup,
             commands::e2ee::recover_secure_backup,
             commands::e2ee::retry_secure_backup_inspection,
             commands::e2ee::change_secure_backup_passphrase,

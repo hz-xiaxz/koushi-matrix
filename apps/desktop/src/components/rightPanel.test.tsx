@@ -571,3 +571,22 @@ describe("ContextualRightPanel thread upload previews", () => {
     expect(revokeObjectURL).not.toHaveBeenCalled();
   });
 });
+
+describe("ContextualRightPanel secure-backup degradation", () => {
+  test("disables the thread composer while encrypted sending is blocked", () => {
+    renderPanel({
+      mode: "thread",
+      snapshot: threadSnapshot(""),
+      encryptedComposerBlocked: true
+    });
+
+    expect(
+      screen
+        .getByRole("textbox", { name: "Thread composer" })
+        .getAttribute("contenteditable")
+    ).toBe("false");
+    expect(
+      (screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+  });
+});

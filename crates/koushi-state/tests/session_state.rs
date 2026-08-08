@@ -7,15 +7,14 @@ use koushi_state::{
     InviteTargetQueryState, InviteWorkflowState, LoginAttemptId, LoginFlow, LoginFlowKind,
     LoginRequest, NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionState, NativeAttentionSummary, NavigationState, PendingKeyCountBucket,
-    ProvisionalPhase,
-    RecoveryMethod, RecoveryRequest, RoomAttentionKind, RoomSummary, RoomTags,
+    ProvisionalPhase, RecoveryMethod, RecoveryRequest, RoomAttentionKind, RoomSummary, RoomTags,
     SearchCrawlerLastActive, SearchCrawlerLastActiveStatus, SearchCrawlerRoomState,
     SearchCrawlerState, SearchScope, SearchState, SecureBackupGateFailureKind,
-    SecureBackupGateState, SessionInfo, SessionState, SpaceSummary,
-    SubmissionId, SyncState, ThreadAttentionState, ThreadPaneState, TimelinePaneState,
-    TrustOperationFailureKind, UiEvent, VerificationAccountKind, VerificationGateFailureKind,
-    VerificationGateRejectReason, VerificationGateState, VerificationMethod,
-    VerificationMethodCapability, encrypted_messaging_is_admitted, reduce,
+    SecureBackupGateState, SessionInfo, SessionState, SpaceSummary, SubmissionId, SyncState,
+    ThreadAttentionState, ThreadPaneState, TimelinePaneState, TrustOperationFailureKind, UiEvent,
+    VerificationAccountKind, VerificationGateFailureKind, VerificationGateRejectReason,
+    VerificationGateState, VerificationMethod, VerificationMethodCapability,
+    encrypted_messaging_is_admitted, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -812,7 +811,10 @@ fn secure_backup_gate_wire_is_closed_privacy_safe_and_legacy_defaults_inactive()
             },
             "existingBackupNeedsRecovery",
         ),
-        (SecureBackupGateState::SecureStorageIncomplete, "secureStorageIncomplete"),
+        (
+            SecureBackupGateState::SecureStorageIncomplete,
+            "secureStorageIncomplete",
+        ),
         (SecureBackupGateState::SetupRequired, "setupRequired"),
         (
             SecureBackupGateState::ExplicitlyDisabledRequiresSetup,
@@ -845,7 +847,10 @@ fn secure_backup_gate_wire_is_closed_privacy_safe_and_legacy_defaults_inactive()
     ];
     for (gate, kind) in cases {
         let value = serde_json::to_value(&gate).expect("gate serializes");
-        assert_eq!(value.get("kind").and_then(serde_json::Value::as_str), Some(kind));
+        assert_eq!(
+            value.get("kind").and_then(serde_json::Value::as_str),
+            Some(kind)
+        );
         let restored: SecureBackupGateState =
             serde_json::from_value(value).expect("gate round trips");
         assert_eq!(restored, gate);

@@ -607,6 +607,26 @@ describe("SessionVerificationGate interactions", () => {
     expect(screen.getByRole("alert").textContent).toContain("recovery key");
   });
 
+  test("recovers incomplete secure storage instead of offering destructive setup", async () => {
+    const snapshot = secureBackupSnapshot(
+      await createBrowserFakeApi().getSnapshot(),
+      { kind: "secureStorageIncomplete" }
+    );
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(snapshot)}
+      />
+    );
+
+    expect(screen.getByLabelText("Secure backup recovery key")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Recover secure backup" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Set up secure backup" })).toBeNull();
+  });
+
   test("submits setup passphrase and native destination selection without retaining either value", async () => {
     const snapshot = secureBackupSnapshot(
       await createBrowserFakeApi().getSnapshot(),

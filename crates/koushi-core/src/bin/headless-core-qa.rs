@@ -7682,6 +7682,7 @@ async fn complete_new_identity_gate_for_qa(
             request: koushi_core::SecureBackupSetupRequest {
                 passphrase: Some(AuthSecret::new(password.to_owned())),
                 recovery_key_destination_path: Some(recovery_key_path.clone()),
+                explicit_reenable_confirmed: false,
             },
         },
     ))

@@ -1100,6 +1100,7 @@ impl fmt::Debug for RoomKeyImportRequest {
 pub struct SecureBackupSetupRequest {
     pub passphrase: Option<koushi_state::AuthSecret>,
     pub recovery_key_destination_path: Option<PathBuf>,
+    pub explicit_reenable_confirmed: bool,
 }
 
 impl fmt::Debug for SecureBackupSetupRequest {
@@ -1110,6 +1111,10 @@ impl fmt::Debug for SecureBackupSetupRequest {
             .field(
                 "has_recovery_key_destination_path",
                 &self.recovery_key_destination_path.is_some(),
+            )
+            .field(
+                "explicit_reenable_confirmed",
+                &self.explicit_reenable_confirmed,
             )
             .finish()
     }
