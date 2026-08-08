@@ -7665,7 +7665,9 @@ test("security settings drive Rust-owned room-key transfer and secure backup sta
   await secureBackupForm
     .getByLabel("Secure backup passphrase", { exact: true })
     .fill("synthetic-secure-backup-passphrase");
-  await secureBackupForm.getByLabel("Recovery key destination").fill("/tmp/recovery-key.txt");
+  await page.evaluate(() =>
+    window.__harness.setCommandResponse("plugin:dialog|save", "/tmp/recovery-key.txt")
+  );
   await secureBackupForm.getByRole("button", { name: "Set up secure backup" }).click();
   await expect.poll(() => invocationCount(page, "bootstrap_secure_backup")).toBe(1);
   await expect(page.getByTestId("secure-backup-state")).toHaveText("Recovery key saved");
@@ -7688,9 +7690,9 @@ test("security settings drive Rust-owned room-key transfer and secure backup sta
   await passphraseChangeForm
     .getByLabel("New secure backup passphrase")
     .fill("synthetic-new-secure-backup-passphrase");
-  await passphraseChangeForm
-    .getByLabel("Recovery key destination")
-    .fill("/tmp/changed-recovery-key.txt");
+  await page.evaluate(() =>
+    window.__harness.setCommandResponse("plugin:dialog|save", "/tmp/changed-recovery-key.txt")
+  );
   await passphraseChangeForm
     .getByRole("button", { name: "Update secure backup passphrase" })
     .click();
@@ -8702,7 +8704,13 @@ test("rail Home and sidebar Threads navigation buttons dispatch Rust-owned comma
   page
 }) => {
   await gotoReadyShell(page);
-  await page.evaluate(() => window.__harness.clearInvocations());
+  await page.evaluate(() => {
+    window.__harness.setCommandResponse(
+      "open_threads_list",
+      () => window.__harness.currentSnapshot()
+    );
+    window.__harness.clearInvocations();
+  });
 
   const sidebar = page.getByRole("complementary", { name: t("workspace.rooms") });
   await expect(sidebar.getByRole("button", { name: t("workspace.threads") })).toBeVisible();
