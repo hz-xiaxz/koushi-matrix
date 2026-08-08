@@ -83,6 +83,7 @@ pub enum TimelineFailureKind {
     InvalidReactionState,
     InvalidSendTarget,
     InvalidSendState,
+    SecureBackupRequired,
     ComposerRevisionExhausted,
     UnsupportedSlashCommand,
     NotSubscribed,

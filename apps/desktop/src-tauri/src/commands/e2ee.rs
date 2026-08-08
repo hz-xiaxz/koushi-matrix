@@ -136,6 +136,37 @@ pub async fn bootstrap_secure_backup(
 }
 
 #[tauri::command]
+pub async fn recover_secure_backup(
+    secret: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        build_recover_secure_backup_command(request_id, AuthSecret::new(secret)),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn retry_secure_backup_inspection(
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command(
+        state.inner(),
+        build_retry_secure_backup_inspection_command(request_id),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn change_secure_backup_passphrase(
     old_secret: String,
     new_passphrase: String,

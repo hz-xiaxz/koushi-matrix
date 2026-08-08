@@ -1570,6 +1570,22 @@ pub(crate) fn build_bootstrap_secure_backup_command(
     })
 }
 
+pub(crate) fn build_recover_secure_backup_command(
+    request_id: koushi_core::RequestId,
+    secret: AuthSecret,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::RecoverSecureBackup {
+        request_id,
+        request: RecoveryRequest { secret },
+    })
+}
+
+pub(crate) fn build_retry_secure_backup_inspection_command(
+    request_id: koushi_core::RequestId,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::RetrySecureBackupInspection { request_id })
+}
+
 pub(crate) fn build_change_secure_backup_passphrase_command(
     request_id: koushi_core::RequestId,
     old_secret: AuthSecret,

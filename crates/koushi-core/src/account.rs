@@ -169,6 +169,7 @@ const RECOVERY_TRUST_SETTLEMENT_POLL_INTERVAL: Duration = Duration::from_millis(
 const IDENTITY_RESET_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 const DEVICE_CLEANUP_REMOTE_TIMEOUT: Duration = Duration::from_secs(20);
 const CURRENT_SESSION_STATUS_TIMEOUT: Duration = Duration::from_secs(15);
+const SECURE_BACKUP_INSPECTION_TIMEOUT: Duration = Duration::from_secs(30);
 const INCOMING_VERIFICATION_OBSERVER_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 const OIDC_REDIRECT_URI: &str = "koushi-desktop://auth/callback";
 /// Redacted message used in reducer error projections (never raw SDK text).
@@ -583,6 +584,18 @@ pub enum AccountMessage {
         trust: koushi_state::CurrentDeviceTrustState,
     },
     CheckCurrentDeviceTrust,
+    InspectSecureBackup,
+    SecureBackupInspectionFinished {
+        generation: u64,
+        result: Result<
+            koushi_sdk::MatrixSecureBackupInspection,
+            koushi_state::SecureBackupGateFailureKind,
+        >,
+    },
+    SecureBackupStateChanged {
+        generation: u64,
+        state: koushi_sdk::MatrixSecureBackupState,
+    },
     RefreshCurrentSessionStatus {
         request_id: u64,
         trigger: koushi_state::SessionStatusRefreshTrigger,
@@ -1700,6 +1713,9 @@ pub struct AccountActor {
     trust_recheck_pending: bool,
     current_session_status_task: Option<crate::executor::JoinHandle<()>>,
     current_session_status_request: Option<u64>,
+    secure_backup_inspection_task: Option<crate::executor::JoinHandle<()>>,
+    secure_backup_inspection_pending: bool,
+    secure_backup_observer: Option<crate::executor::JoinHandle<()>>,
     verification_method_discovery_task: Option<OwnedVerificationMethodDiscoveryTask>,
     verification_method_discovery_serial: u64,
     verification_method_discovery_failed: bool,
@@ -1929,6 +1945,9 @@ impl AccountActor {
             trust_recheck_pending: false,
             current_session_status_task: None,
             current_session_status_request: None,
+            secure_backup_inspection_task: None,
+            secure_backup_inspection_pending: false,
+            secure_backup_observer: None,
             verification_method_discovery_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,
@@ -2600,6 +2619,17 @@ impl AccountActor {
                     locked,
                 } => {
                     self.handle_trust_projection_applied(generation, transition_id, ready, locked)
+                        .await;
+                }
+                AccountMessage::InspectSecureBackup => {
+                    self.start_secure_backup_inspection();
+                }
+                AccountMessage::SecureBackupInspectionFinished { generation, result } => {
+                    self.finish_secure_backup_inspection(generation, result)
+                        .await;
+                }
+                AccountMessage::SecureBackupStateChanged { generation, state } => {
+                    self.handle_secure_backup_state_changed(generation, state)
                         .await;
                 }
                 AccountMessage::RejectProvisionalSession { request_id } => {
@@ -3612,6 +3642,8 @@ impl AccountActor {
         self.stop_recovery_trust_settlement_task().await;
         self.stop_provisional_runtime().await;
         self.cancel_current_session_status_refresh().await;
+        self.cancel_secure_backup_inspection().await;
+        self.stop_secure_backup_observer().await;
         self.stop_recovery_observer().await;
         self.stop_incoming_verification_observer().await;
         self.stop_session_change_observer().await;
@@ -4301,6 +4333,15 @@ impl AccountActor {
             } => {
                 self.handle_bootstrap_secure_backup(request_id, request)
                     .await;
+            }
+            AccountCommand::RecoverSecureBackup {
+                request_id,
+                request,
+            } => {
+                self.handle_recover_secure_backup(request_id, request).await;
+            }
+            AccountCommand::RetrySecureBackupInspection { .. } => {
+                self.start_secure_backup_inspection();
             }
             AccountCommand::ChangeSecureBackupPassphrase {
                 request_id,
@@ -6440,7 +6481,7 @@ impl AccountActor {
     }
 
     async fn handle_bootstrap_secure_backup(
-        &self,
+        &mut self,
         request_id: RequestId,
         request: SecureBackupSetupRequest,
     ) {
@@ -6461,12 +6502,26 @@ impl AccountActor {
             passphrase,
             recovery_key_destination_path,
         } = request;
-        let result = koushi_sdk::bootstrap_secure_backup(
-            &session,
-            passphrase.as_ref(),
-            recovery_key_destination_path,
-        )
+        if recovery_key_destination_path.is_none() {
+            self.send_actions(vec![AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
+            )])
+            .await;
+            self.emit_failure(
+                request_id,
+                CoreFailure::AccountOperationFailed {
+                    kind: AuthFailureKind::Sdk,
+                },
+            );
+            return;
+        }
+        self.send_actions(vec![AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::CreatingBackup,
+        )])
         .await;
+        let result = session
+            .setup_secure_backup(passphrase.as_ref(), recovery_key_destination_path)
+            .await;
         drop(passphrase);
         match result {
             Ok(summary) => {
@@ -6485,6 +6540,7 @@ impl AccountActor {
                     },
                 ])
                 .await;
+                self.start_secure_backup_inspection();
             }
             Err(error) => {
                 let kind = classify_e2ee_trust_error(&error);
@@ -6492,6 +6548,38 @@ impl AccountActor {
                     request_id: request_id.sequence,
                     kind,
                 }])
+                .await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: classify_e2ee_trust_auth_failure(&error),
+                    },
+                );
+            }
+        }
+    }
+
+    async fn handle_recover_secure_backup(
+        &mut self,
+        request_id: RequestId,
+        request: RecoveryRequest,
+    ) {
+        let Some(session) = self.session.clone().filter(|_| self.session_promoted) else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        self.send_actions(vec![AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::Checking,
+        )])
+        .await;
+        match session.recover_secure_backup(&request).await {
+            Ok(()) => self.start_secure_backup_inspection(),
+            Err(error) => {
+                self.send_actions(vec![AppAction::SecureBackupGateChanged(
+                    koushi_state::SecureBackupGateState::ExistingBackupNeedsRecovery {
+                        failure: Some(classify_secure_backup_gate_failure(&error)),
+                    },
+                )])
                 .await;
                 self.emit_failure(
                     request_id,
@@ -8605,6 +8693,7 @@ impl AccountActor {
         let trust_at_promotion = session.current_device_trust();
         self.start_session_change_observer(session.clone());
         self.session_promoted = true;
+        self.start_secure_backup_observer(session.clone());
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
         }
@@ -8970,6 +9059,128 @@ impl AccountActor {
     async fn cancel_current_session_status_refresh(&mut self) {
         self.current_session_status_request = None;
         if let Some(task) = self.current_session_status_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    fn start_secure_backup_inspection(&mut self) {
+        if self.secure_backup_inspection_task.is_some() {
+            self.secure_backup_inspection_pending = true;
+            return;
+        }
+        let Some(session) = self.session.clone().filter(|_| self.session_promoted) else {
+            return;
+        };
+        let generation = self.trust_generation;
+        record(DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.secure_backup",
+            "inspection_started",
+        ));
+        let tx = self.self_tx.clone();
+        self.secure_backup_inspection_task = Some(executor::spawn(async move {
+            let result = match executor::timeout(
+                SECURE_BACKUP_INSPECTION_TIMEOUT,
+                session.inspect_secure_backup(),
+            )
+            .await
+            {
+                Ok(Ok(inspection)) => Ok(inspection),
+                Ok(Err(error)) => Err(classify_secure_backup_gate_failure(&error)),
+                Err(_) => Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+            };
+            let _ = tx
+                .send(AccountMessage::SecureBackupInspectionFinished { generation, result })
+                .await;
+        }));
+    }
+
+    async fn finish_secure_backup_inspection(
+        &mut self,
+        generation: u64,
+        result: Result<
+            koushi_sdk::MatrixSecureBackupInspection,
+            koushi_state::SecureBackupGateFailureKind,
+        >,
+    ) {
+        self.secure_backup_inspection_task = None;
+        if std::mem::take(&mut self.secure_backup_inspection_pending) {
+            self.start_secure_backup_inspection();
+            return;
+        }
+        let Some(action) = secure_backup_inspection_completion_action(
+            self.trust_generation,
+            self.session_promoted,
+            generation,
+            result,
+        ) else {
+            if self.session_promoted {
+                self.start_secure_backup_inspection();
+            }
+            return;
+        };
+        if let AppAction::SecureBackupGateChanged(gate) = &action {
+            record(
+                DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.secure_backup",
+                    "inspection_settled",
+                )
+                .field(DiagnosticField::token(
+                    "gate",
+                    secure_backup_gate_token(gate),
+                )),
+            );
+        }
+        self.send_actions(vec![action]).await;
+    }
+
+    async fn cancel_secure_backup_inspection(&mut self) {
+        self.secure_backup_inspection_pending = false;
+        if let Some(task) = self.secure_backup_inspection_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    fn start_secure_backup_observer(&mut self, session: Arc<MatrixClientSession>) {
+        if let Some(task) = self.secure_backup_observer.take() {
+            task.abort();
+        }
+        let generation = self.trust_generation;
+        let mut observation = session.observe_secure_backup_state();
+        let tx = self.self_tx.clone();
+        self.secure_backup_observer = Some(executor::spawn(async move {
+            while let Some(state) = observation.updates.next().await {
+                if tx
+                    .send(AccountMessage::SecureBackupStateChanged { generation, state })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+    }
+
+    async fn handle_secure_backup_state_changed(
+        &mut self,
+        generation: u64,
+        _state: koushi_sdk::MatrixSecureBackupState,
+    ) {
+        if generation != self.trust_generation || !self.session_promoted {
+            return;
+        }
+        self.send_actions(vec![AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::Checking,
+        )])
+        .await;
+        self.start_secure_backup_inspection();
+    }
+
+    async fn stop_secure_backup_observer(&mut self) {
+        if let Some(task) = self.secure_backup_observer.take() {
             task.abort();
             let _ = task.await;
         }
@@ -9675,6 +9886,7 @@ impl AccountActor {
         self.start_recovery_observer(session.clone());
         self.start_session_change_observer(session.clone());
         self.session_promoted = true;
+        self.start_secure_backup_observer(session.clone());
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
         }
@@ -10470,6 +10682,43 @@ impl AccountActor {
     }
 }
 
+fn secure_backup_inspection_completion_action(
+    current_generation: u64,
+    session_promoted: bool,
+    generation: u64,
+    result: Result<
+        koushi_sdk::MatrixSecureBackupInspection,
+        koushi_state::SecureBackupGateFailureKind,
+    >,
+) -> Option<AppAction> {
+    if generation != current_generation || !session_promoted {
+        return None;
+    }
+    let gate = match result {
+        Ok(inspection) => inspection.recommended_gate_state(),
+        Err(failure) => koushi_state::SecureBackupGateState::BlockedFailed { failure },
+    };
+    Some(AppAction::SecureBackupGateChanged(gate))
+}
+
+fn secure_backup_gate_token(gate: &koushi_state::SecureBackupGateState) -> &'static str {
+    use koushi_state::SecureBackupGateState;
+    match gate {
+        SecureBackupGateState::Inactive => "inactive",
+        SecureBackupGateState::Checking => "checking",
+        SecureBackupGateState::ExistingBackupNeedsRecovery { .. } => "recovery_required",
+        SecureBackupGateState::SecureStorageIncomplete => "secure_storage_incomplete",
+        SecureBackupGateState::SetupRequired => "setup_required",
+        SecureBackupGateState::ExplicitlyDisabledRequiresSetup => "explicitly_disabled",
+        SecureBackupGateState::CreatingBackup => "creating",
+        SecureBackupGateState::RecoveryKeyDeliveryRequired => "delivery_required",
+        SecureBackupGateState::UploadingExistingKeys { .. } => "uploading",
+        SecureBackupGateState::DegradedRetrying { .. } => "degraded",
+        SecureBackupGateState::BlockedFailed { .. } => "blocked_failed",
+        SecureBackupGateState::Ready => "ready",
+    }
+}
+
 async fn send_scheduled_acceptance_actions(
     action_tx: &mpsc::Sender<Vec<AppAction>>,
     actions: Vec<AppAction>,
@@ -10967,7 +11216,10 @@ fn classify_recovery_error(
 
 fn classify_e2ee_trust_error(error: &koushi_sdk::E2eeTrustError) -> TrustOperationFailureKind {
     match error {
-        koushi_sdk::E2eeTrustError::NoOlmMachine => TrustOperationFailureKind::Sdk,
+        koushi_sdk::E2eeTrustError::NoOlmMachine
+        | koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive
+        | koushi_sdk::E2eeTrustError::SecureBackupAlreadyExists
+        | koushi_sdk::E2eeTrustError::SecureBackupUploadFailed => TrustOperationFailureKind::Sdk,
         koushi_sdk::E2eeTrustError::Sdk(message) => {
             let lower = message.to_ascii_lowercase();
             if lower.contains("passphrase")
@@ -10994,6 +11246,32 @@ fn classify_e2ee_trust_error(error: &koushi_sdk::E2eeTrustError) -> TrustOperati
                 TrustOperationFailureKind::Sdk
             }
         }
+    }
+}
+
+fn classify_secure_backup_gate_failure(
+    error: &koushi_sdk::E2eeTrustError,
+) -> koushi_state::SecureBackupGateFailureKind {
+    use koushi_sdk::E2eeTrustError;
+    use koushi_state::SecureBackupGateFailureKind;
+
+    match error {
+        E2eeTrustError::SecureBackupUploadFailed => SecureBackupGateFailureKind::Network,
+        E2eeTrustError::SecureBackupInspectionInconclusive => SecureBackupGateFailureKind::Sdk,
+        E2eeTrustError::SecureBackupAlreadyExists => SecureBackupGateFailureKind::BackupKeyMismatch,
+        E2eeTrustError::NoOlmMachine => SecureBackupGateFailureKind::Sdk,
+        E2eeTrustError::Sdk(_) => match classify_e2ee_trust_error(error) {
+            TrustOperationFailureKind::InvalidPassphrase => {
+                SecureBackupGateFailureKind::InvalidRecoveryKey
+            }
+            TrustOperationFailureKind::Timeout => SecureBackupGateFailureKind::Timeout,
+            TrustOperationFailureKind::Forbidden => SecureBackupGateFailureKind::Forbidden,
+            TrustOperationFailureKind::Network => SecureBackupGateFailureKind::Network,
+            TrustOperationFailureKind::Mismatch => SecureBackupGateFailureKind::BackupKeyMismatch,
+            TrustOperationFailureKind::Cancelled | TrustOperationFailureKind::Sdk => {
+                SecureBackupGateFailureKind::Sdk
+            }
+        },
     }
 }
 
@@ -11360,6 +11638,43 @@ mod tests {
             own_identity_verification: koushi_state::OwnIdentityVerification::Verified,
             key_backup: koushi_state::CurrentSessionBackupState::Ready,
         }
+    }
+
+    fn ready_secure_backup_inspection() -> koushi_sdk::MatrixSecureBackupInspection {
+        koushi_sdk::MatrixSecureBackupInspection {
+            server: koushi_sdk::MatrixSecureBackupServerState::Present,
+            local: koushi_sdk::MatrixSecureBackupLocalState::Enabled,
+            recovery: koushi_sdk::MatrixSecureBackupRecoveryState::Enabled,
+            upload: koushi_sdk::MatrixSecureBackupUploadState::Settled,
+            trust: koushi_sdk::MatrixSecureBackupTrustState::Trusted,
+        }
+    }
+
+    #[test]
+    fn secure_backup_completion_rejects_stale_or_unpromoted_sessions() {
+        for (current_generation, promoted, completed_generation) in [(5, true, 4), (5, false, 5)] {
+            assert!(
+                secure_backup_inspection_completion_action(
+                    current_generation,
+                    promoted,
+                    completed_generation,
+                    Ok(ready_secure_backup_inspection()),
+                )
+                .is_none()
+            );
+        }
+
+        assert!(matches!(
+            secure_backup_inspection_completion_action(
+                5,
+                true,
+                5,
+                Ok(ready_secure_backup_inspection()),
+            ),
+            Some(AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::Ready
+            ))
+        ));
     }
 
     #[test]
@@ -17458,6 +17773,9 @@ mod tests {
             trust_recheck_pending: false,
             current_session_status_task: None,
             current_session_status_request: None,
+            secure_backup_inspection_task: None,
+            secure_backup_inspection_pending: false,
+            secure_backup_observer: None,
             verification_method_discovery_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,

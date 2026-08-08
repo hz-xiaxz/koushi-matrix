@@ -5879,6 +5879,7 @@ pub(crate) fn classify_room_error(error: &MatrixRoomOperationError) -> RoomFailu
             MatrixRoomOperationFailureKind::Sdk
             | MatrixRoomOperationFailureKind::Encryption
             | MatrixRoomOperationFailureKind::Store
+            | MatrixRoomOperationFailureKind::SecureBackupRequired
             | MatrixRoomOperationFailureKind::WrongRoomState => RoomFailureKind::Sdk,
         },
     }

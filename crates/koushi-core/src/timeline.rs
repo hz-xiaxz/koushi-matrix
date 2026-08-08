@@ -10083,6 +10083,7 @@ fn media_download_failure_token(kind: TimelineFailureKind) -> &'static str {
         TimelineFailureKind::InvalidReactionState => "invalid_reaction_state",
         TimelineFailureKind::InvalidSendTarget => "invalid_send_target",
         TimelineFailureKind::InvalidSendState => "invalid_send_state",
+        TimelineFailureKind::SecureBackupRequired => "secure_backup_required",
         TimelineFailureKind::ComposerRevisionExhausted => "composer_revision_exhausted",
         TimelineFailureKind::UnsupportedSlashCommand => "unsupported_slash_command",
         TimelineFailureKind::NotSubscribed => "not_subscribed",
