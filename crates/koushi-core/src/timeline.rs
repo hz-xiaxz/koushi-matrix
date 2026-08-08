@@ -41825,6 +41825,58 @@ mod tests {
     }
 
     #[test]
+    fn send_failure_trace_records_only_closed_failure_fields() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let key = room_key();
+        let mut trace = SendLifecycleTrace::new(&key, true);
+        let correlation = trace.correlation();
+
+        trace.stage_with_failure(
+            "sdk_terminal_observed",
+            Some("failed"),
+            Some("immediate"),
+            SendFailureDiagnostic {
+                reason: "http",
+                recoverable: true,
+            },
+        );
+
+        let diagnostics = koushi_diagnostics::snapshot();
+        let event = &diagnostics.records[diagnostic_start..]
+            .iter()
+            .find(|record| {
+                record.event.source == "core.send"
+                    && record.event.stage == "sdk_terminal_observed"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "correlation"
+                            && field.value == DiagnosticValue::Correlation(correlation)
+                    })
+            })
+            .expect("send failure terminal diagnostic")
+            .event;
+
+        assert!(event.fields.iter().any(|field| {
+            field.key == "reason" && field.value == DiagnosticValue::Token("http")
+        }));
+        assert!(event.fields.iter().any(|field| {
+            field.key == "recoverable" && field.value == DiagnosticValue::Boolean(true)
+        }));
+        assert!(event.fields.iter().all(|field| {
+            !matches!(
+                field.key,
+                "room_id"
+                    | "event_id"
+                    | "user_id"
+                    | "device_id"
+                    | "transaction_id"
+                    | "endpoint"
+                    | "error"
+            )
+        }));
+    }
+
+    #[test]
     fn encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let diagnostic_start = koushi_diagnostics::snapshot().records.len();

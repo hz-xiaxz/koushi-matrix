@@ -194,6 +194,18 @@ fn composer_timeline_command_targets_active_session(
         .is_none_or(|(_, expected_account)| active_session_key == Some(expected_account))
 }
 
+fn secure_backup_monitor_wakeup_is_current(
+    current_generation: u64,
+    current_monitor_serial: u64,
+    session_promoted: bool,
+    wake_generation: u64,
+    wake_monitor_serial: u64,
+) -> bool {
+    session_promoted
+        && wake_generation == current_generation
+        && wake_monitor_serial == current_monitor_serial
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AuthoritativeRoomEncryption {
     Unknown,
@@ -201,10 +213,7 @@ enum AuthoritativeRoomEncryption {
     Encrypted,
 }
 
-fn secure_backup_user_content_is_admitted(
-    _secure_backup_ready: bool,
-    encryption: AuthoritativeRoomEncryption,
-) -> bool {
+fn user_content_is_admitted(encryption: AuthoritativeRoomEncryption) -> bool {
     match encryption {
         AuthoritativeRoomEncryption::Unknown => false,
         AuthoritativeRoomEncryption::Unencrypted => true,
@@ -218,7 +227,6 @@ fn server_delayed_events_are_safe(encryption: AuthoritativeRoomEncryption) -> bo
 
 async fn admit_secure_backup_user_content(
     session: &MatrixClientSession,
-    secure_backup_ready: bool,
     room_id: &str,
 ) -> Result<(matrix_sdk::Room, AuthoritativeRoomEncryption), TimelineFailureKind> {
     let room_id = matrix_sdk::ruma::RoomId::parse(room_id)
@@ -232,7 +240,7 @@ async fn admit_secure_backup_user_content(
         Ok(_) => AuthoritativeRoomEncryption::Unencrypted,
         Err(_) => AuthoritativeRoomEncryption::Unknown,
     };
-    secure_backup_user_content_is_admitted(secure_backup_ready, encryption)
+    user_content_is_admitted(encryption)
         .then_some((room, encryption))
         .ok_or(TimelineFailureKind::SecureBackupRequired)
 }
@@ -639,6 +647,7 @@ pub enum AccountMessage {
     },
     RetrySecureBackupInspection {
         generation: u64,
+        monitor_serial: u64,
     },
     SecureBackupStateChanged {
         generation: u64,
@@ -1765,6 +1774,7 @@ pub struct AccountActor {
     recovery_key_delivery_pending: bool,
     secure_backup_inspection_task: Option<crate::executor::JoinHandle<()>>,
     secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>,
+    secure_backup_monitor_serial: u64,
     secure_backup_inspection_pending: bool,
     secure_backup_observer: Option<crate::executor::JoinHandle<()>>,
     verification_method_discovery_task: Option<OwnedVerificationMethodDiscoveryTask>,
@@ -2000,6 +2010,7 @@ impl AccountActor {
             recovery_key_delivery_pending: false,
             secure_backup_inspection_task: None,
             secure_backup_monitor_task: None,
+            secure_backup_monitor_serial: 0,
             secure_backup_inspection_pending: false,
             secure_backup_observer: None,
             verification_method_discovery_task: None,
@@ -2682,11 +2693,21 @@ impl AccountActor {
                     self.finish_secure_backup_inspection(generation, result)
                         .await;
                 }
-                AccountMessage::RetrySecureBackupInspection { generation } => {
-                    self.secure_backup_monitor_task.take();
-                    if generation == self.trust_generation && self.session_promoted {
-                        self.start_secure_backup_inspection();
+                AccountMessage::RetrySecureBackupInspection {
+                    generation,
+                    monitor_serial,
+                } => {
+                    if !secure_backup_monitor_wakeup_is_current(
+                        self.trust_generation,
+                        self.secure_backup_monitor_serial,
+                        self.session_promoted,
+                        generation,
+                        monitor_serial,
+                    ) {
+                        continue;
                     }
+                    self.secure_backup_monitor_task.take();
+                    self.start_secure_backup_inspection();
                 }
                 AccountMessage::SecureBackupStateChanged { generation, state } => {
                     self.handle_secure_backup_state_changed(generation, state)
@@ -3040,10 +3061,7 @@ impl AccountActor {
                 self.emit_failure(target.request_id, CoreFailure::SessionRequired);
                 return;
             };
-            if let Err(kind) =
-                admit_secure_backup_user_content(session, self.secure_backup_ready, target.room_id)
-                    .await
-            {
+            if let Err(kind) = admit_secure_backup_user_content(session, target.room_id).await {
                 if let Some((key, submission_id)) = target.submission {
                     let _ = self.event_tx.send(CoreEvent::Timeline(
                         TimelineEvent::SubmissionRejected {
@@ -3241,16 +3259,13 @@ impl AccountActor {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
-        let (_, encryption) =
-            match admit_secure_backup_user_content(session, self.secure_backup_ready, &room_id)
-                .await
-            {
-                Ok(admitted) => admitted,
-                Err(kind) => {
-                    self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
-                    return;
-                }
-            };
+        let (_, encryption) = match admit_secure_backup_user_content(session, &room_id).await {
+            Ok(admitted) => admitted,
+            Err(kind) => {
+                self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
+                return;
+            }
+        };
 
         let capability = crate::scheduled_send::detect_capability(&session.client()).await;
         // The delayed-event endpoint accepts event content directly; a homeserver
@@ -3347,17 +3362,14 @@ impl AccountActor {
                 .await;
             return;
         };
-        let room =
-            match admit_secure_backup_user_content(session, self.secure_backup_ready, &room_id)
-                .await
-            {
-                Ok((room, _)) => room,
-                Err(_) => {
-                    self.retry_local_scheduled_send(scheduled_id, retry_at_ms)
-                        .await;
-                    return;
-                }
-            };
+        let room = match admit_secure_backup_user_content(session, &room_id).await {
+            Ok((room, _)) => room,
+            Err(_) => {
+                self.retry_local_scheduled_send(scheduled_id, retry_at_ms)
+                    .await;
+                return;
+            }
+        };
         let content = match build_scheduled_message_content(&body, thread_root_event_id.as_deref())
         {
             Ok(content) => content,
@@ -3443,16 +3455,13 @@ impl AccountActor {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
-        let (_, encryption) =
-            match admit_secure_backup_user_content(session, self.secure_backup_ready, &room_id)
-                .await
-            {
-                Ok(admitted) => admitted,
-                Err(kind) => {
-                    self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
-                    return;
-                }
-            };
+        let (_, encryption) = match admit_secure_backup_user_content(session, &room_id).await {
+            Ok(admitted) => admitted,
+            Err(kind) => {
+                self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
+                return;
+            }
+        };
 
         if self
             .update_server_delayed_event(
@@ -9214,6 +9223,7 @@ impl AccountActor {
             self.secure_backup_inspection_pending = true;
             return;
         }
+        self.retire_secure_backup_monitor();
         let Some(session) = self.session.clone().filter(|_| self.session_promoted) else {
             return;
         };
@@ -9299,9 +9309,8 @@ impl AccountActor {
     }
 
     fn schedule_secure_backup_monitor(&mut self, generation: u64, retrying: bool) {
-        if let Some(task) = self.secure_backup_monitor_task.take() {
-            task.abort();
-        }
+        self.retire_secure_backup_monitor();
+        let monitor_serial = self.secure_backup_monitor_serial;
         let (delay, cadence) = if retrying {
             (SECURE_BACKUP_RETRY_DELAY, "retry_5s")
         } else {
@@ -9319,9 +9328,20 @@ impl AccountActor {
         self.secure_backup_monitor_task = Some(executor::spawn(async move {
             executor::sleep(delay).await;
             let _ = tx
-                .send(AccountMessage::RetrySecureBackupInspection { generation })
+                .send(AccountMessage::RetrySecureBackupInspection {
+                    generation,
+                    monitor_serial,
+                })
                 .await;
         }));
+    }
+
+    fn retire_secure_backup_monitor(&mut self) {
+        self.secure_backup_monitor_serial =
+            self.secure_backup_monitor_serial.wrapping_add(1).max(1);
+        if let Some(task) = self.secure_backup_monitor_task.take() {
+            task.abort();
+        }
     }
 
     async fn cancel_secure_backup_inspection(&mut self) {
@@ -9330,6 +9350,8 @@ impl AccountActor {
             task.abort();
             let _ = task.await;
         }
+        self.secure_backup_monitor_serial =
+            self.secure_backup_monitor_serial.wrapping_add(1).max(1);
         if let Some(task) = self.secure_backup_monitor_task.take() {
             task.abort();
             let _ = task.await;
@@ -9808,6 +9830,8 @@ impl AccountActor {
 
     async fn stop_normal_runtime_children(&mut self) {
         self.set_secure_backup_send_admitted(false);
+        self.cancel_secure_backup_inspection().await;
+        self.stop_secure_backup_observer().await;
         self.record_lifecycle_probe("stop_recovery_observer");
         self.stop_recovery_observer().await;
         self.record_lifecycle_probe("stop_incoming_verification_observer");
@@ -11920,29 +11944,18 @@ mod tests {
 
     #[test]
     fn secure_backup_room_admission_fails_closed_without_authoritative_metadata() {
-        assert!(!secure_backup_user_content_is_admitted(
-            true,
-            AuthoritativeRoomEncryption::Unknown,
-        ));
-        assert!(!secure_backup_user_content_is_admitted(
-            false,
-            AuthoritativeRoomEncryption::Unknown,
+        assert!(!user_content_is_admitted(
+            AuthoritativeRoomEncryption::Unknown
         ));
     }
 
     #[test]
     fn encrypted_room_admission_does_not_wait_for_secure_backup() {
-        assert!(secure_backup_user_content_is_admitted(
-            false,
-            AuthoritativeRoomEncryption::Unencrypted,
+        assert!(user_content_is_admitted(
+            AuthoritativeRoomEncryption::Unencrypted
         ));
-        assert!(secure_backup_user_content_is_admitted(
-            false,
-            AuthoritativeRoomEncryption::Encrypted,
-        ));
-        assert!(secure_backup_user_content_is_admitted(
-            true,
-            AuthoritativeRoomEncryption::Encrypted,
+        assert!(user_content_is_admitted(
+            AuthoritativeRoomEncryption::Encrypted
         ));
     }
 
@@ -12048,6 +12061,26 @@ mod tests {
             .expect("periodic scheduler terminator");
         assert!(scheduler.contains("secure_backup_monitor_task.take()"));
         assert!(scheduler.contains("SECURE_BACKUP_MONITOR_INTERVAL"));
+        assert!(scheduler.contains("monitor_serial"));
+
+        let inspection_start = source
+            .split("fn start_secure_backup_inspection")
+            .nth(1)
+            .expect("Secure Backup inspection starter")
+            .split("async fn finish_secure_backup_inspection")
+            .next()
+            .expect("inspection starter terminator");
+        assert!(inspection_start.contains("retire_secure_backup_monitor()"));
+    }
+
+    #[test]
+    fn secure_backup_monitor_rejects_stale_generation_serial_and_locked_session_wakeups() {
+        assert!(secure_backup_monitor_wakeup_is_current(7, 11, true, 7, 11));
+        assert!(!secure_backup_monitor_wakeup_is_current(7, 11, true, 6, 11));
+        assert!(!secure_backup_monitor_wakeup_is_current(7, 11, true, 7, 10));
+        assert!(!secure_backup_monitor_wakeup_is_current(
+            7, 11, false, 7, 11
+        ));
     }
 
     #[test]
@@ -18216,6 +18249,7 @@ mod tests {
             recovery_key_delivery_pending: false,
             secure_backup_inspection_task: None,
             secure_backup_monitor_task: None,
+            secure_backup_monitor_serial: 0,
             secure_backup_inspection_pending: false,
             secure_backup_observer: None,
             verification_method_discovery_task: None,

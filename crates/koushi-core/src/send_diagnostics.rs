@@ -14,7 +14,7 @@ pub(crate) fn classify_send_failure(
         Error::SecureBackupRequired | Error::SecureBackupSendAdmissionClosed => {
             "secure_backup_required"
         }
-        Error::Http(_) => "http",
+        Error::Http(error) => classify_http_failure(error),
         Error::ConcurrentRequestFailed => "concurrent_request_failed",
         Error::BadCryptoStoreState
         | Error::NoOlmMachine
@@ -27,7 +27,6 @@ pub(crate) fn classify_send_failure(
         | Error::EventCacheStore(_)
         | Error::MediaStore(_)
         | Error::CrossProcessLockError(_) => "store",
-        Error::SendQueueWedgeError(_) => "send_queue_wedged",
         _ => "other",
     };
 
@@ -37,9 +36,18 @@ pub(crate) fn classify_send_failure(
     }
 }
 
+fn classify_http_failure(error: &matrix_sdk::HttpError) -> &'static str {
+    let is_timeout = matches!(error, matrix_sdk::HttpError::Reqwest(error) if error.is_timeout());
+    http_failure_token(is_timeout)
+}
+
+fn http_failure_token(is_timeout: bool) -> &'static str {
+    if is_timeout { "timeout" } else { "http" }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::classify_send_failure;
+    use super::{classify_send_failure, http_failure_token};
 
     #[test]
     fn classifies_secure_backup_without_exposing_raw_error() {
@@ -56,5 +64,11 @@ mod tests {
         let fallback = classify_send_failure(&matrix_sdk::Error::InsufficientData, false);
         assert_eq!(fallback.reason, "other");
         assert!(!fallback.recoverable);
+    }
+
+    #[test]
+    fn distinguishes_http_timeouts_without_exposing_transport_details() {
+        assert_eq!(http_failure_token(true), "timeout");
+        assert_eq!(http_failure_token(false), "http");
     }
 }
