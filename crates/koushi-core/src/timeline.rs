@@ -6193,16 +6193,23 @@ fn record_read_admission(key: &ReadStateKey, diagnostic: ReadAdmissionDiagnostic
 #[derive(Clone, Copy)]
 enum DecryptRetryReason {
     MissingRoomKey,
+    Withheld,
+    Malformed,
+    Unknown,
 }
 
 impl DecryptRetryReason {
     fn token(self) -> &'static str {
         match self {
             Self::MissingRoomKey => "missing_room_key",
+            Self::Withheld => "withheld",
+            Self::Malformed => "malformed",
+            Self::Unknown => "unknown",
         }
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 enum DecryptRetryBackupState {
     Available,
@@ -6277,6 +6284,7 @@ impl DecryptRetryFailure {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 enum DecryptRetrySettledResult {
     Decrypted,
@@ -6373,6 +6381,15 @@ fn decrypt_retry_backup_result_for_error(
     error: &koushi_sdk::E2eeTrustError,
 ) -> DecryptRetryBackupResult {
     match error {
+        koushi_sdk::E2eeTrustError::Classified(kind) => match kind {
+            koushi_sdk::E2eeTrustFailureKind::Network => DecryptRetryBackupResult::Network,
+            koushi_sdk::E2eeTrustFailureKind::Forbidden => DecryptRetryBackupResult::Forbidden,
+            koushi_sdk::E2eeTrustFailureKind::InvalidBackup => {
+                DecryptRetryBackupResult::InvalidBackup
+            }
+            koushi_sdk::E2eeTrustFailureKind::Timeout => DecryptRetryBackupResult::Timeout,
+            koushi_sdk::E2eeTrustFailureKind::Sdk => DecryptRetryBackupResult::Sdk,
+        },
         koushi_sdk::E2eeTrustError::NoOlmMachine
         | koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive
         | koushi_sdk::E2eeTrustError::SecureBackupAlreadyExists
@@ -14052,6 +14069,78 @@ mod timeline_gap_repair_tracker_tests {
     }
 }
 
+static NEXT_DECRYPT_RETRY_OPERATION: AtomicU64 = AtomicU64::new(1);
+
+fn next_decrypt_retry_operation() -> u64 {
+    NEXT_DECRYPT_RETRY_OPERATION.fetch_add(1, Ordering::Relaxed)
+}
+
+#[derive(Clone)]
+struct PendingDecryptRetry {
+    event_id: String,
+    operation: u64,
+    attempt: u8,
+    actor_generation: u64,
+    started_at: executor::Instant,
+    deadline: executor::Instant,
+}
+
+struct DecryptRetrySettlement {
+    pending: PendingDecryptRetry,
+    result: DecryptRetrySettledResult,
+}
+
+#[derive(Default)]
+struct DecryptRetryController {
+    pending: Option<PendingDecryptRetry>,
+}
+
+impl DecryptRetryController {
+    fn admit(
+        &mut self,
+        event_id: &str,
+        actor_generation: u64,
+        started_at: executor::Instant,
+    ) -> (PendingDecryptRetry, Option<PendingDecryptRetry>) {
+        let previous = self.pending.take();
+        let attempt = previous
+            .as_ref()
+            .filter(|pending| pending.event_id == event_id)
+            .map_or(1, |pending| pending.attempt.saturating_add(1));
+        let pending = PendingDecryptRetry {
+            event_id: event_id.to_owned(),
+            operation: next_decrypt_retry_operation(),
+            attempt,
+            actor_generation,
+            started_at,
+            deadline: started_at + DECRYPT_RETRY_TIMEOUT,
+        };
+        self.pending = Some(pending.clone());
+        (pending, previous)
+    }
+
+    fn is_current(&self, operation: u64, actor_generation: u64) -> bool {
+        self.pending.as_ref().is_some_and(|pending| {
+            pending.operation == operation && pending.actor_generation == actor_generation
+        })
+    }
+
+    fn settle_if_current(
+        &mut self,
+        operation: u64,
+        actor_generation: u64,
+        result: DecryptRetrySettledResult,
+    ) -> Option<DecryptRetrySettlement> {
+        if !self.is_current(operation, actor_generation) {
+            return None;
+        }
+        Some(DecryptRetrySettlement {
+            pending: self.pending.take().expect("current retry is retained"),
+            result,
+        })
+    }
+}
+
 struct TimelineActor {
     key: TimelineKey,
     timeline: Arc<Timeline>,
@@ -14199,17 +14288,8 @@ struct TimelineActor {
     /// Diagnostic-only evidence that this actor received foreground repair demand.
     /// It deliberately does not affect repair admission or actor lifecycle.
     foreground_gap_demand_active: bool,
-    next_decrypt_retry_operation: u64,
-    pending_decrypt_retry: Option<PendingDecryptRetry>,
+    decrypt_retry: DecryptRetryController,
     decrypt_retry_timeout_task: Option<executor::JoinHandle<()>>,
-}
-
-struct PendingDecryptRetry {
-    event_id: String,
-    operation: u64,
-    attempt: u8,
-    actor_generation: u64,
-    started_at: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -15021,8 +15101,7 @@ impl TimelineActor {
             test_gap_repair_completion_pause: None,
             last_gap_repair_evaluation_diagnostic: None,
             foreground_gap_demand_active: false,
-            next_decrypt_retry_operation: 0,
-            pending_decrypt_retry: None,
+            decrypt_retry: DecryptRetryController::default(),
             decrypt_retry_timeout_task: None,
         };
 
@@ -15640,10 +15719,7 @@ impl TimelineActor {
                 actor_generation,
             } => {
                 if self.actor_generation == actor_generation
-                    && self
-                        .pending_decrypt_retry
-                        .as_ref()
-                        .is_some_and(|pending| pending.operation == operation)
+                    && self.decrypt_retry.is_current(operation, actor_generation)
                 {
                     self.settle_decrypt_retry(operation, DecryptRetrySettledResult::Timeout);
                 }
@@ -17661,13 +17737,15 @@ impl TimelineActor {
         }));
     }
 
-    fn begin_decrypt_retry(&mut self, event_id: &str) -> PendingDecryptRetry {
-        let previous_attempt = self
-            .pending_decrypt_retry
-            .as_ref()
-            .filter(|pending| pending.event_id == event_id)
-            .map(|pending| pending.attempt);
-        if let Some(previous) = self.pending_decrypt_retry.take() {
+    fn begin_decrypt_retry(
+        &mut self,
+        event_id: &str,
+        reason: DecryptRetryReason,
+    ) -> PendingDecryptRetry {
+        let (pending, previous) =
+            self.decrypt_retry
+                .admit(event_id, self.actor_generation, executor::Instant::now());
+        if let Some(previous) = previous {
             record_decrypt_retry_settled(
                 previous.operation,
                 DecryptRetrySettledResult::Superseded,
@@ -17677,28 +17755,13 @@ impl TimelineActor {
                 task.abort();
             }
         }
-        self.next_decrypt_retry_operation = self.next_decrypt_retry_operation.wrapping_add(1);
-        let pending = PendingDecryptRetry {
-            event_id: event_id.to_owned(),
-            operation: self.next_decrypt_retry_operation,
-            attempt: previous_attempt.map_or(1, |attempt| attempt.saturating_add(1)),
-            actor_generation: self.actor_generation,
-            started_at: Instant::now(),
-        };
         record_decrypt_retry_request(
             pending.operation,
             pending.attempt,
-            DecryptRetryReason::MissingRoomKey,
+            reason,
             DecryptRetryBackupState::Unknown,
             Duration::ZERO,
         );
-        self.pending_decrypt_retry = Some(PendingDecryptRetry {
-            event_id: pending.event_id.clone(),
-            operation: pending.operation,
-            attempt: pending.attempt,
-            actor_generation: pending.actor_generation,
-            started_at: pending.started_at,
-        });
         pending
     }
 
@@ -17708,7 +17771,9 @@ impl TimelineActor {
         }
         self.decrypt_retry_timeout_task = Some(spawn_delayed_timeline_message(
             self.msg_tx.clone(),
-            DECRYPT_RETRY_TIMEOUT,
+            pending
+                .deadline
+                .saturating_duration_since(executor::Instant::now()),
             TimelineActorMessage::DecryptRetryTimeout {
                 operation: pending.operation,
                 actor_generation: pending.actor_generation,
@@ -17717,23 +17782,20 @@ impl TimelineActor {
     }
 
     fn settle_decrypt_retry(&mut self, operation: u64, result: DecryptRetrySettledResult) {
-        if self
-            .pending_decrypt_retry
-            .as_ref()
-            .is_none_or(|pending| pending.operation != operation)
-        {
+        let Some(settlement) =
+            self.decrypt_retry
+                .settle_if_current(operation, self.actor_generation, result)
+        else {
             return;
-        }
-        let elapsed = self
-            .pending_decrypt_retry
-            .as_ref()
-            .map(|pending| pending.started_at.elapsed())
-            .unwrap_or_default();
-        self.pending_decrypt_retry = None;
+        };
         if let Some(task) = self.decrypt_retry_timeout_task.take() {
             task.abort();
         }
-        record_decrypt_retry_settled(operation, result, elapsed);
+        record_decrypt_retry_settled(
+            settlement.pending.operation,
+            settlement.result,
+            settlement.pending.started_at.elapsed(),
+        );
     }
 
     async fn handle_request_room_key(&mut self, request_id: RequestId, event_id: String) {
@@ -17753,32 +17815,78 @@ impl TimelineActor {
             self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
             return;
         }
+        let retry_reason = decrypt_retry_reason_from_content(event_item.content());
+        let pending = self.begin_decrypt_retry(&requested_event_id, retry_reason);
         let Some(original_json) = event_item.original_json().cloned() else {
+            self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Malformed);
             self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
             return;
         };
         let room_id = match matrix_sdk::ruma::RoomId::parse(self.key.room_id()) {
             Ok(room_id) => room_id,
             Err(_) => {
+                self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Malformed);
                 self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
                 return;
             }
         };
-        let Some(session_id) =
-            unable_to_decrypt_from_content(event_item.content()).and_then(|utd| utd.session_id)
-        else {
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
+        let session_id =
+            unable_to_decrypt_from_content(event_item.content()).and_then(|utd| utd.session_id);
+        let Some(session_id) = session_id else {
+            let result = executor::timeout_at(
+                pending.deadline,
+                koushi_sdk::request_room_key_for_event(
+                    &self.session,
+                    room_id.as_str(),
+                    &original_json,
+                ),
+            )
+            .await;
+            match result {
+                Ok(Ok(())) => record_decrypt_retry_device_request(
+                    pending.operation,
+                    DecryptRetryDeviceResult::Sent,
+                    None,
+                    pending.started_at.elapsed(),
+                ),
+                Ok(Err(error)) => {
+                    record_decrypt_retry_device_request(
+                        pending.operation,
+                        DecryptRetryDeviceResult::Failed,
+                        Some(decrypt_retry_failure_for_room_operation(&error)),
+                        pending.started_at.elapsed(),
+                    );
+                    self.settle_decrypt_retry(
+                        pending.operation,
+                        DecryptRetrySettledResult::StillMissing,
+                    );
+                    self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                    return;
+                }
+                Err(_) => {
+                    record_decrypt_retry_device_request(
+                        pending.operation,
+                        DecryptRetryDeviceResult::Failed,
+                        Some(DecryptRetryFailure::Timeout),
+                        pending.started_at.elapsed(),
+                    );
+                    self.settle_decrypt_retry(
+                        pending.operation,
+                        DecryptRetrySettledResult::Timeout,
+                    );
+                    return;
+                }
+            }
+            self.schedule_decrypt_retry_timeout(&pending);
             return;
         };
-        let pending = self.begin_decrypt_retry(&requested_event_id);
-        match koushi_sdk::download_room_key_from_backup(
-            &self.session,
-            room_id.as_str(),
-            &session_id,
+        match executor::timeout_at(
+            pending.deadline,
+            koushi_sdk::download_room_key_from_backup(&self.session, room_id.as_str(), &session_id),
         )
         .await
         {
-            Ok(true) => {
+            Ok(Ok(true)) => {
                 record_decrypt_retry_backup_lookup(
                     pending.operation,
                     DecryptRetryBackupResult::Found,
@@ -17786,26 +17894,29 @@ impl TimelineActor {
                 );
                 self.timeline.retry_decryption([session_id]).await;
             }
-            Ok(false) => {
+            Ok(Ok(false)) => {
                 record_decrypt_retry_backup_lookup(
                     pending.operation,
                     DecryptRetryBackupResult::NotFound,
                     pending.started_at.elapsed(),
                 );
-                let result = koushi_sdk::request_room_key_for_event(
-                    &self.session,
-                    room_id.as_str(),
-                    &original_json,
+                let result = executor::timeout_at(
+                    pending.deadline,
+                    koushi_sdk::request_room_key_for_event(
+                        &self.session,
+                        room_id.as_str(),
+                        &original_json,
+                    ),
                 )
                 .await;
                 match result {
-                    Ok(()) => record_decrypt_retry_device_request(
+                    Ok(Ok(())) => record_decrypt_retry_device_request(
                         pending.operation,
                         DecryptRetryDeviceResult::Sent,
                         None,
                         pending.started_at.elapsed(),
                     ),
-                    Err(error) => {
+                    Ok(Err(error)) => {
                         record_decrypt_retry_device_request(
                             pending.operation,
                             DecryptRetryDeviceResult::Failed,
@@ -17819,28 +17930,44 @@ impl TimelineActor {
                         self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
                         return;
                     }
+                    Err(_) => {
+                        record_decrypt_retry_device_request(
+                            pending.operation,
+                            DecryptRetryDeviceResult::Failed,
+                            Some(DecryptRetryFailure::Timeout),
+                            pending.started_at.elapsed(),
+                        );
+                        self.settle_decrypt_retry(
+                            pending.operation,
+                            DecryptRetrySettledResult::Timeout,
+                        );
+                        return;
+                    }
                 }
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 record_decrypt_retry_backup_lookup(
                     pending.operation,
                     decrypt_retry_backup_result_for_error(&error),
                     pending.started_at.elapsed(),
                 );
-                let result = koushi_sdk::request_room_key_for_event(
-                    &self.session,
-                    room_id.as_str(),
-                    &original_json,
+                let result = executor::timeout_at(
+                    pending.deadline,
+                    koushi_sdk::request_room_key_for_event(
+                        &self.session,
+                        room_id.as_str(),
+                        &original_json,
+                    ),
                 )
                 .await;
                 match result {
-                    Ok(()) => record_decrypt_retry_device_request(
+                    Ok(Ok(())) => record_decrypt_retry_device_request(
                         pending.operation,
                         DecryptRetryDeviceResult::Sent,
                         None,
                         pending.started_at.elapsed(),
                     ),
-                    Err(error) => {
+                    Ok(Err(error)) => {
                         record_decrypt_retry_device_request(
                             pending.operation,
                             DecryptRetryDeviceResult::Failed,
@@ -17854,7 +17981,29 @@ impl TimelineActor {
                         self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
                         return;
                     }
+                    Err(_) => {
+                        record_decrypt_retry_device_request(
+                            pending.operation,
+                            DecryptRetryDeviceResult::Failed,
+                            Some(DecryptRetryFailure::Timeout),
+                            pending.started_at.elapsed(),
+                        );
+                        self.settle_decrypt_retry(
+                            pending.operation,
+                            DecryptRetrySettledResult::Timeout,
+                        );
+                        return;
+                    }
                 }
+            }
+            Err(_) => {
+                record_decrypt_retry_backup_lookup(
+                    pending.operation,
+                    DecryptRetryBackupResult::Timeout,
+                    pending.started_at.elapsed(),
+                );
+                self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Timeout);
+                return;
             }
         }
         self.schedule_decrypt_retry_timeout(&pending);
@@ -18948,16 +19097,19 @@ impl TimelineActor {
         if diffs.is_empty() {
             return;
         }
-        if let Some((operation, event_id)) = self
-            .pending_decrypt_retry
+        let decrypt_retry_resolution = if let Some((operation, event_id)) = self
+            .decrypt_retry
+            .pending
             .as_ref()
             .map(|pending| (pending.operation, pending.event_id.clone()))
             && diffs
                 .iter()
                 .any(|diff| decrypt_retry_diff_resolves_event(diff, &event_id))
         {
-            self.settle_decrypt_retry(operation, DecryptRetrySettledResult::Decrypted);
-        }
+            Some(operation)
+        } else {
+            None
+        };
         let sdk_diffs = diffs;
         let has_historical_gap_repair_projection = gap_repair_projections
             .iter()
@@ -19084,6 +19236,10 @@ impl TimelineActor {
         ) else {
             return;
         };
+
+        if let Some(operation) = decrypt_retry_resolution {
+            self.settle_decrypt_retry(operation, DecryptRetrySettledResult::Decrypted);
+        }
 
         if let Some(AppAction::LiveRoomReceiptsUpdated {
             room_id,
@@ -23917,6 +24073,17 @@ fn unable_to_decrypt_from_content(
         session_id,
         can_request_keys: false,
     })
+}
+
+fn decrypt_retry_reason_from_content(content: &TimelineItemContent) -> DecryptRetryReason {
+    unable_to_decrypt_from_content(content)
+        .map(|unable_to_decrypt| match unable_to_decrypt.reason {
+            TimelineUnableToDecryptReason::MissingRoomKey => DecryptRetryReason::MissingRoomKey,
+            TimelineUnableToDecryptReason::Withheld => DecryptRetryReason::Withheld,
+            TimelineUnableToDecryptReason::Malformed => DecryptRetryReason::Malformed,
+            TimelineUnableToDecryptReason::Unknown => DecryptRetryReason::Unknown,
+        })
+        .unwrap_or(DecryptRetryReason::Unknown)
 }
 
 fn thread_summary_from_sdk(summary: matrix_sdk_ui::timeline::ThreadSummary) -> ThreadSummaryDto {
@@ -41800,6 +41967,100 @@ mod tests {
                 !serialized.contains(forbidden),
                 "diagnostic leaked {forbidden}"
             );
+        }
+    }
+
+    #[test]
+    fn decrypt_retry_controller_fences_deadline_settlement_and_replacement() {
+        let mut controller = DecryptRetryController::default();
+        let admitted_at = executor::Instant::now();
+        let (first, replaced) = controller.admit("$event-a:test", 7, admitted_at);
+        assert!(replaced.is_none());
+        assert!(first.deadline > admitted_at);
+        assert!(controller.is_current(first.operation, 7));
+
+        assert!(
+            controller
+                .settle_if_current(first.operation, 8, DecryptRetrySettledResult::Decrypted)
+                .is_none()
+        );
+        assert!(
+            controller
+                .settle_if_current(
+                    first.operation.wrapping_add(1),
+                    7,
+                    DecryptRetrySettledResult::Timeout
+                )
+                .is_none()
+        );
+        assert!(controller.is_current(first.operation, 7));
+
+        let (second, replaced) = controller.admit("$event-b:test", 7, executor::Instant::now());
+        assert_eq!(
+            replaced.map(|pending| pending.operation),
+            Some(first.operation)
+        );
+        assert!(!controller.is_current(first.operation, 7));
+        assert!(controller.is_current(second.operation, 7));
+
+        assert!(
+            controller
+                .settle_if_current(second.operation, 8, DecryptRetrySettledResult::Decrypted)
+                .is_none()
+        );
+        let settled = controller
+            .settle_if_current(second.operation, 7, DecryptRetrySettledResult::Decrypted)
+            .expect("current operation settles exactly once");
+        assert_eq!(settled.pending.operation, second.operation);
+        assert!(matches!(
+            settled.result,
+            DecryptRetrySettledResult::Decrypted
+        ));
+        assert!(!controller.is_current(second.operation, 7));
+        assert!(
+            controller
+                .settle_if_current(second.operation, 7, DecryptRetrySettledResult::Timeout)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn decrypt_retry_operation_sequence_is_process_wide_and_monotonic() {
+        let first = next_decrypt_retry_operation();
+        let second = next_decrypt_retry_operation();
+        assert!(second > first);
+    }
+
+    #[test]
+    fn decrypt_retry_backup_failures_keep_typed_private_kinds() {
+        for (kind, expected) in [
+            (
+                koushi_sdk::E2eeTrustFailureKind::Network,
+                DecryptRetryBackupResult::Network,
+            ),
+            (
+                koushi_sdk::E2eeTrustFailureKind::Forbidden,
+                DecryptRetryBackupResult::Forbidden,
+            ),
+            (
+                koushi_sdk::E2eeTrustFailureKind::InvalidBackup,
+                DecryptRetryBackupResult::InvalidBackup,
+            ),
+            (
+                koushi_sdk::E2eeTrustFailureKind::Timeout,
+                DecryptRetryBackupResult::Timeout,
+            ),
+            (
+                koushi_sdk::E2eeTrustFailureKind::Sdk,
+                DecryptRetryBackupResult::Sdk,
+            ),
+        ] {
+            assert!(matches!(
+                decrypt_retry_backup_result_for_error(&koushi_sdk::E2eeTrustError::Classified(
+                    kind
+                )),
+                result if result.token() == expected.token()
+            ));
         }
     }
 

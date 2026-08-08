@@ -4,7 +4,7 @@
 
 **Goal:** Make one exported diagnostic report distinguish where an undecryptable-message Retry stopped, without recording Matrix identifiers, message content, cryptographic material, or raw SDK errors.
 
-**Architecture:** Rust owns the retry lifecycle inside the timeline actor. A bounded, actor-local pending record correlates backup lookup, device-key request, and later timeline decryption by an opaque process-local operation token; only fixed tokens enter `koushi-diagnostics`. React dispatches the command and renders state but does not infer cryptographic outcomes.
+**Architecture:** Rust owns the retry lifecycle inside the timeline actor. A bounded, actor-local pending record correlates backup lookup, device-key request, and later timeline decryption by an opaque process-wide monotonic operation token; only fixed tokens enter `koushi-diagnostics`. React dispatches the command and renders state but does not infer cryptographic outcomes.
 
 **Tech Stack:** Rust, Matrix Rust SDK adapter, `koushi-core`, `koushi-diagnostics`, React/TypeScript, Vitest.
 
@@ -18,6 +18,16 @@
 - Keep the implementation bounded and minimal: no persistent incident database, no new retry scheduler, and no SDK fork unless a required typed outcome cannot be obtained through the existing adapter.
 - Main and thread timelines use the same actor implementation.
 - Repeated Retry for the same still-pending event coalesces or supersedes deterministically; stale actor generations cannot settle a current operation.
+
+### Pinned SDK limitation
+
+The pinned Matrix Rust SDK exposes undecryptable timeline content as the typed
+`EncryptedMessage` variants Megolm, Olm, or Unknown. It does not preserve a
+typed withheld/malformed cause at the `TimelineItemContent` boundary used by
+this lifecycle. Therefore production maps only causes that remain representable
+there (`missing_room_key` and `unknown`), plus `withheld`/`malformed` tokens in
+the private fixed-token contract for typed callers and future SDK support. No
+raw SDK error or string parsing is used to manufacture those causes.
 
 ---
 

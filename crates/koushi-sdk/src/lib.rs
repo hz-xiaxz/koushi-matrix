@@ -1222,8 +1222,19 @@ pub enum E2eeTrustError {
     SecureBackupUploadFailed,
     #[error("secure backup recovery key delivery failed")]
     SecureBackupRecoveryKeyDeliveryFailed,
+    #[error("Matrix encryption operation failed")]
+    Classified(E2eeTrustFailureKind),
     #[error("Matrix SDK trust operation failed")]
     Sdk(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum E2eeTrustFailureKind {
+    Network,
+    Forbidden,
+    InvalidBackup,
+    Timeout,
+    Sdk,
 }
 
 #[derive(thiserror::Error)]
@@ -1279,6 +1290,7 @@ impl fmt::Debug for E2eeTrustError {
             Self::SecureBackupRecoveryKeyDeliveryFailed => {
                 formatter.write_str("SecureBackupRecoveryKeyDeliveryFailed")
             }
+            Self::Classified(kind) => formatter.debug_tuple("Classified").field(kind).finish(),
             Self::Sdk(_) => formatter.write_str("Sdk(..)"),
         }
     }
@@ -1290,6 +1302,30 @@ impl From<matrix_sdk::Error> for E2eeTrustError {
             matrix_sdk::Error::NoOlmMachine => Self::NoOlmMachine,
             other => Self::Sdk(other.to_string()),
         }
+    }
+}
+
+fn e2ee_trust_failure_kind(error: &matrix_sdk::Error) -> E2eeTrustFailureKind {
+    match error {
+        matrix_sdk::Error::Http(error)
+            if error
+                .as_client_api_error()
+                .is_some_and(|error| error.status_code.as_u16() == 403)
+                || matches!(
+                    error.client_api_error_kind(),
+                    Some(matrix_sdk::ruma::api::error::ErrorKind::Forbidden)
+                ) =>
+        {
+            E2eeTrustFailureKind::Forbidden
+        }
+        matrix_sdk::Error::Http(_)
+        | matrix_sdk::Error::Io(_)
+        | matrix_sdk::Error::ConcurrentRequestFailed => E2eeTrustFailureKind::Network,
+        matrix_sdk::Error::Timeout => E2eeTrustFailureKind::Timeout,
+        matrix_sdk::Error::BackupNotEnabled | matrix_sdk::Error::SecureBackupRequired => {
+            E2eeTrustFailureKind::InvalidBackup
+        }
+        _ => E2eeTrustFailureKind::Sdk,
     }
 }
 
@@ -1540,7 +1576,7 @@ pub async fn download_room_key_from_backup(
         .backups()
         .download_room_key(room_id.as_ref(), session_id)
         .await
-        .map_err(E2eeTrustError::from)
+        .map_err(|error| E2eeTrustError::Classified(e2ee_trust_failure_kind(&error)))
 }
 
 #[cfg(not(target_family = "wasm"))]
