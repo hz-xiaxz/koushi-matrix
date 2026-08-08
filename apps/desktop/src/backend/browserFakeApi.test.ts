@@ -1,9 +1,14 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { createBrowserFakeApi } from "./browserFakeApi";
 import { documentFromText, insertMention } from "../domain/composerDocument";
 import { parseComposerDraftRevision as revision } from "../domain/composerDraftRevision";
-import type { ComposerTarget, DesktopSnapshot, LiveReadReceipt } from "../domain/types";
+import type {
+  ComposerTarget,
+  DesktopSnapshot,
+  LiveReadReceipt,
+  SecureBackupGateState
+} from "../domain/types";
 
 async function readyAccount(api: ReturnType<typeof createBrowserFakeApi>) {
   const session = (await api.getSnapshot()).state.domain.session;
@@ -418,6 +423,68 @@ describe("BrowserFakeApi Space member audit", () => {
     );
 
     expect(stale).toEqual(before);
+  });
+});
+
+describe("BrowserFakeApi secure backup gate fixtures", () => {
+  test("defaults a ready session to a ready secure backup gate", async () => {
+    const snapshot = await createBrowserFakeApi().getSnapshot();
+
+    expect(snapshot.state.domain.session.kind).toBe("ready");
+    expect(snapshot.state.domain.secure_backup_gate).toEqual({ kind: "ready" });
+  });
+
+  test.each([
+    { kind: "checking" },
+    { kind: "setupRequired" },
+    { kind: "explicitlyDisabledRequiresSetup" },
+    { kind: "uploadingExistingKeys", pending: "two_to_ten" },
+    { kind: "blockedFailed", failure: "forbidden" }
+  ] satisfies SecureBackupGateState[])(
+    "can seed the Rust-shaped non-ready gate fixture %#",
+    async (secureBackupGate) => {
+      const snapshot = await createBrowserFakeApi({ secureBackupGate }).getSnapshot();
+
+      expect(snapshot.state.domain.secure_backup_gate).toEqual(secureBackupGate);
+    }
+  );
+
+  test("uses dedicated secure-backup recovery and re-enable operations", async () => {
+    const api = createBrowserFakeApi({
+      secureBackupGate: { kind: "existingBackupNeedsRecovery" }
+    });
+    const legacyRecovery = vi.spyOn(api, "submitRecovery");
+    const legacyEnable = vi.spyOn(api, "enableKeyBackup");
+    const legacyBootstrap = vi.spyOn(api, "bootstrapSecureBackup");
+
+    const recovered = await api.recoverSecureBackup("synthetic-recovery-key");
+    const setup = await api.setupSecureBackup("synthetic-passphrase", "/tmp/recovery-key.txt");
+    const reenabled = await api.reenableSecureBackup(
+      "reenable-passphrase",
+      "/tmp/reenable-recovery-key.txt"
+    );
+
+    expect(legacyRecovery).not.toHaveBeenCalled();
+    expect(legacyEnable).not.toHaveBeenCalled();
+    expect(legacyBootstrap).not.toHaveBeenCalled();
+    expect(recovered.state.domain.secure_backup_gate).toEqual({ kind: "ready" });
+    expect(setup.state.domain.secure_backup_gate).toEqual({ kind: "ready" });
+    expect(reenabled.state.domain.secure_backup_gate).toEqual({ kind: "ready" });
+  });
+
+  test("exposes a dedicated inspection retry instead of using getSnapshot as the command", async () => {
+    const api = createBrowserFakeApi({
+      secureBackupGate: { kind: "blockedFailed", failure: "network" }
+    });
+    const getSnapshot = vi.spyOn(api, "getSnapshot");
+
+    const retried = await api.retrySecureBackupInspection();
+
+    expect(getSnapshot).not.toHaveBeenCalled();
+    expect(retried.state.domain.secure_backup_gate).toEqual({
+      kind: "blockedFailed",
+      failure: "network"
+    });
   });
 });
 

@@ -738,9 +738,10 @@ describe("appStore projection cache", () => {
 function makeSnapshot(): DesktopSnapshot {
   return {
     state: {
-      schema_version: 3,
+      schema_version: 4,
       domain: {
         session: { kind: "ready", homeserver: "https://example.invalid", user_id: "@user:example.invalid", device_id: "DEVICE" },
+        secure_backup_gate: { kind: "ready" },
         current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },

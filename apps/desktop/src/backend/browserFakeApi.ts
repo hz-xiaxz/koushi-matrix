@@ -83,7 +83,8 @@ import type {
   FilesViewScope,
   UserProfile,
   SpaceMemberEntry,
-  SpaceMembersState
+  SpaceMembersState,
+  SecureBackupGateState
 } from "../domain/types";
 import {
   DEFAULT_SLIDING_SYNC_DIAGNOSTICS,
@@ -113,6 +114,17 @@ export interface DesktopApi {
   changeHomeserver(): Promise<DesktopSnapshot>;
   logout(): Promise<DesktopSnapshot>;
   submitRecovery(secret: string): Promise<DesktopSnapshot>;
+  /** Dedicated Secure Backup commands. */
+  recoverSecureBackup: (secret: string) => Promise<DesktopSnapshot>;
+  setupSecureBackup: (
+    passphrase: string | null,
+    recoveryKeyDestinationPath: string | null
+  ) => Promise<DesktopSnapshot>;
+  reenableSecureBackup: (
+    passphrase: string | null,
+    recoveryKeyDestinationPath: string | null
+  ) => Promise<DesktopSnapshot>;
+  retrySecureBackupInspection: () => Promise<DesktopSnapshot>;
   startDeviceCleanup(): Promise<DesktopSnapshot>;
   submitDeviceCleanupUia(flowId: number, password: string): Promise<DesktopSnapshot>;
   eraseLocalDataAnyway(): Promise<DesktopSnapshot>;
@@ -422,6 +434,7 @@ export interface ComposerDraftAccountOwner {
 export interface BrowserFakeApiOptions {
   restoreSession?: boolean;
   session?: "ready" | "signedOut" | "needsRecovery" | "locked";
+  secureBackupGate?: SecureBackupGateState;
   roomPermissions?: Readonly<Record<string, RoomPermissionFacts>>;
   spaceMemberInviteOutcome?: "pending" | "success" | "failure";
   spaceMemberInviteCancellationOutcome?:
@@ -434,7 +447,18 @@ export interface BrowserFakeApiOptions {
   >;
 }
 
-export function createBrowserFakeApi(options: BrowserFakeApiOptions = {}): DesktopApi {
+export type BrowserFakeApiContract = DesktopApi &
+  Required<
+    Pick<
+      DesktopApi,
+      | "recoverSecureBackup"
+      | "setupSecureBackup"
+      | "reenableSecureBackup"
+      | "retrySecureBackupInspection"
+    >
+  >;
+
+export function createBrowserFakeApi(options: BrowserFakeApiOptions = {}): BrowserFakeApiContract {
   return new BrowserFakeApi(options);
 }
 
@@ -601,7 +625,7 @@ class BrowserFakeApi implements DesktopApi {
     this.spaceMemberInviteCancellationOutcomes = [
       ...(options.spaceMemberInviteCancellationOutcomes ?? [])
     ];
-    this.snapshot = createInitialSnapshot(initialSession(options));
+    this.snapshot = createInitialSnapshot(initialSession(options), options.secureBackupGate);
   }
 
   async getSnapshot(): Promise<DesktopSnapshot> {
@@ -834,6 +858,53 @@ class BrowserFakeApi implements DesktopApi {
     void secret;
 
     return this.getSnapshot();
+  }
+
+  async recoverSecureBackup(secret: string): Promise<DesktopSnapshot> {
+    if (!this.isReady()) {
+      return this.getSnapshot();
+    }
+
+    void secret;
+    this.snapshot.state.domain.secure_backup_gate = { kind: "ready" };
+    return this.getSnapshot();
+  }
+
+  async setupSecureBackup(
+    passphrase: string | null,
+    recoveryKeyDestinationPath: string | null
+  ): Promise<DesktopSnapshot> {
+    if (!this.isReady()) {
+      return this.getSnapshot();
+    }
+
+    void passphrase;
+    void recoveryKeyDestinationPath;
+    this.snapshot.state.domain.secure_backup_gate = { kind: "ready" };
+    return this.getSnapshot();
+  }
+
+  async reenableSecureBackup(
+    passphrase: string | null,
+    recoveryKeyDestinationPath: string | null
+  ): Promise<DesktopSnapshot> {
+    if (!this.isReady()) {
+      return this.getSnapshot();
+    }
+
+    void passphrase;
+    void recoveryKeyDestinationPath;
+    this.snapshot.state.domain.secure_backup_gate = { kind: "ready" };
+    return this.getSnapshot();
+  }
+
+  async retrySecureBackupInspection(): Promise<DesktopSnapshot> {
+    if (!this.isReady()) {
+      return this.getSnapshot();
+    }
+
+    this.refreshRoomPresentation();
+    return clone(this.snapshot);
   }
 
   async startDeviceCleanup(): Promise<DesktopSnapshot> {
@@ -4771,35 +4842,42 @@ function createBrowserFakeSpaceMembersState(spaceId: string): SpaceMembersState 
   };
 }
 
-function createInitialSnapshot(session: BrowserFakeApiOptions["session"]): DesktopSnapshot {
+function createInitialSnapshot(
+  session: BrowserFakeApiOptions["session"],
+  secureBackupGate: SecureBackupGateState | undefined
+): DesktopSnapshot {
   if (session === "signedOut") {
-    return createSignedOutSnapshot();
+    return createSignedOutSnapshot(secureBackupGate);
   }
 
   if (session === "needsRecovery") {
-    return createNeedsRecoverySnapshot();
+    return createNeedsRecoverySnapshot(secureBackupGate);
   }
 
   if (session === "locked") {
-    return createLockedSnapshot();
+    return createLockedSnapshot(secureBackupGate);
   }
 
-  return createReadySnapshot();
+  return createReadySnapshot(savedSessions[0], secureBackupGate);
 }
 
-function createReadySnapshot(session: SavedSessionInfo = savedSessions[0]): DesktopSnapshot {
+function createReadySnapshot(
+  session: SavedSessionInfo = savedSessions[0],
+  secureBackupGate: SecureBackupGateState = { kind: "ready" }
+): DesktopSnapshot {
   const active_space_id = "!space-alpha:example.invalid";
   const active_room_id = "!room-alpha:example.invalid";
   const sidebar = composeBrowserFakeSidebar(active_space_id, spaces, rooms, {}, invites.length);
   const snapshot: DesktopSnapshot = {
     state_generation: 0,
     state: {
-      schema_version: 3,
+      schema_version: 4,
       domain: {
         session: {
           ...session,
           kind: "ready"
         },
+        secure_backup_gate: secureBackupGate,
         current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },
@@ -4902,8 +4980,10 @@ const savedSessions: SavedSessionInfo[] = [
   }
 ];
 
-function createNeedsRecoverySnapshot(): DesktopSnapshot {
-  const snapshot = createReadySnapshot();
+function createNeedsRecoverySnapshot(
+  secureBackupGate: SecureBackupGateState | undefined
+): DesktopSnapshot {
+  const snapshot = createReadySnapshot(savedSessions[0], secureBackupGate);
   snapshot.state.domain.session = {
     ...savedSessions[0],
     kind: "needsRecovery",
@@ -4912,8 +4992,10 @@ function createNeedsRecoverySnapshot(): DesktopSnapshot {
   return snapshot;
 }
 
-function createLockedSnapshot(): DesktopSnapshot {
-  const snapshot = createReadySnapshot();
+function createLockedSnapshot(
+  secureBackupGate: SecureBackupGateState | undefined
+): DesktopSnapshot {
+  const snapshot = createReadySnapshot(savedSessions[0], secureBackupGate);
   snapshot.state.domain.session = {
     ...savedSessions[0],
     kind: "locked"
@@ -4926,12 +5008,15 @@ function createLockedSnapshot(): DesktopSnapshot {
   return snapshot;
 }
 
-function createSignedOutSnapshot(): DesktopSnapshot {
+function createSignedOutSnapshot(
+  secureBackupGate: SecureBackupGateState | undefined
+): DesktopSnapshot {
   return {
     state: {
-      schema_version: 3,
+      schema_version: 4,
       domain: {
         session: { kind: "signedOut" },
+        secure_backup_gate: secureBackupGate ?? { kind: "inactive" },
         current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },

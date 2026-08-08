@@ -13,6 +13,60 @@ import {
 } from "./messages";
 
 describe("i18n message catalog", () => {
+  test("ships secure backup gate copy in both locales, including the account-wide warning", () => {
+    const secureBackupIds = [
+      "gate.secureBackupTitle",
+      "gate.secureBackupChecking",
+      "gate.secureBackupInactive",
+      "gate.secureBackupNeedsRecovery",
+      "gate.secureBackupRecoveryKey",
+      "gate.secureBackupRecover",
+      "gate.secureBackupSetupTitle",
+      "gate.secureBackupSetupCopy",
+      "gate.secureBackupPassphrase",
+      "gate.secureBackupRecoveryKeyDestination",
+      "gate.secureBackupChooseDestination",
+      "gate.secureBackupDestinationSelected",
+      "gate.secureBackupDestinationNotSelected",
+      "gate.secureBackupDestinationSelectionFailed",
+      "gate.secureBackupSetup",
+      "gate.secureBackupExplicitDisabledTitle",
+      "gate.secureBackupExplicitDisabledCopy",
+      "gate.secureBackupReenable",
+      "gate.secureBackupReenableConfirm",
+      "gate.secureBackupCreating",
+      "gate.secureBackupDeliveryRequired",
+      "gate.secureBackupUploading",
+      "gate.secureBackupPendingZero",
+      "gate.secureBackupPendingOne",
+      "gate.secureBackupPendingTwoToTen",
+      "gate.secureBackupPendingElevenToOneHundred",
+      "gate.secureBackupPendingOverOneHundred",
+      "gate.secureBackupPendingUnknown",
+      "gate.secureBackupRetrying",
+      "gate.secureBackupFailureNetwork",
+      "gate.secureBackupFailureRateLimited",
+      "gate.secureBackupFailureInvalidRecoveryKey",
+      "gate.secureBackupFailureBackupKeyMismatch",
+      "gate.secureBackupFailureSecretStorageIncomplete",
+      "gate.secureBackupFailureArtifactDelivery",
+      "gate.secureBackupFailureForbidden",
+      "gate.secureBackupFailureTimeout",
+      "gate.secureBackupFailureSdk",
+      "gate.secureBackupRetry",
+      "gate.secureBackupDiagnostics",
+      "gate.secureBackupCommandFailed",
+      "gate.secureBackupRuntimeDegraded"
+    ] as const satisfies readonly MessageId[];
+
+    for (const id of secureBackupIds) {
+      expect(catalogs.en[id]).toBeTruthy();
+      expect(catalogs.ja[id]).toBeTruthy();
+    }
+    expect(t("gate.secureBackupExplicitDisabledCopy")).toMatch(/other Matrix clients/i);
+    expect(t("gate.secureBackupExplicitDisabledCopy", {}, "ja")).toMatch(/他の Matrix クライアント/);
+  });
+
   test("all locales expose the same message ids", () => {
     const locales = Object.keys(catalogs) as Locale[];
     const baseline = Object.keys(catalogs.en).sort();

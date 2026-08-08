@@ -677,6 +677,7 @@ export function SummaryTile({ label, value }: { label: string; value: string }) 
 
 export function TimelinePane({
   activeRoomName,
+  canEdit = true,
   composerDocument,
   composerDraftKey,
   composerMode,
@@ -720,6 +721,7 @@ export function TimelinePane({
   onTimelineDiagnosticLogEntry
 }: {
   activeRoomName: string;
+  canEdit?: boolean;
   composerDocument: ComposerDocument;
   composerDraftKey?: string;
   composerMode: ComposerModeProp;
@@ -1062,6 +1064,7 @@ export function TimelinePane({
         />
       ) : null}
       <Composer
+        canEdit={canEdit}
         composerMode={composerModeForComposer}
         hasStagedUploads={stagedUploads.length > 0}
         isSending={Boolean(snapshot.state.ui.timeline.composer.pending_transaction_id)}

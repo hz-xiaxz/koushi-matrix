@@ -341,6 +341,29 @@ describe("TauriDesktopApi", () => {
     });
   });
 
+  test("passes secure backup gate actions to their dedicated Rust commands", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    const api = createDesktopApi();
+    await api.recoverSecureBackup("secure-backup-recovery-key");
+    await api.setupSecureBackup("secure-backup-passphrase", "/tmp/recovery.txt");
+    await api.reenableSecureBackup("reenable-passphrase", "/tmp/reenable-recovery.txt");
+    await api.retrySecureBackupInspection();
+
+    expect(invoke).toHaveBeenCalledWith("recover_secure_backup", {
+      secret: "secure-backup-recovery-key"
+    });
+    expect(invoke).toHaveBeenCalledWith("bootstrap_secure_backup", {
+      passphrase: "secure-backup-passphrase",
+      recoveryKeyDestinationPath: "/tmp/recovery.txt"
+    });
+    expect(invoke).toHaveBeenCalledWith("bootstrap_secure_backup", {
+      passphrase: "reenable-passphrase",
+      recoveryKeyDestinationPath: "/tmp/reenable-recovery.txt"
+    });
+    expect(invoke).toHaveBeenCalledWith("retry_secure_backup_inspection");
+  });
+
   test("passes reaction actions to Rust-owned timeline commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 

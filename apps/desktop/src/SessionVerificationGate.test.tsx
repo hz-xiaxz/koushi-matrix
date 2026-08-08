@@ -3,7 +3,11 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { SessionVerificationGate } from "./App";
 import { createBrowserFakeApi } from "./backend/browserFakeApi";
-import type { DesktopSnapshot, ProvisionalPhase } from "./domain/types";
+import type {
+  DesktopSnapshot,
+  ProvisionalPhase,
+  SecureBackupGateState
+} from "./domain/types";
 
 const provisionalPhaseCases: Array<[ProvisionalPhase, string]> = [
   ["checkingTrust", "Checking device trust…"],
@@ -15,6 +19,51 @@ const provisionalPhaseCases: Array<[ProvisionalPhase, string]> = [
 ];
 
 describe("SessionVerificationGate interactions", () => {
+  function secureBackupSnapshot(
+    snapshot: DesktopSnapshot,
+    secureBackupGate: SecureBackupGateState
+  ): DesktopSnapshot {
+    const currentSession = snapshot.state.domain.session;
+    snapshot.state.domain.session = {
+      kind: "ready",
+      homeserver: currentSession.homeserver ?? "https://example.invalid",
+      user_id: currentSession.user_id ?? "@user:example.invalid",
+      device_id: currentSession.device_id ?? "DEVICE"
+    };
+    snapshot.state.domain.secure_backup_gate = secureBackupGate;
+    return snapshot;
+  }
+
+  function secureBackupOperations(
+    snapshot: DesktopSnapshot,
+    overrides: Partial<{
+      recoverSecureBackup: (secret: string) => Promise<DesktopSnapshot>;
+      setupSecureBackup: (
+        passphrase: string | null,
+        recoveryKeyDestinationPath: string | null
+      ) => Promise<DesktopSnapshot>;
+      reenableSecureBackup: (
+        passphrase: string | null,
+        recoveryKeyDestinationPath: string | null
+      ) => Promise<DesktopSnapshot>;
+      chooseSecureBackupDestination: () => Promise<string | null>;
+      retrySecureBackupInspection: () => Promise<DesktopSnapshot>;
+      openSecureBackupDiagnostics: () => Promise<void>;
+    }> = {}
+  ) {
+    return {
+      startOwnUserSas: async () => snapshot,
+      submitRecovery: async () => snapshot,
+      recoverSecureBackup: async () => snapshot,
+      setupSecureBackup: async () => snapshot,
+      reenableSecureBackup: async () => snapshot,
+      chooseSecureBackupDestination: async () => "/tmp/recovery-key.txt",
+      retrySecureBackupInspection: async () => snapshot,
+      openSecureBackupDiagnostics: async () => undefined,
+      ...overrides
+    };
+  }
+
   function setCleanupSurfaceSession(snapshot: DesktopSnapshot): void {
     snapshot.state.domain.session = {
       kind: "awaitingVerification",
@@ -508,5 +557,192 @@ describe("SessionVerificationGate interactions", () => {
     expect(onStartWindowDrag).not.toHaveBeenCalled();
     fireEvent.mouseDown(dragRegion!, { button: 0, buttons: 1 });
     expect(onStartWindowDrag).toHaveBeenCalledTimes(1);
+  });
+
+  test("renders a mandatory secure-backup checking gate for an otherwise ready session", async () => {
+    const snapshot = secureBackupSnapshot(
+      await createBrowserFakeApi().getSnapshot(),
+      { kind: "checking" }
+    );
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(snapshot)}
+      />
+    );
+
+    expect(screen.getByRole("main", { name: "Secure backup required" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Checking secure backup…" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create room" })).toBeNull();
+  });
+
+  test("masks and clears the secure-backup recovery key after submission", async () => {
+    const snapshot = secureBackupSnapshot(
+      await createBrowserFakeApi().getSnapshot(),
+      { kind: "existingBackupNeedsRecovery", failure: "invalidRecoveryKey" }
+    );
+    const recoverSecureBackup = vi.fn(async () => snapshot);
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(snapshot, { recoverSecureBackup })}
+      />
+    );
+
+    const recoveryKey = screen.getByLabelText("Secure backup recovery key") as HTMLInputElement;
+    expect(recoveryKey.type).toBe("password");
+    fireEvent.change(recoveryKey, { target: { value: "synthetic-recovery-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Recover secure backup" }));
+
+    await vi.waitFor(() =>
+      expect(recoverSecureBackup).toHaveBeenCalledWith("synthetic-recovery-key")
+    );
+    expect(recoveryKey.value).toBe("");
+    expect(screen.getByRole("alert").textContent).toContain("recovery key");
+  });
+
+  test("submits setup passphrase and native destination selection without retaining either value", async () => {
+    const snapshot = secureBackupSnapshot(
+      await createBrowserFakeApi().getSnapshot(),
+      { kind: "setupRequired" }
+    );
+    const setupSecureBackup = vi.fn(async () => snapshot);
+    const chooseSecureBackupDestination = vi.fn(async () => "/tmp/recovery-key.txt");
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(snapshot, {
+          setupSecureBackup,
+          chooseSecureBackupDestination
+        })}
+      />
+    );
+
+    const passphrase = screen.getByLabelText("Secure backup passphrase") as HTMLInputElement;
+    expect(screen.queryByLabelText("Recovery key destination")).toBeNull();
+    expect(screen.getByText("No recovery key destination selected.")).toBeTruthy();
+    fireEvent.change(passphrase, { target: { value: "synthetic-passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Choose recovery key destination" }));
+
+    await vi.waitFor(() => expect(chooseSecureBackupDestination).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(screen.getByText("Recovery key destination selected.")).toBeTruthy()
+    );
+    expect(screen.queryByText("/tmp/recovery-key.txt")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Set up secure backup" }));
+
+    await vi.waitFor(() =>
+      expect(setupSecureBackup).toHaveBeenCalledWith(
+        "synthetic-passphrase",
+        "/tmp/recovery-key.txt"
+      )
+    );
+    expect(passphrase.value).toBe("");
+  });
+
+  test("requires explicit confirmation before re-enabling an account-wide disabled backup", async () => {
+    const snapshot = secureBackupSnapshot(
+      await createBrowserFakeApi().getSnapshot(),
+      { kind: "explicitlyDisabledRequiresSetup" }
+    );
+    const reenableSecureBackup = vi.fn(async () => snapshot);
+    const chooseSecureBackupDestination = vi.fn(async () => "/tmp/reenable-recovery-key.txt");
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(snapshot, {
+          reenableSecureBackup,
+          chooseSecureBackupDestination
+        })}
+      />
+    );
+
+    expect(screen.getByText(/other Matrix clients/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Re-enable secure backup" }));
+    const dialog = screen.getByRole("dialog", { name: "Re-enable secure backup" });
+    expect(dialog).toBeTruthy();
+    expect(reenableSecureBackup).not.toHaveBeenCalled();
+    const passphrase = within(dialog).getByLabelText(
+      "Secure backup passphrase"
+    ) as HTMLInputElement;
+    fireEvent.change(passphrase, { target: { value: "reenable-passphrase" } });
+    expect(within(dialog).queryByLabelText("Recovery key destination")).toBeNull();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Choose recovery key destination" })
+    );
+    await vi.waitFor(() => expect(chooseSecureBackupDestination).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(within(dialog).getByText("Recovery key destination selected.")).toBeTruthy()
+    );
+    expect(within(dialog).queryByText("/tmp/reenable-recovery-key.txt")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm re-enable" }));
+
+    await vi.waitFor(() =>
+      expect(reenableSecureBackup).toHaveBeenCalledWith(
+        "reenable-passphrase",
+        "/tmp/reenable-recovery-key.txt"
+      )
+    );
+    expect(passphrase.value).toBe("");
+  });
+
+  test("renders typed upload progress without exposing a raw count or error", async () => {
+    const snapshot = secureBackupSnapshot(
+      await createBrowserFakeApi().getSnapshot(),
+      { kind: "uploadingExistingKeys", pending: "eleven_to_one_hundred" }
+    );
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(snapshot)}
+      />
+    );
+
+    expect(screen.getByText("Uploading existing encrypted keys: 11–100 remaining.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry secure backup" })).toBeNull();
+  });
+
+  test("shows typed failure, supports retry, and exposes diagnostics without raw errors", async () => {
+    const snapshot = secureBackupSnapshot(
+      await createBrowserFakeApi().getSnapshot(),
+      { kind: "blockedFailed", failure: "rateLimited" }
+    );
+    const retrySecureBackupInspection = vi.fn(async () => snapshot);
+    const openSecureBackupDiagnostics = vi.fn(async () => undefined);
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(snapshot, {
+          retrySecureBackupInspection,
+          openSecureBackupDiagnostics
+        })}
+      />
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("limited");
+    expect(screen.getByRole("alert").textContent).not.toContain("raw sdk");
+    fireEvent.click(screen.getByRole("button", { name: "Retry secure backup" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open secure backup diagnostics" }));
+
+    await vi.waitFor(() => expect(retrySecureBackupInspection).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(openSecureBackupDiagnostics).toHaveBeenCalledTimes(1));
   });
 });
