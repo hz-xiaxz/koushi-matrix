@@ -265,6 +265,7 @@ impl FastTcpProxy {
                         thread_rejected.fetch_add(1, Ordering::SeqCst);
                     }
                     Ok((client, _)) => {
+                        let _ = client.set_nonblocking(false);
                         spawn_fast_proxy_pair(
                             client,
                             target,

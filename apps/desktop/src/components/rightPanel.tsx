@@ -72,6 +72,7 @@ export function ContextualRightPanel({
   activeSpace,
   activeSpaceName,
   displayDensity = "comfortable",
+  encryptedComposerBlocked = false,
   isRecoveryBusy,
   mode,
   threadsListScope = { kind: "home" },
@@ -135,6 +136,7 @@ export function ContextualRightPanel({
   onConfirmSasVerification,
   onChooseRoomKeyExportDestination = async () => null,
   onChooseRoomKeyImportSource = async () => null,
+  onChooseSecureBackupDestination = async () => null,
   onExportRoomKeys,
   onImportRoomKeys,
   onBootstrapSecureBackup,
@@ -187,6 +189,7 @@ export function ContextualRightPanel({
   activeSpace: DesktopSnapshot["state"]["domain"]["spaces"][number] | null;
   activeSpaceName: string;
   displayDensity?: DisplayDensity;
+  encryptedComposerBlocked?: boolean;
   isRecoveryBusy: boolean;
   mode: RightPanelMode;
   threadsListScope?: ThreadsListScope;
@@ -264,6 +267,7 @@ export function ContextualRightPanel({
   onConfirmSasVerification: (flowId: number) => void;
   onChooseRoomKeyExportDestination?: () => Promise<string | null>;
   onChooseRoomKeyImportSource?: () => Promise<string | null>;
+  onChooseSecureBackupDestination?: () => Promise<string | null>;
   onExportRoomKeys: (destinationPath: string, passphrase: string) => void;
   onImportRoomKeys: (sourcePath: string, passphrase: string) => void;
   onBootstrapSecureBackup: (
@@ -431,6 +435,7 @@ export function ContextualRightPanel({
           onConfirmSasVerification={onConfirmSasVerification}
           onChooseRoomKeyExportDestination={onChooseRoomKeyExportDestination}
           onChooseRoomKeyImportSource={onChooseRoomKeyImportSource}
+          onChooseSecureBackupDestination={onChooseSecureBackupDestination}
           onExportRoomKeys={onExportRoomKeys}
           onImportRoomKeys={onImportRoomKeys}
           onBootstrapSecureBackup={onBootstrapSecureBackup}
@@ -913,7 +918,11 @@ export function ContextualRightPanel({
         mentionCandidates={threadMentionCandidates}
         mentionCandidatesLoading={threadMentionCandidatesLoading}
         resolveComposerKeyAction={onResolveComposerKeyAction}
-        canEdit={threadState.kind === "open" && Boolean(threadRoomId && rootEventId && threadComposer)}
+        canEdit={
+          !encryptedComposerBlocked &&
+          threadState.kind === "open" &&
+          Boolean(threadRoomId && rootEventId && threadComposer)
+        }
         onDocumentChange={(document) => {
           if (threadRoomId && rootEventId) {
             onThreadComposerDocumentChange(threadRoomId, rootEventId, document);

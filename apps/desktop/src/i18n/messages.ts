@@ -776,6 +776,48 @@ export type MessageId =
   | "gate.cleanupRetryLocal"
   | "gate.cleanupCommandFailed"
   | "gate.signOut"
+  | "gate.secureBackupTitle"
+  | "gate.secureBackupChecking"
+  | "gate.secureBackupInactive"
+  | "gate.secureBackupNeedsRecovery"
+  | "gate.secureBackupRecoveryKey"
+  | "gate.secureBackupRecover"
+  | "gate.secureBackupSetupTitle"
+  | "gate.secureBackupSetupCopy"
+  | "gate.secureBackupPassphrase"
+  | "gate.secureBackupRecoveryKeyDestination"
+  | "gate.secureBackupChooseDestination"
+  | "gate.secureBackupDestinationSelected"
+  | "gate.secureBackupDestinationNotSelected"
+  | "gate.secureBackupDestinationSelectionFailed"
+  | "gate.secureBackupSetup"
+  | "gate.secureBackupExplicitDisabledTitle"
+  | "gate.secureBackupExplicitDisabledCopy"
+  | "gate.secureBackupReenable"
+  | "gate.secureBackupReenableConfirm"
+  | "gate.secureBackupCreating"
+  | "gate.secureBackupDeliveryRequired"
+  | "gate.secureBackupUploading"
+  | "gate.secureBackupPendingZero"
+  | "gate.secureBackupPendingOne"
+  | "gate.secureBackupPendingTwoToTen"
+  | "gate.secureBackupPendingElevenToOneHundred"
+  | "gate.secureBackupPendingOverOneHundred"
+  | "gate.secureBackupPendingUnknown"
+  | "gate.secureBackupRetrying"
+  | "gate.secureBackupFailureNetwork"
+  | "gate.secureBackupFailureRateLimited"
+  | "gate.secureBackupFailureInvalidRecoveryKey"
+  | "gate.secureBackupFailureBackupKeyMismatch"
+  | "gate.secureBackupFailureSecretStorageIncomplete"
+  | "gate.secureBackupFailureArtifactDelivery"
+  | "gate.secureBackupFailureForbidden"
+  | "gate.secureBackupFailureTimeout"
+  | "gate.secureBackupFailureSdk"
+  | "gate.secureBackupRetry"
+  | "gate.secureBackupDiagnostics"
+  | "gate.secureBackupCommandFailed"
+  | "gate.secureBackupRuntimeDegraded"
   | "slidingSync.blockedTitle"
   | "slidingSync.unsupported"
   | "slidingSync.unreachable"
@@ -785,6 +827,7 @@ export type MessageId =
   | "gate.failureForbidden"
   | "gate.failureNoProof"
   | "gate.failureSdk"
+  | "gate.verificationCommandFailed"
   | "gate.rejectNoProof"
   | "gate.rejectUser"
   | "space.allRooms"
@@ -1987,6 +2030,48 @@ const en: Catalog = {
   "gate.resetForNewDevice": "Reset local data and sign in as a new device",
   "gate.resetForNewDeviceConfirm": "Reset this session's local data and sign in again with a new device ID? This removes the local encrypted store, cached history, and saved credentials on this computer. It does not remove messages from the homeserver. This cannot be undone.",
   "gate.signOut": "Sign out",
+  "gate.secureBackupTitle": "Secure backup required",
+  "gate.secureBackupChecking": "Checking secure backup…",
+  "gate.secureBackupInactive": "Secure backup status is unavailable. Encrypted messaging stays locked until it can be checked.",
+  "gate.secureBackupNeedsRecovery": "Recover your existing secure backup to continue.",
+  "gate.secureBackupRecoveryKey": "Secure backup recovery key",
+  "gate.secureBackupRecover": "Recover secure backup",
+  "gate.secureBackupSetupTitle": "Set up secure backup",
+  "gate.secureBackupSetupCopy": "Create and protect a Secure Backup before encrypted messaging is available. Save the recovery key to a secure destination.",
+  "gate.secureBackupPassphrase": "Secure backup passphrase",
+  "gate.secureBackupRecoveryKeyDestination": "Recovery key destination",
+  "gate.secureBackupChooseDestination": "Choose recovery key destination",
+  "gate.secureBackupDestinationSelected": "Recovery key destination selected.",
+  "gate.secureBackupDestinationNotSelected": "No recovery key destination selected.",
+  "gate.secureBackupDestinationSelectionFailed": "Could not open the recovery key destination picker. Try again.",
+  "gate.secureBackupSetup": "Set up secure backup",
+  "gate.secureBackupExplicitDisabledTitle": "Secure backup was disabled",
+  "gate.secureBackupExplicitDisabledCopy": "Re-enabling Secure Backup changes this account-wide setting and affects other Matrix clients signed in to this account. Confirm only if you want those clients to use the updated backup.",
+  "gate.secureBackupReenable": "Re-enable secure backup",
+  "gate.secureBackupReenableConfirm": "Confirm re-enable",
+  "gate.secureBackupCreating": "Creating secure backup…",
+  "gate.secureBackupDeliveryRequired": "Save the recovery key before continuing.",
+  "gate.secureBackupUploading": "Uploading existing encrypted keys…",
+  "gate.secureBackupPendingZero": "No encrypted keys remain to upload.",
+  "gate.secureBackupPendingOne": "Uploading existing encrypted keys: 1 remaining.",
+  "gate.secureBackupPendingTwoToTen": "Uploading existing encrypted keys: 2–10 remaining.",
+  "gate.secureBackupPendingElevenToOneHundred": "Uploading existing encrypted keys: 11–100 remaining.",
+  "gate.secureBackupPendingOverOneHundred": "Uploading existing encrypted keys: more than 100 remaining.",
+  "gate.secureBackupPendingUnknown": "Uploading existing encrypted keys: remaining count unavailable.",
+  "gate.secureBackupRetrying": "Retrying secure backup…",
+  "gate.secureBackupFailureNetwork": "Secure backup could not reach the server.",
+  "gate.secureBackupFailureRateLimited": "Secure backup requests are being limited. Try again later.",
+  "gate.secureBackupFailureInvalidRecoveryKey": "That recovery key could not unlock the existing secure backup.",
+  "gate.secureBackupFailureBackupKeyMismatch": "The local backup key does not match the existing secure backup.",
+  "gate.secureBackupFailureSecretStorageIncomplete": "This device's secure storage is incomplete.",
+  "gate.secureBackupFailureArtifactDelivery": "The recovery key could not be delivered to the selected destination.",
+  "gate.secureBackupFailureForbidden": "This account is not allowed to use secure backup.",
+  "gate.secureBackupFailureTimeout": "Secure backup took too long to respond.",
+  "gate.secureBackupFailureSdk": "Secure backup failed.",
+  "gate.secureBackupRetry": "Retry secure backup",
+  "gate.secureBackupDiagnostics": "Open secure backup diagnostics",
+  "gate.secureBackupCommandFailed": "Secure backup action failed. Try again.",
+  "gate.secureBackupRuntimeDegraded": "Secure Backup is unavailable. Encrypted sending is paused; drafts, receiving, and local decryption remain available.",
   "slidingSync.blockedTitle": "Simplified Sliding Sync is required",
   "slidingSync.unsupported": "This homeserver does not support Simplified Sliding Sync.",
   "slidingSync.unreachable": "Koushi could not reach this homeserver to verify Simplified Sliding Sync support.",
@@ -1996,6 +2081,7 @@ const en: Catalog = {
   "gate.failureForbidden": "Verification was not permitted.",
   "gate.failureNoProof": "No proof method is available.",
   "gate.failureSdk": "Verification failed.",
+  "gate.verificationCommandFailed": "Verification command failed. Please try again.",
   "gate.rejectNoProof": "This existing identity has no acceptable proof method.",
   "gate.rejectUser": "This session was rejected.",
   "space.allRooms": "All rooms",
@@ -3084,6 +3170,48 @@ const ja: Catalog = {
   "gate.cleanupRetryLocal": "ローカルデータの消去を再試行",
   "gate.cleanupCommandFailed": "デバイスのクリーンアップに失敗しました。もう一度お試しください。",
   "gate.signOut": "サインアウト",
+  "gate.secureBackupTitle": "安全なバックアップが必要です",
+  "gate.secureBackupChecking": "安全なバックアップを確認中…",
+  "gate.secureBackupInactive": "安全なバックアップの状態を確認できません。確認が完了するまで暗号化メッセージはロックされます。",
+  "gate.secureBackupNeedsRecovery": "続行するには既存の安全なバックアップを復旧してください。",
+  "gate.secureBackupRecoveryKey": "安全なバックアップのリカバリーキー",
+  "gate.secureBackupRecover": "安全なバックアップを復旧",
+  "gate.secureBackupSetupTitle": "安全なバックアップを設定",
+  "gate.secureBackupSetupCopy": "暗号化メッセージを利用する前に、安全なバックアップを作成して保護してください。リカバリーキーを安全な保存先に保存します。",
+  "gate.secureBackupPassphrase": "安全なバックアップのパスフレーズ",
+  "gate.secureBackupRecoveryKeyDestination": "リカバリーキーの保存先",
+  "gate.secureBackupChooseDestination": "リカバリーキーの保存先を選択",
+  "gate.secureBackupDestinationSelected": "リカバリーキーの保存先を選択しました。",
+  "gate.secureBackupDestinationNotSelected": "リカバリーキーの保存先が選択されていません。",
+  "gate.secureBackupDestinationSelectionFailed": "リカバリーキーの保存先を開けませんでした。もう一度お試しください。",
+  "gate.secureBackupSetup": "安全なバックアップを設定",
+  "gate.secureBackupExplicitDisabledTitle": "安全なバックアップが無効になっています",
+  "gate.secureBackupExplicitDisabledCopy": "安全なバックアップを再有効化すると、このアカウント全体の設定が変わり、このアカウントでサインインしている他の Matrix クライアントにも影響します。これらのクライアントで更新後のバックアップを使う場合のみ確認してください。",
+  "gate.secureBackupReenable": "安全なバックアップを再有効化",
+  "gate.secureBackupReenableConfirm": "再有効化を確認",
+  "gate.secureBackupCreating": "安全なバックアップを作成中…",
+  "gate.secureBackupDeliveryRequired": "続行する前にリカバリーキーを保存してください。",
+  "gate.secureBackupUploading": "既存の暗号化キーをアップロード中…",
+  "gate.secureBackupPendingZero": "アップロードする暗号化キーは残っていません。",
+  "gate.secureBackupPendingOne": "既存の暗号化キーをアップロード中: 残り 1 件。",
+  "gate.secureBackupPendingTwoToTen": "既存の暗号化キーをアップロード中: 残り 2～10 件。",
+  "gate.secureBackupPendingElevenToOneHundred": "既存の暗号化キーをアップロード中: 残り 11～100 件。",
+  "gate.secureBackupPendingOverOneHundred": "既存の暗号化キーをアップロード中: 残り 100 件超。",
+  "gate.secureBackupPendingUnknown": "既存の暗号化キーをアップロード中: 残り件数は不明です。",
+  "gate.secureBackupRetrying": "安全なバックアップを再試行中…",
+  "gate.secureBackupFailureNetwork": "安全なバックアップのサーバーに接続できませんでした。",
+  "gate.secureBackupFailureRateLimited": "安全なバックアップのリクエストが制限されています。後でもう一度お試しください。",
+  "gate.secureBackupFailureInvalidRecoveryKey": "そのリカバリーキーでは既存の安全なバックアップを解除できませんでした。",
+  "gate.secureBackupFailureBackupKeyMismatch": "ローカルのバックアップキーが既存の安全なバックアップと一致しません。",
+  "gate.secureBackupFailureSecretStorageIncomplete": "この端末の安全な保存領域が不完全です。",
+  "gate.secureBackupFailureArtifactDelivery": "選択した保存先にリカバリーキーを保存できませんでした。",
+  "gate.secureBackupFailureForbidden": "このアカウントでは安全なバックアップを使用できません。",
+  "gate.secureBackupFailureTimeout": "安全なバックアップの応答がタイムアウトしました。",
+  "gate.secureBackupFailureSdk": "安全なバックアップに失敗しました。",
+  "gate.secureBackupRetry": "安全なバックアップを再試行",
+  "gate.secureBackupDiagnostics": "安全なバックアップの診断を開く",
+  "gate.secureBackupCommandFailed": "安全なバックアップの操作に失敗しました。もう一度お試しください。",
+  "gate.secureBackupRuntimeDegraded": "安全なバックアップを利用できないため、暗号化メッセージの送信を停止しています。下書き、受信、端末上の復号は引き続き利用できます。",
   "slidingSync.blockedTitle": "Simplified Sliding Sync が必要です",
   "slidingSync.unsupported": "このホームサーバーは Simplified Sliding Sync に対応していません。",
   "slidingSync.unreachable": "このホームサーバーに接続できず、Simplified Sliding Sync 対応を確認できませんでした。",
@@ -3093,6 +3221,7 @@ const ja: Catalog = {
   "gate.failureForbidden": "検証は許可されませんでした。",
   "gate.failureNoProof": "利用可能な証明方法がありません。",
   "gate.failureSdk": "検証に失敗しました。",
+  "gate.verificationCommandFailed": "検証コマンドに失敗しました。もう一度お試しください。",
   "gate.rejectNoProof": "既存の識別情報に利用可能な証明方法がありません。",
   "gate.rejectUser": "このセッションは拒否されました。",
   "space.allRooms": "すべてのルーム",

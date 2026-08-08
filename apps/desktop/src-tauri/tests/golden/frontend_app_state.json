@@ -570,6 +570,9 @@
         "last_active": null,
         "rooms": {}
       },
+      "secure_backup_gate": {
+        "kind": "inactive"
+      },
       "session": {
         "device_id": "FIXTURE_DEVICE",
         "homeserver": "https://matrix.example.invalid",
@@ -681,7 +684,7 @@
         "platform": "linux"
       }
     },
-    "schema_version": 3,
+    "schema_version": 4,
     "ui": {
       "basic_operation": {
         "kind": "creatingRoom",

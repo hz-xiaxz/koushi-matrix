@@ -174,6 +174,9 @@ import type {
   RoomSettingChange,
   SavedSessionInfo,
   SearchScopeKind,
+  SecureBackupGateFailureKind,
+  SecureBackupGateState,
+  PendingKeyCountBucket,
   SettingsPatch,
   ThreadOpenIntent,
   ThreadsListScope,
@@ -982,35 +985,126 @@ function provisionalPhaseFailure(
   return null;
 }
 
+type SecureBackupOperationKind = "recovery" | "setup" | "reenable" | "retry";
+
+export interface SessionVerificationGateOperations {
+  startOwnUserSas: () => Promise<DesktopSnapshot>;
+  submitRecovery: (secret: string) => Promise<DesktopSnapshot>;
+  startDeviceCleanup?: () => Promise<DesktopSnapshot>;
+  submitDeviceCleanupUia?: (flowId: number, password: string) => Promise<DesktopSnapshot>;
+  eraseLocalDataAnyway?: () => Promise<DesktopSnapshot>;
+  recoverSecureBackup?: (secret: string) => Promise<DesktopSnapshot>;
+  setupSecureBackup?: (
+    passphrase: string | null,
+    recoveryKeyDestinationPath: string | null
+  ) => Promise<DesktopSnapshot>;
+  reenableSecureBackup?: (
+    passphrase: string | null,
+    recoveryKeyDestinationPath: string | null
+  ) => Promise<DesktopSnapshot>;
+  chooseSecureBackupDestination?: () => Promise<string | null>;
+  retrySecureBackupInspection?: () => Promise<DesktopSnapshot>;
+  openSecureBackupDiagnostics?: () => Promise<void> | void;
+}
+
+const defaultSessionVerificationGateOperations: SessionVerificationGateOperations = {
+  startOwnUserSas: () => api.startOwnUserSas(),
+  submitRecovery: (secret) => api.submitRecovery(secret),
+  startDeviceCleanup: () => api.startDeviceCleanup(),
+  submitDeviceCleanupUia: (flowId, password) =>
+    api.submitDeviceCleanupUia(flowId, password),
+  eraseLocalDataAnyway: () => api.eraseLocalDataAnyway(),
+  recoverSecureBackup: api.recoverSecureBackup,
+  setupSecureBackup: api.setupSecureBackup,
+  reenableSecureBackup: api.reenableSecureBackup,
+  retrySecureBackupInspection: api.retrySecureBackupInspection,
+  openSecureBackupDiagnostics: () => api.getDiagnosticSnapshot().then(() => undefined)
+};
+
+function secureBackupFailureLabel(kind: SecureBackupGateFailureKind): string {
+  return t(
+    ({
+      network: "gate.secureBackupFailureNetwork",
+      rateLimited: "gate.secureBackupFailureRateLimited",
+      invalidRecoveryKey: "gate.secureBackupFailureInvalidRecoveryKey",
+      backupKeyMismatch: "gate.secureBackupFailureBackupKeyMismatch",
+      secretStorageIncomplete: "gate.secureBackupFailureSecretStorageIncomplete",
+      artifactDelivery: "gate.secureBackupFailureArtifactDelivery",
+      forbidden: "gate.secureBackupFailureForbidden",
+      timeout: "gate.secureBackupFailureTimeout",
+      sdk: "gate.secureBackupFailureSdk"
+    } as const)[kind]
+  );
+}
+
+function secureBackupPendingLabel(bucket: PendingKeyCountBucket): string {
+  return t(
+    ({
+      zero: "gate.secureBackupPendingZero",
+      one: "gate.secureBackupPendingOne",
+      two_to_ten: "gate.secureBackupPendingTwoToTen",
+      eleven_to_one_hundred: "gate.secureBackupPendingElevenToOneHundred",
+      over_one_hundred: "gate.secureBackupPendingOverOneHundred",
+      unknown: "gate.secureBackupPendingUnknown"
+    } as const)[bucket]
+  );
+}
+
+function secureBackupGateHeading(gate: SecureBackupGateState): string {
+  switch (gate.kind) {
+    case "checking":
+      return t("gate.secureBackupChecking");
+    case "creatingBackup":
+      return t("gate.secureBackupCreating");
+    case "recoveryKeyDeliveryRequired":
+      return t("gate.secureBackupDeliveryRequired");
+    case "uploadingExistingKeys":
+      return t("gate.secureBackupUploading");
+    case "degradedRetrying":
+      return t("gate.secureBackupRetrying");
+    default:
+      return t("gate.secureBackupTitle");
+  }
+}
+
+function secureBackupGateFailure(
+  gate: SecureBackupGateState
+): SecureBackupGateFailureKind | null {
+  if (gate.kind === "existingBackupNeedsRecovery") {
+    return gate.failure ?? null;
+  }
+  if (gate.kind === "degradedRetrying" || gate.kind === "blockedFailed") {
+    return gate.failure;
+  }
+  return null;
+}
+
 export function SessionVerificationGate({
   snapshot,
   onSnapshot,
   onSignOut,
   onStartWindowDrag = startSessionVerificationWindowDrag,
-  operations = {
-    startOwnUserSas: () => api.startOwnUserSas(),
-    submitRecovery: (secret) => api.submitRecovery(secret),
-    startDeviceCleanup: () => api.startDeviceCleanup(),
-    submitDeviceCleanupUia: (flowId, password) =>
-      api.submitDeviceCleanupUia(flowId, password),
-    eraseLocalDataAnyway: () => api.eraseLocalDataAnyway()
-  }
+  operations: providedOperations
 }: {
   snapshot: DesktopSnapshot;
   onSnapshot: (snapshot: DesktopSnapshot) => void;
   onSignOut: () => void;
   onStartWindowDrag?: () => void;
-  operations?: {
-    startOwnUserSas: () => Promise<DesktopSnapshot>;
-    submitRecovery: (secret: string) => Promise<DesktopSnapshot>;
-    startDeviceCleanup?: () => Promise<DesktopSnapshot>;
-    submitDeviceCleanupUia?: (flowId: number, password: string) => Promise<DesktopSnapshot>;
-    eraseLocalDataAnyway?: () => Promise<DesktopSnapshot>;
-  };
+  operations?: SessionVerificationGateOperations;
 }) {
   const session = snapshot.state.domain.session;
+  const operations = {
+    ...defaultSessionVerificationGateOperations,
+    ...providedOperations
+  };
+  const secureBackupGate = snapshot.state.domain.secure_backup_gate;
+  const secureBackupGateRequired =
+    session.kind === "ready" && secureBackupGate.kind !== "ready";
   const deviceCleanup = snapshot.state.domain.device_cleanup;
   const recoveryRef = useRef<HTMLInputElement>(null);
+  const secureBackupRecoveryRef = useRef<HTMLInputElement>(null);
+  const secureBackupPassphraseRef = useRef<HTMLInputElement>(null);
+  const secureBackupDestinationPathRef = useRef<string | null>(null);
   const cleanupPasswordRef = useRef<HTMLInputElement>(null);
   const passphraseRef = useRef<HTMLInputElement>(null);
   const destinationRef = useRef<HTMLInputElement>(null);
@@ -1030,11 +1124,20 @@ export function SessionVerificationGate({
     session.kind === "provisional" ? provisionalPhaseFailure(session.phase) : null;
   const activelyVerifying = session.kind === "verifying";
   const [gateOperation, setGateOperation] = useState<"recovery" | "sas" | "cleanup" | null>(null);
+  const [secureBackupOperation, setSecureBackupOperation] =
+    useState<SecureBackupOperationKind | null>(null);
+  const [secureBackupOperationError, setSecureBackupOperationError] = useState(false);
+  const [secureBackupDestinationSelectionError, setSecureBackupDestinationSelectionError] =
+    useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [confirmDeviceVerification, setConfirmDeviceVerification] = useState(false);
   const [confirmDeviceCleanup, setConfirmDeviceCleanup] = useState(false);
   const [confirmEraseLocalAnyway, setConfirmEraseLocalAnyway] = useState(false);
+  const [confirmSecureBackupReenable, setConfirmSecureBackupReenable] = useState(false);
+  const [secureBackupDestinationSelected, setSecureBackupDestinationSelected] = useState(false);
+  const [secureBackupDestinationChoosing, setSecureBackupDestinationChoosing] = useState(false);
   const gateOperationRef = useRef<"recovery" | "sas" | "cleanup" | null>(null);
+  const secureBackupOperationRef = useRef<SecureBackupOperationKind | null>(null);
   const run = async (
     kind: "recovery" | "sas" | "cleanup",
     operation: () => Promise<DesktopSnapshot>
@@ -1049,12 +1152,133 @@ export function SessionVerificationGate({
       setOperationError(
         kind === "cleanup"
           ? t("gate.cleanupCommandFailed")
-          : "Verification command failed. Please try again."
+          : t("gate.verificationCommandFailed")
       );
     } finally {
       gateOperationRef.current = null;
       setGateOperation(null);
     }
+  };
+  const runSecureBackup = async (
+    kind: SecureBackupOperationKind,
+    operation: (() => Promise<DesktopSnapshot>) | undefined
+  ) => {
+    if (secureBackupOperationRef.current !== null) return;
+    if (!operation) {
+      setSecureBackupOperationError(true);
+      return;
+    }
+    secureBackupOperationRef.current = kind;
+    setSecureBackupOperationError(false);
+    setSecureBackupOperation(kind);
+    try {
+      onSnapshot(await operation());
+    } catch {
+      setSecureBackupOperationError(true);
+    } finally {
+      secureBackupOperationRef.current = null;
+      setSecureBackupOperation(null);
+    }
+  };
+  const recoverSecureBackup = (secret: string) => {
+    void runSecureBackup(
+      "recovery",
+      operations.recoverSecureBackup
+        ? () => operations.recoverSecureBackup!(secret)
+        : undefined
+    );
+  };
+  const chooseSecureBackupDestination = async () => {
+    const operation = operations.chooseSecureBackupDestination;
+    if (!operation || secureBackupDestinationChoosing) return;
+    setSecureBackupDestinationChoosing(true);
+    setSecureBackupOperationError(false);
+    setSecureBackupDestinationSelectionError(false);
+    try {
+      const selected = (await operation())?.trim() || null;
+      if (selected) {
+        secureBackupDestinationPathRef.current = selected;
+        setSecureBackupDestinationSelected(true);
+      }
+    } catch {
+      setSecureBackupDestinationSelectionError(true);
+    } finally {
+      setSecureBackupDestinationChoosing(false);
+    }
+  };
+  const submitSecureBackupSetup = (kind: "setup" | "reenable") => {
+    const passphrase = secureBackupPassphraseRef.current?.value || null;
+    const destination = secureBackupDestinationPathRef.current;
+    if (!destination) return;
+    if (secureBackupPassphraseRef.current) secureBackupPassphraseRef.current.value = "";
+    secureBackupDestinationPathRef.current = null;
+    setSecureBackupDestinationSelected(false);
+    if (kind === "reenable") setConfirmSecureBackupReenable(false);
+    void runSecureBackup(
+      kind,
+      kind === "setup"
+        ? operations.setupSecureBackup
+          ? () => operations.setupSecureBackup!(passphrase, destination)
+          : undefined
+        : operations.reenableSecureBackup
+          ? () => operations.reenableSecureBackup!(passphrase, destination)
+          : undefined
+    );
+  };
+  const secureBackupSetupForm = (kind: "setup" | "reenable") => (
+    <ImeSafeForm
+      aria-label={t("gate.secureBackupSetupTitle")}
+      onSubmit={(event) => {
+        event.preventDefault();
+        submitSecureBackupSetup(kind);
+      }}
+    >
+      <SecureImeTextField
+        ref={secureBackupPassphraseRef}
+        aria-label={t("gate.secureBackupPassphrase")}
+        autoComplete="new-password"
+      />
+      <div className="secure-backup-destination-selector">
+        <button
+          className="dialog-button"
+          disabled={
+            !operations.chooseSecureBackupDestination ||
+            secureBackupDestinationChoosing ||
+            secureBackupOperation !== null
+          }
+          type="button"
+          onClick={() => void chooseSecureBackupDestination()}
+        >
+          {t("gate.secureBackupChooseDestination")}
+        </button>
+        <span role="status" aria-live="polite">
+          {secureBackupDestinationSelected
+            ? t("gate.secureBackupDestinationSelected")
+            : t("gate.secureBackupDestinationNotSelected")}
+        </span>
+      </div>
+      <button
+        className="dialog-button is-primary"
+        disabled={secureBackupOperation === kind}
+        type="submit"
+      >
+        {kind === "reenable"
+          ? t("gate.secureBackupReenableConfirm")
+          : t("gate.secureBackupSetup")}
+      </button>
+    </ImeSafeForm>
+  );
+  const retrySecureBackup = () => {
+    void runSecureBackup(
+      "retry",
+      operations.retrySecureBackupInspection
+    );
+  };
+  const openSecureBackupDiagnostics = () => {
+    const operation =
+      operations.openSecureBackupDiagnostics ??
+      (() => api.getDiagnosticSnapshot().then(() => undefined));
+    void Promise.resolve(operation()).catch(() => undefined);
   };
   const useRecoveryKey = () => {
     setConfirmDeviceVerification(false);
@@ -1075,8 +1299,23 @@ export function SessionVerificationGate({
       operations.eraseLocalDataAnyway ?? (() => api.eraseLocalDataAnyway())
     );
   };
-  const heading = checking ? t("gate.checking") : rechecking ? t("gate.finishing") : activelyVerifying ? t("gate.verifying") : t("gate.title");
-  return <main className="session-verification-gate" aria-label={heading}>
+  const heading = secureBackupGateRequired
+    ? secureBackupGateHeading(secureBackupGate)
+    : checking
+      ? t("gate.checking")
+      : rechecking
+        ? t("gate.finishing")
+        : activelyVerifying
+          ? t("gate.verifying")
+          : t("gate.title");
+  const secureBackupFailureKind = secureBackupGateFailure(secureBackupGate);
+  const secureBackupNeedsSetup =
+    secureBackupGate.kind === "setupRequired" ||
+    secureBackupGate.kind === "recoveryKeyDeliveryRequired";
+  const secureBackupNeedsRecovery =
+    secureBackupGate.kind === "existingBackupNeedsRecovery" ||
+    secureBackupGate.kind === "secureStorageIncomplete";
+  return <main className="session-verification-gate" aria-label={secureBackupGateRequired ? t("gate.secureBackupTitle") : heading}>
     <div
       className="session-verification-drag-region"
       data-tauri-drag-region=""
@@ -1088,6 +1327,109 @@ export function SessionVerificationGate({
       }}
     />
     <h1>{heading}</h1>
+    {secureBackupGateRequired && secureBackupGate.kind === "inactive" && (
+      <p>{t("gate.secureBackupInactive")}</p>
+    )}
+    {secureBackupGateRequired && secureBackupNeedsRecovery && (
+      <p>{t("gate.secureBackupNeedsRecovery")}</p>
+    )}
+    {secureBackupGateRequired && secureBackupFailureKind && (
+      <p role="alert">{secureBackupFailureLabel(secureBackupFailureKind)}</p>
+    )}
+    {secureBackupGateRequired && secureBackupOperationError && (
+      <p role="alert">{t("gate.secureBackupCommandFailed")}</p>
+    )}
+    {secureBackupGateRequired && secureBackupDestinationSelectionError && (
+      <p role="alert">{t("gate.secureBackupDestinationSelectionFailed")}</p>
+    )}
+    {secureBackupGateRequired && secureBackupNeedsRecovery && (
+      <ImeSafeForm
+        onSubmit={(event) => {
+          event.preventDefault();
+          const secret = secureBackupRecoveryRef.current?.value.trim() ?? "";
+          if (secureBackupRecoveryRef.current) secureBackupRecoveryRef.current.value = "";
+          if (secret) recoverSecureBackup(secret);
+        }}
+      >
+        <SecureImeTextField
+          ref={secureBackupRecoveryRef}
+          aria-label={t("gate.secureBackupRecoveryKey")}
+          autoComplete="off"
+        />
+        <button
+          className="dialog-button is-primary"
+          disabled={secureBackupOperation === "recovery"}
+          type="submit"
+        >
+          {t("gate.secureBackupRecover")}
+        </button>
+      </ImeSafeForm>
+    )}
+    {secureBackupGateRequired && secureBackupNeedsSetup && (
+      <>
+        <p>{t("gate.secureBackupSetupCopy")}</p>
+        {secureBackupGate.kind === "recoveryKeyDeliveryRequired" && (
+          <p>{t("gate.secureBackupDeliveryRequired")}</p>
+        )}
+        {secureBackupSetupForm("setup")}
+      </>
+    )}
+    {secureBackupGateRequired && secureBackupGate.kind === "explicitlyDisabledRequiresSetup" && (
+      <>
+        <h2>{t("gate.secureBackupExplicitDisabledTitle")}</h2>
+        <p>{t("gate.secureBackupExplicitDisabledCopy")}</p>
+        <button
+          className="dialog-button is-primary"
+          disabled={secureBackupOperation !== null}
+          type="button"
+          onClick={() => setConfirmSecureBackupReenable(true)}
+        >
+          {t("gate.secureBackupReenable")}
+        </button>
+        {confirmSecureBackupReenable && (
+          <div
+            className="trust-verification-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("gate.secureBackupReenable")}
+          >
+            <p>{t("gate.secureBackupExplicitDisabledCopy")}</p>
+            {secureBackupSetupForm("reenable")}
+            <div className="dialog-actions">
+              <button
+                className="dialog-button"
+                type="button"
+                onClick={() => setConfirmSecureBackupReenable(false)}
+              >
+                {t("action.cancel")}
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    )}
+    {secureBackupGateRequired && secureBackupGate.kind === "uploadingExistingKeys" && (
+      <p>{secureBackupPendingLabel(secureBackupGate.pending)}</p>
+    )}
+    {secureBackupGateRequired && secureBackupGate.kind === "blockedFailed" && (
+      <div className="dialog-actions">
+        <button
+          className="dialog-button is-primary"
+          disabled={secureBackupOperation !== null}
+          type="button"
+          onClick={retrySecureBackup}
+        >
+          {t("gate.secureBackupRetry")}
+        </button>
+        <button
+          className="dialog-button"
+          type="button"
+          onClick={openSecureBackupDiagnostics}
+        >
+          {t("gate.secureBackupDiagnostics")}
+        </button>
+      </div>
+    )}
     {discovering && <p>{t("gate.discovering")}</p>}
     {session.kind === "rejecting" && <p>{t("gate.rejecting")}</p>}
     {session.kind === "locked" && <p>{t("gate.locked")}</p>}
@@ -1268,11 +1610,26 @@ function composerDraftApiAccount(scope: ComposerDraftScope): {
 export function App() {
   const snapshot = useAppStore(selectSnapshot);
   const snapshotRef = useRef(snapshot);
+  const secureBackupShellAccountRef = useRef<string | null>(null);
+  const secureBackupShellExposedRef = useRef(false);
   const diagnosticLogBufferRef = useRef<ReturnType<typeof createDiagnosticLogBuffer> | null>(null);
   const diagnosticLogBuffer =
     diagnosticLogBufferRef.current ?? (diagnosticLogBufferRef.current = createDiagnosticLogBuffer());
   snapshotRef.current = snapshot;
   const initialAccount = readyComposerDraftAccountOwner(snapshot);
+  const secureBackupShellAccount = initialAccount
+    ? composerDraftAccountOwnerKey(initialAccount)
+    : null;
+  if (secureBackupShellAccountRef.current !== secureBackupShellAccount) {
+    secureBackupShellAccountRef.current = secureBackupShellAccount;
+    secureBackupShellExposedRef.current = false;
+  }
+  if (
+    secureBackupShellAccount !== null &&
+    snapshot?.state.domain.secure_backup_gate.kind === "ready"
+  ) {
+    secureBackupShellExposedRef.current = true;
+  }
   const submissionAccountOwnerRef = useRef<string | null>(
     initialAccount ? composerDraftAccountOwnerKey(initialAccount) : null
   );
@@ -1494,6 +1851,8 @@ export function App() {
   const [newDmDialogOpen, setNewDmDialogOpen] = useState(false);
   const [resetLocalDataConfirmOpen, setResetLocalDataConfirmOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [secureBackupInspectionRetrying, setSecureBackupInspectionRetrying] = useState(false);
+  const secureBackupInspectionRetryInFlightRef = useRef(false);
   const [runtimeDiagnosticSnapshot, setRuntimeDiagnosticSnapshot] =
     useState<DiagnosticLogSnapshot>({ entries: [], droppedEntries: 0 });
   const [displayDensity, setDisplayDensityState] =
@@ -2811,6 +3170,23 @@ export function App() {
     setDiagnosticsOpen(true);
   }
 
+  async function retrySecureBackupInspection() {
+    const operation = api.retrySecureBackupInspection;
+    if (!operation || secureBackupInspectionRetryInFlightRef.current) {
+      return;
+    }
+    secureBackupInspectionRetryInFlightRef.current = true;
+    setSecureBackupInspectionRetrying(true);
+    try {
+      setSnapshot(await operation());
+    } catch {
+      // The gate remains closed; typed Rust state or the next inspection owns the copy.
+    } finally {
+      secureBackupInspectionRetryInFlightRef.current = false;
+      setSecureBackupInspectionRetrying(false);
+    }
+  }
+
   function closeReportDialog() {
     setReportDialog(null);
     setReportReasonDraft("");
@@ -2895,6 +3271,23 @@ export function App() {
       title: t("settings.roomKeyExport"),
       defaultPath: "koushi-room-keys.txt",
       filters: [{ name: t("settings.roomKeyExport"), extensions: ["txt", "json"] }]
+    });
+    return selected || null;
+  }
+
+  async function chooseSecureBackupDestination(): Promise<string | null> {
+    if (!isTauriRuntime()) {
+      return null;
+    }
+    const selected = await saveDialog({
+      title: t("gate.secureBackupRecoveryKeyDestination"),
+      defaultPath: "koushi-secure-backup-recovery-key.txt",
+      filters: [
+        {
+          name: t("gate.secureBackupRecoveryKeyDestination"),
+          extensions: ["txt"]
+        }
+      ]
     });
     return selected || null;
   }
@@ -5411,6 +5804,16 @@ export function App() {
   }
 
   const sessionKind = snapshot.state.domain.session.kind;
+  const secureBackupGate = snapshot.state.domain.secure_backup_gate;
+  const secureBackupStartupGateRequired =
+    sessionKind === "ready" &&
+    secureBackupGate.kind !== "ready" &&
+    !secureBackupShellExposedRef.current;
+  const secureBackupRuntimeDegraded =
+    sessionKind === "ready" &&
+    secureBackupGate.kind !== "ready" &&
+    secureBackupShellExposedRef.current;
+  const secureBackupRuntimeFailure = secureBackupGateFailure(secureBackupGate);
 
   if (sessionKind === "restoring" || sessionKind === "loggingOut") {
     return <div className="boot-screen">{t("app.title")}</div>;
@@ -5421,9 +5824,34 @@ export function App() {
     snapshot.state.domain.locale_profile.pseudo_locale
   );
 
-  const verificationGate = ["provisional", "awaitingVerification", "verifying", "awaitingBootstrapConfirmation", "rejecting", "locked"].includes(sessionKind);
+  const verificationGate =
+    [
+      "provisional",
+      "awaitingVerification",
+      "verifying",
+      "awaitingBootstrapConfirmation",
+      "rejecting",
+      "locked"
+    ].includes(sessionKind) ||
+    secureBackupStartupGateRequired;
   if (verificationGate) {
-    return <SessionVerificationGate snapshot={snapshot} onSnapshot={setSnapshot} onSignOut={() => void logout()} />;
+    return (
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={setSnapshot}
+        onSignOut={() => void logout()}
+        operations={{
+          startOwnUserSas: () => api.startOwnUserSas(),
+          submitRecovery: (secret) => api.submitRecovery(secret),
+          recoverSecureBackup: api.recoverSecureBackup,
+          setupSecureBackup: api.setupSecureBackup,
+          reenableSecureBackup: api.reenableSecureBackup,
+          chooseSecureBackupDestination,
+          retrySecureBackupInspection: api.retrySecureBackupInspection,
+          openSecureBackupDiagnostics: openDiagnostics
+        }}
+      />
+    );
   }
 
   if (sessionKind === "capabilityBlocked") {
@@ -5463,6 +5891,8 @@ export function App() {
   const activeRoom = snapshot.state.domain.rooms.find(
     (room) => room.room_id === snapshot.state.ui.navigation.active_room_id
   );
+  const encryptedComposerBlocked =
+    secureBackupRuntimeDegraded && Boolean(activeRoom?.is_encrypted);
   const activeSpace = snapshot.state.domain.spaces.find(
     (space) => space.space_id === snapshot.state.ui.navigation.active_space_id
   );
@@ -5583,6 +6013,29 @@ export function App() {
         className="desktop"
         data-density={displayDensity}
       >
+        {secureBackupRuntimeDegraded ? (
+          <div className="secure-backup-runtime-banner" role="status" aria-live="polite">
+            <span>{t("gate.secureBackupRuntimeDegraded")}</span>
+            {secureBackupRuntimeFailure ? (
+              <span>{secureBackupFailureLabel(secureBackupRuntimeFailure)}</span>
+            ) : null}
+            <button
+              className="dialog-button"
+              type="button"
+              disabled={secureBackupInspectionRetrying || !api.retrySecureBackupInspection}
+              onClick={() => void retrySecureBackupInspection()}
+            >
+              {t("gate.secureBackupRetry")}
+            </button>
+            <button
+              className="dialog-button"
+              type="button"
+              onClick={() => void openDiagnostics()}
+            >
+              {t("gate.secureBackupDiagnostics")}
+            </button>
+          </div>
+        ) : null}
         <TopBar
           accountManagementUrl={
             snapshot.state.domain.auth.kind === "ready"
@@ -5756,6 +6209,7 @@ export function App() {
             composerDocument={composerDocument}
             composerDraftKey={mainComposerDraftImeKey}
             composerMode={composerModeProp(snapshot.state.ui.timeline.composer.mode)}
+            canEdit={!encryptedComposerBlocked}
             resolveComposerKeyAction={resolveComposerKeyAction}
             searchQuery={searchHighlightQuery}
             searchResults={searchResults}
@@ -5887,6 +6341,7 @@ export function App() {
           activeSpace={activeSpace ?? null}
           activeSpaceName={activeSpaceName}
           displayDensity={displayDensity}
+          encryptedComposerBlocked={encryptedComposerBlocked}
           isRecoveryBusy={isBusy}
           mode={effectiveRightPanelMode}
           threadsListScope={openThreadsListScope}
@@ -6089,6 +6544,7 @@ export function App() {
           }}
           onChooseRoomKeyExportDestination={chooseRoomKeyExportDestination}
           onChooseRoomKeyImportSource={chooseRoomKeyImportSource}
+          onChooseSecureBackupDestination={chooseSecureBackupDestination}
           onExportRoomKeys={(destinationPath, passphrase) => {
             void exportRoomKeys(destinationPath, passphrase);
           }}

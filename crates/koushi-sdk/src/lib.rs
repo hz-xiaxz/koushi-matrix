@@ -1,12 +1,13 @@
-use futures_util::{Stream, StreamExt};
+use futures_util::{Stream, StreamExt, stream};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 pub use koushi_state::E2eeRecoveryState;
 use koushi_state::{
     AuthSecret, CrossSigningStatus, CurrentDeviceTrustState, CurrentSessionBackupState,
     DelegatedAuthLinks, DeviceCleanupAuthMode, DeviceCleanupFailureKind,
     DeviceCleanupRemoteOutcome, IdentityResetAuthRequest, IdentityResetAuthType, KeyBackupStatus,
-    LoginFlow, LoginFlowKind, LoginRequest, OwnIdentityVerification, RecoveryRequest,
-    RoomAttentionSummary, SasEmoji, SessionInfo, VerificationAccountKind, VerificationGateState,
+    LoginFlow, LoginFlowKind, LoginRequest, OwnIdentityVerification, PendingKeyCountBucket,
+    RecoveryRequest, RoomAttentionSummary, SasEmoji, SecureBackupGateFailureKind,
+    SecureBackupGateState, SessionInfo, VerificationAccountKind, VerificationGateState,
     VerificationMethodCapability, VerificationTarget, room_attention_summary,
 };
 
@@ -15,6 +16,20 @@ pub type CurrentDeviceTrustStream = Pin<Box<dyn Stream<Item = CurrentDeviceTrust
 pub struct CurrentDeviceTrustObservation {
     pub current: CurrentDeviceTrustState,
     pub updates: CurrentDeviceTrustStream,
+}
+
+pub type SecureBackupStateStream = Pin<Box<dyn Stream<Item = MatrixSecureBackupState> + Send>>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct MatrixSecureBackupState {
+    pub backup: MatrixSecureBackupLocalState,
+    pub recovery: MatrixSecureBackupRecoveryState,
+}
+
+pub struct MatrixSecureBackupStateObservation {
+    pub current: MatrixSecureBackupState,
+    pub updates: SecureBackupStateStream,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
@@ -54,6 +69,130 @@ pub enum MatrixCurrentSessionInspectionError {
     DeviceRequest,
     CurrentDeviceMissing,
     IdentityRequest,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixSecureBackupServerState {
+    Unknown,
+    Absent,
+    Present,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixSecureBackupLocalState {
+    Unknown,
+    Disabled,
+    Creating,
+    Enabling,
+    Resuming,
+    Downloading,
+    Disabling,
+    Enabled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixSecureBackupRecoveryState {
+    Unknown,
+    Disabled,
+    Incomplete,
+    Enabled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixSecureBackupUploadState {
+    Unknown,
+    Pending(PendingKeyCountBucket),
+    Failed,
+    Settled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixSecureBackupTrustState {
+    Unknown,
+    Mismatch,
+    Trusted,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MatrixSecureBackupInspection {
+    pub server: MatrixSecureBackupServerState,
+    pub local: MatrixSecureBackupLocalState,
+    pub recovery: MatrixSecureBackupRecoveryState,
+    pub upload: MatrixSecureBackupUploadState,
+    pub trust: MatrixSecureBackupTrustState,
+    pub recovery_key_delivery_pending: bool,
+}
+
+impl MatrixSecureBackupInspection {
+    pub fn recommended_gate_state(&self) -> SecureBackupGateState {
+        use MatrixSecureBackupLocalState as Local;
+        use MatrixSecureBackupRecoveryState as Recovery;
+        use MatrixSecureBackupServerState as Server;
+        use MatrixSecureBackupTrustState as Trust;
+        use MatrixSecureBackupUploadState as Upload;
+
+        if self.server == Server::Unknown {
+            return SecureBackupGateState::Checking;
+        }
+
+        if self.trust == Trust::Mismatch {
+            return SecureBackupGateState::ExistingBackupNeedsRecovery {
+                failure: Some(SecureBackupGateFailureKind::BackupKeyMismatch),
+            };
+        }
+
+        if self.recovery == Recovery::Incomplete {
+            return SecureBackupGateState::SecureStorageIncomplete;
+        }
+
+        match self.server {
+            Server::Present => {
+                if self.recovery_key_delivery_pending {
+                    return SecureBackupGateState::RecoveryKeyDeliveryRequired;
+                }
+                match self.local {
+                    Local::Unknown
+                    | Local::Creating
+                    | Local::Enabling
+                    | Local::Resuming
+                    | Local::Downloading
+                    | Local::Disabling => return SecureBackupGateState::Checking,
+                    Local::Disabled => {
+                        return SecureBackupGateState::ExistingBackupNeedsRecovery {
+                            failure: None,
+                        };
+                    }
+                    Local::Enabled => {}
+                }
+
+                if matches!(self.recovery, Recovery::Unknown | Recovery::Disabled) {
+                    return SecureBackupGateState::ExistingBackupNeedsRecovery { failure: None };
+                }
+
+                match self.upload {
+                    Upload::Settled if self.trust == Trust::Trusted => SecureBackupGateState::Ready,
+                    Upload::Pending(pending) => {
+                        SecureBackupGateState::UploadingExistingKeys { pending }
+                    }
+                    Upload::Failed => SecureBackupGateState::DegradedRetrying {
+                        failure: SecureBackupGateFailureKind::Network,
+                    },
+                    Upload::Unknown | Upload::Settled => SecureBackupGateState::Checking,
+                }
+            }
+            Server::Absent => match self.recovery {
+                Recovery::Disabled => SecureBackupGateState::ExplicitlyDisabledRequiresSetup,
+                Recovery::Unknown | Recovery::Enabled => SecureBackupGateState::SetupRequired,
+                Recovery::Incomplete => SecureBackupGateState::SecureStorageIncomplete,
+            },
+            Server::Unknown => SecureBackupGateState::Checking,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -125,6 +264,40 @@ fn classify_current_session_backup(
     } else {
         CurrentSessionBackupState::Unknown
     }
+}
+
+fn map_secure_backup_local_state(
+    state: matrix_sdk::encryption::backups::BackupState,
+) -> MatrixSecureBackupLocalState {
+    use matrix_sdk::encryption::backups::BackupState;
+
+    match state {
+        BackupState::Enabled => MatrixSecureBackupLocalState::Enabled,
+        BackupState::Unknown => MatrixSecureBackupLocalState::Unknown,
+        BackupState::Creating => MatrixSecureBackupLocalState::Creating,
+        BackupState::Enabling => MatrixSecureBackupLocalState::Enabling,
+        BackupState::Resuming => MatrixSecureBackupLocalState::Resuming,
+        BackupState::Downloading => MatrixSecureBackupLocalState::Downloading,
+        BackupState::Disabling => MatrixSecureBackupLocalState::Disabling,
+    }
+}
+
+fn map_secure_backup_recovery_state(
+    state: matrix_sdk::encryption::recovery::RecoveryState,
+) -> MatrixSecureBackupRecoveryState {
+    use matrix_sdk::encryption::recovery::RecoveryState;
+
+    match state {
+        RecoveryState::Unknown => MatrixSecureBackupRecoveryState::Unknown,
+        RecoveryState::Disabled => MatrixSecureBackupRecoveryState::Disabled,
+        RecoveryState::Incomplete => MatrixSecureBackupRecoveryState::Incomplete,
+        RecoveryState::Enabled => MatrixSecureBackupRecoveryState::Enabled,
+    }
+}
+
+enum SecureBackupStateUpdate {
+    Backup(MatrixSecureBackupLocalState),
+    Recovery(MatrixSecureBackupRecoveryState),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1039,6 +1212,16 @@ pub struct SecureBackupSetupSummary {
 pub enum E2eeTrustError {
     #[error("Matrix encryption is not initialized")]
     NoOlmMachine,
+    #[error("secure backup inspection is inconclusive")]
+    SecureBackupInspectionInconclusive,
+    #[error("a secure backup already exists on the server")]
+    SecureBackupAlreadyExists,
+    #[error("explicit secure-backup re-enable confirmation is required")]
+    SecureBackupReenableConfirmationRequired,
+    #[error("secure backup upload did not settle")]
+    SecureBackupUploadFailed,
+    #[error("secure backup recovery key delivery failed")]
+    SecureBackupRecoveryKeyDeliveryFailed,
     #[error("Matrix SDK trust operation failed")]
     Sdk(String),
 }
@@ -1085,6 +1268,17 @@ impl fmt::Debug for E2eeTrustError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoOlmMachine => formatter.write_str("NoOlmMachine"),
+            Self::SecureBackupInspectionInconclusive => {
+                formatter.write_str("SecureBackupInspectionInconclusive")
+            }
+            Self::SecureBackupAlreadyExists => formatter.write_str("SecureBackupAlreadyExists"),
+            Self::SecureBackupReenableConfirmationRequired => {
+                formatter.write_str("SecureBackupReenableConfirmationRequired")
+            }
+            Self::SecureBackupUploadFailed => formatter.write_str("SecureBackupUploadFailed"),
+            Self::SecureBackupRecoveryKeyDeliveryFailed => {
+                formatter.write_str("SecureBackupRecoveryKeyDeliveryFailed")
+            }
             Self::Sdk(_) => formatter.write_str("Sdk(..)"),
         }
     }
@@ -1431,12 +1625,42 @@ fn write_recovery_key_if_requested(
     destination_path: Option<PathBuf>,
 ) -> Result<bool, E2eeTrustError> {
     let recovery_key = Zeroizing::new(recovery_key);
+    write_recovery_key_material(&recovery_key, destination_path)
+}
+
+fn write_recovery_key_material(
+    recovery_key: &str,
+    destination_path: Option<PathBuf>,
+) -> Result<bool, E2eeTrustError> {
+    use std::io::Write as _;
+
     let Some(destination_path) = destination_path else {
         return Ok(false);
     };
-    std::fs::write(destination_path, recovery_key.as_bytes()).map_err(|_| {
-        E2eeTrustError::Sdk("secure backup recovery key delivery failed".to_owned())
-    })?;
+
+    let mut options = std::fs::OpenOptions::new();
+    // The native save dialog is expected to return a new artifact path. Refuse
+    // to follow or overwrite an existing file (including a symlink).
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&destination_path)
+        .map_err(|_| E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|_| E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed)?;
+    }
+    if file.write_all(recovery_key.as_bytes()).is_err() || file.sync_all().is_err() {
+        drop(file);
+        let _ = std::fs::remove_file(&destination_path);
+        return Err(E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed);
+    }
     Ok(true)
 }
 
@@ -2503,6 +2727,252 @@ pub fn map_backup_state_to_desktop(
 }
 
 #[cfg(test)]
+mod secure_backup_inspection_tests {
+    use koushi_state::{PendingKeyCountBucket, SecureBackupGateFailureKind, SecureBackupGateState};
+
+    use super::{
+        E2eeTrustError, MatrixSecureBackupInspection, MatrixSecureBackupLocalState,
+        MatrixSecureBackupRecoveryState, MatrixSecureBackupServerState, MatrixSecureBackupState,
+        MatrixSecureBackupStateObservation, MatrixSecureBackupTrustState,
+        MatrixSecureBackupUploadState, SecureBackupStateStream,
+    };
+
+    fn inspection(
+        server: MatrixSecureBackupServerState,
+        local: MatrixSecureBackupLocalState,
+        recovery: MatrixSecureBackupRecoveryState,
+        upload: MatrixSecureBackupUploadState,
+        trust: MatrixSecureBackupTrustState,
+    ) -> MatrixSecureBackupInspection {
+        MatrixSecureBackupInspection {
+            server,
+            local,
+            recovery,
+            upload,
+            trust,
+            recovery_key_delivery_pending: false,
+        }
+    }
+
+    #[test]
+    fn secure_backup_inspection_classifies_required_cartesian_cases() {
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupLocalState::Enabled,
+                MatrixSecureBackupRecoveryState::Enabled,
+                MatrixSecureBackupUploadState::Settled,
+                MatrixSecureBackupTrustState::Trusted,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::Ready
+        );
+
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupLocalState::Disabled,
+                MatrixSecureBackupRecoveryState::Enabled,
+                MatrixSecureBackupUploadState::Unknown,
+                MatrixSecureBackupTrustState::Unknown,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::ExistingBackupNeedsRecovery { failure: None }
+        );
+
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Absent,
+                MatrixSecureBackupLocalState::Disabled,
+                MatrixSecureBackupRecoveryState::Unknown,
+                MatrixSecureBackupUploadState::Unknown,
+                MatrixSecureBackupTrustState::Unknown,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::SetupRequired
+        );
+
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Absent,
+                MatrixSecureBackupLocalState::Disabled,
+                MatrixSecureBackupRecoveryState::Disabled,
+                MatrixSecureBackupUploadState::Unknown,
+                MatrixSecureBackupTrustState::Unknown,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::ExplicitlyDisabledRequiresSetup
+        );
+
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Unknown,
+                MatrixSecureBackupLocalState::Enabled,
+                MatrixSecureBackupRecoveryState::Enabled,
+                MatrixSecureBackupUploadState::Settled,
+                MatrixSecureBackupTrustState::Trusted,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::Checking
+        );
+
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupLocalState::Enabled,
+                MatrixSecureBackupRecoveryState::Enabled,
+                MatrixSecureBackupUploadState::Settled,
+                MatrixSecureBackupTrustState::Mismatch,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::ExistingBackupNeedsRecovery {
+                failure: Some(SecureBackupGateFailureKind::BackupKeyMismatch),
+            }
+        );
+
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupLocalState::Enabled,
+                MatrixSecureBackupRecoveryState::Incomplete,
+                MatrixSecureBackupUploadState::Settled,
+                MatrixSecureBackupTrustState::Trusted,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::SecureStorageIncomplete
+        );
+
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupLocalState::Enabled,
+                MatrixSecureBackupRecoveryState::Enabled,
+                MatrixSecureBackupUploadState::Failed,
+                MatrixSecureBackupTrustState::Trusted,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::DegradedRetrying {
+                failure: SecureBackupGateFailureKind::Network,
+            }
+        );
+    }
+
+    #[test]
+    fn pending_recovery_key_delivery_survives_inspection_and_keeps_gate_closed() {
+        let mut inspection = inspection(
+            MatrixSecureBackupServerState::Present,
+            MatrixSecureBackupLocalState::Enabled,
+            MatrixSecureBackupRecoveryState::Enabled,
+            MatrixSecureBackupUploadState::Settled,
+            MatrixSecureBackupTrustState::Trusted,
+        );
+        inspection.recovery_key_delivery_pending = true;
+
+        assert_eq!(
+            inspection.recommended_gate_state(),
+            koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired
+        );
+    }
+
+    #[test]
+    fn secure_backup_inspection_requires_typed_trust_evidence() {
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupLocalState::Enabled,
+                MatrixSecureBackupRecoveryState::Enabled,
+                MatrixSecureBackupUploadState::Settled,
+                MatrixSecureBackupTrustState::Unknown,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::Checking
+        );
+
+        assert_eq!(
+            inspection(
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupLocalState::Enabled,
+                MatrixSecureBackupRecoveryState::Enabled,
+                MatrixSecureBackupUploadState::Settled,
+                MatrixSecureBackupTrustState::Mismatch,
+            )
+            .recommended_gate_state(),
+            SecureBackupGateState::ExistingBackupNeedsRecovery {
+                failure: Some(SecureBackupGateFailureKind::BackupKeyMismatch),
+            }
+        );
+    }
+
+    #[test]
+    fn secure_backup_state_observation_is_public_and_private_data_free() {
+        let state = MatrixSecureBackupState {
+            backup: MatrixSecureBackupLocalState::Enabled,
+            recovery: MatrixSecureBackupRecoveryState::Enabled,
+        };
+        let serialized = serde_json::to_string(&state).expect("state is serializable");
+        let debug = format!("{state:?}");
+
+        assert!(serialized.contains("backup"));
+        assert!(serialized.contains("recovery"));
+        for forbidden in [
+            "backup-version-42",
+            "recovery-key-secret",
+            "@alice:example.invalid",
+            "!room:example.invalid",
+            "/tmp/recovery-key.txt",
+            "raw SDK failure",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "serialized state leaked {forbidden}"
+            );
+            assert!(!debug.contains(forbidden), "debug state leaked {forbidden}");
+        }
+
+        let _observation: Option<MatrixSecureBackupStateObservation> = None;
+        let _stream: Option<SecureBackupStateStream> = None;
+        let _observe: fn(&super::MatrixClientSession) -> MatrixSecureBackupStateObservation =
+            super::MatrixClientSession::observe_secure_backup_state;
+    }
+
+    #[test]
+    fn secure_backup_inspection_has_no_secret_or_identifier_surface() {
+        let inspection = inspection(
+            MatrixSecureBackupServerState::Present,
+            MatrixSecureBackupLocalState::Enabled,
+            MatrixSecureBackupRecoveryState::Enabled,
+            MatrixSecureBackupUploadState::Pending(PendingKeyCountBucket::One),
+            MatrixSecureBackupTrustState::Trusted,
+        );
+        let serialized = serde_json::to_string(&inspection).expect("inspection is serializable");
+        let debug = format!("{inspection:?}");
+        for forbidden in [
+            "backup-version-42",
+            "recovery-key-secret",
+            "@alice:example.invalid",
+            "!room:example.invalid",
+            "/tmp/recovery-key.txt",
+            "raw SDK failure",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "serialized inspection leaked {forbidden}"
+            );
+            assert!(
+                !debug.contains(forbidden),
+                "debug inspection leaked {forbidden}"
+            );
+        }
+        assert!(!serialized.contains("version"));
+        assert!(!debug.contains("version"));
+
+        let error = E2eeTrustError::Sdk("raw SDK failure with a recovery-key-secret".to_owned());
+        assert!(!format!("{error:?}").contains("raw SDK failure"));
+        assert!(!format!("{error:?}").contains("recovery-key-secret"));
+    }
+}
+
+#[cfg(test)]
 mod e2ee_trust_tests {
     use std::sync::{
         Arc, Mutex,
@@ -3210,8 +3680,39 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
 
         assert!(written);
         assert_eq!(
-            std::fs::read_to_string(path).expect("read artifact"),
+            std::fs::read_to_string(&path).expect("read artifact"),
             artifact_payload
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                std::fs::metadata(path)
+                    .expect("artifact metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn recovery_key_delivery_refuses_to_overwrite_an_existing_artifact() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("existing-artifact.txt");
+        std::fs::write(&path, "keep-me").expect("write existing artifact");
+
+        let error = write_recovery_key_if_requested(
+            "fixture-artifact-material".to_owned(),
+            Some(path.clone()),
+        )
+        .expect_err("existing artifact must not be overwritten");
+
+        assert_eq!(error, E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed);
+        assert_eq!(
+            std::fs::read_to_string(path).expect("read artifact"),
+            "keep-me"
         );
     }
 
@@ -4296,6 +4797,53 @@ impl MatrixClientSession {
         )
     }
 
+    /// Update the SDK send-queue admission latch for encrypted events. The
+    /// durability fence remains enabled independently for the whole session.
+    pub fn set_secure_backup_send_admitted(&self, admitted: bool) {
+        self.client()
+            .send_queue()
+            .set_secure_backup_send_admitted(admitted);
+    }
+
+    pub fn observe_secure_backup_state(&self) -> MatrixSecureBackupStateObservation {
+        let encryption = self.client().encryption();
+        let backups = encryption.backups();
+        let recovery = encryption.recovery();
+        let current = MatrixSecureBackupState {
+            backup: map_secure_backup_local_state(backups.state()),
+            recovery: map_secure_backup_recovery_state(recovery.state()),
+        };
+
+        let backup_updates = backups.state_stream().map(|state| {
+            SecureBackupStateUpdate::Backup(
+                state
+                    .map(map_secure_backup_local_state)
+                    .unwrap_or(MatrixSecureBackupLocalState::Unknown),
+            )
+        });
+        let recovery_updates = recovery.state_stream().map(|state| {
+            SecureBackupStateUpdate::Recovery(map_secure_backup_recovery_state(state))
+        });
+        let updates = stream::select(backup_updates, recovery_updates).scan(
+            (current.backup, current.recovery),
+            |state, update| {
+                match update {
+                    SecureBackupStateUpdate::Backup(backup) => state.0 = backup,
+                    SecureBackupStateUpdate::Recovery(recovery) => state.1 = recovery,
+                }
+                futures_util::future::ready(Some(MatrixSecureBackupState {
+                    backup: state.0,
+                    recovery: state.1,
+                }))
+            },
+        );
+
+        MatrixSecureBackupStateObservation {
+            current,
+            updates: Box::pin(updates),
+        }
+    }
+
     pub fn current_device_trust(&self) -> CurrentDeviceTrustState {
         let subscriber = self.client().encryption().verification_state();
         map_sdk_verification_state(subscriber.get())
@@ -4374,6 +4922,179 @@ impl MatrixClientSession {
             own_identity_verification,
             key_backup: classify_current_session_backup(local_backup_state, server_probe),
         })
+    }
+
+    pub async fn inspect_secure_backup(
+        &self,
+    ) -> Result<MatrixSecureBackupInspection, E2eeTrustError> {
+        let encryption = self.client().encryption();
+        let backups = encryption.backups();
+        let (server, trust) = match backups.inspect_server_trust().await {
+            Ok(matrix_sdk::encryption::backups::ServerBackupTrust::Absent) => (
+                MatrixSecureBackupServerState::Absent,
+                MatrixSecureBackupTrustState::Unknown,
+            ),
+            Ok(matrix_sdk::encryption::backups::ServerBackupTrust::Trusted) => (
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupTrustState::Trusted,
+            ),
+            Ok(matrix_sdk::encryption::backups::ServerBackupTrust::Mismatch) => (
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupTrustState::Mismatch,
+            ),
+            Ok(
+                matrix_sdk::encryption::backups::ServerBackupTrust::MissingLocalKey
+                | matrix_sdk::encryption::backups::ServerBackupTrust::Untrusted,
+            ) => (
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupTrustState::Unknown,
+            ),
+            Err(_) => (
+                MatrixSecureBackupServerState::Unknown,
+                MatrixSecureBackupTrustState::Unknown,
+            ),
+        };
+        let local_sdk_state = backups.state();
+        let local = map_secure_backup_local_state(local_sdk_state);
+        let recovery_api = encryption.recovery();
+        let recovery = match map_secure_backup_recovery_state(recovery_api.state()) {
+            MatrixSecureBackupRecoveryState::Disabled => {
+                match recovery_api.is_explicitly_disabled().await {
+                    Ok(true) => MatrixSecureBackupRecoveryState::Disabled,
+                    Ok(false) | Err(_) => MatrixSecureBackupRecoveryState::Unknown,
+                }
+            }
+            state => state,
+        };
+        let upload = if local_sdk_state == matrix_sdk::encryption::backups::BackupState::Enabled
+            && trust == MatrixSecureBackupTrustState::Trusted
+        {
+            match backups.wait_for_steady_state().await {
+                Ok(()) => MatrixSecureBackupUploadState::Settled,
+                Err(_) => MatrixSecureBackupUploadState::Failed,
+            }
+        } else {
+            MatrixSecureBackupUploadState::Unknown
+        };
+        Ok(MatrixSecureBackupInspection {
+            server,
+            local,
+            recovery,
+            upload,
+            trust,
+            recovery_key_delivery_pending: self.recovery_key_delivery_pending().await?,
+        })
+    }
+
+    pub async fn recover_secure_backup(
+        &self,
+        request: &RecoveryRequest,
+    ) -> Result<(), E2eeTrustError> {
+        self.client()
+            .encryption()
+            .recovery()
+            .recover(request.secret.expose_secret())
+            .await?;
+        self.wait_for_secure_backup_steady_state().await
+    }
+
+    pub async fn setup_secure_backup(
+        &self,
+        passphrase: Option<&AuthSecret>,
+        recovery_key_destination_path: Option<PathBuf>,
+    ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+        self.setup_secure_backup_with_confirmation(passphrase, recovery_key_destination_path, false)
+            .await
+    }
+
+    pub async fn reenable_secure_backup(
+        &self,
+        passphrase: Option<&AuthSecret>,
+        recovery_key_destination_path: Option<PathBuf>,
+    ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+        self.setup_secure_backup_with_confirmation(passphrase, recovery_key_destination_path, true)
+            .await
+    }
+
+    async fn setup_secure_backup_with_confirmation(
+        &self,
+        passphrase: Option<&AuthSecret>,
+        recovery_key_destination_path: Option<PathBuf>,
+        explicit_reenable_confirmed: bool,
+    ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+        let inspection = self.inspect_secure_backup().await?;
+        if inspection.recommended_gate_state()
+            == SecureBackupGateState::ExplicitlyDisabledRequiresSetup
+            && !explicit_reenable_confirmed
+        {
+            return Err(E2eeTrustError::SecureBackupReenableConfirmationRequired);
+        }
+        match inspection.server {
+            MatrixSecureBackupServerState::Absent => {}
+            MatrixSecureBackupServerState::Present => {
+                if inspection.local == MatrixSecureBackupLocalState::Enabled
+                    && inspection.trust == MatrixSecureBackupTrustState::Trusted
+                {
+                    let recovery_key = self
+                        .client()
+                        .encryption()
+                        .backups()
+                        .local_recovery_key()
+                        .await?
+                        .ok_or(E2eeTrustError::SecureBackupInspectionInconclusive)?;
+                    let summary = SecureBackupSetupSummary {
+                        recovery_key_written: write_recovery_key_material(
+                            &recovery_key,
+                            recovery_key_destination_path,
+                        )?,
+                    };
+                    self.set_recovery_key_delivery_pending(false).await?;
+                    return Ok(summary);
+                }
+                return Err(E2eeTrustError::SecureBackupAlreadyExists);
+            }
+            MatrixSecureBackupServerState::Unknown => {
+                return Err(E2eeTrustError::SecureBackupInspectionInconclusive);
+            }
+        }
+
+        self.set_recovery_key_delivery_pending(true).await?;
+        let summary =
+            bootstrap_secure_backup(self, passphrase, recovery_key_destination_path).await?;
+        self.set_recovery_key_delivery_pending(false).await?;
+        self.wait_for_secure_backup_steady_state().await?;
+        Ok(summary)
+    }
+
+    async fn recovery_key_delivery_pending(&self) -> Result<bool, E2eeTrustError> {
+        const KEY: &[u8] = b"koushi.secure_backup.recovery_key_delivery_pending.v1";
+        self.client()
+            .state_store()
+            .get_custom_value(KEY)
+            .await
+            .map(|value| value.as_deref() == Some(b"1"))
+            .map_err(|_| E2eeTrustError::SecureBackupInspectionInconclusive)
+    }
+
+    async fn set_recovery_key_delivery_pending(&self, pending: bool) -> Result<(), E2eeTrustError> {
+        const KEY: &[u8] = b"koushi.secure_backup.recovery_key_delivery_pending.v1";
+        let client = self.client();
+        let store = client.state_store();
+        if pending {
+            store.set_custom_value(KEY, b"1".to_vec()).await.map(|_| ())
+        } else {
+            store.remove_custom_value(KEY).await.map(|_| ())
+        }
+        .map_err(|_| E2eeTrustError::SecureBackupInspectionInconclusive)
+    }
+
+    pub async fn wait_for_secure_backup_steady_state(&self) -> Result<(), E2eeTrustError> {
+        self.client()
+            .encryption()
+            .backups()
+            .wait_for_steady_state()
+            .await
+            .map_err(|_| E2eeTrustError::SecureBackupUploadFailed)
     }
 
     pub fn observe_current_device_trust(&self) -> CurrentDeviceTrustObservation {
@@ -5100,6 +5821,7 @@ pub enum MatrixRoomOperationFailureKind {
     Forbidden,
     Http,
     Store,
+    SecureBackupRequired,
     WrongRoomState,
     Sdk,
 }
@@ -5118,6 +5840,7 @@ impl fmt::Display for MatrixRoomOperationFailureKind {
             Self::Forbidden => "forbidden",
             Self::Http => "http",
             Self::Store => "store",
+            Self::SecureBackupRequired => "secure_backup_required",
             Self::WrongRoomState => "wrong_room_state",
             Self::Sdk => "sdk",
         };
@@ -6273,6 +6996,9 @@ pub async fn login_with_password_with_store(
         .map_err(|error| PasswordLoginError::Sdk(error.to_string()))?;
     let user_id = response.user_id.to_string();
     let device_id = response.device_id.to_string();
+    client
+        .send_queue()
+        .require_secure_backup_for_encrypted_sends(true);
 
     Ok(MatrixClientSession {
         client,
@@ -6304,6 +7030,9 @@ pub async fn login_with_existing_device(
         .send()
         .await
         .map_err(|error| PasswordLoginError::Sdk(error.to_string()))?;
+    client
+        .send_queue()
+        .require_secure_backup_for_encrypted_sends(true);
 
     Ok(MatrixClientSession {
         client,
@@ -6411,6 +7140,9 @@ pub async fn finish_oidc_login(
         .device_id()
         .ok_or(PasswordLoginError::MissingSession)?
         .to_string();
+    client
+        .send_queue()
+        .require_secure_backup_for_encrypted_sends(true);
 
     Ok(MatrixClientSession {
         client,
@@ -6471,6 +7203,9 @@ pub async fn restore_session_with_store(
     } else {
         return Err(PasswordLoginError::MissingSession);
     }
+    client
+        .send_queue()
+        .require_secure_backup_for_encrypted_sends(true);
 
     Ok(MatrixClientSession {
         client,
@@ -6968,6 +7703,7 @@ pub async fn send_text_message(
 
     let result = room
         .send(content)
+        .require_backed_up_session()
         .with_transaction_id(txn_id)
         .await
         .map(|_| ());
@@ -8417,6 +9153,7 @@ pub async fn edit_text_message(
         .map_err(|_| MatrixRoomOperationError::Sdk(MatrixRoomOperationFailureKind::Sdk))?;
 
     room.send(edit_event)
+        .require_backed_up_session()
         .await
         .map(|_| ())
         .map_err(MatrixRoomOperationError::from_sdk_error)
@@ -9848,6 +10585,9 @@ fn matrix_room_operation_failure_kind(error: &matrix_sdk::Error) -> MatrixRoomOp
         matrix_sdk::Error::StateStore(_)
         | matrix_sdk::Error::EventCacheStore(_)
         | matrix_sdk::Error::MediaStore(_) => MatrixRoomOperationFailureKind::Store,
+        matrix_sdk::Error::SecureBackupRequired => {
+            MatrixRoomOperationFailureKind::SecureBackupRequired
+        }
         matrix_sdk::Error::SerdeJson(_)
         | matrix_sdk::Error::Io(_)
         | matrix_sdk::Error::CrossProcessLockError(_)
@@ -11757,6 +12497,20 @@ mod tests {
             Err(super::MatrixRoomOperationError::Sdk(
                 super::MatrixRoomOperationFailureKind::Encryption
             ))
+        );
+    }
+
+    #[test]
+    fn send_wrapper_maps_secure_backup_required_to_a_typed_closed_failure() {
+        assert_eq!(
+            super::map_room_send_result(Err(matrix_sdk::Error::SecureBackupRequired)),
+            Err(super::MatrixRoomOperationError::Sdk(
+                super::MatrixRoomOperationFailureKind::SecureBackupRequired
+            ))
+        );
+        assert_eq!(
+            super::MatrixRoomOperationFailureKind::SecureBackupRequired.to_string(),
+            "secure_backup_required"
         );
     }
 

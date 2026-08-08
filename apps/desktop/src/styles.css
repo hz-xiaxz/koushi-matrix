@@ -6968,6 +6968,31 @@ kbd {
   padding: 32px;
 }
 
+.secure-backup-destination-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.secure-backup-destination-selector [role="status"] {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.secure-backup-runtime-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-warning, var(--surface));
+}
+
+.secure-backup-runtime-banner > span:first-child {
+  flex: 1;
+}
+
 .session-verification-drag-region {
   position: fixed;
   inset: 0 0 auto;

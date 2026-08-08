@@ -351,7 +351,7 @@ function defaultSnapshotResponse() {
     else ui[key] = value;
   }
   return {
-    state: { schema_version: 3, domain, ui },
+    state: { schema_version: 4, domain, ui },
     sidebar: {
       active_space_id: null,
       account_home: {

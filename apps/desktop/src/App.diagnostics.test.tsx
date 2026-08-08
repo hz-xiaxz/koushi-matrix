@@ -78,6 +78,56 @@ async function openDiagnostics() {
 }
 
 describe("App diagnostics lifecycle", () => {
+  test("keeps the normal shell hidden until a ready session has a ready secure backup gate", async () => {
+    const api = createBrowserFakeApi({ secureBackupGate: { kind: "setupRequired" } });
+
+    await renderAppWithApi(api);
+
+    expect(
+      await screen.findByRole("heading", { name: "Secure backup required" })
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create room" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
+  });
+
+  test("keeps the read-only shell visible when a ready session later degrades", async () => {
+    const api = createBrowserFakeApi();
+    const readySnapshot = await api.getSnapshot();
+    const mutable = api as unknown as { snapshot: typeof readySnapshot };
+    const activeRoomId = readySnapshot.state.ui.navigation.active_room_id;
+    mutable.snapshot.state.domain.rooms = mutable.snapshot.state.domain.rooms.map((room) =>
+      room.room_id === activeRoomId ? { ...room, is_encrypted: true } : room
+    );
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {}
+    });
+
+    await renderAppWithApi(api);
+
+    expect(await screen.findByRole("button", { name: "Create room" })).toBeTruthy();
+    await waitFor(() =>
+      expect(tauriEventListeners.get("koushi-desktop://state")).toBeDefined()
+    );
+
+    mutable.snapshot.state.domain.secure_backup_gate = {
+      kind: "blockedFailed",
+      failure: "network"
+    };
+
+    await act(async () => {
+      tauriEventListeners.get("koushi-desktop://state")?.({ payload: "stateChanged" });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("Secure backup could not reach the server.")).toBeTruthy()
+    );
+    expect(await screen.findByRole("button", { name: "Create room" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Message composer" }).getAttribute("aria-disabled"))
+      .toBe("true");
+    expect(screen.queryByRole("heading", { name: "Secure backup required" })).toBeNull();
+  });
+
   test("records a schema mismatch without console output and retains the fixed entry after refresh", async () => {
     const api = createBrowserFakeApi();
     const compatibleSnapshot = await api.getSnapshot();

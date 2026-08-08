@@ -333,6 +333,7 @@ pub enum AppAction {
         info: SessionInfo,
     },
     CurrentDeviceTrustChanged(CurrentDeviceTrustState),
+    SecureBackupGateChanged(crate::state::SecureBackupGateState),
     AuthoritativeDeviceTrustChanged {
         generation: u64,
         transition_id: u64,

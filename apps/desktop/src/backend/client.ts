@@ -130,6 +130,10 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("submit_recovery", { secret });
   }
 
+  async recoverSecureBackup(secret: string): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("recover_secure_backup", { secret });
+  }
+
   async startDeviceCleanup(): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("start_device_cleanup");
   }
@@ -250,6 +254,30 @@ class TauriDesktopApi implements DesktopApi {
       passphrase,
       recoveryKeyDestinationPath
     });
+  }
+
+  async setupSecureBackup(
+    passphrase: string | null,
+    recoveryKeyDestinationPath: string | null
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("bootstrap_secure_backup", {
+      passphrase,
+      recoveryKeyDestinationPath
+    });
+  }
+
+  async reenableSecureBackup(
+    passphrase: string | null,
+    recoveryKeyDestinationPath: string | null
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("reenable_secure_backup", {
+      passphrase,
+      recoveryKeyDestinationPath
+    });
+  }
+
+  async retrySecureBackupInspection(): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("retry_secure_backup_inspection");
   }
 
   async changeSecureBackupPassphrase(

@@ -36,14 +36,14 @@ export type ComposerDraftAccountOwner = SavedSessionInfo;
 
 /**
  * IPC snapshot contract version. Must match `dto.rs`'s `SNAPSHOT_SCHEMA_VERSION`.
- * Bumped to 2 by #87 Phase 4 (domain/ui sectioning).
+ * Bumped to 4 for the required secure backup gate DTO field.
  */
-export const SNAPSHOT_SCHEMA_VERSION = 3;
+export const SNAPSHOT_SCHEMA_VERSION = 4;
 
 /**
  * Snapshot state. #87 Phase 4 sectioned this into domain (Matrix/product, Rust-owned,
  * mobile-reusable) and ui (desktop presentation/view/navigation). `schema_version` is the
- * IPC contract version (2 = sectioned); the App boundary asserts it so a stale flat (v1)
+ * IPC contract version (4 = secure backup gate DTO); the App boundary asserts it so a stale flat (v1)
  * snapshot or a mismatched build fails loudly.
  */
 export interface AppState {
@@ -54,6 +54,7 @@ export interface AppState {
 
 export interface AppDomainState {
   session: SessionState;
+  secure_backup_gate: SecureBackupGateState;
   current_session_status: CurrentSessionStatusState;
   device_cleanup: DeviceCleanupState;
   auth: AuthDiscoveryState;
@@ -450,6 +451,42 @@ export type SoftLogoutReauthState =
   | { kind: "failed"; request_id: number; failureKind: AuthFailureKind };
 
 export type RecoveryMethod = "recoveryKey" | "securityPhrase";
+
+export type SecureBackupGateFailureKind =
+  | "network"
+  | "rateLimited"
+  | "invalidRecoveryKey"
+  | "backupKeyMismatch"
+  | "secretStorageIncomplete"
+  | "artifactDelivery"
+  | "forbidden"
+  | "timeout"
+  | "sdk";
+
+export type PendingKeyCountBucket =
+  | "zero"
+  | "one"
+  | "two_to_ten"
+  | "eleven_to_one_hundred"
+  | "over_one_hundred"
+  | "unknown";
+
+export type SecureBackupGateState =
+  | { kind: "inactive" }
+  | { kind: "checking" }
+  | {
+      kind: "existingBackupNeedsRecovery";
+      failure?: SecureBackupGateFailureKind | null;
+    }
+  | { kind: "secureStorageIncomplete" }
+  | { kind: "setupRequired" }
+  | { kind: "explicitlyDisabledRequiresSetup" }
+  | { kind: "creatingBackup" }
+  | { kind: "recoveryKeyDeliveryRequired" }
+  | { kind: "uploadingExistingKeys"; pending: PendingKeyCountBucket }
+  | { kind: "degradedRetrying"; failure: SecureBackupGateFailureKind }
+  | { kind: "blockedFailed"; failure: SecureBackupGateFailureKind }
+  | { kind: "ready" };
 
 export type VerificationMethodCapability = "existingDeviceSas" | "recoveryKey" | "securityPhrase" | "bootstrap";
 export type VerificationMethod = VerificationMethodCapability;

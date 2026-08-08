@@ -22,9 +22,9 @@ use koushi_state::{
     NativeAttentionState, NavigationState, ProfileState, ProvisionalPhase, QrLoginState,
     RoomInteractionState, RoomListProjection, RoomManagementState, RoomNotificationSettings,
     RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchMatchField, SearchMatchKind,
-    SearchResult, SearchScope, SearchState, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceMembersState, SpaceSummary, StagedUploadItem, SyncState,
-    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
+    SearchResult, SearchScope, SearchState, SecureBackupGateState, SessionState, SettingsState,
+    SidebarModel, SoftLogoutReauthState, SpaceMembersState, SpaceSummary, StagedUploadItem,
+    SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     TypographyDisplayProfile, VerificationGateRejectReason, VerificationGateState,
     VerificationMethod, native_attention_capabilities_for_platform, resolve_locale_display_profile,
     resolve_typography_display_profile,
@@ -112,6 +112,8 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<FrontendSessionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub secure_backup_gate: Option<SecureBackupGateState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub current_session_status: Option<CurrentSessionStatusState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_cleanup: Option<DeviceCleanupState>,
@@ -185,6 +187,7 @@ pub struct FrontendDomainStateChangedSlices {
 impl FrontendDomainStateChangedSlices {
     fn is_empty(&self) -> bool {
         self.session.is_none()
+            && self.secure_backup_gate.is_none()
             && self.current_session_status.is_none()
             && self.device_cleanup.is_none()
             && self.auth.is_none()
@@ -266,6 +269,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         let mut ui = FrontendUiStateChangedSlices::default();
 
         domain.session = changed.session.map(Into::into);
+        domain.secure_backup_gate = changed.secure_backup_gate;
         domain.current_session_status = changed.current_session_status;
         domain.device_cleanup = changed.device_cleanup;
         domain.auth = changed.auth;
@@ -361,6 +365,7 @@ pub struct FrontendAppState {
 #[derive(Clone, Debug, Serialize)]
 pub struct FrontendDomainState {
     pub session: FrontendSessionState,
+    pub secure_backup_gate: SecureBackupGateState,
     pub current_session_status: CurrentSessionStatusState,
     pub device_cleanup: DeviceCleanupState,
     pub auth: AuthDiscoveryState,
@@ -430,6 +435,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         domain: FrontendDomainState {
             session: state.session.into(),
+            secure_backup_gate: state.secure_backup_gate,
             current_session_status: state.current_session_status,
             device_cleanup: state.device_cleanup,
             auth: state.auth,
@@ -480,7 +486,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
 }
 
 /// IPC snapshot contract version. Bumped to 2 by #87 Phase 4 (domain/ui sectioning).
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 4;
 
 pub(crate) fn frontend_display_platform() -> DisplayPlatform {
     #[cfg(target_os = "macos")]

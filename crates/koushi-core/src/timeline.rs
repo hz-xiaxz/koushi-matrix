@@ -10083,6 +10083,7 @@ fn media_download_failure_token(kind: TimelineFailureKind) -> &'static str {
         TimelineFailureKind::InvalidReactionState => "invalid_reaction_state",
         TimelineFailureKind::InvalidSendTarget => "invalid_send_target",
         TimelineFailureKind::InvalidSendState => "invalid_send_state",
+        TimelineFailureKind::SecureBackupRequired => "secure_backup_required",
         TimelineFailureKind::ComposerRevisionExhausted => "composer_revision_exhausted",
         TimelineFailureKind::UnsupportedSlashCommand => "unsupported_slash_command",
         TimelineFailureKind::NotSubscribed => "not_subscribed",
@@ -40391,7 +40392,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_on_unsubscribed_key_returns_not_subscribed() {
+    async fn send_without_authoritative_account_session_fails_closed() {
         let runtime = CoreRuntime::start();
         let mut conn = runtime.attach();
 
@@ -40434,12 +40435,7 @@ mod tests {
                     request_id,
                     failure,
                 } if request_id == rid => {
-                    assert_eq!(
-                        failure,
-                        CoreFailure::TimelineOperationFailed {
-                            kind: TimelineFailureKind::NotSubscribed
-                        }
-                    );
+                    assert_eq!(failure, CoreFailure::SessionRequired);
                     return;
                 }
                 _ => continue,

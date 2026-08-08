@@ -5667,6 +5667,12 @@ impl AppActor {
                         .send(AccountMessage::CheckCurrentDeviceTrust)
                         .await;
                 }
+                AppEffect::InspectSecureBackup => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::InspectSecureBackup)
+                        .await;
+                }
                 AppEffect::RefreshCurrentSessionStatus {
                     request_id,
                     trigger,
@@ -5854,6 +5860,12 @@ impl AppActor {
                     let _ = self
                         .account_actor
                         .send(AccountMessage::CheckCurrentDeviceTrust)
+                        .await;
+                }
+                AppEffect::InspectSecureBackup => {
+                    let _ = self
+                        .account_actor
+                        .send(AccountMessage::InspectSecureBackup)
                         .await;
                 }
                 AppEffect::RefreshCurrentSessionStatus {
@@ -6155,6 +6167,64 @@ impl AppActor {
         // full snapshots. The Tauri webview adapter ignores this event on the
         // normal state path and applies StateDelta instead.
         self.emit(CoreEvent::StateChanged(self.state.clone()));
+    }
+}
+
+pub(crate) struct EncryptedUserContentTarget<'a> {
+    pub(crate) request_id: RequestId,
+    pub(crate) room_id: &'a str,
+    pub(crate) submission: Option<(&'a TimelineKey, &'a koushi_state::SubmissionId)>,
+}
+
+pub(crate) fn encrypted_user_content_target(
+    command: &TimelineCommand,
+) -> Option<EncryptedUserContentTarget<'_>> {
+    match command {
+        TimelineCommand::SendText {
+            request_id, key, ..
+        }
+        | TimelineCommand::SendReply {
+            request_id, key, ..
+        }
+        | TimelineCommand::EditText {
+            request_id, key, ..
+        }
+        | TimelineCommand::RetrySend {
+            request_id, key, ..
+        }
+        | TimelineCommand::UploadAndSendMedia {
+            request_id, key, ..
+        } => Some(EncryptedUserContentTarget {
+            request_id: *request_id,
+            room_id: key.room_id(),
+            submission: None,
+        }),
+        TimelineCommand::SubmitText {
+            request_id,
+            key,
+            submission_id,
+            ..
+        }
+        | TimelineCommand::SubmitReply {
+            request_id,
+            key,
+            submission_id,
+            ..
+        } => Some(EncryptedUserContentTarget {
+            request_id: *request_id,
+            room_id: key.room_id(),
+            submission: Some((key, submission_id)),
+        }),
+        TimelineCommand::ForwardMessage {
+            request_id,
+            destination_room_id,
+            ..
+        } => Some(EncryptedUserContentTarget {
+            request_id: *request_id,
+            room_id: destination_room_id,
+            submission: None,
+        }),
+        _ => None,
     }
 }
 
@@ -6474,6 +6544,10 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
                 request_id: request_id.sequence,
             })
         }
+        AccountCommand::RecoverSecureBackup { .. }
+        | AccountCommand::RetrySecureBackupInspection { .. } => Some(
+            AppAction::SecureBackupGateChanged(koushi_state::SecureBackupGateState::Checking),
+        ),
         AccountCommand::ChangeSecureBackupPassphrase { request_id, .. } => {
             Some(AppAction::SecureBackupPassphraseChangeRequested {
                 request_id: request_id.sequence,
@@ -10435,6 +10509,7 @@ mod tests {
                     recovery_key_destination_path: Some(std::path::PathBuf::from(
                         "/private/recovery-key.txt",
                     )),
+                    explicit_reenable_confirmed: false,
                 },
             }
         );

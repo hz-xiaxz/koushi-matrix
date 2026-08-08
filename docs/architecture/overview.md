@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-07-31.
+Last amended: 2026-08-08.
 
 ## Product Scope
 
@@ -1202,6 +1202,31 @@ architectural invariants:
   may claim exhaustive backup-wide restore
   until the exact supported restore scope is proven or split into an explicit
   follow-up.
+
+### Mandatory recoverable Secure Backup
+
+Device verification and Secure Backup readiness are independent Rust-owned
+admission facts. Verification starts the normal sync owner so receiving and
+local decryption can continue, but `AppState.secure_backup_gate` remains
+`Checking` until `koushi-sdk` has established that Recovery is complete, the
+existing trusted backup is enabled locally, and pending room-key upload has
+reached SDK steady state. React exposes the normal shell only when both the
+session and backup gate are ready; it never infers readiness from a click or
+from backup existence alone.
+
+An existing backup without its local decryption key is recovered in place.
+Automatic setup is permitted only when the authoritative probe reports no
+server backup. Koushi never calls a destructive backup fix/reset path from this
+gate. If backup was explicitly disabled, re-enabling requires a user action
+which states that the account-wide setting also affects other Matrix clients.
+
+Koushi encrypted user-content sends opt into the vendored SDK's narrow
+per-outbound-session durability fence. The SDK creates/shares and persists the
+outbound session plus its inbound counterpart, waits for the active backup to
+reach steady state, verifies that the same inbound counterpart is marked
+backed up, and only then encrypts and sends the first event. Existing SDK
+callers are unchanged unless they opt in. A rotated session repeats the fence;
+an already-backed-up session does not create a second upload round trip.
 
 ## Room Timeline Gap Repair
 

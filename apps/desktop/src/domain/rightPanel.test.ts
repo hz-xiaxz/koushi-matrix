@@ -155,7 +155,7 @@ function snapshotForPanelMode(
 ): Pick<DesktopSnapshot, "state" | "thread"> {
   return {
     state: {
-      schema_version: 3,
+      schema_version: 4,
       domain: {
         session:
           sessionKind === "ready"
@@ -172,6 +172,7 @@ function snapshotForPanelMode(
                   recovery_methods: ["recoveryKey"]
                 }
               : { kind: "recovering" },
+        secure_backup_gate: { kind: "ready" },
         current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },
         auth: { kind: "unknown" },

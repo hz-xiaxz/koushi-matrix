@@ -92,6 +92,7 @@ export function UserSettingsPanel({
   onEnableKeyBackup,
   onChooseRoomKeyExportDestination,
   onChooseRoomKeyImportSource,
+  onChooseSecureBackupDestination = async () => null,
   onExportRoomKeys,
   onImportRoomKeys,
   onBootstrapSecureBackup,
@@ -142,6 +143,7 @@ export function UserSettingsPanel({
   onEnableKeyBackup: () => void;
   onChooseRoomKeyExportDestination: () => Promise<string | null>;
   onChooseRoomKeyImportSource: () => Promise<string | null>;
+  onChooseSecureBackupDestination?: () => Promise<string | null>;
   onExportRoomKeys: (destinationPath: string, passphrase: string) => void;
   onImportRoomKeys: (sourcePath: string, passphrase: string) => void;
   onBootstrapSecureBackup: (
@@ -642,6 +644,7 @@ export function UserSettingsPanel({
           onChangeSecureBackupPassphrase={onChangeSecureBackupPassphrase}
           onChooseRoomKeyExportDestination={onChooseRoomKeyExportDestination}
           onChooseRoomKeyImportSource={onChooseRoomKeyImportSource}
+          onChooseSecureBackupDestination={onChooseSecureBackupDestination}
           onExportRoomKeys={onExportRoomKeys}
           onImportRoomKeys={onImportRoomKeys}
           onOpenRecovery={onOpenRecovery}
@@ -726,6 +729,7 @@ function SecuritySection({
   onImportRoomKeys,
   onChooseRoomKeyExportDestination,
   onChooseRoomKeyImportSource,
+  onChooseSecureBackupDestination,
   onBootstrapSecureBackup,
   onChangeSecureBackupPassphrase,
   onOpenRecovery,
@@ -739,6 +743,7 @@ function SecuritySection({
   onImportRoomKeys: (sourcePath: string, passphrase: string) => void;
   onChooseRoomKeyExportDestination: () => Promise<string | null>;
   onChooseRoomKeyImportSource: () => Promise<string | null>;
+  onChooseSecureBackupDestination: () => Promise<string | null>;
   onBootstrapSecureBackup: (
     passphrase: string | null,
     recoveryKeyDestinationPath: string | null
@@ -755,10 +760,8 @@ function SecuritySection({
   const status = localEncryptionStatus(localEncryption);
   const roomKeyPassphraseRef = useRef<HTMLInputElement>(null);
   const secureBackupPassphraseRef = useRef<HTMLInputElement>(null);
-  const secureBackupRecoveryPathRef = useRef<HTMLInputElement>(null);
   const oldSecureBackupSecretRef = useRef<HTMLInputElement>(null);
   const newSecureBackupPassphraseRef = useRef<HTMLInputElement>(null);
-  const passphraseChangeRecoveryPathRef = useRef<HTMLInputElement>(null);
   const [roomKeyPassphraseRequest, setRoomKeyPassphraseRequest] =
     useState<RoomKeyPassphraseRequest | null>(null);
   async function chooseRoomKeyExport(event: FormEvent<HTMLFormElement>) {
@@ -803,25 +806,31 @@ function SecuritySection({
     setRoomKeyPassphraseRequest(null);
   }
 
-  function submitSecureBackupSetup(event: FormEvent<HTMLFormElement>) {
+  async function submitSecureBackupSetup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const passphrase = secureBackupPassphraseRef.current?.value ?? "";
-    const recoveryPath = secureBackupRecoveryPathRef.current?.value.trim() ?? "";
-    onBootstrapSecureBackup(passphrase.length > 0 ? passphrase : null, recoveryPath || null);
+    const recoveryPath = await onChooseSecureBackupDestination();
+    if (!recoveryPath) {
+      return;
+    }
+    onBootstrapSecureBackup(passphrase.length > 0 ? passphrase : null, recoveryPath);
     if (secureBackupPassphraseRef.current) {
       secureBackupPassphraseRef.current.value = "";
     }
   }
 
-  function submitSecureBackupPassphraseChange(event: FormEvent<HTMLFormElement>) {
+  async function submitSecureBackupPassphraseChange(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const oldSecret = oldSecureBackupSecretRef.current?.value ?? "";
     const newPassphrase = newSecureBackupPassphraseRef.current?.value ?? "";
-    const recoveryPath = passphraseChangeRecoveryPathRef.current?.value.trim() ?? "";
     if (!oldSecret || !newPassphrase) {
       return;
     }
-    onChangeSecureBackupPassphrase(oldSecret, newPassphrase, recoveryPath || null);
+    const recoveryPath = await onChooseSecureBackupDestination();
+    if (!recoveryPath) {
+      return;
+    }
+    onChangeSecureBackupPassphrase(oldSecret, newPassphrase, recoveryPath);
     if (oldSecureBackupSecretRef.current) {
       oldSecureBackupSecretRef.current.value = "";
     }
@@ -947,14 +956,6 @@ function SecuritySection({
                 autoComplete="new-password"
               />
             </label>
-            <label className="profile-settings-field">
-              <span>{t("settings.recoveryKeyDestination")}</span>
-              <ImeTextField
-                ref={secureBackupRecoveryPathRef}
-                autoComplete="off"
-                syncKey="secure-backup-recovery-path"
-              />
-            </label>
             <div className="profile-settings-actions">
               <button className="trust-action-button primary" type="submit">
                 <KeyRound size={14} />
@@ -985,14 +986,6 @@ function SecuritySection({
               <SecureImeTextField
                 ref={newSecureBackupPassphraseRef}
                 autoComplete="new-password"
-              />
-            </label>
-            <label className="profile-settings-field">
-              <span>{t("settings.recoveryKeyDestination")}</span>
-              <ImeTextField
-                ref={passphraseChangeRecoveryPathRef}
-                autoComplete="off"
-                syncKey="secure-backup-passphrase-recovery-path"
               />
             </label>
             <div className="profile-settings-actions">

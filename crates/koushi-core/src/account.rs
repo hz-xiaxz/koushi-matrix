@@ -66,7 +66,7 @@ use crate::command::{
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
 use crate::event::{
     AccountEvent, CoreEvent, E2eeTrustEvent, EventCacheFailureReasonClass,
-    EventCacheSubscribeStatus, LiveSignalsEvent, LocalEncryptionEvent,
+    EventCacheSubscribeStatus, LiveSignalsEvent, LocalEncryptionEvent, TimelineEvent,
 };
 use crate::executor;
 #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
@@ -169,6 +169,8 @@ const RECOVERY_TRUST_SETTLEMENT_POLL_INTERVAL: Duration = Duration::from_millis(
 const IDENTITY_RESET_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 const DEVICE_CLEANUP_REMOTE_TIMEOUT: Duration = Duration::from_secs(20);
 const CURRENT_SESSION_STATUS_TIMEOUT: Duration = Duration::from_secs(15);
+const SECURE_BACKUP_INSPECTION_TIMEOUT: Duration = Duration::from_secs(30);
+const SECURE_BACKUP_RETRY_DELAY: Duration = Duration::from_secs(5);
 const INCOMING_VERIFICATION_OBSERVER_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 const OIDC_REDIRECT_URI: &str = "koushi-desktop://auth/callback";
 /// Redacted message used in reducer error projections (never raw SDK text).
@@ -189,6 +191,49 @@ fn composer_timeline_command_targets_active_session(
     command
         .composer_account_fence()
         .is_none_or(|(_, expected_account)| active_session_key == Some(expected_account))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AuthoritativeRoomEncryption {
+    Unknown,
+    Unencrypted,
+    Encrypted,
+}
+
+fn secure_backup_user_content_is_admitted(
+    secure_backup_ready: bool,
+    encryption: AuthoritativeRoomEncryption,
+) -> bool {
+    match encryption {
+        AuthoritativeRoomEncryption::Unknown => false,
+        AuthoritativeRoomEncryption::Unencrypted => true,
+        AuthoritativeRoomEncryption::Encrypted => secure_backup_ready,
+    }
+}
+
+fn server_delayed_events_are_safe(encryption: AuthoritativeRoomEncryption) -> bool {
+    encryption == AuthoritativeRoomEncryption::Unencrypted
+}
+
+async fn admit_secure_backup_user_content(
+    session: &MatrixClientSession,
+    secure_backup_ready: bool,
+    room_id: &str,
+) -> Result<(matrix_sdk::Room, AuthoritativeRoomEncryption), TimelineFailureKind> {
+    let room_id = matrix_sdk::ruma::RoomId::parse(room_id)
+        .map_err(|_| TimelineFailureKind::SecureBackupRequired)?;
+    let room = session
+        .client()
+        .get_room(&room_id)
+        .ok_or(TimelineFailureKind::SecureBackupRequired)?;
+    let encryption = match room.latest_encryption_state().await {
+        Ok(state) if state.is_encrypted() => AuthoritativeRoomEncryption::Encrypted,
+        Ok(_) => AuthoritativeRoomEncryption::Unencrypted,
+        Err(_) => AuthoritativeRoomEncryption::Unknown,
+    };
+    secure_backup_user_content_is_admitted(secure_backup_ready, encryption)
+        .then_some((room, encryption))
+        .ok_or(TimelineFailureKind::SecureBackupRequired)
 }
 
 fn build_scheduled_message_content(
@@ -583,6 +628,21 @@ pub enum AccountMessage {
         trust: koushi_state::CurrentDeviceTrustState,
     },
     CheckCurrentDeviceTrust,
+    InspectSecureBackup,
+    SecureBackupInspectionFinished {
+        generation: u64,
+        result: Result<
+            koushi_sdk::MatrixSecureBackupInspection,
+            koushi_state::SecureBackupGateFailureKind,
+        >,
+    },
+    RetrySecureBackupInspection {
+        generation: u64,
+    },
+    SecureBackupStateChanged {
+        generation: u64,
+        state: koushi_sdk::MatrixSecureBackupState,
+    },
     RefreshCurrentSessionStatus {
         request_id: u64,
         trigger: koushi_state::SessionStatusRefreshTrigger,
@@ -1700,6 +1760,11 @@ pub struct AccountActor {
     trust_recheck_pending: bool,
     current_session_status_task: Option<crate::executor::JoinHandle<()>>,
     current_session_status_request: Option<u64>,
+    secure_backup_ready: bool,
+    recovery_key_delivery_pending: bool,
+    secure_backup_inspection_task: Option<crate::executor::JoinHandle<()>>,
+    secure_backup_inspection_pending: bool,
+    secure_backup_observer: Option<crate::executor::JoinHandle<()>>,
     verification_method_discovery_task: Option<OwnedVerificationMethodDiscoveryTask>,
     verification_method_discovery_serial: u64,
     verification_method_discovery_failed: bool,
@@ -1929,6 +1994,11 @@ impl AccountActor {
             trust_recheck_pending: false,
             current_session_status_task: None,
             current_session_status_request: None,
+            secure_backup_ready: false,
+            recovery_key_delivery_pending: false,
+            secure_backup_inspection_task: None,
+            secure_backup_inspection_pending: false,
+            secure_backup_observer: None,
             verification_method_discovery_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,
@@ -2602,6 +2672,22 @@ impl AccountActor {
                     self.handle_trust_projection_applied(generation, transition_id, ready, locked)
                         .await;
                 }
+                AccountMessage::InspectSecureBackup => {
+                    self.start_secure_backup_inspection();
+                }
+                AccountMessage::SecureBackupInspectionFinished { generation, result } => {
+                    self.finish_secure_backup_inspection(generation, result)
+                        .await;
+                }
+                AccountMessage::RetrySecureBackupInspection { generation } => {
+                    if generation == self.trust_generation && self.session_promoted {
+                        self.start_secure_backup_inspection();
+                    }
+                }
+                AccountMessage::SecureBackupStateChanged { generation, state } => {
+                    self.handle_secure_backup_state_changed(generation, state)
+                        .await;
+                }
                 AccountMessage::RejectProvisionalSession { request_id } => {
                     self.perform_logout(request_id, true, false).await;
                 }
@@ -2945,6 +3031,33 @@ impl AccountActor {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         }
+        if let Some(target) = crate::runtime::encrypted_user_content_target(&command) {
+            let Some(session) = self.session.as_deref().filter(|_| self.session_promoted) else {
+                self.emit_failure(target.request_id, CoreFailure::SessionRequired);
+                return;
+            };
+            if let Err(kind) =
+                admit_secure_backup_user_content(session, self.secure_backup_ready, target.room_id)
+                    .await
+            {
+                if let Some((key, submission_id)) = target.submission {
+                    let _ = self.event_tx.send(CoreEvent::Timeline(
+                        TimelineEvent::SubmissionRejected {
+                            request_id: target.request_id,
+                            key: key.clone(),
+                            submission_id: submission_id.clone(),
+                            kind,
+                        },
+                    ));
+                } else {
+                    self.emit_failure(
+                        target.request_id,
+                        CoreFailure::TimelineOperationFailed { kind },
+                    );
+                }
+                return;
+            }
+        }
         if let TimelineCommand::BroadcastLinkPreviewPolicy {
             unencrypted_global_enabled,
             encrypted_global_enabled,
@@ -3124,9 +3237,25 @@ impl AccountActor {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
+        let (_, encryption) =
+            match admit_secure_backup_user_content(session, self.secure_backup_ready, &room_id)
+                .await
+            {
+                Ok(admitted) => admitted,
+                Err(kind) => {
+                    self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
+                    return;
+                }
+            };
 
         let capability = crate::scheduled_send::detect_capability(&session.client()).await;
-        if capability == ScheduledSendCapability::ServerDelayedEvents {
+        // The delayed-event endpoint accepts event content directly; a homeserver
+        // cannot perform client-side room encryption. Encrypted rooms therefore
+        // always use the local scheduler, whose eventual Room::send crosses the
+        // exact-session secure-backup fence.
+        if server_delayed_events_are_safe(encryption)
+            && capability == ScheduledSendCapability::ServerDelayedEvents
+        {
             match self
                 .send_server_delayed_message(
                     session,
@@ -3214,31 +3343,17 @@ impl AccountActor {
                 .await;
             return;
         };
-        let room_id = match matrix_sdk::ruma::RoomId::parse(&room_id) {
-            Ok(room_id) => room_id,
-            Err(_) => {
-                self.emit_failure(
-                    request_id,
-                    CoreFailure::TimelineOperationFailed {
-                        kind: TimelineFailureKind::Sdk,
-                    },
-                );
-                self.retry_local_scheduled_send(scheduled_id, retry_at_ms)
-                    .await;
-                return;
-            }
-        };
-        let Some(room) = session.client().get_room(&room_id) else {
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::Sdk,
-                },
-            );
-            self.retry_local_scheduled_send(scheduled_id, retry_at_ms)
-                .await;
-            return;
-        };
+        let room =
+            match admit_secure_backup_user_content(session, self.secure_backup_ready, &room_id)
+                .await
+            {
+                Ok((room, _)) => room,
+                Err(_) => {
+                    self.retry_local_scheduled_send(scheduled_id, retry_at_ms)
+                        .await;
+                    return;
+                }
+            };
         let content = match build_scheduled_message_content(&body, thread_root_event_id.as_deref())
         {
             Ok(content) => content,
@@ -3252,7 +3367,12 @@ impl AccountActor {
         let transaction_id = matrix_sdk::ruma::OwnedTransactionId::from(
             crate::scheduled_send::scheduled_send_transaction_id(&scheduled_id),
         );
-        match room.send(content).with_transaction_id(transaction_id).await {
+        match room
+            .send(content)
+            .require_backed_up_session()
+            .with_transaction_id(transaction_id)
+            .await
+        {
             Ok(_) => {
                 self.send_actions(vec![AppAction::ScheduledSendDispatched { scheduled_id }])
                     .await;
@@ -3324,6 +3444,16 @@ impl AccountActor {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
+        let (_, encryption) =
+            match admit_secure_backup_user_content(session, self.secure_backup_ready, &room_id)
+                .await
+            {
+                Ok(admitted) => admitted,
+                Err(kind) => {
+                    self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
+                    return;
+                }
+            };
 
         if self
             .update_server_delayed_event(
@@ -3340,6 +3470,22 @@ impl AccountActor {
                     kind: TimelineFailureKind::Sdk,
                 },
             );
+            return;
+        }
+
+        if encryption == AuthoritativeRoomEncryption::Encrypted {
+            self.send_actions(vec![
+                AppAction::ScheduledSendCapabilityChanged {
+                    capability: ScheduledSendCapability::LocalFallback,
+                },
+                AppAction::ScheduledSendRescheduled {
+                    scheduled_id,
+                    body,
+                    send_at_ms,
+                    handle: ScheduledSendHandle::Local,
+                },
+            ])
+            .await;
             return;
         }
 
@@ -3602,7 +3748,16 @@ impl AccountActor {
         }
     }
 
+    fn set_secure_backup_send_admitted(&mut self, admitted: bool) {
+        self.secure_backup_ready = admitted;
+        if let Some(session) = self.session.as_ref() {
+            session.set_secure_backup_send_admitted(admitted);
+        }
+    }
+
     async fn stop_current_session_runtime(&mut self) {
+        self.set_secure_backup_send_admitted(false);
+        self.recovery_key_delivery_pending = false;
         // Retire the renderer before any account-owned child can be replaced.
         // Already-admitted command permits remain live until their exact
         // reducer settlement, but no producer from the retired generation can
@@ -3612,6 +3767,8 @@ impl AccountActor {
         self.stop_recovery_trust_settlement_task().await;
         self.stop_provisional_runtime().await;
         self.cancel_current_session_status_refresh().await;
+        self.cancel_secure_backup_inspection().await;
+        self.stop_secure_backup_observer().await;
         self.stop_recovery_observer().await;
         self.stop_incoming_verification_observer().await;
         self.stop_session_change_observer().await;
@@ -4301,6 +4458,15 @@ impl AccountActor {
             } => {
                 self.handle_bootstrap_secure_backup(request_id, request)
                     .await;
+            }
+            AccountCommand::RecoverSecureBackup {
+                request_id,
+                request,
+            } => {
+                self.handle_recover_secure_backup(request_id, request).await;
+            }
+            AccountCommand::RetrySecureBackupInspection { .. } => {
+                self.start_secure_backup_inspection();
             }
             AccountCommand::ChangeSecureBackupPassphrase {
                 request_id,
@@ -6440,7 +6606,7 @@ impl AccountActor {
     }
 
     async fn handle_bootstrap_secure_backup(
-        &self,
+        &mut self,
         request_id: RequestId,
         request: SecureBackupSetupRequest,
     ) {
@@ -6460,16 +6626,38 @@ impl AccountActor {
         let SecureBackupSetupRequest {
             passphrase,
             recovery_key_destination_path,
+            explicit_reenable_confirmed,
         } = request;
-        let result = koushi_sdk::bootstrap_secure_backup(
-            &session,
-            passphrase.as_ref(),
-            recovery_key_destination_path,
-        )
+        if recovery_key_destination_path.is_none() {
+            self.send_actions(vec![AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
+            )])
+            .await;
+            self.emit_failure(
+                request_id,
+                CoreFailure::AccountOperationFailed {
+                    kind: AuthFailureKind::Sdk,
+                },
+            );
+            return;
+        }
+        self.send_actions(vec![AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::CreatingBackup,
+        )])
         .await;
+        let result = if explicit_reenable_confirmed {
+            session
+                .reenable_secure_backup(passphrase.as_ref(), recovery_key_destination_path)
+                .await
+        } else {
+            session
+                .setup_secure_backup(passphrase.as_ref(), recovery_key_destination_path)
+                .await
+        };
         drop(passphrase);
         match result {
             Ok(summary) => {
+                self.recovery_key_delivery_pending = false;
                 let delivery = if summary.recovery_key_written {
                     RecoveryKeyDeliveryState::Written
                 } else {
@@ -6485,13 +6673,56 @@ impl AccountActor {
                     },
                 ])
                 .await;
+                self.start_secure_backup_inspection();
             }
             Err(error) => {
                 let kind = classify_e2ee_trust_error(&error);
-                self.send_actions(vec![AppAction::SecureBackupSetupFailed {
+                let mut actions = vec![AppAction::SecureBackupSetupFailed {
                     request_id: request_id.sequence,
                     kind,
-                }])
+                }];
+                if matches!(
+                    error,
+                    koushi_sdk::E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed
+                ) {
+                    self.recovery_key_delivery_pending = true;
+                    self.set_secure_backup_send_admitted(false);
+                    actions.push(AppAction::SecureBackupGateChanged(
+                        koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
+                    ));
+                }
+                self.send_actions(actions).await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: classify_e2ee_trust_auth_failure(&error),
+                    },
+                );
+            }
+        }
+    }
+
+    async fn handle_recover_secure_backup(
+        &mut self,
+        request_id: RequestId,
+        request: RecoveryRequest,
+    ) {
+        let Some(session) = self.session.clone().filter(|_| self.session_promoted) else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        self.send_actions(vec![AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::Checking,
+        )])
+        .await;
+        match session.recover_secure_backup(&request).await {
+            Ok(()) => self.start_secure_backup_inspection(),
+            Err(error) => {
+                self.send_actions(vec![AppAction::SecureBackupGateChanged(
+                    koushi_state::SecureBackupGateState::ExistingBackupNeedsRecovery {
+                        failure: Some(classify_secure_backup_gate_failure(&error)),
+                    },
+                )])
                 .await;
                 self.emit_failure(
                     request_id,
@@ -8101,6 +8332,7 @@ impl AccountActor {
         self.record_lifecycle_probe("incoming_verification_observer_terminated");
         self.stop_session_change_observer().await;
         self.invalidate_account_hydration();
+        self.set_secure_backup_send_admitted(false);
         drop(self.session.take());
         self.session_key_id = None;
 
@@ -8305,6 +8537,7 @@ impl AccountActor {
         let SecureBackupSetupRequest {
             passphrase,
             recovery_key_destination_path,
+            explicit_reenable_confirmed: _,
         } = request;
         let result = koushi_sdk::bootstrap_secure_backup(
             &session,
@@ -8605,6 +8838,7 @@ impl AccountActor {
         let trust_at_promotion = session.current_device_trust();
         self.start_session_change_observer(session.clone());
         self.session_promoted = true;
+        self.start_secure_backup_observer(session.clone());
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
         }
@@ -8975,6 +9209,154 @@ impl AccountActor {
         }
     }
 
+    fn start_secure_backup_inspection(&mut self) {
+        self.set_secure_backup_send_admitted(false);
+        if self.secure_backup_inspection_task.is_some() {
+            self.secure_backup_inspection_pending = true;
+            return;
+        }
+        let Some(session) = self.session.clone().filter(|_| self.session_promoted) else {
+            return;
+        };
+        let generation = self.trust_generation;
+        record(DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.secure_backup",
+            "inspection_started",
+        ));
+        let tx = self.self_tx.clone();
+        self.secure_backup_inspection_task = Some(executor::spawn(async move {
+            let result = match executor::timeout(
+                SECURE_BACKUP_INSPECTION_TIMEOUT,
+                session.inspect_secure_backup(),
+            )
+            .await
+            {
+                Ok(Ok(inspection)) => Ok(inspection),
+                Ok(Err(error)) => Err(classify_secure_backup_gate_failure(&error)),
+                Err(_) => Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+            };
+            let _ = tx
+                .send(AccountMessage::SecureBackupInspectionFinished { generation, result })
+                .await;
+        }));
+    }
+
+    async fn finish_secure_backup_inspection(
+        &mut self,
+        generation: u64,
+        result: Result<
+            koushi_sdk::MatrixSecureBackupInspection,
+            koushi_state::SecureBackupGateFailureKind,
+        >,
+    ) {
+        self.secure_backup_inspection_task = None;
+        if std::mem::take(&mut self.secure_backup_inspection_pending) {
+            self.start_secure_backup_inspection();
+            return;
+        }
+        let Some(mut action) = secure_backup_inspection_completion_action(
+            self.trust_generation,
+            self.session_promoted,
+            generation,
+            result,
+        ) else {
+            if self.session_promoted {
+                self.start_secure_backup_inspection();
+            }
+            return;
+        };
+        if self.recovery_key_delivery_pending
+            && matches!(
+                action,
+                AppAction::SecureBackupGateChanged(koushi_state::SecureBackupGateState::Ready)
+            )
+        {
+            action = AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
+            );
+        }
+        if let AppAction::SecureBackupGateChanged(gate) = &action {
+            let admitted = matches!(gate, koushi_state::SecureBackupGateState::Ready);
+            self.set_secure_backup_send_admitted(admitted);
+            if matches!(
+                gate,
+                koushi_state::SecureBackupGateState::DegradedRetrying { .. }
+            ) {
+                let tx = self.self_tx.clone();
+                std::mem::drop(executor::spawn(async move {
+                    executor::sleep(SECURE_BACKUP_RETRY_DELAY).await;
+                    let _ = tx
+                        .send(AccountMessage::RetrySecureBackupInspection { generation })
+                        .await;
+                }));
+            }
+            record(
+                DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.secure_backup",
+                    "inspection_settled",
+                )
+                .field(DiagnosticField::token(
+                    "gate",
+                    secure_backup_gate_token(gate),
+                )),
+            );
+        }
+        self.send_actions(vec![action]).await;
+    }
+
+    async fn cancel_secure_backup_inspection(&mut self) {
+        self.secure_backup_inspection_pending = false;
+        if let Some(task) = self.secure_backup_inspection_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    fn start_secure_backup_observer(&mut self, session: Arc<MatrixClientSession>) {
+        if let Some(task) = self.secure_backup_observer.take() {
+            task.abort();
+        }
+        let generation = self.trust_generation;
+        let mut observation = session.observe_secure_backup_state();
+        let tx = self.self_tx.clone();
+        self.secure_backup_observer = Some(executor::spawn(async move {
+            while let Some(state) = observation.updates.next().await {
+                if tx
+                    .send(AccountMessage::SecureBackupStateChanged { generation, state })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+    }
+
+    async fn handle_secure_backup_state_changed(
+        &mut self,
+        generation: u64,
+        _state: koushi_sdk::MatrixSecureBackupState,
+    ) {
+        if generation != self.trust_generation || !self.session_promoted {
+            return;
+        }
+        self.set_secure_backup_send_admitted(false);
+        self.send_actions(vec![AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::Checking,
+        )])
+        .await;
+        self.start_secure_backup_inspection();
+    }
+
+    async fn stop_secure_backup_observer(&mut self) {
+        if let Some(task) = self.secure_backup_observer.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
     async fn perform_logout(
         &mut self,
         request_id: RequestId,
@@ -9023,6 +9405,7 @@ impl AccountActor {
         self.pending_sliding_sync_retry = None;
         self.stored_sliding_sync_admission = None;
         self.sliding_sync_revalidation_pending = None;
+        self.set_secure_backup_send_admitted(false);
         let session = match self.session.take() {
             Some(s) => s,
             None => {
@@ -9179,6 +9562,9 @@ impl AccountActor {
         action: AppAction,
     ) {
         debug_assert!(self.pending_session_teardown.is_none());
+        if self.session.is_some() {
+            self.set_secure_backup_send_admitted(false);
+        }
         if let Some(previous_session) = self.session.take() {
             let previous_key_id = self.session_key_id.take();
             self.stop_current_session_runtime().await;
@@ -9205,6 +9591,7 @@ impl AccountActor {
         self.pending_uia_operations.clear();
         self.pending_device_cleanup = None;
         self.session = Some(session.clone());
+        self.set_secure_backup_send_admitted(false);
         self.session_key_id = Some(key_id);
         self.sliding_sync_positive_evidence = persistable.sliding_sync_positive_evidence();
         self.provisional_persistable = Some(persistable);
@@ -9398,6 +9785,7 @@ impl AccountActor {
     }
 
     async fn stop_normal_runtime_children(&mut self) {
+        self.set_secure_backup_send_admitted(false);
         self.record_lifecycle_probe("stop_recovery_observer");
         self.stop_recovery_observer().await;
         self.record_lifecycle_probe("stop_incoming_verification_observer");
@@ -9675,6 +10063,7 @@ impl AccountActor {
         self.start_recovery_observer(session.clone());
         self.start_session_change_observer(session.clone());
         self.session_promoted = true;
+        self.start_secure_backup_observer(session.clone());
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
         }
@@ -10470,6 +10859,48 @@ impl AccountActor {
     }
 }
 
+fn secure_backup_inspection_completion_action(
+    current_generation: u64,
+    session_promoted: bool,
+    generation: u64,
+    result: Result<
+        koushi_sdk::MatrixSecureBackupInspection,
+        koushi_state::SecureBackupGateFailureKind,
+    >,
+) -> Option<AppAction> {
+    if generation != current_generation || !session_promoted {
+        return None;
+    }
+    let gate = match result {
+        Ok(inspection) => inspection.recommended_gate_state(),
+        Err(
+            failure @ (koushi_state::SecureBackupGateFailureKind::Network
+            | koushi_state::SecureBackupGateFailureKind::RateLimited
+            | koushi_state::SecureBackupGateFailureKind::Timeout),
+        ) => koushi_state::SecureBackupGateState::DegradedRetrying { failure },
+        Err(failure) => koushi_state::SecureBackupGateState::BlockedFailed { failure },
+    };
+    Some(AppAction::SecureBackupGateChanged(gate))
+}
+
+fn secure_backup_gate_token(gate: &koushi_state::SecureBackupGateState) -> &'static str {
+    use koushi_state::SecureBackupGateState;
+    match gate {
+        SecureBackupGateState::Inactive => "inactive",
+        SecureBackupGateState::Checking => "checking",
+        SecureBackupGateState::ExistingBackupNeedsRecovery { .. } => "recovery_required",
+        SecureBackupGateState::SecureStorageIncomplete => "secure_storage_incomplete",
+        SecureBackupGateState::SetupRequired => "setup_required",
+        SecureBackupGateState::ExplicitlyDisabledRequiresSetup => "explicitly_disabled",
+        SecureBackupGateState::CreatingBackup => "creating",
+        SecureBackupGateState::RecoveryKeyDeliveryRequired => "delivery_required",
+        SecureBackupGateState::UploadingExistingKeys { .. } => "uploading",
+        SecureBackupGateState::DegradedRetrying { .. } => "degraded",
+        SecureBackupGateState::BlockedFailed { .. } => "blocked_failed",
+        SecureBackupGateState::Ready => "ready",
+    }
+}
+
 async fn send_scheduled_acceptance_actions(
     action_tx: &mpsc::Sender<Vec<AppAction>>,
     actions: Vec<AppAction>,
@@ -10967,7 +11398,14 @@ fn classify_recovery_error(
 
 fn classify_e2ee_trust_error(error: &koushi_sdk::E2eeTrustError) -> TrustOperationFailureKind {
     match error {
-        koushi_sdk::E2eeTrustError::NoOlmMachine => TrustOperationFailureKind::Sdk,
+        koushi_sdk::E2eeTrustError::NoOlmMachine
+        | koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive
+        | koushi_sdk::E2eeTrustError::SecureBackupAlreadyExists
+        | koushi_sdk::E2eeTrustError::SecureBackupReenableConfirmationRequired
+        | koushi_sdk::E2eeTrustError::SecureBackupUploadFailed
+        | koushi_sdk::E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed => {
+            TrustOperationFailureKind::Sdk
+        }
         koushi_sdk::E2eeTrustError::Sdk(message) => {
             let lower = message.to_ascii_lowercase();
             if lower.contains("passphrase")
@@ -10994,6 +11432,37 @@ fn classify_e2ee_trust_error(error: &koushi_sdk::E2eeTrustError) -> TrustOperati
                 TrustOperationFailureKind::Sdk
             }
         }
+    }
+}
+
+fn classify_secure_backup_gate_failure(
+    error: &koushi_sdk::E2eeTrustError,
+) -> koushi_state::SecureBackupGateFailureKind {
+    use koushi_sdk::E2eeTrustError;
+    use koushi_state::SecureBackupGateFailureKind;
+
+    match error {
+        E2eeTrustError::SecureBackupUploadFailed => SecureBackupGateFailureKind::Network,
+        E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed => {
+            SecureBackupGateFailureKind::ArtifactDelivery
+        }
+        E2eeTrustError::SecureBackupInspectionInconclusive => SecureBackupGateFailureKind::Sdk,
+        E2eeTrustError::SecureBackupAlreadyExists => SecureBackupGateFailureKind::BackupKeyMismatch,
+        E2eeTrustError::NoOlmMachine | E2eeTrustError::SecureBackupReenableConfirmationRequired => {
+            SecureBackupGateFailureKind::Sdk
+        }
+        E2eeTrustError::Sdk(_) => match classify_e2ee_trust_error(error) {
+            TrustOperationFailureKind::InvalidPassphrase => {
+                SecureBackupGateFailureKind::InvalidRecoveryKey
+            }
+            TrustOperationFailureKind::Timeout => SecureBackupGateFailureKind::Timeout,
+            TrustOperationFailureKind::Forbidden => SecureBackupGateFailureKind::Forbidden,
+            TrustOperationFailureKind::Network => SecureBackupGateFailureKind::Network,
+            TrustOperationFailureKind::Mismatch => SecureBackupGateFailureKind::BackupKeyMismatch,
+            TrustOperationFailureKind::Cancelled | TrustOperationFailureKind::Sdk => {
+                SecureBackupGateFailureKind::Sdk
+            }
+        },
     }
 }
 
@@ -11360,6 +11829,210 @@ mod tests {
             own_identity_verification: koushi_state::OwnIdentityVerification::Verified,
             key_backup: koushi_state::CurrentSessionBackupState::Ready,
         }
+    }
+
+    fn ready_secure_backup_inspection() -> koushi_sdk::MatrixSecureBackupInspection {
+        koushi_sdk::MatrixSecureBackupInspection {
+            server: koushi_sdk::MatrixSecureBackupServerState::Present,
+            local: koushi_sdk::MatrixSecureBackupLocalState::Enabled,
+            recovery: koushi_sdk::MatrixSecureBackupRecoveryState::Enabled,
+            upload: koushi_sdk::MatrixSecureBackupUploadState::Settled,
+            trust: koushi_sdk::MatrixSecureBackupTrustState::Trusted,
+            recovery_key_delivery_pending: false,
+        }
+    }
+
+    #[test]
+    fn secure_backup_completion_rejects_stale_or_unpromoted_sessions() {
+        for (current_generation, promoted, completed_generation) in [(5, true, 4), (5, false, 5)] {
+            assert!(
+                secure_backup_inspection_completion_action(
+                    current_generation,
+                    promoted,
+                    completed_generation,
+                    Ok(ready_secure_backup_inspection()),
+                )
+                .is_none()
+            );
+        }
+
+        assert!(matches!(
+            secure_backup_inspection_completion_action(
+                5,
+                true,
+                5,
+                Ok(ready_secure_backup_inspection()),
+            ),
+            Some(AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::Ready
+            ))
+        ));
+        assert!(matches!(
+            secure_backup_inspection_completion_action(
+                5,
+                true,
+                5,
+                Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+            ),
+            Some(AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::DegradedRetrying {
+                    failure: koushi_state::SecureBackupGateFailureKind::Timeout
+                }
+            ))
+        ));
+    }
+
+    #[test]
+    fn secure_backup_room_admission_fails_closed_without_authoritative_metadata() {
+        assert!(!secure_backup_user_content_is_admitted(
+            true,
+            AuthoritativeRoomEncryption::Unknown,
+        ));
+        assert!(!secure_backup_user_content_is_admitted(
+            false,
+            AuthoritativeRoomEncryption::Unknown,
+        ));
+    }
+
+    #[test]
+    fn secure_backup_room_admission_only_gates_authoritatively_encrypted_rooms() {
+        assert!(secure_backup_user_content_is_admitted(
+            false,
+            AuthoritativeRoomEncryption::Unencrypted,
+        ));
+        assert!(!secure_backup_user_content_is_admitted(
+            false,
+            AuthoritativeRoomEncryption::Encrypted,
+        ));
+        assert!(secure_backup_user_content_is_admitted(
+            true,
+            AuthoritativeRoomEncryption::Encrypted,
+        ));
+    }
+
+    #[test]
+    fn server_delayed_events_are_used_only_for_authoritatively_unencrypted_rooms() {
+        assert!(server_delayed_events_are_safe(
+            AuthoritativeRoomEncryption::Unencrypted
+        ));
+        assert!(!server_delayed_events_are_safe(
+            AuthoritativeRoomEncryption::Encrypted
+        ));
+        assert!(!server_delayed_events_are_safe(
+            AuthoritativeRoomEncryption::Unknown
+        ));
+    }
+
+    #[test]
+    fn secure_backup_barrier_covers_normal_and_scheduled_user_content_routes() {
+        let source = include_str!("account.rs");
+        for (start, end) in [
+            (
+                "async fn route_timeline_command_with_permit_and_formatting_options",
+                "fn flush_pending_crawler_notification",
+            ),
+            (
+                "async fn handle_schedule_server_delayed_send",
+                "async fn handle_dispatch_local_scheduled_send",
+            ),
+            (
+                "async fn handle_dispatch_local_scheduled_send",
+                "async fn retry_local_scheduled_send",
+            ),
+            (
+                "async fn handle_reschedule_server_delayed_send",
+                "async fn send_server_delayed_message",
+            ),
+        ] {
+            let route = source
+                .split(start)
+                .nth(1)
+                .unwrap_or_else(|| panic!("missing route {start}"))
+                .split(end)
+                .next()
+                .unwrap_or_else(|| panic!("missing route terminator {end}"));
+            assert!(
+                route.contains("admit_secure_backup_user_content"),
+                "{start} must use the authoritative AccountActor barrier"
+            );
+        }
+
+        let reschedule = source
+            .split("async fn handle_reschedule_server_delayed_send")
+            .nth(1)
+            .expect("reschedule handler")
+            .split("async fn send_server_delayed_message")
+            .next()
+            .expect("server send helper");
+        let barrier = reschedule
+            .find("admit_secure_backup_user_content")
+            .expect("reschedule barrier");
+        let cancellation = reschedule
+            .find("UpdateAction::Cancel")
+            .expect("delayed-event cancellation");
+        assert!(
+            barrier < cancellation,
+            "a rejected reschedule must leave the existing delayed event intact"
+        );
+    }
+
+    #[test]
+    fn local_scheduled_room_send_uses_per_session_backup_durability_fence() {
+        let source = include_str!("account.rs");
+        let handler = source
+            .split("async fn handle_dispatch_local_scheduled_send")
+            .nth(1)
+            .expect("local scheduled dispatch handler")
+            .split("async fn retry_local_scheduled_send")
+            .next()
+            .expect("local scheduled retry helper");
+        assert!(
+            handler.contains(".require_backed_up_session()"),
+            "direct Room::send must use the same durability fence as normal sends"
+        );
+    }
+
+    #[test]
+    fn secure_backup_queue_latch_follows_authoritative_gate_lifecycle() {
+        let source = include_str!("account.rs");
+        for (start, end) in [
+            (
+                "fn start_secure_backup_inspection",
+                "async fn finish_secure_backup_inspection",
+            ),
+            (
+                "async fn handle_secure_backup_state_changed",
+                "async fn stop_secure_backup_observer",
+            ),
+            (
+                "async fn stop_current_session_runtime",
+                "async fn stop_room_actor",
+            ),
+        ] {
+            let lifecycle = source
+                .split(start)
+                .nth(1)
+                .unwrap_or_else(|| panic!("missing lifecycle boundary {start}"))
+                .split(end)
+                .next()
+                .unwrap_or_else(|| panic!("missing lifecycle terminator {end}"));
+            assert!(
+                lifecycle.contains("set_secure_backup_send_admitted(false)"),
+                "{start} must close the SDK queue latch before degradation or teardown"
+            );
+        }
+
+        let completion = source
+            .split("async fn finish_secure_backup_inspection")
+            .nth(1)
+            .expect("inspection completion")
+            .split("async fn cancel_secure_backup_inspection")
+            .next()
+            .expect("inspection completion terminator");
+        assert!(
+            completion.contains("set_secure_backup_send_admitted(admitted)"),
+            "only the generation-fenced authoritative completion may reopen the SDK queue latch"
+        );
     }
 
     #[test]
@@ -14829,6 +15502,7 @@ mod tests {
     #[tokio::test]
     async fn own_user_sas_proof_success_enters_shared_authoritative_promotion_path() {
         let (handle, mut action_rx) = login_gated_actor().await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
         let flow_id = 83;
         handle
             .send(AccountMessage::ConfigureSyntheticVerification { flow_id })
@@ -14839,8 +15513,24 @@ mod tests {
                 terminal: SyntheticVerificationTerminal::Success,
             })
             .await;
-        let _ = inspect_session_runtime(&handle).await;
-        let _ = inspect_session_runtime(&handle).await;
+        let mut verification_completed = false;
+        let mut authoritative_recheck_settled = false;
+        while !(verification_completed && authoritative_recheck_settled) {
+            let actions =
+                recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx).await;
+            verification_completed |= matches!(
+                actions.as_slice(),
+                [AppAction::VerificationCompleted { request_id }] if *request_id == flow_id
+            );
+            authoritative_recheck_settled |= matches!(
+                actions.as_slice(),
+                [AppAction::AuthoritativeDeviceTrustChanged {
+                    trust: koushi_state::CurrentDeviceTrustState::Unknown
+                        | koushi_state::CurrentDeviceTrustState::Unverified,
+                    ..
+                }]
+            );
+        }
         handle
             .send(AccountMessage::CurrentDeviceTrustChanged {
                 generation: 2,
@@ -15746,10 +16436,16 @@ mod tests {
                 })
                 .await
         );
-        assert_eq!(
-            inspect_session_runtime(handle).await,
-            (true, true, true, true)
-        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if inspect_session_runtime(handle).await == (true, true, true, true) {
+                    break;
+                }
+                crate::executor::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("verified runtime children should start");
     }
 
     fn assert_no_logout_finished(action_rx: &mut mpsc::Receiver<Vec<AppAction>>) {
@@ -17458,6 +18154,11 @@ mod tests {
             trust_recheck_pending: false,
             current_session_status_task: None,
             current_session_status_request: None,
+            secure_backup_ready: false,
+            recovery_key_delivery_pending: false,
+            secure_backup_inspection_task: None,
+            secure_backup_inspection_pending: false,
+            secure_backup_observer: None,
             verification_method_discovery_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,

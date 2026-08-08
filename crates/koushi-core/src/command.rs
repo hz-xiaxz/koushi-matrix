@@ -117,6 +117,8 @@ impl CoreCommand {
                 | AccountCommand::ExportRoomKeys { request_id, .. }
                 | AccountCommand::ImportRoomKeys { request_id, .. }
                 | AccountCommand::BootstrapSecureBackup { request_id, .. }
+                | AccountCommand::RecoverSecureBackup { request_id, .. }
+                | AccountCommand::RetrySecureBackupInspection { request_id }
                 | AccountCommand::ChangeSecureBackupPassphrase { request_id, .. }
                 | AccountCommand::ProbeLocalEncryptionHealth { request_id }
                 | AccountCommand::ResetLocalData { request_id }
@@ -1098,6 +1100,7 @@ impl fmt::Debug for RoomKeyImportRequest {
 pub struct SecureBackupSetupRequest {
     pub passphrase: Option<koushi_state::AuthSecret>,
     pub recovery_key_destination_path: Option<PathBuf>,
+    pub explicit_reenable_confirmed: bool,
 }
 
 impl fmt::Debug for SecureBackupSetupRequest {
@@ -1108,6 +1111,10 @@ impl fmt::Debug for SecureBackupSetupRequest {
             .field(
                 "has_recovery_key_destination_path",
                 &self.recovery_key_destination_path.is_some(),
+            )
+            .field(
+                "explicit_reenable_confirmed",
+                &self.explicit_reenable_confirmed,
             )
             .finish()
     }
@@ -1229,6 +1236,13 @@ pub enum AccountCommand {
     BootstrapSecureBackup {
         request_id: RequestId,
         request: SecureBackupSetupRequest,
+    },
+    RecoverSecureBackup {
+        request_id: RequestId,
+        request: RecoveryRequest,
+    },
+    RetrySecureBackupInspection {
+        request_id: RequestId,
     },
     ChangeSecureBackupPassphrase {
         request_id: RequestId,
@@ -1400,6 +1414,8 @@ impl AccountCommand {
                 | Self::ExportRoomKeys { .. }
                 | Self::ImportRoomKeys { .. }
                 | Self::BootstrapSecureBackup { .. }
+                | Self::RecoverSecureBackup { .. }
+                | Self::RetrySecureBackupInspection { .. }
                 | Self::ChangeSecureBackupPassphrase { .. }
                 | Self::SetPresence { .. }
                 | Self::SetDisplayName { .. }
@@ -1569,6 +1585,18 @@ impl fmt::Debug for AccountCommand {
                 .debug_struct("BootstrapSecureBackup")
                 .field("request_id", request_id)
                 .field("request", request)
+                .finish(),
+            Self::RecoverSecureBackup {
+                request_id,
+                request,
+            } => formatter
+                .debug_struct("RecoverSecureBackup")
+                .field("request_id", request_id)
+                .field("request", request)
+                .finish(),
+            Self::RetrySecureBackupInspection { request_id } => formatter
+                .debug_struct("RetrySecureBackupInspection")
+                .field("request_id", request_id)
                 .finish(),
             Self::ChangeSecureBackupPassphrase {
                 request_id,

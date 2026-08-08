@@ -10,9 +10,10 @@ use koushi_state::{
     LiveSignalsState, LocalEncryptionState, MentionCandidatesState, NativeAttentionState,
     NavigationState, ProfileState, QrLoginState, RoomInteractionState, RoomListProjection,
     RoomManagementState, RoomNotificationSettings, RoomPreferencesState, RoomSummary,
-    SearchCrawlerState, SearchState, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceMembersState, SpaceSummary, SyncState, ThreadAttentionState,
-    ThreadPaneState, ThreadsListState, TimelinePaneState, compose_sidebar_with_account_facts,
+    SearchCrawlerState, SearchState, SecureBackupGateState, SessionState, SettingsState,
+    SidebarModel, SoftLogoutReauthState, SpaceMembersState, SpaceSummary, SyncState,
+    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
+    compose_sidebar_with_account_facts,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +26,7 @@ pub struct StateDelta {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StateDeltaChangedSlices {
     pub session: Option<SessionState>,
+    pub secure_backup_gate: Option<SecureBackupGateState>,
     pub device_cleanup: Option<DeviceCleanupState>,
     pub current_session_status: Option<CurrentSessionStatusState>,
     pub auth: Option<AuthDiscoveryState>,
@@ -94,6 +96,7 @@ pub fn build_state_delta(
     }
 
     changed_slice!(session);
+    changed_slice!(secure_backup_gate);
     changed_slice!(device_cleanup);
     changed_slice!(current_session_status);
     changed_slice!(auth);
@@ -173,6 +176,7 @@ pub fn build_state_delta(
 fn audit_app_state_delta_slices(state: &AppState) {
     let AppState {
         session: _,
+        secure_backup_gate: _,
         sliding_sync_account_epoch: _,
         sliding_sync_capability: _,
         current_session_status: _,
@@ -270,6 +274,23 @@ mod tests {
         let mut without_cleanup = delta.changed;
         without_cleanup.device_cleanup = None;
         assert!(without_cleanup.is_empty());
+    }
+
+    #[test]
+    fn secure_backup_gate_is_an_incremental_slice() {
+        let previous = AppState::default();
+        let mut next = previous.clone();
+        next.secure_backup_gate = SecureBackupGateState::Checking;
+
+        let delta = build_state_delta(8, &previous, &next).expect("backup gate changed");
+
+        assert_eq!(
+            delta.changed.secure_backup_gate,
+            Some(SecureBackupGateState::Checking)
+        );
+        let mut without_gate = delta.changed;
+        without_gate.secure_backup_gate = None;
+        assert!(without_gate.is_empty());
     }
 
     #[test]
