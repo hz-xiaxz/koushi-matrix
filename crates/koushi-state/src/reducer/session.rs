@@ -196,9 +196,11 @@ pub(crate) fn handle_authoritative_device_trust_changed(
     {
         let info = info.clone();
         state.session = SessionState::Ready(info);
+        state.secure_backup_gate = crate::state::SecureBackupGateState::Checking;
         state.sync = SyncState::Starting;
         return vec![
             AppEffect::StartSync,
+            AppEffect::InspectSecureBackup,
             AppEffect::EmitUiEvent(UiEvent::SessionChanged),
         ];
     }

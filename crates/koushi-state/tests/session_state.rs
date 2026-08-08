@@ -913,6 +913,7 @@ fn authoritative_verified_repromotes_locked_session_without_replaying_actor_owne
     let info = session_info();
     let mut state = AppState {
         session: SessionState::Locked(info.clone()),
+        secure_backup_gate: SecureBackupGateState::Ready,
         sync: SyncState::Stopped,
         ..AppState::default()
     };
@@ -928,8 +929,10 @@ fn authoritative_verified_repromotes_locked_session_without_replaying_actor_owne
 
     assert_eq!(state.session, SessionState::Ready(info));
     assert_eq!(state.sync, SyncState::Starting);
+    assert_eq!(state.secure_backup_gate, SecureBackupGateState::Checking);
     assert!(effects.contains(&AppEffect::EmitUiEvent(UiEvent::SessionChanged)));
     assert!(effects.contains(&AppEffect::StartSync));
+    assert!(effects.contains(&AppEffect::InspectSecureBackup));
     assert!(
         !effects
             .iter()
