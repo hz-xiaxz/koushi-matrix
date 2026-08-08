@@ -285,6 +285,10 @@ test("remote cleanup failure preserves data and separately confirms local-only e
       "erase_local_data_anyway",
       () => window.__harness.currentSnapshot()
     );
+    window.__harness.setCommandResponse(
+      "start_device_cleanup",
+      () => window.__harness.currentSnapshot()
+    );
     window.__harness.pushStateChanged();
     window.__harness.clearInvocations();
   });
