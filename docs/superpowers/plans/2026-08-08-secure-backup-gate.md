@@ -40,7 +40,7 @@
 
 - [ ] **Step 1: Add reducer tests that currently fail**
 
-  Cover verified-device transition to session-ready plus `SecureBackupGateState::Checking`, every non-ready backup state keeping the combined messaging gate closed, backup `Ready` opening it exactly once, stale Core completion being ignored before it reaches the reducer, runtime degradation closing only encrypted sends, and drafts remaining untouched.
+  Cover verified-device transition to session-ready plus `SecureBackupGateState::Checking`, every non-ready backup state keeping the combined messaging gate closed, backup `Ready` opening it exactly once, runtime degradation closing only encrypted sends, and drafts remaining untouched. Stale Core completion fencing is covered in Task 3 where the generation exists.
 
 - [ ] **Step 2: Run the focused tests and confirm the new symbols or transitions fail**
 

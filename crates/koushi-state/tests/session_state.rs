@@ -6,7 +6,8 @@ use koushi_state::{
     DeviceCleanupState, E2eeRecoveryState, InviteOperationState, InviteScopeSelection,
     InviteTargetQueryState, InviteWorkflowState, LoginAttemptId, LoginFlow, LoginFlowKind,
     LoginRequest, NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
-    NativeAttentionState, NativeAttentionSummary, NavigationState, ProvisionalPhase,
+    NativeAttentionState, NativeAttentionSummary, NavigationState, PendingKeyCountBucket,
+    ProvisionalPhase,
     RecoveryMethod, RecoveryRequest, RoomAttentionKind, RoomSummary, RoomTags,
     SearchCrawlerLastActive, SearchCrawlerLastActiveStatus, SearchCrawlerRoomState,
     SearchCrawlerState, SearchScope, SearchState, SecureBackupGateFailureKind,
@@ -799,8 +800,18 @@ fn duplicate_ready_is_quiet_and_degradation_preserves_a_nonempty_draft() {
 
 #[test]
 fn secure_backup_gate_wire_is_closed_privacy_safe_and_legacy_defaults_inactive() {
-    let cases = [
+    let cases = vec![
         (SecureBackupGateState::Checking, "checking"),
+        (
+            SecureBackupGateState::ExistingBackupNeedsRecovery { failure: None },
+            "existingBackupNeedsRecovery",
+        ),
+        (
+            SecureBackupGateState::ExistingBackupNeedsRecovery {
+                failure: Some(SecureBackupGateFailureKind::InvalidRecoveryKey),
+            },
+            "existingBackupNeedsRecovery",
+        ),
         (SecureBackupGateState::SecureStorageIncomplete, "secureStorageIncomplete"),
         (SecureBackupGateState::SetupRequired, "setupRequired"),
         (
@@ -811,6 +822,24 @@ fn secure_backup_gate_wire_is_closed_privacy_safe_and_legacy_defaults_inactive()
         (
             SecureBackupGateState::RecoveryKeyDeliveryRequired,
             "recoveryKeyDeliveryRequired",
+        ),
+        (
+            SecureBackupGateState::UploadingExistingKeys {
+                pending: PendingKeyCountBucket::TwoToTen,
+            },
+            "uploadingExistingKeys",
+        ),
+        (
+            SecureBackupGateState::DegradedRetrying {
+                failure: SecureBackupGateFailureKind::Network,
+            },
+            "degradedRetrying",
+        ),
+        (
+            SecureBackupGateState::BlockedFailed {
+                failure: SecureBackupGateFailureKind::Forbidden,
+            },
+            "blockedFailed",
         ),
         (SecureBackupGateState::Ready, "ready"),
     ];
