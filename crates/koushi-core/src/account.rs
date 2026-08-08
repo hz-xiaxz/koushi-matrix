@@ -171,6 +171,7 @@ const DEVICE_CLEANUP_REMOTE_TIMEOUT: Duration = Duration::from_secs(20);
 const CURRENT_SESSION_STATUS_TIMEOUT: Duration = Duration::from_secs(15);
 const SECURE_BACKUP_INSPECTION_TIMEOUT: Duration = Duration::from_secs(30);
 const SECURE_BACKUP_RETRY_DELAY: Duration = Duration::from_secs(5);
+const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(60);
 const INCOMING_VERIFICATION_OBSERVER_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 const OIDC_REDIRECT_URI: &str = "koushi-desktop://auth/callback";
 /// Redacted message used in reducer error projections (never raw SDK text).
@@ -201,13 +202,13 @@ enum AuthoritativeRoomEncryption {
 }
 
 fn secure_backup_user_content_is_admitted(
-    secure_backup_ready: bool,
+    _secure_backup_ready: bool,
     encryption: AuthoritativeRoomEncryption,
 ) -> bool {
     match encryption {
         AuthoritativeRoomEncryption::Unknown => false,
         AuthoritativeRoomEncryption::Unencrypted => true,
-        AuthoritativeRoomEncryption::Encrypted => secure_backup_ready,
+        AuthoritativeRoomEncryption::Encrypted => true,
     }
 }
 
@@ -1763,6 +1764,7 @@ pub struct AccountActor {
     secure_backup_ready: bool,
     recovery_key_delivery_pending: bool,
     secure_backup_inspection_task: Option<crate::executor::JoinHandle<()>>,
+    secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>,
     secure_backup_inspection_pending: bool,
     secure_backup_observer: Option<crate::executor::JoinHandle<()>>,
     verification_method_discovery_task: Option<OwnedVerificationMethodDiscoveryTask>,
@@ -1997,6 +1999,7 @@ impl AccountActor {
             secure_backup_ready: false,
             recovery_key_delivery_pending: false,
             secure_backup_inspection_task: None,
+            secure_backup_monitor_task: None,
             secure_backup_inspection_pending: false,
             secure_backup_observer: None,
             verification_method_discovery_task: None,
@@ -2680,6 +2683,7 @@ impl AccountActor {
                         .await;
                 }
                 AccountMessage::RetrySecureBackupInspection { generation } => {
+                    self.secure_backup_monitor_task.take();
                     if generation == self.trust_generation && self.session_promoted {
                         self.start_secure_backup_inspection();
                     }
@@ -3367,12 +3371,7 @@ impl AccountActor {
         let transaction_id = matrix_sdk::ruma::OwnedTransactionId::from(
             crate::scheduled_send::scheduled_send_transaction_id(&scheduled_id),
         );
-        match room
-            .send(content)
-            .require_backed_up_session()
-            .with_transaction_id(transaction_id)
-            .await
-        {
+        match room.send(content).with_transaction_id(transaction_id).await {
             Ok(_) => {
                 self.send_actions(vec![AppAction::ScheduledSendDispatched { scheduled_id }])
                     .await;
@@ -9279,18 +9278,10 @@ impl AccountActor {
         if let AppAction::SecureBackupGateChanged(gate) = &action {
             let admitted = matches!(gate, koushi_state::SecureBackupGateState::Ready);
             self.set_secure_backup_send_admitted(admitted);
-            if matches!(
+            let retrying = matches!(
                 gate,
                 koushi_state::SecureBackupGateState::DegradedRetrying { .. }
-            ) {
-                let tx = self.self_tx.clone();
-                std::mem::drop(executor::spawn(async move {
-                    executor::sleep(SECURE_BACKUP_RETRY_DELAY).await;
-                    let _ = tx
-                        .send(AccountMessage::RetrySecureBackupInspection { generation })
-                        .await;
-                }));
-            }
+            );
             record(
                 DiagnosticEvent::new(
                     DiagnosticLevel::Info,
@@ -9302,13 +9293,44 @@ impl AccountActor {
                     secure_backup_gate_token(gate),
                 )),
             );
+            self.schedule_secure_backup_monitor(generation, retrying);
         }
         self.send_actions(vec![action]).await;
+    }
+
+    fn schedule_secure_backup_monitor(&mut self, generation: u64, retrying: bool) {
+        if let Some(task) = self.secure_backup_monitor_task.take() {
+            task.abort();
+        }
+        let (delay, cadence) = if retrying {
+            (SECURE_BACKUP_RETRY_DELAY, "retry_5s")
+        } else {
+            (SECURE_BACKUP_MONITOR_INTERVAL, "periodic_60s")
+        };
+        record(
+            DiagnosticEvent::new(
+                DiagnosticLevel::Debug,
+                "core.secure_backup",
+                "monitor_scheduled",
+            )
+            .field(DiagnosticField::token("cadence", cadence)),
+        );
+        let tx = self.self_tx.clone();
+        self.secure_backup_monitor_task = Some(executor::spawn(async move {
+            executor::sleep(delay).await;
+            let _ = tx
+                .send(AccountMessage::RetrySecureBackupInspection { generation })
+                .await;
+        }));
     }
 
     async fn cancel_secure_backup_inspection(&mut self) {
         self.secure_backup_inspection_pending = false;
         if let Some(task) = self.secure_backup_inspection_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+        if let Some(task) = self.secure_backup_monitor_task.take() {
             task.abort();
             let _ = task.await;
         }
@@ -11909,12 +11931,12 @@ mod tests {
     }
 
     #[test]
-    fn secure_backup_room_admission_only_gates_authoritatively_encrypted_rooms() {
+    fn encrypted_room_admission_does_not_wait_for_secure_backup() {
         assert!(secure_backup_user_content_is_admitted(
             false,
             AuthoritativeRoomEncryption::Unencrypted,
         ));
-        assert!(!secure_backup_user_content_is_admitted(
+        assert!(secure_backup_user_content_is_admitted(
             false,
             AuthoritativeRoomEncryption::Encrypted,
         ));
@@ -11991,7 +12013,7 @@ mod tests {
     }
 
     #[test]
-    fn local_scheduled_room_send_uses_per_session_backup_durability_fence() {
+    fn local_scheduled_room_send_does_not_use_per_session_backup_durability_fence() {
         let source = include_str!("account.rs");
         let handler = source
             .split("async fn handle_dispatch_local_scheduled_send")
@@ -12001,9 +12023,31 @@ mod tests {
             .next()
             .expect("local scheduled retry helper");
         assert!(
-            handler.contains(".require_backed_up_session()"),
-            "direct Room::send must use the same durability fence as normal sends"
+            !handler.contains(".require_backed_up_session()"),
+            "direct Room::send must let Secure Backup upload follow asynchronously"
         );
+    }
+
+    #[test]
+    fn secure_backup_monitor_has_one_sixty_second_timer_owner() {
+        let source = include_str!("account.rs");
+        assert!(
+            source.contains(
+                "const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(60);"
+            )
+        );
+        assert!(
+            source.contains("secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>")
+        );
+        let scheduler = source
+            .split("fn schedule_secure_backup_monitor")
+            .nth(1)
+            .expect("periodic Secure Backup scheduler")
+            .split("async fn cancel_secure_backup_inspection")
+            .next()
+            .expect("periodic scheduler terminator");
+        assert!(scheduler.contains("secure_backup_monitor_task.take()"));
+        assert!(scheduler.contains("SECURE_BACKUP_MONITOR_INTERVAL"));
     }
 
     #[test]
@@ -18171,6 +18215,7 @@ mod tests {
             secure_backup_ready: false,
             recovery_key_delivery_pending: false,
             secure_backup_inspection_task: None,
+            secure_backup_monitor_task: None,
             secure_backup_inspection_pending: false,
             secure_backup_observer: None,
             verification_method_discovery_task: None,

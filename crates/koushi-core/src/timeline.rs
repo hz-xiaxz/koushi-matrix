@@ -86,6 +86,8 @@ use koushi_state::{
     TimelineMediaGalleryThumbnail, TimelineMediaKind as GalleryTimelineMediaKind,
     resolve_composer_send_intent, resolve_composer_send_intent_with_options,
 };
+
+use crate::send_diagnostics::{SendFailureDiagnostic, classify_send_failure};
 use matrix_sdk::attachment::{
     AttachmentConfig, AttachmentInfo, BaseFileInfo, BaseImageInfo, Thumbnail,
 };
@@ -21326,11 +21328,14 @@ async fn run_global_send_completion_observer(
                         sdk_transaction_id: transaction_id.to_string(),
                         event_id: event_id.to_string(),
                     }),
-                    RoomSendQueueUpdate::SendError { transaction_id, .. } => {
-                        Some(SendCompletionObservation::SendError {
-                            sdk_transaction_id: transaction_id.to_string(),
-                        })
-                    }
+                    RoomSendQueueUpdate::SendError {
+                        transaction_id,
+                        error,
+                        is_recoverable,
+                    } => Some(SendCompletionObservation::SendError {
+                        sdk_transaction_id: transaction_id.to_string(),
+                        diagnostic: classify_send_failure(error.as_ref(), is_recoverable),
+                    }),
                     RoomSendQueueUpdate::CancelledLocalEvent { transaction_id } => {
                         Some(SendCompletionObservation::Cancelled {
                             sdk_transaction_id: transaction_id.to_string(),
@@ -25808,11 +25813,11 @@ impl SendLifecycleTrace {
     }
 
     fn stage(&mut self, stage: &'static str) {
-        self.stage_internal(stage, None, None, false);
+        self.stage_internal(stage, None, None, None, false);
     }
 
     fn stage_once(&mut self, stage: &'static str) {
-        self.stage_internal(stage, None, None, true);
+        self.stage_internal(stage, None, None, None, true);
     }
 
     fn stage_with_outcome(
@@ -25821,7 +25826,7 @@ impl SendLifecycleTrace {
         outcome: Option<&'static str>,
         delivery_mode: Option<&'static str>,
     ) {
-        self.stage_internal(stage, outcome, delivery_mode, false);
+        self.stage_internal(stage, outcome, delivery_mode, None, false);
     }
 
     fn stage_with_outcome_once(
@@ -25830,7 +25835,17 @@ impl SendLifecycleTrace {
         outcome: Option<&'static str>,
         delivery_mode: Option<&'static str>,
     ) {
-        self.stage_internal(stage, outcome, delivery_mode, true);
+        self.stage_internal(stage, outcome, delivery_mode, None, true);
+    }
+
+    fn stage_with_failure(
+        &mut self,
+        stage: &'static str,
+        outcome: Option<&'static str>,
+        delivery_mode: Option<&'static str>,
+        failure: SendFailureDiagnostic,
+    ) {
+        self.stage_internal(stage, outcome, delivery_mode, Some(failure), false);
     }
 
     fn record_encryption_local_store_snapshot(&self, snapshot: &EncryptedSendDiagnosticSnapshot) {
@@ -25914,6 +25929,7 @@ impl SendLifecycleTrace {
         stage: &'static str,
         outcome: Option<&'static str>,
         delivery_mode: Option<&'static str>,
+        failure: Option<SendFailureDiagnostic>,
         once: bool,
     ) {
         let Ok(mut state) = self.state.lock() else {
@@ -25943,6 +25959,11 @@ impl SendLifecycleTrace {
         }
         if let Some(delivery_mode) = delivery_mode {
             event = event.field(DiagnosticField::token("delivery_mode", delivery_mode));
+        }
+        if let Some(failure) = failure {
+            event = event
+                .field(DiagnosticField::token("reason", failure.reason))
+                .field(DiagnosticField::boolean("recoverable", failure.recoverable));
         }
         record(event);
         state.previous_stage_at = now;
@@ -25977,6 +25998,7 @@ enum SendCompletionObservation {
     },
     SendError {
         sdk_transaction_id: String,
+        diagnostic: SendFailureDiagnostic,
     },
     Cancelled {
         sdk_transaction_id: String,
@@ -25985,7 +26007,7 @@ enum SendCompletionObservation {
 
 enum ObservedSendTerminal {
     Sent { event_id: String },
-    SendError,
+    SendError { diagnostic: SendFailureDiagnostic },
     Cancelled,
 }
 
@@ -26320,9 +26342,13 @@ impl SendCompletionCoordinator {
                 sdk_transaction_id,
                 event_id,
             } => (sdk_transaction_id, ObservedSendTerminal::Sent { event_id }),
-            SendCompletionObservation::SendError { sdk_transaction_id } => {
-                (sdk_transaction_id, ObservedSendTerminal::SendError)
-            }
+            SendCompletionObservation::SendError {
+                sdk_transaction_id,
+                diagnostic,
+            } => (
+                sdk_transaction_id,
+                ObservedSendTerminal::SendError { diagnostic },
+            ),
             SendCompletionObservation::Cancelled { sdk_transaction_id } => {
                 (sdk_transaction_id, ObservedSendTerminal::Cancelled)
             }
@@ -26448,16 +26474,17 @@ impl SendCompletionCoordinator {
                     },
                 ))
             }
-            ObservedSendTerminal::SendError => {
+            ObservedSendTerminal::SendError { diagnostic } => {
                 let pending = self.pending_sends.get_mut(correlation)?;
                 if pending.failure_reported {
                     return None;
                 }
                 pending.failure_reported = true;
-                pending.lifecycle_trace.stage_with_outcome(
+                pending.lifecycle_trace.stage_with_failure(
                     "sdk_terminal_observed",
                     Some("failed"),
                     Some(delivery_mode),
+                    diagnostic,
                 );
                 pending.lifecycle_trace.stage_with_outcome_once(
                     "terminal_applied",
@@ -43452,6 +43479,10 @@ mod tests {
             key.room_id(),
             SendCompletionObservation::SendError {
                 sdk_transaction_id: "sdk-submission-terminal".to_owned(),
+                diagnostic: SendFailureDiagnostic {
+                    reason: "http",
+                    recoverable: true,
+                },
             },
         );
         let failure = terminal_rx.try_recv().expect("submission send error");
