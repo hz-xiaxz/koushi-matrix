@@ -16,11 +16,11 @@ normal encryption setup and recipient-device key sharing, but do not wait for
 the same Megolm session to be uploaded to Secure Backup.
 
 Keep the existing event-driven Secure Backup observer and add a single-owner
-60-second inspection timer while a verified session is active. A send failure
-also requests an immediate coalesced inspection. Inspections record only their
-closed gate/status projection and reschedule one timer; overlapping timers are
-cancelled. Backup health remains visible and retryable, but does not disable the
-SDK send queue or reject ordinary encrypted user content.
+60-second inspection timer while a verified session is active. Inspections
+record only their closed gate/status projection and reschedule one timer;
+overlapping timers are cancelled. Backup health remains visible and retryable,
+but does not disable the SDK send queue or reject ordinary encrypted user
+content.
 
 At the existing client-global `RoomSendQueueUpdate::SendError` boundary, map
 the SDK error to a closed private-data-free token and retain the SDK recoverable
