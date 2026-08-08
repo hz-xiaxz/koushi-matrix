@@ -197,6 +197,43 @@ describe("App diagnostics lifecycle", () => {
     expect(dialog.textContent).toContain("Diagnostic records dropped: 3");
   });
 
+  test("exports decrypt-retry diagnostics without private values", async () => {
+    const api = createBrowserFakeApi();
+    vi.spyOn(api, "getDiagnosticSnapshot").mockResolvedValue(
+      snapshot([
+        {
+          timestampMs: 1,
+          source: "core.decrypt_retry",
+          message:
+            "stage=request operation=correlation:17 reason=missing_room_key attempt=1 backup_state=available elapsed_bucket=under_1s"
+        },
+        {
+          timestampMs: 2,
+          source: "core.decrypt_retry",
+          message: "stage=settled operation=correlation:17 result=timeout elapsed_bucket=over_30s"
+        }
+      ])
+    );
+
+    await renderAppWithApi(api);
+    const dialog = await openDiagnostics();
+    const exported = dialog.textContent ?? "";
+
+    expect(exported).toContain("core.decrypt_retry");
+    expect(exported).toContain("reason=missing_room_key");
+    expect(exported).toContain("result=timeout");
+    for (const privateValue of [
+      "!room:example.test",
+      "$event:example.test",
+      "MEGOLMSESSION",
+      "message body",
+      "https://private.example.test",
+      "raw SDK error"
+    ]) {
+      expect(exported).not.toContain(privateValue);
+    }
+  });
+
   test("refetches the runtime snapshot when Diagnostics is opened again", async () => {
     const api = createBrowserFakeApi();
     const snapshots = [

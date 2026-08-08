@@ -11398,6 +11398,13 @@ fn classify_recovery_error(
 
 fn classify_e2ee_trust_error(error: &koushi_sdk::E2eeTrustError) -> TrustOperationFailureKind {
     match error {
+        koushi_sdk::E2eeTrustError::Classified(kind) => match kind {
+            koushi_sdk::E2eeTrustFailureKind::Network => TrustOperationFailureKind::Network,
+            koushi_sdk::E2eeTrustFailureKind::Forbidden => TrustOperationFailureKind::Forbidden,
+            koushi_sdk::E2eeTrustFailureKind::InvalidBackup => TrustOperationFailureKind::Mismatch,
+            koushi_sdk::E2eeTrustFailureKind::Timeout => TrustOperationFailureKind::Timeout,
+            koushi_sdk::E2eeTrustFailureKind::Sdk => TrustOperationFailureKind::Sdk,
+        },
         koushi_sdk::E2eeTrustError::NoOlmMachine
         | koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive
         | koushi_sdk::E2eeTrustError::SecureBackupAlreadyExists
@@ -11451,6 +11458,13 @@ fn classify_secure_backup_gate_failure(
         E2eeTrustError::NoOlmMachine | E2eeTrustError::SecureBackupReenableConfirmationRequired => {
             SecureBackupGateFailureKind::Sdk
         }
+        E2eeTrustError::Classified(_) => match classify_e2ee_trust_error(error) {
+            TrustOperationFailureKind::Timeout => SecureBackupGateFailureKind::Timeout,
+            TrustOperationFailureKind::Forbidden => SecureBackupGateFailureKind::Forbidden,
+            TrustOperationFailureKind::Network => SecureBackupGateFailureKind::Network,
+            TrustOperationFailureKind::Mismatch => SecureBackupGateFailureKind::BackupKeyMismatch,
+            _ => SecureBackupGateFailureKind::Sdk,
+        },
         E2eeTrustError::Sdk(_) => match classify_e2ee_trust_error(error) {
             TrustOperationFailureKind::InvalidPassphrase => {
                 SecureBackupGateFailureKind::InvalidRecoveryKey

@@ -9923,7 +9923,7 @@ describe("TimelineView", () => {
     expect(requestRoomKey).toHaveBeenCalledTimes(1);
   });
 
-  it("emits fixed private-data-free diagnostics when a room-key request fails", async () => {
+  it("does not classify room-key request failures in React", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const privateEventId = "$private-event:example.invalid";
     const privateBody = "secret message body";
@@ -9977,22 +9977,11 @@ describe("TimelineView", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Request keys and retry" }));
 
-    await waitFor(() => {
-      expect(onDiagnosticLogEntry).toHaveBeenCalledWith(
-        expect.objectContaining({
-          source: "e2ee.room_key",
-          message: "operation=request_keys stage=failed kind=transport"
-        })
-      );
-    });
-    expect(onDiagnosticLogEntry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: "e2ee.room_key",
-        message: "operation=request_keys stage=request"
-      })
-    );
-
+    await waitFor(() => expect(requestRoomKey).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const diagnosticText = JSON.stringify(onDiagnosticLogEntry.mock.calls);
+    expect(diagnosticText).not.toContain("operation=request_keys stage=failed kind=transport");
+
     for (const privateValue of [
       "!room:example.invalid",
       privateEventId,
