@@ -94,7 +94,10 @@ carry tokens and counts only. The full prohibited list is in
   DTO Debug exposes counts only.
 - `SetAvatar` may carry image bytes only through the typed command boundary.
 - `RoomSendQueueUpdate::SendError` carries raw SDK errors: project only coarse
-  recoverable/unrecoverable status into DTOs and QA tokens.
+  recoverable/unrecoverable status into DTOs and QA tokens. Structured release
+  diagnostics may additionally carry a closed app-owned failure-class token
+  such as `secure_backup_required`, `http`, `crypto`, or `store`; they never
+  carry the raw SDK error, endpoint, identifier, or response body.
 - `koushi-sdk` maps SDK cross-signing/backup states into private-data-free
   `koushi-state` DTOs and redacts SDK error details in `Debug`.
 - Local aliases are private "only I see this" data.
