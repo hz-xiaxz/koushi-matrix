@@ -156,7 +156,7 @@ pub enum SecureBackupGateState {
 }
 
 impl SecureBackupGateState {
-    pub fn allows_encrypted_sending(&self) -> bool {
+    pub fn backup_is_ready(&self) -> bool {
         matches!(self, Self::Ready)
     }
 }

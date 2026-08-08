@@ -36,7 +36,7 @@
 
 **Interfaces:**
 - Produces: `SecureBackupGateState`, `SecureBackupGateFailureKind`, and `AppState::secure_backup_gate`.
-- Produces: `AppEffect::InspectSecureBackup`, `RecoverSecureBackup`, `SetupSecureBackup`, and `RetrySecureBackup`.
+- Produces: `AppEffect::InspectSecureBackup`. Secret-bearing recovery/setup and retry intent travels later as redacted Core commands, not reducer effects.
 
 - [ ] **Step 1: Add reducer tests that currently fail**
 
@@ -55,6 +55,7 @@
   pub enum SecureBackupGateState {
       Checking,
       ExistingBackupNeedsRecovery { failure: Option<SecureBackupGateFailureKind> },
+      SecureStorageIncomplete,
       SetupRequired,
       ExplicitlyDisabledRequiresSetup,
       CreatingBackup,
