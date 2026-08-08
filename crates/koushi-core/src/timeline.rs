@@ -6209,7 +6209,6 @@ impl DecryptRetryReason {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy)]
 enum DecryptRetryBackupState {
     Available,
@@ -6222,6 +6221,19 @@ impl DecryptRetryBackupState {
             Self::Available => "available",
             Self::Unknown => "unknown",
         }
+    }
+}
+
+fn decrypt_retry_backup_state_for(
+    backup: koushi_sdk::MatrixSecureBackupLocalState,
+    recovery: koushi_sdk::MatrixSecureBackupRecoveryState,
+) -> DecryptRetryBackupState {
+    if backup == koushi_sdk::MatrixSecureBackupLocalState::Enabled
+        && recovery == koushi_sdk::MatrixSecureBackupRecoveryState::Enabled
+    {
+        DecryptRetryBackupState::Available
+    } else {
+        DecryptRetryBackupState::Unknown
     }
 }
 
@@ -14139,6 +14151,29 @@ impl DecryptRetryController {
             result,
         })
     }
+
+    fn settle_timeout_if_current(
+        &mut self,
+        operation: u64,
+        actor_generation: u64,
+    ) -> Option<DecryptRetrySettlement> {
+        self.settle_if_current(
+            operation,
+            actor_generation,
+            DecryptRetrySettledResult::Timeout,
+        )
+    }
+}
+
+fn decrypt_retry_settlement_operation(
+    controller: &DecryptRetryController,
+    actor_generation: u64,
+    event_id: &str,
+) -> Option<u64> {
+    controller.pending.as_ref().and_then(|pending| {
+        (pending.actor_generation == actor_generation && pending.event_id == event_id)
+            .then_some(pending.operation)
+    })
 }
 
 struct TimelineActor {
@@ -17741,6 +17776,7 @@ impl TimelineActor {
         &mut self,
         event_id: &str,
         reason: DecryptRetryReason,
+        backup_state: DecryptRetryBackupState,
     ) -> PendingDecryptRetry {
         let (pending, previous) =
             self.decrypt_retry
@@ -17759,7 +17795,7 @@ impl TimelineActor {
             pending.operation,
             pending.attempt,
             reason,
-            DecryptRetryBackupState::Unknown,
+            backup_state,
             Duration::ZERO,
         );
         pending
@@ -17782,10 +17818,15 @@ impl TimelineActor {
     }
 
     fn settle_decrypt_retry(&mut self, operation: u64, result: DecryptRetrySettledResult) {
-        let Some(settlement) =
-            self.decrypt_retry
-                .settle_if_current(operation, self.actor_generation, result)
-        else {
+        let Some(settlement) = (match result {
+            DecryptRetrySettledResult::Timeout => self
+                .decrypt_retry
+                .settle_timeout_if_current(operation, self.actor_generation),
+            result => {
+                self.decrypt_retry
+                    .settle_if_current(operation, self.actor_generation, result)
+            }
+        }) else {
             return;
         };
         if let Some(task) = self.decrypt_retry_timeout_task.take() {
@@ -17816,7 +17857,15 @@ impl TimelineActor {
             return;
         }
         let retry_reason = decrypt_retry_reason_from_content(event_item.content());
-        let pending = self.begin_decrypt_retry(&requested_event_id, retry_reason);
+        let backup_observation = self.session.observe_secure_backup_state();
+        let pending = self.begin_decrypt_retry(
+            &requested_event_id,
+            retry_reason,
+            decrypt_retry_backup_state_for(
+                backup_observation.current.backup,
+                backup_observation.current.recovery,
+            ),
+        );
         let Some(original_json) = event_item.original_json().cloned() else {
             self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Malformed);
             self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
@@ -17892,7 +17941,19 @@ impl TimelineActor {
                     DecryptRetryBackupResult::Found,
                     pending.started_at.elapsed(),
                 );
-                self.timeline.retry_decryption([session_id]).await;
+                if executor::timeout_at(
+                    pending.deadline,
+                    self.timeline.retry_decryption([session_id]),
+                )
+                .await
+                .is_err()
+                {
+                    self.settle_decrypt_retry(
+                        pending.operation,
+                        DecryptRetrySettledResult::Timeout,
+                    );
+                    return;
+                }
             }
             Ok(Ok(false)) => {
                 record_decrypt_retry_backup_lookup(
@@ -19097,19 +19158,19 @@ impl TimelineActor {
         if diffs.is_empty() {
             return;
         }
-        let decrypt_retry_resolution = if let Some((operation, event_id)) = self
-            .decrypt_retry
-            .pending
-            .as_ref()
-            .map(|pending| (pending.operation, pending.event_id.clone()))
-            && diffs
+        let decrypt_retry_resolution = self.decrypt_retry.pending.as_ref().and_then(|pending| {
+            diffs
                 .iter()
-                .any(|diff| decrypt_retry_diff_resolves_event(diff, &event_id))
-        {
-            Some(operation)
-        } else {
-            None
-        };
+                .any(|diff| decrypt_retry_diff_resolves_event(diff, &pending.event_id))
+                .then(|| {
+                    decrypt_retry_settlement_operation(
+                        &self.decrypt_retry,
+                        self.actor_generation,
+                        &pending.event_id,
+                    )
+                })
+                .flatten()
+        });
         let sdk_diffs = diffs;
         let has_historical_gap_repair_projection = gap_repair_projections
             .iter()
@@ -42022,6 +42083,72 @@ mod tests {
                 .settle_if_current(second.operation, 7, DecryptRetrySettledResult::Timeout)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn decrypt_retry_diff_settlement_requires_current_generation_and_matching_event() {
+        let mut controller = DecryptRetryController::default();
+        let (pending, _) = controller.admit("$event:test", 7, executor::Instant::now());
+
+        assert_eq!(
+            decrypt_retry_settlement_operation(&controller, 8, "$event:test"),
+            None
+        );
+        assert_eq!(
+            decrypt_retry_settlement_operation(&controller, 7, "$other:test"),
+            None
+        );
+        assert_eq!(
+            decrypt_retry_settlement_operation(&controller, 7, "$event:test"),
+            Some(pending.operation)
+        );
+    }
+
+    #[test]
+    fn decrypt_retry_timeout_message_settles_current_operation_once() {
+        let mut controller = DecryptRetryController::default();
+        let (pending, _) = controller.admit("$event:test", 7, executor::Instant::now());
+
+        let settled = controller
+            .settle_timeout_if_current(pending.operation, 7)
+            .expect("current timeout settles");
+        assert!(matches!(settled.result, DecryptRetrySettledResult::Timeout));
+        assert!(
+            controller
+                .settle_timeout_if_current(pending.operation, 7)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn decrypt_retry_backup_state_only_reports_available_for_ready_local_recovery() {
+        assert_eq!(
+            decrypt_retry_backup_state_for(
+                koushi_sdk::MatrixSecureBackupLocalState::Enabled,
+                koushi_sdk::MatrixSecureBackupRecoveryState::Enabled,
+            )
+            .token(),
+            "available"
+        );
+        for state in [
+            (
+                koushi_sdk::MatrixSecureBackupLocalState::Unknown,
+                koushi_sdk::MatrixSecureBackupRecoveryState::Enabled,
+            ),
+            (
+                koushi_sdk::MatrixSecureBackupLocalState::Enabled,
+                koushi_sdk::MatrixSecureBackupRecoveryState::Unknown,
+            ),
+            (
+                koushi_sdk::MatrixSecureBackupLocalState::Downloading,
+                koushi_sdk::MatrixSecureBackupRecoveryState::Enabled,
+            ),
+        ] {
+            assert_eq!(
+                decrypt_retry_backup_state_for(state.0, state.1).token(),
+                "unknown"
+            );
+        }
     }
 
     #[test]
