@@ -1220,13 +1220,13 @@ server backup. Koushi never calls a destructive backup fix/reset path from this
 gate. If backup was explicitly disabled, re-enabling requires a user action
 which states that the account-wide setting also affects other Matrix clients.
 
-Koushi encrypted user-content sends opt into the vendored SDK's narrow
-per-outbound-session durability fence. The SDK creates/shares and persists the
-outbound session plus its inbound counterpart, waits for the active backup to
-reach steady state, verifies that the same inbound counterpart is marked
-backed up, and only then encrypts and sends the first event. Existing SDK
-callers are unchanged unless they opt in. A rotated session repeats the fence;
-an already-backed-up session does not create a second upload round trip.
+Koushi encrypted user-content sends use the SDK's normal encryption setup and
+recipient-device key sharing without opting into the vendored SDK's narrow
+per-outbound-session durability fence. The SDK backup worker uploads new and
+rotated Megolm sessions asynchronously. Core continuously observes backup state
+changes and runs a single-owner periodic inspection while the verified session
+is active; a degraded backup is visible and diagnosed but does not turn an
+otherwise valid encrypted send into `NotSent`.
 
 ## Room Timeline Gap Repair
 

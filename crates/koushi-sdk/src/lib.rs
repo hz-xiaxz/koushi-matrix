@@ -7034,7 +7034,7 @@ pub async fn login_with_password_with_store(
     let device_id = response.device_id.to_string();
     client
         .send_queue()
-        .require_secure_backup_for_encrypted_sends(true);
+        .require_secure_backup_for_encrypted_sends(false);
 
     Ok(MatrixClientSession {
         client,
@@ -7068,7 +7068,7 @@ pub async fn login_with_existing_device(
         .map_err(|error| PasswordLoginError::Sdk(error.to_string()))?;
     client
         .send_queue()
-        .require_secure_backup_for_encrypted_sends(true);
+        .require_secure_backup_for_encrypted_sends(false);
 
     Ok(MatrixClientSession {
         client,
@@ -7178,7 +7178,7 @@ pub async fn finish_oidc_login(
         .to_string();
     client
         .send_queue()
-        .require_secure_backup_for_encrypted_sends(true);
+        .require_secure_backup_for_encrypted_sends(false);
 
     Ok(MatrixClientSession {
         client,
@@ -7241,7 +7241,7 @@ pub async fn restore_session_with_store(
     }
     client
         .send_queue()
-        .require_secure_backup_for_encrypted_sends(true);
+        .require_secure_backup_for_encrypted_sends(false);
 
     Ok(MatrixClientSession {
         client,

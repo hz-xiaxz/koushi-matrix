@@ -34,6 +34,7 @@ pub mod runtime;
 pub(crate) mod scheduled_send;
 pub mod search;
 pub(crate) mod search_crawler;
+mod send_diagnostics;
 pub mod settings;
 mod sliding_sync_diagnostics;
 pub(crate) mod startup_trace;
