@@ -2745,16 +2745,7 @@ export const TimelineView = memo(function TimelineView({
         continue;
       }
       autoRequestedRoomKeyIdsRef.current.add(requestKey);
-      emitDiagnosticLog(
-        "e2ee.room_key",
-        "operation=request_keys stage=request source=auto timeline=thread"
-      );
-      void transport.requestRoomKey(roomId, eventId, timelineKey).catch(() => {
-        emitDiagnosticLog(
-          "e2ee.room_key",
-          "operation=request_keys stage=failed source=auto kind=transport timeline=thread"
-        );
-      });
+      void transport.requestRoomKey(roomId, eventId, timelineKey).catch(() => undefined);
     }
   }, [emitDiagnosticLog, items, roomId, timelineKey, timelineStoreKey, transport]);
   useLayoutEffect(() => {
@@ -4203,20 +4194,9 @@ export const TimelineView = memo(function TimelineView({
   );
   const onRequestRoomKey = useCallback(
     (targetRoomId: string, eventId: string) => {
-      onDiagnosticLogEntry?.({
-        timestampMs: Date.now(),
-        source: "e2ee.room_key",
-        message: "operation=request_keys stage=request"
-      });
-      void transport.requestRoomKey(targetRoomId, eventId, timelineKey).catch(() => {
-        onDiagnosticLogEntry?.({
-          timestampMs: Date.now(),
-          source: "e2ee.room_key",
-          message: "operation=request_keys stage=failed kind=transport"
-        });
-      });
+      void transport.requestRoomKey(targetRoomId, eventId, timelineKey).catch(() => undefined);
     },
-    [onDiagnosticLogEntry, timelineKey, transport]
+    [timelineKey, transport]
   );
   const onForwardMessage = useCallback(
     (targetRoomId: string, sourceEventId: string, destinationRoomId: string) => {

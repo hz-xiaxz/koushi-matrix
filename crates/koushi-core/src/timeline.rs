@@ -183,6 +183,7 @@ const ROOM_REPLAY_KNOWN_THREAD_ROOT_PROJECTIONS_MAX: usize = 32;
 const JAVASCRIPT_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
 const REPLY_QUOTE_PREVIEW_MAX_CHARS: usize = 160;
 const MEDIA_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+const DECRYPT_RETRY_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const READ_RETRY_MAX_DELAY: Duration = Duration::from_secs(60);
@@ -6189,6 +6190,212 @@ fn record_read_admission(key: &ReadStateKey, diagnostic: ReadAdmissionDiagnostic
     );
 }
 
+#[derive(Clone, Copy)]
+enum DecryptRetryReason {
+    MissingRoomKey,
+}
+
+impl DecryptRetryReason {
+    fn token(self) -> &'static str {
+        match self {
+            Self::MissingRoomKey => "missing_room_key",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DecryptRetryBackupState {
+    Available,
+    Unknown,
+}
+
+impl DecryptRetryBackupState {
+    fn token(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DecryptRetryBackupResult {
+    Found,
+    NotFound,
+    Network,
+    Forbidden,
+    InvalidBackup,
+    Timeout,
+    Sdk,
+}
+
+impl DecryptRetryBackupResult {
+    fn token(self) -> &'static str {
+        match self {
+            Self::Found => "found",
+            Self::NotFound => "not_found",
+            Self::Network => "network",
+            Self::Forbidden => "forbidden",
+            Self::InvalidBackup => "invalid_backup",
+            Self::Timeout => "timeout",
+            Self::Sdk => "sdk",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DecryptRetryDeviceResult {
+    Sent,
+    Failed,
+}
+
+impl DecryptRetryDeviceResult {
+    fn token(self) -> &'static str {
+        match self {
+            Self::Sent => "sent",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DecryptRetryFailure {
+    Network,
+    Forbidden,
+    Timeout,
+    Sdk,
+}
+
+impl DecryptRetryFailure {
+    fn token(self) -> &'static str {
+        match self {
+            Self::Network => "network",
+            Self::Forbidden => "forbidden",
+            Self::Timeout => "timeout",
+            Self::Sdk => "sdk",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DecryptRetrySettledResult {
+    Decrypted,
+    StillMissing,
+    Withheld,
+    Malformed,
+    Timeout,
+    Superseded,
+}
+
+impl DecryptRetrySettledResult {
+    fn token(self) -> &'static str {
+        match self {
+            Self::Decrypted => "decrypted",
+            Self::StillMissing => "still_missing",
+            Self::Withheld => "withheld",
+            Self::Malformed => "malformed",
+            Self::Timeout => "timeout",
+            Self::Superseded => "superseded",
+        }
+    }
+}
+
+fn decrypt_retry_elapsed_bucket(elapsed: Duration) -> &'static str {
+    match elapsed {
+        elapsed if elapsed < Duration::from_secs(1) => "under_1s",
+        elapsed if elapsed < Duration::from_secs(5) => "under_5s",
+        elapsed if elapsed < DECRYPT_RETRY_TIMEOUT => "under_30s",
+        _ => "over_30s",
+    }
+}
+
+fn decrypt_retry_event(stage: &'static str, operation: u64, elapsed: Duration) -> DiagnosticEvent {
+    DiagnosticEvent::new(DiagnosticLevel::Info, "core.decrypt_retry", stage)
+        .field(DiagnosticField::correlation("operation", operation))
+        .field(DiagnosticField::token(
+            "elapsed_bucket",
+            decrypt_retry_elapsed_bucket(elapsed),
+        ))
+}
+
+fn record_decrypt_retry_request(
+    operation: u64,
+    attempt: u8,
+    reason: DecryptRetryReason,
+    backup_state: DecryptRetryBackupState,
+    elapsed: Duration,
+) {
+    record(
+        decrypt_retry_event("request", operation, elapsed)
+            .field(DiagnosticField::token("reason", reason.token()))
+            .field(DiagnosticField::count("attempt", u64::from(attempt)))
+            .field(DiagnosticField::token("backup_state", backup_state.token())),
+    );
+}
+
+fn record_decrypt_retry_backup_lookup(
+    operation: u64,
+    result: DecryptRetryBackupResult,
+    elapsed: Duration,
+) {
+    record(
+        decrypt_retry_event("backup_lookup", operation, elapsed)
+            .field(DiagnosticField::token("result", result.token())),
+    );
+}
+
+fn record_decrypt_retry_device_request(
+    operation: u64,
+    result: DecryptRetryDeviceResult,
+    failure: Option<DecryptRetryFailure>,
+    elapsed: Duration,
+) {
+    let mut event = decrypt_retry_event("device_request", operation, elapsed)
+        .field(DiagnosticField::token("result", result.token()));
+    if let Some(failure) = failure {
+        event = event.field(DiagnosticField::token("failure", failure.token()));
+    }
+    record(event);
+}
+
+fn record_decrypt_retry_settled(
+    operation: u64,
+    result: DecryptRetrySettledResult,
+    elapsed: Duration,
+) {
+    record(
+        decrypt_retry_event("settled", operation, elapsed)
+            .field(DiagnosticField::token("result", result.token())),
+    );
+}
+
+fn decrypt_retry_backup_result_for_error(
+    error: &koushi_sdk::E2eeTrustError,
+) -> DecryptRetryBackupResult {
+    match error {
+        koushi_sdk::E2eeTrustError::NoOlmMachine
+        | koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive
+        | koushi_sdk::E2eeTrustError::SecureBackupAlreadyExists
+        | koushi_sdk::E2eeTrustError::SecureBackupReenableConfirmationRequired
+        | koushi_sdk::E2eeTrustError::SecureBackupUploadFailed
+        | koushi_sdk::E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed
+        | koushi_sdk::E2eeTrustError::Sdk(_) => DecryptRetryBackupResult::Sdk,
+    }
+}
+
+fn decrypt_retry_failure_for_room_operation(
+    error: &koushi_sdk::MatrixRoomOperationError,
+) -> DecryptRetryFailure {
+    match error.failure_kind() {
+        Some(koushi_sdk::MatrixRoomOperationFailureKind::Forbidden)
+        | Some(koushi_sdk::MatrixRoomOperationFailureKind::AuthenticationRequired) => {
+            DecryptRetryFailure::Forbidden
+        }
+        Some(koushi_sdk::MatrixRoomOperationFailureKind::Http) => DecryptRetryFailure::Network,
+        _ => DecryptRetryFailure::Sdk,
+    }
+}
+
 fn record_room_key_reshare(
     trigger: &'static str,
     outcome: &'static str,
@@ -7003,6 +7210,10 @@ enum TimelineActorMessage {
         request_id: RequestId,
         event_id: String,
     },
+    DecryptRetryTimeout {
+        operation: u64,
+        actor_generation: u64,
+    },
     RetrySend {
         request_id: RequestId,
         transaction_id: String,
@@ -7341,6 +7552,34 @@ impl TimelineRelayBatch {
     fn retain_gap_repair_projections_for_actor(&mut self, actor_generation: u64) {
         self.gap_repair_projections
             .retain(|projection| projection.actor_generation == actor_generation);
+    }
+}
+
+fn decrypt_retry_diff_resolves_event(
+    diff: &eyeball_im::VectorDiff<Arc<SdkTimelineItem>>,
+    event_id: &str,
+) -> bool {
+    let is_resolved = |item: &Arc<SdkTimelineItem>| {
+        let TimelineItemKind::Event(event_item) = item.kind() else {
+            return false;
+        };
+        event_item
+            .event_id()
+            .is_some_and(|candidate| candidate.as_str() == event_id)
+            && !event_item.content().is_unable_to_decrypt()
+    };
+    match diff {
+        eyeball_im::VectorDiff::PushFront { value }
+        | eyeball_im::VectorDiff::PushBack { value }
+        | eyeball_im::VectorDiff::Insert { value, .. }
+        | eyeball_im::VectorDiff::Set { value, .. } => is_resolved(value),
+        eyeball_im::VectorDiff::Reset { values } => values.iter().any(is_resolved),
+        eyeball_im::VectorDiff::Append { values } => values.iter().any(is_resolved),
+        eyeball_im::VectorDiff::Clear
+        | eyeball_im::VectorDiff::PopFront
+        | eyeball_im::VectorDiff::PopBack
+        | eyeball_im::VectorDiff::Remove { .. }
+        | eyeball_im::VectorDiff::Truncate { .. } => false,
     }
 }
 
@@ -13960,6 +14199,17 @@ struct TimelineActor {
     /// Diagnostic-only evidence that this actor received foreground repair demand.
     /// It deliberately does not affect repair admission or actor lifecycle.
     foreground_gap_demand_active: bool,
+    next_decrypt_retry_operation: u64,
+    pending_decrypt_retry: Option<PendingDecryptRetry>,
+    decrypt_retry_timeout_task: Option<executor::JoinHandle<()>>,
+}
+
+struct PendingDecryptRetry {
+    event_id: String,
+    operation: u64,
+    attempt: u8,
+    actor_generation: u64,
+    started_at: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -14335,6 +14585,9 @@ impl Drop for TimelineActor {
         if let Some((_, cancellation, task)) = self.live_tail_refresh.take() {
             cancellation.cancel();
             drop(task);
+        }
+        if let Some(task) = self.decrypt_retry_timeout_task.take() {
+            task.abort();
         }
     }
 }
@@ -14768,6 +15021,9 @@ impl TimelineActor {
             test_gap_repair_completion_pause: None,
             last_gap_repair_evaluation_diagnostic: None,
             foreground_gap_demand_active: false,
+            next_decrypt_retry_operation: 0,
+            pending_decrypt_retry: None,
+            decrypt_retry_timeout_task: None,
         };
 
         actor
@@ -15378,6 +15634,19 @@ impl TimelineActor {
                 event_id,
             } => {
                 self.handle_request_room_key(request_id, event_id).await;
+            }
+            TimelineActorMessage::DecryptRetryTimeout {
+                operation,
+                actor_generation,
+            } => {
+                if self.actor_generation == actor_generation
+                    && self
+                        .pending_decrypt_retry
+                        .as_ref()
+                        .is_some_and(|pending| pending.operation == operation)
+                {
+                    self.settle_decrypt_retry(operation, DecryptRetrySettledResult::Timeout);
+                }
             }
             TimelineActorMessage::RetrySend {
                 request_id,
@@ -17392,7 +17661,83 @@ impl TimelineActor {
         }));
     }
 
+    fn begin_decrypt_retry(&mut self, event_id: &str) -> PendingDecryptRetry {
+        let previous_attempt = self
+            .pending_decrypt_retry
+            .as_ref()
+            .filter(|pending| pending.event_id == event_id)
+            .map(|pending| pending.attempt);
+        if let Some(previous) = self.pending_decrypt_retry.take() {
+            record_decrypt_retry_settled(
+                previous.operation,
+                DecryptRetrySettledResult::Superseded,
+                previous.started_at.elapsed(),
+            );
+            if let Some(task) = self.decrypt_retry_timeout_task.take() {
+                task.abort();
+            }
+        }
+        self.next_decrypt_retry_operation = self.next_decrypt_retry_operation.wrapping_add(1);
+        let pending = PendingDecryptRetry {
+            event_id: event_id.to_owned(),
+            operation: self.next_decrypt_retry_operation,
+            attempt: previous_attempt.map_or(1, |attempt| attempt.saturating_add(1)),
+            actor_generation: self.actor_generation,
+            started_at: Instant::now(),
+        };
+        record_decrypt_retry_request(
+            pending.operation,
+            pending.attempt,
+            DecryptRetryReason::MissingRoomKey,
+            DecryptRetryBackupState::Unknown,
+            Duration::ZERO,
+        );
+        self.pending_decrypt_retry = Some(PendingDecryptRetry {
+            event_id: pending.event_id.clone(),
+            operation: pending.operation,
+            attempt: pending.attempt,
+            actor_generation: pending.actor_generation,
+            started_at: pending.started_at,
+        });
+        pending
+    }
+
+    fn schedule_decrypt_retry_timeout(&mut self, pending: &PendingDecryptRetry) {
+        if let Some(task) = self.decrypt_retry_timeout_task.take() {
+            task.abort();
+        }
+        self.decrypt_retry_timeout_task = Some(spawn_delayed_timeline_message(
+            self.msg_tx.clone(),
+            DECRYPT_RETRY_TIMEOUT,
+            TimelineActorMessage::DecryptRetryTimeout {
+                operation: pending.operation,
+                actor_generation: pending.actor_generation,
+            },
+        ));
+    }
+
+    fn settle_decrypt_retry(&mut self, operation: u64, result: DecryptRetrySettledResult) {
+        if self
+            .pending_decrypt_retry
+            .as_ref()
+            .is_none_or(|pending| pending.operation != operation)
+        {
+            return;
+        }
+        let elapsed = self
+            .pending_decrypt_retry
+            .as_ref()
+            .map(|pending| pending.started_at.elapsed())
+            .unwrap_or_default();
+        self.pending_decrypt_retry = None;
+        if let Some(task) = self.decrypt_retry_timeout_task.take() {
+            task.abort();
+        }
+        record_decrypt_retry_settled(operation, result, elapsed);
+    }
+
     async fn handle_request_room_key(&mut self, request_id: RequestId, event_id: String) {
+        let requested_event_id = event_id.clone();
         let event_id = match matrix_sdk::ruma::EventId::parse(&event_id) {
             Ok(event_id) => event_id,
             Err(_) => {
@@ -17425,6 +17770,7 @@ impl TimelineActor {
             self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
             return;
         };
+        let pending = self.begin_decrypt_retry(&requested_event_id);
         match koushi_sdk::download_room_key_from_backup(
             &self.session,
             room_id.as_str(),
@@ -17433,21 +17779,85 @@ impl TimelineActor {
         .await
         {
             Ok(true) => {
+                record_decrypt_retry_backup_lookup(
+                    pending.operation,
+                    DecryptRetryBackupResult::Found,
+                    pending.started_at.elapsed(),
+                );
                 self.timeline.retry_decryption([session_id]).await;
             }
-            Ok(false) | Err(_) => {
-                if koushi_sdk::request_room_key_for_event(
+            Ok(false) => {
+                record_decrypt_retry_backup_lookup(
+                    pending.operation,
+                    DecryptRetryBackupResult::NotFound,
+                    pending.started_at.elapsed(),
+                );
+                let result = koushi_sdk::request_room_key_for_event(
                     &self.session,
                     room_id.as_str(),
                     &original_json,
                 )
-                .await
-                .is_err()
-                {
-                    self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                .await;
+                match result {
+                    Ok(()) => record_decrypt_retry_device_request(
+                        pending.operation,
+                        DecryptRetryDeviceResult::Sent,
+                        None,
+                        pending.started_at.elapsed(),
+                    ),
+                    Err(error) => {
+                        record_decrypt_retry_device_request(
+                            pending.operation,
+                            DecryptRetryDeviceResult::Failed,
+                            Some(decrypt_retry_failure_for_room_operation(&error)),
+                            pending.started_at.elapsed(),
+                        );
+                        self.settle_decrypt_retry(
+                            pending.operation,
+                            DecryptRetrySettledResult::StillMissing,
+                        );
+                        self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        return;
+                    }
+                }
+            }
+            Err(error) => {
+                record_decrypt_retry_backup_lookup(
+                    pending.operation,
+                    decrypt_retry_backup_result_for_error(&error),
+                    pending.started_at.elapsed(),
+                );
+                let result = koushi_sdk::request_room_key_for_event(
+                    &self.session,
+                    room_id.as_str(),
+                    &original_json,
+                )
+                .await;
+                match result {
+                    Ok(()) => record_decrypt_retry_device_request(
+                        pending.operation,
+                        DecryptRetryDeviceResult::Sent,
+                        None,
+                        pending.started_at.elapsed(),
+                    ),
+                    Err(error) => {
+                        record_decrypt_retry_device_request(
+                            pending.operation,
+                            DecryptRetryDeviceResult::Failed,
+                            Some(decrypt_retry_failure_for_room_operation(&error)),
+                            pending.started_at.elapsed(),
+                        );
+                        self.settle_decrypt_retry(
+                            pending.operation,
+                            DecryptRetrySettledResult::StillMissing,
+                        );
+                        self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        return;
+                    }
                 }
             }
         }
+        self.schedule_decrypt_retry_timeout(&pending);
     }
 
     async fn handle_forward_message(
@@ -18537,6 +18947,16 @@ impl TimelineActor {
     ) {
         if diffs.is_empty() {
             return;
+        }
+        if let Some((operation, event_id)) = self
+            .pending_decrypt_retry
+            .as_ref()
+            .map(|pending| (pending.operation, pending.event_id.clone()))
+            && diffs
+                .iter()
+                .any(|diff| decrypt_retry_diff_resolves_event(diff, &event_id))
+        {
+            self.settle_decrypt_retry(operation, DecryptRetrySettledResult::Decrypted);
         }
         let sdk_diffs = diffs;
         let has_historical_gap_repair_projection = gap_repair_projections
@@ -41293,6 +41713,183 @@ mod tests {
                     | "key_material"
             )
         }));
+    }
+
+    #[test]
+    fn decrypt_retry_diagnostics_are_fixed_token_and_private_data_free() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let operation = 48_217;
+
+        record_decrypt_retry_request(
+            operation,
+            1,
+            DecryptRetryReason::MissingRoomKey,
+            DecryptRetryBackupState::Available,
+            Duration::ZERO,
+        );
+        record_decrypt_retry_backup_lookup(
+            operation,
+            DecryptRetryBackupResult::Found,
+            Duration::ZERO,
+        );
+        record_decrypt_retry_device_request(
+            operation,
+            DecryptRetryDeviceResult::Failed,
+            Some(DecryptRetryFailure::Forbidden),
+            Duration::ZERO,
+        );
+        record_decrypt_retry_settled(
+            operation,
+            DecryptRetrySettledResult::StillMissing,
+            Duration::ZERO,
+        );
+
+        let diagnostics = koushi_diagnostics::snapshot();
+        let records = &diagnostics.records[diagnostic_start..];
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| (record.event.stage, &record.event.fields))
+                .collect::<Vec<_>>(),
+            vec![
+                ("request", &records[0].event.fields),
+                ("backup_lookup", &records[1].event.fields),
+                ("device_request", &records[2].event.fields),
+                ("settled", &records[3].event.fields),
+            ]
+        );
+        for record in records {
+            assert_eq!(record.event.source, "core.decrypt_retry");
+            assert!(record.event.fields.iter().any(|field| {
+                field.key == "operation" && field.value == DiagnosticValue::Correlation(operation)
+            }));
+        }
+        assert!(records[0].event.fields.iter().any(|field| {
+            field.key == "reason" && field.value == DiagnosticValue::Token("missing_room_key")
+        }));
+        assert!(records[1].event.fields.iter().any(|field| {
+            field.key == "result" && field.value == DiagnosticValue::Token("found")
+        }));
+        assert!(records[2].event.fields.iter().any(|field| {
+            field.key == "result" && field.value == DiagnosticValue::Token("failed")
+        }));
+        assert!(records[2].event.fields.iter().any(|field| {
+            field.key == "failure" && field.value == DiagnosticValue::Token("forbidden")
+        }));
+        assert!(records[3].event.fields.iter().any(|field| {
+            field.key == "result" && field.value == DiagnosticValue::Token("still_missing")
+        }));
+
+        let serialized = serde_json::to_string(records).expect("serialize diagnostics");
+        for forbidden in [
+            "!synthetic-room:example.invalid",
+            "$synthetic-event:example.invalid",
+            "@synthetic-user:example.invalid",
+            "SYNTHETICDEVICE",
+            "synthetic-session-id",
+            "synthetic message body",
+            "https://private.example.invalid",
+            "/Users/member/private/store",
+            "private-token",
+            "recovery-key",
+            "backup-version",
+            "raw SDK error",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "diagnostic leaked {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn decrypt_retry_diagnostics_use_only_the_planned_outcome_tokens() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let operation = 48_218;
+
+        record_decrypt_retry_request(
+            operation,
+            2,
+            DecryptRetryReason::MissingRoomKey,
+            DecryptRetryBackupState::Available,
+            Duration::ZERO,
+        );
+        for result in [
+            DecryptRetryBackupResult::Found,
+            DecryptRetryBackupResult::NotFound,
+            DecryptRetryBackupResult::Network,
+            DecryptRetryBackupResult::Forbidden,
+            DecryptRetryBackupResult::InvalidBackup,
+            DecryptRetryBackupResult::Timeout,
+            DecryptRetryBackupResult::Sdk,
+        ] {
+            record_decrypt_retry_backup_lookup(operation, result, Duration::ZERO);
+        }
+        record_decrypt_retry_device_request(
+            operation,
+            DecryptRetryDeviceResult::Sent,
+            None,
+            Duration::ZERO,
+        );
+        for failure in [
+            DecryptRetryFailure::Network,
+            DecryptRetryFailure::Forbidden,
+            DecryptRetryFailure::Timeout,
+            DecryptRetryFailure::Sdk,
+        ] {
+            record_decrypt_retry_device_request(
+                operation,
+                DecryptRetryDeviceResult::Failed,
+                Some(failure),
+                Duration::ZERO,
+            );
+        }
+        for result in [
+            DecryptRetrySettledResult::Decrypted,
+            DecryptRetrySettledResult::StillMissing,
+            DecryptRetrySettledResult::Withheld,
+            DecryptRetrySettledResult::Malformed,
+            DecryptRetrySettledResult::Timeout,
+            DecryptRetrySettledResult::Superseded,
+        ] {
+            record_decrypt_retry_settled(operation, result, Duration::ZERO);
+        }
+
+        let records = &koushi_diagnostics::snapshot().records[diagnostic_start..];
+        let tokens = records
+            .iter()
+            .flat_map(|record| record.event.fields.iter())
+            .filter_map(|field| match field.value {
+                DiagnosticValue::Token(token) => Some((field.key, token)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for expected in [
+            ("backup_state", "available"),
+            ("result", "found"),
+            ("result", "not_found"),
+            ("result", "network"),
+            ("result", "forbidden"),
+            ("result", "invalid_backup"),
+            ("result", "timeout"),
+            ("result", "sdk"),
+            ("failure", "network"),
+            ("failure", "forbidden"),
+            ("failure", "timeout"),
+            ("failure", "sdk"),
+            ("result", "decrypted"),
+            ("result", "still_missing"),
+            ("result", "withheld"),
+            ("result", "malformed"),
+            ("result", "superseded"),
+        ] {
+            assert!(
+                tokens.contains(&expected),
+                "missing fixed token {expected:?}"
+            );
+        }
     }
 
     #[test]
