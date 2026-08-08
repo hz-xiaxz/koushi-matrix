@@ -106,13 +106,26 @@ fn promote_verified_session(
     info: crate::state::SessionInfo,
 ) -> Vec<AppEffect> {
     state.session = SessionState::Ready(info.clone());
+    state.secure_backup_gate = crate::state::SecureBackupGateState::Checking;
     state.device_cleanup = DeviceCleanupState::Idle;
     state.sync = SyncState::Starting;
     vec![
         AppEffect::PersistSession(info),
         AppEffect::StartSync,
+        AppEffect::InspectSecureBackup,
         AppEffect::EmitUiEvent(UiEvent::SessionChanged),
     ]
+}
+
+pub(crate) fn handle_secure_backup_gate_changed(
+    state: &mut AppState,
+    gate: crate::state::SecureBackupGateState,
+) -> Vec<AppEffect> {
+    if !matches!(state.session, SessionState::Ready(_)) || state.secure_backup_gate == gate {
+        return Vec::new();
+    }
+    state.secure_backup_gate = gate;
+    vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
 }
 
 pub(crate) fn handle_current_device_trust_changed(

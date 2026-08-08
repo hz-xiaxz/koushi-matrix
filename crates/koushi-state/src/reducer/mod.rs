@@ -100,6 +100,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::CurrentDeviceTrustChanged(trust) => {
             session::handle_current_device_trust_changed(state, trust)
         }
+        AppAction::SecureBackupGateChanged(gate) => {
+            session::handle_secure_backup_gate_changed(state, gate)
+        }
         AppAction::AuthoritativeDeviceTrustChanged { trust, .. } => {
             session::handle_authoritative_device_trust_changed(state, trust)
         }

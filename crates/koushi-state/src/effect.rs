@@ -38,6 +38,7 @@ pub enum AppEffect {
         request: LoginRequest,
     },
     CheckCurrentDeviceTrust,
+    InspectSecureBackup,
     RefreshCurrentSessionStatus {
         request_id: u64,
         trigger: crate::SessionStatusRefreshTrigger,

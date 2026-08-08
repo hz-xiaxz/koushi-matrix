@@ -103,6 +103,64 @@ pub struct VerificationGateState {
     pub failure: Option<VerificationGateFailureKind>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SecureBackupGateFailureKind {
+    Network,
+    RateLimited,
+    InvalidRecoveryKey,
+    BackupKeyMismatch,
+    SecretStorageIncomplete,
+    ArtifactDelivery,
+    Forbidden,
+    Timeout,
+    Sdk,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PendingKeyCountBucket {
+    Zero,
+    One,
+    TwoToTen,
+    ElevenToOneHundred,
+    OverOneHundred,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SecureBackupGateState {
+    #[default]
+    Inactive,
+    Checking,
+    ExistingBackupNeedsRecovery {
+        #[serde(default)]
+        failure: Option<SecureBackupGateFailureKind>,
+    },
+    SecureStorageIncomplete,
+    SetupRequired,
+    ExplicitlyDisabledRequiresSetup,
+    CreatingBackup,
+    RecoveryKeyDeliveryRequired,
+    UploadingExistingKeys {
+        pending: PendingKeyCountBucket,
+    },
+    DegradedRetrying {
+        failure: SecureBackupGateFailureKind,
+    },
+    BlockedFailed {
+        failure: SecureBackupGateFailureKind,
+    },
+    Ready,
+}
+
+impl SecureBackupGateState {
+    pub fn allows_encrypted_sending(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DeviceCleanupAuthMode {

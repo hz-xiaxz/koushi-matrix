@@ -9,7 +9,8 @@ use koushi_state::{
     NativeAttentionState, NativeAttentionSummary, NavigationState, ProvisionalPhase,
     RecoveryMethod, RecoveryRequest, RoomAttentionKind, RoomSummary, RoomTags,
     SearchCrawlerLastActive, SearchCrawlerLastActiveStatus, SearchCrawlerRoomState,
-    SearchCrawlerState, SearchScope, SearchState, SessionInfo, SessionState, SpaceSummary,
+    SearchCrawlerState, SearchScope, SearchState, SecureBackupGateFailureKind,
+    SecureBackupGateState, SessionInfo, SessionState, SpaceSummary,
     SubmissionId, SyncState, ThreadAttentionState, ThreadPaneState, TimelinePaneState,
     TrustOperationFailureKind, UiEvent, VerificationAccountKind, VerificationGateFailureKind,
     VerificationGateRejectReason, VerificationGateState, VerificationMethod,
@@ -649,8 +650,10 @@ fn only_authoritative_verified_promotes_and_trust_loss_locks_and_clears() {
         AppAction::CurrentDeviceTrustChanged(CurrentDeviceTrustState::Verified),
     );
     assert_eq!(gated.session, SessionState::Ready(session_info()));
+    assert_eq!(gated.secure_backup_gate, SecureBackupGateState::Checking);
     assert!(effects.contains(&AppEffect::PersistSession(session_info())));
     assert!(effects.contains(&AppEffect::StartSync));
+    assert!(effects.contains(&AppEffect::InspectSecureBackup));
 
     let mut ready = state_with_session_scoped_workflows();
     let effects = reduce(
@@ -661,6 +664,61 @@ fn only_authoritative_verified_promotes_and_trust_loss_locks_and_clears() {
     assert_eq!(ready.sync, SyncState::Stopped);
     assert_session_scoped_workflows_cleared(&ready);
     assert!(effects.contains(&AppEffect::StopSync));
+}
+
+#[test]
+fn secure_backup_gate_is_closed_until_authoritative_ready_and_can_degrade() {
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        secure_backup_gate: SecureBackupGateState::Checking,
+        ..AppState::default()
+    };
+
+    let effects = reduce(
+        &mut state,
+        AppAction::SecureBackupGateChanged(SecureBackupGateState::ExistingBackupNeedsRecovery {
+            failure: None,
+        }),
+    );
+    assert!(effects.contains(&AppEffect::EmitUiEvent(UiEvent::SessionChanged)));
+    assert!(matches!(
+        state.secure_backup_gate,
+        SecureBackupGateState::ExistingBackupNeedsRecovery { failure: None }
+    ));
+
+    reduce(
+        &mut state,
+        AppAction::SecureBackupGateChanged(SecureBackupGateState::Ready),
+    );
+    assert_eq!(state.secure_backup_gate, SecureBackupGateState::Ready);
+
+    reduce(
+        &mut state,
+        AppAction::SecureBackupGateChanged(SecureBackupGateState::DegradedRetrying {
+            failure: SecureBackupGateFailureKind::Network,
+        }),
+    );
+    assert!(matches!(
+        state.secure_backup_gate,
+        SecureBackupGateState::DegradedRetrying {
+            failure: SecureBackupGateFailureKind::Network
+        }
+    ));
+    assert_eq!(state.session, SessionState::Ready(session_info()));
+}
+
+#[test]
+fn signed_out_state_ignores_secure_backup_updates() {
+    let mut state = AppState::default();
+    let before = state.clone();
+
+    let effects = reduce(
+        &mut state,
+        AppAction::SecureBackupGateChanged(SecureBackupGateState::Ready),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state, before);
 }
 
 #[test]

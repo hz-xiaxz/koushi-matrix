@@ -248,6 +248,24 @@ stateDiagram-v2
   reconnecting, failed, and offline normal sync remain in the Ready shell and
   use its normal status/restart affordances; they do not reopen or flash the
   verification gate.
+- `SessionState::Ready` is necessary but not sufficient for encrypted sending.
+  The independent `SecureBackupGateState` starts at `Checking` after verified
+  promotion and opens encrypted admission only at `Ready`. This keeps one
+  session lifecycle while allowing sync, receiving, and local decryption to
+  continue during backup recovery or runtime degradation.
+- `SecureBackupGateState` distinguishes an existing backup needing recovery,
+  incomplete secure storage, setup required, explicitly disabled setup,
+  creation, native Recovery Key delivery, upload settlement, retrying,
+  terminal blocking failure, and ready. Server existence, local enablement,
+  recovery completeness, and upload health remain distinct SDK inspection
+  facts and are not collapsed into a boolean.
+- A transition away from backup `Ready` closes encrypted admission
+  immediately but does not clear composer drafts or stop sync. A matching
+  authoritative return to `Ready` reopens admission. Account/session
+  generation fencing occurs in `AccountActor` before reducer projection.
+- Setup after an explicitly disabled state requires a separate user command;
+  the UI states that re-enabling the account-wide backup setting changes the
+  behavior observed by the user's other Matrix clients.
 - A genuine missing cross-signing identity may enter mandatory bootstrap. An
   existing identity without a verified other device or usable recovery method
   enters `Rejecting`; identity reset, skip, and verify-later are not gate exits.

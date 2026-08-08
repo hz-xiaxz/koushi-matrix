@@ -7,7 +7,7 @@ build gates. AGENTS.md remains the operational how-to (permissions, install
 caveats, recovery steps); durable rules discovered there are promoted to
 REPOSITORY_RULES.md or this document.
 
-Last amended: 2026-08-03.
+Last amended: 2026-08-08.
 
 ## Design Simplicity
 
@@ -224,6 +224,20 @@ Rules:
    QA tokens, screenshots, or issue comments. Desktop recovery-key delivery
    writes through a Rust/Tauri native artifact path and reports only a boolean
    or coarse status.
+   Verified-device admission does not imply encrypted-send admission. Secure
+   Backup must also be recoverable, trusted, locally enabled, and settled;
+   every other typed state fails closed for encrypted user content while sync,
+   receiving, local decryption, diagnostics, and logout may continue. An
+   existing backup is recovered in place and is never automatically deleted,
+   replaced, or reset. Re-enabling an explicitly disabled account-wide backup
+   requires an explicit action whose copy warns that other Matrix clients see
+   the changed setting.
+   Every new or rotated outbound Megolm session used for Koushi user content
+   must have its persisted inbound counterpart authoritatively marked backed
+   up by the active trusted backup before the first event is encrypted and sent.
+   The fence is SDK-owned and opt-in; identifiers, backup versions, key
+   material, message content, filesystem paths, and raw failures never cross
+   its typed boundary or diagnostics.
    Authentication alone is not session admission. Until the SDK
    current-device verification state is authoritatively `Verified`, the SDK
    session is AccountActor-owned and quarantined: no normal sync children,
