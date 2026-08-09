@@ -92,6 +92,14 @@ describe("App diagnostics lifecycle", () => {
 
   test("keeps the read-only shell visible when a ready session later degrades", async () => {
     const api = createBrowserFakeApi();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    const getDiagnosticSnapshot = vi
+      .spyOn(api, "getDiagnosticSnapshot")
+      .mockResolvedValue(snapshot([{ timestampMs: 1, source: "core.runtime", message: "stage=copy" }]));
     const readySnapshot = await api.getSnapshot();
     const mutable = api as unknown as { snapshot: typeof readySnapshot };
     const activeRoomId = readySnapshot.state.ui.navigation.active_room_id;
@@ -119,13 +127,51 @@ describe("App diagnostics lifecycle", () => {
       tauriEventListeners.get("koushi-desktop://state")?.({ payload: "stateChanged" });
     });
 
-    await waitFor(() =>
-      expect(screen.getByText("Secure backup could not reach the server.")).toBeTruthy()
-    );
+    const statusTrigger = await screen.findByRole("button", {
+      name: "Open session status, 1 runtime warning"
+    });
     expect(await screen.findByRole("button", { name: "Create room" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Message composer" }).getAttribute("aria-disabled"))
       .toBe("true");
     expect(screen.queryByRole("heading", { name: "Secure backup required" })).toBeNull();
+    expect(document.querySelector(".secure-backup-runtime-banner")).toBeNull();
+
+    fireEvent.click(statusTrigger);
+    const status = screen.getByRole("dialog", { name: "Current session" });
+    expect(status.textContent).toContain("Runtime warnings");
+    expect(status.textContent).toContain("Secure Backup unavailable");
+    expect(status.textContent).toContain("Secure backup could not reach the server.");
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+
+    await waitFor(() => expect(getDiagnosticSnapshot).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0]?.[0]).toContain("Koushi diagnostics");
+    expect(writeText.mock.calls[0]?.[0]).toContain("core.runtime stage=copy");
+  });
+
+  test("projects sync and current-session failures into the status alerts", async () => {
+    const api = createBrowserFakeApi();
+    const initialSnapshot = await api.getSnapshot();
+    const mutable = api as unknown as { snapshot: typeof initialSnapshot };
+    mutable.snapshot.state.domain.sync = { reconnecting: "network_offline" };
+    mutable.snapshot.state.domain.current_session_status = {
+      status: "failed",
+      request_id: 370,
+      kind: "timed_out",
+      checked_at_ms: Date.UTC(2026, 7, 9, 9, 0, 0)
+    };
+
+    await renderAppWithApi(api);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open session status, 2 runtime warnings"
+      })
+    );
+    const status = screen.getByRole("dialog", { name: "Current session" });
+    expect(status.textContent).toContain("Sync");
+    expect(status.textContent).toContain("Sync reconnecting");
+    expect(status.textContent).toContain("Session check timed out");
   });
 
   test("records a schema mismatch without console output and retains the fixed entry after refresh", async () => {

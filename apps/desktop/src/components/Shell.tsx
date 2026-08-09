@@ -9,6 +9,7 @@ import {
   useState
 } from "react";
 import {
+  AlertTriangle,
   Bell,
   Bug,
   ChevronDown,
@@ -66,6 +67,16 @@ import {
 } from "../app/localPresentation";
 
 const ROOM_SECTION_COLLAPSE_KEY = "koushi.roomSectionCollapsed.v1";
+
+export type RuntimeAlertKind = "secureBackup" | "sync" | "session";
+
+export interface RuntimeAlert {
+  kind: RuntimeAlertKind;
+  severity: "warning" | "error";
+  title: string;
+  detail: string;
+  retryable: boolean;
+}
 
 function sortedSidebarRooms(
   rooms: RoomListItem[],
@@ -156,13 +167,17 @@ export function TopBar({
   sync,
   userId = null,
   onManageAccount = () => undefined,
+  onCopyDiagnostics = async () => undefined,
   onOpenKeyboardSettings,
   onOpenDiagnostics = () => undefined,
   onRefreshCurrentSessionStatus = () => undefined,
+  onRetryRuntimeAlert = () => undefined,
   onRestartSync,
   onSearchQueryChange,
   onSearchScopeChange,
-  onStartWindowDrag = () => undefined
+  onStartWindowDrag = () => undefined,
+  runtimeAlertRetrying = false,
+  runtimeAlerts = []
 }: {
   accountManagementUrl?: string | null;
   activeRoomName?: string | null;
@@ -178,13 +193,17 @@ export function TopBar({
   sync: DesktopSnapshot["state"]["domain"]["sync"];
   userId?: string | null;
   onManageAccount?: (safeExternalUrl: string | null) => void;
+  onCopyDiagnostics?: () => Promise<void>;
   onOpenKeyboardSettings: () => void;
   onOpenDiagnostics?: () => void;
   onRefreshCurrentSessionStatus?: (trigger: SessionStatusRefreshTrigger) => void;
+  onRetryRuntimeAlert?: (kind: RuntimeAlertKind) => void;
   onRestartSync: () => void;
   onSearchQueryChange: (value: string) => void;
   onSearchScopeChange: (value: SearchScopeKind) => void;
   onStartWindowDrag?: () => void;
+  runtimeAlertRetrying?: boolean;
+  runtimeAlerts?: RuntimeAlert[];
 }) {
   const [sessionStatusOpen, setSessionStatusOpen] = useState(false);
   const sessionStatusHostRef = useRef<HTMLDivElement>(null);
@@ -196,6 +215,27 @@ export function TopBar({
   const syncAriaLabel = serverLabel
     ? `${serverLabel} · ${syncStatus.ariaLabel}`
     : syncStatus.ariaLabel;
+  const runtimeAlertSeverity = runtimeAlerts.some((alert) => alert.severity === "error")
+    ? "error"
+    : "warning";
+  const runtimeAlertsLabel = t(
+    runtimeAlerts.length === 1
+      ? "sessionStatus.runtimeWarningCount"
+      : "sessionStatus.runtimeWarningsCount",
+    {
+      count: String(runtimeAlerts.length)
+    }
+  );
+  const sessionStatusLabel = runtimeAlerts.length
+    ? t(
+        runtimeAlerts.length === 1
+          ? "sessionStatus.openWithRuntimeWarning"
+          : "sessionStatus.openWithRuntimeWarnings",
+        {
+          count: String(runtimeAlerts.length)
+        }
+      )
+    : t("sessionStatus.open");
 
   function closeSessionStatus() {
     setSessionStatusOpen(false);
@@ -275,7 +315,7 @@ export function TopBar({
             className="sync-status"
             data-sync-state={syncStatus.state}
             type="button"
-            aria-label={t("sessionStatus.open")}
+            aria-label={sessionStatusLabel}
             aria-expanded={sessionStatusOpen}
             aria-haspopup="dialog"
             onClick={() => {
@@ -300,6 +340,16 @@ export function TopBar({
                 <span className="sync-status-detail">{syncStatus.detail}</span>
               ) : null}
             </span>
+            {runtimeAlerts.length ? (
+              <span
+                className="runtime-alert-indicator"
+                data-runtime-alert-severity={runtimeAlertSeverity}
+                role="img"
+                aria-label={runtimeAlertsLabel}
+              >
+                <AlertTriangle size={ICON_SIZE.micro} aria-hidden="true" />
+              </span>
+            ) : null}
             <ChevronDown size={ICON_SIZE.micro} aria-hidden="true" />
           </button>
           {sessionStatusOpen ? (
@@ -311,8 +361,12 @@ export function TopBar({
               homeserver={serverLabel ?? homeserver ?? null}
               userId={userId}
               onManageAccount={onManageAccount}
+              onCopyDiagnostics={onCopyDiagnostics}
               onOpenDiagnostics={onOpenDiagnostics}
               onRefresh={onRefreshCurrentSessionStatus}
+              runtimeAlertRetrying={runtimeAlertRetrying}
+              onRetryRuntimeAlert={onRetryRuntimeAlert}
+              runtimeAlerts={runtimeAlerts}
             />
           ) : null}
         </div>
@@ -356,8 +410,12 @@ function SessionStatusPopover({
   homeserver,
   userId,
   onManageAccount,
+  onCopyDiagnostics,
   onOpenDiagnostics,
-  onRefresh
+  onRefresh,
+  runtimeAlertRetrying,
+  onRetryRuntimeAlert,
+  runtimeAlerts
 }: {
   accountManagementUrl: string | null;
   accountManagementResolved: boolean;
@@ -366,10 +424,15 @@ function SessionStatusPopover({
   homeserver: string | null;
   userId: string | null;
   onManageAccount: (safeExternalUrl: string | null) => void;
+  onCopyDiagnostics: () => Promise<void>;
   onOpenDiagnostics: () => void;
   onRefresh: (trigger: SessionStatusRefreshTrigger) => void;
+  runtimeAlertRetrying: boolean;
+  onRetryRuntimeAlert: (kind: RuntimeAlertKind) => void;
+  runtimeAlerts: RuntimeAlert[];
 }) {
   const dialogRef = useRef<HTMLElement>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copying" | "copied" | "failed">("idle");
   const details =
     currentSessionStatus.status === "ready" ? currentSessionStatus.details : null;
   const displayedDeviceId = details?.device_id ?? deviceId;
@@ -382,6 +445,16 @@ function SessionStatusPopover({
   useEffect(() => {
     dialogRef.current?.focus();
   }, []);
+
+  async function copyDiagnostics() {
+    setCopyState("copying");
+    try {
+      await onCopyDiagnostics();
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  }
 
   return (
     <section
@@ -463,6 +536,30 @@ function SessionStatusPopover({
       {accountManagementResolved && !accountManagementUrl ? (
         <p className="session-status-note">{t("sessionStatus.accountManagementFallback")}</p>
       ) : null}
+      {runtimeAlerts.length ? (
+        <section className="runtime-alerts" aria-labelledby="runtime-warnings-title">
+          <h2 id="runtime-warnings-title">{t("sessionStatus.runtimeWarnings")}</h2>
+          <ul>
+            {runtimeAlerts.map((alert) => (
+              <li key={alert.kind} data-runtime-alert-severity={alert.severity}>
+                <strong>{alert.title}</strong>
+                <p>{alert.detail}</p>
+                {alert.retryable ? (
+                  <button
+                    type="button"
+                    disabled={runtimeAlertRetrying}
+                    onClick={() => onRetryRuntimeAlert(alert.kind)}
+                  >
+                    {alert.kind === "secureBackup"
+                      ? t("gate.secureBackupRetry")
+                      : t("sessionStatus.retry")}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <div className="session-status-actions">
         <button
           type="button"
@@ -490,7 +587,15 @@ function SessionStatusPopover({
         <button type="button" onClick={onOpenDiagnostics}>
           {t("diagnostics.open")}
         </button>
+        <button type="button" disabled={copyState === "copying"} onClick={() => void copyDiagnostics()}>
+          {copyState === "copying" ? t("diagnostics.copying") : t("diagnostics.copy")}
+        </button>
       </div>
+      {copyState !== "idle" && copyState !== "copying" ? (
+        <p className="session-status-copy-feedback" aria-live="polite">
+          {copyState === "copied" ? t("diagnostics.copied") : t("diagnostics.copyFailed")}
+        </p>
+      ) : null}
     </section>
   );
 }

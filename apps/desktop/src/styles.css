@@ -900,6 +900,73 @@ button:disabled {
   color: var(--danger);
 }
 
+.runtime-alert-indicator {
+  display: inline-flex;
+  align-items: center;
+  color: var(--warning);
+}
+
+.runtime-alert-indicator[data-runtime-alert-severity="error"] {
+  color: var(--danger);
+}
+
+.runtime-alerts {
+  margin-block-start: 14px;
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--line);
+}
+
+.runtime-alerts h2,
+.runtime-alerts p {
+  margin: 0;
+}
+
+.runtime-alerts h2 {
+  font-size: 13px;
+}
+
+.runtime-alerts ul {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.runtime-alerts li {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.runtime-alerts li[data-runtime-alert-severity="error"] {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
+}
+
+.runtime-alerts li p,
+.session-status-copy-feedback {
+  margin-block-start: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.runtime-alerts button {
+  min-height: 30px;
+  margin-block-start: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.session-status-copy-feedback {
+  margin-block-end: 0;
+}
+
 .session-status-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6978,19 +7045,6 @@ kbd {
 .secure-backup-destination-selector [role="status"] {
   color: var(--text-muted);
   font-size: 12px;
-}
-
-.secure-backup-runtime-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-warning, var(--surface));
-}
-
-.secure-backup-runtime-banner > span:first-child {
-  flex: 1;
 }
 
 .session-verification-drag-region {

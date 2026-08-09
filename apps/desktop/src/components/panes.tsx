@@ -47,11 +47,14 @@ import {
 } from "../domain/appStore";
 import {
   TimelineView,
+  invokeReturnToLiveSafely,
+  roomLatestDisplayEventId,
   type TimelineDiagnosticLogEntry,
   type TimelineDiagnostics,
   type TimelineRowActionHandlers,
   type TimelineThreadAttention,
-  type TimelineTransport
+  type TimelineTransport,
+  type ReturnToLiveHandler
 } from "./TimelineView";
 import { EntityAvatar } from "./Shell";
 import {
@@ -764,7 +767,7 @@ export function TimelinePane({
   onOpenPeople: () => void;
   onOpenThreads: () => void;
   onToggleRoomInfo: () => void;
-  onReturnToLive?: () => void;
+  onReturnToLive?: ReturnToLiveHandler;
   onTimelineDiagnosticsChange?: (diagnostics: TimelineDiagnostics) => void;
   onTimelineDiagnosticLogEntry?: (entry: TimelineDiagnosticLogEntry) => void;
 }) {
@@ -773,6 +776,7 @@ export function TimelinePane({
   const activeRoom = timelineRoomId
     ? snapshot.state.domain.rooms.find((room) => room.room_id === timelineRoomId) ?? null
     : null;
+  const liveLatestEventId = roomLatestDisplayEventId(activeRoom?.latest_event);
   const threadAttention = snapshot.state.domain.thread_attention;
   const trackingThreadAttention = threadAttention.kind === "tracking" ? threadAttention : null;
   const timelineThreadAttention = useMemo<TimelineThreadAttention | null>(() => {
@@ -907,7 +911,7 @@ export function TimelinePane({
               title={t("timeline.latest")}
               onClick={() => {
                 if (mainTimelineAnchorEventId && onReturnToLive) {
-                  onReturnToLive();
+                  invokeReturnToLiveSafely(onReturnToLive);
                   return;
                 }
                 jumpToLatestRef.current?.();
@@ -992,6 +996,7 @@ export function TimelinePane({
               timelineKey={timelineKey!}
               isAnchored={Boolean(mainTimelineAnchorEventId)}
               onReturnToLive={onReturnToLive}
+              liveLatestEventId={liveLatestEventId}
               transport={timelineTransport}
               onReply={onReplyStable}
               onOpenMatrixTarget={onOpenMatrixTarget ? onOpenMatrixTargetStable : undefined}

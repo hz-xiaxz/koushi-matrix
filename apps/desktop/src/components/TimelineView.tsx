@@ -161,6 +161,7 @@ import type {
   LiveReadReceipt,
   LiveSignalsState,
   PresenceKind,
+  RoomLatestEventSummary,
   ResolveComposerKeyAction,
   TimelineScrollAnchor,
   TimelineMediaDownloadState,
@@ -184,6 +185,35 @@ import {
 } from "../domain/timelineDisplayProjection";
 
 export type { TimelineForwardDestination } from "../domain/projectionTypes";
+
+/**
+ * Returns an authoritative display event ID from a room summary.
+ *
+ * The SDK summary describes the latest Matrix event, not the final projected
+ * timeline row. A relation target therefore cannot prove that its target is
+ * the display tail, so relation summaries remain unknown until the backend
+ * exposes that fact directly.
+ */
+export function roomLatestDisplayEventId(
+  summary: RoomLatestEventSummary | null | undefined
+): string | null {
+  if (!summary) {
+    return null;
+  }
+  if (summary.relation_type) {
+    return null;
+  }
+  return summary.event_id || null;
+}
+
+export type ReturnToLiveHandler = () => void | Promise<void>;
+
+/** Keep UI event handlers from leaking rejected async navigation callbacks. */
+export function invokeReturnToLiveSafely(handler: ReturnToLiveHandler): void {
+  void Promise.resolve()
+    .then(() => handler())
+    .catch(() => undefined);
+}
 
 // ---------------------------------------------------------------------------
 // Transport interface (Tauri IPC, browser fake, or test mock)
@@ -2370,6 +2400,7 @@ export const TimelineView = memo(function TimelineView({
   initialTargetEventId = null,
   isAnchored = false,
   onReturnToLive,
+  liveLatestEventId = null,
   autoLoadOlderMessages = false,
   threadRootOrder = ROOT_EVENT_THREAD_ORDER,
   codeBlockWrap = true,
@@ -2426,7 +2457,8 @@ export const TimelineView = memo(function TimelineView({
   // #161: main pane is anchored to a jump-to-date event; the live-edge control
   // returns to the live timeline instead of scrolling within the focused window.
   isAnchored?: boolean;
-  onReturnToLive?: () => void;
+  onReturnToLive?: ReturnToLiveHandler;
+  liveLatestEventId?: string | null;
   autoLoadOlderMessages?: boolean;
   /** Presentation-only Room order; the canonical store remains SDK ordered. */
   threadRootOrder?: TimelineThreadRootOrder;
@@ -2634,6 +2666,8 @@ export const TimelineView = memo(function TimelineView({
   const lastBackfillEvaluationDiagnosticSignatureRef = useRef<string | null>(null);
   const readSignalEventRef = useRef<string | null>(null);
   const lastViewportObservationRef = useRef<string | null>(null);
+  const autoReturnToLiveIdentityRef = useRef<string | null>(null);
+  const autoReturnToLiveKeyRef = useRef<string | null>(null);
   const downloadedEventIdsRef = useRef<Set<string>>(new Set());
   const autoRequestedRoomKeyIdsRef = useRef<Set<string>>(new Set());
   const requestedImagePreviewEventIdsRef = useRef<Set<string>>(new Set());
@@ -4112,6 +4146,50 @@ export const TimelineView = memo(function TimelineView({
   // moved root only changes presentation; it must not cause the root id to be
   // sent as the room's latest readable event.
   const latestReadableEventId = latestEventBackedItemId(items);
+  useEffect(() => {
+    const anchorEventId = focusedTimelineTargetEventId ?? initialTargetEventId ?? "anchored";
+    const identityKey = [roomId, anchorEventId].join("\u0000");
+    if (!isAnchored) {
+      autoReturnToLiveIdentityRef.current = null;
+      autoReturnToLiveKeyRef.current = null;
+      return;
+    }
+    if (autoReturnToLiveIdentityRef.current !== identityKey) {
+      autoReturnToLiveIdentityRef.current = identityKey;
+      autoReturnToLiveKeyRef.current = null;
+    }
+    if (
+      !onReturnToLive ||
+      !viewportAtBottom ||
+      !latestReadableEventId ||
+      !liveLatestEventId ||
+      latestReadableEventId !== liveLatestEventId
+    ) {
+      return;
+    }
+
+    const key = [identityKey, liveLatestEventId].join("\u0000");
+    if (autoReturnToLiveKeyRef.current === key) {
+      return;
+    }
+    autoReturnToLiveKeyRef.current = key;
+    void Promise.resolve()
+      .then(() => onReturnToLive())
+      .catch(() => {
+        if (autoReturnToLiveKeyRef.current === key) {
+          autoReturnToLiveKeyRef.current = null;
+        }
+      });
+  }, [
+    focusedTimelineTargetEventId,
+    initialTargetEventId,
+    isAnchored,
+    latestReadableEventId,
+    liveLatestEventId,
+    onReturnToLive,
+    roomId,
+    viewportAtBottom
+  ]);
   const timelineInitialized = Boolean(timelineKeyState && !timelineKeyState.awaitingResync);
   // Stable, render-visible timeline generation for this key. Bumps when the
   // store replaces the list for a new generation (InitialItems / resync), so
@@ -4282,7 +4360,8 @@ export const TimelineView = memo(function TimelineView({
     const observeViewport = transport.observeViewport;
     const canObserveRoomViewport = Boolean(observeViewport && roomTimelineRoomId === roomId);
     const canSendReadSignals = readSignalRoomId === roomId;
-    if (!canObserveRoomViewport && !canSendReadSignals) {
+    const canComputeLocalViewport = focusedTimelineTargetEventId !== null;
+    if (!canObserveRoomViewport && !canSendReadSignals && !canComputeLocalViewport) {
       return;
     }
     const container = containerRef.current;
@@ -4333,6 +4412,7 @@ export const TimelineView = memo(function TimelineView({
       )
       .catch(() => undefined);
   }, [
+    focusedTimelineTargetEventId,
     latestReadableEventId,
     readSignalRoomId,
     roomId,
@@ -5607,7 +5687,7 @@ export const TimelineView = memo(function TimelineView({
             <button
               className="timeline-navigation-pill"
               type="button"
-              onClick={onReturnToLive}
+              onClick={() => invokeReturnToLiveSafely(onReturnToLive)}
             >
               <ArrowDown size={14} aria-hidden="true" />
               <span>{t("shortcut.jumpToLatestMessage")}</span>

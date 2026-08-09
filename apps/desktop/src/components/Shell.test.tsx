@@ -2,14 +2,21 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createBrowserFakeApi } from "../backend/browserFakeApi";
 import { computeBrowserRoomListProjection } from "../backend/roomListProjection";
 import type { CurrentSessionStatusState, RoomSummary } from "../domain/types";
 import { elementAvatarColorIndex, elementAvatarInitial } from "../app/uiShared";
-import { EntityAvatar, Sidebar, TopBar, WorkspaceRail, avatarColorClass } from "./Shell";
+import {
+  EntityAvatar,
+  Sidebar,
+  TopBar,
+  WorkspaceRail,
+  avatarColorClass,
+  type RuntimeAlert
+} from "./Shell";
 
 afterEach(() => {
   cleanup();
@@ -1303,6 +1310,9 @@ describe("TopBar current session status", () => {
       onRefresh?: (trigger: "open" | "manual") => void;
       onManage?: (url: string | null) => void;
       onDiagnostics?: () => void;
+      runtimeAlerts?: RuntimeAlert[];
+      onRetryRuntimeAlert?: (kind: RuntimeAlert["kind"]) => void;
+      onCopyDiagnostics?: () => Promise<void>;
     } = {}
   ) {
     return render(
@@ -1319,6 +1329,9 @@ describe("TopBar current session status", () => {
         sync="running"
         userId="@alice:matrix.example"
         onManageAccount={overrides.onManage ?? (() => undefined)}
+        runtimeAlerts={overrides.runtimeAlerts}
+        onRetryRuntimeAlert={overrides.onRetryRuntimeAlert}
+        onCopyDiagnostics={overrides.onCopyDiagnostics}
         onOpenDiagnostics={overrides.onDiagnostics ?? (() => undefined)}
         onOpenKeyboardSettings={() => undefined}
         onRefreshCurrentSessionStatus={overrides.onRefresh ?? (() => undefined)}
@@ -1442,6 +1455,100 @@ describe("TopBar current session status", () => {
     expect(screen.getByText(/did not advertise a safe external account destination/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open local account settings" }));
     expect(onManage).toHaveBeenLastCalledWith(null);
+  });
+
+  it("shows the highest runtime-alert severity, lists every warning, and retries Secure Backup", () => {
+    const onRetryRuntimeAlert = vi.fn();
+    const runtimeAlerts: RuntimeAlert[] = [
+      {
+        kind: "secureBackup",
+        severity: "warning",
+        title: "Secure Backup unavailable",
+        detail: "Encrypted sending is paused.",
+        retryable: true
+      },
+      {
+        kind: "sync",
+        severity: "error",
+        title: "Sync failed",
+        detail: "Sign-in required.",
+        retryable: false
+      }
+    ];
+    renderStatus(readyStatus, { runtimeAlerts, onRetryRuntimeAlert });
+
+    const trigger = screen.getByRole("button", {
+      name: "Open session status, 2 runtime warnings"
+    });
+    expect(
+      screen.getByRole("img", { name: "2 runtime warnings" }).getAttribute(
+        "data-runtime-alert-severity"
+      )
+    ).toBe("error");
+
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole("dialog", { name: "Current session" });
+    expect(dialog.textContent).toContain("Runtime warnings");
+    expect(dialog.textContent).toContain("Secure Backup unavailable");
+    expect(dialog.textContent).toContain("Encrypted sending is paused.");
+    expect(dialog.textContent).toContain("Sync failed");
+    expect(dialog.textContent).toContain("Sign-in required.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retry secure backup" }));
+    expect(onRetryRuntimeAlert).toHaveBeenCalledWith("secureBackup");
+  });
+
+  it("uses singular accessibility text for one runtime warning", () => {
+    renderStatus(readyStatus, {
+      runtimeAlerts: [
+        {
+          kind: "sync",
+          severity: "warning",
+          title: "Sync reconnecting",
+          detail: "Network unavailable.",
+          retryable: false
+        }
+      ]
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Open session status, 1 runtime warning" })
+    ).toBeTruthy();
+    expect(screen.getByRole("img", { name: "1 runtime warning" })).toBeTruthy();
+  });
+
+  it("announces successful diagnostic copying from the status popover", async () => {
+    const onCopyDiagnostics = vi.fn().mockResolvedValue(undefined);
+    renderStatus(readyStatus, { onCopyDiagnostics });
+    fireEvent.click(screen.getByRole("button", { name: "Open session status" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+
+    expect(onCopyDiagnostics).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByText("Diagnostics copied.")).toBeTruthy());
+  });
+
+  it("keeps the popover open and offers a retryable copy failure", async () => {
+    const onCopyDiagnostics = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("clipboard unavailable"))
+      .mockResolvedValueOnce(undefined);
+    renderStatus(readyStatus, { onCopyDiagnostics });
+    fireEvent.click(screen.getByRole("button", { name: "Open session status" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Could not copy diagnostics. Try again.")).toBeTruthy()
+    );
+    expect(screen.getByRole("dialog", { name: "Current session" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy diagnostics" }).hasAttribute("disabled")).toBe(
+      false
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+    await waitFor(() => expect(screen.getByText("Diagnostics copied.")).toBeTruthy());
+    expect(onCopyDiagnostics).toHaveBeenCalledTimes(2);
   });
 
   it("dismisses on Escape and outside pointer input and returns focus", () => {
