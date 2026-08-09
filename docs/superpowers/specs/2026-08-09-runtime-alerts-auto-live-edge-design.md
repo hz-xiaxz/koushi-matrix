@@ -45,11 +45,11 @@ The focused timeline may leave focused mode only when all of the following are t
 4. The active room's authoritative latest display event ID is known.
 5. Those display event IDs are equal.
 
-For ordinary messages, the room summary event ID is the display event ID. For edits and annotations, the relation target is the display event ID. The TypeScript DTO exposes the already-serialized optional `relation_type` and `relation_event_id` fields so this mapping is explicit.
+For an ordinary displayable event, the room summary event ID is the display event ID. A latest-event summary for an edit or annotation is not sufficient proof of the final display row: the relation may target an older message while a newer message remains below it. Relation summaries therefore produce an unknown authoritative display ID and keep focused mode active. The TypeScript DTO exposes the already-serialized optional `relation_type` and `relation_event_id` fields so this conservative decision is explicit.
 
 `TimelineView` reports the proven condition once through `onReturnToLive`. An in-flight guard prevents repeated `closeFocusedContext()` calls while the state transition is settling. Switching rooms or changing the anchor resets the guard. If either event ID is unavailable, differs, or the viewport is above the bottom, focused mode and the explicit return button remain.
 
-This is deliberately UI-owned. The necessary authoritative room summary already exists, and adding a new backend command or persistent state would duplicate information without improving correctness.
+This is deliberately UI-owned for ordinary displayable events. If automatic return for relation-only latest summaries is desired later, the backend must expose the actual final display-row ID; inferring it from the relation target is unsafe.
 
 ## Accessibility and Layout
 

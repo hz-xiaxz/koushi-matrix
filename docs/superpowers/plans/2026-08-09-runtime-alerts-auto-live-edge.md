@@ -14,7 +14,7 @@
 - Aggregate only existing failed, reconnecting, or degraded runtime states; do not persist alert history.
 - Copy the same privacy-safe diagnostic report used by the existing diagnostics dialog.
 - Auto-return only when anchored, at bottom, and both known display-event IDs match.
-- Resolve edit and annotation events to their relation target before comparing IDs.
+- Treat edit and annotation latest-event summaries as insufficient proof of the final display row; do not auto-return from those summaries.
 - Keep an explicit return control whenever automatic proof is absent.
 
 ---
@@ -114,7 +114,7 @@ git commit -m "feat: integrate runtime warnings into session status"
 
 - [ ] **Step 1: Write failing display-event mapping tests**
 
-Add table-driven tests proving that an ordinary event maps to its own ID, `m.replace` and `m.annotation` map to `relation_event_id`, and a relation without a target returns `null`.
+Add table-driven tests proving that an ordinary event maps to its own ID, while `m.replace`, `m.annotation`, and a relation without a target return `null` because they do not prove the final display row.
 
 - [ ] **Step 2: Write failing focused-timeline behavior tests**
 
@@ -128,7 +128,7 @@ Expected: FAIL because relation mapping and the `liveLatestEventId` prop do not 
 
 - [ ] **Step 4: Implement DTO mapping and guarded auto-return**
 
-Add the serialized relation fields to the TypeScript DTO, derive the authoritative display event in `TimelinePane`, and pass it to `TimelineView`. Add an effect with a ref guard keyed by room, anchor, and live event. Invoke `onReturnToLive` only after all five proof conditions in the design are true.
+Add the serialized relation fields to the TypeScript DTO, conservatively derive the authoritative display event in `TimelinePane`, and pass it to `TimelineView`. Add an effect with a ref guard keyed by room, anchor, and live event. Invoke `onReturnToLive` only after all five proof conditions in the design are true; release the matching guard if the asynchronous close fails so a later retry remains possible.
 
 - [ ] **Step 5: Run TimelineView tests and verify GREEN**
 
