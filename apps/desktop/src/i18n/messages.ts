@@ -198,7 +198,10 @@ export type MessageId =
   | "dialog.reportReasonTitle"
   | "dialog.submitCreateRoom"
   | "dialog.submitCreateSpace"
+  | "diagnostics.copied"
   | "diagnostics.copy"
+  | "diagnostics.copyFailed"
+  | "diagnostics.copying"
   | "diagnostics.open"
   | "diagnostics.title"
   | "emoji.category.people"
@@ -500,10 +503,14 @@ export type MessageId =
   | "sessionStatus.notChecked"
   | "sessionStatus.notCrossSigned"
   | "sessionStatus.open"
+  | "sessionStatus.openWithRuntimeWarnings"
   | "sessionStatus.openLocalSettings"
   | "sessionStatus.ownerCrossSigning"
   | "sessionStatus.recheck"
   | "sessionStatus.retry"
+  | "sessionStatus.runtimeAlertSecureBackup"
+  | "sessionStatus.runtimeWarnings"
+  | "sessionStatus.runtimeWarningsCount"
   | "sessionStatus.sync"
   | "sessionStatus.syncError"
   | "sessionStatus.syncRunning"
@@ -1432,7 +1439,10 @@ const en: Catalog = {
   "dialog.reportReasonTitle": "Report",
   "dialog.submitCreateRoom": "Submit create room",
   "dialog.submitCreateSpace": "Submit create space",
+  "diagnostics.copied": "Diagnostics copied.",
   "diagnostics.copy": "Copy diagnostics",
+  "diagnostics.copyFailed": "Could not copy diagnostics. Try again.",
+  "diagnostics.copying": "Copying diagnostics…",
   "diagnostics.open": "Open diagnostics",
   "diagnostics.title": "Diagnostics",
   "emoji.category.people": "Smileys & People",
@@ -1741,10 +1751,14 @@ const en: Catalog = {
   "sessionStatus.notChecked": "Not checked",
   "sessionStatus.notCrossSigned": "Not cross-signed",
   "sessionStatus.open": "Open session status",
+  "sessionStatus.openWithRuntimeWarnings": "Open session status, {count} runtime warnings",
   "sessionStatus.openLocalSettings": "Open local account settings",
   "sessionStatus.ownerCrossSigning": "Owner cross-signing",
   "sessionStatus.recheck": "Recheck",
   "sessionStatus.retry": "Retry",
+  "sessionStatus.runtimeAlertSecureBackup": "Secure Backup unavailable",
+  "sessionStatus.runtimeWarnings": "Runtime warnings",
+  "sessionStatus.runtimeWarningsCount": "{count} runtime warnings",
   "sessionStatus.sync": "Sync",
   "sessionStatus.syncError": "Error",
   "sessionStatus.syncRunning": "Running",
@@ -2572,7 +2586,10 @@ const ja: Catalog = {
   "dialog.reportReasonTitle": "報告",
   "dialog.submitCreateRoom": "ルーム作成を実行",
   "dialog.submitCreateSpace": "スペース作成を実行",
+  "diagnostics.copied": "診断情報をコピーしました。",
   "diagnostics.copy": "診断情報をコピー",
+  "diagnostics.copyFailed": "診断情報をコピーできませんでした。もう一度お試しください。",
+  "diagnostics.copying": "診断情報をコピー中…",
   "diagnostics.open": "診断情報を開く",
   "diagnostics.title": "診断情報",
   "emoji.category.people": "顔と人",
@@ -2881,10 +2898,14 @@ const ja: Catalog = {
   "sessionStatus.notChecked": "未確認",
   "sessionStatus.notCrossSigned": "クロス署名なし",
   "sessionStatus.open": "セッション状態を開く",
+  "sessionStatus.openWithRuntimeWarnings": "セッション状態を開く（実行時の警告 {count} 件）",
   "sessionStatus.openLocalSettings": "ローカルのアカウント設定を開く",
   "sessionStatus.ownerCrossSigning": "所有者のクロス署名",
   "sessionStatus.recheck": "再確認",
   "sessionStatus.retry": "再試行",
+  "sessionStatus.runtimeAlertSecureBackup": "安全なバックアップを利用できません",
+  "sessionStatus.runtimeWarnings": "実行時の警告",
+  "sessionStatus.runtimeWarningsCount": "実行時の警告 {count} 件",
   "sessionStatus.sync": "同期",
   "sessionStatus.syncError": "エラー",
   "sessionStatus.syncRunning": "実行中",

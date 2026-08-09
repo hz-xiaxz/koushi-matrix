@@ -211,6 +211,7 @@ import { openExternalHttpUrl } from "./domain/externalLinks";
 import {
   composerModeProp,
   serverNameFromRoomId,
+  syncStatePresentation,
   type ActiveContextMenu,
   type ContextMenuTarget,
   type PrimaryView,
@@ -234,7 +235,8 @@ import {
 import {
   TopBar,
   WorkspaceRail,
-  Sidebar
+  Sidebar,
+  type RuntimeAlert
 } from "./components/Shell";
 import { ContextualRightPanel } from "./components/rightPanel";
 import type {
@@ -1035,6 +1037,17 @@ function secureBackupFailureLabel(kind: SecureBackupGateFailureKind): string {
       sdk: "gate.secureBackupFailureSdk"
     } as const)[kind]
   );
+}
+
+function currentSessionStatusFailureLabel(kind: "sdk" | "timed_out" | "unavailable"): string {
+  switch (kind) {
+    case "sdk":
+      return t("sessionStatus.failureSdk");
+    case "timed_out":
+      return t("sessionStatus.failureTimedOut");
+    case "unavailable":
+      return t("sessionStatus.failureUnavailable");
+  }
 }
 
 function secureBackupPendingLabel(bucket: PendingKeyCountBucket): string {
@@ -5893,6 +5906,40 @@ export function App() {
   );
   const encryptedComposerBlocked =
     secureBackupRuntimeDegraded && Boolean(activeRoom?.is_encrypted);
+  const runtimeAlerts: RuntimeAlert[] = [];
+  if (secureBackupRuntimeDegraded) {
+    runtimeAlerts.push({
+      kind: "secureBackup",
+      severity: "warning",
+      title: t("sessionStatus.runtimeAlertSecureBackup"),
+      detail: [
+        t("gate.secureBackupRuntimeDegraded"),
+        secureBackupRuntimeFailure ? secureBackupFailureLabel(secureBackupRuntimeFailure) : null
+      ]
+        .filter((value): value is string => Boolean(value))
+        .join(" "),
+      retryable: Boolean(api.retrySecureBackupInspection)
+    });
+  }
+  if (typeof snapshot.state.domain.sync !== "string") {
+    const syncStatus = syncStatePresentation(snapshot.state.domain.sync);
+    runtimeAlerts.push({
+      kind: "sync",
+      severity: "reconnecting" in snapshot.state.domain.sync ? "warning" : "error",
+      title: t("sessionStatus.sync"),
+      detail: syncStatus.ariaLabel,
+      retryable: false
+    });
+  }
+  if (snapshot.state.domain.current_session_status.status === "failed") {
+    runtimeAlerts.push({
+      kind: "session",
+      severity: "error",
+      title: t("sessionStatus.failed"),
+      detail: currentSessionStatusFailureLabel(snapshot.state.domain.current_session_status.kind),
+      retryable: false
+    });
+  }
   const activeSpace = snapshot.state.domain.spaces.find(
     (space) => space.space_id === snapshot.state.ui.navigation.active_space_id
   );
@@ -5962,6 +6009,36 @@ export function App() {
     "--right-panel-width": `${rightPanelWidth}px`
   } as CSSProperties;
 
+  function diagnosticReportFor(
+    appSnapshot: DesktopSnapshot,
+    runtimeSnapshot: DiagnosticLogSnapshot
+  ): string {
+    const localDiagnosticSnapshot = diagnosticLogBuffer.snapshot();
+    return diagnosticReport({
+      snapshot: appSnapshot,
+      panelMode: effectiveRightPanelMode,
+      sendStatus: qaSendStatus,
+      timelineDiagnostics,
+      domDiagnostics: qaRenderedDomDiagnostics(),
+      uiLatencyDiagnostics,
+      stateDeltaStats: getAppStoreDeltaStats(),
+      timelineTransportStats: getTimelineTransportStats(),
+      jsErrors: getRecentJsErrors(),
+      logEntries: [...localDiagnosticSnapshot.entries, ...runtimeSnapshot.entries],
+      droppedLogEntries: localDiagnosticSnapshot.droppedEntries + runtimeSnapshot.droppedEntries,
+      slidingSyncDiagnostics: runtimeSnapshot.slidingSync,
+      securityDiagnostics: qaSecurityDiagnostics()
+    });
+  }
+
+  async function copyDiagnostics(appSnapshot: DesktopSnapshot) {
+    const nextSnapshot = await api.getDiagnosticSnapshot();
+    if (!navigator.clipboard) {
+      throw new Error("clipboard unavailable");
+    }
+    await navigator.clipboard.writeText(diagnosticReportFor(appSnapshot, nextSnapshot));
+  }
+
   function beginSidebarResize(event: PointerEvent<HTMLButtonElement>) {
     event.preventDefault();
     const startX = event.clientX;
@@ -6013,29 +6090,6 @@ export function App() {
         className="desktop"
         data-density={displayDensity}
       >
-        {secureBackupRuntimeDegraded ? (
-          <div className="secure-backup-runtime-banner" role="status" aria-live="polite">
-            <span>{t("gate.secureBackupRuntimeDegraded")}</span>
-            {secureBackupRuntimeFailure ? (
-              <span>{secureBackupFailureLabel(secureBackupRuntimeFailure)}</span>
-            ) : null}
-            <button
-              className="dialog-button"
-              type="button"
-              disabled={secureBackupInspectionRetrying || !api.retrySecureBackupInspection}
-              onClick={() => void retrySecureBackupInspection()}
-            >
-              {t("gate.secureBackupRetry")}
-            </button>
-            <button
-              className="dialog-button"
-              type="button"
-              onClick={() => void openDiagnostics()}
-            >
-              {t("gate.secureBackupDiagnostics")}
-            </button>
-          </div>
-        ) : null}
         <TopBar
           accountManagementUrl={
             snapshot.state.domain.auth.kind === "ready"
@@ -6061,6 +6115,7 @@ export function App() {
             }
             void setRightPanelModeClosingFocusedContext("userSettings");
           }}
+          onCopyDiagnostics={() => copyDiagnostics(snapshot)}
           onOpenKeyboardSettings={() => {
             void setRightPanelModeClosingFocusedContext("keyboardSettings");
           }}
@@ -6070,10 +6125,17 @@ export function App() {
           onRefreshCurrentSessionStatus={(trigger) => {
             void api.refreshCurrentSessionStatus(trigger).then(setSnapshot);
           }}
+          onRetryRuntimeAlert={(kind) => {
+            if (kind === "secureBackup") {
+              void retrySecureBackupInspection();
+            }
+          }}
           onRestartSync={restartSync}
           onSearchQueryChange={setSearchQuery}
           onSearchScopeChange={setSearchScope}
           onStartWindowDrag={startWindowDrag}
+          runtimeAlertRetrying={secureBackupInspectionRetrying}
+          runtimeAlerts={runtimeAlerts}
         />
       <div
         className={`app-grid ${rightPanelOpen ? "right-panel-open" : "thread-closed"}`}
@@ -6760,27 +6822,8 @@ export function App() {
         />
       ) : null}
       {diagnosticsOpen ? (() => {
-        const localDiagnosticSnapshot = diagnosticLogBuffer.snapshot();
         return <DiagnosticDialog
-          report={diagnosticReport({
-            snapshot,
-            panelMode: effectiveRightPanelMode,
-            sendStatus: qaSendStatus,
-            timelineDiagnostics,
-            domDiagnostics: qaRenderedDomDiagnostics(),
-            uiLatencyDiagnostics,
-            stateDeltaStats: getAppStoreDeltaStats(),
-            timelineTransportStats: getTimelineTransportStats(),
-            jsErrors: getRecentJsErrors(),
-            logEntries: [
-              ...localDiagnosticSnapshot.entries,
-              ...runtimeDiagnosticSnapshot.entries
-            ],
-            droppedLogEntries:
-              localDiagnosticSnapshot.droppedEntries + runtimeDiagnosticSnapshot.droppedEntries,
-            slidingSyncDiagnostics: runtimeDiagnosticSnapshot.slidingSync,
-            securityDiagnostics: qaSecurityDiagnostics()
-          })}
+          report={diagnosticReportFor(snapshot, runtimeDiagnosticSnapshot)}
           onClose={() => setDiagnosticsOpen(false)}
         />;
       })() : null}
