@@ -473,6 +473,79 @@ describe("TimelineView", () => {
     }
   });
 
+  it("automatically returns a focused anchored timeline at the live edge", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const onReturnToLive = vi.fn();
+    const observeViewport = vi.fn(async () => undefined);
+    const focusedKey = focusedTimelineKey(
+      "@alice:example.invalid",
+      "!room:example.invalid",
+      "$anchor:example.invalid"
+    );
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      observeViewport
+    });
+    const scrollContainerRef: { current: HTMLElement | null } = { current: null };
+    const rectSpy = mockTimelineRects(
+      { "$live:example.invalid": { top: 520, height: 80 } },
+      { top: 0, height: 500 },
+      scrollContainerRef
+    );
+
+    try {
+      render(
+        <TimelineView
+          timelineKey={focusedKey}
+          roomId="!room:example.invalid"
+          transport={transport}
+          onReply={vi.fn()}
+          initialTargetEventId="$anchor:example.invalid"
+          isAnchored
+          onReturnToLive={onReturnToLive}
+          liveLatestEventId="$live:example.invalid"
+        />
+      );
+
+      const timeline = await screen.findByTestId("timeline-view");
+      scrollContainerRef.current = timeline;
+      Object.defineProperty(timeline, "clientHeight", { value: 500, configurable: true });
+      Object.defineProperty(timeline, "scrollHeight", { value: 1_000, configurable: true });
+      Object.defineProperty(timeline, "scrollTop", {
+        value: 500,
+        writable: true,
+        configurable: true
+      });
+
+      act(() => {
+        emit({
+          kind: "Timeline",
+          event: {
+            InitialItems: {
+              request_id: null,
+              key: focusedKey,
+              generation: 1,
+              items: [message("$live:example.invalid", "Live message")]
+            }
+          }
+        });
+      });
+
+      fireEvent.wheel(timeline, { deltaY: 1 });
+      fireEvent.scroll(timeline);
+
+      await waitFor(() => {
+        expect(onReturnToLive).toHaveBeenCalledTimes(1);
+      });
+      expect(observeViewport).not.toHaveBeenCalled();
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
+
   it("does not re-request live mode after a transient loss of bottom proof", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onReturnToLive = vi.fn(() => new Promise<void>(() => undefined));

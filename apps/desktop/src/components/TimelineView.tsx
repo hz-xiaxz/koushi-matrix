@@ -4360,7 +4360,8 @@ export const TimelineView = memo(function TimelineView({
     const observeViewport = transport.observeViewport;
     const canObserveRoomViewport = Boolean(observeViewport && roomTimelineRoomId === roomId);
     const canSendReadSignals = readSignalRoomId === roomId;
-    if (!canObserveRoomViewport && !canSendReadSignals) {
+    const canComputeLocalViewport = focusedTimelineTargetEventId !== null;
+    if (!canObserveRoomViewport && !canSendReadSignals && !canComputeLocalViewport) {
       return;
     }
     const container = containerRef.current;
@@ -4411,6 +4412,7 @@ export const TimelineView = memo(function TimelineView({
       )
       .catch(() => undefined);
   }, [
+    focusedTimelineTargetEventId,
     latestReadableEventId,
     readSignalRoomId,
     roomId,
