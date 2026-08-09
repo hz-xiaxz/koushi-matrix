@@ -218,11 +218,23 @@ export function TopBar({
   const runtimeAlertSeverity = runtimeAlerts.some((alert) => alert.severity === "error")
     ? "error"
     : "warning";
-  const runtimeAlertsLabel = t("sessionStatus.runtimeWarningsCount", {
-    count: String(runtimeAlerts.length)
-  });
+  const runtimeAlertsLabel = t(
+    runtimeAlerts.length === 1
+      ? "sessionStatus.runtimeWarningCount"
+      : "sessionStatus.runtimeWarningsCount",
+    {
+      count: String(runtimeAlerts.length)
+    }
+  );
   const sessionStatusLabel = runtimeAlerts.length
-    ? t("sessionStatus.openWithRuntimeWarnings", { count: String(runtimeAlerts.length) })
+    ? t(
+        runtimeAlerts.length === 1
+          ? "sessionStatus.openWithRuntimeWarning"
+          : "sessionStatus.openWithRuntimeWarnings",
+        {
+          count: String(runtimeAlerts.length)
+        }
+      )
     : t("sessionStatus.open");
 
   function closeSessionStatus() {

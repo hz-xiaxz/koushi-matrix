@@ -47,12 +47,14 @@ import {
 } from "../domain/appStore";
 import {
   TimelineView,
+  invokeReturnToLiveSafely,
   roomLatestDisplayEventId,
   type TimelineDiagnosticLogEntry,
   type TimelineDiagnostics,
   type TimelineRowActionHandlers,
   type TimelineThreadAttention,
-  type TimelineTransport
+  type TimelineTransport,
+  type ReturnToLiveHandler
 } from "./TimelineView";
 import { EntityAvatar } from "./Shell";
 import {
@@ -765,7 +767,7 @@ export function TimelinePane({
   onOpenPeople: () => void;
   onOpenThreads: () => void;
   onToggleRoomInfo: () => void;
-  onReturnToLive?: () => void;
+  onReturnToLive?: ReturnToLiveHandler;
   onTimelineDiagnosticsChange?: (diagnostics: TimelineDiagnostics) => void;
   onTimelineDiagnosticLogEntry?: (entry: TimelineDiagnosticLogEntry) => void;
 }) {
@@ -909,7 +911,7 @@ export function TimelinePane({
               title={t("timeline.latest")}
               onClick={() => {
                 if (mainTimelineAnchorEventId && onReturnToLive) {
-                  onReturnToLive();
+                  invokeReturnToLiveSafely(onReturnToLive);
                   return;
                 }
                 jumpToLatestRef.current?.();

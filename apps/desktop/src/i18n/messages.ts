@@ -503,12 +503,14 @@ export type MessageId =
   | "sessionStatus.notChecked"
   | "sessionStatus.notCrossSigned"
   | "sessionStatus.open"
+  | "sessionStatus.openWithRuntimeWarning"
   | "sessionStatus.openWithRuntimeWarnings"
   | "sessionStatus.openLocalSettings"
   | "sessionStatus.ownerCrossSigning"
   | "sessionStatus.recheck"
   | "sessionStatus.retry"
   | "sessionStatus.runtimeAlertSecureBackup"
+  | "sessionStatus.runtimeWarningCount"
   | "sessionStatus.runtimeWarnings"
   | "sessionStatus.runtimeWarningsCount"
   | "sessionStatus.sync"
@@ -1751,12 +1753,14 @@ const en: Catalog = {
   "sessionStatus.notChecked": "Not checked",
   "sessionStatus.notCrossSigned": "Not cross-signed",
   "sessionStatus.open": "Open session status",
+  "sessionStatus.openWithRuntimeWarning": "Open session status, {count} runtime warning",
   "sessionStatus.openWithRuntimeWarnings": "Open session status, {count} runtime warnings",
   "sessionStatus.openLocalSettings": "Open local account settings",
   "sessionStatus.ownerCrossSigning": "Owner cross-signing",
   "sessionStatus.recheck": "Recheck",
   "sessionStatus.retry": "Retry",
   "sessionStatus.runtimeAlertSecureBackup": "Secure Backup unavailable",
+  "sessionStatus.runtimeWarningCount": "{count} runtime warning",
   "sessionStatus.runtimeWarnings": "Runtime warnings",
   "sessionStatus.runtimeWarningsCount": "{count} runtime warnings",
   "sessionStatus.sync": "Sync",
@@ -2898,12 +2902,14 @@ const ja: Catalog = {
   "sessionStatus.notChecked": "未確認",
   "sessionStatus.notCrossSigned": "クロス署名なし",
   "sessionStatus.open": "セッション状態を開く",
+  "sessionStatus.openWithRuntimeWarning": "セッション状態を開く（実行時の警告 {count} 件）",
   "sessionStatus.openWithRuntimeWarnings": "セッション状態を開く（実行時の警告 {count} 件）",
   "sessionStatus.openLocalSettings": "ローカルのアカウント設定を開く",
   "sessionStatus.ownerCrossSigning": "所有者のクロス署名",
   "sessionStatus.recheck": "再確認",
   "sessionStatus.retry": "再試行",
   "sessionStatus.runtimeAlertSecureBackup": "安全なバックアップを利用できません",
+  "sessionStatus.runtimeWarningCount": "実行時の警告 {count} 件",
   "sessionStatus.runtimeWarnings": "実行時の警告",
   "sessionStatus.runtimeWarningsCount": "実行時の警告 {count} 件",
   "sessionStatus.sync": "同期",

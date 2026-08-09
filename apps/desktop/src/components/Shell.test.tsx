@@ -1498,6 +1498,25 @@ describe("TopBar current session status", () => {
     expect(onRetryRuntimeAlert).toHaveBeenCalledWith("secureBackup");
   });
 
+  it("uses singular accessibility text for one runtime warning", () => {
+    renderStatus(readyStatus, {
+      runtimeAlerts: [
+        {
+          kind: "sync",
+          severity: "warning",
+          title: "Sync reconnecting",
+          detail: "Network unavailable.",
+          retryable: false
+        }
+      ]
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Open session status, 1 runtime warning" })
+    ).toBeTruthy();
+    expect(screen.getByRole("img", { name: "1 runtime warning" })).toBeTruthy();
+  });
+
   it("announces successful diagnostic copying from the status popover", async () => {
     const onCopyDiagnostics = vi.fn().mockResolvedValue(undefined);
     renderStatus(readyStatus, { onCopyDiagnostics });
@@ -1510,7 +1529,10 @@ describe("TopBar current session status", () => {
   });
 
   it("keeps the popover open and offers a retryable copy failure", async () => {
-    const onCopyDiagnostics = vi.fn().mockRejectedValue(new Error("clipboard unavailable"));
+    const onCopyDiagnostics = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("clipboard unavailable"))
+      .mockResolvedValueOnce(undefined);
     renderStatus(readyStatus, { onCopyDiagnostics });
     fireEvent.click(screen.getByRole("button", { name: "Open session status" }));
 
@@ -1523,6 +1545,10 @@ describe("TopBar current session status", () => {
     expect(screen.getByRole("button", { name: "Copy diagnostics" }).hasAttribute("disabled")).toBe(
       false
     );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+    await waitFor(() => expect(screen.getByText("Diagnostics copied.")).toBeTruthy());
+    expect(onCopyDiagnostics).toHaveBeenCalledTimes(2);
   });
 
   it("dismisses on Escape and outside pointer input and returns focus", () => {

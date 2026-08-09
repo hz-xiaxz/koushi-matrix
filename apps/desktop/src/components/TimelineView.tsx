@@ -187,10 +187,12 @@ import {
 export type { TimelineForwardDestination } from "../domain/projectionTypes";
 
 /**
- * Returns the event ID represented by a room summary's latest display row.
- * Edits and annotations update an existing row, so their relation target is
- * the authoritative display ID. Other relations, such as replies, are still
- * their own display rows.
+ * Returns an authoritative display event ID from a room summary.
+ *
+ * The SDK summary describes the latest Matrix event, not the final projected
+ * timeline row. A relation target therefore cannot prove that its target is
+ * the display tail, so relation summaries remain unknown until the backend
+ * exposes that fact directly.
  */
 export function roomLatestDisplayEventId(
   summary: RoomLatestEventSummary | null | undefined
@@ -198,10 +200,19 @@ export function roomLatestDisplayEventId(
   if (!summary) {
     return null;
   }
-  if (summary.relation_type === "m.replace" || summary.relation_type === "m.annotation") {
-    return summary.relation_event_id ?? null;
+  if (summary.relation_type) {
+    return null;
   }
   return summary.event_id || null;
+}
+
+export type ReturnToLiveHandler = () => void | Promise<void>;
+
+/** Keep UI event handlers from leaking rejected async navigation callbacks. */
+export function invokeReturnToLiveSafely(handler: ReturnToLiveHandler): void {
+  void Promise.resolve()
+    .then(() => handler())
+    .catch(() => undefined);
 }
 
 // ---------------------------------------------------------------------------
@@ -2446,7 +2457,7 @@ export const TimelineView = memo(function TimelineView({
   // #161: main pane is anchored to a jump-to-date event; the live-edge control
   // returns to the live timeline instead of scrolling within the focused window.
   isAnchored?: boolean;
-  onReturnToLive?: () => void;
+  onReturnToLive?: ReturnToLiveHandler;
   liveLatestEventId?: string | null;
   autoLoadOlderMessages?: boolean;
   /** Presentation-only Room order; the canonical store remains SDK ordered. */
@@ -4162,7 +4173,13 @@ export const TimelineView = memo(function TimelineView({
       return;
     }
     autoReturnToLiveKeyRef.current = key;
-    onReturnToLive();
+    void Promise.resolve()
+      .then(() => onReturnToLive())
+      .catch(() => {
+        if (autoReturnToLiveKeyRef.current === key) {
+          autoReturnToLiveKeyRef.current = null;
+        }
+      });
   }, [
     focusedTimelineTargetEventId,
     initialTargetEventId,
@@ -5668,7 +5685,7 @@ export const TimelineView = memo(function TimelineView({
             <button
               className="timeline-navigation-pill"
               type="button"
-              onClick={onReturnToLive}
+              onClick={() => invokeReturnToLiveSafely(onReturnToLive)}
             >
               <ArrowDown size={14} aria-hidden="true" />
               <span>{t("shortcut.jumpToLatestMessage")}</span>

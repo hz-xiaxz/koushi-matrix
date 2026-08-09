@@ -128,7 +128,7 @@ describe("App diagnostics lifecycle", () => {
     });
 
     const statusTrigger = await screen.findByRole("button", {
-      name: "Open session status, 1 runtime warnings"
+      name: "Open session status, 1 runtime warning"
     });
     expect(await screen.findByRole("button", { name: "Create room" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Message composer" }).getAttribute("aria-disabled"))
@@ -147,6 +147,31 @@ describe("App diagnostics lifecycle", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText.mock.calls[0]?.[0]).toContain("Koushi diagnostics");
     expect(writeText.mock.calls[0]?.[0]).toContain("core.runtime stage=copy");
+  });
+
+  test("projects sync and current-session failures into the status alerts", async () => {
+    const api = createBrowserFakeApi();
+    const initialSnapshot = await api.getSnapshot();
+    const mutable = api as unknown as { snapshot: typeof initialSnapshot };
+    mutable.snapshot.state.domain.sync = { reconnecting: "network_offline" };
+    mutable.snapshot.state.domain.current_session_status = {
+      status: "failed",
+      request_id: 370,
+      kind: "timed_out",
+      checked_at_ms: Date.UTC(2026, 7, 9, 9, 0, 0)
+    };
+
+    await renderAppWithApi(api);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open session status, 2 runtime warnings"
+      })
+    );
+    const status = screen.getByRole("dialog", { name: "Current session" });
+    expect(status.textContent).toContain("Sync");
+    expect(status.textContent).toContain("Sync reconnecting");
+    expect(status.textContent).toContain("Session check timed out");
   });
 
   test("records a schema mismatch without console output and retains the fixed entry after refresh", async () => {

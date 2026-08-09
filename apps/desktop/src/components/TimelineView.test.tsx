@@ -382,19 +382,24 @@ describe("TimelineView", () => {
     [
       "message edit",
       latestEventSummary({ relation_type: "m.replace", relation_event_id: "$target:example.invalid" }),
-      "$target:example.invalid"
+      null
     ],
     [
       "reaction annotation",
       latestEventSummary({ relation_type: "m.annotation", relation_event_id: "$target:example.invalid" }),
-      "$target:example.invalid"
+      null
     ],
     [
       "relation without a target",
       latestEventSummary({ relation_type: "m.replace", relation_event_id: null }),
       null
+    ],
+    [
+      "other relation",
+      latestEventSummary({ relation_type: "m.reference", relation_event_id: "$target:example.invalid" }),
+      null
     ]
-  ])("maps the latest room summary to its display event for %s", (_label, summary, expected) => {
+  ])("only maps an ordinary room summary to a display event for %s", (_label, summary, expected) => {
     expect(roomLatestDisplayEventId(summary)).toBe(expected);
   });
 
@@ -558,6 +563,72 @@ describe("TimelineView", () => {
         expect(observeViewport.mock.calls.some((call) => call[4] === true)).toBe(true);
       });
       expect(onReturnToLive).toHaveBeenCalledTimes(1);
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
+
+  it("retries automatic live return after a rejected close operation", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const onReturnToLive = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("close failed"))
+      .mockResolvedValue(undefined);
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+    const scrollContainerRef: { current: HTMLElement | null } = { current: null };
+    const rectSpy = mockTimelineRects(
+      { "$live:example.invalid": { top: 520, height: 80 } },
+      { top: 0, height: 500 },
+      scrollContainerRef
+    );
+
+    try {
+      const props = {
+        timelineKey: KEY,
+        roomId: "!room:example.invalid",
+        transport,
+        onReply: vi.fn(),
+        initialTargetEventId: "$anchor:example.invalid",
+        isAnchored: true,
+        onReturnToLive,
+        liveLatestEventId: "$live:example.invalid"
+      };
+      const { rerender } = render(<TimelineView {...props} />);
+      const timeline = await screen.findByTestId("timeline-view");
+      scrollContainerRef.current = timeline;
+      Object.defineProperty(timeline, "clientHeight", { value: 500, configurable: true });
+      Object.defineProperty(timeline, "scrollHeight", { value: 1_000, configurable: true });
+      Object.defineProperty(timeline, "scrollTop", {
+        value: 500,
+        writable: true,
+        configurable: true
+      });
+
+      act(() => {
+        emit({
+          kind: "Timeline",
+          event: {
+            InitialItems: {
+              request_id: null,
+              key: KEY,
+              generation: 1,
+              items: [message("$live:example.invalid", "Live message")]
+            }
+          }
+        });
+      });
+      fireEvent.wheel(timeline, { deltaY: 1 });
+      fireEvent.scroll(timeline);
+      await waitFor(() => expect(onReturnToLive).toHaveBeenCalledTimes(1));
+
+      rerender(<TimelineView {...props} liveLatestEventId="$other:example.invalid" />);
+      rerender(<TimelineView {...props} liveLatestEventId="$live:example.invalid" />);
+      await waitFor(() => expect(onReturnToLive).toHaveBeenCalledTimes(2));
     } finally {
       rectSpy.mockRestore();
     }
