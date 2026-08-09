@@ -2655,6 +2655,7 @@ export const TimelineView = memo(function TimelineView({
   const lastBackfillEvaluationDiagnosticSignatureRef = useRef<string | null>(null);
   const readSignalEventRef = useRef<string | null>(null);
   const lastViewportObservationRef = useRef<string | null>(null);
+  const autoReturnToLiveIdentityRef = useRef<string | null>(null);
   const autoReturnToLiveKeyRef = useRef<string | null>(null);
   const downloadedEventIdsRef = useRef<Set<string>>(new Set());
   const autoRequestedRoomKeyIdsRef = useRef<Set<string>>(new Set());
@@ -4135,20 +4136,28 @@ export const TimelineView = memo(function TimelineView({
   // sent as the room's latest readable event.
   const latestReadableEventId = latestEventBackedItemId(items);
   useEffect(() => {
+    const anchorEventId = focusedTimelineTargetEventId ?? initialTargetEventId ?? "anchored";
+    const identityKey = [roomId, anchorEventId].join("\u0000");
+    if (!isAnchored) {
+      autoReturnToLiveIdentityRef.current = null;
+      autoReturnToLiveKeyRef.current = null;
+      return;
+    }
+    if (autoReturnToLiveIdentityRef.current !== identityKey) {
+      autoReturnToLiveIdentityRef.current = identityKey;
+      autoReturnToLiveKeyRef.current = null;
+    }
     if (
-      !isAnchored ||
       !onReturnToLive ||
       !viewportAtBottom ||
       !latestReadableEventId ||
       !liveLatestEventId ||
       latestReadableEventId !== liveLatestEventId
     ) {
-      autoReturnToLiveKeyRef.current = null;
       return;
     }
 
-    const anchorEventId = focusedTimelineTargetEventId ?? initialTargetEventId ?? "anchored";
-    const key = [roomId, anchorEventId, liveLatestEventId].join("\u0000");
+    const key = [identityKey, liveLatestEventId].join("\u0000");
     if (autoReturnToLiveKeyRef.current === key) {
       return;
     }
