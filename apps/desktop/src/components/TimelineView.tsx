@@ -161,6 +161,7 @@ import type {
   LiveReadReceipt,
   LiveSignalsState,
   PresenceKind,
+  RoomLatestEventSummary,
   ResolveComposerKeyAction,
   TimelineScrollAnchor,
   TimelineMediaDownloadState,
@@ -184,6 +185,24 @@ import {
 } from "../domain/timelineDisplayProjection";
 
 export type { TimelineForwardDestination } from "../domain/projectionTypes";
+
+/**
+ * Returns the event ID represented by a room summary's latest display row.
+ * Edits and annotations update an existing row, so their relation target is
+ * the authoritative display ID. Other relations, such as replies, are still
+ * their own display rows.
+ */
+export function roomLatestDisplayEventId(
+  summary: RoomLatestEventSummary | null | undefined
+): string | null {
+  if (!summary) {
+    return null;
+  }
+  if (summary.relation_type === "m.replace" || summary.relation_type === "m.annotation") {
+    return summary.relation_event_id ?? null;
+  }
+  return summary.event_id || null;
+}
 
 // ---------------------------------------------------------------------------
 // Transport interface (Tauri IPC, browser fake, or test mock)
@@ -2370,6 +2389,7 @@ export const TimelineView = memo(function TimelineView({
   initialTargetEventId = null,
   isAnchored = false,
   onReturnToLive,
+  liveLatestEventId = null,
   autoLoadOlderMessages = false,
   threadRootOrder = ROOT_EVENT_THREAD_ORDER,
   codeBlockWrap = true,
@@ -2427,6 +2447,7 @@ export const TimelineView = memo(function TimelineView({
   // returns to the live timeline instead of scrolling within the focused window.
   isAnchored?: boolean;
   onReturnToLive?: () => void;
+  liveLatestEventId?: string | null;
   autoLoadOlderMessages?: boolean;
   /** Presentation-only Room order; the canonical store remains SDK ordered. */
   threadRootOrder?: TimelineThreadRootOrder;
@@ -2634,6 +2655,7 @@ export const TimelineView = memo(function TimelineView({
   const lastBackfillEvaluationDiagnosticSignatureRef = useRef<string | null>(null);
   const readSignalEventRef = useRef<string | null>(null);
   const lastViewportObservationRef = useRef<string | null>(null);
+  const autoReturnToLiveKeyRef = useRef<string | null>(null);
   const downloadedEventIdsRef = useRef<Set<string>>(new Set());
   const autoRequestedRoomKeyIdsRef = useRef<Set<string>>(new Set());
   const requestedImagePreviewEventIdsRef = useRef<Set<string>>(new Set());
@@ -4112,6 +4134,36 @@ export const TimelineView = memo(function TimelineView({
   // moved root only changes presentation; it must not cause the root id to be
   // sent as the room's latest readable event.
   const latestReadableEventId = latestEventBackedItemId(items);
+  useEffect(() => {
+    if (
+      !isAnchored ||
+      !onReturnToLive ||
+      !viewportAtBottom ||
+      !latestReadableEventId ||
+      !liveLatestEventId ||
+      latestReadableEventId !== liveLatestEventId
+    ) {
+      autoReturnToLiveKeyRef.current = null;
+      return;
+    }
+
+    const anchorEventId = focusedTimelineTargetEventId ?? initialTargetEventId ?? "anchored";
+    const key = [roomId, anchorEventId, liveLatestEventId].join("\u0000");
+    if (autoReturnToLiveKeyRef.current === key) {
+      return;
+    }
+    autoReturnToLiveKeyRef.current = key;
+    onReturnToLive();
+  }, [
+    focusedTimelineTargetEventId,
+    initialTargetEventId,
+    isAnchored,
+    latestReadableEventId,
+    liveLatestEventId,
+    onReturnToLive,
+    roomId,
+    viewportAtBottom
+  ]);
   const timelineInitialized = Boolean(timelineKeyState && !timelineKeyState.awaitingResync);
   // Stable, render-visible timeline generation for this key. Bumps when the
   // store replaces the list for a new generation (InitialItems / resync), so

@@ -905,6 +905,8 @@ export interface ConversationActivity {
 
 export interface RoomLatestEventSummary {
   event_id: string;
+  relation_type?: string | null;
+  relation_event_id?: string | null;
   sender_id: string | null;
   sender_label: string | null;
   sender_avatar: AvatarImage | null;

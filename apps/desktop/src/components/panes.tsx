@@ -47,6 +47,7 @@ import {
 } from "../domain/appStore";
 import {
   TimelineView,
+  roomLatestDisplayEventId,
   type TimelineDiagnosticLogEntry,
   type TimelineDiagnostics,
   type TimelineRowActionHandlers,
@@ -773,6 +774,7 @@ export function TimelinePane({
   const activeRoom = timelineRoomId
     ? snapshot.state.domain.rooms.find((room) => room.room_id === timelineRoomId) ?? null
     : null;
+  const liveLatestEventId = roomLatestDisplayEventId(activeRoom?.latest_event);
   const threadAttention = snapshot.state.domain.thread_attention;
   const trackingThreadAttention = threadAttention.kind === "tracking" ? threadAttention : null;
   const timelineThreadAttention = useMemo<TimelineThreadAttention | null>(() => {
@@ -992,6 +994,7 @@ export function TimelinePane({
               timelineKey={timelineKey!}
               isAnchored={Boolean(mainTimelineAnchorEventId)}
               onReturnToLive={onReturnToLive}
+              liveLatestEventId={liveLatestEventId}
               transport={timelineTransport}
               onReply={onReplyStable}
               onOpenMatrixTarget={onOpenMatrixTarget ? onOpenMatrixTargetStable : undefined}

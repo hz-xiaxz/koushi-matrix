@@ -32,12 +32,17 @@ import {
   MessageSourceDialog,
   TimelineView,
   clearTimelineViewportSessionMemoryForTests,
+  roomLatestDisplayEventId,
   timelineBackfillThresholdForTests,
   timelineMediaDisplayBoxForTests,
   timelineRowsArePurePrependForTests,
   type TimelineTransport
 } from "./TimelineView";
-import type { LiveSignalsState, TimelineContinuityState } from "../domain/types";
+import type {
+  LiveSignalsState,
+  RoomLatestEventSummary,
+  TimelineContinuityState
+} from "../domain/types";
 import type { MentionCandidate } from "../app/uiShared";
 import { documentFromText } from "../domain/composerDocument";
 import { resetTimelineTransportStats } from "../domain/timelineTransportStats";
@@ -80,6 +85,22 @@ afterEach(() => {
 });
 
 const KEY = roomTimelineKey("@alice:example.invalid", "!room:example.invalid");
+
+function latestEventSummary(
+  overrides: Partial<RoomLatestEventSummary> = {}
+): RoomLatestEventSummary {
+  return {
+    event_id: "$event:example.invalid",
+    relation_type: null,
+    relation_event_id: null,
+    sender_id: null,
+    sender_label: null,
+    sender_avatar: null,
+    preview: null,
+    timestamp_ms: 1_800_000_000_000,
+    ...overrides
+  };
+}
 
 function message(eventId: string, body: string): TimelineItem {
   return {
@@ -356,6 +377,188 @@ function installResizeObserverMock() {
 }
 
 describe("TimelineView", () => {
+  it.each([
+    ["ordinary event", latestEventSummary(), "$event:example.invalid"],
+    [
+      "message edit",
+      latestEventSummary({ relation_type: "m.replace", relation_event_id: "$target:example.invalid" }),
+      "$target:example.invalid"
+    ],
+    [
+      "reaction annotation",
+      latestEventSummary({ relation_type: "m.annotation", relation_event_id: "$target:example.invalid" }),
+      "$target:example.invalid"
+    ],
+    [
+      "relation without a target",
+      latestEventSummary({ relation_type: "m.replace", relation_event_id: null }),
+      null
+    ]
+  ])("maps the latest room summary to its display event for %s", (_label, summary, expected) => {
+    expect(roomLatestDisplayEventId(summary)).toBe(expected);
+  });
+
+  it("automatically returns an anchored timeline once its focused bottom matches the live edge", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const onReturnToLive = vi.fn();
+    const observeViewport = vi.fn(async () => undefined);
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      observeViewport
+    });
+    const scrollContainerRef: { current: HTMLElement | null } = { current: null };
+    const rectSpy = mockTimelineRects(
+      { "$live:example.invalid": { top: 520, height: 80 } },
+      { top: 0, height: 500 },
+      scrollContainerRef
+    );
+
+    try {
+      render(
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={transport}
+          onReply={vi.fn()}
+          initialTargetEventId="$anchor:example.invalid"
+          isAnchored
+          onReturnToLive={onReturnToLive}
+          liveLatestEventId="$live:example.invalid"
+        />
+      );
+
+      const timeline = await screen.findByTestId("timeline-view");
+      scrollContainerRef.current = timeline;
+      Object.defineProperty(timeline, "clientHeight", { value: 500, configurable: true });
+      Object.defineProperty(timeline, "scrollHeight", { value: 1_000, configurable: true });
+      Object.defineProperty(timeline, "scrollTop", {
+        value: 500,
+        writable: true,
+        configurable: true
+      });
+
+      act(() => {
+        emit({
+          kind: "Timeline",
+          event: {
+            InitialItems: {
+              request_id: null,
+              key: KEY,
+              generation: 1,
+              items: [message("$live:example.invalid", "Live message")]
+            }
+          }
+        });
+      });
+
+      fireEvent.wheel(timeline, { deltaY: 1 });
+      fireEvent.scroll(timeline);
+
+      await waitFor(() => {
+        expect(onReturnToLive).toHaveBeenCalledTimes(1);
+      });
+      fireEvent.scroll(timeline);
+      expect(onReturnToLive).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: /jump to latest message/i })).toBeTruthy();
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["different event IDs", "$other:example.invalid", 500],
+    ["unknown authoritative event ID", null, 500],
+    ["viewport above the bottom", "$live:example.invalid", 0]
+  ])(
+    "keeps the explicit return control when the live-edge proof is missing: %s",
+    async (_label, liveLatestEventId, scrollTop) => {
+      let emit: (payload: CoreEventPayload) => void = () => undefined;
+      const onReturnToLive = vi.fn();
+      const observeViewport = vi.fn(async () => undefined);
+      const transport = baseTransport({
+        listenCoreEvents(nextListener) {
+          emit = nextListener;
+          return () => undefined;
+        },
+        observeViewport
+      });
+      const scrollContainerRef: { current: HTMLElement | null } = { current: null };
+      const rectSpy = mockTimelineRects(
+        {
+          "$older:example.invalid": { top: 100, height: 80 },
+          "$live:example.invalid": { top: 900, height: 80 }
+        },
+        { top: 0, height: 500 },
+        scrollContainerRef
+      );
+
+      try {
+        const props = {
+          timelineKey: KEY,
+          roomId: "!room:example.invalid",
+          transport,
+          onReply: vi.fn(),
+          initialTargetEventId: "$anchor:example.invalid",
+          isAnchored: true,
+          onReturnToLive,
+          liveLatestEventId: null
+        };
+        const { rerender } = render(
+          <TimelineView
+            {...props}
+          />
+        );
+
+        const timeline = await screen.findByTestId("timeline-view");
+        scrollContainerRef.current = timeline;
+        Object.defineProperty(timeline, "clientHeight", { value: 500, configurable: true });
+        Object.defineProperty(timeline, "scrollHeight", { value: 1_000, configurable: true });
+        Object.defineProperty(timeline, "scrollTop", {
+          value: scrollTop,
+          writable: true,
+          configurable: true
+        });
+
+        act(() => {
+          emit({
+            kind: "Timeline",
+            event: {
+              InitialItems: {
+                request_id: null,
+                key: KEY,
+                generation: 1,
+                items: [
+                  message("$older:example.invalid", "Older message"),
+                  message("$live:example.invalid", "Live message")
+                ]
+              }
+            }
+          }
+        );
+        });
+
+        timeline.scrollTop = scrollTop;
+        fireEvent.wheel(timeline, { deltaY: scrollTop > 0 ? 1 : -1 });
+        fireEvent.scroll(timeline);
+        await act(async () => {
+          await Promise.resolve();
+        });
+        rerender(<TimelineView {...props} liveLatestEventId={liveLatestEventId} />);
+        await act(async () => {
+          await Promise.resolve();
+        });
+
+        expect(onReturnToLive).not.toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: /jump to latest message/i })).toBeTruthy();
+      } finally {
+        rectSpy.mockRestore();
+      }
+    }
+  );
+
   it("keeps edit live conversion DOM value and selection across timeline rerenders", () => {
     const editable = { ...message("$edit-ime", "before"), can_edit: true };
     const makeStore = (item: TimelineItem): TimelineStoreState =>
