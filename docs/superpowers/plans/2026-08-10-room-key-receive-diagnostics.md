@@ -79,7 +79,10 @@ pub enum RoomKeyMergeDecision {
 ```
 
 `RoomKeyDiagnosticEvent` gains `Receive(RoomKeyReceiveDiagnostic)` where the
-diagnostic carries `kind` plus a coarse elapsed bucket. The hub keeps
+diagnostic carries `kind` only: receive observations are instantaneous with no
+lifecycle duration, so no elapsed bucket is meaningful for them (bounded
+duration buckets remain available for any future stage that has one). The hub
+keeps
 `u64`-style aggregate counters for every token above (guarded by the existing
 mutex) and emits the typed event to the observer.
 

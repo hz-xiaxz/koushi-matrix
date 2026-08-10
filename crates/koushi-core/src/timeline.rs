@@ -14990,12 +14990,14 @@ impl TimelineActor {
         }
 
         // Spawn the diff relay task: converts SDK VectorDiff stream into actor messages.
+        let initial_items: Vec<_> = initial_sdk_items.iter().cloned().collect();
         let relay_task = Some(executor::spawn(run_diff_relay(
             relay_data_tx,
             relay_control_tx.clone(),
             generation,
             actor_generation,
             diff_stream,
+            initial_items,
         )));
 
         // Spawn the send queue monitor task: forwards RoomSendQueueUpdate to actor.
@@ -20882,12 +20884,14 @@ impl TimelineActor {
         };
         let (relay_data_tx, relay_data_rx) = mpsc::channel(256);
         self.relay_data_rx = Some(relay_data_rx);
+        let initial_items: Vec<_> = self.timeline.items().await.iter().cloned().collect();
         self.relay_task = Some(executor::spawn(run_diff_relay(
             relay_data_tx,
             self.relay_control_tx.clone(),
             self.generation,
             self.actor_generation,
             diff_stream,
+            initial_items,
         )));
         let restore = self.restore_anchor.take();
         drop(finalize_lease);
@@ -21317,6 +21321,7 @@ async fn run_diff_relay(
     actor_generation: u64,
     mut diff_stream: impl futures_util::Stream<Item = Vec<eyeball_im::VectorDiff<Arc<SdkTimelineItem>>>>
     + Unpin,
+    initial_items: Vec<Arc<SdkTimelineItem>>,
 ) {
     use futures_util::StreamExt;
 
@@ -21328,6 +21333,20 @@ async fn run_diff_relay(
     // queue-overflow batch never claims a visible replacement.
     let mut utd_event_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     const UTD_TRACK_LIMIT: usize = 256;
+    // Seed tracking from UTD rows already present when the timeline opened so
+    // a later decrypted `Set` for an initial UTD is counted.
+    for item in &initial_items {
+        let is_utd = item
+            .as_event()
+            .map(|event| event.content().is_unable_to_decrypt())
+            .unwrap_or(false);
+        if is_utd
+            && let Some(event_id) = sdk_timeline_item_event_id(item)
+            && utd_event_ids.len() < UTD_TRACK_LIMIT
+        {
+            utd_event_ids.insert(event_id.to_string());
+        }
+    }
 
     loop {
         let Some(diffs) = diff_stream.next().await else {
@@ -41363,6 +41382,7 @@ mod tests {
             TimelineGeneration(7),
             1,
             futures_util::stream::iter([Vec::new()]),
+            vec![],
         ));
 
         let control = tokio::time::timeout(Duration::from_secs(1), control_rx.recv())
@@ -41389,6 +41409,7 @@ mod tests {
             TimelineGeneration(8),
             1,
             futures_util::stream::iter([Vec::new()]),
+            vec![],
         )
         .await;
         assert!(matches!(
@@ -41422,6 +41443,7 @@ mod tests {
             TimelineGeneration(9),
             1,
             futures_util::stream::empty(),
+            vec![],
         )
         .await;
 
@@ -41575,7 +41597,15 @@ mod tests {
 
         let (actor_tx, mut actor_rx) = mpsc::channel(1);
         let (control_tx, _control_rx) = mpsc::channel(1);
-        run_diff_relay(actor_tx, control_tx, generation, actor_generation, stream).await;
+        run_diff_relay(
+            actor_tx,
+            control_tx,
+            generation,
+            actor_generation,
+            stream,
+            vec![],
+        )
+        .await;
         let Some(TimelineRelayBatch {
             generation: batch_generation,
             diffs,

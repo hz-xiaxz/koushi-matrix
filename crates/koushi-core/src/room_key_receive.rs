@@ -124,6 +124,30 @@ pub fn record_room_key_receive_summary(
             late.redecryption_remained_utd,
         ))
         .field(DiagnosticField::count(
+            "late_matching_bucket_0",
+            late.matching_events_bucket_0,
+        ))
+        .field(DiagnosticField::count(
+            "late_matching_bucket_1",
+            late.matching_events_bucket_1,
+        ))
+        .field(DiagnosticField::count(
+            "late_matching_bucket_2_to_5",
+            late.matching_events_bucket_2_to_5,
+        ))
+        .field(DiagnosticField::count(
+            "late_matching_bucket_6_to_20",
+            late.matching_events_bucket_6_to_20,
+        ))
+        .field(DiagnosticField::count(
+            "late_matching_bucket_21_to_100",
+            late.matching_events_bucket_21_to_100,
+        ))
+        .field(DiagnosticField::count(
+            "late_matching_bucket_101_plus",
+            late.matching_events_bucket_101_plus,
+        ))
+        .field(DiagnosticField::count(
             "late_failed",
             late.redecryption_failed,
         ))
