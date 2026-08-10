@@ -6340,6 +6340,39 @@ fn decrypt_retry_event(stage: &'static str, operation: u64, elapsed: Duration) -
         ))
 }
 
+fn record_room_key_requester_stage(
+    operation: u64,
+    stage: &'static str,
+    withheld_code: &'static str,
+    elapsed: Duration,
+) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_requester", stage)
+            .field(DiagnosticField::ordinal_alias(
+                "request_alias",
+                "request",
+                operation,
+            ))
+            .field(DiagnosticField::token("withheld_code", withheld_code))
+            .field(DiagnosticField::token("response_source", "unknown"))
+            .field(DiagnosticField::milliseconds(
+                "elapsed_ms",
+                elapsed.as_millis(),
+            )),
+    );
+    koushi_diagnostics::increment_counter(match stage {
+        "send_started" => "requester_send_started",
+        "sent" => "requester_sent",
+        "awaiting" => "requester_awaiting",
+        "still_waiting" => "requester_still_waiting",
+        "withheld_received" => "requester_withheld",
+        "key_received" => "requester_key_received",
+        "decryption_recovered" => "requester_decryption_recovered",
+        "send_failed" => "requester_send_failed",
+        _ => "requester_unknown",
+    });
+}
+
 fn record_decrypt_retry_request(
     operation: u64,
     attempt: u8,
@@ -6347,6 +6380,7 @@ fn record_decrypt_retry_request(
     backup_state: DecryptRetryBackupState,
     elapsed: Duration,
 ) {
+    record_room_key_requester_stage(operation, "send_started", "none", elapsed);
     record(
         decrypt_retry_event("request", operation, elapsed)
             .field(DiagnosticField::token("reason", reason.token()))
@@ -6378,6 +6412,15 @@ fn record_decrypt_retry_device_request(
         event = event.field(DiagnosticField::token("failure", failure.token()));
     }
     record(event);
+    match result {
+        DecryptRetryDeviceResult::Sent => {
+            record_room_key_requester_stage(operation, "sent", "none", elapsed);
+            record_room_key_requester_stage(operation, "awaiting", "none", elapsed);
+        }
+        DecryptRetryDeviceResult::Failed => {
+            record_room_key_requester_stage(operation, "send_failed", "none", elapsed);
+        }
+    }
 }
 
 fn record_decrypt_retry_settled(
@@ -6385,6 +6428,19 @@ fn record_decrypt_retry_settled(
     result: DecryptRetrySettledResult,
     elapsed: Duration,
 ) {
+    match result {
+        DecryptRetrySettledResult::Decrypted => {
+            record_room_key_requester_stage(operation, "key_received", "none", elapsed);
+            record_room_key_requester_stage(operation, "decryption_recovered", "none", elapsed);
+        }
+        DecryptRetrySettledResult::Withheld => {
+            record_room_key_requester_stage(operation, "withheld_received", "custom", elapsed);
+        }
+        DecryptRetrySettledResult::Timeout => {
+            record_room_key_requester_stage(operation, "still_waiting", "none", elapsed);
+        }
+        _ => {}
+    }
     record(
         decrypt_retry_event("settled", operation, elapsed)
             .field(DiagnosticField::token("result", result.token())),
@@ -7586,31 +7642,43 @@ impl TimelineRelayBatch {
     }
 }
 
-fn decrypt_retry_diff_resolves_event(
+fn decrypt_retry_diff_settlement(
     diff: &eyeball_im::VectorDiff<Arc<SdkTimelineItem>>,
     event_id: &str,
-) -> bool {
-    let is_resolved = |item: &Arc<SdkTimelineItem>| {
+) -> Option<DecryptRetrySettledResult> {
+    let settlement = |item: &Arc<SdkTimelineItem>| {
         let TimelineItemKind::Event(event_item) = item.kind() else {
-            return false;
+            return None;
         };
-        event_item
+        if !event_item
             .event_id()
             .is_some_and(|candidate| candidate.as_str() == event_id)
-            && !event_item.content().is_unable_to_decrypt()
+        {
+            return None;
+        }
+        if !event_item.content().is_unable_to_decrypt() {
+            Some(DecryptRetrySettledResult::Decrypted)
+        } else if matches!(
+            decrypt_retry_reason_from_content(event_item.content()),
+            DecryptRetryReason::Withheld
+        ) {
+            Some(DecryptRetrySettledResult::Withheld)
+        } else {
+            None
+        }
     };
     match diff {
         eyeball_im::VectorDiff::PushFront { value }
         | eyeball_im::VectorDiff::PushBack { value }
         | eyeball_im::VectorDiff::Insert { value, .. }
-        | eyeball_im::VectorDiff::Set { value, .. } => is_resolved(value),
-        eyeball_im::VectorDiff::Reset { values } => values.iter().any(is_resolved),
-        eyeball_im::VectorDiff::Append { values } => values.iter().any(is_resolved),
+        | eyeball_im::VectorDiff::Set { value, .. } => settlement(value),
+        eyeball_im::VectorDiff::Reset { values } => values.iter().find_map(settlement),
+        eyeball_im::VectorDiff::Append { values } => values.iter().find_map(settlement),
         eyeball_im::VectorDiff::Clear
         | eyeball_im::VectorDiff::PopFront
         | eyeball_im::VectorDiff::PopBack
         | eyeball_im::VectorDiff::Remove { .. }
-        | eyeball_im::VectorDiff::Truncate { .. } => false,
+        | eyeball_im::VectorDiff::Truncate { .. } => None,
     }
 }
 
@@ -14115,7 +14183,12 @@ impl DecryptRetryController {
         event_id: &str,
         actor_generation: u64,
         started_at: executor::Instant,
-    ) -> (PendingDecryptRetry, Option<PendingDecryptRetry>) {
+    ) -> (PendingDecryptRetry, Option<PendingDecryptRetry>, bool) {
+        if let Some(current) = self.pending.as_ref().filter(|pending| {
+            pending.event_id == event_id && pending.actor_generation == actor_generation
+        }) {
+            return (current.clone(), None, true);
+        }
         let previous = self.pending.take();
         let attempt = previous
             .as_ref()
@@ -14130,7 +14203,7 @@ impl DecryptRetryController {
             deadline: started_at + DECRYPT_RETRY_TIMEOUT,
         };
         self.pending = Some(pending.clone());
-        (pending, previous)
+        (pending, previous, false)
     }
 
     fn is_current(&self, operation: u64, actor_generation: u64) -> bool {
@@ -17779,10 +17852,19 @@ impl TimelineActor {
         event_id: &str,
         reason: DecryptRetryReason,
         backup_state: DecryptRetryBackupState,
-    ) -> PendingDecryptRetry {
-        let (pending, previous) =
+    ) -> Option<PendingDecryptRetry> {
+        let (pending, previous, coalesced) =
             self.decrypt_retry
                 .admit(event_id, self.actor_generation, executor::Instant::now());
+        if coalesced {
+            record_room_key_requester_stage(
+                pending.operation,
+                "awaiting",
+                "none",
+                pending.started_at.elapsed(),
+            );
+            return None;
+        }
         if let Some(previous) = previous {
             record_decrypt_retry_settled(
                 previous.operation,
@@ -17800,7 +17882,7 @@ impl TimelineActor {
             backup_state,
             Duration::ZERO,
         );
-        pending
+        Some(pending)
     }
 
     fn schedule_decrypt_retry_timeout(&mut self, pending: &PendingDecryptRetry) {
@@ -17860,14 +17942,16 @@ impl TimelineActor {
         }
         let retry_reason = decrypt_retry_reason_from_content(event_item.content());
         let backup_observation = self.session.observe_secure_backup_state();
-        let pending = self.begin_decrypt_retry(
+        let Some(pending) = self.begin_decrypt_retry(
             &requested_event_id,
             retry_reason,
             decrypt_retry_backup_state_for(
                 backup_observation.current.backup,
                 backup_observation.current.recovery,
             ),
-        );
+        ) else {
+            return;
+        };
         let Some(original_json) = event_item.original_json().cloned() else {
             self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Malformed);
             self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
@@ -19161,17 +19245,16 @@ impl TimelineActor {
             return;
         }
         let decrypt_retry_resolution = self.decrypt_retry.pending.as_ref().and_then(|pending| {
-            diffs
-                .iter()
-                .any(|diff| decrypt_retry_diff_resolves_event(diff, &pending.event_id))
-                .then(|| {
+            diffs.iter().find_map(|diff| {
+                decrypt_retry_diff_settlement(diff, &pending.event_id).and_then(|result| {
                     decrypt_retry_settlement_operation(
                         &self.decrypt_retry,
                         self.actor_generation,
                         &pending.event_id,
                     )
+                    .map(|operation| (operation, result))
                 })
-                .flatten()
+            })
         });
         let sdk_diffs = diffs;
         let has_historical_gap_repair_projection = gap_repair_projections
@@ -19300,8 +19383,8 @@ impl TimelineActor {
             return;
         };
 
-        if let Some(operation) = decrypt_retry_resolution {
-            self.settle_decrypt_retry(operation, DecryptRetrySettledResult::Decrypted);
+        if let Some((operation, result)) = decrypt_retry_resolution {
+            self.settle_decrypt_retry(operation, result);
         }
 
         if let Some(AppAction::LiveRoomReceiptsUpdated {
@@ -42025,7 +42108,6 @@ mod tests {
     #[test]
     fn decrypt_retry_diagnostics_are_fixed_token_and_private_data_free() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let operation = 48_217;
 
         record_decrypt_retry_request(
@@ -42053,7 +42135,17 @@ mod tests {
         );
 
         let diagnostics = koushi_diagnostics::snapshot();
-        let records = &diagnostics.records[diagnostic_start..];
+        let records = diagnostics
+            .records
+            .iter()
+            .filter(|record| {
+                record.event.source == "core.decrypt_retry"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "operation"
+                            && field.value == DiagnosticValue::Correlation(operation)
+                    })
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
             records
                 .iter()
@@ -42066,7 +42158,7 @@ mod tests {
                 ("settled", &records[3].event.fields),
             ]
         );
-        for record in records {
+        for record in &records {
             assert_eq!(record.event.source, "core.decrypt_retry");
             assert!(record.event.fields.iter().any(|field| {
                 field.key == "operation" && field.value == DiagnosticValue::Correlation(operation)
@@ -42088,7 +42180,7 @@ mod tests {
             field.key == "result" && field.value == DiagnosticValue::Token("still_missing")
         }));
 
-        let serialized = serde_json::to_string(records).expect("serialize diagnostics");
+        let serialized = serde_json::to_string(&records).expect("serialize diagnostics");
         for forbidden in [
             "!synthetic-room:example.invalid",
             "$synthetic-event:example.invalid",
@@ -42114,10 +42206,16 @@ mod tests {
     fn decrypt_retry_controller_fences_deadline_settlement_and_replacement() {
         let mut controller = DecryptRetryController::default();
         let admitted_at = executor::Instant::now();
-        let (first, replaced) = controller.admit("$event-a:test", 7, admitted_at);
+        let (first, replaced, coalesced) = controller.admit("$event-a:test", 7, admitted_at);
         assert!(replaced.is_none());
+        assert!(!coalesced);
         assert!(first.deadline > admitted_at);
         assert!(controller.is_current(first.operation, 7));
+        let (same, replaced, coalesced) =
+            controller.admit("$event-a:test", 7, executor::Instant::now());
+        assert!(coalesced);
+        assert!(replaced.is_none());
+        assert_eq!(same.operation, first.operation);
 
         assert!(
             controller
@@ -42135,7 +42233,9 @@ mod tests {
         );
         assert!(controller.is_current(first.operation, 7));
 
-        let (second, replaced) = controller.admit("$event-b:test", 7, executor::Instant::now());
+        let (second, replaced, coalesced) =
+            controller.admit("$event-b:test", 7, executor::Instant::now());
+        assert!(!coalesced);
         assert_eq!(
             replaced.map(|pending| pending.operation),
             Some(first.operation)
@@ -42167,7 +42267,7 @@ mod tests {
     #[test]
     fn decrypt_retry_diff_settlement_requires_current_generation_and_matching_event() {
         let mut controller = DecryptRetryController::default();
-        let (pending, _) = controller.admit("$event:test", 7, executor::Instant::now());
+        let (pending, _, _) = controller.admit("$event:test", 7, executor::Instant::now());
 
         assert_eq!(
             decrypt_retry_settlement_operation(&controller, 8, "$event:test"),
@@ -42186,7 +42286,7 @@ mod tests {
     #[test]
     fn decrypt_retry_timeout_message_settles_current_operation_once() {
         let mut controller = DecryptRetryController::default();
-        let (pending, _) = controller.admit("$event:test", 7, executor::Instant::now());
+        let (pending, _, _) = controller.admit("$event:test", 7, executor::Instant::now());
 
         let settled = controller
             .settle_timeout_if_current(pending.operation, 7)
@@ -42273,7 +42373,6 @@ mod tests {
     #[test]
     fn decrypt_retry_diagnostics_use_only_the_planned_outcome_tokens() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let operation = 48_218;
 
         record_decrypt_retry_request(
@@ -42324,9 +42423,17 @@ mod tests {
             record_decrypt_retry_settled(operation, result, Duration::ZERO);
         }
 
-        let records = &koushi_diagnostics::snapshot().records[diagnostic_start..];
-        let tokens = records
+        let diagnostics = koushi_diagnostics::snapshot();
+        let tokens = diagnostics
+            .records
             .iter()
+            .filter(|record| {
+                record.event.source == "core.decrypt_retry"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "operation"
+                            && field.value == DiagnosticValue::Correlation(operation)
+                    })
+            })
             .flat_map(|record| record.event.fields.iter())
             .filter_map(|field| match field.value {
                 DiagnosticValue::Token(token) => Some((field.key, token)),

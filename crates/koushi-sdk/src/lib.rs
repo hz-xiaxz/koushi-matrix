@@ -7035,6 +7035,7 @@ pub async fn login_with_password_with_store(
     client
         .send_queue()
         .require_secure_backup_for_encrypted_sends(false);
+    install_room_key_diagnostic_observer(&client).await;
 
     Ok(MatrixClientSession {
         client,
@@ -7069,6 +7070,7 @@ pub async fn login_with_existing_device(
     client
         .send_queue()
         .require_secure_backup_for_encrypted_sends(false);
+    install_room_key_diagnostic_observer(&client).await;
 
     Ok(MatrixClientSession {
         client,
@@ -7179,6 +7181,7 @@ pub async fn finish_oidc_login(
     client
         .send_queue()
         .require_secure_backup_for_encrypted_sends(false);
+    install_room_key_diagnostic_observer(&client).await;
 
     Ok(MatrixClientSession {
         client,
@@ -7189,6 +7192,295 @@ pub async fn finish_oidc_login(
             authentication_method,
         },
     })
+}
+
+async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
+    for counter in [
+        "received_requests",
+        "cancellations",
+        "forwarded",
+        "queued",
+        "refused",
+        "missing_sessions",
+        "sdk_errors",
+        "initial_session_creations",
+        "rotations_expired_time",
+        "rotations_expired_message_count",
+        "rotations_membership_or_device_change",
+        "rotations_encryption_settings_changed",
+        "rotations_explicit_discard",
+        "rotations_store_missing",
+        "rotations_invalidated",
+        "rotations_unknown",
+        "rotation_creation_failures",
+        "rotation_share_failures",
+        "requester_send_started",
+        "requester_sent",
+        "requester_awaiting",
+        "requester_still_waiting",
+        "requester_withheld",
+        "requester_key_received",
+        "requester_decryption_recovered",
+        "requester_send_failed",
+        "requester_unknown",
+    ] {
+        koushi_diagnostics::reset_counter(counter);
+    }
+    client
+        .encryption()
+        .set_room_key_diagnostic_observer(Some(Arc::new(record_room_key_diagnostic)))
+        .await;
+}
+
+fn record_room_key_diagnostic(event: matrix_sdk::encryption::RoomKeyDiagnosticEvent) {
+    use matrix_sdk::encryption::RoomKeyDiagnosticEvent;
+
+    match event {
+        RoomKeyDiagnosticEvent::IncomingRequest(event) => {
+            record_incoming_room_key_diagnostic(event)
+        }
+        RoomKeyDiagnosticEvent::Rotation(event) => record_room_key_rotation_diagnostic(event),
+    }
+}
+
+fn record_incoming_room_key_diagnostic(
+    event: matrix_sdk::encryption::IncomingRoomKeyRequestDiagnostic,
+) {
+    use matrix_sdk::encryption::{
+        IncomingRoomKeyRequestOutcome as Outcome, IncomingRoomKeyRequestStage as Stage,
+        RequestedRoomKeySession as SessionKind, RoomKeyRefusalReason as Refusal,
+        RoomKeyRequestAction as Action, RoomKeyRequesterDeviceState as DeviceState,
+        RoomKeyRequesterScope as Scope,
+    };
+
+    let stage = match event.stage {
+        Stage::Received => "received",
+        Stage::Classified => "classified",
+        Stage::SessionLookup => "session_lookup",
+        Stage::AuthorizationDecided => "authorization_decided",
+        Stage::Outcome => "outcome",
+    };
+    let action = match event.action {
+        Action::Request => "request",
+        Action::Cancellation => "cancellation",
+        Action::Unknown => "unknown",
+    };
+    let scope = match event.requester_scope {
+        Scope::Own => "own",
+        Scope::Peer => "peer",
+        Scope::Unknown => "unknown",
+    };
+    let device_state = match event.requester_device_state {
+        DeviceState::Current => "current",
+        DeviceState::VerifiedOwn => "verified_own",
+        DeviceState::UnverifiedOwn => "unverified_own",
+        DeviceState::KnownPeer => "known_peer",
+        DeviceState::Unknown => "unknown",
+    };
+    let session_kind = match event.requested_session_kind {
+        SessionKind::Current => "current",
+        SessionKind::Historical => "historical",
+        SessionKind::Unknown => "unknown",
+    };
+    let outcome = match event.outcome {
+        Outcome::None => "none",
+        Outcome::Forwarded => "forwarded",
+        Outcome::QueuedForOlm => "queued_for_olm",
+        Outcome::Cancelled => "cancelled",
+        Outcome::IgnoredSelf => "ignored_self",
+        Outcome::Refused => "refused",
+        Outcome::MissingSession => "missing_session",
+        Outcome::UnsupportedAlgorithm => "unsupported_algorithm",
+        Outcome::ForwardingDisabled => "forwarding_disabled",
+        Outcome::SdkError => "sdk_error",
+    };
+    let refusal = match event.refusal_reason {
+        Refusal::None => "none",
+        Refusal::MissingOldOutboundProof => "missing_old_outbound_proof",
+        Refusal::NotOriginalRecipient => "not_original_recipient",
+        Refusal::UntrustedOwnDevice => "untrusted_own_device",
+        Refusal::ChangedSenderKey => "changed_sender_key",
+        Refusal::UnknownDevice => "unknown_device",
+        Refusal::UnsupportedAlgorithm => "unsupported_algorithm",
+        Refusal::ForwardingDisabled => "forwarding_disabled",
+        Refusal::MissingInboundSession => "missing_inbound_session",
+        Refusal::MissingOlmSession => "missing_olm_session",
+        Refusal::SdkError => "sdk_error",
+    };
+
+    let mut diagnostic =
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_request", stage)
+            .field(DiagnosticField::token("action", action))
+            .field(DiagnosticField::ordinal_alias(
+                "request_alias",
+                "request",
+                event.request.ordinal(),
+            ))
+            .field(DiagnosticField::token("requester_scope", scope))
+            .field(DiagnosticField::ordinal_alias(
+                "requester_device_alias",
+                "device",
+                event.requester_device.ordinal(),
+            ))
+            .field(DiagnosticField::token(
+                "requester_device_state",
+                device_state,
+            ))
+            .field(DiagnosticField::token("requested_session", session_kind))
+            .field(DiagnosticField::token(
+                "inbound_session_present",
+                optional_bool_token(event.inbound_session_present),
+            ))
+            .field(DiagnosticField::token(
+                "matching_outbound_proof_present",
+                optional_bool_token(event.matching_outbound_proof_present),
+            ))
+            .field(DiagnosticField::token("outcome", outcome))
+            .field(DiagnosticField::token("refusal_reason", refusal))
+            .field(DiagnosticField::token(
+                "response_created",
+                optional_bool_token(event.response_created),
+            ))
+            .field(DiagnosticField::milliseconds(
+                "elapsed_ms",
+                event.elapsed_ms.into(),
+            ));
+    if let Some(peer) = event.requester_user {
+        diagnostic = diagnostic.field(DiagnosticField::ordinal_alias(
+            "requester_user_alias",
+            "peer",
+            peer.ordinal(),
+        ));
+    }
+    if let Some(room) = event.room {
+        diagnostic = diagnostic.field(DiagnosticField::ordinal_alias(
+            "room_alias",
+            "room",
+            room.ordinal(),
+        ));
+    }
+    if let Some(session) = event.requested_session {
+        diagnostic = diagnostic.field(DiagnosticField::ordinal_alias(
+            "requested_session_alias",
+            "session",
+            session.ordinal(),
+        ));
+    }
+    record(diagnostic);
+
+    if event.stage == Stage::Received {
+        koushi_diagnostics::increment_counter("received_requests");
+        if event.action == Action::Cancellation {
+            koushi_diagnostics::increment_counter("cancellations");
+        }
+    }
+    if event.stage == Stage::Outcome {
+        match event.outcome {
+            Outcome::Forwarded => koushi_diagnostics::increment_counter("forwarded"),
+            Outcome::QueuedForOlm => koushi_diagnostics::increment_counter("queued"),
+            Outcome::Refused => koushi_diagnostics::increment_counter("refused"),
+            Outcome::MissingSession => koushi_diagnostics::increment_counter("missing_sessions"),
+            Outcome::SdkError => koushi_diagnostics::increment_counter("sdk_errors"),
+            _ => {}
+        }
+    }
+}
+
+fn record_room_key_rotation_diagnostic(event: matrix_sdk::encryption::RoomKeyRotationDiagnostic) {
+    use matrix_sdk::encryption::{
+        RoomKeyCreationOutcome as Creation, RoomKeyFirstShareOutcome as Share,
+        RoomKeyRotationReason as Reason,
+    };
+
+    let reason = match event.reason {
+        Reason::Initial => "initial",
+        Reason::ExpiredTime => "expired_time",
+        Reason::ExpiredMessageCount => "expired_message_count",
+        Reason::MembershipOrDeviceChange => "membership_or_device_change",
+        Reason::EncryptionSettingsChanged => "encryption_settings_changed",
+        Reason::ExplicitDiscard => "explicit_discard",
+        Reason::StoreMissing => "store_missing",
+        Reason::Invalidated => "invalidated",
+        Reason::Unknown => "unknown",
+    };
+    let creation = match event.creation_outcome {
+        Creation::Created => "created",
+        Creation::Reused => "reused",
+        Creation::Failed => "failed",
+    };
+    let share = match event.first_share_outcome {
+        Share::Pending => "pending",
+        Share::Sent => "sent",
+        Share::Failed => "failed",
+        Share::Unknown => "unknown",
+    };
+    let mut diagnostic =
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_rotation", "boundary")
+            .field(DiagnosticField::ordinal_alias(
+                "room_alias",
+                "room",
+                event.room.ordinal(),
+            ))
+            .field(DiagnosticField::token("reason", reason))
+            .field(DiagnosticField::token("creation_outcome", creation))
+            .field(DiagnosticField::token("first_share_outcome", share))
+            .field(DiagnosticField::boolean(
+                "first_send_correlation_present",
+                event.first_send_correlation_present,
+            ))
+            .field(DiagnosticField::milliseconds(
+                "elapsed_ms",
+                event.elapsed_ms.into(),
+            ));
+    if let Some(previous) = event.previous_session {
+        diagnostic = diagnostic.field(DiagnosticField::ordinal_alias(
+            "previous_session_alias",
+            "session",
+            previous.ordinal(),
+        ));
+    }
+    if let Some(new) = event.new_session {
+        diagnostic = diagnostic.field(DiagnosticField::ordinal_alias(
+            "new_session_alias",
+            "session",
+            new.ordinal(),
+        ));
+    }
+    record(diagnostic);
+
+    match event.reason {
+        Reason::Initial => koushi_diagnostics::increment_counter("initial_session_creations"),
+        Reason::ExpiredTime => koushi_diagnostics::increment_counter("rotations_expired_time"),
+        Reason::ExpiredMessageCount => {
+            koushi_diagnostics::increment_counter("rotations_expired_message_count")
+        }
+        Reason::MembershipOrDeviceChange => {
+            koushi_diagnostics::increment_counter("rotations_membership_or_device_change")
+        }
+        Reason::EncryptionSettingsChanged => {
+            koushi_diagnostics::increment_counter("rotations_encryption_settings_changed")
+        }
+        Reason::ExplicitDiscard => {
+            koushi_diagnostics::increment_counter("rotations_explicit_discard")
+        }
+        Reason::StoreMissing => koushi_diagnostics::increment_counter("rotations_store_missing"),
+        Reason::Invalidated => koushi_diagnostics::increment_counter("rotations_invalidated"),
+        Reason::Unknown => koushi_diagnostics::increment_counter("rotations_unknown"),
+    }
+    if event.creation_outcome == Creation::Failed {
+        koushi_diagnostics::increment_counter("rotation_creation_failures");
+    }
+    if event.first_share_outcome == Share::Failed {
+        koushi_diagnostics::increment_counter("rotation_share_failures");
+    }
+}
+
+fn optional_bool_token(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "true",
+        Some(false) => "false",
+        None => "unknown",
+    }
 }
 
 pub async fn restore_session(
@@ -7242,6 +7534,7 @@ pub async fn restore_session_with_store(
     client
         .send_queue()
         .require_secure_backup_for_encrypted_sends(false);
+    install_room_key_diagnostic_observer(&client).await;
 
     Ok(MatrixClientSession {
         client,
