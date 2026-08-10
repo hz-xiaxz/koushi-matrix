@@ -14297,6 +14297,10 @@ mod room_key_receive_diagnostics_tests {
                 decision: RoomKeyMergeDecision::StoreFailed,
             },
         ];
+        // Hold the diagnostic lock and slice from a captured start so parallel
+        // tests in this process cannot pollute the count.
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = snapshot().records.len();
         for kind in cases {
             record_room_key_receive_diagnostic(RoomKeyReceiveDiagnostic { kind });
         }
@@ -14305,6 +14309,7 @@ mod room_key_receive_diagnostics_tests {
         let receive_records: Vec<_> = snapshot
             .records
             .iter()
+            .skip(diagnostic_start)
             .filter(|record| record.event.source == "core.room_key_receive")
             .collect();
         assert_eq!(receive_records.len(), cases.len());
