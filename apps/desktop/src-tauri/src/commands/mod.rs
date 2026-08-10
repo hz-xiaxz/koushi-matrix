@@ -2261,6 +2261,24 @@ pub(crate) fn build_request_room_key_command(
     }))
 }
 
+pub(crate) fn build_request_late_decryption_command(
+    request_id: koushi_core::RequestId,
+    account_key: AccountKey,
+    room_id: String,
+    timeline_key: Option<TimelineKey>,
+) -> Option<CoreCommand> {
+    let key = match timeline_key {
+        Some(timeline_key) => TimelineKey {
+            account_key,
+            kind: timeline_key.kind,
+        },
+        None => build_timeline_key(account_key, room_id),
+    };
+    Some(CoreCommand::Timeline(
+        TimelineCommand::RequestLateDecryption { request_id, key },
+    ))
+}
+
 pub(crate) fn build_load_link_previews_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,

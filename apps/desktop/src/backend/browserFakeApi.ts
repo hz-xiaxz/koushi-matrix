@@ -296,6 +296,10 @@ export interface DesktopApi {
     eventId: string,
     timelineKey?: import("../domain/coreEvents").TimelineKey
   ): Promise<DesktopSnapshot>;
+  requestLateDecryption(
+    roomId: string,
+    timelineKey?: import("../domain/coreEvents").TimelineKey
+  ): Promise<DesktopSnapshot>;
   forwardMessage(
     roomId: string,
     sourceEventId: string,
@@ -2316,6 +2320,13 @@ class BrowserFakeApi implements DesktopApi {
   async requestRoomKey(
     _roomId: string,
     _eventId: string,
+    _timelineKey?: import("../domain/coreEvents").TimelineKey
+  ): Promise<DesktopSnapshot> {
+    return this.getSnapshot();
+  }
+
+  async requestLateDecryption(
+    _roomId: string,
     _timelineKey?: import("../domain/coreEvents").TimelineKey
   ): Promise<DesktopSnapshot> {
     return this.getSnapshot();

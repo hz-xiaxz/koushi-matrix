@@ -10249,6 +10249,16 @@ impl AccountActor {
         };
         let event_cache_result = koushi_sdk::enable_event_cache(&session).await;
         self.emit_event_cache_status(encrypted_store, &event_cache_result);
+        // Baseline receive-side room-key diagnostics for this account runtime
+        // (#476). The observer is installed by `restore_session_with_store`
+        // before sync can deliver to-device events; reset the per-runtime
+        // late-decryption counters and record the initial summary.
+        crate::room_key_receive::reset_late_decryption_counters();
+        let diagnostics = koushi_sdk::room_key_receive_diagnostics(&session).await;
+        crate::room_key_receive::record_room_key_receive_summary(
+            &diagnostics,
+            crate::room_key_receive::RECEIVE_SUMMARY_TRIGGER_RESTORE,
+        );
         Ok(session)
     }
 
