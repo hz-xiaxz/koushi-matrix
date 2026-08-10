@@ -6752,6 +6752,16 @@ export function TimelineItemRow({
             </button>
           </div>
         ) : null}
+        {item.unable_to_decrypt?.recovery_stage ? (
+          <p className="profile-settings-hint">
+            {recoveryStageText(t, item.unable_to_decrypt.recovery_stage)}
+          </p>
+        ) : null}
+        {item.unable_to_decrypt?.recovery_guidance ? (
+          <p className="profile-settings-hint error">
+            {recoveryGuidanceText(t, item.unable_to_decrypt.recovery_guidance)}
+          </p>
+        ) : null}
         {newThreadReplyCount > 0 ? (
           <button
             className="thread-summary-chip thread-new-replies-chip"
@@ -8486,4 +8496,53 @@ function formatThreadSummary(
   }
   const timestamp = formatMessageTimestamp(latestTimestampMs);
   return timestamp ? `${summary} · ${timestamp}` : summary;
+}
+
+function recoveryStageText(
+  t: (key: import("../i18n/messages").MessageId) => string,
+  stage: string
+): string {
+  switch (stage) {
+    case "checking_local":
+      return t("timeline.recoveryCheckingLocal");
+    case "checking_backup":
+      return t("timeline.recoveryCheckingBackup");
+    case "requesting_own_devices":
+      return t("timeline.recoveryRequestingDevices");
+    case "repairing_olm":
+      return t("timeline.recoveryRepairingOlm");
+    case "waiting_for_key":
+      return t("timeline.recoveryWaitingForKey");
+    case "key_received":
+    case "retrying_decryption":
+      return t("timeline.recoveryRetrying");
+    case "recovered":
+      return t("timeline.recoveryRecovered");
+    case "temporarily_failed":
+      return t("timeline.recoveryTemporarilyFailed");
+    case "automatic_paths_exhausted":
+      return t("timeline.recoveryExhausted");
+    case "unrecoverable_no_known_holder":
+      return t("timeline.recoveryUnrecoverable");
+    default:
+      return "";
+  }
+}
+
+function recoveryGuidanceText(
+  t: (key: import("../i18n/messages").MessageId) => string,
+  guidance: string
+): string {
+  switch (guidance) {
+    case "another_own_device":
+      return t("timeline.recoveryGuidanceAnotherDevice");
+    case "backup_unavailable":
+      return t("timeline.recoveryGuidanceBackup");
+    case "sender_reshare_may_recover":
+      return t("timeline.recoveryGuidanceSenderMessage");
+    case "ask_sender_to_repost":
+      return t("timeline.recoveryGuidanceRepost");
+    default:
+      return "";
+  }
 }

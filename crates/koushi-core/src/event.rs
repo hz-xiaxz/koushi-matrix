@@ -1862,6 +1862,12 @@ pub struct TimelineUnableToDecrypt {
     pub session_id: Option<String>,
     pub reason: TimelineUnableToDecryptReason,
     pub can_request_keys: bool,
+    /// Closed recovery-stage token (issue #478), present while a standard-only
+    /// recovery operation is running or settled for this session.
+    pub recovery_stage: Option<String>,
+    /// Closed terminal-guidance token (issue #478), present when automatic
+    /// recovery is exhausted or impossible.
+    pub recovery_guidance: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

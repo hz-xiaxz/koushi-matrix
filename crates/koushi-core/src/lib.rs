@@ -31,6 +31,7 @@ pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 pub mod room;
 mod room_key_receive;
+mod room_key_recovery;
 pub mod runtime;
 pub(crate) mod scheduled_send;
 pub mod search;

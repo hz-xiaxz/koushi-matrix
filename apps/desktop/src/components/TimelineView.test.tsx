@@ -10299,7 +10299,9 @@ describe("TimelineView", () => {
       unable_to_decrypt: {
         session_id: "session-1",
         reason: "missingRoomKey" as const,
-        can_request_keys: true
+        can_request_keys: true,
+        recovery_stage: null,
+        recovery_guidance: null
       }
     };
 
@@ -10351,7 +10353,9 @@ describe("TimelineView", () => {
       unable_to_decrypt: {
         session_id: "session-1",
         reason: "missingRoomKey" as const,
-        can_request_keys: true
+        can_request_keys: true,
+        recovery_stage: null,
+        recovery_guidance: null
       }
     };
 
@@ -10428,7 +10432,9 @@ describe("TimelineView", () => {
       unable_to_decrypt: {
         session_id: "private-session-id",
         reason: "missingRoomKey" as const,
-        can_request_keys: true
+        can_request_keys: true,
+        recovery_stage: null,
+        recovery_guidance: null
       }
     };
 

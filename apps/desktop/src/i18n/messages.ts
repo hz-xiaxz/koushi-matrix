@@ -998,6 +998,20 @@ export type MessageId =
   | "timeline.copyPermalink"
   | "timeline.viewSource"
   | "timeline.removeMessage"
+  | "timeline.recoveryCheckingLocal"
+  | "timeline.recoveryCheckingBackup"
+  | "timeline.recoveryRequestingDevices"
+  | "timeline.recoveryRepairingOlm"
+  | "timeline.recoveryWaitingForKey"
+  | "timeline.recoveryRetrying"
+  | "timeline.recoveryRecovered"
+  | "timeline.recoveryTemporarilyFailed"
+  | "timeline.recoveryExhausted"
+  | "timeline.recoveryUnrecoverable"
+  | "timeline.recoveryGuidanceAnotherDevice"
+  | "timeline.recoveryGuidanceBackup"
+  | "timeline.recoveryGuidanceSenderMessage"
+  | "timeline.recoveryGuidanceRepost"
   | "timeline.requestRoomKey"
   | "timeline.forwardMessage"
   | "timeline.messageSource"
@@ -2262,6 +2276,20 @@ const en: Catalog = {
   "timeline.viewSource": "View source",
   "timeline.removeMessage": "Remove",
   "timeline.requestRoomKey": "Request keys and retry",
+  "timeline.recoveryCheckingLocal": "Checking this device for the key…",
+  "timeline.recoveryCheckingBackup": "Checking your Secure Backup…",
+  "timeline.recoveryRequestingDevices": "Requesting the key from your verified devices…",
+  "timeline.recoveryRepairingOlm": "Repairing encryption sessions…",
+  "timeline.recoveryWaitingForKey": "Waiting for the key…",
+  "timeline.recoveryRetrying": "Retrying decryption…",
+  "timeline.recoveryRecovered": "Recovered",
+  "timeline.recoveryTemporarilyFailed": "Recovery will retry automatically.",
+  "timeline.recoveryExhausted": "Automatic recovery could not get this key.",
+  "timeline.recoveryUnrecoverable": "This key cannot be recovered.",
+  "timeline.recoveryGuidanceAnotherDevice": "Open another verified device and retry.",
+  "timeline.recoveryGuidanceBackup": "Secure Backup is unavailable or incomplete. Check your backup status and retry.",
+  "timeline.recoveryGuidanceSenderMessage": "Ask the sender to send a new message in this room, then retry.",
+  "timeline.recoveryGuidanceRepost": "Ask the sender to repost the unreadable content; the original message cannot be restored without its key.",
   "timeline.forwardMessage": "Forward",
   "timeline.messageSource": "Message source",
   "timeline.closeMessageSource": "Close message source",
@@ -3411,6 +3439,20 @@ const ja: Catalog = {
   "timeline.viewSource": "ソースを表示",
   "timeline.removeMessage": "削除",
   "timeline.requestRoomKey": "鍵を要求して再試行",
+  "timeline.recoveryCheckingLocal": "この端末の鍵を確認中…",
+  "timeline.recoveryCheckingBackup": "Secure Backup を確認中…",
+  "timeline.recoveryRequestingDevices": "認証済み端末に鍵をリクエスト中…",
+  "timeline.recoveryRepairingOlm": "暗号化セッションを修復中…",
+  "timeline.recoveryWaitingForKey": "鍵を待機中…",
+  "timeline.recoveryRetrying": "復号を再試行中…",
+  "timeline.recoveryRecovered": "復旧しました",
+  "timeline.recoveryTemporarilyFailed": "自動復旧を再試行します。",
+  "timeline.recoveryExhausted": "自動復旧ではこの鍵を取得できませんでした。",
+  "timeline.recoveryUnrecoverable": "この鍵は復旧できません。",
+  "timeline.recoveryGuidanceAnotherDevice": "別の認証済み端末を開いて再試行してください。",
+  "timeline.recoveryGuidanceBackup": "Secure Backup が利用できないか不完全です。バックアップの状態を確認して再試行してください。",
+  "timeline.recoveryGuidanceSenderMessage": "送信者にこのルームで新しいメッセージを送ってもらい、再試行してください。",
+  "timeline.recoveryGuidanceRepost": "送信者に未読の内容を再投稿してもらってください。鍵がなければ元のメッセージは復元できません。",
   "timeline.forwardMessage": "転送",
   "timeline.messageSource": "メッセージソース",
   "timeline.closeMessageSource": "メッセージソースを閉じる",
