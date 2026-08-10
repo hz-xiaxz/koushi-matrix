@@ -7312,6 +7312,11 @@ enum TimelineActorMessage {
         request_id: Option<RequestId>,
         trigger: &'static str,
     },
+    RoomKeyRecoveryTick {
+        session_id: String,
+        attempt: u32,
+        actor_generation: u64,
+    },
     DecryptRetryTimeout {
         operation: u64,
         actor_generation: u64,
@@ -10097,6 +10102,8 @@ fn thread_root_projection_item_from_raw_with_context(
             session_id: None,
             reason: TimelineUnableToDecryptReason::Unknown,
             can_request_keys: false,
+            recovery_stage: None,
+            recovery_guidance: None,
         }),
         actions: message_actions_for_timeline_item(
             key.room_id(),
@@ -14307,6 +14314,12 @@ struct TimelineActor {
     foreground_gap_demand_active: bool,
     decrypt_retry: DecryptRetryController,
     decrypt_retry_timeout_task: Option<executor::JoinHandle<()>>,
+    /// Standard-only room-key recovery operations (issue #478), keyed by the
+    /// Megolm session id internally (never exported).
+    room_key_recovery:
+        std::collections::BTreeMap<String, crate::room_key_recovery::RecoveryOperation>,
+    next_session_alias: u64,
+    recovery_tick_task: Option<executor::JoinHandle<()>>,
 }
 
 #[derive(Clone, Debug)]
@@ -15165,6 +15178,9 @@ impl TimelineActor {
             foreground_gap_demand_active: false,
             decrypt_retry: DecryptRetryController::default(),
             decrypt_retry_timeout_task: None,
+            room_key_recovery: Default::default(),
+            next_session_alias: 0,
+            recovery_tick_task: None,
         };
 
         actor
@@ -15781,6 +15797,14 @@ impl TimelineActor {
                 trigger,
             } => {
                 self.handle_request_late_decryption(request_id, trigger)
+                    .await;
+            }
+            TimelineActorMessage::RoomKeyRecoveryTick {
+                session_id,
+                attempt,
+                actor_generation,
+            } => {
+                self.handle_room_key_recovery_tick(session_id, attempt, actor_generation)
                     .await;
             }
             TimelineActorMessage::DecryptRetryTimeout {
@@ -18143,6 +18167,186 @@ impl TimelineActor {
         }
     }
 
+    /// Start or join the standard-only recovery operation for a missing-session
+    /// UTD (issue #478). Only `MissingMegolmSession` UTDs are eligible.
+    fn ensure_room_key_recovery(&mut self, session_id: &str) {
+        use crate::room_key_recovery::{RecoveryOperation, RecoveryStage};
+
+        let should_begin = {
+            let op = self
+                .room_key_recovery
+                .entry(session_id.to_owned())
+                .or_insert_with(|| {
+                    self.next_session_alias += 1;
+                    RecoveryOperation::new(self.next_session_alias)
+                });
+            op.stage() == RecoveryStage::Detected && op.attempts() == 0 && op.begin_attempt()
+        };
+        if should_begin {
+            let attempts = self
+                .room_key_recovery
+                .get(session_id)
+                .map(|op| op.attempts())
+                .unwrap_or(0);
+            self.schedule_recovery_tick(session_id.to_owned(), attempts);
+        }
+    }
+
+    fn schedule_recovery_tick(&mut self, session_id: String, attempt: u32) {
+        use crate::room_key_recovery::RECOVERY_BACKOFF;
+        if let Some(task) = self.recovery_tick_task.take() {
+            task.abort();
+        }
+        self.recovery_tick_task = Some(spawn_delayed_timeline_message(
+            self.msg_tx.clone(),
+            RECOVERY_BACKOFF,
+            TimelineActorMessage::RoomKeyRecoveryTick {
+                session_id,
+                attempt,
+                actor_generation: self.actor_generation,
+            },
+        ));
+    }
+
+    /// Drive one automatic recovery step for a missing Megolm session
+    /// (issue #478): local store, then trusted backup, then own verified
+    /// devices, then a bounded wait for sender re-sharing; finally local
+    /// redecryption. Never requests keys from peers and never re-broadcasts.
+    async fn handle_room_key_recovery_tick(
+        &mut self,
+        session_id: String,
+        attempt: u32,
+        actor_generation: u64,
+    ) {
+        use crate::room_key_recovery::{RecoveryStage, RecoveryStepOutcome as Outcome};
+
+        if self.actor_generation != actor_generation {
+            return;
+        }
+        let stage = match self.room_key_recovery.get(&session_id) {
+            Some(op) if attempt == op.attempts() && !op.is_terminal() => op.stage(),
+            _ => return,
+        };
+        let room_id = self.key.room_id().to_owned();
+        let outcome = match stage {
+            RecoveryStage::CheckingLocal => {
+                match koushi_sdk::has_inbound_group_session(&self.session, &room_id, &session_id)
+                    .await
+                {
+                    Ok(true) => Outcome::LocalFound,
+                    Ok(false) | Err(_) => Outcome::LocalAbsent,
+                }
+            }
+            RecoveryStage::CheckingBackup => {
+                match koushi_sdk::download_room_key_from_backup(
+                    &self.session,
+                    &room_id,
+                    &session_id,
+                )
+                .await
+                {
+                    Ok(true) => Outcome::BackupImported,
+                    Ok(false) => Outcome::BackupAbsent,
+                    Err(_) => Outcome::BackupUnavailable,
+                }
+            }
+            RecoveryStage::RequestingOwnDevices => {
+                // Request from own verified devices via the standard
+                // m.room_key_request path using a matching UTD event.
+                let raw = self
+                    .timeline
+                    .items()
+                    .await
+                    .iter()
+                    .find_map(|item| {
+                        let event = item.as_event()?;
+                        let content = event.content();
+                        let utd = content.as_unable_to_decrypt()?;
+                        let EncryptedMessage::MegolmV1AesSha2 {
+                            session_id: sid, ..
+                        } = utd
+                        else {
+                            return None;
+                        };
+                        (sid.as_str() == session_id).then(|| event.original_json().cloned())
+                    })
+                    .flatten();
+                match raw {
+                    Some(raw) => {
+                        match koushi_sdk::request_room_key_for_event(&self.session, &room_id, &raw)
+                            .await
+                        {
+                            Ok(()) => Outcome::OwnDeviceRequestQueued,
+                            Err(_) => Outcome::OwnDeviceRequestFailed,
+                        }
+                    }
+                    None => Outcome::OwnDeviceRequestFailed,
+                }
+            }
+            RecoveryStage::WaitingForKey => {
+                // The key may have arrived (sender re-sharing incl. #477).
+                match koushi_sdk::has_inbound_group_session(&self.session, &room_id, &session_id)
+                    .await
+                {
+                    Ok(true) => Outcome::KeyArrived,
+                    _ => Outcome::OwnDeviceRequestFailed,
+                }
+            }
+            RecoveryStage::KeyReceived | RecoveryStage::RetryingDecryption => {
+                // Key is stored: bounded local redecryption only.
+                koushi_sdk::request_late_decryption(&self.session, &room_id, [session_id.clone()]);
+                Outcome::RedecryptionRequested
+            }
+            stage => {
+                // Other stages are not driver steps.
+                return;
+            }
+        };
+        let next = {
+            let Some(op) = self.room_key_recovery.get_mut(&session_id) else {
+                return;
+            };
+            op.observe(outcome)
+        };
+        match next {
+            RecoveryStage::Recovered => {
+                crate::room_key_recovery::record_recovery_settled(RecoveryStage::Recovered);
+            }
+            RecoveryStage::AutomaticPathsExhausted | RecoveryStage::UnrecoverableNoKnownHolder => {
+                crate::room_key_recovery::record_recovery_settled(next);
+            }
+            RecoveryStage::TemporarilyFailed => {
+                // Bounded retry: schedule the next attempt if allowed.
+                let can_retry = {
+                    let Some(op) = self.room_key_recovery.get_mut(&session_id) else {
+                        return;
+                    };
+                    op.begin_attempt()
+                };
+                if can_retry {
+                    let attempts = self
+                        .room_key_recovery
+                        .get(&session_id)
+                        .map(|op| op.attempts())
+                        .unwrap_or(0);
+                    self.schedule_recovery_tick(session_id, attempts);
+                } else {
+                    crate::room_key_recovery::record_recovery_settled(
+                        RecoveryStage::AutomaticPathsExhausted,
+                    );
+                }
+            }
+            _ => {
+                let attempts = self
+                    .room_key_recovery
+                    .get(&session_id)
+                    .map(|op| op.attempts())
+                    .unwrap_or(0);
+                self.schedule_recovery_tick(session_id, attempts);
+            }
+        }
+    }
+
     async fn handle_forward_message(
         &mut self,
         request_id: RequestId,
@@ -19230,6 +19434,28 @@ impl TimelineActor {
     ) {
         if diffs.is_empty() {
             return;
+        }
+        // #478: start/join standard-only recovery for genuine missing-session
+        // UTDs appearing in this batch.
+        for diff in &diffs {
+            let item = match diff {
+                eyeball_im::VectorDiff::PushFront { value }
+                | eyeball_im::VectorDiff::PushBack { value }
+                | eyeball_im::VectorDiff::Insert { value, .. }
+                | eyeball_im::VectorDiff::Set { value, .. } => value,
+                _ => continue,
+            };
+            let Some(event) = item.as_event() else {
+                continue;
+            };
+            let content = event.content();
+            let Some(utd) = content.as_unable_to_decrypt() else {
+                continue;
+            };
+            let EncryptedMessage::MegolmV1AesSha2 { session_id, .. } = utd else {
+                continue;
+            };
+            self.ensure_room_key_recovery(session_id);
         }
         let decrypt_retry_resolution = self.decrypt_retry.pending.as_ref().and_then(|pending| {
             diffs.iter().find_map(|diff| {
@@ -20570,6 +20796,7 @@ impl TimelineActor {
                     item,
                     self.own_user_id.as_deref(),
                     &self.send_statuses,
+                    Some(&self.room_key_recovery),
                 )
             })
             .map(|mut item| {
@@ -20711,6 +20938,7 @@ impl TimelineActor {
                     item,
                     self.own_user_id.as_deref(),
                     &self.send_statuses,
+                    Some(&self.room_key_recovery),
                 )
             })
             .map(|mut item| {
@@ -24081,7 +24309,7 @@ pub fn sdk_item_to_timeline_item(
     item: &Arc<SdkTimelineItem>,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
 ) -> TimelineItem {
-    sdk_item_to_timeline_item_with_send_states(key, item, own_user_id, &HashMap::new())
+    sdk_item_to_timeline_item_with_send_states(key, item, own_user_id, &HashMap::new(), None)
 }
 
 fn sdk_item_to_timeline_item_with_send_states(
@@ -24089,6 +24317,9 @@ fn sdk_item_to_timeline_item_with_send_states(
     item: &Arc<SdkTimelineItem>,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
     send_statuses: &HashMap<String, TimelineSendState>,
+    recovery: Option<
+        &std::collections::BTreeMap<String, crate::room_key_recovery::RecoveryOperation>,
+    >,
 ) -> TimelineItem {
     use matrix_sdk_ui::timeline::{TimelineItemKind, VirtualTimelineItem};
 
@@ -24206,6 +24437,16 @@ fn sdk_item_to_timeline_item_with_send_states(
             let mut unable_to_decrypt = unable_to_decrypt_from_content(content);
             if let Some(utd) = unable_to_decrypt.as_mut() {
                 utd.can_request_keys = event_item.original_json().is_some();
+                if let Some(session_id) = utd.session_id.as_deref()
+                    && let Some(op) = recovery.and_then(|map| map.get(session_id))
+                {
+                    utd.recovery_stage =
+                        Some(crate::room_key_recovery::stage_token(op.stage()).to_owned());
+                    utd.recovery_guidance = op
+                        .guidance()
+                        .map(crate::room_key_recovery::guidance_token)
+                        .map(ToOwned::to_owned);
+                }
             }
             let mut actions = message_actions_for_timeline_item(
                 key.room_id(),
@@ -24313,6 +24554,8 @@ fn unable_to_decrypt_from_content(
         },
         session_id,
         can_request_keys: false,
+        recovery_stage: None,
+        recovery_guidance: None,
     })
 }
 
@@ -25770,6 +26013,7 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         value,
                         own_user_id,
                         send_statuses,
+                        None,
                     ),
                 });
                 canonical_len += 1;
@@ -25781,6 +26025,7 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         value,
                         own_user_id,
                         send_statuses,
+                        None,
                     ),
                 });
                 canonical_len += 1;
@@ -25793,6 +26038,7 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         value,
                         own_user_id,
                         send_statuses,
+                        None,
                     ),
                 });
                 canonical_len += 1;
@@ -25805,6 +26051,7 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         value,
                         own_user_id,
                         send_statuses,
+                        None,
                     ),
                 });
             }
@@ -25832,6 +26079,7 @@ fn sdk_vector_diffs_to_timeline_diffs(
                                 value,
                                 own_user_id,
                                 send_statuses,
+                                None,
                             )
                         })
                         .collect(),
@@ -25859,6 +26107,7 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         value,
                         own_user_id,
                         send_statuses,
+                        None,
                     ),
                 }));
                 canonical_len += values.len();

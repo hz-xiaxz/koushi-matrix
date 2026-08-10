@@ -247,6 +247,8 @@ export interface TimelineUnableToDecrypt {
   session_id: string | null;
   reason: TimelineUnableToDecryptReason;
   can_request_keys: boolean;
+  recovery_stage: string | null;
+  recovery_guidance: string | null;
 }
 
 export type TimelineUnableToDecryptReason =

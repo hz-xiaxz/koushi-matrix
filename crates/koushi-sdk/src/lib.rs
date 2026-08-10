@@ -7268,24 +7268,20 @@ fn record_olm_recovery_diagnostic(event: matrix_sdk::encryption::OlmRecoveryDiag
     koushi_diagnostics::increment_counter("olm_recovery_signal");
     if let Some(reshare) = reshare_token {
         koushi_diagnostics::increment_counter("olm_recovery_reshare");
-        koushi_diagnostics::record(DiagnosticEvent::new(
-            DiagnosticLevel::Info,
-            "core.olm_recovery",
-            "reshare",
-        )
-        .field(DiagnosticField::token("signal", signal_token))
-        .field(DiagnosticField::token("reshare", reshare))
-        .field(DiagnosticField::count(
-            "matching_sessions_bucket",
-            event.matching_sessions_bucket as u64,
-        )));
+        koushi_diagnostics::record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.olm_recovery", "reshare")
+                .field(DiagnosticField::token("signal", signal_token))
+                .field(DiagnosticField::token("reshare", reshare))
+                .field(DiagnosticField::count(
+                    "matching_sessions_bucket",
+                    event.matching_sessions_bucket as u64,
+                )),
+        );
     } else {
-        koushi_diagnostics::record(DiagnosticEvent::new(
-            DiagnosticLevel::Info,
-            "core.olm_recovery",
-            "signal",
-        )
-        .field(DiagnosticField::token("signal", signal_token)));
+        koushi_diagnostics::record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.olm_recovery", "signal")
+                .field(DiagnosticField::token("signal", signal_token)),
+        );
     }
 }
 
@@ -14360,7 +14356,9 @@ mod room_key_receive_diagnostics_tests {
         // synthesized aggregate counter records) so parallel tests cannot
         // perturb the count.
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         for kind in cases {
             record_room_key_receive_diagnostic(RoomKeyReceiveDiagnostic { kind });
         }
