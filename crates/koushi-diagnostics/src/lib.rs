@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,6 +23,7 @@ pub enum DiagnosticValue {
     Milliseconds(u64),
     RequestId { connection_id: u64, sequence: u64 },
     Token(&'static str),
+    OrdinalAlias { kind: &'static str, ordinal: u64 },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -114,6 +115,13 @@ impl DiagnosticField {
             },
         }
     }
+
+    pub fn ordinal_alias(key: &'static str, kind: &'static str, ordinal: u64) -> Self {
+        Self {
+            key,
+            value: DiagnosticValue::OrdinalAlias { kind, ordinal },
+        }
+    }
 }
 
 pub struct DiagnosticBuffer {
@@ -190,6 +198,7 @@ impl DiagnosticBuffer {
 }
 
 static GLOBAL_BUFFER: OnceLock<DiagnosticBuffer> = OnceLock::new();
+static GLOBAL_COUNTERS: OnceLock<Mutex<BTreeMap<&'static str, u64>>> = OnceLock::new();
 
 /// Test-only coordination for assertions against the process-wide diagnostic
 /// buffer. Production diagnostics remain concurrent; tests that inspect the
@@ -199,6 +208,8 @@ static GLOBAL_BUFFER: OnceLock<DiagnosticBuffer> = OnceLock::new();
 pub mod test_support {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
+    use super::{DEFAULT_DIAGNOSTIC_CAPACITY, DiagnosticBuffer, DiagnosticSnapshot, GLOBAL_BUFFER};
+
     static GLOBAL_DIAGNOSTIC_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     pub fn lock() -> MutexGuard<'static, ()> {
@@ -206,6 +217,15 @@ pub mod test_support {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Snapshot only the bounded detail ring. Tests that compare positions
+    /// before and after one emission must not include synthesized aggregate
+    /// counter records, whose count can change independently of the ring.
+    pub fn detail_snapshot() -> DiagnosticSnapshot {
+        GLOBAL_BUFFER
+            .get_or_init(|| DiagnosticBuffer::new(DEFAULT_DIAGNOSTIC_CAPACITY))
+            .snapshot()
     }
 }
 
@@ -228,10 +248,41 @@ pub fn record_batch(events: impl IntoIterator<Item = DiagnosticEvent>) {
         .record_batch(events);
 }
 
+/// Increment a closed, privacy-safe aggregate diagnostic counter. Counter
+/// summaries are appended outside the bounded detail ring when exported.
+pub fn increment_counter(name: &'static str) {
+    let mut counters =
+        lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new())));
+    let counter = counters.entry(name).or_default();
+    *counter = counter.saturating_add(1);
+}
+
+/// Reset one aggregate counter when its owning account runtime is replaced.
+pub fn reset_counter(name: &'static str) {
+    lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new()))).remove(name);
+}
+
 pub fn snapshot() -> DiagnosticSnapshot {
-    GLOBAL_BUFFER
+    let mut snapshot = GLOBAL_BUFFER
         .get_or_init(|| DiagnosticBuffer::new(DEFAULT_DIAGNOSTIC_CAPACITY))
-        .snapshot()
+        .snapshot();
+    let timestamp_ms = timestamp_millis_at(SystemTime::now());
+    let counters = lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new())));
+    snapshot
+        .records
+        .extend(counters.iter().map(|(name, count)| {
+            DiagnosticRecord {
+                timestamp_ms,
+                event: DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.room_key_summary",
+                    "counter",
+                )
+                .field(DiagnosticField::token("name", name))
+                .field(DiagnosticField::count("count", *count)),
+            }
+        }));
+    snapshot
 }
 
 pub fn format_event(event: &DiagnosticEvent) -> String {
@@ -251,6 +302,11 @@ pub fn format_event(event: &DiagnosticEvent) -> String {
                 sequence,
             } => line.push_str(&format!("{}:{}", connection_id, sequence)),
             DiagnosticValue::Token(value) => line.push_str(value),
+            DiagnosticValue::OrdinalAlias { kind, ordinal } => {
+                line.push_str(kind);
+                line.push('-');
+                line.push_str(&ordinal.to_string());
+            }
         }
     }
     line
@@ -361,6 +417,35 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(2, "two"), (2, "three")]
         );
+    }
+
+    #[test]
+    fn aggregate_counter_is_exported_outside_the_bounded_detail_ring() {
+        let _guard = test_support::lock();
+        reset_counter("synthetic_room_key_counter");
+        increment_counter("synthetic_room_key_counter");
+        increment_counter("synthetic_room_key_counter");
+
+        let snapshot = super::snapshot();
+        let summary = snapshot
+            .records
+            .iter()
+            .find(|record| {
+                record.event.source == "core.room_key_summary"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "name"
+                            && field.value == DiagnosticValue::Token("synthetic_room_key_counter")
+                    })
+            })
+            .expect("aggregate summary remains exportable independently of the detail ring");
+        assert!(
+            summary
+                .event
+                .fields
+                .iter()
+                .any(|field| { field.key == "count" && field.value == DiagnosticValue::Count(2) })
+        );
+        reset_counter("synthetic_room_key_counter");
     }
 
     #[test]

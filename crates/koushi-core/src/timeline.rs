@@ -6340,6 +6340,39 @@ fn decrypt_retry_event(stage: &'static str, operation: u64, elapsed: Duration) -
         ))
 }
 
+fn record_room_key_requester_stage(
+    operation: u64,
+    stage: &'static str,
+    withheld_code: &'static str,
+    elapsed: Duration,
+) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_requester", stage)
+            .field(DiagnosticField::ordinal_alias(
+                "request_alias",
+                "request",
+                operation,
+            ))
+            .field(DiagnosticField::token("withheld_code", withheld_code))
+            .field(DiagnosticField::token("response_source", "unknown"))
+            .field(DiagnosticField::milliseconds(
+                "elapsed_ms",
+                elapsed.as_millis(),
+            )),
+    );
+    koushi_diagnostics::increment_counter(match stage {
+        "send_started" => "requester_send_started",
+        "sent" => "requester_sent",
+        "awaiting" => "requester_awaiting",
+        "still_waiting" => "requester_still_waiting",
+        "withheld_received" => "requester_withheld",
+        "key_received" => "requester_key_received",
+        "decryption_recovered" => "requester_decryption_recovered",
+        "send_failed" => "requester_send_failed",
+        _ => "requester_unknown",
+    });
+}
+
 fn record_decrypt_retry_request(
     operation: u64,
     attempt: u8,
@@ -6347,6 +6380,7 @@ fn record_decrypt_retry_request(
     backup_state: DecryptRetryBackupState,
     elapsed: Duration,
 ) {
+    record_room_key_requester_stage(operation, "send_started", "none", elapsed);
     record(
         decrypt_retry_event("request", operation, elapsed)
             .field(DiagnosticField::token("reason", reason.token()))
@@ -6378,6 +6412,15 @@ fn record_decrypt_retry_device_request(
         event = event.field(DiagnosticField::token("failure", failure.token()));
     }
     record(event);
+    match result {
+        DecryptRetryDeviceResult::Sent => {
+            record_room_key_requester_stage(operation, "sent", "none", elapsed);
+            record_room_key_requester_stage(operation, "awaiting", "none", elapsed);
+        }
+        DecryptRetryDeviceResult::Failed => {
+            record_room_key_requester_stage(operation, "send_failed", "none", elapsed);
+        }
+    }
 }
 
 fn record_decrypt_retry_settled(
@@ -6385,6 +6428,19 @@ fn record_decrypt_retry_settled(
     result: DecryptRetrySettledResult,
     elapsed: Duration,
 ) {
+    match result {
+        DecryptRetrySettledResult::Decrypted => {
+            record_room_key_requester_stage(operation, "key_received", "none", elapsed);
+            record_room_key_requester_stage(operation, "decryption_recovered", "none", elapsed);
+        }
+        DecryptRetrySettledResult::Withheld => {
+            record_room_key_requester_stage(operation, "withheld_received", "custom", elapsed);
+        }
+        DecryptRetrySettledResult::Timeout => {
+            record_room_key_requester_stage(operation, "still_waiting", "none", elapsed);
+        }
+        _ => {}
+    }
     record(
         decrypt_retry_event("settled", operation, elapsed)
             .field(DiagnosticField::token("result", result.token())),
@@ -7586,31 +7642,43 @@ impl TimelineRelayBatch {
     }
 }
 
-fn decrypt_retry_diff_resolves_event(
+fn decrypt_retry_diff_settlement(
     diff: &eyeball_im::VectorDiff<Arc<SdkTimelineItem>>,
     event_id: &str,
-) -> bool {
-    let is_resolved = |item: &Arc<SdkTimelineItem>| {
+) -> Option<DecryptRetrySettledResult> {
+    let settlement = |item: &Arc<SdkTimelineItem>| {
         let TimelineItemKind::Event(event_item) = item.kind() else {
-            return false;
+            return None;
         };
-        event_item
+        if !event_item
             .event_id()
             .is_some_and(|candidate| candidate.as_str() == event_id)
-            && !event_item.content().is_unable_to_decrypt()
+        {
+            return None;
+        }
+        if !event_item.content().is_unable_to_decrypt() {
+            Some(DecryptRetrySettledResult::Decrypted)
+        } else if matches!(
+            decrypt_retry_reason_from_content(event_item.content()),
+            DecryptRetryReason::Withheld
+        ) {
+            Some(DecryptRetrySettledResult::Withheld)
+        } else {
+            None
+        }
     };
     match diff {
         eyeball_im::VectorDiff::PushFront { value }
         | eyeball_im::VectorDiff::PushBack { value }
         | eyeball_im::VectorDiff::Insert { value, .. }
-        | eyeball_im::VectorDiff::Set { value, .. } => is_resolved(value),
-        eyeball_im::VectorDiff::Reset { values } => values.iter().any(is_resolved),
-        eyeball_im::VectorDiff::Append { values } => values.iter().any(is_resolved),
+        | eyeball_im::VectorDiff::Set { value, .. } => settlement(value),
+        eyeball_im::VectorDiff::Reset { values } => values.iter().find_map(settlement),
+        eyeball_im::VectorDiff::Append { values } => values.iter().find_map(settlement),
         eyeball_im::VectorDiff::Clear
         | eyeball_im::VectorDiff::PopFront
         | eyeball_im::VectorDiff::PopBack
         | eyeball_im::VectorDiff::Remove { .. }
-        | eyeball_im::VectorDiff::Truncate { .. } => false,
+        | eyeball_im::VectorDiff::Truncate { .. } => None,
     }
 }
 
@@ -12269,7 +12337,7 @@ mod timeline_gap_repair_tracker_tests {
             scheduler_phase: "idle",
         });
 
-        let snapshot = koushi_diagnostics::snapshot();
+        let snapshot = koushi_diagnostics::test_support::detail_snapshot();
         for source in [
             "core.timeline_gap_projection",
             "core.timeline_gap_demand",
@@ -12312,7 +12380,7 @@ mod timeline_gap_repair_tracker_tests {
             1,
         );
 
-        let event = koushi_diagnostics::snapshot()
+        let event = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
             .rev()
@@ -12555,7 +12623,7 @@ mod timeline_gap_repair_tracker_tests {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_timeline_gap_repair_evaluation("wake", 2, 1, true, true, "awaiting_render_ack");
 
-        let record = koushi_diagnostics::snapshot()
+        let record = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
             .rev()
@@ -13660,7 +13728,9 @@ mod timeline_gap_repair_tracker_tests {
     #[test]
     fn gap_repair_attempt_diagnostics_emit_once_per_changed_admission() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let demand_revision = 9_004_001;
         let mut tracker = TimelineGapRepairTracker::default();
 
@@ -13690,7 +13760,7 @@ mod timeline_gap_repair_tracker_tests {
             demand_revision + 1,
         ));
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let admissions = records[diagnostic_start..]
             .iter()
             .filter(|record| {
@@ -13727,7 +13797,9 @@ mod timeline_gap_repair_tracker_tests {
     #[test]
     fn gap_repair_attempt_diagnostics_emit_one_budget_update_per_sdk_result() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let demand_revision = 9_004_101;
         let mut tracker = TimelineGapRepairTracker::default();
         tracker
@@ -13791,7 +13863,7 @@ mod timeline_gap_repair_tracker_tests {
         stage: &str,
         demand_revision: u64,
     ) -> usize {
-        koushi_diagnostics::snapshot().records[diagnostic_start..]
+        koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
             .iter()
             .filter(|record| {
                 record.event.source == "core.timeline_gap_repair"
@@ -14115,7 +14187,12 @@ impl DecryptRetryController {
         event_id: &str,
         actor_generation: u64,
         started_at: executor::Instant,
-    ) -> (PendingDecryptRetry, Option<PendingDecryptRetry>) {
+    ) -> (PendingDecryptRetry, Option<PendingDecryptRetry>, bool) {
+        if let Some(current) = self.pending.as_ref().filter(|pending| {
+            pending.event_id == event_id && pending.actor_generation == actor_generation
+        }) {
+            return (current.clone(), None, true);
+        }
         let previous = self.pending.take();
         let attempt = previous
             .as_ref()
@@ -14130,7 +14207,7 @@ impl DecryptRetryController {
             deadline: started_at + DECRYPT_RETRY_TIMEOUT,
         };
         self.pending = Some(pending.clone());
-        (pending, previous)
+        (pending, previous, false)
     }
 
     fn is_current(&self, operation: u64, actor_generation: u64) -> bool {
@@ -17779,10 +17856,19 @@ impl TimelineActor {
         event_id: &str,
         reason: DecryptRetryReason,
         backup_state: DecryptRetryBackupState,
-    ) -> PendingDecryptRetry {
-        let (pending, previous) =
+    ) -> Option<PendingDecryptRetry> {
+        let (pending, previous, coalesced) =
             self.decrypt_retry
                 .admit(event_id, self.actor_generation, executor::Instant::now());
+        if coalesced {
+            record_room_key_requester_stage(
+                pending.operation,
+                "awaiting",
+                "none",
+                pending.started_at.elapsed(),
+            );
+            return None;
+        }
         if let Some(previous) = previous {
             record_decrypt_retry_settled(
                 previous.operation,
@@ -17800,7 +17886,7 @@ impl TimelineActor {
             backup_state,
             Duration::ZERO,
         );
-        pending
+        Some(pending)
     }
 
     fn schedule_decrypt_retry_timeout(&mut self, pending: &PendingDecryptRetry) {
@@ -17860,14 +17946,16 @@ impl TimelineActor {
         }
         let retry_reason = decrypt_retry_reason_from_content(event_item.content());
         let backup_observation = self.session.observe_secure_backup_state();
-        let pending = self.begin_decrypt_retry(
+        let Some(pending) = self.begin_decrypt_retry(
             &requested_event_id,
             retry_reason,
             decrypt_retry_backup_state_for(
                 backup_observation.current.backup,
                 backup_observation.current.recovery,
             ),
-        );
+        ) else {
+            return;
+        };
         let Some(original_json) = event_item.original_json().cloned() else {
             self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Malformed);
             self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
@@ -19161,17 +19249,16 @@ impl TimelineActor {
             return;
         }
         let decrypt_retry_resolution = self.decrypt_retry.pending.as_ref().and_then(|pending| {
-            diffs
-                .iter()
-                .any(|diff| decrypt_retry_diff_resolves_event(diff, &pending.event_id))
-                .then(|| {
+            diffs.iter().find_map(|diff| {
+                decrypt_retry_diff_settlement(diff, &pending.event_id).and_then(|result| {
                     decrypt_retry_settlement_operation(
                         &self.decrypt_retry,
                         self.actor_generation,
                         &pending.event_id,
                     )
+                    .map(|operation| (operation, result))
                 })
-                .flatten()
+            })
         });
         let sdk_diffs = diffs;
         let has_historical_gap_repair_projection = gap_repair_projections
@@ -19300,8 +19387,8 @@ impl TimelineActor {
             return;
         };
 
-        if let Some(operation) = decrypt_retry_resolution {
-            self.settle_decrypt_retry(operation, DecryptRetrySettledResult::Decrypted);
+        if let Some((operation, result)) = decrypt_retry_resolution {
+            self.settle_decrypt_retry(operation, result);
         }
 
         if let Some(AppAction::LiveRoomReceiptsUpdated {
@@ -37122,7 +37209,7 @@ mod tests {
             ],
         );
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let expected = [
             ("core.timeline", "actor_finish"),
             ("core.timeline", "target_scan"),
@@ -37159,7 +37246,7 @@ mod tests {
             }
         }
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         for (source, stage, kind) in [
             ("core.timeline_item", "diff_batch", "remove"),
             ("core.timeline_item", "diff_batch", "clear"),
@@ -37212,7 +37299,7 @@ mod tests {
                 Some(outcome),
             );
         }
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         for record in records
             .iter()
             .filter(|record| record.event.source == "core.timeline")
@@ -37232,7 +37319,9 @@ mod tests {
     fn timeline_items_record_batch_only_by_default() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let key = room_key();
-        let baseline = koushi_diagnostics::snapshot().records.len();
+        let baseline = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         trace_timeline_items(
             "replay_initial",
             &key,
@@ -37242,7 +37331,7 @@ mod tests {
             ],
         );
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let appended = records[baseline..]
             .iter()
             .filter(|record| {
@@ -37272,7 +37361,9 @@ mod tests {
     #[test]
     fn thread_projection_diagnostic_records_only_thread_batches() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let baseline = koushi_diagnostics::snapshot().records.len();
+        let baseline = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let thread_key = TimelineKey {
             account_key: AccountKey("@a:test".to_owned()),
             kind: TimelineKind::Thread {
@@ -37300,7 +37391,7 @@ mod tests {
             11,
         );
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let appended = records[baseline..]
             .iter()
             .filter(|record| record.event.source == "core.thread_timeline")
@@ -37387,7 +37478,7 @@ mod tests {
             .await;
         drop(manager_tx);
 
-        let event = koushi_diagnostics::snapshot()
+        let event = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
             .rev()
@@ -37470,7 +37561,7 @@ mod tests {
             ],
         );
 
-        let diff_records = koushi_diagnostics::snapshot().records;
+        let diff_records = koushi_diagnostics::test_support::detail_snapshot().records;
         for (source, stage) in [
             ("core.timeline_item", "diff_batch"),
             ("core.event_cache", "cache_update"),
@@ -37612,7 +37703,7 @@ mod tests {
             manager.handle_command(command).await;
         }
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         for kind in [
             "send_reaction",
             "redact_reaction",
@@ -37673,7 +37764,7 @@ mod tests {
             Some(7),
             Some("success"),
         );
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         for kind in ["redact_reaction", "send_read_receipt", "set_fully_read"] {
             let event = records
                 .iter()
@@ -38547,7 +38638,9 @@ mod tests {
         let generations = Arc::new(TimelineActorGenerationGate::default());
         let actor_generation = generations.activate_after_quiescence(&key).await.generation;
         let (action_tx, mut action_rx) = mpsc::channel(1);
-        let records_before = koushi_diagnostics::snapshot().records.len();
+        let records_before = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         assert!(
             emit_live_receipt_observation_actions(
                 session.as_ref(),
@@ -38566,7 +38659,7 @@ mod tests {
             [AppAction::LiveRoomReceiptsUpdated { .. }]
         ));
         assert!(
-            koushi_diagnostics::snapshot()
+            koushi_diagnostics::test_support::detail_snapshot()
                 .records
                 .iter()
                 .skip(records_before)
@@ -41748,7 +41841,7 @@ mod tests {
             }
         }
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let records = diagnostics
             .records
             .iter()
@@ -41827,7 +41920,9 @@ mod tests {
     #[test]
     fn send_failure_trace_records_only_closed_failure_fields() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let key = room_key();
         let mut trace = SendLifecycleTrace::new(&key, true);
         let correlation = trace.correlation();
@@ -41842,7 +41937,7 @@ mod tests {
             },
         );
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let event = &diagnostics.records[diagnostic_start..]
             .iter()
             .find(|record| {
@@ -41879,7 +41974,9 @@ mod tests {
     #[test]
     fn encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let key = room_key();
         let trace = SendLifecycleTrace::new(&key, true);
         let correlation = trace.correlation();
@@ -41896,7 +41993,7 @@ mod tests {
             dehydrated_own_other_device_count: Some(1),
             blacklisted_own_other_device_count: Some(1),
         });
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let record = diagnostics.records[diagnostic_start..]
             .iter()
             .find(|record| {
@@ -41967,7 +42064,9 @@ mod tests {
     #[test]
     fn post_send_encryption_diagnostics_keep_unknown_state_and_session_evidence_separate() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let correlation = 8_204;
 
         record_post_send_encryption_snapshot(
@@ -41976,7 +42075,7 @@ mod tests {
             OutboundSessionLookupDiagnostic::Present,
         );
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let record = diagnostics.records[diagnostic_start..]
             .iter()
             .find(|record| {
@@ -42025,7 +42124,6 @@ mod tests {
     #[test]
     fn decrypt_retry_diagnostics_are_fixed_token_and_private_data_free() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let operation = 48_217;
 
         record_decrypt_retry_request(
@@ -42052,8 +42150,18 @@ mod tests {
             Duration::ZERO,
         );
 
-        let diagnostics = koushi_diagnostics::snapshot();
-        let records = &diagnostics.records[diagnostic_start..];
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
+        let records = diagnostics
+            .records
+            .iter()
+            .filter(|record| {
+                record.event.source == "core.decrypt_retry"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "operation"
+                            && field.value == DiagnosticValue::Correlation(operation)
+                    })
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
             records
                 .iter()
@@ -42066,7 +42174,7 @@ mod tests {
                 ("settled", &records[3].event.fields),
             ]
         );
-        for record in records {
+        for record in &records {
             assert_eq!(record.event.source, "core.decrypt_retry");
             assert!(record.event.fields.iter().any(|field| {
                 field.key == "operation" && field.value == DiagnosticValue::Correlation(operation)
@@ -42088,7 +42196,7 @@ mod tests {
             field.key == "result" && field.value == DiagnosticValue::Token("still_missing")
         }));
 
-        let serialized = serde_json::to_string(records).expect("serialize diagnostics");
+        let serialized = serde_json::to_string(&records).expect("serialize diagnostics");
         for forbidden in [
             "!synthetic-room:example.invalid",
             "$synthetic-event:example.invalid",
@@ -42114,10 +42222,16 @@ mod tests {
     fn decrypt_retry_controller_fences_deadline_settlement_and_replacement() {
         let mut controller = DecryptRetryController::default();
         let admitted_at = executor::Instant::now();
-        let (first, replaced) = controller.admit("$event-a:test", 7, admitted_at);
+        let (first, replaced, coalesced) = controller.admit("$event-a:test", 7, admitted_at);
         assert!(replaced.is_none());
+        assert!(!coalesced);
         assert!(first.deadline > admitted_at);
         assert!(controller.is_current(first.operation, 7));
+        let (same, replaced, coalesced) =
+            controller.admit("$event-a:test", 7, executor::Instant::now());
+        assert!(coalesced);
+        assert!(replaced.is_none());
+        assert_eq!(same.operation, first.operation);
 
         assert!(
             controller
@@ -42135,7 +42249,9 @@ mod tests {
         );
         assert!(controller.is_current(first.operation, 7));
 
-        let (second, replaced) = controller.admit("$event-b:test", 7, executor::Instant::now());
+        let (second, replaced, coalesced) =
+            controller.admit("$event-b:test", 7, executor::Instant::now());
+        assert!(!coalesced);
         assert_eq!(
             replaced.map(|pending| pending.operation),
             Some(first.operation)
@@ -42167,7 +42283,7 @@ mod tests {
     #[test]
     fn decrypt_retry_diff_settlement_requires_current_generation_and_matching_event() {
         let mut controller = DecryptRetryController::default();
-        let (pending, _) = controller.admit("$event:test", 7, executor::Instant::now());
+        let (pending, _, _) = controller.admit("$event:test", 7, executor::Instant::now());
 
         assert_eq!(
             decrypt_retry_settlement_operation(&controller, 8, "$event:test"),
@@ -42186,7 +42302,7 @@ mod tests {
     #[test]
     fn decrypt_retry_timeout_message_settles_current_operation_once() {
         let mut controller = DecryptRetryController::default();
-        let (pending, _) = controller.admit("$event:test", 7, executor::Instant::now());
+        let (pending, _, _) = controller.admit("$event:test", 7, executor::Instant::now());
 
         let settled = controller
             .settle_timeout_if_current(pending.operation, 7)
@@ -42273,7 +42389,6 @@ mod tests {
     #[test]
     fn decrypt_retry_diagnostics_use_only_the_planned_outcome_tokens() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
         let operation = 48_218;
 
         record_decrypt_retry_request(
@@ -42324,9 +42439,17 @@ mod tests {
             record_decrypt_retry_settled(operation, result, Duration::ZERO);
         }
 
-        let records = &koushi_diagnostics::snapshot().records[diagnostic_start..];
-        let tokens = records
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
+        let tokens = diagnostics
+            .records
             .iter()
+            .filter(|record| {
+                record.event.source == "core.decrypt_retry"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "operation"
+                            && field.value == DiagnosticValue::Correlation(operation)
+                    })
+            })
             .flat_map(|record| record.event.fields.iter())
             .filter_map(|field| match field.value {
                 DiagnosticValue::Token(token) => Some((field.key, token)),
@@ -42362,7 +42485,9 @@ mod tests {
     #[test]
     fn room_key_reshare_diagnostics_include_attempt_target_and_result() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
 
         record_room_key_reshare(
             "own_device_retry_1",
@@ -42374,7 +42499,7 @@ mod tests {
             5,
         );
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let record = diagnostics.records[diagnostic_start..]
             .iter()
             .find(|record| {
@@ -42417,7 +42542,9 @@ mod tests {
     #[test]
     fn send_diagnostic_tasks_are_capacity_bounded_and_cancellable() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let (terminal_ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
         let mut supervisor = SendEnqueueWorkerSupervisor::new(terminal_ingress);
 
@@ -42429,7 +42556,7 @@ mod tests {
             supervisor.diagnostic_tasks.len(),
             MAX_CONCURRENT_SEND_DIAGNOSTICS
         );
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         assert!(
             diagnostics.records[diagnostic_start..]
                 .iter()
