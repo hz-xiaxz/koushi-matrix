@@ -4852,6 +4852,17 @@ impl TimelineManagerActor {
                 )
                 .await;
             }
+            TimelineCommand::RequestLateDecryption { request_id, key } => {
+                self.route_to_actor_or_fail(
+                    request_id,
+                    &key,
+                    TimelineActorMessage::RequestLateDecryption {
+                        request_id: Some(request_id),
+                        trigger: crate::room_key_receive::RECEIVE_SUMMARY_TRIGGER_MANUAL,
+                    },
+                )
+                .await;
+            }
             TimelineCommand::RetrySend {
                 request_id,
                 key,
@@ -7296,6 +7307,10 @@ enum TimelineActorMessage {
     RequestRoomKey {
         request_id: RequestId,
         event_id: String,
+    },
+    RequestLateDecryption {
+        request_id: Option<RequestId>,
+        trigger: &'static str,
     },
     DecryptRetryTimeout {
         operation: u64,
@@ -14888,6 +14903,49 @@ impl TimelineActor {
             }));
         }
 
+        // Late-decryption reports observer (#476): when the event-cache
+        // redecryptor reports lag or backup availability, drive the bounded
+        // local retry for this timeline's visible UTD sessions.
+        {
+            use futures_util::StreamExt;
+            let late_decryption_tx = actor_tx.clone();
+            let late_decryption_reports = koushi_sdk::late_decryption_report_stream(&session);
+            auxiliary_tasks.push(executor::spawn(async move {
+                use matrix_sdk::event_cache::RedecryptorReport;
+                let mut reports = late_decryption_reports;
+                let mut last_sent = std::time::Instant::now()
+                    - crate::room_key_receive::LATE_DECRYPTION_RETRY_COALESCE_WINDOW;
+                while let Some(report) = reports.next().await {
+                    let Ok(report) = report else { continue };
+                    let trigger = match &report {
+                        RedecryptorReport::Lagging => {
+                            crate::room_key_receive::RECEIVE_SUMMARY_TRIGGER_STREAM_LAGGED
+                        }
+                        RedecryptorReport::BackupAvailable => {
+                            crate::room_key_receive::RECEIVE_SUMMARY_TRIGGER_BACKUP_AVAILABLE
+                        }
+                        RedecryptorReport::ResolvedUtds { .. } => continue,
+                    };
+                    if last_sent.elapsed()
+                        < crate::room_key_receive::LATE_DECRYPTION_RETRY_COALESCE_WINDOW
+                    {
+                        continue;
+                    }
+                    last_sent = std::time::Instant::now();
+                    if late_decryption_tx
+                        .send(TimelineActorMessage::RequestLateDecryption {
+                            request_id: None,
+                            trigger,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }));
+        }
+
         // Emit InitialItems (generation 0).
         let generation = TimelineGeneration(0);
         let replay_known_candidates = replay_known_candidates_for_display_items(
@@ -14932,12 +14990,14 @@ impl TimelineActor {
         }
 
         // Spawn the diff relay task: converts SDK VectorDiff stream into actor messages.
+        let initial_items: Vec<_> = initial_sdk_items.iter().cloned().collect();
         let relay_task = Some(executor::spawn(run_diff_relay(
             relay_data_tx,
             relay_control_tx.clone(),
             generation,
             actor_generation,
             diff_stream,
+            initial_items,
         )));
 
         // Spawn the send queue monitor task: forwards RoomSendQueueUpdate to actor.
@@ -15715,6 +15775,13 @@ impl TimelineActor {
                 event_id,
             } => {
                 self.handle_request_room_key(request_id, event_id).await;
+            }
+            TimelineActorMessage::RequestLateDecryption {
+                request_id,
+                trigger,
+            } => {
+                self.handle_request_late_decryption(request_id, trigger)
+                    .await;
             }
             TimelineActorMessage::DecryptRetryTimeout {
                 operation,
@@ -18046,6 +18113,34 @@ impl TimelineActor {
             }
         }
         self.schedule_decrypt_retry_timeout(&pending);
+    }
+
+    async fn handle_request_late_decryption(
+        &mut self,
+        request_id: Option<RequestId>,
+        trigger: &'static str,
+    ) {
+        // Consolidated receive-side summary: transport/Olm, merge, and
+        // late-decryption groups plus event-cache health (#476).
+        let diagnostics = koushi_sdk::room_key_receive_diagnostics(&self.session).await;
+        crate::room_key_receive::record_room_key_receive_summary(&diagnostics, trigger);
+
+        let items: Vec<_> = self.timeline.items().await.iter().cloned().collect();
+        let session_ids = crate::room_key_receive::collect_visible_utd_sessions(&items);
+        let requested = !session_ids.is_empty();
+        if requested {
+            koushi_sdk::request_late_decryption(
+                &self.session,
+                self.key.room_id(),
+                session_ids.iter().cloned(),
+            );
+        }
+        crate::room_key_receive::record_late_decryption_retry(session_ids.len(), requested);
+        if let Some(request_id) = request_id {
+            if !requested {
+                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
+            }
+        }
     }
 
     async fn handle_forward_message(
@@ -20789,12 +20884,14 @@ impl TimelineActor {
         };
         let (relay_data_tx, relay_data_rx) = mpsc::channel(256);
         self.relay_data_rx = Some(relay_data_rx);
+        let initial_items: Vec<_> = self.timeline.items().await.iter().cloned().collect();
         self.relay_task = Some(executor::spawn(run_diff_relay(
             relay_data_tx,
             self.relay_control_tx.clone(),
             self.generation,
             self.actor_generation,
             diff_stream,
+            initial_items,
         )));
         let restore = self.restore_anchor.take();
         drop(finalize_lease);
@@ -21212,6 +21309,11 @@ where
 // Relay task: SDK diff stream → actor inbox (with overflow detection)
 // ---------------------------------------------------------------------------
 
+/// Event ID of an SDK timeline item, when it has one.
+fn sdk_timeline_item_event_id(item: &SdkTimelineItem) -> Option<&matrix_sdk::ruma::EventId> {
+    item.as_event()?.event_id()
+}
+
 async fn run_diff_relay(
     actor_tx: mpsc::Sender<TimelineRelayBatch>,
     control_tx: mpsc::Sender<TimelineRelayControl>,
@@ -21219,8 +21321,32 @@ async fn run_diff_relay(
     actor_generation: u64,
     mut diff_stream: impl futures_util::Stream<Item = Vec<eyeball_im::VectorDiff<Arc<SdkTimelineItem>>>>
     + Unpin,
+    initial_items: Vec<Arc<SdkTimelineItem>>,
 ) {
     use futures_util::StreamExt;
+
+    // Track recently-observed UTD event IDs so a late-decryption replacement
+    // in the visible timeline is counted exactly once per UTD item (#476). The
+    // set is bounded; old entries age out by replacement. Only the aggregate
+    // counter is exported — no event IDs ever enter diagnostics. The set and
+    // counter are updated only after the batch is accepted by the actor, so a
+    // queue-overflow batch never claims a visible replacement.
+    let mut utd_event_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    const UTD_TRACK_LIMIT: usize = 256;
+    // Seed tracking from UTD rows already present when the timeline opened so
+    // a later decrypted `Set` for an initial UTD is counted.
+    for item in &initial_items {
+        let is_utd = item
+            .as_event()
+            .map(|event| event.content().is_unable_to_decrypt())
+            .unwrap_or(false);
+        if is_utd
+            && let Some(event_id) = sdk_timeline_item_event_id(item)
+            && utd_event_ids.len() < UTD_TRACK_LIMIT
+        {
+            utd_event_ids.insert(event_id.to_string());
+        }
+    }
 
     loop {
         let Some(diffs) = diff_stream.next().await else {
@@ -21229,6 +21355,58 @@ async fn run_diff_relay(
                 .await;
             break;
         };
+
+        // Compute visible-UTD tracking ops for this batch. They are applied
+        // only after the actor accepts the batch, so dropped batches never
+        // claim visible replacements.
+        enum TrackOp {
+            Track(String),
+            CountReplacement(String),
+            Clear,
+        }
+        let mut track_ops: Vec<TrackOp> = Vec::new();
+        for diff in &diffs {
+            match diff {
+                eyeball_im::VectorDiff::Set { value, .. } => {
+                    let item = value.as_ref();
+                    let event_id = sdk_timeline_item_event_id(item).map(|id| id.to_string());
+                    let is_utd = item
+                        .as_event()
+                        .map(|event| event.content().is_unable_to_decrypt())
+                        .unwrap_or(false);
+                    if is_utd {
+                        if let Some(event_id) = event_id {
+                            track_ops.push(TrackOp::Track(event_id));
+                        }
+                    } else if let Some(event_id) = event_id {
+                        track_ops.push(TrackOp::CountReplacement(event_id));
+                    }
+                }
+                eyeball_im::VectorDiff::PushFront { value }
+                | eyeball_im::VectorDiff::PushBack { value }
+                | eyeball_im::VectorDiff::Insert { value, .. } => {
+                    let item = value.as_ref();
+                    let is_utd = item
+                        .as_event()
+                        .map(|event| event.content().is_unable_to_decrypt())
+                        .unwrap_or(false);
+                    if is_utd && let Some(event_id) = sdk_timeline_item_event_id(item) {
+                        track_ops.push(TrackOp::Track(event_id.to_string()));
+                    }
+                }
+                // Removal/reset shapes invalidate tracked positions; drop the
+                // tracking so stale entries cannot fill the bound.
+                eyeball_im::VectorDiff::Remove { .. }
+                | eyeball_im::VectorDiff::Truncate { .. }
+                | eyeball_im::VectorDiff::Clear
+                | eyeball_im::VectorDiff::PopFront
+                | eyeball_im::VectorDiff::PopBack
+                | eyeball_im::VectorDiff::Reset { .. } => {
+                    track_ops.push(TrackOp::Clear);
+                }
+                _ => {}
+            }
+        }
 
         let thread_attention_provenance = ThreadAttentionBatchProvenance::from_sdk_diffs(&diffs);
         let mut batch = TimelineRelayBatch {
@@ -21252,7 +21430,29 @@ async fn run_diff_relay(
             );
         }
         match actor_tx.try_send(batch) {
-            Ok(_) => {}
+            Ok(_) => {
+                // The batch is now owned by the actor's inbox; apply the
+                // visible-UTD tracking against the diffs the actor will apply.
+                for op in track_ops {
+                    match op {
+                        TrackOp::Track(event_id) => {
+                            if utd_event_ids.len() < UTD_TRACK_LIMIT {
+                                utd_event_ids.insert(event_id);
+                            }
+                        }
+                        TrackOp::CountReplacement(event_id) => {
+                            if utd_event_ids.remove(&event_id) {
+                                koushi_diagnostics::increment_counter(
+                                    "late_decryption_timeline_replacements",
+                                );
+                            }
+                        }
+                        TrackOp::Clear => {
+                            utd_event_ids.clear();
+                        }
+                    }
+                }
+            }
             Err(mpsc::error::TrySendError::Full(batch)) => {
                 for projection in &batch.gap_repair_projections {
                     record_timeline_gap_projection_boundary(
@@ -41182,6 +41382,7 @@ mod tests {
             TimelineGeneration(7),
             1,
             futures_util::stream::iter([Vec::new()]),
+            vec![],
         ));
 
         let control = tokio::time::timeout(Duration::from_secs(1), control_rx.recv())
@@ -41208,6 +41409,7 @@ mod tests {
             TimelineGeneration(8),
             1,
             futures_util::stream::iter([Vec::new()]),
+            vec![],
         )
         .await;
         assert!(matches!(
@@ -41241,6 +41443,7 @@ mod tests {
             TimelineGeneration(9),
             1,
             futures_util::stream::empty(),
+            vec![],
         )
         .await;
 
@@ -41394,7 +41597,15 @@ mod tests {
 
         let (actor_tx, mut actor_rx) = mpsc::channel(1);
         let (control_tx, _control_rx) = mpsc::channel(1);
-        run_diff_relay(actor_tx, control_tx, generation, actor_generation, stream).await;
+        run_diff_relay(
+            actor_tx,
+            control_tx,
+            generation,
+            actor_generation,
+            stream,
+            vec![],
+        )
+        .await;
         let Some(TimelineRelayBatch {
             generation: batch_generation,
             diffs,

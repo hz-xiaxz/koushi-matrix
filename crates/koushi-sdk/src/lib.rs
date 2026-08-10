@@ -7190,6 +7190,25 @@ async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
         "requester_decryption_recovered",
         "requester_send_failed",
         "requester_unknown",
+        // Receive-side counters (issue #476).
+        "receive_ingress_direct",
+        "receive_ingress_forwarded",
+        "receive_olm_failed",
+        "receive_olm_wedged",
+        "receive_dehydrated_rejected",
+        "receive_malformed",
+        "receive_unsupported_algorithm",
+        "receive_forwarded_no_matching_request",
+        "receive_forwarded_untrusted_sender",
+        "receive_forwarded_unsupported",
+        "receive_forwarded_accepted",
+        "receive_merge_accepted_new",
+        "receive_merge_accepted_improved",
+        "receive_merge_duplicate_ignored",
+        "receive_merge_worse_ignored",
+        "receive_merge_unconnected_rejected",
+        "receive_merge_invalid_session_key",
+        "receive_merge_store_failed",
     ] {
         koushi_diagnostics::reset_counter(counter);
     }
@@ -7207,7 +7226,81 @@ fn record_room_key_diagnostic(event: matrix_sdk::encryption::RoomKeyDiagnosticEv
             record_incoming_room_key_diagnostic(event)
         }
         RoomKeyDiagnosticEvent::Rotation(event) => record_room_key_rotation_diagnostic(event),
+        RoomKeyDiagnosticEvent::Receive(event) => record_room_key_receive_diagnostic(event),
     }
+}
+
+fn record_room_key_receive_diagnostic(event: matrix_sdk::encryption::RoomKeyReceiveDiagnostic) {
+    use matrix_sdk::encryption::{
+        ForwardedRoomKeyAuthOutcome as ForwardOutcome, RoomKeyIngressKind as IngressKind,
+        RoomKeyMergeDecision as MergeDecision, RoomKeyReceiveDiagnosticKind as Kind,
+    };
+
+    let (token, counter) = match event.kind {
+        Kind::RoomKeyIngress {
+            kind: IngressKind::Direct,
+        } => ("ingress_direct", "receive_ingress_direct"),
+        Kind::RoomKeyIngress {
+            kind: IngressKind::Forwarded,
+        } => ("ingress_forwarded", "receive_ingress_forwarded"),
+        Kind::ToDeviceOlmFailed => ("olm_failed", "receive_olm_failed"),
+        Kind::ToDeviceOlmWedged => ("olm_wedged", "receive_olm_wedged"),
+        Kind::ToDeviceDehydratedRejected => ("dehydrated_rejected", "receive_dehydrated_rejected"),
+        Kind::ToDeviceMalformed => ("malformed", "receive_malformed"),
+        Kind::RoomKeyUnsupportedAlgorithm => {
+            ("unsupported_algorithm", "receive_unsupported_algorithm")
+        }
+        Kind::ForwardedRoomKeyAuth {
+            outcome: ForwardOutcome::RejectedNoMatchingRequest,
+        } => (
+            "forwarded_no_matching_request",
+            "receive_forwarded_no_matching_request",
+        ),
+        Kind::ForwardedRoomKeyAuth {
+            outcome: ForwardOutcome::RejectedUntrustedSender,
+        } => (
+            "forwarded_untrusted_sender",
+            "receive_forwarded_untrusted_sender",
+        ),
+        Kind::ForwardedRoomKeyAuth {
+            outcome: ForwardOutcome::UnsupportedAlgorithm,
+        } => ("forwarded_unsupported", "receive_forwarded_unsupported"),
+        Kind::ForwardedRoomKeyAuth {
+            outcome: ForwardOutcome::Accepted,
+        } => ("forwarded_accepted", "receive_forwarded_accepted"),
+        Kind::Merge {
+            decision: MergeDecision::AcceptedNew,
+        } => ("merge_accepted_new", "receive_merge_accepted_new"),
+        Kind::Merge {
+            decision: MergeDecision::AcceptedImproved,
+        } => ("merge_accepted_improved", "receive_merge_accepted_improved"),
+        Kind::Merge {
+            decision: MergeDecision::DuplicateIgnored,
+        } => ("merge_duplicate_ignored", "receive_merge_duplicate_ignored"),
+        Kind::Merge {
+            decision: MergeDecision::WorseIgnored,
+        } => ("merge_worse_ignored", "receive_merge_worse_ignored"),
+        Kind::Merge {
+            decision: MergeDecision::UnconnectedRejected,
+        } => (
+            "merge_unconnected_rejected",
+            "receive_merge_unconnected_rejected",
+        ),
+        Kind::Merge {
+            decision: MergeDecision::InvalidSessionKey,
+        } => (
+            "merge_invalid_session_key",
+            "receive_merge_invalid_session_key",
+        ),
+        Kind::Merge {
+            decision: MergeDecision::StoreFailed,
+        } => ("merge_store_failed", "receive_merge_store_failed"),
+    };
+    koushi_diagnostics::increment_counter(counter);
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_receive", "outcome")
+            .field(DiagnosticField::token("outcome", token)),
+    );
 }
 
 fn record_incoming_room_key_diagnostic(
@@ -8139,6 +8232,67 @@ pub async fn request_room_key_for_event(
         .request_room_key_for_event(event, room_id.as_ref())
         .await
         .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
+/// Privacy-safe snapshot of the receive-side room-key handling state: the
+/// crypto-machine counters plus the event-cache late-decryption counters and
+/// health. Contains only counts, booleans, and closed tokens.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MatrixRoomKeyReceiveDiagnostics {
+    /// Crypto-machine receive counters (ingress, Olm, merge decisions).
+    pub crypto: matrix_sdk::encryption::RoomKeyReceiveCounters,
+    /// Event-cache late-decryption counters and health.
+    pub late_decryption: matrix_sdk::event_cache::RoomKeyLateDecryptionDiagnostics,
+}
+
+/// Snapshot the privacy-safe receive-side room-key diagnostics for a session.
+pub async fn room_key_receive_diagnostics(
+    session: &MatrixClientSession,
+) -> MatrixRoomKeyReceiveDiagnostics {
+    let client = session.client();
+    let crypto = client.encryption().room_key_receive_counters().await;
+    let late_decryption = client.event_cache().room_key_receive_diagnostics();
+    MatrixRoomKeyReceiveDiagnostics {
+        crypto,
+        late_decryption,
+    }
+}
+
+/// Issue a bounded local late-decryption retry for the given room and session
+/// IDs, using the SDK event-cache redecryptor. This requests no new keys and
+/// redistributes nothing; it only asks the redecryptor to re-attempt decryption
+/// of the events it already holds for those sessions.
+pub fn request_late_decryption(
+    session: &MatrixClientSession,
+    room_id: &str,
+    utd_session_ids: impl IntoIterator<Item = String>,
+) {
+    use matrix_sdk::event_cache::DecryptionRetryRequest;
+
+    let Ok(room_id) = matrix_sdk::ruma::OwnedRoomId::try_from(room_id) else {
+        return;
+    };
+    let request = DecryptionRetryRequest {
+        room_id,
+        utd_session_ids: utd_session_ids.into_iter().collect(),
+        refresh_info_session_ids: Default::default(),
+    };
+    session.client().event_cache().request_decryption(request);
+}
+
+/// Subscribe to the SDK event-cache redecryptor reports (Lagging,
+/// BackupAvailable, ResolvedUtds). Used by the runtime to drive bounded local
+/// late-decryption retries.
+pub fn late_decryption_report_stream(
+    session: &MatrixClientSession,
+) -> impl futures_util::Stream<
+    Item = std::result::Result<
+        matrix_sdk::event_cache::RedecryptorReport,
+        matrix_sdk::event_cache::BroadcastStreamRecvError,
+    >,
+> + use<> {
+    let client = session.client();
+    client.event_cache().subscribe_to_decryption_reports()
 }
 
 pub async fn update_room_setting(
@@ -14083,5 +14237,89 @@ mod tests {
             MatrixRoomMemberRole::Administrator
         );
         assert_eq!(matrix_room_member_role(None), MatrixRoomMemberRole::Creator);
+    }
+}
+
+#[cfg(test)]
+mod room_key_receive_diagnostics_tests {
+    use super::record_room_key_receive_diagnostic;
+    use koushi_diagnostics::snapshot;
+    use matrix_sdk::encryption::{
+        ForwardedRoomKeyAuthOutcome, RoomKeyIngressKind, RoomKeyMergeDecision,
+        RoomKeyReceiveDiagnostic, RoomKeyReceiveDiagnosticKind,
+    };
+
+    #[test]
+    fn receive_diagnostic_records_closed_tokens_only() {
+        let cases = [
+            RoomKeyReceiveDiagnosticKind::RoomKeyIngress {
+                kind: RoomKeyIngressKind::Direct,
+            },
+            RoomKeyReceiveDiagnosticKind::RoomKeyIngress {
+                kind: RoomKeyIngressKind::Forwarded,
+            },
+            RoomKeyReceiveDiagnosticKind::ToDeviceOlmFailed,
+            RoomKeyReceiveDiagnosticKind::ToDeviceOlmWedged,
+            RoomKeyReceiveDiagnosticKind::ToDeviceDehydratedRejected,
+            RoomKeyReceiveDiagnosticKind::ToDeviceMalformed,
+            RoomKeyReceiveDiagnosticKind::RoomKeyUnsupportedAlgorithm,
+            RoomKeyReceiveDiagnosticKind::ForwardedRoomKeyAuth {
+                outcome: ForwardedRoomKeyAuthOutcome::RejectedNoMatchingRequest,
+            },
+            RoomKeyReceiveDiagnosticKind::ForwardedRoomKeyAuth {
+                outcome: ForwardedRoomKeyAuthOutcome::RejectedUntrustedSender,
+            },
+            RoomKeyReceiveDiagnosticKind::ForwardedRoomKeyAuth {
+                outcome: ForwardedRoomKeyAuthOutcome::UnsupportedAlgorithm,
+            },
+            RoomKeyReceiveDiagnosticKind::ForwardedRoomKeyAuth {
+                outcome: ForwardedRoomKeyAuthOutcome::Accepted,
+            },
+            RoomKeyReceiveDiagnosticKind::Merge {
+                decision: RoomKeyMergeDecision::AcceptedNew,
+            },
+            RoomKeyReceiveDiagnosticKind::Merge {
+                decision: RoomKeyMergeDecision::AcceptedImproved,
+            },
+            RoomKeyReceiveDiagnosticKind::Merge {
+                decision: RoomKeyMergeDecision::DuplicateIgnored,
+            },
+            RoomKeyReceiveDiagnosticKind::Merge {
+                decision: RoomKeyMergeDecision::WorseIgnored,
+            },
+            RoomKeyReceiveDiagnosticKind::Merge {
+                decision: RoomKeyMergeDecision::UnconnectedRejected,
+            },
+            RoomKeyReceiveDiagnosticKind::Merge {
+                decision: RoomKeyMergeDecision::InvalidSessionKey,
+            },
+            RoomKeyReceiveDiagnosticKind::Merge {
+                decision: RoomKeyMergeDecision::StoreFailed,
+            },
+        ];
+        // Hold the diagnostic lock and use the detail ring only (no
+        // synthesized aggregate counter records) so parallel tests cannot
+        // perturb the count.
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
+        for kind in cases {
+            record_room_key_receive_diagnostic(RoomKeyReceiveDiagnostic { kind });
+        }
+
+        let snapshot = koushi_diagnostics::test_support::detail_snapshot();
+        let receive_records: Vec<_> = snapshot
+            .records
+            .iter()
+            .skip(diagnostic_start)
+            .filter(|record| record.event.source == "core.room_key_receive")
+            .collect();
+        assert_eq!(receive_records.len(), cases.len());
+        for record in receive_records {
+            let text = format!("{:?}", record.event);
+            assert!(
+                !text.contains('@') && !text.contains('!') && !text.contains("http"),
+                "privacy leak in receive diagnostic: {text}"
+            );
+        }
     }
 }

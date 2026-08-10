@@ -30,6 +30,7 @@ pub(crate) mod mention_candidates;
 pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 pub mod room;
+mod room_key_receive;
 pub mod runtime;
 pub(crate) mod scheduled_send;
 pub mod search;

@@ -216,6 +216,7 @@ impl CoreCommand {
                 | TimelineCommand::ForwardMessage { request_id, .. }
                 | TimelineCommand::LoadMessageSource { request_id, .. }
                 | TimelineCommand::RequestRoomKey { request_id, .. }
+                | TimelineCommand::RequestLateDecryption { request_id, .. }
                 | TimelineCommand::RetrySend { request_id, .. }
                 | TimelineCommand::CancelSend { request_id, .. }
                 | TimelineCommand::UploadAndSendMedia { request_id, .. }
@@ -2683,6 +2684,10 @@ pub enum TimelineCommand {
         key: TimelineKey,
         event_id: String,
     },
+    RequestLateDecryption {
+        request_id: RequestId,
+        key: TimelineKey,
+    },
     RetrySend {
         request_id: RequestId,
         key: TimelineKey,
@@ -2946,6 +2951,11 @@ impl fmt::Debug for TimelineCommand {
                 .field("request_id", request_id)
                 .field("key", &"TimelineKey(..)")
                 .field("event_id", &"EventId(..)")
+                .finish(),
+            Self::RequestLateDecryption { request_id, .. } => formatter
+                .debug_struct("RequestLateDecryption")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
                 .finish(),
             Self::RetrySend { request_id, .. } => formatter
                 .debug_struct("RetrySend")

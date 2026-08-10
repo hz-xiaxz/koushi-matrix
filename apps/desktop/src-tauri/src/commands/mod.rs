@@ -2261,6 +2261,24 @@ pub(crate) fn build_request_room_key_command(
     }))
 }
 
+pub(crate) fn build_request_late_decryption_command(
+    request_id: koushi_core::RequestId,
+    account_key: AccountKey,
+    room_id: String,
+    timeline_key: Option<TimelineKey>,
+) -> Option<CoreCommand> {
+    let key = match timeline_key {
+        Some(timeline_key) => TimelineKey {
+            account_key,
+            kind: timeline_key.kind,
+        },
+        None => build_timeline_key(account_key, room_id),
+    };
+    Some(CoreCommand::Timeline(
+        TimelineCommand::RequestLateDecryption { request_id, key },
+    ))
+}
+
 pub(crate) fn build_load_link_previews_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
@@ -3783,7 +3801,8 @@ mod tests {
 
     use crate::commands::{
         TIMELINE_BACKWARDS_PAGE_EVENT_COUNT, TIMELINE_RESTORE_ANCHOR_MAX_BATCHES,
-        build_request_room_key_command, snapshot_has_login_transport_terminal,
+        build_request_late_decryption_command, build_request_room_key_command,
+        snapshot_has_login_transport_terminal,
     };
     use koushi_core::AccountKey;
     use koushi_core::{
@@ -4827,6 +4846,27 @@ mod tests {
                     }
                 );
                 assert_eq!(event_id, "$source-event");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        match build_request_late_decryption_command(
+            fake_request_id(37),
+            active_account_key.clone(),
+            room_id.clone(),
+            None,
+        )
+        .expect("request_late_decryption should build a command")
+        {
+            CoreCommand::Timeline(TimelineCommand::RequestLateDecryption { request_id, key }) => {
+                assert_eq!(request_id, fake_request_id(37));
+                assert_eq!(key.account_key, active_account_key);
+                assert_eq!(
+                    key.kind,
+                    koushi_core::TimelineKind::Room {
+                        room_id: room_id.clone()
+                    }
+                );
             }
             other => panic!("unexpected command: {other:?}"),
         }
