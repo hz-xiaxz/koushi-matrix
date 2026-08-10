@@ -262,6 +262,14 @@ pub fn reset_counter(name: &'static str) {
     lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new()))).remove(name);
 }
 
+/// Set an aggregate counter to an absolute value. Used when mirroring an
+/// authoritative SDK snapshot so repeated summaries do not inflate the count.
+pub fn set_counter(name: &'static str, value: u64) {
+    let mut counters =
+        lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new())));
+    counters.insert(name, value);
+}
+
 pub fn snapshot() -> DiagnosticSnapshot {
     let mut snapshot = GLOBAL_BUFFER
         .get_or_init(|| DiagnosticBuffer::new(DEFAULT_DIAGNOSTIC_CAPACITY))

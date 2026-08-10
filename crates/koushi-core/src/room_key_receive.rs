@@ -9,10 +9,7 @@ use std::collections::BTreeSet;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixRoomKeyReceiveDiagnostics;
-use matrix_sdk::{
-    encryption::RoomKeyReceiveCounters,
-    event_cache::{RedecryptorReport, RoomKeyLateDecryptionCounters},
-};
+use matrix_sdk::event_cache::RedecryptorReport;
 
 /// Bound on how many distinct UTD session IDs a single explicit retry may
 /// carry, so a pathological timeline cannot fan out unboundedly.
@@ -21,103 +18,49 @@ pub const LATE_DECRYPTION_RETRY_SESSION_LIMIT: usize = 64;
 /// Fixed token for the trigger that produced a receive-side summary.
 pub const RECEIVE_SUMMARY_TRIGGER_RESTORE: &str = "restore";
 pub const RECEIVE_SUMMARY_TRIGGER_STREAM_LAGGED: &str = "stream_lagged";
+pub const RECEIVE_SUMMARY_TRIGGER_BACKUP_AVAILABLE: &str = "backup_available";
 pub const RECEIVE_SUMMARY_TRIGGER_MANUAL: &str = "manual";
 
-fn late_decryption_counter_names() -> [&'static str; 15] {
-    [
-        "late_decryption_updates_broadcast",
-        "late_decryption_requests",
-        "late_decryption_explicit_retry_requests",
-        "late_decryption_matching_bucket_0",
-        "late_decryption_matching_bucket_1",
-        "late_decryption_matching_bucket_2_to_5",
-        "late_decryption_matching_bucket_6_to_20",
-        "late_decryption_matching_bucket_21_to_100",
-        "late_decryption_matching_bucket_101_plus",
-        "late_decryption_succeeded",
-        "late_decryption_remained_utd",
-        "late_decryption_failed",
-        "late_decryption_store_failed",
-        "late_decryption_stream_lagged",
-        "late_decryption_stream_recreated",
-    ]
-}
+/// Minimum interval between automatic late-decryption retries driven by
+/// redecryptor reports, per timeline. Report-driven retries are idempotent;
+/// this window bounds repeated reports from fanning out.
+pub const LATE_DECRYPTION_RETRY_COALESCE_WINDOW: std::time::Duration =
+    std::time::Duration::from_secs(10);
 
 /// Reset the receive-side late-decryption counters when an account runtime is
 /// replaced.
 pub fn reset_late_decryption_counters() {
-    for counter in late_decryption_counter_names() {
-        koushi_diagnostics::reset_counter(counter);
-    }
     koushi_diagnostics::reset_counter("late_decryption_timeline_replacements");
     koushi_diagnostics::reset_counter("late_decryption_explicit_retries");
 }
 
-/// Mirror the SDK late-decryption counters into `koushi-diagnostics` so the
-/// exported summary is complete even when no detail records survive.
-fn mirror_late_decryption_counters(counters: &RoomKeyLateDecryptionCounters) {
-    let values: [(&'static str, u64); 15] = [
-        (
-            "late_decryption_updates_broadcast",
-            counters.room_key_updates_broadcast,
-        ),
-        ("late_decryption_requests", counters.redecryption_requests),
-        (
-            "late_decryption_explicit_retry_requests",
-            counters.explicit_retry_requests,
-        ),
-        (
-            "late_decryption_matching_bucket_0",
-            counters.matching_events_bucket_0,
-        ),
-        (
-            "late_decryption_matching_bucket_1",
-            counters.matching_events_bucket_1,
-        ),
-        (
-            "late_decryption_matching_bucket_2_to_5",
-            counters.matching_events_bucket_2_to_5,
-        ),
-        (
-            "late_decryption_matching_bucket_6_to_20",
-            counters.matching_events_bucket_6_to_20,
-        ),
-        (
-            "late_decryption_matching_bucket_21_to_100",
-            counters.matching_events_bucket_21_to_100,
-        ),
-        (
-            "late_decryption_matching_bucket_101_plus",
-            counters.matching_events_bucket_101_plus,
-        ),
-        ("late_decryption_succeeded", counters.redecryption_succeeded),
-        (
-            "late_decryption_remained_utd",
-            counters.redecryption_remained_utd,
-        ),
-        ("late_decryption_failed", counters.redecryption_failed),
-        (
-            "late_decryption_store_failed",
-            counters.redecryption_store_failed,
-        ),
-        (
-            "late_decryption_stream_lagged",
-            counters.room_key_stream_lagged,
-        ),
-        (
-            "late_decryption_stream_recreated",
-            counters.room_key_stream_recreated,
-        ),
-    ];
-    for (name, value) in values {
-        for _ in 0..value {
-            koushi_diagnostics::increment_counter(name);
-        }
-    }
-}
-
-fn crypto_counter_fields(crypto: &RoomKeyReceiveCounters) -> Vec<DiagnosticField> {
-    vec![
+/// Record the consolidated privacy-safe receive-side summary: transport/Olm,
+/// Megolm merge, and late-decryption groups plus event-cache health.
+///
+/// This is the single export that distinguishes the three failure groups from
+/// issue #476. No identifiers or key material are recorded. The summary
+/// record carries every count; no persistent counter keys are created here so
+/// unrelated diagnostic tests that slice the global snapshot are unaffected.
+pub fn record_room_key_receive_summary(
+    diagnostics: &MatrixRoomKeyReceiveDiagnostics,
+    trigger: &'static str,
+) {
+    let mut event = DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "core.room_key_receive_summary",
+        "summary",
+    )
+    .field(DiagnosticField::token("trigger", trigger))
+    .field(DiagnosticField::boolean(
+        "event_cache_subscribed",
+        diagnostics.late_decryption.subscribed,
+    ))
+    .field(DiagnosticField::boolean(
+        "redecryptor_alive",
+        diagnostics.late_decryption.redecryptor_alive,
+    ));
+    let crypto = &diagnostics.crypto;
+    let crypto_fields = [
         DiagnosticField::count("ingress_direct", crypto.ingress_direct),
         DiagnosticField::count("ingress_forwarded", crypto.ingress_forwarded),
         DiagnosticField::count("olm_failed", crypto.to_device_olm_failed),
@@ -154,34 +97,8 @@ fn crypto_counter_fields(crypto: &RoomKeyReceiveCounters) -> Vec<DiagnosticField
             crypto.merge_invalid_session_key,
         ),
         DiagnosticField::count("merge_store_failed", crypto.merge_store_failed),
-    ]
-}
-
-/// Record the consolidated privacy-safe receive-side summary: transport/Olm,
-/// Megolm merge, and late-decryption groups plus event-cache health.
-///
-/// This is the single export that distinguishes the three failure groups from
-/// issue #476. No identifiers or key material are recorded.
-pub fn record_room_key_receive_summary(
-    diagnostics: &MatrixRoomKeyReceiveDiagnostics,
-    trigger: &'static str,
-) {
-    mirror_late_decryption_counters(&diagnostics.late_decryption.counters);
-    let mut event = DiagnosticEvent::new(
-        DiagnosticLevel::Info,
-        "core.room_key_receive_summary",
-        "summary",
-    )
-    .field(DiagnosticField::token("trigger", trigger))
-    .field(DiagnosticField::boolean(
-        "event_cache_subscribed",
-        diagnostics.late_decryption.subscribed,
-    ))
-    .field(DiagnosticField::boolean(
-        "redecryptor_alive",
-        diagnostics.late_decryption.redecryptor_alive,
-    ));
-    for field in crypto_counter_fields(&diagnostics.crypto) {
+    ];
+    for field in crypto_fields {
         event = event.field(field);
     }
     let late = &diagnostics.late_decryption.counters;
@@ -276,7 +193,10 @@ pub fn report_should_trigger_retry(report: &RedecryptorReport) -> bool {
 mod tests {
     use super::*;
     use koushi_diagnostics::snapshot;
-    use matrix_sdk::event_cache::RoomKeyLateDecryptionDiagnostics;
+    use matrix_sdk::{
+        encryption::RoomKeyReceiveCounters,
+        event_cache::{RoomKeyLateDecryptionCounters, RoomKeyLateDecryptionDiagnostics},
+    };
 
     fn sample_diagnostics() -> MatrixRoomKeyReceiveDiagnostics {
         let mut crypto = RoomKeyReceiveCounters::default();

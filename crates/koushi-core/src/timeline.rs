@@ -14911,18 +14911,34 @@ impl TimelineActor {
             let late_decryption_tx = actor_tx.clone();
             let late_decryption_reports = koushi_sdk::late_decryption_report_stream(&session);
             auxiliary_tasks.push(executor::spawn(async move {
+                use matrix_sdk::event_cache::RedecryptorReport;
                 let mut reports = late_decryption_reports;
+                let mut last_sent = std::time::Instant::now()
+                    - crate::room_key_receive::LATE_DECRYPTION_RETRY_COALESCE_WINDOW;
                 while let Some(report) = reports.next().await {
                     let Ok(report) = report else { continue };
-                    if crate::room_key_receive::report_should_trigger_retry(&report)
-                        && late_decryption_tx
-                            .send(TimelineActorMessage::RequestLateDecryption {
-                                request_id: None,
-                                trigger:
-                                    crate::room_key_receive::RECEIVE_SUMMARY_TRIGGER_STREAM_LAGGED,
-                            })
-                            .await
-                            .is_err()
+                    let trigger = match &report {
+                        RedecryptorReport::Lagging => {
+                            crate::room_key_receive::RECEIVE_SUMMARY_TRIGGER_STREAM_LAGGED
+                        }
+                        RedecryptorReport::BackupAvailable => {
+                            crate::room_key_receive::RECEIVE_SUMMARY_TRIGGER_BACKUP_AVAILABLE
+                        }
+                        RedecryptorReport::ResolvedUtds { .. } => continue,
+                    };
+                    if last_sent.elapsed()
+                        < crate::room_key_receive::LATE_DECRYPTION_RETRY_COALESCE_WINDOW
+                    {
+                        continue;
+                    }
+                    last_sent = std::time::Instant::now();
+                    if late_decryption_tx
+                        .send(TimelineActorMessage::RequestLateDecryption {
+                            request_id: None,
+                            trigger,
+                        })
+                        .await
+                        .is_err()
                     {
                         break;
                     }
@@ -21307,7 +21323,9 @@ async fn run_diff_relay(
     // Track recently-observed UTD event IDs so a late-decryption replacement
     // in the visible timeline is counted exactly once per UTD item (#476). The
     // set is bounded; old entries age out by replacement. Only the aggregate
-    // counter is exported — no event IDs ever enter diagnostics.
+    // counter is exported — no event IDs ever enter diagnostics. The set and
+    // counter are updated only after the batch is accepted by the actor, so a
+    // queue-overflow batch never claims a visible replacement.
     let mut utd_event_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     const UTD_TRACK_LIMIT: usize = 256;
 
@@ -21319,6 +21337,15 @@ async fn run_diff_relay(
             break;
         };
 
+        // Compute visible-UTD tracking ops for this batch. They are applied
+        // only after the actor accepts the batch, so dropped batches never
+        // claim visible replacements.
+        enum TrackOp {
+            Track(String),
+            CountReplacement(String),
+            Clear,
+        }
+        let mut track_ops: Vec<TrackOp> = Vec::new();
         for diff in &diffs {
             match diff {
                 eyeball_im::VectorDiff::Set { value, .. } => {
@@ -21329,21 +21356,11 @@ async fn run_diff_relay(
                         .map(|event| event.content().is_unable_to_decrypt())
                         .unwrap_or(false);
                     if is_utd {
-                        // Re-sent UTD copies keep the item tracked.
-                        if let Some(event_id) = event_id
-                            && utd_event_ids.len() < UTD_TRACK_LIMIT
-                        {
-                            utd_event_ids.insert(event_id);
+                        if let Some(event_id) = event_id {
+                            track_ops.push(TrackOp::Track(event_id));
                         }
-                    } else if let Some(event_id) = event_id
-                        && utd_event_ids.remove(&event_id)
-                    {
-                        // A previously-UTD item was replaced by a decrypted one:
-                        // the visible timeline received a late-decryption
-                        // replacement.
-                        koushi_diagnostics::increment_counter(
-                            "late_decryption_timeline_replacements",
-                        );
+                    } else if let Some(event_id) = event_id {
+                        track_ops.push(TrackOp::CountReplacement(event_id));
                     }
                 }
                 eyeball_im::VectorDiff::PushFront { value }
@@ -21354,12 +21371,19 @@ async fn run_diff_relay(
                         .as_event()
                         .map(|event| event.content().is_unable_to_decrypt())
                         .unwrap_or(false);
-                    if is_utd
-                        && let Some(event_id) = sdk_timeline_item_event_id(item)
-                        && utd_event_ids.len() < UTD_TRACK_LIMIT
-                    {
-                        utd_event_ids.insert(event_id.to_string());
+                    if is_utd && let Some(event_id) = sdk_timeline_item_event_id(item) {
+                        track_ops.push(TrackOp::Track(event_id.to_string()));
                     }
+                }
+                // Removal/reset shapes invalidate tracked positions; drop the
+                // tracking so stale entries cannot fill the bound.
+                eyeball_im::VectorDiff::Remove { .. }
+                | eyeball_im::VectorDiff::Truncate { .. }
+                | eyeball_im::VectorDiff::Clear
+                | eyeball_im::VectorDiff::PopFront
+                | eyeball_im::VectorDiff::PopBack
+                | eyeball_im::VectorDiff::Reset { .. } => {
+                    track_ops.push(TrackOp::Clear);
                 }
                 _ => {}
             }
@@ -21387,7 +21411,29 @@ async fn run_diff_relay(
             );
         }
         match actor_tx.try_send(batch) {
-            Ok(_) => {}
+            Ok(_) => {
+                // The batch is now owned by the actor's inbox; apply the
+                // visible-UTD tracking against the diffs the actor will apply.
+                for op in track_ops {
+                    match op {
+                        TrackOp::Track(event_id) => {
+                            if utd_event_ids.len() < UTD_TRACK_LIMIT {
+                                utd_event_ids.insert(event_id);
+                            }
+                        }
+                        TrackOp::CountReplacement(event_id) => {
+                            if utd_event_ids.remove(&event_id) {
+                                koushi_diagnostics::increment_counter(
+                                    "late_decryption_timeline_replacements",
+                                );
+                            }
+                        }
+                        TrackOp::Clear => {
+                            utd_event_ids.clear();
+                        }
+                    }
+                }
+            }
             Err(mpsc::error::TrySendError::Full(batch)) => {
                 for projection in &batch.gap_repair_projections {
                     record_timeline_gap_projection_boundary(
