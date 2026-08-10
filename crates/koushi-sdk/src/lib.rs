@@ -6134,39 +6134,6 @@ fn trace_sdk_unread_snapshot(trace: SdkUnreadTrace<'_>) {
     );
 }
 
-fn trace_sdk_conversation_activity(
-    activity: Option<MatrixConversationActivity>,
-    recency_stamp_present: bool,
-) {
-    record(
-        DiagnosticEvent::new(
-            DiagnosticLevel::Debug,
-            "sdk.room_list",
-            "conversation_activity_selected",
-        )
-        .field(DiagnosticField::boolean(
-            "conversation_activity_present",
-            activity.is_some(),
-        ))
-        .field(DiagnosticField::token(
-            "conversation_activity_source",
-            conversation_activity_source_token(activity),
-        ))
-        .field(DiagnosticField::token(
-            "activity_sort_bucket",
-            if activity.is_some() {
-                "conversation"
-            } else {
-                "fallback"
-            },
-        ))
-        .field(DiagnosticField::boolean(
-            "recency_stamp_present",
-            recency_stamp_present,
-        )),
-    );
-}
-
 fn conversation_activity_source_token(
     activity: Option<MatrixConversationActivity>,
 ) -> &'static str {
@@ -11119,8 +11086,6 @@ async fn matrix_room_list_snapshot_from_rooms(
         let fully_read_event_id = matrix_room_fully_read_event_id(&room).await;
         let private_read_receipt_event_id = matrix_room_private_read_receipt_event_id(&room).await;
         let recency_stamp = room.recency_stamp().map(Into::into);
-        trace_sdk_conversation_activity(conversation_activity, recency_stamp.is_some());
-
         if unread_count > 0 || notification_count > 0 || highlight_count > 0 || is_marked_unread {
             trace_sdk_unread_snapshot(SdkUnreadTrace {
                 unread_messages,
@@ -12071,8 +12036,8 @@ mod tests {
         moderate_room_member, newest_conversation_activity, normalized_local_user_aliases,
         people_scope_diagnostic_event, query_public_room_directory, resolve_join_target,
         room_settings_snapshot_with_change, room_settings_snapshot_with_member_power_level,
-        space_members_scope_diagnostic_event, trace_sdk_conversation_activity,
-        trace_sdk_unread_snapshot, update_room_member_power_level, update_room_setting,
+        space_members_scope_diagnostic_event, trace_sdk_unread_snapshot,
+        update_room_member_power_level, update_room_setting,
     };
 
     use koushi_diagnostics::DiagnosticValue;
@@ -13560,17 +13525,8 @@ mod tests {
                 source: MatrixConversationActivitySource::Message,
             }),
         });
-        trace_sdk_conversation_activity(
-            Some(MatrixConversationActivity {
-                timestamp_ms: 3,
-                source: MatrixConversationActivitySource::Message,
-            }),
-            true,
-        );
-
         let serialized = serde_json::to_string(&koushi_diagnostics::snapshot()).unwrap();
         assert!(serialized.contains("conversation_activity_source"));
-        assert!(serialized.contains("activity_sort_bucket"));
         for forbidden in [
             "!room:example.invalid",
             "@user:example.invalid",

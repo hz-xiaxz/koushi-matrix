@@ -6,6 +6,7 @@ import {
   createDiagnosticLogBuffer,
   DEFAULT_DIAGNOSTIC_LOG_LIMIT,
   diagnosticReport,
+  diagnosticReportPreview,
   schemaMismatchDiagnosticEntry,
   type DiagnosticLogEntry
 } from "./diagnostics";
@@ -16,6 +17,16 @@ test("creates a fixed private-data-free schema mismatch diagnostic", () => {
     source: "snapshot",
     message: "schema_mismatch"
   });
+});
+
+test("bounds the rendered diagnostic preview while preserving the report tail", () => {
+  const report = `Koushi diagnostics\n${"old\n".repeat(100)}terminal_failure`;
+  const preview = diagnosticReportPreview(report, 80);
+
+  expect(preview.length).toBeLessThan(report.length);
+  expect(preview).toContain("Koushi diagnostics");
+  expect(preview).toContain("preview_truncated=true");
+  expect(preview).toContain("terminal_failure");
 });
 
 describe("diagnosticReport", () => {

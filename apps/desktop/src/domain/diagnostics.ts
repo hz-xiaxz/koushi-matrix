@@ -175,6 +175,20 @@ export const DEFAULT_SLIDING_SYNC_DIAGNOSTICS: SlidingSyncDiagnostics = {
 };
 
 export const DEFAULT_DIAGNOSTIC_LOG_LIMIT = 10_000;
+export const DEFAULT_DIAGNOSTIC_PREVIEW_LIMIT = 100_000;
+
+export function diagnosticReportPreview(
+  report: string,
+  limit = DEFAULT_DIAGNOSTIC_PREVIEW_LIMIT
+): string {
+  const normalizedLimit = Math.max(1, Math.trunc(limit));
+  if (report.length <= normalizedLimit) {
+    return report;
+  }
+  const heading = report.split("\n", 1)[0] || "Koushi diagnostics";
+  const marker = `\npreview_truncated=true omitted_characters=${report.length - normalizedLimit}\n`;
+  return `${heading}${marker}${report.slice(-normalizedLimit)}`;
+}
 
 export function schemaMismatchDiagnosticEntry(timestampMs: number): DiagnosticLogEntry {
   return { timestampMs, source: "snapshot", message: "schema_mismatch" };

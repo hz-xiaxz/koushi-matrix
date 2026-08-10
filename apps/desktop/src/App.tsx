@@ -2429,34 +2429,45 @@ export function App() {
     snapshot?.state.ui.navigation.active_space_id
   ]);
 
-  useEffect(() => {
-    const title = snapshot
-      ? qaTitleEnabled()
-        ? qaWindowTitle(
-            snapshot,
-            effectiveRightPanelModeForSnapshot(rightPanelMode, snapshot),
-            qaSendStatus,
-            [
-              ...qaSendSmokeTargetDiagnosticTokens(snapshot, qaSendSmokeTargetUserId()),
-              ...qaTimelineDiagnosticTokens(timelineDiagnostics),
-              ...qaDomDiagnosticTokens(qaRenderedDomDiagnostics())
-            ]
-          )
-        : desktopAttentionWindowTitle("Koushi", safeAttentionSummary)
-      : qaTitleEnabled()
-        ? "koushi-desktop qa session=booting"
-        : "Koushi";
+  const attentionWindowTitle = snapshot
+    ? qaTitleEnabled()
+      ? qaWindowTitle(
+          snapshot,
+          effectiveRightPanelModeForSnapshot(rightPanelMode, snapshot),
+          qaSendStatus,
+          [
+            ...qaSendSmokeTargetDiagnosticTokens(snapshot, qaSendSmokeTargetUserId()),
+            ...qaTimelineDiagnosticTokens(timelineDiagnostics),
+            ...qaDomDiagnosticTokens(qaRenderedDomDiagnostics())
+          ]
+        )
+      : desktopAttentionWindowTitle("Koushi", safeAttentionSummary)
+    : qaTitleEnabled()
+      ? "koushi-desktop qa session=booting"
+      : "Koushi";
+  const attentionCapabilities = useMemo(
+    () => snapshot?.state.domain.native_attention.summary.capabilities,
+    [
+      snapshot?.state.domain.native_attention.summary.capabilities.activation,
+      snapshot?.state.domain.native_attention.summary.capabilities.badge,
+      snapshot?.state.domain.native_attention.summary.capabilities.notifications,
+      snapshot?.state.domain.native_attention.summary.capabilities.overlay_icon,
+      snapshot?.state.domain.native_attention.summary.capabilities.sound,
+      snapshot?.state.domain.native_attention.summary.capabilities.tray
+    ]
+  );
 
-    document.title = title;
+  useEffect(() => {
+    document.title = attentionWindowTitle;
     if (!isTauriRuntime()) {
       return;
     }
 
     void applyDesktopAttentionToWindow(
       getCurrentWindow(),
-      title,
+      attentionWindowTitle,
       safeAttentionSummary.badgeCount,
-      snapshot?.state.domain.native_attention.summary.capabilities,
+      attentionCapabilities,
       (token) => appendDiagnosticLog({
         timestampMs: Date.now(),
         source: "native.attention",
@@ -2464,12 +2475,9 @@ export function App() {
       })
     );
   }, [
-    snapshot,
-    rightPanelMode,
-    qaSendStatus,
-    safeAttentionSummary.badgeCount,
-    safeAttentionSummary.qaTitleToken,
-    timelineDiagnostics
+    attentionCapabilities,
+    attentionWindowTitle,
+    safeAttentionSummary.badgeCount
   ]);
 
   useEffect(() => {

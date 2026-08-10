@@ -33,6 +33,7 @@ import {
   type ImageCompressionPlan
 } from "../app/uiShared";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
+import { diagnosticReportPreview } from "../domain/diagnostics";
 
 async function writeClipboardText(value: string): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -352,7 +353,7 @@ export function DiagnosticDialog({
             <X size={ICON_SIZE.small} />
           </button>
         </div>
-        <pre className="diagnostics-output">{report}</pre>
+        <pre className="diagnostics-output">{diagnosticReportPreview(report)}</pre>
         <div className="dialog-actions">
           <button
             className="dialog-button is-primary"
