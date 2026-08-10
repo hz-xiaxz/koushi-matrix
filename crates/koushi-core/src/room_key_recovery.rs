@@ -19,7 +19,7 @@ pub const MAX_RECOVERY_ATTEMPTS: u32 = 3;
 pub const RECOVERY_BACKOFF: Duration = Duration::from_secs(30);
 
 /// Closed recovery stage (issue #478): temporary and terminal states distinct.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RecoveryStage {
     /// A missing-session UTD was observed.
     Detected,
@@ -63,6 +63,9 @@ pub enum RecoveryStepOutcome {
     OwnDeviceRequestQueued,
     OwnDeviceRequestFailed,
     OwnDeviceNoVerifiedDevices,
+    /// The standard Olm unwedge work (one-time-key claim / m.dummy flush) was
+    /// dispatched.
+    OlmRepairFlushed,
     KeyArrived,
     RedecryptionRequested,
     RedecryptionVerified,
@@ -96,6 +99,17 @@ pub struct RecoveryOperation {
     started_at: Instant,
 }
 
+/// Minimal safe record persisted across restarts (issue #478): only the
+/// attempt count and closed stage token per session, so a bounded retry
+/// resumes without duplicate requests. No identifiers or key material.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RecoveryResumeRecord {
+    /// Attempts already consumed by the automatic sequence.
+    pub attempts: u32,
+    /// Closed stage token.
+    pub stage: RecoveryStage,
+}
+
 impl RecoveryOperation {
     pub fn new(session_alias: u64) -> Self {
         Self {
@@ -112,6 +126,22 @@ impl RecoveryOperation {
 
     pub fn attempts(&self) -> u32 {
         self.attempts
+    }
+
+    /// Resume from a persisted record (issue #478): pre-seed the attempt count
+    /// and stage so a restart continues the bounded sequence instead of
+    /// starting over.
+    pub fn resume(&mut self, record: RecoveryResumeRecord) {
+        self.attempts = record.attempts.min(MAX_RECOVERY_ATTEMPTS);
+        self.stage = record.stage;
+    }
+
+    /// The minimal safe resume record for this operation.
+    pub fn resume_record(&self) -> RecoveryResumeRecord {
+        RecoveryResumeRecord {
+            attempts: self.attempts,
+            stage: self.stage,
+        }
     }
 
     /// Advance to the next automatic step. Returns false when a manual retry
@@ -151,7 +181,7 @@ impl RecoveryOperation {
                 RecoveryStage::RequestingOwnDevices
             }
             (RecoveryStage::RequestingOwnDevices, RecoveryStepOutcome::OwnDeviceRequestQueued) => {
-                RecoveryStage::WaitingForKey
+                RecoveryStage::RepairingOlm
             }
             (
                 RecoveryStage::RequestingOwnDevices,
@@ -162,6 +192,9 @@ impl RecoveryOperation {
             }
             (RecoveryStage::WaitingForKey, RecoveryStepOutcome::KeyArrived) => {
                 RecoveryStage::RetryingDecryption
+            }
+            (RecoveryStage::RepairingOlm, RecoveryStepOutcome::OlmRepairFlushed) => {
+                RecoveryStage::WaitingForKey
             }
             // A waiting tick without the key is retryable and bounded by the
             // attempt limit.
@@ -306,6 +339,10 @@ mod tests {
         );
         assert_eq!(
             op.observe(RecoveryStepOutcome::OwnDeviceRequestQueued),
+            RecoveryStage::RepairingOlm
+        );
+        assert_eq!(
+            op.observe(RecoveryStepOutcome::OlmRepairFlushed),
             RecoveryStage::WaitingForKey
         );
         assert_eq!(
@@ -369,6 +406,59 @@ mod tests {
             RecoveryStage::UnrecoverableNoKnownHolder
         );
         assert_eq!(op.guidance(), Some(RecoveryGuidance::AskSenderToRepost));
+    }
+
+    #[test]
+    fn resume_pre_seeds_attempts_and_keeps_the_bound() {
+        // Simulate a restart: an operation had already consumed all attempts
+        // before the process stopped. Resuming must NOT start a fresh sequence
+        // that would issue duplicate requests.
+        let mut op = RecoveryOperation::new(1);
+        let record = RecoveryResumeRecord {
+            attempts: MAX_RECOVERY_ATTEMPTS,
+            stage: RecoveryStage::TemporarilyFailed,
+        };
+        op.resume(record);
+        assert_eq!(op.attempts(), MAX_RECOVERY_ATTEMPTS);
+        assert!(
+            !op.begin_attempt(),
+            "resumed operation must stay within the bound"
+        );
+        assert_eq!(op.stage(), RecoveryStage::AutomaticPathsExhausted);
+    }
+
+    #[test]
+    fn resume_record_round_trips_serde_without_identifiers() {
+        let record = RecoveryResumeRecord {
+            attempts: 2,
+            stage: RecoveryStage::WaitingForKey,
+        };
+        let encoded = serde_json::to_vec(&record).unwrap();
+        let decoded: RecoveryResumeRecord = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, record);
+        let text = String::from_utf8(encoded).unwrap();
+        for private in ["@", "!", "http", "session_id", "room_id", "device_id"] {
+            assert!(
+                !text.contains(private),
+                "{private} leaked into resume record: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn own_device_request_queued_flows_through_olm_repair() {
+        let mut op = RecoveryOperation::new(2);
+        op.begin_attempt();
+        op.observe(RecoveryStepOutcome::LocalAbsent);
+        op.observe(RecoveryStepOutcome::BackupAbsent);
+        assert_eq!(
+            op.observe(RecoveryStepOutcome::OwnDeviceRequestQueued),
+            RecoveryStage::RepairingOlm
+        );
+        assert_eq!(
+            op.observe(RecoveryStepOutcome::OlmRepairFlushed),
+            RecoveryStage::WaitingForKey
+        );
     }
 
     #[test]

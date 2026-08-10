@@ -41,6 +41,10 @@ ignore = [
     "RUSTSEC-2025-0081",
     "RUSTSEC-2025-0098",
     "RUSTSEC-2025-0100",
+    # RUSTSEC-2026-0247: bitmaps is unmaintained. It enters through the
+    # vendored Matrix SDK's imbl/eyeball dependency; the repo already accepts
+    # bitmaps' MPL-2.0 license above and there is no available fix.
+    "RUSTSEC-2026-0247",
     # RUSTSEC-2026-0173: proc-macro-error2 is unmaintained. This crate is a
     # transitive dependency through aquamarine (used in matrix-sdk docs macros)
     # and matrix-pickle-derive (used by vodozemac). There is no upstream fix

@@ -18172,13 +18172,20 @@ impl TimelineActor {
     fn ensure_room_key_recovery(&mut self, session_id: &str) {
         use crate::room_key_recovery::{RecoveryOperation, RecoveryStage};
 
+        let resume = self.load_recovery_resume(session_id);
         let should_begin = {
             let op = self
                 .room_key_recovery
                 .entry(session_id.to_owned())
                 .or_insert_with(|| {
                     self.next_session_alias += 1;
-                    RecoveryOperation::new(self.next_session_alias)
+                    let mut op = RecoveryOperation::new(self.next_session_alias);
+                    // Resume the bounded sequence from a persisted record so a
+                    // restart does not duplicate requests or reset the backoff.
+                    if let Some(record) = resume {
+                        op.resume(record);
+                    }
+                    op
                 });
             op.stage() == RecoveryStage::Detected && op.attempts() == 0 && op.begin_attempt()
         };
@@ -18190,6 +18197,50 @@ impl TimelineActor {
                 .unwrap_or(0);
             self.schedule_recovery_tick(session_id.to_owned(), attempts);
         }
+        self.persist_recovery_state();
+    }
+
+    /// Path of the per-account recovery resume file.
+    fn recovery_resume_path(&self) -> Option<std::path::PathBuf> {
+        let data_dir = self.data_dir.as_ref()?;
+        Some(data_dir.join(format!("recovery-{}.json", self.key.account_key.0)))
+    }
+
+    /// Persist the minimal safe resume records for the current operations.
+    fn persist_recovery_state(&mut self) {
+        let Some(path) = self.recovery_resume_path() else {
+            return;
+        };
+        let records: std::collections::BTreeMap<
+            String,
+            crate::room_key_recovery::RecoveryResumeRecord,
+        > = self
+            .room_key_recovery
+            .iter()
+            .filter(|(_, op)| !op.is_terminal())
+            .map(|(session, op)| (session.clone(), op.resume_record()))
+            .collect();
+        let Ok(payload) = serde_json::to_vec(&records) else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, payload);
+    }
+
+    /// Load the resume record for a session, if any.
+    fn load_recovery_resume(
+        &self,
+        session_id: &str,
+    ) -> Option<crate::room_key_recovery::RecoveryResumeRecord> {
+        let path = self.recovery_resume_path()?;
+        let bytes = std::fs::read(&path).ok()?;
+        let records: std::collections::BTreeMap<
+            String,
+            crate::room_key_recovery::RecoveryResumeRecord,
+        > = serde_json::from_slice(&bytes).ok()?;
+        records.get(session_id).copied()
     }
 
     fn schedule_recovery_tick(&mut self, session_id: String, attempt: u32) {
@@ -18284,6 +18335,13 @@ impl TimelineActor {
                     None => Outcome::OwnDeviceRequestFailed,
                 }
             }
+            RecoveryStage::RepairingOlm => {
+                // The standard Olm unwedge work (one-time-key claim and
+                // m.dummy) is flushed by the SDK's outgoing request pump on
+                // the next sync; record the closed stage and transition to
+                // waiting.
+                Outcome::OlmRepairFlushed
+            }
             RecoveryStage::WaitingForKey => {
                 // The key may have arrived (sender re-sharing incl. #477).
                 match koushi_sdk::has_inbound_group_session(&self.session, &room_id, &session_id)
@@ -18309,6 +18367,7 @@ impl TimelineActor {
             };
             op.observe(outcome)
         };
+        self.persist_recovery_state();
         match next {
             RecoveryStage::Recovered => {
                 crate::room_key_recovery::record_recovery_settled(RecoveryStage::Recovered);
