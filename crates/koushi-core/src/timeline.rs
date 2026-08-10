@@ -12337,7 +12337,7 @@ mod timeline_gap_repair_tracker_tests {
             scheduler_phase: "idle",
         });
 
-        let snapshot = koushi_diagnostics::snapshot();
+        let snapshot = koushi_diagnostics::test_support::detail_snapshot();
         for source in [
             "core.timeline_gap_projection",
             "core.timeline_gap_demand",
@@ -12380,7 +12380,7 @@ mod timeline_gap_repair_tracker_tests {
             1,
         );
 
-        let event = koushi_diagnostics::snapshot()
+        let event = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
             .rev()
@@ -12623,7 +12623,7 @@ mod timeline_gap_repair_tracker_tests {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_timeline_gap_repair_evaluation("wake", 2, 1, true, true, "awaiting_render_ack");
 
-        let record = koushi_diagnostics::snapshot()
+        let record = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
             .rev()
@@ -13728,7 +13728,9 @@ mod timeline_gap_repair_tracker_tests {
     #[test]
     fn gap_repair_attempt_diagnostics_emit_once_per_changed_admission() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let demand_revision = 9_004_001;
         let mut tracker = TimelineGapRepairTracker::default();
 
@@ -13758,7 +13760,7 @@ mod timeline_gap_repair_tracker_tests {
             demand_revision + 1,
         ));
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let admissions = records[diagnostic_start..]
             .iter()
             .filter(|record| {
@@ -13795,7 +13797,9 @@ mod timeline_gap_repair_tracker_tests {
     #[test]
     fn gap_repair_attempt_diagnostics_emit_one_budget_update_per_sdk_result() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let demand_revision = 9_004_101;
         let mut tracker = TimelineGapRepairTracker::default();
         tracker
@@ -13859,7 +13863,7 @@ mod timeline_gap_repair_tracker_tests {
         stage: &str,
         demand_revision: u64,
     ) -> usize {
-        koushi_diagnostics::snapshot().records[diagnostic_start..]
+        koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
             .iter()
             .filter(|record| {
                 record.event.source == "core.timeline_gap_repair"
@@ -37205,7 +37209,7 @@ mod tests {
             ],
         );
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let expected = [
             ("core.timeline", "actor_finish"),
             ("core.timeline", "target_scan"),
@@ -37242,7 +37246,7 @@ mod tests {
             }
         }
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         for (source, stage, kind) in [
             ("core.timeline_item", "diff_batch", "remove"),
             ("core.timeline_item", "diff_batch", "clear"),
@@ -37295,7 +37299,7 @@ mod tests {
                 Some(outcome),
             );
         }
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         for record in records
             .iter()
             .filter(|record| record.event.source == "core.timeline")
@@ -37315,7 +37319,9 @@ mod tests {
     fn timeline_items_record_batch_only_by_default() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let key = room_key();
-        let baseline = koushi_diagnostics::snapshot().records.len();
+        let baseline = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         trace_timeline_items(
             "replay_initial",
             &key,
@@ -37325,7 +37331,7 @@ mod tests {
             ],
         );
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let appended = records[baseline..]
             .iter()
             .filter(|record| {
@@ -37355,7 +37361,9 @@ mod tests {
     #[test]
     fn thread_projection_diagnostic_records_only_thread_batches() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let baseline = koushi_diagnostics::snapshot().records.len();
+        let baseline = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let thread_key = TimelineKey {
             account_key: AccountKey("@a:test".to_owned()),
             kind: TimelineKind::Thread {
@@ -37383,7 +37391,7 @@ mod tests {
             11,
         );
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let appended = records[baseline..]
             .iter()
             .filter(|record| record.event.source == "core.thread_timeline")
@@ -37470,7 +37478,7 @@ mod tests {
             .await;
         drop(manager_tx);
 
-        let event = koushi_diagnostics::snapshot()
+        let event = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
             .rev()
@@ -37553,7 +37561,7 @@ mod tests {
             ],
         );
 
-        let diff_records = koushi_diagnostics::snapshot().records;
+        let diff_records = koushi_diagnostics::test_support::detail_snapshot().records;
         for (source, stage) in [
             ("core.timeline_item", "diff_batch"),
             ("core.event_cache", "cache_update"),
@@ -37695,7 +37703,7 @@ mod tests {
             manager.handle_command(command).await;
         }
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         for kind in [
             "send_reaction",
             "redact_reaction",
@@ -37756,7 +37764,7 @@ mod tests {
             Some(7),
             Some("success"),
         );
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         for kind in ["redact_reaction", "send_read_receipt", "set_fully_read"] {
             let event = records
                 .iter()
@@ -38630,7 +38638,9 @@ mod tests {
         let generations = Arc::new(TimelineActorGenerationGate::default());
         let actor_generation = generations.activate_after_quiescence(&key).await.generation;
         let (action_tx, mut action_rx) = mpsc::channel(1);
-        let records_before = koushi_diagnostics::snapshot().records.len();
+        let records_before = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         assert!(
             emit_live_receipt_observation_actions(
                 session.as_ref(),
@@ -38649,7 +38659,7 @@ mod tests {
             [AppAction::LiveRoomReceiptsUpdated { .. }]
         ));
         assert!(
-            koushi_diagnostics::snapshot()
+            koushi_diagnostics::test_support::detail_snapshot()
                 .records
                 .iter()
                 .skip(records_before)
@@ -41831,7 +41841,7 @@ mod tests {
             }
         }
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let records = diagnostics
             .records
             .iter()
@@ -41910,7 +41920,9 @@ mod tests {
     #[test]
     fn send_failure_trace_records_only_closed_failure_fields() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let key = room_key();
         let mut trace = SendLifecycleTrace::new(&key, true);
         let correlation = trace.correlation();
@@ -41925,7 +41937,7 @@ mod tests {
             },
         );
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let event = &diagnostics.records[diagnostic_start..]
             .iter()
             .find(|record| {
@@ -41962,7 +41974,9 @@ mod tests {
     #[test]
     fn encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let key = room_key();
         let trace = SendLifecycleTrace::new(&key, true);
         let correlation = trace.correlation();
@@ -41979,7 +41993,7 @@ mod tests {
             dehydrated_own_other_device_count: Some(1),
             blacklisted_own_other_device_count: Some(1),
         });
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let record = diagnostics.records[diagnostic_start..]
             .iter()
             .find(|record| {
@@ -42050,7 +42064,9 @@ mod tests {
     #[test]
     fn post_send_encryption_diagnostics_keep_unknown_state_and_session_evidence_separate() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let correlation = 8_204;
 
         record_post_send_encryption_snapshot(
@@ -42059,7 +42075,7 @@ mod tests {
             OutboundSessionLookupDiagnostic::Present,
         );
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let record = diagnostics.records[diagnostic_start..]
             .iter()
             .find(|record| {
@@ -42134,7 +42150,7 @@ mod tests {
             Duration::ZERO,
         );
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let records = diagnostics
             .records
             .iter()
@@ -42423,7 +42439,7 @@ mod tests {
             record_decrypt_retry_settled(operation, result, Duration::ZERO);
         }
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let tokens = diagnostics
             .records
             .iter()
@@ -42469,7 +42485,9 @@ mod tests {
     #[test]
     fn room_key_reshare_diagnostics_include_attempt_target_and_result() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
 
         record_room_key_reshare(
             "own_device_retry_1",
@@ -42481,7 +42499,7 @@ mod tests {
             5,
         );
 
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         let record = diagnostics.records[diagnostic_start..]
             .iter()
             .find(|record| {
@@ -42524,7 +42542,9 @@ mod tests {
     #[test]
     fn send_diagnostic_tasks_are_capacity_bounded_and_cancellable() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let (terminal_ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
         let mut supervisor = SendEnqueueWorkerSupervisor::new(terminal_ingress);
 
@@ -42536,7 +42556,7 @@ mod tests {
             supervisor.diagnostic_tasks.len(),
             MAX_CONCURRENT_SEND_DIAGNOSTICS
         );
-        let diagnostics = koushi_diagnostics::snapshot();
+        let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
         assert!(
             diagnostics.records[diagnostic_start..]
                 .iter()

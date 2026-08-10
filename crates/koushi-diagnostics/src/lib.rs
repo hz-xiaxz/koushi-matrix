@@ -208,6 +208,8 @@ static GLOBAL_COUNTERS: OnceLock<Mutex<BTreeMap<&'static str, u64>>> = OnceLock:
 pub mod test_support {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
+    use super::{DEFAULT_DIAGNOSTIC_CAPACITY, DiagnosticBuffer, DiagnosticSnapshot, GLOBAL_BUFFER};
+
     static GLOBAL_DIAGNOSTIC_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     pub fn lock() -> MutexGuard<'static, ()> {
@@ -215,6 +217,15 @@ pub mod test_support {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Snapshot only the bounded detail ring. Tests that compare positions
+    /// before and after one emission must not include synthesized aggregate
+    /// counter records, whose count can change independently of the ring.
+    pub fn detail_snapshot() -> DiagnosticSnapshot {
+        GLOBAL_BUFFER
+            .get_or_init(|| DiagnosticBuffer::new(DEFAULT_DIAGNOSTIC_CAPACITY))
+            .snapshot()
     }
 }
 
