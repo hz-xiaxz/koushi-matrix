@@ -1563,6 +1563,23 @@ pub async fn download_joined_room_keys_from_backup(
     })
 }
 
+/// Whether the local crypto store already holds an inbound group session for
+/// the given room + Megolm session (issue #478 local recovery source).
+pub async fn has_inbound_group_session(
+    session: &MatrixClientSession,
+    room_id: &str,
+    session_id: &str,
+) -> Result<bool, MatrixRoomOperationError> {
+    let room_id = matrix_sdk::ruma::RoomId::parse(room_id)
+        .map_err(|_| MatrixRoomOperationError::InvalidRoomId)?;
+    session
+        .client()
+        .encryption()
+        .has_inbound_group_session(room_id.as_ref(), session_id)
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
 pub async fn download_room_key_from_backup(
     session: &MatrixClientSession,
     room_id: &str,
@@ -7227,6 +7244,48 @@ fn record_room_key_diagnostic(event: matrix_sdk::encryption::RoomKeyDiagnosticEv
         }
         RoomKeyDiagnosticEvent::Rotation(event) => record_room_key_rotation_diagnostic(event),
         RoomKeyDiagnosticEvent::Receive(event) => record_room_key_receive_diagnostic(event),
+        RoomKeyDiagnosticEvent::OlmRecovery(event) => record_olm_recovery_diagnostic(event),
+    }
+}
+
+fn record_olm_recovery_diagnostic(event: matrix_sdk::encryption::OlmRecoveryDiagnostic) {
+    use matrix_sdk::encryption::{OlmRecoveryReshareOutcome, OlmRecoverySignalOutcome};
+
+    let signal_token = match event.signal {
+        OlmRecoverySignalOutcome::Observed => "observed",
+        OlmRecoverySignalOutcome::IgnoredUnknownDevice => "ignored_unknown_device",
+        OlmRecoverySignalOutcome::IgnoredDehydrated => "ignored_dehydrated",
+        OlmRecoverySignalOutcome::Failed => "failed",
+    };
+    let reshare_token = event.reshare.map(|outcome| match outcome {
+        OlmRecoveryReshareOutcome::Queued => "queued",
+        OlmRecoveryReshareOutcome::AlreadyPending => "already_pending",
+        OlmRecoveryReshareOutcome::NoMatchingSession => "no_matching_session",
+        OlmRecoveryReshareOutcome::PolicyBlocked => "policy_blocked",
+        OlmRecoveryReshareOutcome::Failed => "failed",
+    });
+
+    koushi_diagnostics::increment_counter("olm_recovery_signal");
+    if let Some(reshare) = reshare_token {
+        koushi_diagnostics::increment_counter("olm_recovery_reshare");
+        koushi_diagnostics::record(DiagnosticEvent::new(
+            DiagnosticLevel::Info,
+            "core.olm_recovery",
+            "reshare",
+        )
+        .field(DiagnosticField::token("signal", signal_token))
+        .field(DiagnosticField::token("reshare", reshare))
+        .field(DiagnosticField::count(
+            "matching_sessions_bucket",
+            event.matching_sessions_bucket as u64,
+        )));
+    } else {
+        koushi_diagnostics::record(DiagnosticEvent::new(
+            DiagnosticLevel::Info,
+            "core.olm_recovery",
+            "signal",
+        )
+        .field(DiagnosticField::token("signal", signal_token)));
     }
 }
 
