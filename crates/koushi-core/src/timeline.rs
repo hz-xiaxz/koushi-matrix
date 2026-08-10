@@ -8557,6 +8557,14 @@ fn trace_timeline_items(stage: &str, key: &TimelineKey, items: &[TimelineItem]) 
 }
 
 fn trace_timeline_diffs(stage: &str, key: &TimelineKey, diffs: &[TimelineDiff]) {
+    koushi_diagnostics::record(timeline_diff_batch_diagnostic_event(stage, key, diffs));
+}
+
+fn timeline_diff_batch_diagnostic_event(
+    stage: &str,
+    key: &TimelineKey,
+    diffs: &[TimelineDiff],
+) -> DiagnosticEvent {
     let mut push_front_count = 0_u64;
     let mut push_back_count = 0_u64;
     let mut insert_count = 0_u64;
@@ -8581,28 +8589,26 @@ fn trace_timeline_diffs(stage: &str, key: &TimelineKey, diffs: &[TimelineDiff]) 
             }
         }
     }
-    koushi_diagnostics::record(
-        DiagnosticEvent::new(
-            DiagnosticLevel::Debug,
-            "core.timeline_item",
-            timeline_stage_token(stage),
-        )
-        .field(DiagnosticField::token("kind", "batch"))
-        .field(DiagnosticField::token(
-            "timeline",
-            timeline_key_trace_kind(key),
-        ))
-        .field(DiagnosticField::count("count", diffs.len() as u64))
-        .field(DiagnosticField::count("push_front_count", push_front_count))
-        .field(DiagnosticField::count("push_back_count", push_back_count))
-        .field(DiagnosticField::count("insert_count", insert_count))
-        .field(DiagnosticField::count("set_count", set_count))
-        .field(DiagnosticField::count("remove_count", remove_count))
-        .field(DiagnosticField::count("truncate_count", truncate_count))
-        .field(DiagnosticField::count("clear_count", clear_count))
-        .field(DiagnosticField::count("reset_count", reset_count))
-        .field(DiagnosticField::count("reset_item_count", reset_item_count)),
-    );
+    DiagnosticEvent::new(
+        DiagnosticLevel::Debug,
+        "core.timeline_item",
+        timeline_stage_token(stage),
+    )
+    .field(DiagnosticField::token("kind", "batch"))
+    .field(DiagnosticField::token(
+        "timeline",
+        timeline_key_trace_kind(key),
+    ))
+    .field(DiagnosticField::count("count", diffs.len() as u64))
+    .field(DiagnosticField::count("push_front_count", push_front_count))
+    .field(DiagnosticField::count("push_back_count", push_back_count))
+    .field(DiagnosticField::count("insert_count", insert_count))
+    .field(DiagnosticField::count("set_count", set_count))
+    .field(DiagnosticField::count("remove_count", remove_count))
+    .field(DiagnosticField::count("truncate_count", truncate_count))
+    .field(DiagnosticField::count("clear_count", clear_count))
+    .field(DiagnosticField::count("reset_count", reset_count))
+    .field(DiagnosticField::count("reset_item_count", reset_item_count))
 }
 
 #[derive(Default)]
@@ -8924,6 +8930,17 @@ fn trace_event_cache_diffs(
     origin: &matrix_sdk::event_cache::EventsOrigin,
     diffs: &[eyeball_im::VectorDiff<matrix_sdk_base::event_cache::Event>],
 ) {
+    koushi_diagnostics::record(event_cache_diff_batch_diagnostic_event(
+        stage, key, origin, diffs,
+    ));
+}
+
+fn event_cache_diff_batch_diagnostic_event(
+    stage: &str,
+    key: &TimelineKey,
+    origin: &matrix_sdk::event_cache::EventsOrigin,
+    diffs: &[eyeball_im::VectorDiff<matrix_sdk_base::event_cache::Event>],
+) -> DiagnosticEvent {
     let mut push_front_count = 0_u64;
     let mut push_back_count = 0_u64;
     let mut insert_count = 0_u64;
@@ -8958,39 +8975,37 @@ fn trace_event_cache_diffs(
             eyeball_im::VectorDiff::PopBack => pop_back_count += 1,
         }
     }
-    koushi_diagnostics::record(
-        DiagnosticEvent::new(
-            DiagnosticLevel::Debug,
-            "core.event_cache",
-            timeline_stage_token(stage),
-        )
-        .field(DiagnosticField::token("kind", "batch"))
-        .field(DiagnosticField::token(
-            "timeline",
-            timeline_key_trace_kind(key),
-        ))
-        .field(DiagnosticField::token(
-            "origin",
-            event_cache_origin_trace_token(origin),
-        ))
-        .field(DiagnosticField::count("count", diffs.len() as u64))
-        .field(DiagnosticField::count("push_front_count", push_front_count))
-        .field(DiagnosticField::count("push_back_count", push_back_count))
-        .field(DiagnosticField::count("insert_count", insert_count))
-        .field(DiagnosticField::count("set_count", set_count))
-        .field(DiagnosticField::count("append_count", append_count))
-        .field(DiagnosticField::count(
-            "append_item_count",
-            append_item_count,
-        ))
-        .field(DiagnosticField::count("reset_count", reset_count))
-        .field(DiagnosticField::count("reset_item_count", reset_item_count))
-        .field(DiagnosticField::count("remove_count", remove_count))
-        .field(DiagnosticField::count("truncate_count", truncate_count))
-        .field(DiagnosticField::count("clear_count", clear_count))
-        .field(DiagnosticField::count("pop_front_count", pop_front_count))
-        .field(DiagnosticField::count("pop_back_count", pop_back_count)),
-    );
+    DiagnosticEvent::new(
+        DiagnosticLevel::Debug,
+        "core.event_cache",
+        timeline_stage_token(stage),
+    )
+    .field(DiagnosticField::token("kind", "batch"))
+    .field(DiagnosticField::token(
+        "timeline",
+        timeline_key_trace_kind(key),
+    ))
+    .field(DiagnosticField::token(
+        "origin",
+        event_cache_origin_trace_token(origin),
+    ))
+    .field(DiagnosticField::count("count", diffs.len() as u64))
+    .field(DiagnosticField::count("push_front_count", push_front_count))
+    .field(DiagnosticField::count("push_back_count", push_back_count))
+    .field(DiagnosticField::count("insert_count", insert_count))
+    .field(DiagnosticField::count("set_count", set_count))
+    .field(DiagnosticField::count("append_count", append_count))
+    .field(DiagnosticField::count(
+        "append_item_count",
+        append_item_count,
+    ))
+    .field(DiagnosticField::count("reset_count", reset_count))
+    .field(DiagnosticField::count("reset_item_count", reset_item_count))
+    .field(DiagnosticField::count("remove_count", remove_count))
+    .field(DiagnosticField::count("truncate_count", truncate_count))
+    .field(DiagnosticField::count("clear_count", clear_count))
+    .field(DiagnosticField::count("pop_front_count", pop_front_count))
+    .field(DiagnosticField::count("pop_back_count", pop_back_count))
 }
 
 fn pagination_direction_trace_token(direction: PaginationDirection) -> &'static str {
@@ -37190,20 +37205,12 @@ mod tests {
 
     #[test]
     fn timeline_diff_batch_emits_one_count_only_summary() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let before = koushi_diagnostics::test_support::detail_snapshot()
-            .records
-            .len();
-        trace_timeline_diffs(
+        let event = timeline_diff_batch_diagnostic_event(
             "diff_batch",
             &room_key(),
             &[TimelineDiff::Remove { index: 2 }, TimelineDiff::Clear],
         );
 
-        let records = koushi_diagnostics::test_support::detail_snapshot().records;
-        let emitted = &records[before..];
-        assert_eq!(emitted.len(), 1);
-        let event = &emitted[0].event;
         assert!(event.fields.iter().any(|field| {
             field.key == "remove_count" && field.value == DiagnosticValue::Count(1)
         }));
@@ -37214,11 +37221,7 @@ mod tests {
 
     #[test]
     fn event_cache_diff_batch_emits_one_count_only_summary() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let before = koushi_diagnostics::test_support::detail_snapshot()
-            .records
-            .len();
-        trace_event_cache_diffs(
+        let event = event_cache_diff_batch_diagnostic_event(
             "cache_update",
             &room_key(),
             &matrix_sdk::event_cache::EventsOrigin::Cache,
@@ -37228,10 +37231,6 @@ mod tests {
             ],
         );
 
-        let records = koushi_diagnostics::test_support::detail_snapshot().records;
-        let emitted = &records[before..];
-        assert_eq!(emitted.len(), 1);
-        let event = &emitted[0].event;
         assert!(event.fields.iter().any(|field| {
             field.key == "remove_count" && field.value == DiagnosticValue::Count(1)
         }));
