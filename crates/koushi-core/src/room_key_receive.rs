@@ -9,7 +9,6 @@ use std::collections::BTreeSet;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixRoomKeyReceiveDiagnostics;
-use matrix_sdk::event_cache::RedecryptorReport;
 
 /// Bound on how many distinct UTD session IDs a single explicit retry may
 /// carry, so a pathological timeline cannot fan out unboundedly.
@@ -204,15 +203,6 @@ pub fn collect_visible_utd_sessions(
     sessions
 }
 
-/// Classify a decryption report for the retry observer: only lag and backup
-/// availability should drive a bounded retry; resolved events need no action.
-pub fn report_should_trigger_retry(report: &RedecryptorReport) -> bool {
-    matches!(
-        report,
-        RedecryptorReport::Lagging | RedecryptorReport::BackupAvailable
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,18 +269,9 @@ mod tests {
     }
 
     #[test]
-    fn report_classification_is_closed() {
-        use RedecryptorReport::*;
-        assert!(report_should_trigger_retry(&Lagging));
-        assert!(report_should_trigger_retry(&BackupAvailable));
-        assert!(!report_should_trigger_retry(&ResolvedUtds {
-            room_id: matrix_sdk::ruma::owned_room_id!("!x:example.invalid"),
-            events: Default::default(),
-        }));
-    }
-
-    #[test]
     fn retry_outcome_record_is_closed() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        reset_late_decryption_counters();
         record_late_decryption_retry(2, true);
         let snapshot = snapshot();
         let retry = snapshot
@@ -302,5 +283,6 @@ mod tests {
             .expect("retry recorded");
         let text = format!("{:?}", retry.event);
         assert!(!text.contains('@') && !text.contains('!'));
+        reset_late_decryption_counters();
     }
 }
