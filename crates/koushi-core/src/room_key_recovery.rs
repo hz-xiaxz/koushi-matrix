@@ -373,6 +373,7 @@ mod tests {
 
     #[test]
     fn stage_records_are_privacy_safe() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let mut op = RecoveryOperation::new(99);
         op.begin_attempt();
         op.observe(RecoveryStepOutcome::BackupImported);
