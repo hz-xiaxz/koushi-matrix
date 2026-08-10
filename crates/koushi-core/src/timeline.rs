@@ -14319,7 +14319,7 @@ struct TimelineActor {
     room_key_recovery:
         std::collections::BTreeMap<String, crate::room_key_recovery::RecoveryOperation>,
     next_session_alias: u64,
-    recovery_tick_task: Option<executor::JoinHandle<()>>,
+    recovery_tick_tasks: std::collections::BTreeMap<String, executor::JoinHandle<()>>,
 }
 
 #[derive(Clone, Debug)]
@@ -15180,7 +15180,7 @@ impl TimelineActor {
             decrypt_retry_timeout_task: None,
             room_key_recovery: Default::default(),
             next_session_alias: 0,
-            recovery_tick_task: None,
+            recovery_tick_tasks: Default::default(),
         };
 
         actor
@@ -18194,18 +18194,19 @@ impl TimelineActor {
 
     fn schedule_recovery_tick(&mut self, session_id: String, attempt: u32) {
         use crate::room_key_recovery::RECOVERY_BACKOFF;
-        if let Some(task) = self.recovery_tick_task.take() {
+        if let Some(task) = self.recovery_tick_tasks.remove(&session_id) {
             task.abort();
         }
-        self.recovery_tick_task = Some(spawn_delayed_timeline_message(
+        let task = spawn_delayed_timeline_message(
             self.msg_tx.clone(),
             RECOVERY_BACKOFF,
             TimelineActorMessage::RoomKeyRecoveryTick {
-                session_id,
+                session_id: session_id.clone(),
                 attempt,
                 actor_generation: self.actor_generation,
             },
-        ));
+        );
+        self.recovery_tick_tasks.insert(session_id, task);
     }
 
     /// Drive one automatic recovery step for a missing Megolm session
@@ -19452,10 +19453,23 @@ impl TimelineActor {
             let Some(utd) = content.as_unable_to_decrypt() else {
                 continue;
             };
-            let EncryptedMessage::MegolmV1AesSha2 { session_id, .. } = utd else {
+            let EncryptedMessage::MegolmV1AesSha2 {
+                session_id, cause, ..
+            } = utd
+            else {
                 continue;
             };
-            self.ensure_room_key_recovery(session_id);
+            // Only genuine missing-session UTDs are eligible for automatic
+            // standard recovery; identity/trust/policy causes use their
+            // existing typed handling.
+            use matrix_sdk_base::crypto::types::events::UtdCause;
+            let eligible = matches!(
+                cause,
+                UtdCause::Unknown | UtdCause::HistoricalMessageAndBackupIsDisabled
+            );
+            if eligible {
+                self.ensure_room_key_recovery(session_id);
+            }
         }
         let decrypt_retry_resolution = self.decrypt_retry.pending.as_ref().and_then(|pending| {
             diffs.iter().find_map(|diff| {

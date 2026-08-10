@@ -163,6 +163,11 @@ impl RecoveryOperation {
             (RecoveryStage::WaitingForKey, RecoveryStepOutcome::KeyArrived) => {
                 RecoveryStage::RetryingDecryption
             }
+            // A waiting tick without the key is retryable and bounded by the
+            // attempt limit.
+            (RecoveryStage::WaitingForKey, RecoveryStepOutcome::OwnDeviceRequestFailed) => {
+                RecoveryStage::TemporarilyFailed
+            }
             (RecoveryStage::KeyReceived, RecoveryStepOutcome::RedecryptionVerified)
             | (RecoveryStage::RetryingDecryption, RecoveryStepOutcome::RedecryptionVerified) => {
                 RecoveryStage::Recovered
