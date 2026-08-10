@@ -19,7 +19,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
@@ -678,6 +678,7 @@ async fn reconcile_committed_room_list(
     run_generation: u64,
     response_sequence: u64,
 ) -> RoomListReconcileResult {
+    let started_at = Instant::now();
     let (ack_tx, ack_rx) = oneshot::channel();
     if room_tx
         .send(RoomMessage::ReconcileCommittedRange {
@@ -689,12 +690,105 @@ async fn reconcile_committed_room_list(
         .await
         .is_err()
     {
+        record_room_list_reconcile_diagnostic(
+            RoomListReconcileDiagnosticOutcome::SendClosed,
+            started_at.elapsed(),
+            run_generation,
+            response_sequence,
+        );
         return RoomListReconcileResult::Failed;
     }
     match executor::timeout(ROOM_OBSERVATION_ACK_TIMEOUT, ack_rx).await {
-        Ok(Ok(ack)) => classify_room_list_reconcile_ack(run_generation, response_sequence, ack),
-        _ => RoomListReconcileResult::Failed,
+        Ok(Ok(ack)) => {
+            let result = classify_room_list_reconcile_ack(run_generation, response_sequence, ack);
+            record_room_list_reconcile_diagnostic(
+                if result == RoomListReconcileResult::Failed {
+                    RoomListReconcileDiagnosticOutcome::InvalidAck
+                } else {
+                    RoomListReconcileDiagnosticOutcome::Received
+                },
+                started_at.elapsed(),
+                run_generation,
+                response_sequence,
+            );
+            result
+        }
+        Ok(Err(_)) => {
+            record_room_list_reconcile_diagnostic(
+                RoomListReconcileDiagnosticOutcome::AckClosed,
+                started_at.elapsed(),
+                run_generation,
+                response_sequence,
+            );
+            RoomListReconcileResult::Failed
+        }
+        Err(_) => {
+            record_room_list_reconcile_diagnostic(
+                RoomListReconcileDiagnosticOutcome::Timeout,
+                started_at.elapsed(),
+                run_generation,
+                response_sequence,
+            );
+            RoomListReconcileResult::Failed
+        }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RoomListReconcileDiagnosticOutcome {
+    Received,
+    SendClosed,
+    Timeout,
+    AckClosed,
+    InvalidAck,
+}
+
+fn room_list_reconcile_diagnostic_outcome_token(
+    outcome: RoomListReconcileDiagnosticOutcome,
+) -> &'static str {
+    match outcome {
+        RoomListReconcileDiagnosticOutcome::Received => "received",
+        RoomListReconcileDiagnosticOutcome::SendClosed => "send_closed",
+        RoomListReconcileDiagnosticOutcome::Timeout => "timeout",
+        RoomListReconcileDiagnosticOutcome::AckClosed => "ack_closed",
+        RoomListReconcileDiagnosticOutcome::InvalidAck => "invalid_ack",
+    }
+}
+
+fn room_list_reconcile_diagnostic_event(
+    outcome: RoomListReconcileDiagnosticOutcome,
+    elapsed_ms: u128,
+) -> DiagnosticEvent {
+    DiagnosticEvent::new(
+        if outcome == RoomListReconcileDiagnosticOutcome::Received {
+            DiagnosticLevel::Debug
+        } else {
+            DiagnosticLevel::Warn
+        },
+        "core.sync",
+        "room_list_reconcile_wait",
+    )
+    .field(DiagnosticField::token(
+        "outcome",
+        room_list_reconcile_diagnostic_outcome_token(outcome),
+    ))
+    .field(DiagnosticField::milliseconds("elapsed_ms", elapsed_ms))
+}
+
+fn record_room_list_reconcile_diagnostic(
+    outcome: RoomListReconcileDiagnosticOutcome,
+    elapsed: Duration,
+    run_generation: u64,
+    response_sequence: u64,
+) {
+    record(
+        room_list_reconcile_diagnostic_event(outcome, elapsed.as_millis())
+            .field(DiagnosticField::count("backend_generation", run_generation))
+            .field(DiagnosticField::count(
+                "response_sequence",
+                response_sequence,
+            )),
+    );
 }
 
 fn classify_room_list_reconcile_ack(
@@ -1529,6 +1623,35 @@ pub mod tests {
             ),
             RoomListReconcileResult::Failed
         );
+    }
+
+    #[test]
+    fn room_list_reconcile_wait_diagnostic_distinguishes_terminal_outcomes() {
+        for (outcome, token) in [
+            (RoomListReconcileDiagnosticOutcome::Received, "received"),
+            (
+                RoomListReconcileDiagnosticOutcome::SendClosed,
+                "send_closed",
+            ),
+            (RoomListReconcileDiagnosticOutcome::Timeout, "timeout"),
+            (RoomListReconcileDiagnosticOutcome::AckClosed, "ack_closed"),
+            (
+                RoomListReconcileDiagnosticOutcome::InvalidAck,
+                "invalid_ack",
+            ),
+        ] {
+            let event = room_list_reconcile_diagnostic_event(outcome, 42);
+            assert_eq!(event.source, "core.sync");
+            assert_eq!(event.stage, "room_list_reconcile_wait");
+            assert!(event.fields.iter().any(|field| {
+                field.key == "outcome"
+                    && field.value == koushi_diagnostics::DiagnosticValue::Token(token)
+            }));
+            assert!(event.fields.iter().any(|field| {
+                field.key == "elapsed_ms"
+                    && field.value == koushi_diagnostics::DiagnosticValue::Milliseconds(42)
+            }));
+        }
     }
 
     #[tokio::test]

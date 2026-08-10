@@ -1871,7 +1871,12 @@ describe("desktop integration source guards", () => {
     expect(source).toContain("qaSendStatus");
     expect(source).toContain("getCurrentWindow()");
     expect(source).toContain("snapshot?.state.domain.native_attention.summary.capabilities");
-    expect(source).toContain("document.title = title");
+    expect(source).toContain("document.title = attentionWindowTitle");
+    const windowEffectStart = source.indexOf("useEffect(() => {\n    document.title");
+    const windowEffectEnd = source.indexOf("]);", windowEffectStart);
+    const windowEffectSource = source.slice(windowEffectStart, windowEffectEnd);
+    expect(windowEffectSource).toContain("attentionWindowTitle");
+    expect(windowEffectSource).not.toContain("\n    snapshot,");
     expect(source).toContain("desktopAttentionWindowTitle");
   });
 
