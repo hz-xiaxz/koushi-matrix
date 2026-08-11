@@ -555,7 +555,29 @@ function renderEditorDocument(control: HTMLDivElement, document: ComposerDocumen
     }
     return span;
   });
+  // Issue #471: under `white-space: pre-wrap` a trailing newline as the last
+  // character of the block creates no final line box — the composer neither
+  // grows nor paints the caret on the new line. Append a sentinel <br> that
+  // the DOM readers ignore; it never counts toward document offsets.
+  if (documentEndsWithNewline(document)) {
+    const sentinel = control.ownerDocument.createElement("br");
+    sentinel.dataset.composerSentinel = "";
+    nodes.push(sentinel);
+  }
   control.replaceChildren(...nodes);
+}
+
+function documentEndsWithNewline(document: ComposerDocument): boolean {
+  const last = document.inlines.at(-1);
+  return last?.kind === "text" && last.text.endsWith("\n");
+}
+
+function isSentinelBr(node: Node): boolean {
+  return (
+    node instanceof HTMLElement &&
+    node.tagName === "BR" &&
+    node.hasAttribute("data-composer-sentinel")
+  );
 }
 
 export function inlineMentionEditorSelection(control: HTMLDivElement): DocumentSelection {
@@ -589,6 +611,10 @@ function documentOffsetFromDomPoint(
   offset: number
 ): number {
   if (container === control) {
+    // Issue #471: the trailing newline lives inside the last text span, so
+    // the sentinel <br> contributes zero and the after-sentinel point maps
+    // to the same document offset as the end of that span (the empty final
+    // line has no document width). No special case is needed.
     return Array.from(control.childNodes)
       .slice(0, offset)
       .reduce((total, child) => total + editorNodeLength(child), 0);
@@ -620,6 +646,11 @@ function documentFromEditorDom(
 ): ComposerDocument {
   const inlines: ComposerInline[] = [];
   for (const node of control.childNodes) {
+    if (isSentinelBr(node)) {
+      // Issue #471: the trailing-newline sentinel is presentation-only and
+      // never becomes document content.
+      continue;
+    }
     if (node instanceof HTMLElement && node.hasAttribute("data-composer-mention")) {
       const index = Number(node.dataset.composerMention);
       const mention = current.inlines[index];

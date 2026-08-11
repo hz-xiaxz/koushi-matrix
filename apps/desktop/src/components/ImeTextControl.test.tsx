@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createRef, useState, type FormEventHandler } from "react";
-import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -9,7 +9,8 @@ import {
   ImeSafeForm,
   ImeTextArea,
   ImeTextField,
-  SecureImeTextField
+  SecureImeTextField,
+  type ImeInlineMentionEditorHandle
 } from "./ImeTextControl";
 import type { ComposerDocument } from "../domain/types";
 
@@ -84,6 +85,137 @@ afterEach(() => {
 });
 
 describe("IME text controls", () => {
+
+describe("trailing newline rendering (#471)", () => {
+  it("renders a trailing <br> sentinel when the document ends with a newline", () => {
+    render(
+      <ControlledMentionEditor
+        initial={{ version: 2, inlines: [{ kind: "text", text: "foo\n" }] }}
+      />
+    );
+    const control = screen.getByRole("textbox", { name: "message" });
+    const last = control.lastChild;
+    expect(last).not.toBeNull();
+    expect((last as HTMLElement).tagName).toBe("BR");
+    expect((last as HTMLElement).hasAttribute("data-composer-sentinel")).toBe(true);
+    // The sentinel never counts toward the model text.
+    expect(control.textContent).toBe("foo\n");
+  });
+
+  it("does not append a sentinel without a trailing newline", () => {
+    render(
+      <ControlledMentionEditor initial={{ version: 2, inlines: [{ kind: "text", text: "foo" }] }} />
+    );
+    const control = screen.getByRole("textbox", { name: "message" });
+    expect(control.querySelector("br")).toBeNull();
+  });
+
+  it("mid-text newlines render without a sentinel", () => {
+    render(
+      <ControlledMentionEditor
+        initial={{ version: 2, inlines: [{ kind: "text", text: "foo\nbar" }] }}
+      />
+    );
+    const control = screen.getByRole("textbox", { name: "message" });
+    expect(control.querySelector("br")).toBeNull();
+    expect(control.textContent).toBe("foo\nbar");
+  });
+
+  it("keeps the caret at the end of the document after a trailing newline (round-trip)", () => {
+    const ref = createRef<ImeInlineMentionEditorHandle>();
+    render(
+      <ImeInlineMentionEditor
+        aria-label={EDITOR_LABEL}
+        ref={ref}
+        document={{ version: 2, inlines: [{ kind: "text", text: "foo\n" }] }}
+        syncKey="message-a"
+        onDocumentChange={() => undefined}
+      />
+    );
+    const control = screen.getByRole("textbox", { name: "message" });
+    // The sentinel gives the empty final line a paintable box.
+    expect(control.querySelector("br[data-composer-sentinel]")).not.toBeNull();
+    // documentLength("foo\n") === 4 and the caret must stay there, past the
+    // newline (visually the start of line 2), never snapped back to line 1.
+    const selection = ref.current?.selection();
+    expect(selection?.start).toBe(4);
+    expect(selection?.end).toBe(4);
+    const text = control.firstChild?.firstChild;
+    expect(text?.nodeType).toBe(Node.TEXT_NODE);
+    const range = control.ownerDocument.getSelection()?.getRangeAt(0);
+    expect(range?.startContainer).toBe(text);
+    expect(range?.startOffset).toBe(4);
+  });
+
+  it("restoreDocumentSelection moves the caret past the trailing newline", () => {
+    const ref = createRef<ImeInlineMentionEditorHandle>();
+    function StatefulEditor() {
+      const [document, setDocument] = useState<ComposerDocument>({
+        version: 2,
+        inlines: [{ kind: "text", text: "foo" }]
+      });
+      return (
+        <ImeInlineMentionEditor
+          aria-label={EDITOR_LABEL}
+          ref={ref}
+          document={document}
+          syncKey="message-a"
+          onDocumentChange={setDocument}
+        />
+      );
+    }
+    render(<StatefulEditor />);
+    const control = screen.getByRole("textbox", { name: "message" });
+    // Simulate Shift+Enter at the end: insert the newline then restore.
+    act(() => {
+      ref.current?.commit({
+        document: { version: 2, inlines: [{ kind: "text", text: "foo\n" }] },
+        selection: { start: 4, end: 4 }
+      });
+    });
+    const sentinel = control.querySelector("br[data-composer-sentinel]");
+    expect(sentinel).not.toBeNull();
+    const text = control.firstChild?.firstChild;
+    const range = control.ownerDocument.getSelection()?.getRangeAt(0);
+    expect(range?.startContainer).toBe(text);
+    expect(range?.startOffset).toBe(4);
+    // Reading the caret back still reports the end of the document.
+    const selection = ref.current?.selection();
+    expect(selection?.start).toBe(4);
+  });
+
+  it("maps a caret placed after the sentinel back to the document end (collapsed and range)", () => {
+    const ref = createRef<ImeInlineMentionEditorHandle>();
+    render(
+      <ImeInlineMentionEditor
+        aria-label={EDITOR_LABEL}
+        ref={ref}
+        document={{ version: 2, inlines: [{ kind: "text", text: "foo\n" }] }}
+        syncKey="message-a"
+        onDocumentChange={() => undefined}
+      />
+    );
+    const control = screen.getByRole("textbox", { name: "message" });
+    const sentinel = control.querySelector("br[data-composer-sentinel]");
+    expect(sentinel).not.toBeNull();
+    // The browser may place the caret after the sentinel when the user clicks
+    // the empty final line; that point must read as documentLength (4), never
+    // past it.
+    setSelection(control, control.childNodes.length);
+    const caret = control.ownerDocument.getSelection()?.getRangeAt(0);
+    expect(caret?.startContainer).toBe(control);
+    expect(caret?.startOffset).toBe(control.childNodes.length);
+    const collapsed = ref.current?.selection();
+    expect(collapsed?.start).toBe(4);
+    expect(collapsed?.end).toBe(4);
+    // Range ending after the sentinel.
+    setSelection(control, 0, control, control.childNodes.length);
+    const rangeSel = ref.current?.selection();
+    expect(rangeSel?.start).toBe(0);
+    expect(rangeSel?.end).toBe(4);
+  });
+});
+
   it.each([
     ["text", (props: { value: string; syncKey: string }) => (
       <ImeTextField aria-label={fieldLabel} {...props} />
