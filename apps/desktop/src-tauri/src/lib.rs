@@ -2428,7 +2428,8 @@ mod tests {
                 EventCacheFailureReasonClass, EventCacheSubscribeStatus, IntentNoOpReason,
                 IntentOutcome, LinkPreview, LinkPreviewImage, LinkPreviewState, LiveSignalsEvent,
                 LocalEncryptionEvent, NativeAttentionEvent, PaginationDirection, PaginationState,
-                ReactionGroup, RoomEvent, RoomKeyReshareOutcome, SearchEvent, SyncEvent,
+                ReactionGroup, RoomEvent, RoomKeyRequestStage, RoomKeyRequestStateDto,
+                RoomKeyRequestWithheldCode, RoomKeyReshareOutcome, SearchEvent, SyncEvent,
                 ThreadRootProjectionDto, ThreadRootProjectionStateDto, ThreadSummaryDto,
                 ThreadsListEvent, TimelineAnchorRestoreStatus, TimelineCodeBlock,
                 TimelineDisplayLabelUpdate, TimelineEvent, TimelineFormattedBody, TimelineGapId,
@@ -2465,7 +2466,10 @@ mod tests {
         };
         let key = TimelineKey::room(AccountKey("@u:example.test".to_owned()), "!r:example.test");
         let item = TimelineItem {
-            request_state: None,
+            request_state: Some(RoomKeyRequestStateDto {
+                stage: RoomKeyRequestStage::Withheld,
+                withheld_code: Some(RoomKeyRequestWithheldCode::Unavailable),
+            }),
             id: TimelineItemId::Event {
                 event_id: "$e1".to_owned(),
             },
@@ -2786,6 +2790,7 @@ mod tests {
             json!({
                 "id": { "Event": { "event_id": "$e1" } },
                 "sender": "@u:example.test",
+                "request_state": { "stage": "withheld", "withheldCode": "unavailable" },
                 "sender_label": null,
                 "body": "hello",
                 "message_kind": "emote",
@@ -3286,6 +3291,14 @@ mod tests {
                 },
             }))
             .expect("serialize room key reshare outcome");
+        let room_key_request_state_changed =
+            serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyRequestStateChanged {
+                room_id: "!r:example.test".to_owned(),
+                event_id: "$e1".to_owned(),
+                stage: RoomKeyRequestStage::Withheld,
+                withheld_code: Some(RoomKeyRequestWithheldCode::Unavailable),
+            }))
+            .expect("serialize room key request state changed");
 
         let room_invite_accepted =
             serialize_core_event(&CoreEvent::Room(RoomEvent::InviteAccepted {
@@ -3842,6 +3855,7 @@ mod tests {
             "roomInviteDeclined": room_invite_declined,
             "roomLeft": room_left,
             "roomKeyReshared": room_key_reshared,
+            "roomKeyRequestStateChanged": room_key_request_state_changed,
             "roomMarkedAsRead": room_marked_as_read,
             "roomMarkedAsUnread": room_marked_as_unread,
             "roomReportCompleted": room_report_completed,
@@ -3983,6 +3997,7 @@ mod tests {
             "roomInviteDeclined",
             "roomLeft",
             "roomKeyReshared",
+            "roomKeyRequestStateChanged",
             "roomMarkedAsRead",
             "roomMarkedAsUnread",
             "roomMemberModerated",

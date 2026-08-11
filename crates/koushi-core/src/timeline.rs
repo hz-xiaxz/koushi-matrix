@@ -15258,6 +15258,23 @@ impl TimelineActor {
             .forward_initial_items_to_search(initial_sdk_items.iter().cloned())
             .await;
         actor.maybe_hydrate_missing_thread_roots().await;
+        // Issue #460: automatic one-shot key requests for Thread timelines at
+        // subscription time — existing UTD rows are delivered as InitialItems,
+        // not as diffs, so the diff-batch scanner never sees them. The actor
+        // processes these after startup; the automatic guard in
+        // handle_request_room_key refuses repeats for already-requested events.
+        if matches!(key.kind, TimelineKind::Thread { .. }) {
+            for item in &initial_sdk_items {
+                let Some(event_id) = thread_auto_requestable_event_id(item) else {
+                    continue;
+                };
+                let _ = actor_tx.try_send(TimelineActorMessage::RequestRoomKey {
+                    request_id: None,
+                    event_id,
+                    origin: crate::command::KeyRequestOrigin::Automatic,
+                });
+            }
+        }
         let task = executor::spawn(actor.run());
 
         TimelineActorHandle {
@@ -19824,29 +19841,21 @@ impl TimelineActor {
                     _ => Vec::new(),
                 };
                 for value in values {
-                    let Some(event_item) = value.as_event() else {
+                    let Some(event_id) = thread_auto_requestable_event_id(value) else {
                         continue;
                     };
-                    let Some(event_id) = event_item.event_id() else {
-                        continue;
-                    };
-                    let event_id = event_id.to_string();
                     if self.key_request_states.contains_key(&event_id) {
-                        continue;
-                    }
-                    let requestable = event_item.content().is_unable_to_decrypt()
-                        && event_item.original_json().is_some()
-                        && unable_to_decrypt_from_content(event_item.content())
-                            .and_then(|utd| utd.session_id)
-                            .is_some();
-                    if !requestable {
                         continue;
                     }
                     auto_request_event_ids.push(event_id);
                 }
             }
             for event_id in auto_request_event_ids {
-                let _ = self.msg_tx.send(TimelineActorMessage::RequestRoomKey {
+                // try_send: never block the projection on the actor's own
+                // bounded mailbox (awaiting would deadlock the loop); if the
+                // mailbox is momentarily full the request is skipped and the
+                // next batch re-scans the same events.
+                let _ = self.msg_tx.try_send(TimelineActorMessage::RequestRoomKey {
                     request_id: None,
                     event_id,
                     origin: crate::command::KeyRequestOrigin::Automatic,
@@ -25002,6 +25011,20 @@ fn sdk_item_to_timeline_item_with_send_states(
             }
         }
     }
+}
+
+/// Event id of a requestable UTD event for automatic key requests (issue
+/// #460): decryptable-retry eligible (session known) and the original JSON is
+/// available to re-request from.
+fn thread_auto_requestable_event_id(item: &Arc<SdkTimelineItem>) -> Option<String> {
+    let event_item = item.as_event()?;
+    let event_id = event_item.event_id()?.to_string();
+    let requestable = event_item.content().is_unable_to_decrypt()
+        && event_item.original_json().is_some()
+        && unable_to_decrypt_from_content(event_item.content())
+            .and_then(|utd| utd.session_id)
+            .is_some();
+    requestable.then_some(event_id)
 }
 
 fn unable_to_decrypt_from_content(
