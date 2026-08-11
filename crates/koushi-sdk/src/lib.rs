@@ -1618,7 +1618,6 @@ fn withheld_code_from_sdk(
     use matrix_sdk::encryption::RoomKeyWithheldContent;
     match content {
         RoomKeyWithheldContent::MegolmV1AesSha2(content) => {
-            use matrix_sdk::encryption::RoomKeyWithheldContent::MegolmV1AesSha2 as _;
             Some(match content.withheld_code() {
                 matrix_sdk::encryption::WithheldCode::Blacklisted => {
                     MatrixRoomKeyWithheldCode::Blacklisted
