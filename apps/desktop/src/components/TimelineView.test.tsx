@@ -11655,4 +11655,99 @@ describe("room key request feedback (#460)", () => {
     // The local pending marker is gone once the terminal state is rendered.
     expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
   });
+
+  it("a delayed rejection from an earlier visit does not clear the current pending marker (A->B->A)", async () => {
+    let emitA: (payload: unknown) => void = () => undefined;
+    let rejectFirst: (reason?: unknown) => void = () => undefined;
+    let rejectSecond: (reason?: unknown) => void = () => undefined;
+    const requestRoomKey = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFirst = reject;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectSecond = reject;
+          })
+      );
+    const keyB = roomTimelineKey("@bob:example.invalid", "!room:example.invalid");
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emitA = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey,
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    const { rerender } = render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    const seed = (key: typeof KEY) =>
+      act(() => {
+        emitA({
+          kind: "Timeline",
+          event: {
+            InitialItems: {
+              request_id: null,
+              key,
+              generation: 1,
+              items: [utdItem("$click", null)]
+            }
+          }
+        });
+      });
+    seed(KEY);
+    const button = await screen.findByRole("button", { name: "Request keys and retry" });
+    fireEvent.click(button); // visit A, epoch 1
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Waiting for the decryption key");
+    });
+    // Navigate A -> B -> A (each switch bumps the view epoch).
+    rerender(
+      <TimelineView
+        timelineKey={keyB}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    seed(keyB);
+    rerender(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    seed(KEY);
+    // New click in the final A visit (epoch 3) — new marker + request.
+    const buttonAgain = await screen.findByRole("button", { name: "Request keys and retry" });
+    fireEvent.click(buttonAgain);
+    await waitFor(() => {
+      expect(requestRoomKey).toHaveBeenCalledTimes(2);
+    });
+    // The FIRST visit's request rejects late: it must not clear the new marker.
+    act(() => {
+      rejectFirst(new Error("stale rejection"));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText(/Waiting for the decryption key/)).toBeTruthy();
+    // The CURRENT visit's own rejection still clears its marker.
+    act(() => {
+      rejectSecond(new Error("current rejection"));
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
+    });
+  });
 });

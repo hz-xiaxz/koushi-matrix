@@ -2720,8 +2720,10 @@ export const TimelineView = memo(function TimelineView({
   // Account switch: the same room/event may open under a different account
   // (the pane component is keyed by room/anchor, not account). Rust-owned
   // request state is per-actor, so the previous account's local optimistic
-  // marker must not suppress the new account's legitimate request.
+  // marker must not suppress the new account's legitimate request. The epoch
+  // also fences delayed rejections across A->B->A navigation (same key hash).
   const previousTimelineKeyHashRef = useRef<string | null>(null);
+  const keyRequestEpochRef = useRef(0);
   useEffect(() => {
     if (
       previousTimelineKeyHashRef.current !== null &&
@@ -2729,6 +2731,7 @@ export const TimelineView = memo(function TimelineView({
     ) {
       setPendingKeyRequests(new Set());
       setKeyRequestToast(null);
+      keyRequestEpochRef.current += 1;
     }
     previousTimelineKeyHashRef.current = timelineKeyHash;
   }, [timelineKeyHash]);
@@ -4355,6 +4358,7 @@ export const TimelineView = memo(function TimelineView({
       // (IPC/command failure) the optimistic marker and toast are reverted so
       // the UI never shows a stuck "waiting" state.
       const pendingKey = `event:${eventId}`;
+      const capturedEpoch = keyRequestEpochRef.current;
       if (targetRoomId === roomId) {
         setKeyRequestToast(t("timeline.keyRequestToast"));
         if (pendingKeyRequests.has(pendingKey)) {
@@ -4369,9 +4373,14 @@ export const TimelineView = memo(function TimelineView({
       void transport
         .requestRoomKey(targetRoomId, eventId, "user", timelineKey)
         .catch(() => {
-          // Fence by timeline key: a delayed rejection from a previous
-          // account/room must not clear the current view's marker/toast.
-          if (targetRoomId === roomId && timelineKeyHashRef.current === timelineKeyHash) {
+          // Fence by timeline key AND view epoch: a delayed rejection from a
+          // previous account/room — or an earlier visit to the same key
+          // (A->B->A) — must not clear the current view's marker/toast.
+          if (
+            targetRoomId === roomId &&
+            timelineKeyHashRef.current === timelineKeyHash &&
+            keyRequestEpochRef.current === capturedEpoch
+          ) {
             setPendingKeyRequests((current) => {
               const next = new Set(current);
               next.delete(pendingKey);
