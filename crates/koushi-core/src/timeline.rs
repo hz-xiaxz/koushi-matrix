@@ -7044,7 +7044,9 @@ fn newest_provable_receipt_event_id(
         .unwrap_or_else(|| requested_event_id.to_owned())
 }
 
-fn validate_composer_body_for_timeline_send(body: &str) -> Result<(), TimelineFailureKind> {
+pub(crate) fn validate_composer_body_for_timeline_send(
+    body: &str,
+) -> Result<(), TimelineFailureKind> {
     match resolve_composer_send_intent(body, MentionIntent::default()) {
         ComposerSendIntent::LocalFailure { .. }
         | ComposerSendIntent::SlashCommand {
@@ -38819,12 +38821,34 @@ mod tests {
     }
 
     #[test]
-    fn composer_core_rejects_unknown_slash_command_locally() {
-        assert_eq!(
-            build_room_message_content_from_composer_body("/shrug nope", MentionIntent::default(),)
-                .expect_err("unsupported slash command should fail before SDK send"),
-            TimelineFailureKind::UnsupportedSlashCommand
+    fn composer_core_sends_unknown_slash_text_literally() {
+        // Issue #450: unknown leading-slash text is ordinary content.
+        for body in ["/shrug nope", "/usr/local/bin", "/not-a-command", "/ 文章"] {
+            let content =
+                build_room_message_content_from_composer_body(body, MentionIntent::default())
+                    .expect("ordinary leading-slash text must send");
+            assert_eq!(content.body(), body);
+        }
+    }
+
+    #[test]
+    fn composer_core_rejects_recognized_unavailable_commands_locally() {
+        // Issue #450: /me is sent (emote); /join and /invite are recognized
+        // but unavailable on this surface and rejected before any SDK send.
+        assert!(
+            build_room_message_content_from_composer_body("/me waves", MentionIntent::default(),)
+                .is_ok()
         );
+        for body in [
+            "/join #room:example.invalid",
+            "/invite @alice:example.invalid",
+        ] {
+            assert_eq!(
+                build_room_message_content_from_composer_body(body, MentionIntent::default())
+                    .expect_err("recognized-but-unavailable command should fail before SDK send"),
+                TimelineFailureKind::UnsupportedSlashCommand
+            );
+        }
     }
 
     fn focused_key() -> TimelineKey {

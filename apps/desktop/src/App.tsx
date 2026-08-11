@@ -76,6 +76,9 @@ import {
   type CoreEventPayload,
   type TimelineKey,
   focusedTimelineKey,
+  isUnsupportedSlashCommandRejection,
+  noticeMatchesMainComposer,
+  noticeMatchesThreadComposer,
   roomTimelineKey,
   threadTimelineKey
 } from "./domain/coreEvents";
@@ -1834,6 +1837,31 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [rightPanelWidth, setRightPanelWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
   const [qaSendStatus, setQaSendStatus] = useState<QaSendSmokeStatus>("idle");
+  // Issue #450: transient localized notice for recognized-but-unavailable
+  // slash commands (e.g. /join, /invite), rendered above the composer that
+  // owns the rejected target (main vs thread, keyed by the event's key).
+  const [composerNotice, setComposerNotice] = useState<{
+    key: TimelineKey;
+    message: string;
+  } | null>(null);
+  const composerNoticeTimerRef = useRef<number | null>(null);
+  const showComposerNotice = useCallback((key: TimelineKey, message: string) => {
+    setComposerNotice({ key, message });
+    if (composerNoticeTimerRef.current !== null) {
+      window.clearTimeout(composerNoticeTimerRef.current);
+    }
+    composerNoticeTimerRef.current = window.setTimeout(() => {
+      setComposerNotice(null);
+      composerNoticeTimerRef.current = null;
+    }, 4000);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (composerNoticeTimerRef.current !== null) {
+        window.clearTimeout(composerNoticeTimerRef.current);
+      }
+    };
+  }, []);
   const [timelineDiagnostics, setTimelineDiagnostics] =
     useState<QaTimelineDiagnostics>(INITIAL_TIMELINE_DIAGNOSTICS);
   const timelineDiagnosticsRef = useRef<QaTimelineDiagnostics>(INITIAL_TIMELINE_DIAGNOSTICS);
@@ -2752,6 +2780,44 @@ export function App() {
             );
             continue;
           }
+          if (payload.kind === "OperationFailed") {
+            // Issue #450: a recognized-but-unavailable slash command (e.g.
+            // /join, /invite) is rejected before any Matrix send; surface the
+            // localized explanation near the composer instead of appearing
+            // inert. Transient: auto-dismissed. The OperationFailed envelope
+            // carries no key, so the notice keys to the active main room
+            // (schedule-time rejections use the keyed
+            // ComposerSlashCommandRejected event instead).
+            if (isUnsupportedSlashCommandRejection(payload)) {
+              // The keyless OperationFailed surface is the legacy send path;
+              // only show the notice when a ready account exists (the key
+              // must be canonical to route at all).
+              const account = readyComposerDraftAccountOwner(snapshotRef.current);
+              const activeRoomId = snapshotRef.current?.state.ui.timeline.room_id;
+              if (account && activeRoomId) {
+                showComposerNotice(
+                  roomTimelineKey(account.userId, activeRoomId),
+                  t("composer.slashCommandUnavailable")
+                );
+              }
+            }
+            continue;
+          }
+          if (
+            payload.kind === "Room" &&
+            typeof payload.event === "object" &&
+            payload.event !== null &&
+            "ComposerSlashCommandRejected" in payload.event
+          ) {
+            // Issue #450: the schedule-time rejection is keyed to the exact
+            // composer target by Rust, so the notice routes without any
+            // frontend correlation.
+            showComposerNotice(
+              payload.event.ComposerSlashCommandRejected.key,
+              t("composer.slashCommandUnavailable")
+            );
+            continue;
+          }
           if (
             payload.kind === "Room" &&
             typeof payload.event === "object" &&
@@ -2770,6 +2836,18 @@ export function App() {
           }
           if (payload.kind !== "Timeline") {
             continue;
+          }
+          if (isUnsupportedSlashCommandRejection(payload)) {
+            // Issue #450: the production submission path rejects recognized
+            // but unavailable slash commands via SubmissionRejected (not
+            // OperationFailed); surface the localized notice near the
+            // composer that owns the rejected target (keyed by the event).
+            if ("SubmissionRejected" in payload.event) {
+              showComposerNotice(
+                payload.event.SubmissionRejected.key,
+                t("composer.slashCommandUnavailable")
+              );
+            }
           }
           const applied = applyTimelineEventWithProjectionResultAndRetention(
             next,
@@ -6299,6 +6377,17 @@ export function App() {
           <TimelinePane
             activeRoomName={activeRoom?.display_label ?? t("room.noRoomSelected")}
             composerDocument={composerDocument}
+            composerNotice={
+              composerNotice &&
+              "Room" in composerNotice.key.kind &&
+              noticeMatchesMainComposer(
+                composerNotice.key,
+                snapshot.state.ui.timeline.room_id ?? "",
+                readyComposerDraftAccountOwner(snapshot)?.userId ?? ""
+              )
+                ? composerNotice.message
+                : null
+            }
             composerDraftKey={mainComposerDraftImeKey}
             composerMode={composerModeProp(snapshot.state.ui.timeline.composer.mode)}
             canEdit={!encryptedComposerBlocked}
@@ -6584,6 +6673,18 @@ export function App() {
           }}
           threadComposerDraftImeKey={threadComposerDraftImeKey}
           threadComposerDocumentOverride={threadComposerDocumentOverride}
+          threadComposerNotice={
+            composerNotice &&
+            activeThreadTarget &&
+            noticeMatchesThreadComposer(
+              composerNotice.key,
+              activeThreadTarget.room_id,
+              activeThreadTarget.root_event_id,
+              currentComposerAccount?.userId ?? ""
+            )
+              ? composerNotice.message
+              : null
+          }
           onThreadMentionQueryChange={(roomId, query) => {
             if (query !== null) {
               void applyLatestTextSnapshot(`mention-thread:${roomId}`, async () => {

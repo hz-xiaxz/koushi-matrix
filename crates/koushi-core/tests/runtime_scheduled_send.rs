@@ -677,3 +677,208 @@ where
     }
     panic!("state predicate was not satisfied within {timeout:?}");
 }
+
+#[tokio::test]
+async fn scheduled_recognized_unavailable_command_is_rejected_before_acceptance() {
+    // Issue #450: a recognized-but-unavailable slash command (/join, /invite)
+    // must be rejected terminally at schedule time — never accepted, never
+    // cleared from the draft, and never scheduled for a dispatch/retry loop.
+    let (runtime, mut conn, _, _data_dir, _credential_dir) =
+        ready_room_conn("!room:example.test").await;
+    runtime
+        .inject_actions(vec![AppAction::ScheduledSendCapabilityChanged {
+            capability: ScheduledSendCapability::LocalFallback,
+        }])
+        .await;
+    submit_composer_command(
+        &conn,
+        CoreCommand::App(AppCommand::SetComposerDraft {
+            request_id: conn.next_request_id(),
+            expected_account: session_key(),
+            room_id: "!room:example.test".to_owned(),
+            document: "keep draft".into(),
+            revision: ComposerDraftRevision::from_u64(7),
+        }),
+    )
+    .await
+    .expect("seed scheduled draft");
+    wait_for_state(&mut conn, |state| {
+        state.timeline.composer.draft == "keep draft"
+            && state.timeline.scheduled_send_capability == ScheduledSendCapability::LocalFallback
+    })
+    .await;
+
+    let request_id = conn.next_request_id();
+    submit_composer_command(
+        &conn,
+        CoreCommand::App(AppCommand::ScheduleSend {
+            request_id,
+            expected_account: session_key(),
+            room_id: "!room:example.test".to_owned(),
+            thread_root_event_id: None,
+            body: "/join #room:example.test".to_owned(),
+            send_at_ms: future_epoch_ms(Duration::from_secs(60)),
+            draft_revision: ComposerDraftRevision::from_u64(7),
+        }),
+    )
+    .await
+    .expect("submit recognized-unavailable scheduled send");
+
+    let event = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match conn.recv_event().await.expect("runtime event stream") {
+                event @ CoreEvent::Room(
+                    koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. },
+                ) => {
+                    break event;
+                }
+                event @ CoreEvent::OperationFailed {
+                    request_id: failed_request_id,
+                    ..
+                } if failed_request_id == request_id => break event,
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("scheduled rejection should be correlated");
+    let (rejected_key, rejected_request_id) = match &event {
+        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+            key,
+            request_id,
+        }) => (key, *request_id),
+        other => panic!("unexpected event: {other:?}"),
+    };
+    assert_eq!(rejected_request_id, request_id);
+    // Keyed to the main room under the canonical account.
+    assert_eq!(
+        rejected_key,
+        &koushi_core::TimelineKey::room(
+            koushi_core::AccountKey(session_key().user_id),
+            "!room:example.test",
+        )
+    );
+    let snapshot = conn.snapshot();
+    // Nothing was scheduled and the draft survives untouched.
+    assert!(snapshot.timeline.scheduled_sends.is_empty());
+    assert_eq!(snapshot.timeline.composer.draft, "keep draft");
+}
+
+#[tokio::test]
+async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preserves_the_item() {
+    // Issue #450: rescheduling to /join or /invite must be rejected
+    // terminally without touching the existing scheduled item (no permanent
+    // dispatch/retry loop).
+    let (runtime, mut conn, _, _data_dir, _credential_dir) =
+        ready_room_conn("!room:example.test").await;
+    runtime
+        .inject_actions(vec![
+            AppAction::ScheduledSendCapabilityChanged {
+                capability: ScheduledSendCapability::LocalFallback,
+            },
+            AppAction::OpenThread {
+                room_id: "!room:example.test".to_owned(),
+                root_event_id: "$thread-root:example.test".to_owned(),
+                intent: koushi_state::ThreadOpenIntent::ExistingThread,
+            },
+            AppAction::ThreadSubscribed {
+                room_id: "!room:example.test".to_owned(),
+                root_event_id: "$thread-root:example.test".to_owned(),
+            },
+        ])
+        .await;
+    wait_for_state(&mut conn, |state| {
+        state.timeline.scheduled_send_capability == ScheduledSendCapability::LocalFallback
+            && matches!(state.thread, koushi_state::ThreadPaneState::Open { .. })
+    })
+    .await;
+
+    let schedule_request = conn.next_request_id();
+    submit_composer_command(
+        &conn,
+        CoreCommand::App(AppCommand::ScheduleSend {
+            request_id: schedule_request,
+            expected_account: session_key(),
+            room_id: "!room:example.test".to_owned(),
+            thread_root_event_id: Some("$thread-root:example.test".to_owned()),
+            body: "valid scheduled body".to_owned(),
+            send_at_ms: future_epoch_ms(Duration::from_secs(60)),
+            draft_revision: ComposerDraftRevision::from_u64(1),
+        }),
+    )
+    .await
+    .expect("submit valid scheduled send");
+    let scheduled_snapshot = wait_for_state(&mut conn, |state| {
+        state
+            .scheduled_sends
+            .items
+            .values()
+            .any(|item| item.body == "valid scheduled body")
+    })
+    .await;
+    let scheduled_id = scheduled_snapshot
+        .scheduled_sends
+        .items
+        .values()
+        .find(|item| item.body == "valid scheduled body")
+        .map(|item| item.scheduled_id.clone())
+        .expect("scheduled item exists");
+
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::App(AppCommand::RescheduleScheduledSend {
+        request_id,
+        scheduled_id: scheduled_id.clone(),
+        body: "/join #room:example.test".to_owned(),
+        send_at_ms: future_epoch_ms(Duration::from_secs(120)),
+    }))
+    .await
+    .expect("submit invalid reschedule");
+
+    let event = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match conn.recv_event().await.expect("runtime event stream") {
+                event @ CoreEvent::Room(
+                    koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. },
+                ) => {
+                    break event;
+                }
+                event @ CoreEvent::OperationFailed {
+                    request_id: failed_request_id,
+                    ..
+                } if failed_request_id == request_id => break event,
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("reschedule rejection should be correlated");
+    let (rejected_key, rejected_request_id) = match &event {
+        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+            key,
+            request_id,
+        }) => (key, *request_id),
+        other => panic!("unexpected event: {other:?}"),
+    };
+    assert_eq!(rejected_request_id, request_id);
+    // The item is a THREAD item but the reschedule rejection is keyed to the
+    // item's room (main-pane scheduled list) under the canonical account —
+    // visible without the thread being open.
+    assert_eq!(
+        rejected_key,
+        &koushi_core::TimelineKey::room(
+            koushi_core::AccountKey(session_key().user_id),
+            "!room:example.test",
+        )
+    );
+    // The existing item is preserved with its original body and thread root.
+    let snapshot = conn.snapshot();
+    assert_eq!(
+        snapshot
+            .scheduled_sends
+            .items
+            .values()
+            .find(|item| item.scheduled_id == scheduled_id)
+            .map(|item| (item.body.as_str(), item.thread_root_event_id.as_deref())),
+        Some(("valid scheduled body", Some("$thread-root:example.test")))
+    );
+}

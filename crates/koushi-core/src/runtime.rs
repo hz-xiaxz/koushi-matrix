@@ -2647,6 +2647,31 @@ fn scheduled_send_id() -> String {
 }
 
 impl AppActor {
+    /// Issue #450: the TimelineKey of the composer target a slash-command
+    /// rejection should be keyed to (canonical user id account key).
+    fn composer_target_notice_key(
+        &self,
+        account: &koushi_key::SessionKeyId,
+        target: &ComposerTarget,
+    ) -> Option<TimelineKey> {
+        let account_key = crate::ids::AccountKey(account.user_id.clone());
+        match target {
+            ComposerTarget::Main { room_id } => {
+                Some(TimelineKey::room(account_key, room_id.clone()))
+            }
+            ComposerTarget::Thread {
+                room_id,
+                root_event_id,
+            } => Some(TimelineKey {
+                account_key,
+                kind: crate::ids::TimelineKind::Thread {
+                    room_id: room_id.clone(),
+                    root_event_id: root_event_id.clone(),
+                },
+            }),
+        }
+    }
+
     async fn run(mut self) {
         loop {
             let composer_draft_persist_delay = self.composer_draft_persist_delay();
@@ -4050,6 +4075,35 @@ impl AppActor {
                         });
                         return false;
                     }
+                    // Issue #450: validate slash semantics BEFORE either
+                    // scheduled-send acceptance path clears the draft — a
+                    // recognized-but-unavailable command (/join, /invite) is
+                    // rejected terminally here instead of being scheduled and
+                    // entering a permanent dispatch/retry loop. The rejection
+                    // is keyed to the composer target so the UI routes the
+                    // notice to the right pane (no frontend correlation
+                    // needed).
+                    if let Err(kind) =
+                        crate::timeline::validate_composer_body_for_timeline_send(&body)
+                    {
+                        if kind == TimelineFailureKind::UnsupportedSlashCommand
+                            && let Some(key) =
+                                self.composer_target_notice_key(&expected_account, &target)
+                        {
+                            self.emit(CoreEvent::Room(
+                                crate::event::RoomEvent::ComposerSlashCommandRejected {
+                                    key,
+                                    request_id,
+                                },
+                            ));
+                        } else {
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id,
+                                failure: CoreFailure::TimelineOperationFailed { kind },
+                            });
+                        }
+                        return false;
+                    }
                     if self.state.scheduled_sends.capability
                         != ScheduledSendCapability::LocalFallback
                     {
@@ -4151,6 +4205,50 @@ impl AppActor {
                     body,
                     send_at_ms,
                 } => {
+                    // Issue #450: rescheduling must apply the same slash
+                    // validation as the initial schedule — otherwise a
+                    // recognized-but-unavailable command (/join, /invite)
+                    // could be stored and enter the permanent dispatch/retry
+                    // loop. Reject terminally and leave the existing item
+                    // untouched. Scheduled items are edited from the main-pane
+                    // scheduled list (thread items included), so the notice is
+                    // keyed to the item's room — visible without the thread
+                    // being open.
+                    if let Err(kind) =
+                        crate::timeline::validate_composer_body_for_timeline_send(&body)
+                    {
+                        let notice_key =
+                            composer_draft_session_key(&self.state).and_then(|account| {
+                                self.state
+                                    .scheduled_sends
+                                    .items
+                                    .get(&scheduled_id)
+                                    .and_then(|item| {
+                                        self.composer_target_notice_key(
+                                            &account,
+                                            &ComposerTarget::Main {
+                                                room_id: item.room_id.clone(),
+                                            },
+                                        )
+                                    })
+                            });
+                        if kind == TimelineFailureKind::UnsupportedSlashCommand
+                            && let Some(key) = notice_key
+                        {
+                            self.emit(CoreEvent::Room(
+                                crate::event::RoomEvent::ComposerSlashCommandRejected {
+                                    key,
+                                    request_id,
+                                },
+                            ));
+                        } else {
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id,
+                                failure: CoreFailure::TimelineOperationFailed { kind },
+                            });
+                        }
+                        return false;
+                    }
                     if let Some(item) = self.state.scheduled_sends.items.get(&scheduled_id).cloned()
                         && let ScheduledSendHandle::Server { delay_id } = item.handle
                     {

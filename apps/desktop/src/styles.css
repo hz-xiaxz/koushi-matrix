@@ -4611,6 +4611,15 @@ mark {
   margin: 0;
 }
 
+.composer-notice {
+  margin: 0;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--danger-tint, rgba(214, 68, 68, 0.08));
+  color: var(--danger, #d64545);
+  font-size: 12px;
+}
+
 .composer-drop-overlay {
   position: absolute;
   z-index: 4;

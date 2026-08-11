@@ -218,7 +218,13 @@ pub fn parse_slash_command(body: &str) -> SlashCommandIntent {
         },
         "invite" => SlashCommandIntent::Invite { user_id: argument },
         "me" => SlashCommandIntent::Me { body: argument },
-        _ => SlashCommandIntent::Unsupported { command, argument },
+        // Issue #450: only implemented/recognized commands are commands.
+        // Unknown leading-slash text is ordinary content and is sent
+        // literally with the slash preserved (the // escape remains for
+        // compatibility).
+        _ => SlashCommandIntent::PlainText {
+            body: body.to_owned(),
+        },
     }
 }
 

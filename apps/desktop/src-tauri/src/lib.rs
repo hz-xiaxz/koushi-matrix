@@ -3300,6 +3300,12 @@ mod tests {
                 withheld_code: Some(RoomKeyRequestWithheldCode::Unavailable),
             }))
             .expect("serialize room key request state changed");
+        let composer_slash_command_rejected =
+            serialize_core_event(&CoreEvent::Room(RoomEvent::ComposerSlashCommandRejected {
+                key: key.clone(),
+                request_id,
+            }))
+            .expect("serialize composer slash command rejection");
 
         let room_invite_accepted =
             serialize_core_event(&CoreEvent::Room(RoomEvent::InviteAccepted {
@@ -3857,6 +3863,7 @@ mod tests {
             "roomLeft": room_left,
             "roomKeyReshared": room_key_reshared,
             "roomKeyRequestStateChanged": room_key_request_state_changed,
+            "composerSlashCommandRejected": composer_slash_command_rejected,
             "roomMarkedAsRead": room_marked_as_read,
             "roomMarkedAsUnread": room_marked_as_unread,
             "roomReportCompleted": room_report_completed,
@@ -3999,6 +4006,7 @@ mod tests {
             "roomLeft",
             "roomKeyReshared",
             "roomKeyRequestStateChanged",
+            "composerSlashCommandRejected",
             "roomMarkedAsRead",
             "roomMarkedAsUnread",
             "roomMemberModerated",

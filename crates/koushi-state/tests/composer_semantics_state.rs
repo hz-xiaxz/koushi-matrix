@@ -243,13 +243,52 @@ fn composer_me_slash_command_returns_structured_emote_intent() {
 }
 
 #[test]
-fn composer_unknown_slash_command_returns_structured_local_failure() {
+fn composer_unknown_slash_text_is_plain_content() {
+    // Issue #450: unknown leading-slash tokens are ordinary messages and are
+    // sent literally (the slash is preserved).
     assert_eq!(
         resolve_composer_send_intent("/shrug nope", MentionIntent::default()),
-        ComposerSendIntent::LocalFailure {
-            command: SlashCommandIntent::Unsupported {
-                command: "shrug".to_owned(),
-                argument: "nope".to_owned(),
+        ComposerSendIntent::Message {
+            draft: koushi_state::build_formatted_message_draft(
+                "/shrug nope",
+                MentionIntent::default()
+            ),
+        }
+    );
+    assert_eq!(
+        resolve_composer_send_intent("/usr/local/bin", MentionIntent::default()),
+        ComposerSendIntent::Message {
+            draft: koushi_state::build_formatted_message_draft(
+                "/usr/local/bin",
+                MentionIntent::default()
+            ),
+        }
+    );
+    assert_eq!(
+        resolve_composer_send_intent("/ 文章", MentionIntent::default()),
+        ComposerSendIntent::Message {
+            draft: koushi_state::build_formatted_message_draft("/ 文章", MentionIntent::default()),
+        }
+    );
+}
+
+#[test]
+fn composer_recognized_unavailable_commands_are_structured_slash_intents() {
+    // Issue #450: /join and /invite remain recognized commands; the desktop
+    // surfaces their rejection locally instead of sending them as text.
+    assert_eq!(
+        resolve_composer_send_intent("/join #room:example.invalid", MentionIntent::default()),
+        ComposerSendIntent::SlashCommand {
+            command: SlashCommandIntent::Join {
+                room_alias: "#room:example.invalid".to_owned(),
+            },
+        }
+    );
+    assert_eq!(
+        resolve_composer_send_intent("/invite @alice:example.invalid", MentionIntent::default()),
+        ComposerSendIntent::SlashCommand {
+            command: SlashCommandIntent::Invite {
+                user_id: "@alice:example.invalid".to_owned(),
             },
         }
     );

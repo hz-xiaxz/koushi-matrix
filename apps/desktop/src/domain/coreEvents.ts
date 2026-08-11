@@ -623,6 +623,9 @@ export type RoomEvent =
         withheld_code: RoomKeyRequestWithheldCode | null;
       };
     }
+  | {
+      ComposerSlashCommandRejected: { key: TimelineKey; request_id: RequestId }
+    }
   | { PinnedEventsUpdated: { room_id: string; pinned: PinnedEvent[] } }
   | { PinEventCompleted: { request_id: RequestId; room_id: string } }
   | { UnpinEventCompleted: { request_id: RequestId; room_id: string } }
@@ -1225,6 +1228,65 @@ export type CoreEventPayload =
     }
   /** Emitted by the Tauri adapter when EventStreamLag is detected. */
   | { kind: "ResyncMarker" };
+
+/**
+ * Issue #450: whether a CoreEvent reports a recognized-but-unavailable slash
+ * command rejection (e.g. /join, /invite). Both the OperationFailed surface
+ * and the production submission-path SubmissionRejected surface count.
+ */
+export function isUnsupportedSlashCommandRejection(
+  payload: CoreEventPayload
+): boolean {
+  if (payload.kind === "OperationFailed") {
+    const failure = payload.failure;
+    return (
+      !!failure &&
+      typeof failure === "object" &&
+      "TimelineOperationFailed" in failure &&
+      failure.TimelineOperationFailed.kind === "UnsupportedSlashCommand"
+    );
+  }
+  if (payload.kind === "Timeline" && "SubmissionRejected" in payload.event) {
+    return payload.event.SubmissionRejected.kind === "UnsupportedSlashCommand";
+  }
+  return false;
+}
+
+/**
+ * Issue #450: whether a keyed slash-command rejection notice belongs to the
+ * main composer of `activeRoomId` under the active account (canonical Matrix
+ * user id). The account is part of the TimelineKey, so a stale cross-account
+ * notice never matches.
+ */
+export function noticeMatchesMainComposer(
+  key: TimelineKey,
+  activeRoomId: string,
+  activeUserId: string
+): boolean {
+  return (
+    "Room" in key.kind &&
+    key.kind.Room.room_id === activeRoomId &&
+    key.account_key === activeUserId
+  );
+}
+
+/**
+ * Issue #450: whether a keyed slash-command rejection notice belongs to the
+ * open thread composer (room + root event) under the active account.
+ */
+export function noticeMatchesThreadComposer(
+  key: TimelineKey,
+  threadRoomId: string,
+  threadRootEventId: string,
+  activeUserId: string
+): boolean {
+  return (
+    "Thread" in key.kind &&
+    key.kind.Thread.room_id === threadRoomId &&
+    key.kind.Thread.root_event_id === threadRootEventId &&
+    key.account_key === activeUserId
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

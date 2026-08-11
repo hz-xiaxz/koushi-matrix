@@ -268,6 +268,16 @@ async fn wait_for_composer_draft_acceptance<S: SubmissionEventSource>(
             })) if failed_request_id == request_id => {
                 "composer draft acceptance was rejected".to_owned()
             }
+            // Issue #450: schedule-time slash rejections are keyed events
+            // carrying the request id; terminate the wait immediately.
+            Ok(Ok(koushi_core::CoreEvent::Room(
+                koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+                    request_id: rejected_request_id,
+                    ..
+                },
+            ))) if rejected_request_id == request_id => {
+                "composer draft acceptance was rejected".to_owned()
+            }
             Ok(Ok(_)) => continue,
             Ok(Err(lag)) if lag.skipped == 0 => "composer draft acceptance disconnected".to_owned(),
             Ok(Err(_)) => "composer draft acceptance event stream lagged".to_owned(),
@@ -2539,6 +2549,65 @@ mod submission_settlement_tests {
             )
             .await,
             Err("composer draft acceptance was rejected".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn composer_acceptance_wait_stops_only_on_the_correlated_keyed_slash_rejection() {
+        // Issue #450: the schedule waiter must ignore unrelated keyed
+        // rejections and terminate on the matching request id.
+        let target = koushi_state::ComposerTarget::Main {
+            room_id: "!room-a:test".to_owned(),
+        };
+        let expected_request_id = request_id(42);
+        let mut source = ScriptedSource {
+            state: koushi_state::AppState::default(),
+            events: VecDeque::from([
+                (
+                    Ok(CoreEvent::Room(
+                        koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+                            key: koushi_core::TimelineKey::room(
+                                koushi_core::AccountKey("@a:test".to_owned()),
+                                "!room-a:test",
+                            ),
+                            request_id: request_id(7),
+                        },
+                    )),
+                    None,
+                ),
+                (
+                    Ok(CoreEvent::Room(
+                        koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+                            key: koushi_core::TimelineKey::room(
+                                koushi_core::AccountKey("@a:test".to_owned()),
+                                "!room-a:test",
+                            ),
+                            request_id: expected_request_id,
+                        },
+                    )),
+                    None,
+                ),
+            ]),
+            pending_on_empty: true,
+        };
+
+        assert_eq!(
+            wait_for_composer_draft_acceptance(
+                &mut source,
+                expected_request_id,
+                &target,
+                1.into(),
+                Duration::from_secs(1),
+            )
+            .await,
+            Err("composer draft acceptance was rejected".to_owned())
+        );
+        // Both events were consumed: the unrelated keyed rejection was skipped
+        // (continue) and the matching one terminated the wait. If the waiter
+        // terminated on ANY keyed rejection, this assertion fails.
+        assert!(
+            source.events.is_empty(),
+            "waiter must consume the unrelated rejection before the matching one"
         );
     }
 

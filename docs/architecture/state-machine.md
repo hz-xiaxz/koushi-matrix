@@ -1008,6 +1008,16 @@ stateDiagram-v2
     Queued --> Empty: LogoutRequested/SessionCleared
 ```
 
+- **Issue #450 guards**: `ScheduleSend` and `RescheduleScheduledSend` validate
+  slash semantics before any acceptance path clears or mutates the draft/item.
+  A recognized-but-unavailable command (`/join`, `/invite`) is rejected
+  terminally: nothing is scheduled, an existing item is preserved untouched, and
+  a keyed `ComposerSlashCommandRejected` CoreEvent (composer target +
+  `request_id`) is emitted so the GUI shows the localized notice on the owning
+  composer — the main pane for scheduled-item edits (thread items included),
+  the exact thread composer for initial thread scheduling. Unknown leading-slash
+  text is ordinary content and schedules normally (#450).
+
 - The thread pane is either closed, opening a root event, or open with a focused
   thread timeline. Every opening/open pane retains a Rust-owned
   `ThreadOpenIntent`: `ExistingThread`, `NewThreadDraft`, or `PinnedReply { event_id }`.

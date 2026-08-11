@@ -114,9 +114,10 @@ Crate responsibilities:
   atomic mention nodes, from which Core derives readable plain text, safe
   `matrix.to` mention anchors, and Matrix `m.mentions`; markdown/html and `/me`
   emote conversion are built before SDK send, and
-  unsupported slash commands fail locally with structured private-data-free
-  failure kinds. React does not construct `m.mentions`, formatted bodies, or
-  slash-command dispatch.
+  recognized-but-unavailable slash commands (/join, /invite) fail locally with
+  structured private-data-free failure kinds surfaced near the composer; unknown
+  leading-slash text is ordinary content and sends literally (#450). React does
+  not construct `m.mentions`, formatted bodies, or slash-command dispatch.
   The same native-composition boundary applies to every desktop text-entry
   surface, including upload captions, search, room/profile/settings fields,
   authentication, recovery, and dialogs. These surfaces share one React

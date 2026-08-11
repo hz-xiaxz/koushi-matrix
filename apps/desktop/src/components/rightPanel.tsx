@@ -183,6 +183,7 @@ export function ContextualRightPanel({
   onThreadUseOriginalStagedUpload = () => undefined,
   onThreadUpdateStagedUploadCaption = () => undefined,
   threadComposerDraftImeKey,
+  threadComposerNotice = null,
   threadComposerDocumentOverride
 }: {
   activeRoom: DesktopSnapshot["state"]["domain"]["rooms"][number] | null;
@@ -363,6 +364,8 @@ export function ContextualRightPanel({
     caption: string
   ) => void;
   threadComposerDraftImeKey?: string;
+  /** Localized transient notice for the open thread composer (#450). */
+  threadComposerNotice?: string | null;
   threadComposerDocumentOverride?: ComposerDocument;
 }) {
   const mediaDownloads = snapshot.state.ui.timeline.media_downloads ?? {};
@@ -908,6 +911,7 @@ export function ContextualRightPanel({
         />
       ) : null}
       <ThreadComposer
+        notice={threadComposerNotice}
         document={threadDocument}
         draftKey={
           threadComposerDraftImeKey ??
