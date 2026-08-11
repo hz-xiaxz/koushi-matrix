@@ -908,6 +908,7 @@ async fn cancel_send_queue_item(
 
 fn projection_timeline_item(event_id: &str, is_redacted: bool) -> TimelineItem {
     TimelineItem {
+        request_state: None,
         id: TimelineItemId::Event {
             event_id: event_id.to_owned(),
         },

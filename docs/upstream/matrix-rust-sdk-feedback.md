@@ -349,3 +349,15 @@ Current SDK-only patch area:
 - Decide whether to add a `matrix-sdk` store-kind boundary test for encrypted index open failure with the wrong secret, or rely on the `matrix-sdk-search` encrypted directory coverage.
 - Add an SDK late-decryption reindex hook or keep the current documented gap as an API feedback item.
 - Prepare the upstream patch with only the remaining SDK search-index diff under `vendor/matrix-rust-sdk`.
+
+## 2026-08-10 (#460): withheld-code feedback accessors
+
+Added two doc-hidden `Encryption` accessors for the GUI phase of room-key
+request feedback (issue #460):
+
+- `room_keys_withheld_received_stream()` — surfaces the crypto store's
+  withheld stream. Only `blacklisted`, `unverified`, `unauthorised`, and
+  `unavailable` codes are retained by `add_withheld_info`; `no_olm`,
+  `history_not_shared`, and custom codes are not correlatable from this stream.
+- `room_key_withheld_codes(room_id)` — maps stored withheld entries to
+  `(session, closed code)` via `get_withheld_sessions_by_room_id`.

@@ -2588,6 +2588,16 @@ pub enum MediaDownloadSelection {
     Thumbnail { width: u64, height: u64 },
 }
 
+/// Presentation origin of a manual room-key request (issue #460): only
+/// user-triggered requests publish the "sent" toast; automatic recovery
+/// requests stay silent in the UI.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KeyRequestOrigin {
+    User,
+    Automatic,
+}
+
 pub enum TimelineCommand {
     Subscribe {
         request_id: RequestId,
@@ -2683,6 +2693,7 @@ pub enum TimelineCommand {
         request_id: RequestId,
         key: TimelineKey,
         event_id: String,
+        origin: KeyRequestOrigin,
     },
     RequestLateDecryption {
         request_id: RequestId,

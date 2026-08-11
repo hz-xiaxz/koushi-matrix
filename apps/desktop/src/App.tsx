@@ -81,6 +81,7 @@ import {
 } from "./domain/coreEvents";
 import {
   applyGlobalResync,
+  applyRoomKeyRequestStateChanged,
   applyTimelineEventWithProjectionResultAndRetention,
   createTimelineStore,
   pruneTimelineStore,
@@ -480,8 +481,13 @@ const tauriTimelineTransport: TimelineTransport | null = isTauriRuntime()
       async loadMessageSource(roomId: string, eventId: string) {
         await invoke("load_message_source", { roomId, eventId });
       },
-      async requestRoomKey(roomId: string, eventId: string, timelineKey?: TimelineKey) {
-        await invoke("request_room_key", { roomId, eventId, timelineKey });
+      async requestRoomKey(
+        roomId: string,
+        eventId: string,
+        origin: "user" | "automatic",
+        timelineKey?: TimelineKey
+      ) {
+        await invoke("request_room_key", { roomId, eventId, origin, timelineKey });
       },
       async forwardMessage(
         roomId: string,
@@ -2743,6 +2749,22 @@ export function App() {
             next = pruneTimelineStore(
               applyGlobalResync(next),
               retainedTimelineKeyIdsRef.current
+            );
+            continue;
+          }
+          if (
+            payload.kind === "Room" &&
+            typeof payload.event === "object" &&
+            payload.event !== null &&
+            "RoomKeyRequestStateChanged" in payload.event
+          ) {
+            const change = payload.event.RoomKeyRequestStateChanged;
+            next = applyRoomKeyRequestStateChanged(
+              next,
+              change.key,
+              change.event_id,
+              change.stage,
+              change.withheld_code
             );
             continue;
           }

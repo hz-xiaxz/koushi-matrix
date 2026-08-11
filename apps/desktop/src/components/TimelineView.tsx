@@ -126,6 +126,7 @@ import {
 } from "../domain/coreEvents";
 import {
   applyGlobalResync,
+  applyRoomKeyRequestStateChanged,
   applyTimelineEvent,
   batchContainsPrepend,
   createTimelineStore,
@@ -283,7 +284,12 @@ export interface TimelineTransport {
   /** Request a Rust-owned safe source DTO for an event-backed item. */
   loadMessageSource(roomId: string, eventId: string): Promise<void>;
   /** Request missing room keys for an undecryptable event and retry decryption. */
-  requestRoomKey(roomId: string, eventId: string, timelineKey?: TimelineKey): Promise<void>;
+  requestRoomKey(
+    roomId: string,
+    eventId: string,
+    origin: "user" | "automatic",
+    timelineKey?: TimelineKey
+  ): Promise<void>;
   /** Forward an event-backed message through Rust-owned source projection. */
   forwardMessage(
     roomId: string,
@@ -652,9 +658,6 @@ function canonicalTimelineContainsActivityEventId(
   );
 }
 
-function timelineItemEventId(item: TimelineItem): string | null {
-  return "Event" in item.id ? item.id.Event.event_id : null;
-}
 
 function timelineEventIdentityAttribute(identity: TimelineEventIdentity): string {
   return identity === "activity" ? "data-activity-event-id" : "data-content-event-id";
@@ -2669,7 +2672,6 @@ export const TimelineView = memo(function TimelineView({
   const autoReturnToLiveIdentityRef = useRef<string | null>(null);
   const autoReturnToLiveKeyRef = useRef<string | null>(null);
   const downloadedEventIdsRef = useRef<Set<string>>(new Set());
-  const autoRequestedRoomKeyIdsRef = useRef<Set<string>>(new Set());
   const requestedImagePreviewEventIdsRef = useRef<Set<string>>(new Set());
   const relevantAvatarMxcsRef = useRef<Set<string>>(new Set());
   const requestedAvatarMxcsRef = useRef<Set<string>>(new Set());
@@ -2710,7 +2712,72 @@ export const TimelineView = memo(function TimelineView({
   const readSignalThreadRootEventId =
     "Thread" in timelineKey.kind ? timelineKey.kind.Thread.root_event_id : null;
   const items = getItems(store, timelineKey);
-  const timelineStoreKey = useMemo(() => timelineStoreKeyId(timelineKey), [timelineKeyHash]);
+  // Issue #460: immediate acknowledgment on the user's "Request keys and
+  // retry" click: a toast + a local pending marker, until Rust publishes a
+  // terminal request state via the timeline DTO. Presentation-only.
+  const [keyRequestToast, setKeyRequestToast] = useState<string | null>(null);
+  const [pendingKeyRequests, setPendingKeyRequests] = useState<Set<string>>(new Set());
+  // Account switch: the same room/event may open under a different account
+  // (the pane component is keyed by room/anchor, not account). Rust-owned
+  // request state is per-actor, so the previous account's local optimistic
+  // marker must not suppress the new account's legitimate request. The epoch
+  // also fences delayed rejections across A->B->A navigation (same key hash).
+  const previousTimelineKeyHashRef = useRef<string | null>(null);
+  const keyRequestEpochRef = useRef(0);
+  useEffect(() => {
+    if (
+      previousTimelineKeyHashRef.current !== null &&
+      previousTimelineKeyHashRef.current !== timelineKeyHash
+    ) {
+      setPendingKeyRequests(new Set());
+      setKeyRequestToast(null);
+      keyRequestEpochRef.current += 1;
+    }
+    previousTimelineKeyHashRef.current = timelineKeyHash;
+  }, [timelineKeyHash]);
+  useEffect(() => {
+    if (!keyRequestToast) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setKeyRequestToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [keyRequestToast]);
+  // Clear the local pending marker only on a terminal Rust outcome or a
+  // rejection: while Rust reports sent/automatic/still_waiting the request is
+  // still pending, so repeat clicks must stay suppressed (no duplicate
+  // commands while pending). The Rust-published waiting copy renders from the
+  // DTO regardless of the local marker.
+  const KEY_REQUEST_TERMINAL_STAGES = [
+    "withheld",
+    "decryption_recovered",
+    "send_failed"
+  ];
+  useEffect(() => {
+    if (pendingKeyRequests.size === 0) {
+      return;
+    }
+    const settled = new Set<string>();
+    for (const key of pendingKeyRequests) {
+      for (const item of items) {
+        if (`event:${timelineItemDomId(item.id)}` !== key) {
+          continue;
+        }
+        if (
+          item.request_state &&
+          KEY_REQUEST_TERMINAL_STAGES.includes(item.request_state.stage)
+        ) {
+          settled.add(key);
+        }
+      }
+    }
+    if (settled.size > 0) {
+      const next = new Set(pendingKeyRequests);
+      for (const key of settled) {
+        next.delete(key);
+      }
+      setPendingKeyRequests(next);
+    }
+  }, [items, pendingKeyRequests]);
   // A reaction preview can omit its display label even when the sender is
   // already represented in this room's timeline. Keep a room-scoped fallback
   // so the tooltip does not regress to "Unknown user" while profile data
@@ -2762,26 +2829,6 @@ export const TimelineView = memo(function TimelineView({
     lastStoreLookupDiagnosticRef.current = message;
     emitDiagnosticLog("timeline.store", message);
   }, [emitDiagnosticLog, store, timelineKey, timelineKeyHash]);
-  useEffect(() => {
-    if (!("Thread" in timelineKey.kind)) {
-      return;
-    }
-    for (const item of items) {
-      if (!item.unable_to_decrypt?.can_request_keys) {
-        continue;
-      }
-      const eventId = timelineItemEventId(item);
-      if (eventId === null) {
-        continue;
-      }
-      const requestKey = `${timelineStoreKey}\u0000${eventId}`;
-      if (autoRequestedRoomKeyIdsRef.current.has(requestKey)) {
-        continue;
-      }
-      autoRequestedRoomKeyIdsRef.current.add(requestKey);
-      void transport.requestRoomKey(roomId, eventId, timelineKey).catch(() => undefined);
-    }
-  }, [emitDiagnosticLog, items, roomId, timelineKey, timelineStoreKey, transport]);
   useLayoutEffect(() => {
     if (!("Thread" in timelineKey.kind) || !timelineKeyState) {
       return;
@@ -3253,6 +3300,37 @@ export const TimelineView = memo(function TimelineView({
         }
         emitDiagnosticLog("timeline.avatar", avatarThumbnailLogMessage(thumbnail));
         setAvatarThumbnails((current) => ({ ...current, [mxc_uri]: thumbnail }));
+        return;
+      }
+      // Issue #460: Rust-published room-key request transitions update the
+      // displayed item directly (a static timeline emits no diff for the
+      // to-device withheld / operational-timeout outcomes).
+      if (
+        payload.kind === "Room" &&
+        typeof payload.event === "object" &&
+        payload.event !== null &&
+        "RoomKeyRequestStateChanged" in payload.event
+      ) {
+        const change = payload.event.RoomKeyRequestStateChanged;
+        if (!timelineKeyEquals(timelineKeyRef.current, change.key)) {
+          return;
+        }
+        if (!isAppLevelStore) {
+          setStore((current) => {
+            const next = applyRoomKeyRequestStateChanged(
+              current,
+              change.key,
+              change.event_id,
+              change.stage,
+              change.withheld_code
+            );
+            relevantAvatarMxcsRef.current = timelineAvatarMxcsForItems(
+              getItems(next, timelineKeyRef.current),
+              profileUsersRef.current
+            );
+            return next;
+          });
+        }
         return;
       }
       if (payload.kind !== "Timeline") {
@@ -4272,9 +4350,47 @@ export const TimelineView = memo(function TimelineView({
   );
   const onRequestRoomKey = useCallback(
     (targetRoomId: string, eventId: string) => {
-      void transport.requestRoomKey(targetRoomId, eventId, timelineKey).catch(() => undefined);
+      // User-triggered "Request keys and retry" action: immediate visible
+      // acknowledgment, then the Rust command confirms the lifecycle. While a
+      // request for this event is already pending locally, a repeat click only
+      // re-shows the toast — no duplicate command is dispatched (the pending
+      // marker is exactly the in-flight command marker). On rejection
+      // (IPC/command failure) the optimistic marker and toast are reverted so
+      // the UI never shows a stuck "waiting" state.
+      const pendingKey = `event:${eventId}`;
+      const capturedEpoch = keyRequestEpochRef.current;
+      if (targetRoomId === roomId) {
+        setKeyRequestToast(t("timeline.keyRequestToast"));
+        if (pendingKeyRequests.has(pendingKey)) {
+          return;
+        }
+        setPendingKeyRequests((current) => {
+          const next = new Set(current);
+          next.add(pendingKey);
+          return next;
+        });
+      }
+      void transport
+        .requestRoomKey(targetRoomId, eventId, "user", timelineKey)
+        .catch(() => {
+          // Fence by timeline key AND view epoch: a delayed rejection from a
+          // previous account/room — or an earlier visit to the same key
+          // (A->B->A) — must not clear the current view's marker/toast.
+          if (
+            targetRoomId === roomId &&
+            timelineKeyHashRef.current === timelineKeyHash &&
+            keyRequestEpochRef.current === capturedEpoch
+          ) {
+            setPendingKeyRequests((current) => {
+              const next = new Set(current);
+              next.delete(pendingKey);
+              return next;
+            });
+            setKeyRequestToast(null);
+          }
+        });
     },
-    [timelineKey, transport]
+    [pendingKeyRequests, roomId, t, timelineKey, transport]
   );
   const onForwardMessage = useCallback(
     (targetRoomId: string, sourceEventId: string, destinationRoomId: string) => {
@@ -5628,6 +5744,11 @@ export const TimelineView = memo(function TimelineView({
       snapshot={projectionSnapshot}
       onBeforeProjectionChange={captureProjectionLayoutTransaction}
     >
+      {keyRequestToast ? (
+        <div className="message-send-actions" role="status" aria-live="polite">
+          <span>{keyRequestToast}</span>
+        </div>
+      ) : null}
       <div
         className="timeline-view"
         data-testid="timeline-view"
@@ -5801,6 +5922,7 @@ export const TimelineView = memo(function TimelineView({
                 activityEventId={activityEventId}
                 contentTimestampMs={row.content_timestamp_ms}
                 roomId={roomId}
+                keyRequestPending={pendingKeyRequests.has(`event:${timelineItemDomId(item.id)}`)}
                 presentationContext={presentationContext}
                 codeBlockWrap={codeBlockWrap}
                 searchQuery={searchQuery}
@@ -6036,7 +6158,8 @@ export function TimelineItemRow({
   ignoredUserIds = [],
   onOpenContextMenu,
   threadAttention = null,
-  mediaDownload
+  mediaDownload,
+  keyRequestPending = false
 }: {
   item: TimelineItem;
   /** Stable presentation identity used by DOM/virtualization rows. */
@@ -6048,6 +6171,7 @@ export function TimelineItemRow({
   /** The content event timestamp, independent of presentation placement. */
   contentTimestampMs?: number | null;
   roomId: string;
+  keyRequestPending?: boolean;
   presentationContext?: "room" | "thread" | "focused";
   codeBlockWrap?: boolean;
   showThreadSummary?: boolean;
@@ -6760,6 +6884,25 @@ export function TimelineItemRow({
         {item.unable_to_decrypt?.recovery_guidance ? (
           <p className="profile-settings-hint error">
             {recoveryGuidanceText(t, item.unable_to_decrypt.recovery_guidance)}
+          </p>
+        ) : null}
+        {keyRequestPending || item.request_state ? (
+          <p
+            className={
+              (item.request_state?.stage === "withheld" ||
+                item.request_state?.stage === "still_waiting") &&
+              item.request_state
+                ? "profile-settings-hint error"
+                : item.request_state?.stage === "decryption_recovered"
+                  ? "profile-settings-hint success"
+                  : "profile-settings-hint"
+            }
+          >
+            {keyRequestStateText(
+              t,
+              item.request_state?.stage ?? "sent",
+              item.request_state?.withheldCode ?? null
+            )}
           </p>
         ) : null}
         {newThreadReplyCount > 0 ? (
@@ -8544,5 +8687,45 @@ function recoveryGuidanceText(
       return t("timeline.recoveryGuidanceRepost");
     default:
       return "";
+  }
+}
+
+function keyRequestStateText(
+  t: (key: import("../i18n/messages").MessageId) => string,
+  stage: string,
+  withheldCode: string | null
+): string {
+  switch (stage) {
+    case "sent":
+    case "automatic":
+      return t("timeline.keyRequestAwaiting");
+    case "still_waiting":
+      return t("timeline.keyRequestStillWaiting");
+    case "withheld":
+      return withheldCodeText(t, withheldCode);
+    case "decryption_recovered":
+      return t("timeline.keyRequestRecovered");
+    case "send_failed":
+      return t("timeline.keyRequestWithheld");
+    default:
+      return "";
+  }
+}
+
+function withheldCodeText(
+  t: (key: import("../i18n/messages").MessageId) => string,
+  code: string | null
+): string {
+  switch (code) {
+    case "unavailable":
+      return t("timeline.keyRequestUnavailable");
+    case "unauthorised":
+      return t("timeline.keyRequestUnauthorised");
+    case "unverified":
+      return t("timeline.keyRequestUnverified");
+    case "blacklisted":
+      return t("timeline.keyRequestBlacklisted");
+    default:
+      return t("timeline.keyRequestWithheld");
   }
 }

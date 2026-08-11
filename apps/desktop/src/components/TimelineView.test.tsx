@@ -43,6 +43,10 @@ import type {
   RoomLatestEventSummary,
   TimelineContinuityState
 } from "../domain/types";
+import type {
+  RoomKeyRequestStateDto,
+  RoomKeyRequestWithheldCode
+} from "../domain/coreEvents";
 import type { MentionCandidate } from "../app/uiShared";
 import { documentFromText } from "../domain/composerDocument";
 import { resetTimelineTransportStats } from "../domain/timelineTransportStats";
@@ -10329,10 +10333,15 @@ describe("TimelineView", () => {
     const button = await screen.findByRole("button", { name: "Request keys and retry" });
     fireEvent.click(button);
 
-    expect(requestRoomKey).toHaveBeenCalledWith("!room:example.invalid", "$encrypted", KEY);
+    expect(requestRoomKey).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$encrypted",
+      "user",
+      KEY
+    );
   });
 
-  it("automatically requests missing room keys once for undecryptable thread timeline events", async () => {
+  it("renders Rust-owned automatic request state without dispatching automatic commands", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const requestRoomKey = vi.fn(async () => undefined);
     const threadKey = threadTimelineKey(
@@ -10356,7 +10365,8 @@ describe("TimelineView", () => {
         can_request_keys: true,
         recovery_stage: null,
         recovery_guidance: null
-      }
+      },
+      request_state: { stage: "automatic", withheldCode: null } as const
     };
 
     render(
@@ -10381,29 +10391,12 @@ describe("TimelineView", () => {
       }
     });
 
+    // Automatic admission is Rust-owned: the frontend dispatches nothing and
+    // only renders the Rust-published request state (awaiting copy).
     await waitFor(() => {
-      expect(requestRoomKey).toHaveBeenCalledWith(
-        "!room:example.invalid",
-        "$encrypted-thread-reply:example.invalid",
-        threadKey
-      );
+      expect(requestRoomKey).not.toHaveBeenCalled();
     });
-    expect(requestRoomKey).toHaveBeenCalledTimes(1);
-
-    emit({
-      kind: "Timeline",
-      event: {
-        ItemsUpdated: {
-          key: threadKey,
-          generation: 1,
-          batch_id: 2,
-          diffs: [{ Set: { index: 0, item: encrypted } }]
-        }
-      }
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(requestRoomKey).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Waiting for the decryption key…")).toBeTruthy();
   });
 
   it("does not classify room-key request failures in React", async () => {
@@ -11379,5 +11372,382 @@ describe("TimelineView", () => {
 
     expect(screen.getByText("Unknown user is typing")).toBeTruthy();
     expect(screen.queryByText("@unknown:example.invalid is typing")).toBeNull();
+  });
+});
+
+describe("room key request feedback (#460)", () => {
+  function utdItem(eventId: string, requestState: RoomKeyRequestStateDto | null) {
+    return {
+      ...message(eventId, "Unable to decrypt message"),
+      unable_to_decrypt: {
+        session_id: "session-1",
+        reason: "missingRoomKey" as const,
+        can_request_keys: true,
+        recovery_stage: null,
+        recovery_guidance: null
+      },
+      request_state: requestState
+    };
+  }
+
+  function renderWithItems(items: TimelineItem[]) {
+    let emit: (payload: unknown) => void = () => undefined;
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey: vi.fn(async () => undefined),
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items
+          }
+        }
+      });
+    });
+    return { transport };
+  }
+
+  it("renders localized copy for each closed withheld code", () => {
+    const cases: Array<[RoomKeyRequestWithheldCode | null, RegExp]> = [
+      ["unavailable", /The requested device does not have this decryption key/],
+      ["unauthorised", /Sharing the decryption key was not permitted/],
+      ["unverified", /This device is unverified, so the key was not shared/],
+      ["blacklisted", /This device is excluded from key sharing/],
+      [null, /The decryption key could not be obtained/]
+    ];
+    for (const [code, expected] of cases) {
+      renderWithItems([utdItem("$w", { stage: "withheld", withheldCode: code })]);
+      expect(screen.queryByText(expected)).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it("still_waiting shows non-terminal guidance and never a raw reason", () => {
+    renderWithItems([utdItem("$s", { stage: "still_waiting", withheldCode: null })]);
+    expect(
+      screen.queryByText(/No response yet. Another device may be offline/)
+    ).toBeTruthy();
+    expect(screen.queryByText(/m\.unauthorised|refused|denied/i)).toBeNull();
+  });
+
+  it("send_failed shows the generic refusal copy instead of nothing", () => {
+    renderWithItems([utdItem("$f", { stage: "send_failed", withheldCode: null })]);
+    expect(
+      screen.queryByText("The decryption key could not be obtained.")
+    ).toBeTruthy();
+    expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
+  });
+
+  it("decryption_recovered shows success and clears the pending marker", () => {
+    renderWithItems([utdItem("$r", { stage: "decryption_recovered", withheldCode: null })]);
+    expect(screen.queryByText("Decryption key received")).toBeTruthy();
+    expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
+  });
+
+  it("clicking Request keys shows an immediate toast and pending copy; repeat clicks are suppressed while pending", async () => {
+    let emit: (payload: unknown) => void = () => undefined;
+    const requestRoomKey = vi.fn(async () => undefined);
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey,
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [utdItem("$click", null)]
+          }
+        }
+      });
+    });
+    const button = await screen.findByRole("button", { name: "Request keys and retry" });
+    // Click twice: the toast/pending marker must not duplicate, and a repeat
+    // click while the request is pending dispatches no duplicate command
+    // (plan: no duplicate commands while pending; Rust also coalesces).
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Decryption key requested");
+    });
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Waiting for the decryption key");
+    });
+    expect(screen.getAllByText(/Decryption key requested/)).toHaveLength(1);
+    expect(screen.getAllByText(/Waiting for the decryption key/)).toHaveLength(1);
+    expect(requestRoomKey).toHaveBeenCalledTimes(1);
+    expect(requestRoomKey).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$click",
+      "user",
+      KEY
+    );
+    // Suppression persists through the Rust-published pending (sent) stage:
+    // a further click re-shows the toast but dispatches no new command.
+    act(() => {
+      emit({
+        kind: "Room",
+        event: {
+          RoomKeyRequestStateChanged: {
+            key: {
+              account_key: "@alice:example.invalid",
+              kind: { Room: { room_id: "!room:example.invalid" } }
+            },
+            event_id: "$click",
+            request_id: null,
+            stage: "sent",
+            withheld_code: null
+          }
+        }
+      });
+    });
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Waiting for the decryption key");
+    });
+    fireEvent.click(button);
+    expect(requestRoomKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("keyboard activation requests keys and announces the toast in an ARIA-live status region", async () => {
+    let emit: (payload: unknown) => void = () => undefined;
+    const requestRoomKey = vi.fn(async () => undefined);
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey,
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [utdItem("$kb", null)]
+          }
+        }
+      });
+    });
+    const button = await screen.findByRole("button", { name: "Request keys and retry" });
+    // The action is a native <button> (browser-activated by Enter/Space);
+    // jsdom does not synthesize the Enter->click translation, so activate it
+    // while focused and assert the IPC payload + ARIA-live announcement.
+    expect(button.tagName).toBe("BUTTON");
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(requestRoomKey).toHaveBeenCalledWith(
+        "!room:example.invalid",
+        "$kb",
+        "user",
+        KEY
+      );
+    });
+    const status = screen.getByRole("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toContain("Decryption key requested");
+  });
+
+  it("a Rust-published transition clears the local pending marker and shows the terminal copy", async () => {
+    let emit: (payload: unknown) => void = () => undefined;
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey: vi.fn(async () => undefined),
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [utdItem("$click", null)]
+          }
+        }
+      });
+    });
+    const button = await screen.findByRole("button", { name: "Request keys and retry" });
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Waiting for the decryption key");
+    });
+    // Rust settles the request as refused (withheld) via the typed event.
+    act(() => {
+      emit({
+        kind: "Room",
+        event: {
+          RoomKeyRequestStateChanged: {
+            key: {
+              account_key: "@alice:example.invalid",
+              kind: { Room: { room_id: "!room:example.invalid" } }
+            },
+            event_id: "$click",
+            request_id: null,
+            stage: "withheld",
+            withheld_code: "unavailable"
+          }
+        }
+      });
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/The requested device does not have this decryption key/)
+      ).toBeTruthy();
+    });
+    // The local pending marker is gone once the terminal state is rendered.
+    expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
+  });
+
+  it("a delayed rejection from an earlier visit does not clear the current pending marker (A->B->A)", async () => {
+    let emitA: (payload: unknown) => void = () => undefined;
+    let rejectFirst: (reason?: unknown) => void = () => undefined;
+    let rejectSecond: (reason?: unknown) => void = () => undefined;
+    const requestRoomKey = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFirst = reject;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectSecond = reject;
+          })
+      );
+    const keyB = roomTimelineKey("@bob:example.invalid", "!room:example.invalid");
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emitA = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey,
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    const { rerender } = render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    const seed = (key: typeof KEY) =>
+      act(() => {
+        emitA({
+          kind: "Timeline",
+          event: {
+            InitialItems: {
+              request_id: null,
+              key,
+              generation: 1,
+              items: [utdItem("$click", null)]
+            }
+          }
+        });
+      });
+    seed(KEY);
+    const button = await screen.findByRole("button", { name: "Request keys and retry" });
+    fireEvent.click(button); // visit A, epoch 1
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Waiting for the decryption key");
+    });
+    // Navigate A -> B -> A (each switch bumps the view epoch).
+    rerender(
+      <TimelineView
+        timelineKey={keyB}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    seed(keyB);
+    rerender(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    seed(KEY);
+    // New click in the final A visit (epoch 3) — new marker + request.
+    const buttonAgain = await screen.findByRole("button", { name: "Request keys and retry" });
+    fireEvent.click(buttonAgain);
+    await waitFor(() => {
+      expect(requestRoomKey).toHaveBeenCalledTimes(2);
+    });
+    // The FIRST visit's request rejects late: it must not clear the new marker.
+    act(() => {
+      rejectFirst(new Error("stale rejection"));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText(/Waiting for the decryption key/)).toBeTruthy();
+    // The CURRENT visit's own rejection still clears its marker.
+    act(() => {
+      rejectSecond(new Error("current rejection"));
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
+    });
   });
 });

@@ -50,10 +50,10 @@ pub(crate) mod unread_trace;
 pub use command::{
     AccountCommand, AppCommand, CoreCommand, CreateRoomOptions, CreateRoomParentSpace,
     CreateRoomVisibility, ImageUploadCompressionPolicy, ImageUploadCompressionState,
-    ImageUploadDimensions, ImageUploadVariantInfo, ImageUploadVariantKind, MediaDownloadSelection,
-    RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, SearchCommand, SearchScope,
-    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
-    TimelineCommand, UploadMediaKind, UploadMediaRequest, UploadMediaThumbnail,
+    ImageUploadDimensions, ImageUploadVariantInfo, ImageUploadVariantKind, KeyRequestOrigin,
+    MediaDownloadSelection, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, SearchCommand,
+    SearchScope, SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
+    SyncCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest, UploadMediaThumbnail,
 };
 pub use direct_message_classification::DirectAccountDataSource;
 pub use event::{

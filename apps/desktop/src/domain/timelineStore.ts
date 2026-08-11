@@ -35,6 +35,9 @@ import type {
   MediaTransferProgress,
   PaginationDirection,
   PaginationState,
+  RoomKeyRequestStage,
+  RoomKeyRequestStateDto,
+  RoomKeyRequestWithheldCode,
   TimelineDiff,
   TimelineEvent,
   TimelineItem,
@@ -502,6 +505,42 @@ export function applyGlobalResync(store: TimelineStoreState): TimelineStoreState
   // actors replay InitialItems. It is not a canonical-window transition, so
   // retained terminal root snapshots must survive until that replay restores
   // their reply activity. True window exits still flow through `withKeys`.
+  return { ...store, keys: next };
+}
+
+/**
+ * Apply a Rust-published room-key request state transition (issue #460) to
+ * exactly the timeline the event names. The event carries the authoritative
+ * `TimelineKey` (including the account), so a transition published for one
+ * account can never mutate another account's same room/event. The DTO is
+ * Rust-owned and closed; this only updates the displayed item.
+ */
+export function applyRoomKeyRequestStateChanged(
+  store: TimelineStoreState,
+  key: TimelineKey,
+  eventId: string,
+  stage: RoomKeyRequestStage,
+  withheldCode: RoomKeyRequestWithheldCode | null
+): TimelineStoreState {
+  const targetKey = keyStr(key);
+  const keyState = store.keys.get(targetKey);
+  if (!keyState) {
+    return store;
+  }
+  const requestState: RoomKeyRequestStateDto = { stage, withheldCode };
+  let changed = false;
+  const items = keyState.items.map((item) => {
+    if (timelineItemDomId(item.id) !== eventId) {
+      return item;
+    }
+    changed = true;
+    return { ...item, request_state: requestState };
+  });
+  if (!changed) {
+    return store;
+  }
+  const next = new Map(store.keys);
+  next.set(targetKey, { ...keyState, items });
   return { ...store, keys: next };
 }
 

@@ -241,7 +241,27 @@ export interface TimelineItem {
   actions?: TimelineMessageActions;
   send_state?: TimelineSendState | null;
   unable_to_decrypt?: TimelineUnableToDecrypt | null;
+  request_state?: RoomKeyRequestStateDto | null;
 }
+
+export interface RoomKeyRequestStateDto {
+  stage: RoomKeyRequestStage;
+  withheldCode: RoomKeyRequestWithheldCode | null;
+}
+
+export type RoomKeyRequestStage =
+  | "sent"
+  | "automatic"
+  | "still_waiting"
+  | "withheld"
+  | "decryption_recovered"
+  | "send_failed";
+
+export type RoomKeyRequestWithheldCode =
+  | "blacklisted"
+  | "unverified"
+  | "unauthorised"
+  | "unavailable";
 
 export interface TimelineUnableToDecrypt {
   session_id: string | null;
@@ -594,6 +614,15 @@ export type RoomEvent =
   | { RoomForgotten: { request_id: RequestId; room_id: string } }
   | { RoomTagSet: { request_id: RequestId; room_id: string; tag: RoomTagKind } }
   | { RoomTagRemoved: { request_id: RequestId; room_id: string; tag: RoomTagKind } }
+  | {
+      RoomKeyRequestStateChanged: {
+        key: TimelineKey;
+        event_id: string;
+        request_id: RequestId | null;
+        stage: RoomKeyRequestStage;
+        withheld_code: RoomKeyRequestWithheldCode | null;
+      };
+    }
   | { PinnedEventsUpdated: { room_id: string; pinned: PinnedEvent[] } }
   | { PinEventCompleted: { request_id: RequestId; room_id: string } }
   | { UnpinEventCompleted: { request_id: RequestId; room_id: string } }

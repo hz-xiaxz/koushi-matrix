@@ -1347,6 +1347,62 @@ reaction counts, ownership, target eligibility, or toggle semantics.
   present. If the projection does not support the requested transition, settle
   it as an invalid reaction failure instead of guessing from React state.
 
+## Timeline Room-Key Request Feedback (#460)
+
+Undecryptable-message key-request presentation is Rust-owned. `RequestRoomKey`
+carries a closed `User | Automatic` origin; Rust admits/coalesces/refuses
+requests, tracks per-event presentation state, and publishes the outcome as a
+`RoomKeyRequestStateChanged` CoreEvent. React renders the closed state only —
+no timers, no outcome inference, no raw withheld reasons.
+
+```mermaid
+stateDiagram-v2
+    [*] --> sent: RequestRoomKey(User) admitted
+    [*] --> automatic: RequestRoomKey(Automatic) admitted
+    sent --> still_waiting: operational timeout
+    automatic --> still_waiting: operational timeout
+    sent --> still_waiting: superseded by another request
+    automatic --> still_waiting: superseded by another request
+    sent --> withheld: m.room_key.withheld for session
+    automatic --> withheld: m.room_key.withheld for session
+    still_waiting --> withheld: late withheld observation
+    sent --> decryption_recovered: late key / diff decrypts
+    automatic --> decryption_recovered: late key / diff decrypts
+    still_waiting --> decryption_recovered: late key / diff decrypts
+    sent --> send_failed: enqueue/SDK failure
+    automatic --> send_failed: enqueue/SDK failure
+    withheld --> decryption_recovered: key later received
+    decryption_recovered --> [*]
+    withheld --> [*]
+    send_failed --> [*]
+```
+
+Guard notes:
+
+- **Admission**: user-origin commands are always admitted; the single-slot
+  retry controller coalesces duplicates for the same current event and
+  supersedes a previous request (the superseded event's presentation moves to
+  `still_waiting` — its Matrix request is still outstanding). Automatic
+  (thread auto-recovery) requests are refused once any request state exists for
+  the event, so settled events are never re-spammed on re-render.
+- **Deadline**: one operational timeout per current request; the timeout
+  settles presentation to `still_waiting` (non-terminal — a late key or
+  withheld observation still settles it).
+- **Withheld**: `m.room_key.withheld` observations (to-device, no diff) settle
+  matching pending events to `withheld` immediately and publish; the code is a
+  closed token from the SDK store (`blacklisted | unverified | unauthorised |
+  unavailable`); unknown/custom codes render the generic refusal copy.
+- **Publication**: every transition publishes `RoomKeyRequestStateChanged`
+  with the command `request_id` (`Some` for every externally-issued command
+  including public `Automatic` requests; `None` only for actor-internal
+  automatic work), so accepted commands retain their correlation. Coalesced
+  duplicates republish the in-flight state with the duplicate command's id.
+- **Stale generations**: settlement is fenced by the actor generation; a stale
+  actor cannot publish outcomes for its replaced batch.
+- **React contract**: local optimistic marker + toast on the user's click only;
+  any Rust-published stage supersedes it; repeat clicks while a request is
+  pending dispatch no duplicate command.
+
 ## Timeline Reply Quotes, Pins, And Actions
 
 Reply quote previews and pinned-event state are Rust-owned message-interaction

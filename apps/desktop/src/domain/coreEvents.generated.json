@@ -58,7 +58,9 @@
   "activityMarkedRead": {
     "event": {
       "MarkedRead": {
-        "cleared_event_ids": ["$activity-unread:example.test"],
+        "cleared_event_ids": [
+          "$activity-unread:example.test"
+        ],
         "request_id": {
           "connection_id": 3,
           "sequence": 7
@@ -78,12 +80,27 @@
     },
     "kind": "Activity"
   },
+  "activityResolutionRetried": {
+    "event": {
+      "ResolutionRetried": {
+        "generation": 4,
+        "request_id": {
+          "connection_id": 3,
+          "sequence": 7
+        }
+      }
+    },
+    "kind": "Activity"
+  },
   "activitySnapshotLoaded": {
     "event": {
       "SnapshotLoaded": {
         "active_tab": "unread",
         "recent": {
           "next_batch": "recent-next",
+          "resolution": {
+            "kind": "idle"
+          },
           "rows": [
             {
               "context_label": "",
@@ -100,10 +117,7 @@
               "timestamp_ms": 20,
               "unread": false
             }
-          ],
-          "resolution": {
-            "kind": "idle"
-          }
+          ]
         },
         "request_id": {
           "connection_id": 3,
@@ -111,6 +125,9 @@
         },
         "unread": {
           "next_batch": "unread-next",
+          "resolution": {
+            "kind": "idle"
+          },
           "rows": [
             {
               "context_label": "",
@@ -142,10 +159,7 @@
               "timestamp_ms": 9,
               "unread": true
             }
-          ],
-          "resolution": {
-            "kind": "idle"
-          }
+          ]
         }
       }
     },
@@ -157,7 +171,9 @@
       "profile": {
         "catalog_locale": "ja",
         "complete": false,
-        "missing_message_ids": ["settings.title"]
+        "missing_message_ids": [
+          "settings.title"
+        ]
       }
     },
     "kind": "CjkTextPolicy"
@@ -323,11 +339,11 @@
           {
             "avatar_url": null,
             "canonical_alias": "#public:example.test",
-            "room_type": null,
             "guest_can_join": false,
             "joined_members": 5,
             "name": "Public Room",
             "room_id": "!public:example.test",
+            "room_type": null,
             "topic": "Directory sample",
             "world_readable": true
           }
@@ -360,14 +376,24 @@
     },
     "kind": "Room"
   },
-  "roomLeft": {
+  "roomKeyRequestStateChanged": {
     "event": {
-      "RoomLeft": {
+      "RoomKeyRequestStateChanged": {
+        "event_id": "$e1",
+        "key": {
+          "account_key": "@u:example.test",
+          "kind": {
+            "Room": {
+              "room_id": "!r:example.test"
+            }
+          }
+        },
         "request_id": {
           "connection_id": 3,
           "sequence": 7
         },
-        "room_id": "!r:example.test"
+        "stage": "withheld",
+        "withheld_code": "unavailable"
       }
     },
     "kind": "Room"
@@ -380,6 +406,18 @@
           "recipient_count": 3,
           "request_count": 2
         },
+        "request_id": {
+          "connection_id": 3,
+          "sequence": 7
+        },
+        "room_id": "!r:example.test"
+      }
+    },
+    "kind": "Room"
+  },
+  "roomLeft": {
+    "event": {
+      "RoomLeft": {
         "request_id": {
           "connection_id": 3,
           "sequence": 7
@@ -462,7 +500,9 @@
           "sequence": 7
         },
         "settings": {
-          "alternate_aliases": ["#private-alt:example.test"],
+          "alternate_aliases": [
+            "#private-alt:example.test"
+          ],
           "avatar_url": "mxc://example.test/avatar",
           "canonical_alias": "#private:example.test",
           "history_visibility": "shared",
@@ -506,7 +546,9 @@
           "sequence": 7
         },
         "settings": {
-          "alternate_aliases": ["#private-alt:example.test"],
+          "alternate_aliases": [
+            "#private-alt:example.test"
+          ],
           "avatar_url": "mxc://example.test/avatar",
           "canonical_alias": "#private:example.test",
           "history_visibility": "shared",
@@ -743,6 +785,49 @@
     },
     "kind": "Timeline"
   },
+  "timelineGapPositionsUpdated": {
+    "event": {
+      "GapPositionsUpdated": {
+        "actor_generation": 3,
+        "generation": 4,
+        "key": {
+          "account_key": "@u:example.test",
+          "kind": {
+            "Room": {
+              "room_id": "!r:example.test"
+            }
+          }
+        },
+        "positions": [
+          {
+            "before_item_index": 2,
+            "id": {
+              "ordinal": 0,
+              "topology_revision": "14695981039346656037"
+            }
+          }
+        ]
+      }
+    },
+    "kind": "Timeline"
+  },
+  "timelineGapRepairReleased": {
+    "event": {
+      "GapRepairReleased": {
+        "actor_generation": 3,
+        "generation": 5,
+        "key": {
+          "account_key": "@u:example.test",
+          "kind": {
+            "Room": {
+              "room_id": "!r:example.test"
+            }
+          }
+        }
+      }
+    },
+    "kind": "Timeline"
+  },
   "timelineInitialItems": {
     "event": {
       "InitialItems": {
@@ -757,28 +842,28 @@
             "actions": {
               "can_copy": true,
               "can_forward": true,
-              "can_reply": true,
               "can_permalink": true,
+              "can_reply": true,
               "can_view_source": true,
-              "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1",
               "editable_document": {
-                "version": 2,
                 "inlines": [
                   {
                     "kind": "text",
                     "text": "Hello "
                   },
                   {
+                    "display_label": "Mention User",
                     "kind": "mention",
                     "target": {
+                      "display_label": "Mention User",
                       "kind": "user",
-                      "user_id": "@mention:example.test",
-                      "display_label": "Mention User"
-                    },
-                    "display_label": "Mention User"
+                      "user_id": "@mention:example.test"
+                    }
                   }
-                ]
-              }
+                ],
+                "version": 2
+              },
+              "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1"
             },
             "body": "hello",
             "can_edit": true,
@@ -818,6 +903,10 @@
                 ]
               }
             ],
+            "request_state": {
+              "stage": "withheld",
+              "withheldCode": "unavailable"
+            },
             "sender": "@u:example.test",
             "sender_label": null,
             "spoiler_spans": [
@@ -866,25 +955,28 @@
                 "actions": {
                   "can_copy": true,
                   "can_forward": true,
-                  "can_reply": true,
                   "can_permalink": true,
+                  "can_reply": true,
                   "can_view_source": true,
-                  "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1",
                   "editable_document": {
-                    "version": 2,
                     "inlines": [
-                      { "kind": "text", "text": "Hello " },
                       {
+                        "kind": "text",
+                        "text": "Hello "
+                      },
+                      {
+                        "display_label": "Mention User",
                         "kind": "mention",
                         "target": {
+                          "display_label": "Mention User",
                           "kind": "user",
-                          "user_id": "@mention:example.test",
-                          "display_label": "Mention User"
-                        },
-                        "display_label": "Mention User"
+                          "user_id": "@mention:example.test"
+                        }
                       }
-                    ]
-                  }
+                    ],
+                    "version": 2
+                  },
+                  "permalink": "https://matrix.to/#/!r%3Aexample.test/%24e1"
                 },
                 "body": "hello",
                 "can_edit": true,
@@ -924,6 +1016,10 @@
                     ]
                   }
                 ],
+                "request_state": {
+                  "stage": "withheld",
+                  "withheldCode": "unavailable"
+                },
                 "sender": "@u:example.test",
                 "sender_label": null,
                 "spoiler_spans": [
@@ -966,33 +1062,6 @@
     },
     "kind": "Timeline"
   },
-  "timelineThreadRootProjection": {
-    "event": {
-      "ThreadRootProjection": {
-        "key": {
-          "account_key": "@u:example.test",
-          "kind": {
-            "Room": {
-              "room_id": "!r:example.test"
-            }
-          }
-        },
-        "projection": {
-          "activity_event_id": "$thread-reply:example.test",
-          "activity_timestamp_ms": 124,
-          "retain_without_reply": false,
-          "root_event_id": "$e1",
-          "source": {
-            "kind": "hydration"
-          },
-          "state": {
-            "kind": "pending"
-          }
-        }
-      }
-    },
-    "kind": "Timeline"
-  },
   "timelineLinkPreviewInitialItems": {
     "event": {
       "InitialItems": {
@@ -1004,8 +1073,8 @@
             "actions": {
               "can_copy": true,
               "can_forward": true,
-              "can_reply": true,
               "can_permalink": true,
+              "can_reply": true,
               "can_view_source": true,
               "permalink": "https://matrix.to/#/!r%3Aexample.test/%24linkpreview1"
             },
@@ -1153,8 +1222,8 @@
             "actions": {
               "can_copy": true,
               "can_forward": true,
-              "can_reply": true,
               "can_permalink": true,
+              "can_reply": true,
               "can_view_source": true,
               "permalink": "https://matrix.to/#/!r%3Aexample.test/%24media1"
             },
@@ -1347,49 +1416,6 @@
     },
     "kind": "Timeline"
   },
-  "timelineGapPositionsUpdated": {
-    "event": {
-      "GapPositionsUpdated": {
-        "actor_generation": 3,
-        "generation": 4,
-        "key": {
-          "account_key": "@u:example.test",
-          "kind": {
-            "Room": {
-              "room_id": "!r:example.test"
-            }
-          }
-        },
-        "positions": [
-          {
-            "before_item_index": 2,
-            "id": {
-              "ordinal": 0,
-              "topology_revision": "14695981039346656037"
-            }
-          }
-        ]
-      }
-    },
-    "kind": "Timeline"
-  },
-  "timelineGapRepairReleased": {
-    "event": {
-      "GapRepairReleased": {
-        "actor_generation": 3,
-        "generation": 5,
-        "key": {
-          "account_key": "@u:example.test",
-          "kind": {
-            "Room": {
-              "room_id": "!r:example.test"
-            }
-          }
-        }
-      }
-    },
-    "kind": "Timeline"
-  },
   "timelinePaginationEndReached": {
     "event": {
       "PaginationStateChanged": {
@@ -1420,8 +1446,8 @@
             "actions": {
               "can_copy": true,
               "can_forward": true,
-              "can_reply": true,
               "can_permalink": true,
+              "can_reply": true,
               "can_view_source": true,
               "permalink": "https://matrix.to/#/!r%3Aexample.test/%24reply1"
             },
@@ -1508,8 +1534,8 @@
             "actions": {
               "can_copy": false,
               "can_forward": false,
-              "can_reply": false,
               "can_permalink": false,
+              "can_reply": false,
               "can_view_source": false
             },
             "body": "queued",
@@ -1597,16 +1623,31 @@
     },
     "kind": "Timeline"
   },
-  "activityResolutionRetried": {
-    "kind": "Activity",
+  "timelineThreadRootProjection": {
     "event": {
-      "ResolutionRetried": {
-        "request_id": {
-          "connection_id": 3,
-          "sequence": 7
+      "ThreadRootProjection": {
+        "key": {
+          "account_key": "@u:example.test",
+          "kind": {
+            "Room": {
+              "room_id": "!r:example.test"
+            }
+          }
         },
-        "generation": 4
+        "projection": {
+          "activity_event_id": "$thread-reply:example.test",
+          "activity_timestamp_ms": 124,
+          "retain_without_reply": false,
+          "root_event_id": "$e1",
+          "source": {
+            "kind": "hydration"
+          },
+          "state": {
+            "kind": "pending"
+          }
+        }
       }
-    }
+    },
+    "kind": "Timeline"
   }
 }

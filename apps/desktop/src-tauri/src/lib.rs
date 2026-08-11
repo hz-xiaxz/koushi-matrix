@@ -2428,7 +2428,8 @@ mod tests {
                 EventCacheFailureReasonClass, EventCacheSubscribeStatus, IntentNoOpReason,
                 IntentOutcome, LinkPreview, LinkPreviewImage, LinkPreviewState, LiveSignalsEvent,
                 LocalEncryptionEvent, NativeAttentionEvent, PaginationDirection, PaginationState,
-                ReactionGroup, RoomEvent, RoomKeyReshareOutcome, SearchEvent, SyncEvent,
+                ReactionGroup, RoomEvent, RoomKeyRequestStage, RoomKeyRequestStateDto,
+                RoomKeyRequestWithheldCode, RoomKeyReshareOutcome, SearchEvent, SyncEvent,
                 ThreadRootProjectionDto, ThreadRootProjectionStateDto, ThreadSummaryDto,
                 ThreadsListEvent, TimelineAnchorRestoreStatus, TimelineCodeBlock,
                 TimelineDisplayLabelUpdate, TimelineEvent, TimelineFormattedBody, TimelineGapId,
@@ -2465,6 +2466,10 @@ mod tests {
         };
         let key = TimelineKey::room(AccountKey("@u:example.test".to_owned()), "!r:example.test");
         let item = TimelineItem {
+            request_state: Some(RoomKeyRequestStateDto {
+                stage: RoomKeyRequestStage::Withheld,
+                withheld_code: Some(RoomKeyRequestWithheldCode::Unavailable),
+            }),
             id: TimelineItemId::Event {
                 event_id: "$e1".to_owned(),
             },
@@ -2540,6 +2545,7 @@ mod tests {
             unable_to_decrypt: None,
         };
         let media_item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$media1".to_owned(),
             },
@@ -2602,6 +2608,7 @@ mod tests {
             unable_to_decrypt: None,
         };
         let send_state_item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Transaction {
                 transaction_id: "txn-not-sent".to_owned(),
             },
@@ -2635,6 +2642,7 @@ mod tests {
             unable_to_decrypt: None,
         };
         let reply_quote_item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$reply1".to_owned(),
             },
@@ -2688,6 +2696,7 @@ mod tests {
             unable_to_decrypt: None,
         };
         let link_preview_item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$linkpreview1".to_owned(),
             },
@@ -2781,6 +2790,7 @@ mod tests {
             json!({
                 "id": { "Event": { "event_id": "$e1" } },
                 "sender": "@u:example.test",
+                "request_state": { "stage": "withheld", "withheldCode": "unavailable" },
                 "sender_label": null,
                 "body": "hello",
                 "message_kind": "emote",
@@ -3281,6 +3291,15 @@ mod tests {
                 },
             }))
             .expect("serialize room key reshare outcome");
+        let room_key_request_state_changed =
+            serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyRequestStateChanged {
+                key: key.clone(),
+                event_id: "$e1".to_owned(),
+                request_id: Some(request_id),
+                stage: RoomKeyRequestStage::Withheld,
+                withheld_code: Some(RoomKeyRequestWithheldCode::Unavailable),
+            }))
+            .expect("serialize room key request state changed");
 
         let room_invite_accepted =
             serialize_core_event(&CoreEvent::Room(RoomEvent::InviteAccepted {
@@ -3837,6 +3856,7 @@ mod tests {
             "roomInviteDeclined": room_invite_declined,
             "roomLeft": room_left,
             "roomKeyReshared": room_key_reshared,
+            "roomKeyRequestStateChanged": room_key_request_state_changed,
             "roomMarkedAsRead": room_marked_as_read,
             "roomMarkedAsUnread": room_marked_as_unread,
             "roomReportCompleted": room_report_completed,
@@ -3978,6 +3998,7 @@ mod tests {
             "roomInviteDeclined",
             "roomLeft",
             "roomKeyReshared",
+            "roomKeyRequestStateChanged",
             "roomMarkedAsRead",
             "roomMarkedAsUnread",
             "roomMemberModerated",

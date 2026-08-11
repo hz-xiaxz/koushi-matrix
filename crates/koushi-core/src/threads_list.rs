@@ -744,6 +744,7 @@ mod tests {
 
     fn test_timeline_item(event_id: &str) -> TimelineItem {
         TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: event_id.to_owned(),
             },
@@ -1049,6 +1050,7 @@ mod tests {
             &HashSet::from([activity.root_event_id.clone()]),
         );
         let item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: activity.root_event_id.clone(),
             },

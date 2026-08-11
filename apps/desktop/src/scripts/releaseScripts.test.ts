@@ -2980,6 +2980,39 @@ fn test_only() {
     expect(source).not.toContain("${match[1]}");
   });
 
+  test("assertNoRawSdkErrors rejects raw SDK shapes without echoing payloads", async () => {
+    const { assertNoRawSdkErrors } = await import(
+      "../../../../scripts/lib/qa-token-contract.mjs"
+    );
+    const sentinel = "PRIVATE-SENTINEL-IDENTIFIER:example.invalid";
+    const cases = [
+      `warning: matrix_sdk::${sentinel}`,
+      `matrix_sdk_base::${sentinel}`,
+      `ruma::${sentinel}`,
+      `reqwest::${sentinel}`,
+      `hyper::${sentinel}`,
+      `SdkError ${sentinel}`,
+      `HttpError ${sentinel}`,
+      `ClientApiError ${sentinel}`,
+      `StoreError ${sentinel}`,
+      `ServerError ${sentinel}`,
+      `M_UNKNOWN ${sentinel}`
+    ];
+    for (const input of cases) {
+      let message = "";
+      try {
+        assertNoRawSdkErrors(input, "test");
+      } catch (error) {
+        message = String((error as Error).message);
+      }
+      expect(message).toContain("raw SDK diagnostic leaked");
+      // The rejection must never echo the source line/payload.
+      expect(message).not.toContain(sentinel);
+    }
+    // Clean output passes.
+    expect(() => assertNoRawSdkErrors("clean QA output", "test")).not.toThrow();
+  });
+
   test("release preflight validates headless local QA entry", () => {
     const output = runScript("scripts/desktop-release-preflight.mjs", ["--check-config"]);
 

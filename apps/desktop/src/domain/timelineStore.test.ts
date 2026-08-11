@@ -28,6 +28,7 @@ import type { TimelineThreadRootOrder } from "./types";
 import {
   applyDiffs,
   applyGlobalResync,
+  applyRoomKeyRequestStateChanged,
   applyTimelineEvent,
   batchContainsPrepend,
   classifyTimelineItemsUpdatedApplication,
@@ -232,6 +233,121 @@ describe("timeline store — diff application", () => {
     expect(timelineStoreKeyId(wireKey)).toBe(timelineStoreKeyId(uiKey));
     expect(getItems(store, uiKey)).toEqual([target]);
     expect(getKeyState(store, uiKey)?.generation).toBe(2);
+  });
+
+  test("applies a published room-key request transition to Room, Thread, and Focused timelines", () => {
+    const roomKey = roomTimelineKey(ACCOUNT_KEY, "!room:example.invalid");
+    const threadKey = {
+      account_key: ACCOUNT_KEY,
+      kind: {
+        Thread: {
+          room_id: "!room:example.invalid",
+          root_event_id: "$root:example.invalid"
+        }
+      }
+    } as TimelineKey;
+    const focusedKey = focusedTimelineKey(
+      ACCOUNT_KEY,
+      "!room:example.invalid",
+      "$target:example.invalid"
+    );
+    const item = {
+      ...makeMsg("$target:example.invalid", "utd"),
+      unable_to_decrypt: {
+        session_id: "s1",
+        reason: "missingRoomKey" as const,
+        can_request_keys: true,
+        recovery_stage: null,
+        recovery_guidance: null
+      }
+    };
+    let store = createTimelineStore();
+    for (const key of [roomKey, threadKey, focusedKey]) {
+      store = applyTimelineEvent(store, {
+        InitialItems: {
+          request_id: null,
+          key,
+          generation: 1,
+          items: [item]
+        }
+      });
+    }
+    // Seed both accounts BEFORE applying the transition so the negative case
+    // is meaningful: the account-A transition must leave B untouched.
+    const otherAccountKey = roomTimelineKey(
+      "@other-account:example.invalid",
+      "!room:example.invalid"
+    );
+    store = applyTimelineEvent(store, {
+      InitialItems: {
+        request_id: null,
+        key: otherAccountKey,
+        generation: 1,
+        items: [item]
+      }
+    });
+    expect(getItems(store, otherAccountKey)[0].request_state).toBeUndefined();
+    store = applyRoomKeyRequestStateChanged(
+      store,
+      roomKey,
+      "$target:example.invalid",
+      "withheld",
+      "unavailable"
+    );
+    expect(getItems(store, roomKey)[0].request_state).toEqual({
+      stage: "withheld",
+      withheldCode: "unavailable"
+    });
+    // Cross-account negative: the same room/event under another account was
+    // seeded first and must remain untouched by the account-A transition.
+    expect(getItems(store, otherAccountKey)[0].request_state).toBeUndefined();
+    expect(getItems(store, threadKey)[0].request_state).toBeUndefined();
+    expect(getItems(store, focusedKey)[0].request_state).toBeUndefined();
+    // Thread and Focused keys receive their own targeted transitions.
+    store = applyRoomKeyRequestStateChanged(
+      store,
+      threadKey,
+      "$target:example.invalid",
+      "withheld",
+      "unavailable"
+    );
+    expect(getItems(store, threadKey)[0].request_state).toEqual({
+      stage: "withheld",
+      withheldCode: "unavailable"
+    });
+    store = applyRoomKeyRequestStateChanged(
+      store,
+      focusedKey,
+      "$target:example.invalid",
+      "withheld",
+      "unavailable"
+    );
+    expect(getItems(store, focusedKey)[0].request_state).toEqual({
+      stage: "withheld",
+      withheldCode: "unavailable"
+    });
+    // A transition for a different room updates only its own items.
+    const otherKey = roomTimelineKey(ACCOUNT_KEY, "!other:example.invalid");
+    store = applyTimelineEvent(store, {
+      InitialItems: {
+        request_id: null,
+        key: otherKey,
+        generation: 1,
+        items: [item]
+      }
+    });
+    expect(getItems(store, otherKey)[0].request_state).toBeUndefined();
+    store = applyRoomKeyRequestStateChanged(
+      store,
+      otherKey,
+      "$target:example.invalid",
+      "withheld",
+      "unavailable"
+    );
+    expect(getItems(store, otherKey)[0].request_state).toEqual({
+      stage: "withheld",
+      withheldCode: "unavailable"
+    });
   });
 
   test("formats privacy-safe focused projection application and lookup diagnostics", () => {

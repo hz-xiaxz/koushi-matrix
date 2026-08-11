@@ -135,15 +135,16 @@ use crate::command::{
 };
 use crate::event::{
     CoreEvent, LinkPreview, LinkPreviewState, LiveSignalsEvent, PaginationDirection,
-    PaginationState, ReactionGroup, ReactionSender, ThreadRootProjectionDto,
-    ThreadRootProjectionSourceDto, ThreadRootProjectionStateDto, ThreadSummaryDto,
-    TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition,
-    TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind, TimelineMediaSource,
-    TimelineMediaThumbnail, TimelineMessageActions, TimelineMessageKind, TimelineMessageSource,
-    TimelineNavigationSnapshot, TimelineNoticeI18n, TimelineNoticeI18nKey, TimelineResyncReason,
-    TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan, TimelineUnableToDecrypt,
-    TimelineUnableToDecryptReason, TimelineUnreadPosition, TimelineViewportObservation,
-    message_actions_for_timeline_item, message_source_for_timeline_item,
+    PaginationState, ReactionGroup, ReactionSender, RoomKeyRequestStage, RoomKeyRequestStateDto,
+    RoomKeyRequestWithheldCode, ThreadRootProjectionDto, ThreadRootProjectionSourceDto,
+    ThreadRootProjectionStateDto, ThreadSummaryDto, TimelineAnchorRestoreStatus, TimelineDiff,
+    TimelineEvent, TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia,
+    TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions,
+    TimelineMessageKind, TimelineMessageSource, TimelineNavigationSnapshot, TimelineNoticeI18n,
+    TimelineNoticeI18nKey, TimelineResyncReason, TimelineSendFailureReason, TimelineSendState,
+    TimelineSpoilerSpan, TimelineUnableToDecrypt, TimelineUnableToDecryptReason,
+    TimelineUnreadPosition, TimelineViewportObservation, message_actions_for_timeline_item,
+    message_source_for_timeline_item,
 };
 use crate::executor;
 use crate::failure::{CoreFailure, TimelineFailureKind};
@@ -4841,13 +4842,15 @@ impl TimelineManagerActor {
                 request_id,
                 key,
                 event_id,
+                origin,
             } => {
                 self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::RequestRoomKey {
-                        request_id,
+                        request_id: Some(request_id),
                         event_id,
+                        origin,
                     },
                 )
                 .await;
@@ -7305,8 +7308,9 @@ enum TimelineActorMessage {
         event_id: String,
     },
     RequestRoomKey {
-        request_id: RequestId,
+        request_id: Option<RequestId>,
         event_id: String,
+        origin: crate::command::KeyRequestOrigin,
     },
     RequestLateDecryption {
         request_id: Option<RequestId>,
@@ -7316,6 +7320,11 @@ enum TimelineActorMessage {
         session_id: String,
         attempt: u32,
         actor_generation: u64,
+    },
+    RoomKeyWithheldObserved {
+        room_id: String,
+        session_id: String,
+        code: &'static str,
     },
     DecryptRetryTimeout {
         operation: u64,
@@ -10105,6 +10114,7 @@ fn thread_root_projection_item_from_raw_with_context(
             recovery_stage: None,
             recovery_guidance: None,
         }),
+        request_state: None,
         actions: message_actions_for_timeline_item(
             key.room_id(),
             &TimelineItemId::Event { event_id },
@@ -12041,6 +12051,7 @@ mod timeline_gap_repair_tracker_tests {
 
     fn event_item(event_id: &str, body: &str) -> TimelineItem {
         TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: event_id.to_owned(),
             },
@@ -14071,6 +14082,18 @@ fn next_decrypt_retry_operation() -> u64 {
     NEXT_DECRYPT_RETRY_OPERATION.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Presentation state of a user/automatic room-key request (issue #460).
+/// Rust-owned; React renders the closed tokens only.
+#[derive(Clone, Debug)]
+struct KeyRequestUiState {
+    stage: &'static str,
+    withheld_code: Option<&'static str>,
+    session_id: Option<String>,
+    /// Command correlation for externally issued requests (both origins;
+    /// issue #460); None only for actor-internal automatic work.
+    request_id: Option<RequestId>,
+}
+
 #[derive(Clone)]
 struct PendingDecryptRetry {
     event_id: String,
@@ -14318,6 +14341,15 @@ struct TimelineActor {
     /// Megolm session id internally (never exported).
     room_key_recovery:
         std::collections::BTreeMap<String, crate::room_key_recovery::RecoveryOperation>,
+    /// Per-event room-key request presentation state (issue #460), keyed by
+    /// event id (already visible timeline correlation).
+    key_request_states: std::collections::BTreeMap<String, KeyRequestUiState>,
+    /// Issue #460: automatic key-request candidates whose try_send hit a full
+    /// mailbox; retried on the next actor loop iteration.
+    pending_auto_key_requests: Vec<String>,
+    /// Closed `m.room_key.withheld` codes per (room, session) observed in this
+    /// timeline's room (issue #460).
+    withheld_codes: std::collections::BTreeMap<(String, String), &'static str>,
     next_session_alias: u64,
     recovery_tick_tasks: std::collections::BTreeMap<String, executor::JoinHandle<()>>,
 }
@@ -14916,6 +14948,56 @@ impl TimelineActor {
             }));
         }
 
+        // Room-key withheld observer (issue #460): capture standard
+        // m.room_key.withheld codes for this room into closed presentation
+        // tokens, so the UI can show localized refusal copy.
+        {
+            let withheld_tx = actor_tx.clone();
+            let withheld_room = key.room_id().to_owned();
+            let withheld_session = session.clone();
+            auxiliary_tasks.push(executor::spawn(async move {
+                // Establish the broadcast subscription BEFORE reading the
+                // stored snapshot: the underlying channel does not replay, so
+                // an observation between the snapshot and the subscription
+                // would otherwise be lost from both sources. The wrapper
+                // subscribes eagerly; no timeout is needed (the task is
+                // detached and never awaited by actor construction).
+                let mut stream =
+                    Box::pin(koushi_sdk::room_key_withheld_stream(&withheld_session).await);
+                // Seed from stored withheld state (duplicates are idempotent
+                // in the observer handler).
+                for (session_id, code) in
+                    koushi_sdk::room_key_withheld_codes(&withheld_session, &withheld_room).await
+                {
+                    let _ = withheld_tx
+                        .send(TimelineActorMessage::RoomKeyWithheldObserved {
+                            room_id: withheld_room.clone(),
+                            session_id,
+                            code: code.token(),
+                        })
+                        .await;
+                }
+                while let Some(batch) = stream.next().await {
+                    for (room_id, session_id, code) in batch {
+                        if room_id != withheld_room {
+                            continue;
+                        }
+                        if withheld_tx
+                            .send(TimelineActorMessage::RoomKeyWithheldObserved {
+                                room_id,
+                                session_id,
+                                code: code.token(),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }));
+        }
+
         // Late-decryption reports observer (#476): when the event-cache
         // redecryptor reports lag or backup availability, drive the bounded
         // local retry for this timeline's visible UTD sessions.
@@ -15181,12 +15263,29 @@ impl TimelineActor {
             room_key_recovery: Default::default(),
             next_session_alias: 0,
             recovery_tick_tasks: Default::default(),
+            key_request_states: Default::default(),
+            pending_auto_key_requests: Vec::new(),
+            withheld_codes: Default::default(),
         };
 
         actor
             .forward_initial_items_to_search(initial_sdk_items.iter().cloned())
             .await;
         actor.maybe_hydrate_missing_thread_roots().await;
+        // Issue #460: automatic one-shot key requests for Thread timelines at
+        // subscription time — existing UTD rows are delivered as InitialItems,
+        // not as diffs, so the diff-batch scanner never sees them. The actor
+        // processes these after startup; mailbox-full candidates are retained
+        // in the pending set and retried by the run loop. The automatic guard
+        // in handle_request_room_key refuses repeats for already-requested
+        // events.
+        if matches!(key.kind, TimelineKind::Thread { .. }) {
+            let initial_candidates: Vec<String> = initial_sdk_items
+                .iter()
+                .filter_map(thread_auto_requestable_event_id)
+                .collect();
+            actor.dispatch_auto_key_requests(initial_candidates);
+        }
         let task = executor::spawn(actor.run());
 
         TimelineActorHandle {
@@ -15212,6 +15311,13 @@ impl TimelineActor {
         };
         self.gap_repair.queue_inspection(initial_trigger);
         loop {
+            // Issue #460: retry automatic key-request candidates that were
+            // deferred when the mailbox was full (deduplicated by the
+            // key_request_states guard inside dispatch_auto_key_requests).
+            if !self.pending_auto_key_requests.is_empty() {
+                let pending = std::mem::take(&mut self.pending_auto_key_requests);
+                self.dispatch_auto_key_requests(pending);
+            }
             tokio::select! {
                 biased;
                 cleanup = self.cleanup_rx.changed() => {
@@ -15789,8 +15895,10 @@ impl TimelineActor {
             TimelineActorMessage::RequestRoomKey {
                 request_id,
                 event_id,
+                origin,
             } => {
-                self.handle_request_room_key(request_id, event_id).await;
+                self.handle_request_room_key(request_id, event_id, origin)
+                    .await;
             }
             TimelineActorMessage::RequestLateDecryption {
                 request_id,
@@ -15806,6 +15914,58 @@ impl TimelineActor {
             } => {
                 self.handle_room_key_recovery_tick(session_id, attempt, actor_generation)
                     .await;
+            }
+            TimelineActorMessage::RoomKeyWithheldObserved {
+                room_id,
+                session_id,
+                code,
+            } => {
+                self.withheld_codes
+                    .insert((room_id.clone(), session_id.clone()), code);
+                // Issue #460: a withheld observation for a session that a
+                // pending request is waiting on settles that presentation and
+                // publishes immediately (the to-device event carries no
+                // timeline diff, so without this the refusal stays invisible).
+                let pending_event_ids: Vec<String> = self
+                    .key_request_states
+                    .iter()
+                    .filter(|(_, state)| state.session_id.as_deref() == Some(session_id.as_str()))
+                    .map(|(event_id, _)| event_id.clone())
+                    .collect();
+                for event_id in pending_event_ids {
+                    // Settle the active retry for this event first (if any):
+                    // its settle path transitions the stage and publishes, and
+                    // prevents the pending timeout from later downgrading the
+                    // refusal to still_waiting.
+                    if let Some(operation) = decrypt_retry_settlement_operation(
+                        &self.decrypt_retry,
+                        self.actor_generation,
+                        &event_id,
+                    ) {
+                        self.settle_decrypt_retry(operation, DecryptRetrySettledResult::Withheld);
+                        continue;
+                    }
+                    // Non-current requests (already timed out / settled) still
+                    // surface the refusal when the observation arrives late.
+                    // Terminal stages are not regressed: a recovered event stays
+                    // recovered and a send failure stays failed. A stage already
+                    // settled `withheld` by a diff still gains the typed code
+                    // when the independent observation arrives later.
+                    let should_publish =
+                        self.key_request_states.get(&event_id).is_some_and(|state| {
+                            withheld_update_should_publish(state.stage, state.withheld_code, code)
+                        });
+                    if !should_publish {
+                        continue;
+                    }
+                    if let Some(state) = self.key_request_states.get_mut(&event_id) {
+                        state.stage = "withheld";
+                        state.withheld_code = Some(code);
+                    }
+                    if let Some(state) = self.key_request_states.get(&event_id) {
+                        self.publish_key_request_state(&event_id, state);
+                    }
+                }
             }
             TimelineActorMessage::DecryptRetryTimeout {
                 operation,
@@ -17857,6 +18017,21 @@ impl TimelineActor {
             if let Some(task) = self.decrypt_retry_timeout_task.take() {
                 task.abort();
             }
+            // Issue #460: the superseded request's operational window ends and
+            // its timeout task is gone — move its presentation to
+            // still_waiting (the Matrix request is still outstanding; a late
+            // key or withheld observation settles it further).
+            if let Some(state) = self.key_request_states.get_mut(&previous.event_id) {
+                if !matches!(
+                    state.stage,
+                    "withheld" | "decryption_recovered" | "send_failed"
+                ) {
+                    state.stage = "still_waiting";
+                }
+            }
+            if let Some(state) = self.key_request_states.get(&previous.event_id) {
+                self.publish_key_request_state(&previous.event_id, state);
+            }
         }
         record_decrypt_retry_request(
             pending.operation,
@@ -17904,27 +18079,156 @@ impl TimelineActor {
             settlement.result,
             settlement.pending.started_at.elapsed(),
         );
+        // Issue #460: update the presentation state for the affected event.
+        let event_id = settlement.pending.event_id.clone();
+        let stage = match settlement.result {
+            DecryptRetrySettledResult::Decrypted => Some("decryption_recovered"),
+            DecryptRetrySettledResult::Withheld => Some("withheld"),
+            DecryptRetrySettledResult::Timeout => Some("still_waiting"),
+            // Request enqueue/SDK failures settle as still-missing; surface
+            // them as a terminal send failure so the UI is not stuck waiting.
+            DecryptRetrySettledResult::StillMissing => Some("send_failed"),
+            _ => None,
+        };
+        if let Some(stage) = stage {
+            // Resolve a closed withheld code from the observed to-device
+            // `m.room_key.withheld` for this event's session, if known.
+            let existing_session = self
+                .key_request_states
+                .get(&event_id)
+                .and_then(|state| state.session_id.clone());
+            let withheld_code = existing_session.as_deref().and_then(|session| {
+                self.withheld_codes
+                    .get(&(self.key.room_id().to_owned(), session.to_owned()))
+                    .copied()
+            });
+            self.key_request_states
+                .entry(event_id.clone())
+                .and_modify(|state| {
+                    state.stage = stage;
+                    state.withheld_code = withheld_code;
+                })
+                .or_insert(KeyRequestUiState {
+                    stage,
+                    withheld_code,
+                    session_id: None,
+                    request_id: None,
+                });
+            // Issue #460: every settle transition is published so the UI can
+            // reflect withheld / still-waiting / send-failure even when no
+            // timeline diff follows (static timeline, to-device withheld).
+            if let Some(state) = self.key_request_states.get(&event_id) {
+                self.publish_key_request_state(&event_id, state);
+            }
+        }
     }
 
-    async fn handle_request_room_key(&mut self, request_id: RequestId, event_id: String) {
+    fn publish_key_request_state(&self, event_id: &str, state: &KeyRequestUiState) {
+        // Generation fence: a replaced actor must not publish outcomes for a
+        // batch the UI has already discarded (same gate as timeline events).
+        let Some(_lease) = self
+            .timeline_actor_generations
+            .try_acquire(&self.key, self.actor_generation)
+        else {
+            return;
+        };
+        let _ = self.event_tx.send(CoreEvent::Room(
+            crate::event::RoomEvent::RoomKeyRequestStateChanged {
+                key: self.key.clone(),
+                event_id: event_id.to_owned(),
+                request_id: state.request_id.clone(),
+                stage: key_request_stage_token(state.stage),
+                withheld_code: state
+                    .withheld_code
+                    .and_then(key_request_withheld_code_token),
+            },
+        ));
+    }
+
+    /// Issue #460: queue automatic key-request messages for events, retaining
+    /// candidates that hit a full mailbox for a later retry (never blocks the
+    /// projection on the actor's own bounded mailbox).
+    fn dispatch_auto_key_requests(&mut self, event_ids: Vec<String>) {
+        for event_id in event_ids {
+            if self.key_request_states.contains_key(&event_id) {
+                continue;
+            }
+            match self.msg_tx.try_send(TimelineActorMessage::RequestRoomKey {
+                request_id: None,
+                event_id,
+                origin: crate::command::KeyRequestOrigin::Automatic,
+            }) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(message)) => {
+                    match message {
+                        TimelineActorMessage::RequestRoomKey { event_id, .. }
+                            if !self.pending_auto_key_requests.contains(&event_id) =>
+                        {
+                            // Dedup: repeated Reset batches re-scan the same
+                            // events; the pending set stays bounded by the
+                            // number of distinct requestable events.
+                            self.pending_auto_key_requests.push(event_id);
+                        }
+                        _ => {}
+                    }
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
+            }
+        }
+    }
+
+    async fn handle_request_room_key(
+        &mut self,
+        request_id: Option<RequestId>,
+        event_id: String,
+        origin: crate::command::KeyRequestOrigin,
+    ) {
         let requested_event_id = event_id.clone();
         let event_id = match matrix_sdk::ruma::EventId::parse(&event_id) {
             Ok(event_id) => event_id,
             Err(_) => {
-                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+                if let Some(request_id) = request_id {
+                    self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+                }
                 return;
             }
         };
         let Some(event_item) = self.timeline.item_by_event_id(&event_id).await else {
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+            if let Some(request_id) = request_id {
+                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+            }
             return;
         };
         if !event_item.content().is_unable_to_decrypt() {
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
+            if let Some(request_id) = request_id {
+                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
+            }
             return;
         }
         let retry_reason = decrypt_retry_reason_from_content(event_item.content());
         let backup_observation = self.session.observe_secure_backup_state();
+        // Issue #460: automatic (thread auto-recovery) requests are one-shot
+        // per event — once a request state exists, repeats are refused so a
+        // settled still-waiting/withheld event is not re-spammed on every
+        // render. Externally issued commands still retain correlation: when a
+        // concrete request id is present, republish the in-flight state with
+        // it (silent return only for actor-internal None).
+        if origin == crate::command::KeyRequestOrigin::Automatic
+            && self.key_request_states.contains_key(&requested_event_id)
+        {
+            if let Some(request_id) = request_id
+                && let Some(state) = self.key_request_states.get(&requested_event_id)
+            {
+                let correlated = KeyRequestUiState {
+                    stage: state.stage,
+                    withheld_code: state.withheld_code,
+                    session_id: state.session_id.clone(),
+                    request_id: Some(request_id),
+                };
+                self.publish_key_request_state(&requested_event_id, &correlated);
+            }
+            return;
+        }
         let Some(pending) = self.begin_decrypt_retry(
             &requested_event_id,
             retry_reason,
@@ -17933,23 +18237,59 @@ impl TimelineActor {
                 backup_observation.current.recovery,
             ),
         ) else {
+            // Issue #460: coalesced duplicate — the request for this event is
+            // already in flight. Republish the current state correlated to
+            // this accepted command so every accepted command retains its
+            // request_id (the frontend apply is idempotent).
+            if let Some(state) = self.key_request_states.get(&requested_event_id) {
+                let correlated = KeyRequestUiState {
+                    stage: state.stage,
+                    withheld_code: state.withheld_code,
+                    session_id: state.session_id.clone(),
+                    request_id: request_id.clone(),
+                };
+                self.publish_key_request_state(&requested_event_id, &correlated);
+            }
             return;
         };
         let Some(original_json) = event_item.original_json().cloned() else {
             self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Malformed);
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+            if let Some(request_id) = request_id {
+                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+            }
             return;
         };
         let room_id = match matrix_sdk::ruma::RoomId::parse(self.key.room_id()) {
             Ok(room_id) => room_id,
             Err(_) => {
                 self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Malformed);
-                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+                if let Some(request_id) = request_id {
+                    self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+                }
                 return;
             }
         };
         let session_id =
             unable_to_decrypt_from_content(event_item.content()).and_then(|utd| utd.session_id);
+        // Issue #460: publish the request state so the UI can show progress.
+        self.key_request_states.insert(
+            requested_event_id.clone(),
+            KeyRequestUiState {
+                stage: if origin == crate::command::KeyRequestOrigin::User {
+                    "sent"
+                } else {
+                    "automatic"
+                },
+                withheld_code: None,
+                session_id: session_id.clone(),
+                request_id: request_id.clone(),
+            },
+        );
+        // Issue #460: publish the accepted initial state so the UI can move
+        // off its local optimistic marker onto Rust-owned waiting copy.
+        if let Some(state) = self.key_request_states.get(&requested_event_id) {
+            self.publish_key_request_state(&requested_event_id, state);
+        }
         let Some(session_id) = session_id else {
             let result = executor::timeout_at(
                 pending.deadline,
@@ -17978,7 +18318,9 @@ impl TimelineActor {
                         pending.operation,
                         DecryptRetrySettledResult::StillMissing,
                     );
-                    self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                    if let Some(request_id) = request_id {
+                        self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                    }
                     return;
                 }
                 Err(_) => {
@@ -18057,7 +18399,9 @@ impl TimelineActor {
                             pending.operation,
                             DecryptRetrySettledResult::StillMissing,
                         );
-                        self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        if let Some(request_id) = request_id {
+                            self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        }
                         return;
                     }
                     Err(_) => {
@@ -18108,7 +18452,9 @@ impl TimelineActor {
                             pending.operation,
                             DecryptRetrySettledResult::StillMissing,
                         );
-                        self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        if let Some(request_id) = request_id {
+                            self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        }
                         return;
                     }
                     Err(_) => {
@@ -19530,6 +19876,61 @@ impl TimelineActor {
                 self.ensure_room_key_recovery(session_id);
             }
         }
+        // Issue #460: a decrypted replacement for an event with a pending
+        // key-request state settles the presentation as recovered (late keys
+        // included, after the operational timeout). Scans every batch value
+        // shape (singleton, Reset, Append) so a late decrypt delivered as a
+        // full reset or append still settles an already-timed-out request.
+        for diff in &diffs {
+            let values: Vec<&Arc<SdkTimelineItem>> = match diff {
+                eyeball_im::VectorDiff::PushFront { value } => vec![value],
+                eyeball_im::VectorDiff::PushBack { value } => vec![value],
+                eyeball_im::VectorDiff::Insert { value, .. } => vec![value],
+                eyeball_im::VectorDiff::Set { value, .. } => vec![value],
+                eyeball_im::VectorDiff::Reset { values } => values.iter().collect(),
+                eyeball_im::VectorDiff::Append { values } => values.iter().collect(),
+                _ => continue,
+            };
+            for item in values {
+                let Some(event) = item.as_event() else {
+                    continue;
+                };
+                let Some(event_id) = event.event_id() else {
+                    continue;
+                };
+                let event_id = event_id.to_string();
+                if !self.key_request_states.contains_key(&event_id) {
+                    continue;
+                }
+                if event.content().is_unable_to_decrypt() {
+                    continue;
+                }
+                let mut recovered = false;
+                if let Some(state) = self.key_request_states.get_mut(&event_id) {
+                    // Terminal send failure is not regressed by a late key.
+                    if state.stage != "decryption_recovered" && state.stage != "send_failed" {
+                        state.stage = "decryption_recovered";
+                        recovered = true;
+                    }
+                }
+                // Issue #460: a late recovery after the operational timeout is
+                // published as the correlated Room event (the diff updates the
+                // DTO, but only this event carries the request_id). The active
+                // settlement path publishes for the current operation, so skip
+                // it here to avoid a duplicate publication.
+                if recovered
+                    && decrypt_retry_settlement_operation(
+                        &self.decrypt_retry,
+                        self.actor_generation,
+                        &event_id,
+                    )
+                    .is_none()
+                    && let Some(state) = self.key_request_states.get(&event_id)
+                {
+                    self.publish_key_request_state(&event_id, state);
+                }
+            }
+        }
         let decrypt_retry_resolution = self.decrypt_retry.pending.as_ref().and_then(|pending| {
             diffs.iter().find_map(|diff| {
                 decrypt_retry_diff_settlement(diff, &pending.event_id).and_then(|result| {
@@ -19542,7 +19943,45 @@ impl TimelineActor {
                 })
             })
         });
+        // Issue #460: settle BEFORE the conversion below so the emitted batch
+        // carries the settled request state (withheld/decryption_recovered) in
+        // the same diff the UI applies — otherwise a static timeline would
+        // never learn the outcome.
+        if let Some((operation, result)) = decrypt_retry_resolution {
+            self.settle_decrypt_retry(operation, result);
+        }
         let sdk_diffs = diffs;
+        // Issue #460: automatic one-shot key requests for Thread timelines.
+        // Admission is Rust-owned (the automatic guard in
+        // handle_request_room_key refuses repeats for events that already
+        // have a request state), so React only renders the resulting state.
+        if matches!(self.key.kind, TimelineKind::Thread { .. }) {
+            let mut auto_request_event_ids: Vec<String> = Vec::new();
+            for diff in &sdk_diffs {
+                let values: Vec<&Arc<SdkTimelineItem>> = match diff {
+                    eyeball_im::VectorDiff::PushFront { value } => vec![value],
+                    eyeball_im::VectorDiff::PushBack { value } => vec![value],
+                    eyeball_im::VectorDiff::Insert { value, .. } => vec![value],
+                    eyeball_im::VectorDiff::Set { value, .. } => vec![value],
+                    eyeball_im::VectorDiff::Reset { values } => values.iter().collect(),
+                    eyeball_im::VectorDiff::Append { values } => values.iter().collect(),
+                    _ => Vec::new(),
+                };
+                for value in values {
+                    let Some(event_id) = thread_auto_requestable_event_id(value) else {
+                        continue;
+                    };
+                    if self.key_request_states.contains_key(&event_id) {
+                        continue;
+                    }
+                    auto_request_event_ids.push(event_id);
+                }
+            }
+            // Dispatched through the helper so mailbox-full candidates are
+            // retained and retried on the next loop iteration instead of
+            // being silently lost.
+            self.dispatch_auto_key_requests(auto_request_event_ids);
+        }
         let has_historical_gap_repair_projection = gap_repair_projections
             .iter()
             .any(|projection| projection.operation.domain == CausalProjectionDomain::HistoricalGap);
@@ -19556,6 +19995,8 @@ impl TimelineActor {
             &self.key,
             self.own_user_id.as_deref(),
             &self.send_statuses,
+            Some(&self.key_request_states),
+            Some(&self.withheld_codes),
         );
         for diff in &mut core_diffs {
             apply_ignored_sender_suppression_to_diff(diff, &self.ignored_user_ids);
@@ -19668,10 +20109,6 @@ impl TimelineActor {
         ) else {
             return;
         };
-
-        if let Some((operation, result)) = decrypt_retry_resolution {
-            self.settle_decrypt_retry(operation, result);
-        }
 
         if let Some(AppAction::LiveRoomReceiptsUpdated {
             room_id,
@@ -20870,6 +21307,8 @@ impl TimelineActor {
                     self.own_user_id.as_deref(),
                     &self.send_statuses,
                     Some(&self.room_key_recovery),
+                    Some(&self.key_request_states),
+                    Some(&self.withheld_codes),
                 )
             })
             .map(|mut item| {
@@ -21012,6 +21451,8 @@ impl TimelineActor {
                     self.own_user_id.as_deref(),
                     &self.send_statuses,
                     Some(&self.room_key_recovery),
+                    Some(&self.key_request_states),
+                    Some(&self.withheld_codes),
                 )
             })
             .map(|mut item| {
@@ -24382,7 +24823,79 @@ pub fn sdk_item_to_timeline_item(
     item: &Arc<SdkTimelineItem>,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
 ) -> TimelineItem {
-    sdk_item_to_timeline_item_with_send_states(key, item, own_user_id, &HashMap::new(), None)
+    sdk_item_to_timeline_item_with_send_states(
+        key,
+        item,
+        own_user_id,
+        &HashMap::new(),
+        None,
+        None,
+        None,
+    )
+}
+
+/// Build the closed room-key request presentation state for an event
+/// (issue #460). Only closed tokens cross the wire.
+fn request_state_for_item(
+    key_request_states: Option<&std::collections::BTreeMap<String, KeyRequestUiState>>,
+    withheld_codes: Option<&std::collections::BTreeMap<(String, String), &'static str>>,
+    key: &TimelineKey,
+    event_item: &matrix_sdk_ui::timeline::EventTimelineItem,
+) -> Option<RoomKeyRequestStateDto> {
+    let event_id = event_item.event_id()?.to_string();
+    let state = key_request_states?.get(&event_id)?;
+    let withheld_code = state
+        .withheld_code
+        .and_then(key_request_withheld_code_token)
+        .or_else(|| {
+            let session = event_item
+                .content()
+                .as_unable_to_decrypt()
+                .and_then(|utd| {
+                    let matrix_sdk_ui::timeline::EncryptedMessage::MegolmV1AesSha2 {
+                        session_id,
+                        ..
+                    } = utd
+                    else {
+                        return None;
+                    };
+                    Some(session_id.as_str())
+                })?;
+            withheld_codes?
+                .get(&(key.room_id().to_owned(), session.to_owned()))
+                .copied()
+                .and_then(key_request_withheld_code_token)
+        });
+    Some(RoomKeyRequestStateDto {
+        stage: key_request_stage_token(state.stage),
+        withheld_code,
+    })
+}
+
+/// Map an internal stage literal to the closed wire token. Internal stages
+/// are compile-time literals only; the fallback keeps the wire contract closed
+/// even if a future literal is added before the mapping is extended.
+fn key_request_stage_token(stage: &str) -> RoomKeyRequestStage {
+    match stage {
+        "sent" => RoomKeyRequestStage::Sent,
+        "automatic" => RoomKeyRequestStage::Automatic,
+        "still_waiting" => RoomKeyRequestStage::StillWaiting,
+        "withheld" => RoomKeyRequestStage::Withheld,
+        "decryption_recovered" => RoomKeyRequestStage::DecryptionRecovered,
+        "send_failed" => RoomKeyRequestStage::SendFailed,
+        _ => RoomKeyRequestStage::StillWaiting,
+    }
+}
+
+/// Map an internal withheld-code literal to the closed wire token.
+fn key_request_withheld_code_token(code: &str) -> Option<RoomKeyRequestWithheldCode> {
+    match code {
+        "blacklisted" => Some(RoomKeyRequestWithheldCode::Blacklisted),
+        "unverified" => Some(RoomKeyRequestWithheldCode::Unverified),
+        "unauthorised" => Some(RoomKeyRequestWithheldCode::Unauthorised),
+        "unavailable" => Some(RoomKeyRequestWithheldCode::Unavailable),
+        _ => None,
+    }
 }
 
 fn sdk_item_to_timeline_item_with_send_states(
@@ -24393,6 +24906,8 @@ fn sdk_item_to_timeline_item_with_send_states(
     recovery: Option<
         &std::collections::BTreeMap<String, crate::room_key_recovery::RecoveryOperation>,
     >,
+    key_request_states: Option<&std::collections::BTreeMap<String, KeyRequestUiState>>,
+    withheld_codes: Option<&std::collections::BTreeMap<(String, String), &'static str>>,
 ) -> TimelineItem {
     use matrix_sdk_ui::timeline::{TimelineItemKind, VirtualTimelineItem};
 
@@ -24541,6 +25056,12 @@ fn sdk_item_to_timeline_item_with_send_states(
                 link_ranges_for_message_projection(body.as_deref(), formatted.as_ref());
 
             TimelineItem {
+                request_state: request_state_for_item(
+                    key_request_states,
+                    withheld_codes,
+                    key,
+                    event_item,
+                ),
                 id,
                 sender,
                 sender_label,
@@ -24579,6 +25100,7 @@ fn sdk_item_to_timeline_item_with_send_states(
                 VirtualTimelineItem::TimelineStart => ("timeline-start".to_owned(), None, true),
             };
             TimelineItem {
+                request_state: None,
                 id: TimelineItemId::Synthetic { synthetic_id },
                 sender: None,
                 sender_label: None,
@@ -24609,6 +25131,29 @@ fn sdk_item_to_timeline_item_with_send_states(
             }
         }
     }
+}
+
+/// Event id of a requestable UTD event for automatic key requests (issue
+/// #460): decryptable-retry eligible (session known) and the original JSON is
+/// available to re-request from.
+fn thread_auto_requestable_event_id(item: &Arc<SdkTimelineItem>) -> Option<String> {
+    let event_item = item.as_event()?;
+    let event_id = event_item.event_id()?.to_string();
+    let requestable = event_item.content().is_unable_to_decrypt()
+        && event_item.original_json().is_some()
+        && unable_to_decrypt_from_content(event_item.content())
+            .and_then(|utd| utd.session_id)
+            .is_some();
+    requestable.then_some(event_id)
+}
+
+/// Whether a late withheld observation should update/publish a presentation
+/// state (issue #460): terminal stages are never regressed, and a stage
+/// already settled `withheld` by a diff still gains the typed code when the
+/// independent observation arrives later with a different code.
+fn withheld_update_should_publish(stage: &str, current_code: Option<&str>, new_code: &str) -> bool {
+    !matches!(stage, "decryption_recovered" | "send_failed")
+        && (stage != "withheld" || current_code != Some(new_code))
 }
 
 fn unable_to_decrypt_from_content(
@@ -26074,6 +26619,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
     key: &TimelineKey,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
     send_statuses: &HashMap<String, TimelineSendState>,
+    key_request_states: Option<&std::collections::BTreeMap<String, KeyRequestUiState>>,
+    withheld_codes: Option<&std::collections::BTreeMap<(String, String), &'static str>>,
 ) -> Vec<TimelineDiff> {
     let mut canonical_len = initial_canonical_len;
     let mut converted = Vec::with_capacity(diffs.len());
@@ -26087,6 +26634,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 });
                 canonical_len += 1;
@@ -26099,6 +26648,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 });
                 canonical_len += 1;
@@ -26112,6 +26663,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 });
                 canonical_len += 1;
@@ -26125,6 +26678,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 });
             }
@@ -26152,6 +26707,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                                 value,
                                 own_user_id,
                                 send_statuses,
+                                None,
+                                None,
                                 None,
                             )
                         })
@@ -26181,6 +26738,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 }));
                 canonical_len += values.len();
@@ -32862,6 +33421,7 @@ mod tests {
         is_hidden: bool,
     ) -> TimelineItem {
         TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: event_id.to_owned(),
             },
@@ -38289,6 +38849,7 @@ mod tests {
 
     fn timeline_message_item(event_id: &str, sender: &str) -> TimelineItem {
         TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: event_id.to_owned(),
             },
@@ -41938,7 +42499,15 @@ mod tests {
         };
         let sdk_diffs = accepted_relay_batch(generation, batch_generation, diffs)
             .expect("replacement generation must be accepted");
-        let diffs = sdk_vector_diffs_to_timeline_diffs(&sdk_diffs, 0, &key, None, &HashMap::new());
+        let diffs = sdk_vector_diffs_to_timeline_diffs(
+            &sdk_diffs,
+            0,
+            &key,
+            None,
+            &HashMap::new(),
+            None,
+            None,
+        );
         assert!(
             emit_items_updated_and_reconcile_replay_known_for_generation(
                 &event_tx,
@@ -42735,6 +43304,104 @@ mod tests {
                 .settle_if_current(second.operation, 7, DecryptRetrySettledResult::Timeout)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn room_key_request_state_tokens_are_closed_and_serde_stable() {
+        // Every internal stage literal maps to a closed wire token, and the
+        // DTO serializes with the exact tokens the TypeScript union declares.
+        let stage_cases = [
+            ("sent", "sent"),
+            ("automatic", "automatic"),
+            ("still_waiting", "still_waiting"),
+            ("withheld", "withheld"),
+            ("decryption_recovered", "decryption_recovered"),
+            ("send_failed", "send_failed"),
+        ];
+        for (literal, wire) in stage_cases {
+            let serialized = serde_json::to_string(&key_request_stage_token(literal)).unwrap();
+            assert_eq!(serialized, format!("\"{wire}\""));
+        }
+        let code_cases = [
+            ("blacklisted", "blacklisted"),
+            ("unverified", "unverified"),
+            ("unauthorised", "unauthorised"),
+            ("unavailable", "unavailable"),
+        ];
+        for (literal, wire) in code_cases {
+            let serialized =
+                serde_json::to_string(&key_request_withheld_code_token(literal)).unwrap();
+            assert_eq!(serialized, format!("\"{wire}\""));
+        }
+        // Unknown / custom codes carry no specific copy: they map to None.
+        assert!(key_request_withheld_code_token("custom").is_none());
+        let dto = RoomKeyRequestStateDto {
+            stage: key_request_stage_token("withheld"),
+            withheld_code: key_request_withheld_code_token("unavailable"),
+        };
+        assert_eq!(
+            serde_json::to_string(&dto).unwrap(),
+            "{\"stage\":\"withheld\",\"withheldCode\":\"unavailable\"}"
+        );
+    }
+
+    #[test]
+    fn withheld_update_guard_allows_typed_code_and_never_regresses_terminal_stages() {
+        // Stage settled withheld by a diff without a code still gains it.
+        assert!(withheld_update_should_publish(
+            "withheld",
+            None,
+            "unavailable"
+        ));
+        // A different typed code replaces the previous one.
+        assert!(withheld_update_should_publish(
+            "withheld",
+            Some("unverified"),
+            "blacklisted"
+        ));
+        // Duplicate observation of the same code is idempotent.
+        assert!(!withheld_update_should_publish(
+            "withheld",
+            Some("unavailable"),
+            "unavailable"
+        ));
+        // Non-withheld pending stages accept the refusal.
+        assert!(withheld_update_should_publish("sent", None, "unavailable"));
+        assert!(withheld_update_should_publish(
+            "still_waiting",
+            None,
+            "unavailable"
+        ));
+        // Terminal stages are never regressed by a late observation.
+        assert!(!withheld_update_should_publish(
+            "decryption_recovered",
+            None,
+            "unavailable"
+        ));
+        assert!(!withheld_update_should_publish(
+            "send_failed",
+            None,
+            "unavailable"
+        ));
+    }
+
+    #[test]
+    fn room_key_request_state_changed_debug_redacts_identifiers() {
+        let event = CoreEvent::Room(crate::event::RoomEvent::RoomKeyRequestStateChanged {
+            key: TimelineKey::room(
+                crate::ids::AccountKey("@secret-account:example.invalid".to_owned()),
+                "!secret-room:example.invalid",
+            ),
+            event_id: "$secret-event:example.invalid".to_owned(),
+            request_id: None,
+            stage: RoomKeyRequestStage::Withheld,
+            withheld_code: Some(RoomKeyRequestWithheldCode::Unverified),
+        });
+        let rendered = format!("{event:?}");
+        assert!(!rendered.contains("secret-account"));
+        assert!(!rendered.contains("secret-room"));
+        assert!(!rendered.contains("secret-event"));
+        assert!(rendered.contains("withheld"));
     }
 
     #[test]
@@ -45386,6 +46053,8 @@ mod tests {
             &key,
             Some(&ALICE),
             &HashMap::new(),
+            None,
+            None,
         );
         apply_timeline_diffs_to_items(&mut canonical, &diffs);
 
