@@ -246,7 +246,7 @@ export interface TimelineItem {
 
 export interface RoomKeyRequestStateDto {
   stage: string;
-  withheld_code: string | null;
+  withheldCode: string | null;
 }
 
 export interface TimelineUnableToDecrypt {

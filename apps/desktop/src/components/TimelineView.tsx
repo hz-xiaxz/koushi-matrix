@@ -2428,6 +2428,7 @@ export const TimelineView = memo(function TimelineView({
 }: {
   timelineKey: TimelineKey;
   roomId: string;
+  keyRequestPending?: boolean;
   presentationContext?: "room" | "thread" | "focused";
   transport: TimelineTransport;
   onReply: TimelineRowActionHandlers["onReply"];
@@ -2716,26 +2717,47 @@ export const TimelineView = memo(function TimelineView({
     "Thread" in timelineKey.kind ? timelineKey.kind.Thread.root_event_id : null;
   const items = getItems(store, timelineKey);
   const timelineStoreKey = useMemo(() => timelineStoreKeyId(timelineKey), [timelineKeyHash]);
-  // Issue #460: transient toast when a user-triggered key request is accepted
-  // by Rust (request_state transitions to "sent"). Presentation-only.
+  // Issue #460: immediate acknowledgment on the user's "Request keys and
+  // retry" click: a toast + a local pending marker, until Rust confirms a
+  // terminal request state via the timeline DTO. Presentation-only.
   const [keyRequestToast, setKeyRequestToast] = useState<string | null>(null);
-  const seenSentRequests = useRef<Set<string>>(new Set());
+  const [pendingKeyRequests, setPendingKeyRequests] = useState<Set<string>>(new Set());
   useEffect(() => {
-    let announced = false;
-    for (const item of items) {
-      const key = timelineItemDomId(item.id);
-      if (item.request_state?.stage === "sent" && !seenSentRequests.current.has(key)) {
-        seenSentRequests.current.add(key);
-        announced = true;
+    if (!keyRequestToast) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setKeyRequestToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [keyRequestToast]);
+  // Clear the local pending marker once Rust publishes a terminal state.
+  useEffect(() => {
+    if (pendingKeyRequests.size === 0) {
+      return;
+    }
+    const settled = new Set<string>();
+    for (const key of pendingKeyRequests) {
+      for (const item of items) {
+        if (timelineItemDomId(item.id) !== key) {
+          continue;
+        }
+        if (
+          item.request_state &&
+          ["withheld", "decryption_recovered", "send_failed"].includes(
+            item.request_state.stage
+          )
+        ) {
+          settled.add(key);
+        }
       }
     }
-    if (announced) {
-      setKeyRequestToast(t("timeline.keyRequestToast"));
-      const timer = setTimeout(() => setKeyRequestToast(null), 4000);
-      return () => clearTimeout(timer);
+    if (settled.size > 0) {
+      const next = new Set(pendingKeyRequests);
+      for (const key of settled) {
+        next.delete(key);
+      }
+      setPendingKeyRequests(next);
     }
-    return undefined;
-  }, [items, t]);
+  }, [items, pendingKeyRequests]);
   // A reaction preview can omit its display label even when the sender is
   // already represented in this room's timeline. Keep a room-scoped fallback
   // so the tooltip does not regress to "Unknown user" while profile data
@@ -4299,12 +4321,21 @@ export const TimelineView = memo(function TimelineView({
   );
   const onRequestRoomKey = useCallback(
     (targetRoomId: string, eventId: string) => {
-      // User-triggered "Request keys and retry" action.
+      // User-triggered "Request keys and retry" action: immediate visible
+      // acknowledgment, then the Rust command confirms the lifecycle.
+      if (targetRoomId === roomId) {
+        setPendingKeyRequests((current) => {
+          const next = new Set(current);
+          next.add(`event:${eventId}`);
+          return next;
+        });
+        setKeyRequestToast(t("timeline.keyRequestToast"));
+      }
       void transport
         .requestRoomKey(targetRoomId, eventId, "user", timelineKey)
         .catch(() => undefined);
     },
-    [timelineKey, transport]
+    [roomId, t, timelineKey, transport]
   );
   const onForwardMessage = useCallback(
     (targetRoomId: string, sourceEventId: string, destinationRoomId: string) => {
@@ -5836,6 +5867,7 @@ export const TimelineView = memo(function TimelineView({
                 activityEventId={activityEventId}
                 contentTimestampMs={row.content_timestamp_ms}
                 roomId={roomId}
+                keyRequestPending={pendingKeyRequests.has(`event:${timelineItemDomId(item.id)}`)}
                 presentationContext={presentationContext}
                 codeBlockWrap={codeBlockWrap}
                 searchQuery={searchQuery}
@@ -6071,7 +6103,8 @@ export function TimelineItemRow({
   ignoredUserIds = [],
   onOpenContextMenu,
   threadAttention = null,
-  mediaDownload
+  mediaDownload,
+  keyRequestPending = false
 }: {
   item: TimelineItem;
   /** Stable presentation identity used by DOM/virtualization rows. */
@@ -6083,6 +6116,7 @@ export function TimelineItemRow({
   /** The content event timestamp, independent of presentation placement. */
   contentTimestampMs?: number | null;
   roomId: string;
+  keyRequestPending?: boolean;
   presentationContext?: "room" | "thread" | "focused";
   codeBlockWrap?: boolean;
   showThreadSummary?: boolean;
@@ -6797,18 +6831,23 @@ export function TimelineItemRow({
             {recoveryGuidanceText(t, item.unable_to_decrypt.recovery_guidance)}
           </p>
         ) : null}
-        {item.request_state ? (
+        {keyRequestPending || item.request_state ? (
           <p
             className={
-              item.request_state.stage === "withheld" ||
-              item.request_state.stage === "still_waiting"
+              (item.request_state?.stage === "withheld" ||
+                item.request_state?.stage === "still_waiting") &&
+              item.request_state
                 ? "profile-settings-hint error"
-                : item.request_state.stage === "decryption_recovered"
+                : item.request_state?.stage === "decryption_recovered"
                   ? "profile-settings-hint success"
                   : "profile-settings-hint"
             }
           >
-            {keyRequestStateText(t, item.request_state.stage, item.request_state.withheld_code)}
+            {keyRequestStateText(
+              t,
+              item.request_state?.stage ?? "awaiting",
+              item.request_state?.withheldCode ?? null
+            )}
           </p>
         ) : null}
         {newThreadReplyCount > 0 ? (

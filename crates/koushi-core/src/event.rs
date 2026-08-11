@@ -726,6 +726,12 @@ pub enum RoomEvent {
         room_id: String,
         outcome: RoomKeyReshareOutcome,
     },
+    RoomKeyRequestStateChanged {
+        room_id: String,
+        event_id: String,
+        stage: String,
+        withheld_code: Option<String>,
+    },
     MarkedAsRead {
         request_id: RequestId,
         room_id: String,
@@ -938,6 +944,18 @@ impl fmt::Debug for RoomEvent {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("outcome", outcome)
+                .finish(),
+            Self::RoomKeyRequestStateChanged {
+                room_id,
+                event_id,
+                stage,
+                withheld_code,
+            } => formatter
+                .debug_struct("RoomKeyRequestStateChanged")
+                .field("room_id", &"RoomId(..)")
+                .field("event_id", &"EventId(..)")
+                .field("stage", stage)
+                .field("withheld_code", withheld_code)
                 .finish(),
             Self::MarkedAsRead { request_id, .. } => formatter
                 .debug_struct("MarkedAsRead")
@@ -2221,6 +2239,7 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
         | RoomEvent::RoomMemberModerated { .. }
         | RoomEvent::RoomMemberRoleUpdated { .. }
         | RoomEvent::RoomKeyReshared { .. }
+        | RoomEvent::RoomKeyRequestStateChanged { .. }
         | RoomEvent::MarkedAsRead { .. }
         | RoomEvent::MarkedAsUnread { .. }
         | RoomEvent::ReportCompleted { .. } => {}

@@ -17990,6 +17990,9 @@ impl TimelineActor {
             DecryptRetrySettledResult::Decrypted => Some("decryption_recovered"),
             DecryptRetrySettledResult::Withheld => Some("withheld"),
             DecryptRetrySettledResult::Timeout => Some("still_waiting"),
+            // Request enqueue/SDK failures settle as still-missing; surface
+            // them as a terminal send failure so the UI is not stuck waiting.
+            DecryptRetrySettledResult::StillMissing => Some("send_failed"),
             _ => None,
         };
         if let Some(stage) = stage {
@@ -18004,6 +18007,17 @@ impl TimelineActor {
                     withheld_code,
                 });
         }
+    }
+
+    fn publish_key_request_state(&self, event_id: &str, state: &KeyRequestUiState) {
+        let _ = self.event_tx.send(CoreEvent::Room(
+            crate::event::RoomEvent::RoomKeyRequestStateChanged {
+                room_id: self.key.room_id().to_owned(),
+                event_id: event_id.to_owned(),
+                stage: state.stage.to_owned(),
+                withheld_code: state.withheld_code.map(ToOwned::to_owned),
+            },
+        ));
     }
 
     /// Closed withheld code for an event's session, if observed (issue #460).
@@ -19681,6 +19695,11 @@ impl TimelineActor {
             if let Some(state) = self.key_request_states.get_mut(&event_id) {
                 if state.stage != "decryption_recovered" {
                     state.stage = "decryption_recovered";
+                    let published = KeyRequestUiState {
+                        stage: "decryption_recovered",
+                        withheld_code: state.withheld_code,
+                    };
+                    self.publish_key_request_state(&event_id, &published);
                 }
             }
         }

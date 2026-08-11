@@ -11448,14 +11448,14 @@ describe("room key request feedback (#460)", () => {
       [null, /The decryption key could not be obtained/]
     ];
     for (const [code, expected] of cases) {
-      renderWithItems([utdItem("$w", { stage: "withheld", withheld_code: code })]);
+      renderWithItems([utdItem("$w", { stage: "withheld", withheldCode: code })]);
       expect(screen.queryByText(expected)).toBeTruthy();
       cleanup();
     }
   });
 
   it("still_waiting shows non-terminal guidance and never a raw reason", () => {
-    renderWithItems([utdItem("$s", { stage: "still_waiting", withheld_code: null })]);
+    renderWithItems([utdItem("$s", { stage: "still_waiting", withheldCode: null })]);
     expect(
       screen.queryByText(/No response yet. Another device may be offline/)
     ).toBeTruthy();
@@ -11463,8 +11463,61 @@ describe("room key request feedback (#460)", () => {
   });
 
   it("decryption_recovered shows success and clears the pending marker", () => {
-    renderWithItems([utdItem("$r", { stage: "decryption_recovered", withheld_code: null })]);
+    renderWithItems([utdItem("$r", { stage: "decryption_recovered", withheldCode: null })]);
     expect(screen.queryByText("Decryption key received")).toBeTruthy();
     expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
+  });
+
+  it("clicking Request keys shows an immediate toast and pending copy, coalescing repeats", async () => {
+    let emit: (payload: unknown) => void = () => undefined;
+    const requestRoomKey = vi.fn(async () => undefined);
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey,
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [utdItem("$click", null)]
+          }
+        }
+      });
+    });
+    const button = await screen.findByRole("button", { name: "Request keys and retry" });
+    fireEvent.click(button);
+    // Immediate visible acknowledgment (toast) on the click.
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Decryption key requested");
+    });
+    // Pending copy appears immediately.
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Waiting for the decryption key");
+    });
+    // Coalescing: the Rust side admits duplicates; the frontend sends the
+    // typed command once per distinct event.
+    expect(requestRoomKey).toHaveBeenCalledTimes(1);
+    expect(requestRoomKey).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$click",
+      "user",
+      KEY
+    );
   });
 });
