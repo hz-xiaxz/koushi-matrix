@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   isUnsupportedSlashCommandRejection,
-  type CoreEventPayload
+  noticeMatchesMainComposer,
+  noticeMatchesThreadComposer,
+  type CoreEventPayload,
+  type TimelineKey
 } from "./coreEvents";
 
 describe("isUnsupportedSlashCommandRejection (#450)", () => {
@@ -75,5 +78,53 @@ describe("isUnsupportedSlashCommandRejection (#450)", () => {
         event: { Connected: { kind: "connecting" } }
       } as unknown as CoreEventPayload)
     ).toBe(false);
+  });
+});
+
+describe("composer notice routing (#450)", () => {
+  const userId = "@alice:example.invalid";
+  const roomKey: TimelineKey = {
+    account_key: userId,
+    kind: { Room: { room_id: "!room:example.invalid" } }
+  };
+  const threadKey: TimelineKey = {
+    account_key: userId,
+    kind: {
+      Thread: {
+        room_id: "!room:example.invalid",
+        root_event_id: "$root:example.invalid"
+      }
+    }
+  };
+  const otherAccountKey: TimelineKey = {
+    ...roomKey,
+    account_key: "@bob:example.invalid"
+  };
+
+  it("matches the main composer only for the same room and account", () => {
+    expect(noticeMatchesMainComposer(roomKey, "!room:example.invalid", userId)).toBe(true);
+    expect(noticeMatchesMainComposer(roomKey, "!other:example.invalid", userId)).toBe(false);
+    // Cross-account: the same room under another account never matches.
+    expect(noticeMatchesMainComposer(otherAccountKey, "!room:example.invalid", userId)).toBe(false);
+    // A thread key never matches the main composer.
+    expect(noticeMatchesMainComposer(threadKey, "!room:example.invalid", userId)).toBe(false);
+  });
+
+  it("matches the thread composer only for the same thread and account", () => {
+    expect(
+      noticeMatchesThreadComposer(threadKey, "!room:example.invalid", "$root:example.invalid", userId)
+    ).toBe(true);
+    expect(
+      noticeMatchesThreadComposer(threadKey, "!room:example.invalid", "$other-root:example.invalid", userId)
+    ).toBe(false);
+    expect(
+      noticeMatchesThreadComposer(
+        { ...threadKey, account_key: "@bob:example.invalid" },
+        "!room:example.invalid",
+        "$root:example.invalid",
+        userId
+      )
+    ).toBe(false);
+    expect(noticeMatchesMainComposer(threadKey, "!room:example.invalid", userId)).toBe(false);
   });
 });

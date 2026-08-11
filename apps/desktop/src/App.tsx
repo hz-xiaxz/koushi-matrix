@@ -77,9 +77,10 @@ import {
   type TimelineKey,
   focusedTimelineKey,
   isUnsupportedSlashCommandRejection,
+  noticeMatchesMainComposer,
+  noticeMatchesThreadComposer,
   roomTimelineKey,
-  threadTimelineKey,
-  timelineKeyEquals
+  threadTimelineKey
 } from "./domain/coreEvents";
 import {
   applyGlobalResync,
@@ -2799,10 +2800,7 @@ export function App() {
                 if (activeRoomId) {
                   const account = readyComposerDraftAccountOwner(snapshotRef.current);
                   showComposerNotice(
-                    roomTimelineKey(
-                      account ? composerDraftAccountOwnerKey(account) : "main",
-                      activeRoomId
-                    ),
+                    roomTimelineKey(account ? account.userId : "main", activeRoomId),
                     t("composer.slashCommandUnavailable")
                   );
                 }
@@ -4606,7 +4604,6 @@ export function App() {
     }
 
     const target: ComposerTarget = { kind: "main", room_id: roomId };
-    lastScheduleTargetKeyRef.current = roomTimelineKey(accountOwner, roomId);
     const scope = composerDraftScope(account, target);
     const admitted = beginComposerOperation(scope);
     if (!admitted) return;
@@ -4614,6 +4611,9 @@ export function App() {
     if (!reserveComposerAcceptedRevision(admitted, draftRevision)) return;
     const localRevisionAtSubmission = mainComposerOverlayRef.current?.revision ?? null;
     try {
+      // Issue #450: key any schedule-time rejection to this target. The
+      // canonical account is the Matrix user id (matches Rust AccountKey).
+      lastScheduleTargetKeyRef.current = roomTimelineKey(account.userId, roomId);
       const response = await api.scheduleSend(
         account,
         admitted.lease.leaseId,
@@ -4628,6 +4628,10 @@ export function App() {
       const accepted =
         response.acceptedRevision !== null &&
         compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
+      if (accepted) {
+        // The schedule was accepted; no rejection event is pending for it.
+        lastScheduleTargetKeyRef.current = null;
+      }
       const hasNewerDraft = mainComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
       if (accepted && !hasNewerDraft) {
         cancelComposerDraftPersist(scope);
@@ -4636,6 +4640,7 @@ export function App() {
       }
       setSnapshot(response.snapshot);
     } catch {
+      lastScheduleTargetKeyRef.current = null;
       settleComposerOperation(admitted);
       // Command failures are surfaced through the Rust-owned error/event path.
     }
@@ -5318,7 +5323,6 @@ export function App() {
     ) {
       return;
     }
-    lastScheduleTargetKeyRef.current = threadTimelineKey(accountOwner, roomId, rootEventId);
     const target: ComposerTarget = {
       kind: "thread",
       room_id: roomId,
@@ -5332,6 +5336,8 @@ export function App() {
     const localRevisionAtSubmission = threadComposerOverlayRef.current?.revision ?? null;
     let response;
     try {
+      // Issue #450: key any schedule-time rejection to this thread target.
+      lastScheduleTargetKeyRef.current = threadTimelineKey(account.userId, roomId, rootEventId);
       response = await api.scheduleSend(
         account,
         admitted.lease.leaseId,
@@ -5342,6 +5348,7 @@ export function App() {
         draftRevision
       );
     } catch {
+      lastScheduleTargetKeyRef.current = null;
       settleComposerOperation(admitted);
       return;
     }
@@ -5350,6 +5357,9 @@ export function App() {
     const accepted =
       response.acceptedRevision !== null &&
       compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
+    if (accepted) {
+      lastScheduleTargetKeyRef.current = null;
+    }
     const hasNewerDraft =
       threadComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
     if (accepted && !hasNewerDraft) {
@@ -6374,16 +6384,11 @@ export function App() {
             composerNotice={
               composerNotice &&
               "Room" in composerNotice.key.kind &&
-              composerNotice.key.kind.Room.room_id === snapshot.state.ui.timeline.room_id &&
-              (() => {
-                const account = readyComposerDraftAccountOwner(snapshot);
-                return account
-                  ? timelineKeyEquals(
-                      composerNotice.key,
-                      roomTimelineKey(composerDraftAccountOwnerKey(account), snapshot.state.ui.timeline.room_id ?? "")
-                    )
-                  : true;
-              })()
+              noticeMatchesMainComposer(
+                composerNotice.key,
+                snapshot.state.ui.timeline.room_id ?? "",
+                readyComposerDraftAccountOwner(snapshot)?.userId ?? ""
+              )
                 ? composerNotice.message
                 : null
             }
@@ -6675,14 +6680,11 @@ export function App() {
           threadComposerNotice={
             composerNotice &&
             activeThreadTarget &&
-            "Thread" in composerNotice.key.kind &&
-            timelineKeyEquals(
+            noticeMatchesThreadComposer(
               composerNotice.key,
-              threadTimelineKey(
-                currentComposerAccount ? composerDraftAccountOwnerKey(currentComposerAccount) : "main",
-                activeThreadTarget.room_id,
-                activeThreadTarget.root_event_id
-              )
+              activeThreadTarget.room_id,
+              activeThreadTarget.root_event_id,
+              currentComposerAccount?.userId ?? ""
             )
               ? composerNotice.message
               : null
