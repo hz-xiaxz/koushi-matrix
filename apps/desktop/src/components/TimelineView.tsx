@@ -283,7 +283,12 @@ export interface TimelineTransport {
   /** Request a Rust-owned safe source DTO for an event-backed item. */
   loadMessageSource(roomId: string, eventId: string): Promise<void>;
   /** Request missing room keys for an undecryptable event and retry decryption. */
-  requestRoomKey(roomId: string, eventId: string, timelineKey?: TimelineKey): Promise<void>;
+  requestRoomKey(
+    roomId: string,
+    eventId: string,
+    origin: "user" | "automatic",
+    timelineKey?: TimelineKey
+  ): Promise<void>;
   /** Forward an event-backed message through Rust-owned source projection. */
   forwardMessage(
     roomId: string,
@@ -2711,6 +2716,26 @@ export const TimelineView = memo(function TimelineView({
     "Thread" in timelineKey.kind ? timelineKey.kind.Thread.root_event_id : null;
   const items = getItems(store, timelineKey);
   const timelineStoreKey = useMemo(() => timelineStoreKeyId(timelineKey), [timelineKeyHash]);
+  // Issue #460: transient toast when a user-triggered key request is accepted
+  // by Rust (request_state transitions to "sent"). Presentation-only.
+  const [keyRequestToast, setKeyRequestToast] = useState<string | null>(null);
+  const seenSentRequests = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let announced = false;
+    for (const item of items) {
+      const key = timelineItemDomId(item.id);
+      if (item.request_state?.stage === "sent" && !seenSentRequests.current.has(key)) {
+        seenSentRequests.current.add(key);
+        announced = true;
+      }
+    }
+    if (announced) {
+      setKeyRequestToast(t("timeline.keyRequestToast"));
+      const timer = setTimeout(() => setKeyRequestToast(null), 4000);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [items, t]);
   // A reaction preview can omit its display label even when the sender is
   // already represented in this room's timeline. Keep a room-scoped fallback
   // so the tooltip does not regress to "Unknown user" while profile data
@@ -2779,7 +2804,9 @@ export const TimelineView = memo(function TimelineView({
         continue;
       }
       autoRequestedRoomKeyIdsRef.current.add(requestKey);
-      void transport.requestRoomKey(roomId, eventId, timelineKey).catch(() => undefined);
+      void transport
+        .requestRoomKey(roomId, eventId, "automatic", timelineKey)
+        .catch(() => undefined);
     }
   }, [emitDiagnosticLog, items, roomId, timelineKey, timelineStoreKey, transport]);
   useLayoutEffect(() => {
@@ -4272,7 +4299,10 @@ export const TimelineView = memo(function TimelineView({
   );
   const onRequestRoomKey = useCallback(
     (targetRoomId: string, eventId: string) => {
-      void transport.requestRoomKey(targetRoomId, eventId, timelineKey).catch(() => undefined);
+      // User-triggered "Request keys and retry" action.
+      void transport
+        .requestRoomKey(targetRoomId, eventId, "user", timelineKey)
+        .catch(() => undefined);
     },
     [timelineKey, transport]
   );
@@ -5628,6 +5658,11 @@ export const TimelineView = memo(function TimelineView({
       snapshot={projectionSnapshot}
       onBeforeProjectionChange={captureProjectionLayoutTransaction}
     >
+      {keyRequestToast ? (
+        <div className="message-send-actions" role="status" aria-live="polite">
+          <span>{keyRequestToast}</span>
+        </div>
+      ) : null}
       <div
         className="timeline-view"
         data-testid="timeline-view"
@@ -6760,6 +6795,20 @@ export function TimelineItemRow({
         {item.unable_to_decrypt?.recovery_guidance ? (
           <p className="profile-settings-hint error">
             {recoveryGuidanceText(t, item.unable_to_decrypt.recovery_guidance)}
+          </p>
+        ) : null}
+        {item.request_state ? (
+          <p
+            className={
+              item.request_state.stage === "withheld" ||
+              item.request_state.stage === "still_waiting"
+                ? "profile-settings-hint error"
+                : item.request_state.stage === "decryption_recovered"
+                  ? "profile-settings-hint success"
+                  : "profile-settings-hint"
+            }
+          >
+            {keyRequestStateText(t, item.request_state.stage, item.request_state.withheld_code)}
           </p>
         ) : null}
         {newThreadReplyCount > 0 ? (
@@ -8544,5 +8593,44 @@ function recoveryGuidanceText(
       return t("timeline.recoveryGuidanceRepost");
     default:
       return "";
+  }
+}
+
+function keyRequestStateText(
+  t: (key: import("../i18n/messages").MessageId) => string,
+  stage: string,
+  withheldCode: string | null
+): string {
+  switch (stage) {
+    case "sent":
+    case "awaiting":
+    case "automatic":
+      return t("timeline.keyRequestAwaiting");
+    case "still_waiting":
+      return t("timeline.keyRequestStillWaiting");
+    case "withheld":
+      return withheldCodeText(t, withheldCode);
+    case "decryption_recovered":
+      return t("timeline.keyRequestRecovered");
+    default:
+      return "";
+  }
+}
+
+function withheldCodeText(
+  t: (key: import("../i18n/messages").MessageId) => string,
+  code: string | null
+): string {
+  switch (code) {
+    case "unavailable":
+      return t("timeline.keyRequestUnavailable");
+    case "unauthorised":
+      return t("timeline.keyRequestUnauthorised");
+    case "unverified":
+      return t("timeline.keyRequestUnverified");
+    case "blacklisted":
+      return t("timeline.keyRequestBlacklisted");
+    default:
+      return t("timeline.keyRequestWithheld");
   }
 }

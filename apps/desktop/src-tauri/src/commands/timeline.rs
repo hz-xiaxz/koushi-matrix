@@ -1805,15 +1805,25 @@ pub async fn load_message_source(
 pub async fn request_room_key(
     room_id: String,
     event_id: String,
+    origin: Option<String>,
     timeline_key: Option<TimelineKey>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
-        build_request_room_key_command(request_id, account_key, room_id, timeline_key, event_id)
-    {
+    let origin = match origin.as_deref() {
+        Some("automatic") => koushi_core::KeyRequestOrigin::Automatic,
+        _ => koushi_core::KeyRequestOrigin::User,
+    };
+    if let Some(command) = build_request_room_key_command(
+        request_id,
+        account_key,
+        room_id,
+        event_id,
+        origin,
+        timeline_key,
+    ) {
         submit_core_command(state.inner(), command).await?;
     }
     update_qa_window_title_from_state(&app, state.inner()).await;

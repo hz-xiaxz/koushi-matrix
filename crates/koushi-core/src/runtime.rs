@@ -8956,6 +8956,7 @@ mod tests {
             actor_generation: 0,
             generation: crate::ids::TimelineGeneration(0),
             items: vec![TimelineItem {
+                request_state: None,
                 id: TimelineItemId::Event {
                     event_id: "$event:example.invalid".to_owned(),
                 },
@@ -9045,6 +9046,7 @@ mod tests {
             batch_id: crate::ids::TimelineBatchId(1),
             diffs: vec![TimelineDiff::PushBack {
                 item: TimelineItem {
+                    request_state: None,
                     id: TimelineItemId::Event {
                         event_id: "$later:example.invalid".to_owned(),
                     },

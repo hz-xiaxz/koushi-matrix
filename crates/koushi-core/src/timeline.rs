@@ -135,15 +135,16 @@ use crate::command::{
 };
 use crate::event::{
     CoreEvent, LinkPreview, LinkPreviewState, LiveSignalsEvent, PaginationDirection,
-    PaginationState, ReactionGroup, ReactionSender, ThreadRootProjectionDto,
-    ThreadRootProjectionSourceDto, ThreadRootProjectionStateDto, ThreadSummaryDto,
-    TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition,
-    TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind, TimelineMediaSource,
-    TimelineMediaThumbnail, TimelineMessageActions, TimelineMessageKind, TimelineMessageSource,
-    TimelineNavigationSnapshot, TimelineNoticeI18n, TimelineNoticeI18nKey, TimelineResyncReason,
-    TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan, TimelineUnableToDecrypt,
-    TimelineUnableToDecryptReason, TimelineUnreadPosition, TimelineViewportObservation,
-    message_actions_for_timeline_item, message_source_for_timeline_item,
+    PaginationState, ReactionGroup, ReactionSender, RoomKeyRequestStateDto,
+    ThreadRootProjectionDto, ThreadRootProjectionSourceDto, ThreadRootProjectionStateDto,
+    ThreadSummaryDto, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineGapId,
+    TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind,
+    TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions, TimelineMessageKind,
+    TimelineMessageSource, TimelineNavigationSnapshot, TimelineNoticeI18n, TimelineNoticeI18nKey,
+    TimelineResyncReason, TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan,
+    TimelineUnableToDecrypt, TimelineUnableToDecryptReason, TimelineUnreadPosition,
+    TimelineViewportObservation, message_actions_for_timeline_item,
+    message_source_for_timeline_item,
 };
 use crate::executor;
 use crate::failure::{CoreFailure, TimelineFailureKind};
@@ -4841,6 +4842,7 @@ impl TimelineManagerActor {
                 request_id,
                 key,
                 event_id,
+                origin,
             } => {
                 self.route_to_actor_or_fail(
                     request_id,
@@ -4848,6 +4850,7 @@ impl TimelineManagerActor {
                     TimelineActorMessage::RequestRoomKey {
                         request_id,
                         event_id,
+                        origin,
                     },
                 )
                 .await;
@@ -7307,6 +7310,7 @@ enum TimelineActorMessage {
     RequestRoomKey {
         request_id: RequestId,
         event_id: String,
+        origin: crate::command::KeyRequestOrigin,
     },
     RequestLateDecryption {
         request_id: Option<RequestId>,
@@ -7316,6 +7320,11 @@ enum TimelineActorMessage {
         session_id: String,
         attempt: u32,
         actor_generation: u64,
+    },
+    RoomKeyWithheldObserved {
+        room_id: String,
+        session_id: String,
+        code: &'static str,
     },
     DecryptRetryTimeout {
         operation: u64,
@@ -10105,6 +10114,7 @@ fn thread_root_projection_item_from_raw_with_context(
             recovery_stage: None,
             recovery_guidance: None,
         }),
+        request_state: None,
         actions: message_actions_for_timeline_item(
             key.room_id(),
             &TimelineItemId::Event { event_id },
@@ -12041,6 +12051,7 @@ mod timeline_gap_repair_tracker_tests {
 
     fn event_item(event_id: &str, body: &str) -> TimelineItem {
         TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: event_id.to_owned(),
             },
@@ -14071,6 +14082,14 @@ fn next_decrypt_retry_operation() -> u64 {
     NEXT_DECRYPT_RETRY_OPERATION.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Presentation state of a user/automatic room-key request (issue #460).
+/// Rust-owned; React renders the closed tokens only.
+#[derive(Clone, Debug)]
+struct KeyRequestUiState {
+    stage: &'static str,
+    withheld_code: Option<&'static str>,
+}
+
 #[derive(Clone)]
 struct PendingDecryptRetry {
     event_id: String,
@@ -14318,6 +14337,12 @@ struct TimelineActor {
     /// Megolm session id internally (never exported).
     room_key_recovery:
         std::collections::BTreeMap<String, crate::room_key_recovery::RecoveryOperation>,
+    /// Per-event room-key request presentation state (issue #460), keyed by
+    /// event id (already visible timeline correlation).
+    key_request_states: std::collections::BTreeMap<String, KeyRequestUiState>,
+    /// Closed `m.room_key.withheld` codes per (room, session) observed in this
+    /// timeline's room (issue #460).
+    withheld_codes: std::collections::BTreeMap<(String, String), &'static str>,
     next_session_alias: u64,
     recovery_tick_tasks: std::collections::BTreeMap<String, executor::JoinHandle<()>>,
 }
@@ -14916,6 +14941,49 @@ impl TimelineActor {
             }));
         }
 
+        // Room-key withheld observer (issue #460): capture standard
+        // m.room_key.withheld codes for this room into closed presentation
+        // tokens, so the UI can show localized refusal copy.
+        {
+            use futures_util::StreamExt;
+            let withheld_tx = actor_tx.clone();
+            let withheld_room = key.room_id().to_owned();
+            let withheld_session = session.clone();
+            auxiliary_tasks.push(executor::spawn(async move {
+                // Seed from stored withheld state first, then consume updates.
+                for (session_id, code) in
+                    koushi_sdk::room_key_withheld_codes(&withheld_session, &withheld_room).await
+                {
+                    let _ = withheld_tx
+                        .send(TimelineActorMessage::RoomKeyWithheldObserved {
+                            room_id: withheld_room.clone(),
+                            session_id,
+                            code: code.token(),
+                        })
+                        .await;
+                }
+                let mut stream = Box::pin(koushi_sdk::room_key_withheld_stream(&withheld_session));
+                while let Some(batch) = stream.next().await {
+                    for (room_id, session_id, code) in batch {
+                        if room_id != withheld_room {
+                            continue;
+                        }
+                        if withheld_tx
+                            .send(TimelineActorMessage::RoomKeyWithheldObserved {
+                                room_id,
+                                session_id,
+                                code: code.token(),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }));
+        }
+
         // Late-decryption reports observer (#476): when the event-cache
         // redecryptor reports lag or backup availability, drive the bounded
         // local retry for this timeline's visible UTD sessions.
@@ -15181,6 +15249,8 @@ impl TimelineActor {
             room_key_recovery: Default::default(),
             next_session_alias: 0,
             recovery_tick_tasks: Default::default(),
+            key_request_states: Default::default(),
+            withheld_codes: Default::default(),
         };
 
         actor
@@ -15789,8 +15859,10 @@ impl TimelineActor {
             TimelineActorMessage::RequestRoomKey {
                 request_id,
                 event_id,
+                origin,
             } => {
-                self.handle_request_room_key(request_id, event_id).await;
+                self.handle_request_room_key(request_id, event_id, origin)
+                    .await;
             }
             TimelineActorMessage::RequestLateDecryption {
                 request_id,
@@ -15806,6 +15878,13 @@ impl TimelineActor {
             } => {
                 self.handle_room_key_recovery_tick(session_id, attempt, actor_generation)
                     .await;
+            }
+            TimelineActorMessage::RoomKeyWithheldObserved {
+                room_id,
+                session_id,
+                code,
+            } => {
+                self.withheld_codes.insert((room_id, session_id), code);
             }
             TimelineActorMessage::DecryptRetryTimeout {
                 operation,
@@ -17904,9 +17983,42 @@ impl TimelineActor {
             settlement.result,
             settlement.pending.started_at.elapsed(),
         );
+        // Issue #460: update the presentation state for the affected event.
+        let event_id = settlement.pending.event_id.clone();
+        let withheld_code = self.withheld_code_for_event(&event_id);
+        let stage = match settlement.result {
+            DecryptRetrySettledResult::Decrypted => Some("decryption_recovered"),
+            DecryptRetrySettledResult::Withheld => Some("withheld"),
+            DecryptRetrySettledResult::Timeout => Some("still_waiting"),
+            _ => None,
+        };
+        if let Some(stage) = stage {
+            self.key_request_states
+                .entry(event_id)
+                .and_modify(|state| {
+                    state.stage = stage;
+                    state.withheld_code = withheld_code;
+                })
+                .or_insert(KeyRequestUiState {
+                    stage,
+                    withheld_code,
+                });
+        }
     }
 
-    async fn handle_request_room_key(&mut self, request_id: RequestId, event_id: String) {
+    /// Closed withheld code for an event's session, if observed (issue #460).
+    fn withheld_code_for_event(&self, _event_id: &str) -> Option<&'static str> {
+        // Resolved during projection from the UTD session when needed; kept
+        // simple: look up by scanning the withheld map is done at projection.
+        None
+    }
+
+    async fn handle_request_room_key(
+        &mut self,
+        request_id: RequestId,
+        event_id: String,
+        origin: crate::command::KeyRequestOrigin,
+    ) {
         let requested_event_id = event_id.clone();
         let event_id = match matrix_sdk::ruma::EventId::parse(&event_id) {
             Ok(event_id) => event_id,
@@ -17950,6 +18062,18 @@ impl TimelineActor {
         };
         let session_id =
             unable_to_decrypt_from_content(event_item.content()).and_then(|utd| utd.session_id);
+        // Issue #460: publish the request state so the UI can show progress.
+        self.key_request_states.insert(
+            requested_event_id.clone(),
+            KeyRequestUiState {
+                stage: if origin == crate::command::KeyRequestOrigin::User {
+                    "sent"
+                } else {
+                    "automatic"
+                },
+                withheld_code: None,
+            },
+        );
         let Some(session_id) = session_id else {
             let result = executor::timeout_at(
                 pending.deadline,
@@ -19530,6 +19654,36 @@ impl TimelineActor {
                 self.ensure_room_key_recovery(session_id);
             }
         }
+        // Issue #460: a decrypted replacement for an event with a pending
+        // key-request state settles the presentation as recovered (late keys
+        // included, after the operational timeout).
+        for diff in &diffs {
+            let item = match diff {
+                eyeball_im::VectorDiff::PushFront { value }
+                | eyeball_im::VectorDiff::PushBack { value }
+                | eyeball_im::VectorDiff::Insert { value, .. }
+                | eyeball_im::VectorDiff::Set { value, .. } => value,
+                _ => continue,
+            };
+            let Some(event) = item.as_event() else {
+                continue;
+            };
+            let Some(event_id) = event.event_id() else {
+                continue;
+            };
+            let event_id = event_id.to_string();
+            if !self.key_request_states.contains_key(&event_id) {
+                continue;
+            }
+            if event.content().is_unable_to_decrypt() {
+                continue;
+            }
+            if let Some(state) = self.key_request_states.get_mut(&event_id) {
+                if state.stage != "decryption_recovered" {
+                    state.stage = "decryption_recovered";
+                }
+            }
+        }
         let decrypt_retry_resolution = self.decrypt_retry.pending.as_ref().and_then(|pending| {
             diffs.iter().find_map(|diff| {
                 decrypt_retry_diff_settlement(diff, &pending.event_id).and_then(|result| {
@@ -19556,6 +19710,8 @@ impl TimelineActor {
             &self.key,
             self.own_user_id.as_deref(),
             &self.send_statuses,
+            Some(&self.key_request_states),
+            Some(&self.withheld_codes),
         );
         for diff in &mut core_diffs {
             apply_ignored_sender_suppression_to_diff(diff, &self.ignored_user_ids);
@@ -20870,6 +21026,8 @@ impl TimelineActor {
                     self.own_user_id.as_deref(),
                     &self.send_statuses,
                     Some(&self.room_key_recovery),
+                    Some(&self.key_request_states),
+                    Some(&self.withheld_codes),
                 )
             })
             .map(|mut item| {
@@ -21012,6 +21170,8 @@ impl TimelineActor {
                     self.own_user_id.as_deref(),
                     &self.send_statuses,
                     Some(&self.room_key_recovery),
+                    Some(&self.key_request_states),
+                    Some(&self.withheld_codes),
                 )
             })
             .map(|mut item| {
@@ -24382,7 +24542,49 @@ pub fn sdk_item_to_timeline_item(
     item: &Arc<SdkTimelineItem>,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
 ) -> TimelineItem {
-    sdk_item_to_timeline_item_with_send_states(key, item, own_user_id, &HashMap::new(), None)
+    sdk_item_to_timeline_item_with_send_states(
+        key,
+        item,
+        own_user_id,
+        &HashMap::new(),
+        None,
+        None,
+        None,
+    )
+}
+
+/// Build the closed room-key request presentation state for an event
+/// (issue #460).
+fn request_state_for_item(
+    key_request_states: Option<&std::collections::BTreeMap<String, KeyRequestUiState>>,
+    withheld_codes: Option<&std::collections::BTreeMap<(String, String), &'static str>>,
+    key: &TimelineKey,
+    event_item: &matrix_sdk_ui::timeline::EventTimelineItem,
+) -> Option<RoomKeyRequestStateDto> {
+    let event_id = event_item.event_id()?.to_string();
+    let state = key_request_states?.get(&event_id)?;
+    let withheld_code = state.withheld_code.map(ToOwned::to_owned).or_else(|| {
+        let session = event_item
+            .content()
+            .as_unable_to_decrypt()
+            .and_then(|utd| {
+                let matrix_sdk_ui::timeline::EncryptedMessage::MegolmV1AesSha2 {
+                    session_id, ..
+                } = utd
+                else {
+                    return None;
+                };
+                Some(session_id.as_str())
+            })?;
+        withheld_codes?
+            .get(&(key.room_id().to_owned(), session.to_owned()))
+            .copied()
+            .map(ToOwned::to_owned)
+    });
+    Some(RoomKeyRequestStateDto {
+        stage: state.stage.to_owned(),
+        withheld_code,
+    })
 }
 
 fn sdk_item_to_timeline_item_with_send_states(
@@ -24393,6 +24595,8 @@ fn sdk_item_to_timeline_item_with_send_states(
     recovery: Option<
         &std::collections::BTreeMap<String, crate::room_key_recovery::RecoveryOperation>,
     >,
+    key_request_states: Option<&std::collections::BTreeMap<String, KeyRequestUiState>>,
+    withheld_codes: Option<&std::collections::BTreeMap<(String, String), &'static str>>,
 ) -> TimelineItem {
     use matrix_sdk_ui::timeline::{TimelineItemKind, VirtualTimelineItem};
 
@@ -24541,6 +24745,12 @@ fn sdk_item_to_timeline_item_with_send_states(
                 link_ranges_for_message_projection(body.as_deref(), formatted.as_ref());
 
             TimelineItem {
+                request_state: request_state_for_item(
+                    key_request_states,
+                    withheld_codes,
+                    key,
+                    event_item,
+                ),
                 id,
                 sender,
                 sender_label,
@@ -24579,6 +24789,7 @@ fn sdk_item_to_timeline_item_with_send_states(
                 VirtualTimelineItem::TimelineStart => ("timeline-start".to_owned(), None, true),
             };
             TimelineItem {
+                request_state: None,
                 id: TimelineItemId::Synthetic { synthetic_id },
                 sender: None,
                 sender_label: None,
@@ -26074,6 +26285,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
     key: &TimelineKey,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
     send_statuses: &HashMap<String, TimelineSendState>,
+    key_request_states: Option<&std::collections::BTreeMap<String, KeyRequestUiState>>,
+    withheld_codes: Option<&std::collections::BTreeMap<(String, String), &'static str>>,
 ) -> Vec<TimelineDiff> {
     let mut canonical_len = initial_canonical_len;
     let mut converted = Vec::with_capacity(diffs.len());
@@ -26087,6 +26300,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 });
                 canonical_len += 1;
@@ -26099,6 +26314,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 });
                 canonical_len += 1;
@@ -26112,6 +26329,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 });
                 canonical_len += 1;
@@ -26125,6 +26344,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 });
             }
@@ -26152,6 +26373,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                                 value,
                                 own_user_id,
                                 send_statuses,
+                                None,
+                                None,
                                 None,
                             )
                         })
@@ -26181,6 +26404,8 @@ fn sdk_vector_diffs_to_timeline_diffs(
                         own_user_id,
                         send_statuses,
                         None,
+                        key_request_states,
+                        withheld_codes,
                     ),
                 }));
                 canonical_len += values.len();
@@ -32862,6 +33087,7 @@ mod tests {
         is_hidden: bool,
     ) -> TimelineItem {
         TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: event_id.to_owned(),
             },
@@ -38289,6 +38515,7 @@ mod tests {
 
     fn timeline_message_item(event_id: &str, sender: &str) -> TimelineItem {
         TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: event_id.to_owned(),
             },
@@ -41938,7 +42165,15 @@ mod tests {
         };
         let sdk_diffs = accepted_relay_batch(generation, batch_generation, diffs)
             .expect("replacement generation must be accepted");
-        let diffs = sdk_vector_diffs_to_timeline_diffs(&sdk_diffs, 0, &key, None, &HashMap::new());
+        let diffs = sdk_vector_diffs_to_timeline_diffs(
+            &sdk_diffs,
+            0,
+            &key,
+            None,
+            &HashMap::new(),
+            None,
+            None,
+        );
         assert!(
             emit_items_updated_and_reconcile_replay_known_for_generation(
                 &event_tx,
@@ -45386,6 +45621,8 @@ mod tests {
             &key,
             Some(&ALICE),
             &HashMap::new(),
+            None,
+            None,
         );
         apply_timeline_diffs_to_items(&mut canonical, &diffs);
 

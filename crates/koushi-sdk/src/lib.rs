@@ -1563,6 +1563,111 @@ pub async fn download_joined_room_keys_from_backup(
     })
 }
 
+/// Closed token for an `m.room_key.withheld` code observed for a session
+/// (issue #460). Only the codes retained by the SDK store are correlatable.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixRoomKeyWithheldCode {
+    Blacklisted,
+    Unverified,
+    Unauthorised,
+    Unavailable,
+    Other,
+}
+
+impl MatrixRoomKeyWithheldCode {
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::Blacklisted => "blacklisted",
+            Self::Unverified => "unverified",
+            Self::Unauthorised => "unauthorised",
+            Self::Unavailable => "unavailable",
+            Self::Other => "custom",
+        }
+    }
+}
+
+/// Live stream of `m.room_key.withheld` codes (issue #460), mapped to closed
+/// app-owned tokens. Never exposes raw SDK content.
+pub fn room_key_withheld_stream(
+    session: &MatrixClientSession,
+) -> impl futures_util::Stream<Item = Vec<(String, String, MatrixRoomKeyWithheldCode)>> + use<> {
+    use futures_util::StreamExt;
+
+    let client = session.client();
+    let stream = futures_util::stream::once(async move {
+        client
+            .encryption()
+            .room_keys_withheld_received_stream()
+            .await
+    })
+    .filter_map(|opt| async move { opt });
+    stream.flat_map(|s| s).map(move |infos| {
+        infos
+            .into_iter()
+            .filter_map(|info| {
+                let code = withheld_code_from_sdk(info.withheld_event.content)?;
+                Some((info.room_id.to_string(), info.session_id, code))
+            })
+            .collect()
+    })
+}
+
+fn withheld_code_from_sdk(
+    content: matrix_sdk::encryption::RoomKeyWithheldContent,
+) -> Option<MatrixRoomKeyWithheldCode> {
+    use matrix_sdk::encryption::RoomKeyWithheldContent;
+    match content {
+        RoomKeyWithheldContent::MegolmV1AesSha2(content) => {
+            use matrix_sdk::encryption::RoomKeyWithheldContent::MegolmV1AesSha2 as _;
+            Some(match content.withheld_code() {
+                matrix_sdk::encryption::WithheldCode::Blacklisted => {
+                    MatrixRoomKeyWithheldCode::Blacklisted
+                }
+                matrix_sdk::encryption::WithheldCode::Unverified => {
+                    MatrixRoomKeyWithheldCode::Unverified
+                }
+                matrix_sdk::encryption::WithheldCode::Unauthorised => {
+                    MatrixRoomKeyWithheldCode::Unauthorised
+                }
+                matrix_sdk::encryption::WithheldCode::Unavailable => {
+                    MatrixRoomKeyWithheldCode::Unavailable
+                }
+                _ => MatrixRoomKeyWithheldCode::Other,
+            })
+        }
+        _ => Some(MatrixRoomKeyWithheldCode::Other),
+    }
+}
+
+/// Stored `m.room_key.withheld` codes for a room (issue #460), mapped to
+/// closed tokens keyed by session id.
+pub async fn room_key_withheld_codes(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Vec<(String, MatrixRoomKeyWithheldCode)> {
+    let Ok(room_id) = matrix_sdk::ruma::RoomId::parse(room_id) else {
+        return Vec::new();
+    };
+    session
+        .client()
+        .encryption()
+        .room_key_withheld_codes(room_id.as_ref())
+        .await
+        .into_iter()
+        .map(|(session, code)| {
+            use matrix_sdk::encryption::WithheldCode;
+            let code = match code {
+                WithheldCode::Blacklisted => MatrixRoomKeyWithheldCode::Blacklisted,
+                WithheldCode::Unverified => MatrixRoomKeyWithheldCode::Unverified,
+                WithheldCode::Unauthorised => MatrixRoomKeyWithheldCode::Unauthorised,
+                WithheldCode::Unavailable => MatrixRoomKeyWithheldCode::Unavailable,
+                _ => MatrixRoomKeyWithheldCode::Other,
+            };
+            (session, code)
+        })
+        .collect()
+}
+
 /// Whether the local crypto store already holds an inbound group session for
 /// the given room + Megolm session (issue #478 local recovery source).
 pub async fn has_inbound_group_session(

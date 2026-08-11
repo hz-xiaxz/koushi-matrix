@@ -2241,8 +2241,9 @@ pub(crate) fn build_request_room_key_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
-    timeline_key: Option<TimelineKey>,
     event_id: String,
+    origin: koushi_core::KeyRequestOrigin,
+    timeline_key: Option<TimelineKey>,
 ) -> Option<CoreCommand> {
     if event_id.trim().is_empty() {
         return None;
@@ -2258,6 +2259,7 @@ pub(crate) fn build_request_room_key_command(
         request_id,
         key,
         event_id,
+        origin,
     }))
 }
 
@@ -4820,6 +4822,8 @@ mod tests {
             fake_request_id(36),
             active_account_key.clone(),
             room_id.clone(),
+            "$source-event".to_owned(),
+            koushi_core::KeyRequestOrigin::User,
             Some(TimelineKey {
                 account_key: AccountKey("@stale:example.invalid".to_owned()),
                 kind: koushi_core::TimelineKind::Thread {
@@ -4827,7 +4831,6 @@ mod tests {
                     root_event_id: "$thread-root".to_owned(),
                 },
             }),
-            "$source-event".to_owned(),
         )
         .expect("request_room_key should build a command")
         {
@@ -4835,6 +4838,7 @@ mod tests {
                 request_id,
                 key,
                 event_id,
+                origin,
             }) => {
                 assert_eq!(request_id, fake_request_id(36));
                 assert_eq!(key.account_key, active_account_key);
@@ -4846,6 +4850,7 @@ mod tests {
                     }
                 );
                 assert_eq!(event_id, "$source-event");
+                assert_eq!(origin, koushi_core::KeyRequestOrigin::User);
             }
             other => panic!("unexpected command: {other:?}"),
         }

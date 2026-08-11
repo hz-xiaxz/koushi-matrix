@@ -1012,6 +1012,16 @@ export type MessageId =
   | "timeline.recoveryGuidanceBackup"
   | "timeline.recoveryGuidanceSenderMessage"
   | "timeline.recoveryGuidanceRepost"
+  | "timeline.keyRequestSent"
+  | "timeline.keyRequestAwaiting"
+  | "timeline.keyRequestStillWaiting"
+  | "timeline.keyRequestWithheld"
+  | "timeline.keyRequestUnavailable"
+  | "timeline.keyRequestUnauthorised"
+  | "timeline.keyRequestUnverified"
+  | "timeline.keyRequestBlacklisted"
+  | "timeline.keyRequestRecovered"
+  | "timeline.keyRequestToast"
   | "timeline.requestRoomKey"
   | "timeline.forwardMessage"
   | "timeline.messageSource"
@@ -2276,6 +2286,16 @@ const en: Catalog = {
   "timeline.viewSource": "View source",
   "timeline.removeMessage": "Remove",
   "timeline.requestRoomKey": "Request keys and retry",
+  "timeline.keyRequestToast": "Decryption key requested",
+  "timeline.keyRequestSent": "Waiting for the decryption key…",
+  "timeline.keyRequestAwaiting": "Waiting for the decryption key…",
+  "timeline.keyRequestStillWaiting": "No response yet. Another device may be offline; it may decrypt later.",
+  "timeline.keyRequestWithheld": "The decryption key could not be obtained.",
+  "timeline.keyRequestUnavailable": "The requested device does not have this decryption key.",
+  "timeline.keyRequestUnauthorised": "Sharing the decryption key was not permitted.",
+  "timeline.keyRequestUnverified": "This device is unverified, so the key was not shared.",
+  "timeline.keyRequestBlacklisted": "This device is excluded from key sharing.",
+  "timeline.keyRequestRecovered": "Decryption key received",
   "timeline.recoveryCheckingLocal": "Checking this device for the key…",
   "timeline.recoveryCheckingBackup": "Checking your Secure Backup…",
   "timeline.recoveryRequestingDevices": "Requesting the key from your verified devices…",
@@ -3439,6 +3459,16 @@ const ja: Catalog = {
   "timeline.viewSource": "ソースを表示",
   "timeline.removeMessage": "削除",
   "timeline.requestRoomKey": "鍵を要求して再試行",
+  "timeline.keyRequestToast": "復号鍵をリクエストしました",
+  "timeline.keyRequestSent": "復号鍵を待っています…",
+  "timeline.keyRequestAwaiting": "復号鍵を待っています…",
+  "timeline.keyRequestStillWaiting": "まだ応答がありません。別の端末がオフラインの場合、後で復号されることがあります。",
+  "timeline.keyRequestWithheld": "復号鍵を取得できませんでした。",
+  "timeline.keyRequestUnavailable": "要求先の端末はこの復号鍵を保持していません。",
+  "timeline.keyRequestUnauthorised": "復号鍵の共有が許可されませんでした。",
+  "timeline.keyRequestUnverified": "この端末が未検証のため、復号鍵の共有が拒否されました。",
+  "timeline.keyRequestBlacklisted": "この端末は共有対象から除外されています。",
+  "timeline.keyRequestRecovered": "復号鍵を受信しました",
   "timeline.recoveryCheckingLocal": "この端末の鍵を確認中…",
   "timeline.recoveryCheckingBackup": "Secure Backup を確認中…",
   "timeline.recoveryRequestingDevices": "認証済み端末に鍵をリクエスト中…",

@@ -630,9 +630,10 @@ class TauriDesktopApi implements DesktopApi {
   async requestRoomKey(
     roomId: string,
     eventId: string,
+    origin?: "user" | "automatic",
     timelineKey?: TimelineKey
   ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("request_room_key", { roomId, eventId, timelineKey });
+    return invoke<DesktopSnapshot>("request_room_key", { roomId, eventId, origin, timelineKey });
   }
 
   async requestLateDecryption(

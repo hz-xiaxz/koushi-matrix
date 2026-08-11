@@ -1851,10 +1851,22 @@ pub struct TimelineItem {
     pub can_edit: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unable_to_decrypt: Option<TimelineUnableToDecrypt>,
+    /// Room-key request presentation state (issue #460): closed stage + code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_state: Option<RoomKeyRequestStateDto>,
     #[serde(default)]
     pub actions: TimelineMessageActions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_state: Option<TimelineSendState>,
+}
+
+/// Rust-owned room-key request presentation state for a timeline item
+/// (issue #460). Only closed tokens cross the wire.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomKeyRequestStateDto {
+    pub stage: String,
+    pub withheld_code: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -2586,6 +2598,7 @@ mod tests {
     #[test]
     fn timeline_item_serializes_thread_fields_reactions_and_redaction_affordances() {
         let item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$event:test".to_owned(),
             },
@@ -2674,6 +2687,7 @@ mod tests {
     #[test]
     fn timeline_item_serializes_reply_quote_without_debugging_body() {
         let item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$reply:test".to_owned(),
             },
@@ -2742,6 +2756,7 @@ mod tests {
     #[test]
     fn timeline_item_serializes_formatted_body_without_debugging_content() {
         let item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$formatted:test".to_owned(),
             },
@@ -2823,6 +2838,7 @@ mod tests {
     #[test]
     fn timeline_item_serializes_rust_owned_message_actions() {
         let item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$event:test".to_owned(),
             },
@@ -3080,6 +3096,7 @@ mod tests {
     #[test]
     fn timeline_item_serializes_outbound_send_state_without_raw_error() {
         let item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Transaction {
                 transaction_id: "txn-send-state".to_owned(),
             },
@@ -3130,6 +3147,7 @@ mod tests {
     #[test]
     fn timeline_item_serializes_media_metadata_without_encryption_secrets() {
         let item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$media:test".to_owned(),
             },
@@ -3378,6 +3396,7 @@ mod tests {
 
     fn timeline_item_fixture(event_id: &str, is_redacted: bool) -> TimelineItem {
         TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: event_id.to_owned(),
             },

@@ -43,6 +43,7 @@ import type {
   RoomLatestEventSummary,
   TimelineContinuityState
 } from "../domain/types";
+import type { RoomKeyRequestStateDto } from "../domain/coreEvents";
 import type { MentionCandidate } from "../app/uiShared";
 import { documentFromText } from "../domain/composerDocument";
 import { resetTimelineTransportStats } from "../domain/timelineTransportStats";
@@ -10329,7 +10330,12 @@ describe("TimelineView", () => {
     const button = await screen.findByRole("button", { name: "Request keys and retry" });
     fireEvent.click(button);
 
-    expect(requestRoomKey).toHaveBeenCalledWith("!room:example.invalid", "$encrypted", KEY);
+    expect(requestRoomKey).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$encrypted",
+      "user",
+      KEY
+    );
   });
 
   it("automatically requests missing room keys once for undecryptable thread timeline events", async () => {
@@ -10385,6 +10391,7 @@ describe("TimelineView", () => {
       expect(requestRoomKey).toHaveBeenCalledWith(
         "!room:example.invalid",
         "$encrypted-thread-reply:example.invalid",
+        "automatic",
         threadKey
       );
     });
@@ -11379,5 +11386,85 @@ describe("TimelineView", () => {
 
     expect(screen.getByText("Unknown user is typing")).toBeTruthy();
     expect(screen.queryByText("@unknown:example.invalid is typing")).toBeNull();
+  });
+});
+
+describe("room key request feedback (#460)", () => {
+  function utdItem(eventId: string, requestState: RoomKeyRequestStateDto | null) {
+    return {
+      ...message(eventId, "Unable to decrypt message"),
+      unable_to_decrypt: {
+        session_id: "session-1",
+        reason: "missingRoomKey" as const,
+        can_request_keys: true,
+        recovery_stage: null,
+        recovery_guidance: null
+      },
+      request_state: requestState
+    };
+  }
+
+  function renderWithItems(items: TimelineItem[]) {
+    let emit: (payload: unknown) => void = () => undefined;
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey: vi.fn(async () => undefined),
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items
+          }
+        }
+      });
+    });
+    return { transport };
+  }
+
+  it("renders localized copy for each closed withheld code", () => {
+    const cases: Array<[string | null, RegExp]> = [
+      ["unavailable", /The requested device does not have this decryption key/],
+      ["unauthorised", /Sharing the decryption key was not permitted/],
+      ["unverified", /This device is unverified, so the key was not shared/],
+      ["blacklisted", /This device is excluded from key sharing/],
+      ["custom", /The decryption key could not be obtained/],
+      [null, /The decryption key could not be obtained/]
+    ];
+    for (const [code, expected] of cases) {
+      renderWithItems([utdItem("$w", { stage: "withheld", withheld_code: code })]);
+      expect(screen.queryByText(expected)).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it("still_waiting shows non-terminal guidance and never a raw reason", () => {
+    renderWithItems([utdItem("$s", { stage: "still_waiting", withheld_code: null })]);
+    expect(
+      screen.queryByText(/No response yet. Another device may be offline/)
+    ).toBeTruthy();
+    expect(screen.queryByText(/m\.unauthorised|refused|denied/i)).toBeNull();
+  });
+
+  it("decryption_recovered shows success and clears the pending marker", () => {
+    renderWithItems([utdItem("$r", { stage: "decryption_recovered", withheld_code: null })]);
+    expect(screen.queryByText("Decryption key received")).toBeTruthy();
+    expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
   });
 });

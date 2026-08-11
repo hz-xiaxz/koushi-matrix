@@ -241,6 +241,12 @@ export interface TimelineItem {
   actions?: TimelineMessageActions;
   send_state?: TimelineSendState | null;
   unable_to_decrypt?: TimelineUnableToDecrypt | null;
+  request_state?: RoomKeyRequestStateDto | null;
+}
+
+export interface RoomKeyRequestStateDto {
+  stage: string;
+  withheld_code: string | null;
 }
 
 export interface TimelineUnableToDecrypt {

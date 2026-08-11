@@ -2465,6 +2465,7 @@ mod tests {
         };
         let key = TimelineKey::room(AccountKey("@u:example.test".to_owned()), "!r:example.test");
         let item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$e1".to_owned(),
             },
@@ -2540,6 +2541,7 @@ mod tests {
             unable_to_decrypt: None,
         };
         let media_item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$media1".to_owned(),
             },
@@ -2602,6 +2604,7 @@ mod tests {
             unable_to_decrypt: None,
         };
         let send_state_item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Transaction {
                 transaction_id: "txn-not-sent".to_owned(),
             },
@@ -2635,6 +2638,7 @@ mod tests {
             unable_to_decrypt: None,
         };
         let reply_quote_item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$reply1".to_owned(),
             },
@@ -2688,6 +2692,7 @@ mod tests {
             unable_to_decrypt: None,
         };
         let link_preview_item = TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: "$linkpreview1".to_owned(),
             },
