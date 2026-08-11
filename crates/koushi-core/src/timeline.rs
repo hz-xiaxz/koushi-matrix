@@ -14089,8 +14089,8 @@ struct KeyRequestUiState {
     stage: &'static str,
     withheld_code: Option<&'static str>,
     session_id: Option<String>,
-    /// Command correlation for user-originated requests (issue #460); None
-    /// for actor-internal automatic requests.
+    /// Command correlation for externally issued requests (both origins;
+    /// issue #460); None only for actor-internal automatic work.
     request_id: Option<RequestId>,
 }
 
@@ -15948,11 +15948,13 @@ impl TimelineActor {
                     // Non-current requests (already timed out / settled) still
                     // surface the refusal when the observation arrives late.
                     // Terminal stages are not regressed: a recovered event stays
-                    // recovered and a send failure stays failed.
+                    // recovered and a send failure stays failed. A stage already
+                    // settled `withheld` by a diff still gains the typed code
+                    // when the independent observation arrives later.
                     let should_publish =
                         self.key_request_states.get(&event_id).is_some_and(|state| {
-                            state.stage != "withheld"
-                                && !matches!(state.stage, "decryption_recovered" | "send_failed")
+                            !matches!(state.stage, "decryption_recovered" | "send_failed")
+                                && (state.stage != "withheld" || state.withheld_code != Some(code))
                         });
                     if !should_publish {
                         continue;
