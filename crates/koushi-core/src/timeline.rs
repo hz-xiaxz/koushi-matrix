@@ -14949,12 +14949,34 @@ impl TimelineActor {
         // m.room_key.withheld codes for this room into closed presentation
         // tokens, so the UI can show localized refusal copy.
         {
-            use futures_util::StreamExt;
             let withheld_tx = actor_tx.clone();
             let withheld_room = key.room_id().to_owned();
             let withheld_session = session.clone();
             auxiliary_tasks.push(executor::spawn(async move {
-                // Seed from stored withheld state first, then consume updates.
+                let mut stream = Box::pin(koushi_sdk::room_key_withheld_stream(&withheld_session));
+                // Establish the broadcast subscription BEFORE reading the
+                // stored snapshot: the underlying channel does not replay, so
+                // an observation between the snapshot and the subscription
+                // would otherwise be lost from both sources.
+                let first =
+                    tokio::time::timeout(std::time::Duration::from_millis(500), stream.next())
+                        .await;
+                if let Ok(Some(batch)) = first {
+                    for (room_id, session_id, code) in batch {
+                        if room_id != withheld_room {
+                            continue;
+                        }
+                        let _ = withheld_tx
+                            .send(TimelineActorMessage::RoomKeyWithheldObserved {
+                                room_id,
+                                session_id,
+                                code: code.token(),
+                            })
+                            .await;
+                    }
+                }
+                // Seed from stored withheld state (duplicates are idempotent
+                // in the observer handler).
                 for (session_id, code) in
                     koushi_sdk::room_key_withheld_codes(&withheld_session, &withheld_room).await
                 {
@@ -14966,7 +14988,6 @@ impl TimelineActor {
                         })
                         .await;
                 }
-                let mut stream = Box::pin(koushi_sdk::room_key_withheld_stream(&withheld_session));
                 while let Some(batch) = stream.next().await {
                     for (room_id, session_id, code) in batch {
                         if room_id != withheld_room {
@@ -19817,31 +19838,37 @@ impl TimelineActor {
         }
         // Issue #460: a decrypted replacement for an event with a pending
         // key-request state settles the presentation as recovered (late keys
-        // included, after the operational timeout).
+        // included, after the operational timeout). Scans every batch value
+        // shape (singleton, Reset, Append) so a late decrypt delivered as a
+        // full reset or append still settles an already-timed-out request.
         for diff in &diffs {
-            let item = match diff {
-                eyeball_im::VectorDiff::PushFront { value }
-                | eyeball_im::VectorDiff::PushBack { value }
-                | eyeball_im::VectorDiff::Insert { value, .. }
-                | eyeball_im::VectorDiff::Set { value, .. } => value,
+            let values: Vec<&Arc<SdkTimelineItem>> = match diff {
+                eyeball_im::VectorDiff::PushFront { value } => vec![value],
+                eyeball_im::VectorDiff::PushBack { value } => vec![value],
+                eyeball_im::VectorDiff::Insert { value, .. } => vec![value],
+                eyeball_im::VectorDiff::Set { value, .. } => vec![value],
+                eyeball_im::VectorDiff::Reset { values } => values.iter().collect(),
+                eyeball_im::VectorDiff::Append { values } => values.iter().collect(),
                 _ => continue,
             };
-            let Some(event) = item.as_event() else {
-                continue;
-            };
-            let Some(event_id) = event.event_id() else {
-                continue;
-            };
-            let event_id = event_id.to_string();
-            if !self.key_request_states.contains_key(&event_id) {
-                continue;
-            }
-            if event.content().is_unable_to_decrypt() {
-                continue;
-            }
-            if let Some(state) = self.key_request_states.get_mut(&event_id) {
-                if state.stage != "decryption_recovered" {
-                    state.stage = "decryption_recovered";
+            for item in values {
+                let Some(event) = item.as_event() else {
+                    continue;
+                };
+                let Some(event_id) = event.event_id() else {
+                    continue;
+                };
+                let event_id = event_id.to_string();
+                if !self.key_request_states.contains_key(&event_id) {
+                    continue;
+                }
+                if event.content().is_unable_to_decrypt() {
+                    continue;
+                }
+                if let Some(state) = self.key_request_states.get_mut(&event_id) {
+                    if state.stage != "decryption_recovered" {
+                        state.stage = "decryption_recovered";
+                    }
                 }
             }
         }

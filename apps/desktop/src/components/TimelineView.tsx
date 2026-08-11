@@ -2725,9 +2725,16 @@ export const TimelineView = memo(function TimelineView({
     const timer = setTimeout(() => setKeyRequestToast(null), 4000);
     return () => clearTimeout(timer);
   }, [keyRequestToast]);
-  // Clear the local pending marker once Rust publishes a request state: any
-  // published stage (confirmed waiting or terminal outcome) supersedes the
-  // local optimistic marker, which only exists until Rust accepts the command.
+  // Clear the local pending marker only on a terminal Rust outcome or a
+  // rejection: while Rust reports sent/automatic/still_waiting the request is
+  // still pending, so repeat clicks must stay suppressed (no duplicate
+  // commands while pending). The Rust-published waiting copy renders from the
+  // DTO regardless of the local marker.
+  const KEY_REQUEST_TERMINAL_STAGES = [
+    "withheld",
+    "decryption_recovered",
+    "send_failed"
+  ];
   useEffect(() => {
     if (pendingKeyRequests.size === 0) {
       return;
@@ -2738,7 +2745,10 @@ export const TimelineView = memo(function TimelineView({
         if (`event:${timelineItemDomId(item.id)}` !== key) {
           continue;
         }
-        if (item.request_state) {
+        if (
+          item.request_state &&
+          KEY_REQUEST_TERMINAL_STAGES.includes(item.request_state.stage)
+        ) {
           settled.add(key);
         }
       }

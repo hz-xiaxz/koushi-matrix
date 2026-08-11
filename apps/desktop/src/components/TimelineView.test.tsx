@@ -11461,7 +11461,7 @@ describe("room key request feedback (#460)", () => {
     expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
   });
 
-  it("clicking Request keys shows an immediate toast and pending copy; repeated clicks reach Rust for coalescing", async () => {
+  it("clicking Request keys shows an immediate toast and pending copy; repeat clicks are suppressed while pending", async () => {
     let emit: (payload: unknown) => void = () => undefined;
     const requestRoomKey = vi.fn(async () => undefined);
     const transport = {
@@ -11514,6 +11514,26 @@ describe("room key request feedback (#460)", () => {
       "user",
       KEY
     );
+    // Suppression persists through the Rust-published pending (sent) stage:
+    // a further click re-shows the toast but dispatches no new command.
+    act(() => {
+      emit({
+        kind: "Room",
+        event: {
+          RoomKeyRequestStateChanged: {
+            room_id: "!room:example.invalid",
+            event_id: "$click",
+            stage: "sent",
+            withheld_code: null
+          }
+        }
+      });
+    });
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Waiting for the decryption key");
+    });
+    fireEvent.click(button);
+    expect(requestRoomKey).toHaveBeenCalledTimes(1);
   });
 
   it("keyboard activation requests keys and announces the toast in an ARIA-live status region", async () => {
