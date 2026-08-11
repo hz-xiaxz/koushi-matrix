@@ -743,7 +743,10 @@ async fn scheduled_recognized_unavailable_command_is_rejected_before_acceptance(
     .await
     .expect("scheduled rejection should be correlated");
     let rejected_key = match &event {
-        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected { key }) => key,
+        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+            key,
+            ..
+        }) => key,
         other => panic!("unexpected event: {other:?}"),
     };
     // Keyed to the main room under the canonical account.
@@ -768,12 +771,24 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
     let (runtime, mut conn, _, _data_dir, _credential_dir) =
         ready_room_conn("!room:example.test").await;
     runtime
-        .inject_actions(vec![AppAction::ScheduledSendCapabilityChanged {
-            capability: ScheduledSendCapability::LocalFallback,
-        }])
+        .inject_actions(vec![
+            AppAction::ScheduledSendCapabilityChanged {
+                capability: ScheduledSendCapability::LocalFallback,
+            },
+            AppAction::OpenThread {
+                room_id: "!room:example.test".to_owned(),
+                root_event_id: "$thread-root:example.test".to_owned(),
+                intent: koushi_state::ThreadOpenIntent::ExistingThread,
+            },
+            AppAction::ThreadSubscribed {
+                room_id: "!room:example.test".to_owned(),
+                root_event_id: "$thread-root:example.test".to_owned(),
+            },
+        ])
         .await;
     wait_for_state(&mut conn, |state| {
         state.timeline.scheduled_send_capability == ScheduledSendCapability::LocalFallback
+            && matches!(state.thread, koushi_state::ThreadPaneState::Open { .. })
     })
     .await;
 
@@ -784,7 +799,7 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
             request_id: schedule_request,
             expected_account: session_key(),
             room_id: "!room:example.test".to_owned(),
-            thread_root_event_id: None,
+            thread_root_event_id: Some("$thread-root:example.test".to_owned()),
             body: "valid scheduled body".to_owned(),
             send_at_ms: future_epoch_ms(Duration::from_secs(60)),
             draft_revision: ComposerDraftRevision::from_u64(1),
@@ -794,16 +809,16 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
     .expect("submit valid scheduled send");
     let scheduled_snapshot = wait_for_state(&mut conn, |state| {
         state
-            .timeline
             .scheduled_sends
-            .iter()
+            .items
+            .values()
             .any(|item| item.body == "valid scheduled body")
     })
     .await;
     let scheduled_id = scheduled_snapshot
-        .timeline
         .scheduled_sends
-        .iter()
+        .items
+        .values()
         .find(|item| item.body == "valid scheduled body")
         .map(|item| item.scheduled_id.clone())
         .expect("scheduled item exists");
@@ -837,11 +852,15 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
     .await
     .expect("reschedule rejection should be correlated");
     let rejected_key = match &event {
-        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected { key }) => key,
+        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+            key,
+            ..
+        }) => key,
         other => panic!("unexpected event: {other:?}"),
     };
-    // Keyed to the scheduled item's room (main pane) under the canonical
-    // account — visible without the thread being open.
+    // The item is a THREAD item but the reschedule rejection is keyed to the
+    // item's room (main-pane scheduled list) under the canonical account —
+    // visible without the thread being open.
     assert_eq!(
         rejected_key,
         &koushi_core::TimelineKey::room(
@@ -849,15 +868,15 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
             "!room:example.test",
         )
     );
-    // The existing item is preserved with its original body.
+    // The existing item is preserved with its original body and thread root.
     let snapshot = conn.snapshot();
     assert_eq!(
         snapshot
-            .timeline
             .scheduled_sends
-            .iter()
+            .items
+            .values()
             .find(|item| item.scheduled_id == scheduled_id)
-            .map(|item| item.body.as_str()),
-        Some("valid scheduled body")
+            .map(|item| (item.body.as_str(), item.thread_root_event_id.as_deref())),
+        Some(("valid scheduled body", Some("$thread-root:example.test")))
     );
 }

@@ -3303,6 +3303,7 @@ mod tests {
         let composer_slash_command_rejected =
             serialize_core_event(&CoreEvent::Room(RoomEvent::ComposerSlashCommandRejected {
                 key: key.clone(),
+                request_id,
             }))
             .expect("serialize composer slash command rejection");
 

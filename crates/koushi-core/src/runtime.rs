@@ -4091,7 +4091,10 @@ impl AppActor {
                                 self.composer_target_notice_key(&expected_account, &target)
                         {
                             self.emit(CoreEvent::Room(
-                                crate::event::RoomEvent::ComposerSlashCommandRejected { key },
+                                crate::event::RoomEvent::ComposerSlashCommandRejected {
+                                    key,
+                                    request_id,
+                                },
                             ));
                         } else {
                             self.emit(CoreEvent::OperationFailed {
@@ -4233,7 +4236,10 @@ impl AppActor {
                             && let Some(key) = notice_key
                         {
                             self.emit(CoreEvent::Room(
-                                crate::event::RoomEvent::ComposerSlashCommandRejected { key },
+                                crate::event::RoomEvent::ComposerSlashCommandRejected {
+                                    key,
+                                    request_id,
+                                },
                             ));
                         } else {
                             self.emit(CoreEvent::OperationFailed {

@@ -735,9 +735,11 @@ pub enum RoomEvent {
     },
     /// Issue #450: a recognized-but-unavailable slash command (/join, /invite)
     /// was rejected for a composer target; the key names which composer should
-    /// show the localized notice.
+    /// show the localized notice and the request id lets the Tauri submission
+    /// waiter settle immediately instead of waiting out its timeout.
     ComposerSlashCommandRejected {
         key: TimelineKey,
+        request_id: RequestId,
     },
     MarkedAsRead {
         request_id: RequestId,
@@ -965,9 +967,10 @@ impl fmt::Debug for RoomEvent {
                 .field("stage", stage)
                 .field("withheld_code", withheld_code)
                 .finish(),
-            Self::ComposerSlashCommandRejected { key: _ } => formatter
+            Self::ComposerSlashCommandRejected { key: _, request_id } => formatter
                 .debug_struct("ComposerSlashCommandRejected")
                 .field("key", &"TimelineKey(..)")
+                .field("request_id", request_id)
                 .finish(),
             Self::MarkedAsRead { request_id, .. } => formatter
                 .debug_struct("MarkedAsRead")

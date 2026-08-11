@@ -268,6 +268,16 @@ async fn wait_for_composer_draft_acceptance<S: SubmissionEventSource>(
             })) if failed_request_id == request_id => {
                 "composer draft acceptance was rejected".to_owned()
             }
+            // Issue #450: schedule-time slash rejections are keyed events
+            // carrying the request id; terminate the wait immediately.
+            Ok(Ok(koushi_core::CoreEvent::Room(
+                koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+                    request_id: rejected_request_id,
+                    ..
+                },
+            ))) if rejected_request_id == request_id => {
+                "composer draft acceptance was rejected".to_owned()
+            }
             Ok(Ok(_)) => continue,
             Ok(Err(lag)) if lag.skipped == 0 => "composer draft acceptance disconnected".to_owned(),
             Ok(Err(_)) => "composer draft acceptance event stream lagged".to_owned(),
