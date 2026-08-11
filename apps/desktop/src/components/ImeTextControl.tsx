@@ -555,7 +555,29 @@ function renderEditorDocument(control: HTMLDivElement, document: ComposerDocumen
     }
     return span;
   });
+  // Issue #471: under `white-space: pre-wrap` a trailing newline as the last
+  // character of the block creates no final line box — the composer neither
+  // grows nor paints the caret on the new line. Append a sentinel <br> that
+  // the DOM readers ignore; it never counts toward document offsets.
+  if (documentEndsWithNewline(document)) {
+    const sentinel = control.ownerDocument.createElement("br");
+    sentinel.dataset.composerSentinel = "";
+    nodes.push(sentinel);
+  }
   control.replaceChildren(...nodes);
+}
+
+function documentEndsWithNewline(document: ComposerDocument): boolean {
+  const last = document.inlines.at(-1);
+  return last?.kind === "text" && last.text.endsWith("\n");
+}
+
+function isSentinelBr(node: Node): boolean {
+  return (
+    node instanceof HTMLElement &&
+    node.tagName === "BR" &&
+    node.hasAttribute("data-composer-sentinel")
+  );
 }
 
 export function inlineMentionEditorSelection(control: HTMLDivElement): DocumentSelection {
@@ -589,9 +611,18 @@ function documentOffsetFromDomPoint(
   offset: number
 ): number {
   if (container === control) {
-    return Array.from(control.childNodes)
+    const children = Array.from(control.childNodes);
+    const total = children
       .slice(0, offset)
-      .reduce((total, child) => total + editorNodeLength(child), 0);
+      .reduce((sum, child) => sum + editorNodeLength(child), 0);
+    // Issue #471: a caret placed after the sentinel <br> represents the
+    // trailing newline itself, which the sentinel's zero length would
+    // otherwise hide on the next read-back.
+    const atEnd = offset >= children.length;
+    if (atEnd && children.length > 0 && isSentinelBr(children[children.length - 1])) {
+      return total + 1;
+    }
+    return total;
   }
   const child = Array.from(control.childNodes).find(
     (candidate) => candidate === container || candidate.contains?.(container)
@@ -620,6 +651,11 @@ function documentFromEditorDom(
 ): ComposerDocument {
   const inlines: ComposerInline[] = [];
   for (const node of control.childNodes) {
+    if (isSentinelBr(node)) {
+      // Issue #471: the trailing-newline sentinel is presentation-only and
+      // never becomes document content.
+      continue;
+    }
     if (node instanceof HTMLElement && node.hasAttribute("data-composer-mention")) {
       const index = Number(node.dataset.composerMention);
       const mention = current.inlines[index];
