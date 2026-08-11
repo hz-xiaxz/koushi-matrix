@@ -2718,6 +2718,21 @@ export const TimelineView = memo(function TimelineView({
   // terminal request state via the timeline DTO. Presentation-only.
   const [keyRequestToast, setKeyRequestToast] = useState<string | null>(null);
   const [pendingKeyRequests, setPendingKeyRequests] = useState<Set<string>>(new Set());
+  // Account switch: the same room/event may open under a different account
+  // (the pane component is keyed by room/anchor, not account). Rust-owned
+  // request state is per-actor, so the previous account's local optimistic
+  // marker must not suppress the new account's legitimate request.
+  const previousTimelineKeyHashRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      previousTimelineKeyHashRef.current !== null &&
+      previousTimelineKeyHashRef.current !== timelineKeyHash
+    ) {
+      setPendingKeyRequests(new Set());
+      setKeyRequestToast(null);
+    }
+    previousTimelineKeyHashRef.current = timelineKeyHash;
+  }, [timelineKeyHash]);
   useEffect(() => {
     if (!keyRequestToast) {
       return undefined;

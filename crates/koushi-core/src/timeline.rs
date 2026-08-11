@@ -15953,8 +15953,7 @@ impl TimelineActor {
                     // when the independent observation arrives later.
                     let should_publish =
                         self.key_request_states.get(&event_id).is_some_and(|state| {
-                            !matches!(state.stage, "decryption_recovered" | "send_failed")
-                                && (state.stage != "withheld" || state.withheld_code != Some(code))
+                            withheld_update_should_publish(state.stage, state.withheld_code, code)
                         });
                     if !should_publish {
                         continue;
@@ -25138,6 +25137,15 @@ fn thread_auto_requestable_event_id(item: &Arc<SdkTimelineItem>) -> Option<Strin
             .and_then(|utd| utd.session_id)
             .is_some();
     requestable.then_some(event_id)
+}
+
+/// Whether a late withheld observation should update/publish a presentation
+/// state (issue #460): terminal stages are never regressed, and a stage
+/// already settled `withheld` by a diff still gains the typed code when the
+/// independent observation arrives later with a different code.
+fn withheld_update_should_publish(stage: &str, current_code: Option<&str>, new_code: &str) -> bool {
+    !matches!(stage, "decryption_recovered" | "send_failed")
+        && (stage != "withheld" || current_code != Some(new_code))
 }
 
 fn unable_to_decrypt_from_content(
@@ -43327,6 +43335,46 @@ mod tests {
             serde_json::to_string(&dto).unwrap(),
             "{\"stage\":\"withheld\",\"withheldCode\":\"unavailable\"}"
         );
+    }
+
+    #[test]
+    fn withheld_update_guard_allows_typed_code_and_never_regresses_terminal_stages() {
+        // Stage settled withheld by a diff without a code still gains it.
+        assert!(withheld_update_should_publish(
+            "withheld",
+            None,
+            "unavailable"
+        ));
+        // A different typed code replaces the previous one.
+        assert!(withheld_update_should_publish(
+            "withheld",
+            Some("unverified"),
+            "blacklisted"
+        ));
+        // Duplicate observation of the same code is idempotent.
+        assert!(!withheld_update_should_publish(
+            "withheld",
+            Some("unavailable"),
+            "unavailable"
+        ));
+        // Non-withheld pending stages accept the refusal.
+        assert!(withheld_update_should_publish("sent", None, "unavailable"));
+        assert!(withheld_update_should_publish(
+            "still_waiting",
+            None,
+            "unavailable"
+        ));
+        // Terminal stages are never regressed by a late observation.
+        assert!(!withheld_update_should_publish(
+            "decryption_recovered",
+            None,
+            "unavailable"
+        ));
+        assert!(!withheld_update_should_publish(
+            "send_failed",
+            None,
+            "unavailable"
+        ));
     }
 
     #[test]
