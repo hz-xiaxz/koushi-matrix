@@ -1617,23 +1617,21 @@ fn withheld_code_from_sdk(
 ) -> Option<MatrixRoomKeyWithheldCode> {
     use matrix_sdk::encryption::RoomKeyWithheldContent;
     match content {
-        RoomKeyWithheldContent::MegolmV1AesSha2(content) => {
-            Some(match content.withheld_code() {
-                matrix_sdk::encryption::WithheldCode::Blacklisted => {
-                    MatrixRoomKeyWithheldCode::Blacklisted
-                }
-                matrix_sdk::encryption::WithheldCode::Unverified => {
-                    MatrixRoomKeyWithheldCode::Unverified
-                }
-                matrix_sdk::encryption::WithheldCode::Unauthorised => {
-                    MatrixRoomKeyWithheldCode::Unauthorised
-                }
-                matrix_sdk::encryption::WithheldCode::Unavailable => {
-                    MatrixRoomKeyWithheldCode::Unavailable
-                }
-                _ => MatrixRoomKeyWithheldCode::Other,
-            })
-        }
+        RoomKeyWithheldContent::MegolmV1AesSha2(content) => Some(match content.withheld_code() {
+            matrix_sdk::encryption::WithheldCode::Blacklisted => {
+                MatrixRoomKeyWithheldCode::Blacklisted
+            }
+            matrix_sdk::encryption::WithheldCode::Unverified => {
+                MatrixRoomKeyWithheldCode::Unverified
+            }
+            matrix_sdk::encryption::WithheldCode::Unauthorised => {
+                MatrixRoomKeyWithheldCode::Unauthorised
+            }
+            matrix_sdk::encryption::WithheldCode::Unavailable => {
+                MatrixRoomKeyWithheldCode::Unavailable
+            }
+            _ => MatrixRoomKeyWithheldCode::Other,
+        }),
         _ => Some(MatrixRoomKeyWithheldCode::Other),
     }
 }

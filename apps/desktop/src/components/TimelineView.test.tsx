@@ -10341,7 +10341,7 @@ describe("TimelineView", () => {
     );
   });
 
-  it("automatically requests missing room keys once for undecryptable thread timeline events", async () => {
+  it("renders Rust-owned automatic request state without dispatching automatic commands", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const requestRoomKey = vi.fn(async () => undefined);
     const threadKey = threadTimelineKey(
@@ -10365,7 +10365,8 @@ describe("TimelineView", () => {
         can_request_keys: true,
         recovery_stage: null,
         recovery_guidance: null
-      }
+      },
+      request_state: { stage: "automatic", withheldCode: null } as const
     };
 
     render(
@@ -10390,30 +10391,12 @@ describe("TimelineView", () => {
       }
     });
 
+    // Automatic admission is Rust-owned: the frontend dispatches nothing and
+    // only renders the Rust-published request state (awaiting copy).
     await waitFor(() => {
-      expect(requestRoomKey).toHaveBeenCalledWith(
-        "!room:example.invalid",
-        "$encrypted-thread-reply:example.invalid",
-        "automatic",
-        threadKey
-      );
+      expect(requestRoomKey).not.toHaveBeenCalled();
     });
-    expect(requestRoomKey).toHaveBeenCalledTimes(1);
-
-    emit({
-      kind: "Timeline",
-      event: {
-        ItemsUpdated: {
-          key: threadKey,
-          generation: 1,
-          batch_id: 2,
-          diffs: [{ Set: { index: 0, item: encrypted } }]
-        }
-      }
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(requestRoomKey).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Waiting for the decryption key…")).toBeTruthy();
   });
 
   it("does not classify room-key request failures in React", async () => {

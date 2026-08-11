@@ -1885,7 +1885,6 @@ pub struct TimelineItem {
 pub enum RoomKeyRequestStage {
     Sent,
     Automatic,
-    Awaiting,
     StillWaiting,
     Withheld,
     DecryptionRecovered,

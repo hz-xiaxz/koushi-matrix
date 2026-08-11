@@ -658,9 +658,6 @@ function canonicalTimelineContainsActivityEventId(
   );
 }
 
-function timelineItemEventId(item: TimelineItem): string | null {
-  return "Event" in item.id ? item.id.Event.event_id : null;
-}
 
 function timelineEventIdentityAttribute(identity: TimelineEventIdentity): string {
   return identity === "activity" ? "data-activity-event-id" : "data-content-event-id";
@@ -2728,7 +2725,9 @@ export const TimelineView = memo(function TimelineView({
     const timer = setTimeout(() => setKeyRequestToast(null), 4000);
     return () => clearTimeout(timer);
   }, [keyRequestToast]);
-  // Clear the local pending marker once Rust publishes a terminal state.
+  // Clear the local pending marker once Rust publishes a request state: any
+  // published stage (confirmed waiting or terminal outcome) supersedes the
+  // local optimistic marker, which only exists until Rust accepts the command.
   useEffect(() => {
     if (pendingKeyRequests.size === 0) {
       return;
@@ -2739,12 +2738,7 @@ export const TimelineView = memo(function TimelineView({
         if (`event:${timelineItemDomId(item.id)}` !== key) {
           continue;
         }
-        if (
-          item.request_state &&
-          ["withheld", "decryption_recovered", "send_failed"].includes(
-            item.request_state.stage
-          )
-        ) {
+        if (item.request_state) {
           settled.add(key);
         }
       }
@@ -2808,26 +2802,6 @@ export const TimelineView = memo(function TimelineView({
     lastStoreLookupDiagnosticRef.current = message;
     emitDiagnosticLog("timeline.store", message);
   }, [emitDiagnosticLog, store, timelineKey, timelineKeyHash]);
-  useEffect(() => {
-    if (!("Thread" in timelineKey.kind)) {
-      return;
-    }
-    // Issue #460: automatic one-shot recovery on thread load. Rust refuses
-    // repeats for events that already have a request state, so this effect
-    // may fire on every items change without re-spamming settled events.
-    for (const item of items) {
-      if (!item.unable_to_decrypt?.can_request_keys) {
-        continue;
-      }
-      const eventId = timelineItemEventId(item);
-      if (eventId === null) {
-        continue;
-      }
-      void transport
-        .requestRoomKey(roomId, eventId, "automatic", timelineKey)
-        .catch(() => undefined);
-    }
-  }, [items, roomId, timelineKey, transport]);
   useLayoutEffect(() => {
     if (!("Thread" in timelineKey.kind) || !timelineKeyState) {
       return;
@@ -4355,7 +4329,9 @@ export const TimelineView = memo(function TimelineView({
   const onRequestRoomKey = useCallback(
     (targetRoomId: string, eventId: string) => {
       // User-triggered "Request keys and retry" action: immediate visible
-      // acknowledgment, then the Rust command confirms the lifecycle.
+      // acknowledgment, then the Rust command confirms the lifecycle. On
+      // rejection (IPC/command failure) the optimistic marker and toast are
+      // reverted so the UI never shows a stuck "waiting" state.
       if (targetRoomId === roomId) {
         setPendingKeyRequests((current) => {
           const next = new Set(current);
@@ -4366,7 +4342,16 @@ export const TimelineView = memo(function TimelineView({
       }
       void transport
         .requestRoomKey(targetRoomId, eventId, "user", timelineKey)
-        .catch(() => undefined);
+        .catch(() => {
+          if (targetRoomId === roomId) {
+            setPendingKeyRequests((current) => {
+              const next = new Set(current);
+              next.delete(`event:${eventId}`);
+              return next;
+            });
+            setKeyRequestToast(null);
+          }
+        });
     },
     [roomId, t, timelineKey, transport]
   );
@@ -6878,7 +6863,7 @@ export function TimelineItemRow({
           >
             {keyRequestStateText(
               t,
-              item.request_state?.stage ?? "awaiting",
+              item.request_state?.stage ?? "sent",
               item.request_state?.withheldCode ?? null
             )}
           </p>
@@ -8675,7 +8660,6 @@ function keyRequestStateText(
 ): string {
   switch (stage) {
     case "sent":
-    case "awaiting":
     case "automatic":
       return t("timeline.keyRequestAwaiting");
     case "still_waiting":

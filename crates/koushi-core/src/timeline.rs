@@ -4848,7 +4848,7 @@ impl TimelineManagerActor {
                     request_id,
                     &key,
                     TimelineActorMessage::RequestRoomKey {
-                        request_id,
+                        request_id: Some(request_id),
                         event_id,
                         origin,
                     },
@@ -7308,7 +7308,7 @@ enum TimelineActorMessage {
         event_id: String,
     },
     RequestRoomKey {
-        request_id: RequestId,
+        request_id: Option<RequestId>,
         event_id: String,
         origin: crate::command::KeyRequestOrigin,
     },
@@ -18087,7 +18087,7 @@ impl TimelineActor {
     /// Closed withheld code for an event's session, if observed (issue #460).
     async fn handle_request_room_key(
         &mut self,
-        request_id: RequestId,
+        request_id: Option<RequestId>,
         event_id: String,
         origin: crate::command::KeyRequestOrigin,
     ) {
@@ -18095,16 +18095,22 @@ impl TimelineActor {
         let event_id = match matrix_sdk::ruma::EventId::parse(&event_id) {
             Ok(event_id) => event_id,
             Err(_) => {
-                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+                if let Some(request_id) = request_id {
+                    self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+                }
                 return;
             }
         };
         let Some(event_item) = self.timeline.item_by_event_id(&event_id).await else {
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+            if let Some(request_id) = request_id {
+                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+            }
             return;
         };
         if !event_item.content().is_unable_to_decrypt() {
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
+            if let Some(request_id) = request_id {
+                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
+            }
             return;
         }
         let retry_reason = decrypt_retry_reason_from_content(event_item.content());
@@ -18131,14 +18137,18 @@ impl TimelineActor {
         };
         let Some(original_json) = event_item.original_json().cloned() else {
             self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Malformed);
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+            if let Some(request_id) = request_id {
+                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+            }
             return;
         };
         let room_id = match matrix_sdk::ruma::RoomId::parse(self.key.room_id()) {
             Ok(room_id) => room_id,
             Err(_) => {
                 self.settle_decrypt_retry(pending.operation, DecryptRetrySettledResult::Malformed);
-                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+                if let Some(request_id) = request_id {
+                    self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
+                }
                 return;
             }
         };
@@ -18157,6 +18167,11 @@ impl TimelineActor {
                 session_id: session_id.clone(),
             },
         );
+        // Issue #460: publish the accepted initial state so the UI can move
+        // off its local optimistic marker onto Rust-owned waiting copy.
+        if let Some(state) = self.key_request_states.get(&requested_event_id) {
+            self.publish_key_request_state(&requested_event_id, state);
+        }
         let Some(session_id) = session_id else {
             let result = executor::timeout_at(
                 pending.deadline,
@@ -18185,7 +18200,9 @@ impl TimelineActor {
                         pending.operation,
                         DecryptRetrySettledResult::StillMissing,
                     );
-                    self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                    if let Some(request_id) = request_id {
+                        self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                    }
                     return;
                 }
                 Err(_) => {
@@ -18264,7 +18281,9 @@ impl TimelineActor {
                             pending.operation,
                             DecryptRetrySettledResult::StillMissing,
                         );
-                        self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        if let Some(request_id) = request_id {
+                            self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        }
                         return;
                     }
                     Err(_) => {
@@ -18315,7 +18334,9 @@ impl TimelineActor {
                             pending.operation,
                             DecryptRetrySettledResult::StillMissing,
                         );
-                        self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        if let Some(request_id) = request_id {
+                            self.emit_timeline_failure(request_id, TimelineFailureKind::Sdk);
+                        }
                         return;
                     }
                     Err(_) => {
@@ -19787,6 +19808,51 @@ impl TimelineActor {
             self.settle_decrypt_retry(operation, result);
         }
         let sdk_diffs = diffs;
+        // Issue #460: automatic one-shot key requests for Thread timelines.
+        // Admission is Rust-owned (the automatic guard in
+        // handle_request_room_key refuses repeats for events that already
+        // have a request state), so React only renders the resulting state.
+        if matches!(self.key.kind, TimelineKind::Thread { .. }) {
+            let mut auto_request_event_ids: Vec<String> = Vec::new();
+            for diff in &sdk_diffs {
+                let values: Vec<&Arc<SdkTimelineItem>> = match diff {
+                    eyeball_im::VectorDiff::PushFront { value } => vec![value],
+                    eyeball_im::VectorDiff::PushBack { value } => vec![value],
+                    eyeball_im::VectorDiff::Insert { value, .. } => vec![value],
+                    eyeball_im::VectorDiff::Set { value, .. } => vec![value],
+                    eyeball_im::VectorDiff::Reset { values } => values.iter().collect(),
+                    _ => Vec::new(),
+                };
+                for value in values {
+                    let Some(event_item) = value.as_event() else {
+                        continue;
+                    };
+                    let Some(event_id) = event_item.event_id() else {
+                        continue;
+                    };
+                    let event_id = event_id.to_string();
+                    if self.key_request_states.contains_key(&event_id) {
+                        continue;
+                    }
+                    let requestable = event_item.content().is_unable_to_decrypt()
+                        && event_item.original_json().is_some()
+                        && unable_to_decrypt_from_content(event_item.content())
+                            .and_then(|utd| utd.session_id)
+                            .is_some();
+                    if !requestable {
+                        continue;
+                    }
+                    auto_request_event_ids.push(event_id);
+                }
+            }
+            for event_id in auto_request_event_ids {
+                let _ = self.msg_tx.send(TimelineActorMessage::RequestRoomKey {
+                    request_id: None,
+                    event_id,
+                    origin: crate::command::KeyRequestOrigin::Automatic,
+                });
+            }
+        }
         let has_historical_gap_repair_projection = gap_repair_projections
             .iter()
             .any(|projection| projection.operation.domain == CausalProjectionDomain::HistoricalGap);
@@ -24684,12 +24750,11 @@ fn key_request_stage_token(stage: &str) -> RoomKeyRequestStage {
     match stage {
         "sent" => RoomKeyRequestStage::Sent,
         "automatic" => RoomKeyRequestStage::Automatic,
-        "awaiting" => RoomKeyRequestStage::Awaiting,
         "still_waiting" => RoomKeyRequestStage::StillWaiting,
         "withheld" => RoomKeyRequestStage::Withheld,
         "decryption_recovered" => RoomKeyRequestStage::DecryptionRecovered,
         "send_failed" => RoomKeyRequestStage::SendFailed,
-        _ => RoomKeyRequestStage::Awaiting,
+        _ => RoomKeyRequestStage::StillWaiting,
     }
 }
 
@@ -43096,7 +43161,6 @@ mod tests {
         let stage_cases = [
             ("sent", "sent"),
             ("automatic", "automatic"),
-            ("awaiting", "awaiting"),
             ("still_waiting", "still_waiting"),
             ("withheld", "withheld"),
             ("decryption_recovered", "decryption_recovered"),

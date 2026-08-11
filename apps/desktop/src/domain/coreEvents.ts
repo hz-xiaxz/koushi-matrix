@@ -252,7 +252,6 @@ export interface RoomKeyRequestStateDto {
 export type RoomKeyRequestStage =
   | "sent"
   | "automatic"
-  | "awaiting"
   | "still_waiting"
   | "withheld"
   | "decryption_recovered"

@@ -1012,7 +1012,6 @@ export type MessageId =
   | "timeline.recoveryGuidanceBackup"
   | "timeline.recoveryGuidanceSenderMessage"
   | "timeline.recoveryGuidanceRepost"
-  | "timeline.keyRequestSent"
   | "timeline.keyRequestAwaiting"
   | "timeline.keyRequestStillWaiting"
   | "timeline.keyRequestWithheld"
@@ -2287,7 +2286,6 @@ const en: Catalog = {
   "timeline.removeMessage": "Remove",
   "timeline.requestRoomKey": "Request keys and retry",
   "timeline.keyRequestToast": "Decryption key requested",
-  "timeline.keyRequestSent": "Waiting for the decryption key…",
   "timeline.keyRequestAwaiting": "Waiting for the decryption key…",
   "timeline.keyRequestStillWaiting": "No response yet. Another device may be offline; it may decrypt later.",
   "timeline.keyRequestWithheld": "The decryption key could not be obtained.",
@@ -3460,7 +3458,6 @@ const ja: Catalog = {
   "timeline.removeMessage": "削除",
   "timeline.requestRoomKey": "鍵を要求して再試行",
   "timeline.keyRequestToast": "復号鍵をリクエストしました",
-  "timeline.keyRequestSent": "復号鍵を待っています…",
   "timeline.keyRequestAwaiting": "復号鍵を待っています…",
   "timeline.keyRequestStillWaiting": "まだ応答がありません。別の端末がオフラインの場合、後で復号されることがあります。",
   "timeline.keyRequestWithheld": "復号鍵を取得できませんでした。",
