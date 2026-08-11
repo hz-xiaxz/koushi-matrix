@@ -18097,13 +18097,10 @@ impl TimelineActor {
                 .key_request_states
                 .get(&event_id)
                 .and_then(|state| state.session_id.clone());
-            let withheld_code: Option<&'static str> = None;
-            let withheld_code = withheld_code.or_else(|| {
-                existing_session.as_deref().and_then(|session| {
-                    self.withheld_codes
-                        .get(&(self.key.room_id().to_owned(), session.to_owned()))
-                        .copied()
-                })
+            let withheld_code = existing_session.as_deref().and_then(|session| {
+                self.withheld_codes
+                    .get(&(self.key.room_id().to_owned(), session.to_owned()))
+                    .copied()
             });
             self.key_request_states
                 .entry(event_id.clone())
@@ -18148,7 +18145,6 @@ impl TimelineActor {
         ));
     }
 
-    /// Closed withheld code for an event's session, if observed (issue #460).
     /// Issue #460: queue automatic key-request messages for events, retaining
     /// candidates that hit a full mailbox for a later retry (never blocks the
     /// projection on the actor's own bounded mailbox).
