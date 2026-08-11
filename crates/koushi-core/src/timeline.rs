@@ -14341,6 +14341,9 @@ struct TimelineActor {
     /// Per-event room-key request presentation state (issue #460), keyed by
     /// event id (already visible timeline correlation).
     key_request_states: std::collections::BTreeMap<String, KeyRequestUiState>,
+    /// Issue #460: automatic key-request candidates whose try_send hit a full
+    /// mailbox; retried on the next actor loop iteration.
+    pending_auto_key_requests: Vec<String>,
     /// Closed `m.room_key.withheld` codes per (room, session) observed in this
     /// timeline's room (issue #460).
     withheld_codes: std::collections::BTreeMap<(String, String), &'static str>,
@@ -15251,6 +15254,7 @@ impl TimelineActor {
             next_session_alias: 0,
             recovery_tick_tasks: Default::default(),
             key_request_states: Default::default(),
+            pending_auto_key_requests: Vec::new(),
             withheld_codes: Default::default(),
         };
 
@@ -15261,19 +15265,16 @@ impl TimelineActor {
         // Issue #460: automatic one-shot key requests for Thread timelines at
         // subscription time — existing UTD rows are delivered as InitialItems,
         // not as diffs, so the diff-batch scanner never sees them. The actor
-        // processes these after startup; the automatic guard in
-        // handle_request_room_key refuses repeats for already-requested events.
+        // processes these after startup; mailbox-full candidates are retained
+        // in the pending set and retried by the run loop. The automatic guard
+        // in handle_request_room_key refuses repeats for already-requested
+        // events.
         if matches!(key.kind, TimelineKind::Thread { .. }) {
-            for item in &initial_sdk_items {
-                let Some(event_id) = thread_auto_requestable_event_id(item) else {
-                    continue;
-                };
-                let _ = actor_tx.try_send(TimelineActorMessage::RequestRoomKey {
-                    request_id: None,
-                    event_id,
-                    origin: crate::command::KeyRequestOrigin::Automatic,
-                });
-            }
+            let initial_candidates: Vec<String> = initial_sdk_items
+                .iter()
+                .filter_map(thread_auto_requestable_event_id)
+                .collect();
+            actor.dispatch_auto_key_requests(initial_candidates);
         }
         let task = executor::spawn(actor.run());
 
@@ -15300,6 +15301,13 @@ impl TimelineActor {
         };
         self.gap_repair.queue_inspection(initial_trigger);
         loop {
+            // Issue #460: retry automatic key-request candidates that were
+            // deferred when the mailbox was full (deduplicated by the
+            // key_request_states guard inside dispatch_auto_key_requests).
+            if !self.pending_auto_key_requests.is_empty() {
+                let pending = std::mem::take(&mut self.pending_auto_key_requests);
+                self.dispatch_auto_key_requests(pending);
+            }
             tokio::select! {
                 biased;
                 cleanup = self.cleanup_rx.changed() => {
@@ -18102,6 +18110,35 @@ impl TimelineActor {
     }
 
     /// Closed withheld code for an event's session, if observed (issue #460).
+    /// Issue #460: queue automatic key-request messages for events, retaining
+    /// candidates that hit a full mailbox for a later retry (never blocks the
+    /// projection on the actor's own bounded mailbox).
+    fn dispatch_auto_key_requests(&mut self, event_ids: Vec<String>) {
+        for event_id in event_ids {
+            if self.key_request_states.contains_key(&event_id) {
+                continue;
+            }
+            match self.msg_tx.try_send(TimelineActorMessage::RequestRoomKey {
+                request_id: None,
+                event_id,
+                origin: crate::command::KeyRequestOrigin::Automatic,
+            }) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(message)) => {
+                    match message {
+                        TimelineActorMessage::RequestRoomKey { event_id, .. } => {
+                            self.pending_auto_key_requests.push(event_id);
+                        }
+                        // Only automatic key-request messages are dispatched
+                        // through this helper.
+                        _ => {}
+                    }
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
+            }
+        }
+    }
+
     async fn handle_request_room_key(
         &mut self,
         request_id: Option<RequestId>,
@@ -19850,17 +19887,10 @@ impl TimelineActor {
                     auto_request_event_ids.push(event_id);
                 }
             }
-            for event_id in auto_request_event_ids {
-                // try_send: never block the projection on the actor's own
-                // bounded mailbox (awaiting would deadlock the loop); if the
-                // mailbox is momentarily full the request is skipped and the
-                // next batch re-scans the same events.
-                let _ = self.msg_tx.try_send(TimelineActorMessage::RequestRoomKey {
-                    request_id: None,
-                    event_id,
-                    origin: crate::command::KeyRequestOrigin::Automatic,
-                });
-            }
+            // Dispatched through the helper so mailbox-full candidates are
+            // retained and retried on the next loop iteration instead of
+            // being silently lost.
+            self.dispatch_auto_key_requests(auto_request_event_ids);
         }
         let has_historical_gap_repair_projection = gap_repair_projections
             .iter()
