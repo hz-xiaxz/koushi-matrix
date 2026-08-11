@@ -528,7 +528,10 @@ export function applyRoomKeyRequestStateChanged(
     let identityRoomId: string | null = null;
     try {
       const parsed: unknown = JSON.parse(key);
-      if (Array.isArray(parsed) && (parsed[1] === "Room" || parsed[1] === "Thread")) {
+      if (
+        Array.isArray(parsed) &&
+        (parsed[1] === "Room" || parsed[1] === "Thread" || parsed[1] === "Focused")
+      ) {
         identityRoomId = typeof parsed[2] === "string" ? parsed[2] : null;
       }
     } catch {

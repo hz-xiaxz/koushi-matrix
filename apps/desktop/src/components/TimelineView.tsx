@@ -8684,6 +8684,8 @@ function keyRequestStateText(
       return withheldCodeText(t, withheldCode);
     case "decryption_recovered":
       return t("timeline.keyRequestRecovered");
+    case "send_failed":
+      return t("timeline.keyRequestWithheld");
     default:
       return "";
   }

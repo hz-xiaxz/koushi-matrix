@@ -11464,6 +11464,14 @@ describe("room key request feedback (#460)", () => {
     expect(screen.queryByText(/m\.unauthorised|refused|denied/i)).toBeNull();
   });
 
+  it("send_failed shows the generic refusal copy instead of nothing", () => {
+    renderWithItems([utdItem("$f", { stage: "send_failed", withheldCode: null })]);
+    expect(
+      screen.queryByText("The decryption key could not be obtained.")
+    ).toBeTruthy();
+    expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
+  });
+
   it("decryption_recovered shows success and clears the pending marker", () => {
     renderWithItems([utdItem("$r", { stage: "decryption_recovered", withheldCode: null })]);
     expect(screen.queryByText("Decryption key received")).toBeTruthy();

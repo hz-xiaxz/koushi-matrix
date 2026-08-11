@@ -15898,14 +15898,29 @@ impl TimelineActor {
                     .map(|(event_id, _)| event_id.clone())
                     .collect();
                 for event_id in pending_event_ids {
-                    let should_publish = self
-                        .key_request_states
-                        .get(&event_id)
-                        .is_some_and(|state| state.withheld_code.is_none());
+                    // Settle the active retry for this event first (if any):
+                    // its settle path transitions the stage and publishes, and
+                    // prevents the pending timeout from later downgrading the
+                    // refusal to still_waiting.
+                    if let Some(operation) = decrypt_retry_settlement_operation(
+                        &self.decrypt_retry,
+                        self.actor_generation,
+                        &event_id,
+                    ) {
+                        self.settle_decrypt_retry(operation, DecryptRetrySettledResult::Withheld);
+                        continue;
+                    }
+                    // Non-current requests (already timed out / settled) still
+                    // surface the refusal when the observation arrives late.
+                    let should_publish =
+                        self.key_request_states.get(&event_id).is_some_and(|state| {
+                            state.stage != "withheld" || state.withheld_code.is_none()
+                        });
                     if !should_publish {
                         continue;
                     }
                     if let Some(state) = self.key_request_states.get_mut(&event_id) {
+                        state.stage = "withheld";
                         state.withheld_code = Some(code);
                     }
                     if let Some(state) = self.key_request_states.get(&event_id) {
@@ -18062,7 +18077,9 @@ impl TimelineActor {
                 room_id: self.key.room_id().to_owned(),
                 event_id: event_id.to_owned(),
                 stage: key_request_stage_token(state.stage),
-                withheld_code: state.withheld_code.map(key_request_withheld_code_token),
+                withheld_code: state
+                    .withheld_code
+                    .and_then(key_request_withheld_code_token),
             },
         ));
     }
@@ -19747,12 +19764,6 @@ impl TimelineActor {
             if let Some(state) = self.key_request_states.get_mut(&event_id) {
                 if state.stage != "decryption_recovered" {
                     state.stage = "decryption_recovered";
-                    let published = KeyRequestUiState {
-                        stage: "decryption_recovered",
-                        withheld_code: state.withheld_code,
-                        session_id: state.session_id.clone(),
-                    };
-                    self.publish_key_request_state(&event_id, &published);
                 }
             }
         }
@@ -24640,7 +24651,7 @@ fn request_state_for_item(
     let state = key_request_states?.get(&event_id)?;
     let withheld_code = state
         .withheld_code
-        .map(key_request_withheld_code_token)
+        .and_then(key_request_withheld_code_token)
         .or_else(|| {
             let session = event_item
                 .content()
@@ -24658,7 +24669,7 @@ fn request_state_for_item(
             withheld_codes?
                 .get(&(key.room_id().to_owned(), session.to_owned()))
                 .copied()
-                .map(key_request_withheld_code_token)
+                .and_then(key_request_withheld_code_token)
         });
     Some(RoomKeyRequestStateDto {
         stage: key_request_stage_token(state.stage),
@@ -24683,13 +24694,13 @@ fn key_request_stage_token(stage: &str) -> RoomKeyRequestStage {
 }
 
 /// Map an internal withheld-code literal to the closed wire token.
-fn key_request_withheld_code_token(code: &str) -> RoomKeyRequestWithheldCode {
+fn key_request_withheld_code_token(code: &str) -> Option<RoomKeyRequestWithheldCode> {
     match code {
-        "blacklisted" => RoomKeyRequestWithheldCode::Blacklisted,
-        "unverified" => RoomKeyRequestWithheldCode::Unverified,
-        "unauthorised" => RoomKeyRequestWithheldCode::Unauthorised,
-        "unavailable" => RoomKeyRequestWithheldCode::Unavailable,
-        _ => RoomKeyRequestWithheldCode::Unavailable,
+        "blacklisted" => Some(RoomKeyRequestWithheldCode::Blacklisted),
+        "unverified" => Some(RoomKeyRequestWithheldCode::Unverified),
+        "unauthorised" => Some(RoomKeyRequestWithheldCode::Unauthorised),
+        "unavailable" => Some(RoomKeyRequestWithheldCode::Unavailable),
+        _ => None,
     }
 }
 
@@ -43106,9 +43117,11 @@ mod tests {
                 serde_json::to_string(&key_request_withheld_code_token(literal)).unwrap();
             assert_eq!(serialized, format!("\"{wire}\""));
         }
+        // Unknown / custom codes carry no specific copy: they map to None.
+        assert!(key_request_withheld_code_token("custom").is_none());
         let dto = RoomKeyRequestStateDto {
             stage: key_request_stage_token("withheld"),
-            withheld_code: Some(key_request_withheld_code_token("unavailable")),
+            withheld_code: key_request_withheld_code_token("unavailable"),
         };
         assert_eq!(
             serde_json::to_string(&dto).unwrap(),

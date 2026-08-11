@@ -28,6 +28,7 @@ import type { TimelineThreadRootOrder } from "./types";
 import {
   applyDiffs,
   applyGlobalResync,
+  applyRoomKeyRequestStateChanged,
   applyTimelineEvent,
   batchContainsPrepend,
   classifyTimelineItemsUpdatedApplication,
@@ -232,6 +233,81 @@ describe("timeline store — diff application", () => {
     expect(timelineStoreKeyId(wireKey)).toBe(timelineStoreKeyId(uiKey));
     expect(getItems(store, uiKey)).toEqual([target]);
     expect(getKeyState(store, uiKey)?.generation).toBe(2);
+  });
+
+  test("applies a published room-key request transition to Room, Thread, and Focused timelines", () => {
+    const roomKey = roomTimelineKey(ACCOUNT_KEY, "!room:example.invalid");
+    const threadKey = {
+      account_key: ACCOUNT_KEY,
+      kind: {
+        Thread: {
+          room_id: "!room:example.invalid",
+          root_event_id: "$root:example.invalid"
+        }
+      }
+    } as TimelineKey;
+    const focusedKey = focusedTimelineKey(
+      ACCOUNT_KEY,
+      "!room:example.invalid",
+      "$target:example.invalid"
+    );
+    const item = {
+      ...makeMsg("$target:example.invalid", "utd"),
+      unable_to_decrypt: {
+        session_id: "s1",
+        reason: "missingRoomKey" as const,
+        can_request_keys: true,
+        recovery_stage: null,
+        recovery_guidance: null
+      }
+    };
+    let store = createTimelineStore();
+    for (const key of [roomKey, threadKey, focusedKey]) {
+      store = applyTimelineEvent(store, {
+        InitialItems: {
+          request_id: null,
+          key,
+          generation: 1,
+          items: [item]
+        }
+      });
+    }
+    store = applyRoomKeyRequestStateChanged(
+      store,
+      "!room:example.invalid",
+      "$target:example.invalid",
+      "withheld",
+      "unavailable"
+    );
+    for (const key of [roomKey, threadKey, focusedKey]) {
+      expect(getItems(store, key)[0].request_state).toEqual({
+        stage: "withheld",
+        withheldCode: "unavailable"
+      });
+    }
+    // Non-matching room is untouched by the first call.
+    const otherKey = roomTimelineKey(ACCOUNT_KEY, "!other:example.invalid");
+    store = applyTimelineEvent(store, {
+      InitialItems: {
+        request_id: null,
+        key: otherKey,
+        generation: 1,
+        items: [item]
+      }
+    });
+    expect(getItems(store, otherKey)[0].request_state).toBeUndefined();
+    // A transition published for the other room updates only its own items.
+    store = applyRoomKeyRequestStateChanged(
+      store,
+      "!other:example.invalid",
+      "$target:example.invalid",
+      "withheld",
+      "unavailable"
+    );
+    expect(getItems(store, otherKey)[0].request_state).toEqual({
+      stage: "withheld",
+      withheldCode: "unavailable"
+    });
   });
 
   test("formats privacy-safe focused projection application and lookup diagnostics", () => {
