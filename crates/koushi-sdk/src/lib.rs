@@ -1587,21 +1587,21 @@ impl MatrixRoomKeyWithheldCode {
 }
 
 /// Live stream of `m.room_key.withheld` codes (issue #460), mapped to closed
-/// app-owned tokens. Never exposes raw SDK content.
-pub fn room_key_withheld_stream(
+/// app-owned tokens. Never exposes raw SDK content. The broadcast
+/// subscription is established eagerly (before the caller reads the stored
+/// snapshot) so observations cannot fall into a snapshot/subscription gap.
+pub async fn room_key_withheld_stream(
     session: &MatrixClientSession,
 ) -> impl futures_util::Stream<Item = Vec<(String, String, MatrixRoomKeyWithheldCode)>> + use<> {
     use futures_util::StreamExt;
 
     let client = session.client();
-    let stream = futures_util::stream::once(async move {
-        client
-            .encryption()
-            .room_keys_withheld_received_stream()
-            .await
-    })
-    .filter_map(|opt| async move { opt });
-    stream.flat_map(|s| s).map(move |infos| {
+    let stream = client
+        .encryption()
+        .room_keys_withheld_received_stream()
+        .await;
+    let stream = futures_util::stream::iter(stream).flatten();
+    stream.map(move |infos| {
         infos
             .into_iter()
             .filter_map(|info| {

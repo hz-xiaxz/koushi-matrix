@@ -1805,17 +1805,16 @@ pub async fn load_message_source(
 pub async fn request_room_key(
     room_id: String,
     event_id: String,
-    origin: Option<String>,
+    origin: Option<koushi_core::KeyRequestOrigin>,
     timeline_key: Option<TimelineKey>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    let origin = match origin.as_deref() {
-        Some("automatic") => koushi_core::KeyRequestOrigin::Automatic,
-        _ => koushi_core::KeyRequestOrigin::User,
-    };
+    // Only absent origin defaults to User; unknown wire values are rejected by
+    // the typed deserializer instead of being silently coerced.
+    let origin = origin.unwrap_or(koushi_core::KeyRequestOrigin::User);
     if let Some(command) = build_request_room_key_command(
         request_id,
         account_key,

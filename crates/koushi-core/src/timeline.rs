@@ -14089,6 +14089,9 @@ struct KeyRequestUiState {
     stage: &'static str,
     withheld_code: Option<&'static str>,
     session_id: Option<String>,
+    /// Command correlation for user-originated requests (issue #460); None
+    /// for actor-internal automatic requests.
+    request_id: Option<RequestId>,
 }
 
 #[derive(Clone)]
@@ -14953,28 +14956,14 @@ impl TimelineActor {
             let withheld_room = key.room_id().to_owned();
             let withheld_session = session.clone();
             auxiliary_tasks.push(executor::spawn(async move {
-                let mut stream = Box::pin(koushi_sdk::room_key_withheld_stream(&withheld_session));
                 // Establish the broadcast subscription BEFORE reading the
                 // stored snapshot: the underlying channel does not replay, so
                 // an observation between the snapshot and the subscription
-                // would otherwise be lost from both sources.
-                let first =
-                    tokio::time::timeout(std::time::Duration::from_millis(500), stream.next())
-                        .await;
-                if let Ok(Some(batch)) = first {
-                    for (room_id, session_id, code) in batch {
-                        if room_id != withheld_room {
-                            continue;
-                        }
-                        let _ = withheld_tx
-                            .send(TimelineActorMessage::RoomKeyWithheldObserved {
-                                room_id,
-                                session_id,
-                                code: code.token(),
-                            })
-                            .await;
-                    }
-                }
+                // would otherwise be lost from both sources. The wrapper
+                // subscribes eagerly; no timeout is needed (the task is
+                // detached and never awaited by actor construction).
+                let mut stream =
+                    Box::pin(koushi_sdk::room_key_withheld_stream(&withheld_session).await);
                 // Seed from stored withheld state (duplicates are idempotent
                 // in the observer handler).
                 for (session_id, code) in
@@ -18024,6 +18013,21 @@ impl TimelineActor {
             if let Some(task) = self.decrypt_retry_timeout_task.take() {
                 task.abort();
             }
+            // Issue #460: the superseded request's operational window ends and
+            // its timeout task is gone — move its presentation to
+            // still_waiting (the Matrix request is still outstanding; a late
+            // key or withheld observation settles it further).
+            if let Some(state) = self.key_request_states.get_mut(&previous.event_id) {
+                if !matches!(
+                    state.stage,
+                    "withheld" | "decryption_recovered" | "send_failed"
+                ) {
+                    state.stage = "still_waiting";
+                }
+            }
+            if let Some(state) = self.key_request_states.get(&previous.event_id) {
+                self.publish_key_request_state(&previous.event_id, state);
+            }
         }
         record_decrypt_retry_request(
             pending.operation,
@@ -18107,6 +18111,7 @@ impl TimelineActor {
                     stage,
                     withheld_code,
                     session_id: None,
+                    request_id: None,
                 });
             // Issue #460: every settle transition is published so the UI can
             // reflect withheld / still-waiting / send-failure even when no
@@ -18122,6 +18127,7 @@ impl TimelineActor {
             crate::event::RoomEvent::RoomKeyRequestStateChanged {
                 room_id: self.key.room_id().to_owned(),
                 event_id: event_id.to_owned(),
+                request_id: state.request_id.clone(),
                 stage: key_request_stage_token(state.stage),
                 withheld_code: state
                     .withheld_code
@@ -18243,6 +18249,7 @@ impl TimelineActor {
                 },
                 withheld_code: None,
                 session_id: session_id.clone(),
+                request_id: request_id.clone(),
             },
         );
         // Issue #460: publish the accepted initial state so the UI can move
@@ -19905,6 +19912,7 @@ impl TimelineActor {
                     eyeball_im::VectorDiff::Insert { value, .. } => vec![value],
                     eyeball_im::VectorDiff::Set { value, .. } => vec![value],
                     eyeball_im::VectorDiff::Reset { values } => values.iter().collect(),
+                    eyeball_im::VectorDiff::Append { values } => values.iter().collect(),
                     _ => Vec::new(),
                 };
                 for value in values {
@@ -43281,6 +43289,7 @@ mod tests {
         let event = CoreEvent::Room(crate::event::RoomEvent::RoomKeyRequestStateChanged {
             room_id: "!secret-room:example.invalid".to_owned(),
             event_id: "$secret-event:example.invalid".to_owned(),
+            request_id: None,
             stage: RoomKeyRequestStage::Withheld,
             withheld_code: Some(RoomKeyRequestWithheldCode::Unverified),
         });

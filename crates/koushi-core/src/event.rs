@@ -729,6 +729,7 @@ pub enum RoomEvent {
     RoomKeyRequestStateChanged {
         room_id: String,
         event_id: String,
+        request_id: Option<RequestId>,
         stage: RoomKeyRequestStage,
         withheld_code: Option<RoomKeyRequestWithheldCode>,
     },
@@ -948,6 +949,7 @@ impl fmt::Debug for RoomEvent {
             Self::RoomKeyRequestStateChanged {
                 room_id: _,
                 event_id: _,
+                request_id: _,
                 stage,
                 withheld_code,
             } => formatter

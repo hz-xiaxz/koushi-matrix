@@ -3295,6 +3295,7 @@ mod tests {
             serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyRequestStateChanged {
                 room_id: "!r:example.test".to_owned(),
                 event_id: "$e1".to_owned(),
+                request_id: Some(request_id),
                 stage: RoomKeyRequestStage::Withheld,
                 withheld_code: Some(RoomKeyRequestWithheldCode::Unavailable),
             }))

@@ -618,6 +618,7 @@ export type RoomEvent =
       RoomKeyRequestStateChanged: {
         room_id: string;
         event_id: string;
+        request_id: RequestId | null;
         stage: RoomKeyRequestStage;
         withheld_code: RoomKeyRequestWithheldCode | null;
       };
