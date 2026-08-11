@@ -682,6 +682,7 @@ export function TimelinePane({
   activeRoomName,
   canEdit = true,
   composerDocument,
+  composerNotice = null,
   composerDraftKey,
   composerMode,
   resolveComposerKeyAction,
@@ -760,6 +761,8 @@ export function TimelinePane({
   onResultSelect: (roomId: string, eventId: string) => void;
   onScheduleSend: (sendAtMs: number, document: ComposerDocument) => void;
   onSendText: (document: ComposerDocument) => void;
+  /** Localized transient notice rendered above the main composer (#450). */
+  composerNotice?: string | null;
   onSetLocalUserAlias: (userId: string, alias: string | null) => void;
   /** Kept for fixture compatibility; pinned unpin actions live in the panel. */
   onUnpinPinnedEvent?: (roomId: string, eventId: string) => void;
@@ -1078,6 +1081,7 @@ export function TimelinePane({
         mentionCandidatesLoading={mentionCandidatesLoading}
         resolveComposerKeyAction={resolveComposerKeyActionStable}
         document={composerDocument}
+        notice={composerNotice}
         draftKey={composerDraftKey ?? timelineRoomId ?? "no-room"}
         roomName={activeRoomName}
         onCancelReply={onCancelReplyStable}

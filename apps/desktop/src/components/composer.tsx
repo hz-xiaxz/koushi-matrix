@@ -95,7 +95,8 @@ export const Composer = memo(function Composer({
   onMathModeChange = () => undefined,
   onMentionQueryChange = () => undefined,
   onScheduleSend,
-  onSend
+  onSend,
+  notice = null
 }: {
   surface?: ComposerSurface;
   editorOnly?: boolean;
@@ -120,6 +121,8 @@ export const Composer = memo(function Composer({
   onMentionQueryChange?: (query: string | null) => void;
   onScheduleSend?: (sendAtMs: number, document: ComposerDocument) => void | Promise<void>;
   onSend: (document: ComposerDocument) => void | Promise<void>;
+  /** Localized transient notice rendered above the composer (issue #450). */
+  notice?: string | null;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
@@ -532,6 +535,11 @@ export const Composer = memo(function Composer({
       <div className="composer-drop-overlay" aria-hidden={!fileDragActive}>
         {t("composer.dropFiles")}
       </div>
+      {notice ? (
+        <p className="composer-notice" role="status">
+          {notice}
+        </p>
+      ) : null}
       {!editorOnly && composerMode.kind === "reply" ? (
         <div className="composer-reply-banner">
           <span className="composer-reply-label">{t("composer.replying")}</span>

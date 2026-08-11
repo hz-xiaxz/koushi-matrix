@@ -101,6 +101,7 @@ export type MessageId =
   | "composer.imageCompressionTitle"
   | "composer.placeholder"
   | "composer.replying"
+  | "composer.slashCommandUnavailable"
   | "composer.removeAttachment"
   | "composer.cancelReply"
   | "upload.captionForFile"
@@ -1364,6 +1365,7 @@ const en: Catalog = {
   "composer.imageCompressionTitle": "Compress image",
   "composer.placeholder": "Message {roomName}",
   "composer.replying": "Replying",
+  "composer.slashCommandUnavailable": "This command is not available in this composer.",
   "composer.removeAttachment": "Remove attachment",
   "composer.cancelReply": "Cancel reply",
   "upload.captionForFile": "Caption for {filename}",
@@ -2531,6 +2533,7 @@ const ja: Catalog = {
   "composer.messageComposer": "メッセージ入力欄",
   "composer.placeholder": "{roomName}にメッセージ",
   "composer.replying": "返信中",
+  "composer.slashCommandUnavailable": "このコマンドはこの入力欄では実行できません。",
   "composer.removeAttachment": "添付を削除",
   "composer.cancelReply": "返信をキャンセル",
   "composer.imageCompressionCompressed": "圧縮済み",

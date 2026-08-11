@@ -1834,6 +1834,28 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [rightPanelWidth, setRightPanelWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
   const [qaSendStatus, setQaSendStatus] = useState<QaSendSmokeStatus>("idle");
+  // Issue #450: transient localized notice for recognized-but-unavailable
+  // slash commands (e.g. /join, /invite), rendered above the main composer.
+  const [composerNotice, setComposerNotice] = useState<string | null>(null);
+  const composerNoticeTimerRef = useRef<number | null>(null);
+  const showComposerNoticeRef = useRef<(message: string) => void>(() => undefined);
+  useEffect(() => {
+    showComposerNoticeRef.current = (message: string) => {
+      setComposerNotice(message);
+      if (composerNoticeTimerRef.current !== null) {
+        window.clearTimeout(composerNoticeTimerRef.current);
+      }
+      composerNoticeTimerRef.current = window.setTimeout(() => {
+        setComposerNotice(null);
+        composerNoticeTimerRef.current = null;
+      }, 4000);
+    };
+    return () => {
+      if (composerNoticeTimerRef.current !== null) {
+        window.clearTimeout(composerNoticeTimerRef.current);
+      }
+    };
+  }, []);
   const [timelineDiagnostics, setTimelineDiagnostics] =
     useState<QaTimelineDiagnostics>(INITIAL_TIMELINE_DIAGNOSTICS);
   const timelineDiagnosticsRef = useRef<QaTimelineDiagnostics>(INITIAL_TIMELINE_DIAGNOSTICS);
@@ -2750,6 +2772,22 @@ export function App() {
               applyGlobalResync(next),
               retainedTimelineKeyIdsRef.current
             );
+            continue;
+          }
+          if (payload.kind === "OperationFailed") {
+            // Issue #450: a recognized-but-unavailable slash command (e.g.
+            // /join, /invite) is rejected before any Matrix send; surface the
+            // localized explanation near the composer instead of appearing
+            // inert. Transient: auto-dismissed.
+            const failure = payload.failure;
+            if (
+              failure &&
+              typeof failure === "object" &&
+              "TimelineOperationFailed" in failure &&
+              failure.TimelineOperationFailed.kind === "UnsupportedSlashCommand"
+            ) {
+              showComposerNoticeRef.current(t("composer.slashCommandUnavailable"));
+            }
             continue;
           }
           if (
@@ -6299,6 +6337,7 @@ export function App() {
           <TimelinePane
             activeRoomName={activeRoom?.display_label ?? t("room.noRoomSelected")}
             composerDocument={composerDocument}
+            composerNotice={composerNotice}
             composerDraftKey={mainComposerDraftImeKey}
             composerMode={composerModeProp(snapshot.state.ui.timeline.composer.mode)}
             canEdit={!encryptedComposerBlocked}

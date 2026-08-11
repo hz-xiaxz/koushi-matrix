@@ -194,6 +194,38 @@ describe("Composer", () => {
     expect(onValueChange).toHaveBeenLastCalledWith("**world**");
   });
 
+  it("renders a localized notice for rejected slash commands and hides it without one", () => {
+    // Issue #450: recognized-but-unavailable commands (/join, /invite) show a
+    // clear localized explanation near the composer instead of appearing inert.
+    const { rerender } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("")}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+        notice="This command is not available in this composer."
+      />
+    );
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("This command is not available in this composer.");
+    rerender(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("")}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+        notice={null}
+      />
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("renders the math mode toggle from props and requests Rust-owned settings updates", () => {
     const onMathModeChange = vi.fn();
     const { rerender } = render(
