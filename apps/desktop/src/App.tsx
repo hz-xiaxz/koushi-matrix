@@ -1845,9 +1845,6 @@ export function App() {
     message: string;
   } | null>(null);
   const composerNoticeTimerRef = useRef<number | null>(null);
-  // Keyless OperationFailed rejections (e.g. schedule-time validation) fall
-  // back to the composer target of the most recent schedule attempt.
-  const lastScheduleTargetKeyRef = useRef<TimelineKey | null>(null);
   const showComposerNotice = useCallback((key: TimelineKey, message: string) => {
     setComposerNotice({ key, message });
     if (composerNoticeTimerRef.current !== null) {
@@ -2788,24 +2785,34 @@ export function App() {
             // /join, /invite) is rejected before any Matrix send; surface the
             // localized explanation near the composer instead of appearing
             // inert. Transient: auto-dismissed. The OperationFailed envelope
-            // carries no key, so the notice keys to the target of the most
-            // recent schedule attempt (or the active main room as a fallback).
+            // carries no key, so the notice keys to the active main room
+            // (schedule-time rejections use the keyed
+            // ComposerSlashCommandRejected event instead).
             if (isUnsupportedSlashCommandRejection(payload)) {
-              const scheduledTarget = lastScheduleTargetKeyRef.current;
-              if (scheduledTarget) {
-                showComposerNotice(scheduledTarget, t("composer.slashCommandUnavailable"));
-                lastScheduleTargetKeyRef.current = null;
-              } else {
-                const activeRoomId = snapshotRef.current?.state.ui.timeline.room_id;
-                if (activeRoomId) {
-                  const account = readyComposerDraftAccountOwner(snapshotRef.current);
-                  showComposerNotice(
-                    roomTimelineKey(account ? account.userId : "main", activeRoomId),
-                    t("composer.slashCommandUnavailable")
-                  );
-                }
+              const activeRoomId = snapshotRef.current?.state.ui.timeline.room_id;
+              if (activeRoomId) {
+                const account = readyComposerDraftAccountOwner(snapshotRef.current);
+                showComposerNotice(
+                  roomTimelineKey(account ? account.userId : "main", activeRoomId),
+                  t("composer.slashCommandUnavailable")
+                );
               }
             }
+            continue;
+          }
+          if (
+            payload.kind === "Room" &&
+            typeof payload.event === "object" &&
+            payload.event !== null &&
+            "ComposerSlashCommandRejected" in payload.event
+          ) {
+            // Issue #450: the schedule-time rejection is keyed to the exact
+            // composer target by Rust, so the notice routes without any
+            // frontend correlation.
+            showComposerNotice(
+              payload.event.ComposerSlashCommandRejected.key,
+              t("composer.slashCommandUnavailable")
+            );
             continue;
           }
           if (
@@ -4611,9 +4618,6 @@ export function App() {
     if (!reserveComposerAcceptedRevision(admitted, draftRevision)) return;
     const localRevisionAtSubmission = mainComposerOverlayRef.current?.revision ?? null;
     try {
-      // Issue #450: key any schedule-time rejection to this target. The
-      // canonical account is the Matrix user id (matches Rust AccountKey).
-      lastScheduleTargetKeyRef.current = roomTimelineKey(account.userId, roomId);
       const response = await api.scheduleSend(
         account,
         admitted.lease.leaseId,
@@ -4628,10 +4632,6 @@ export function App() {
       const accepted =
         response.acceptedRevision !== null &&
         compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
-      if (accepted) {
-        // The schedule was accepted; no rejection event is pending for it.
-        lastScheduleTargetKeyRef.current = null;
-      }
       const hasNewerDraft = mainComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
       if (accepted && !hasNewerDraft) {
         cancelComposerDraftPersist(scope);
@@ -4640,7 +4640,6 @@ export function App() {
       }
       setSnapshot(response.snapshot);
     } catch {
-      lastScheduleTargetKeyRef.current = null;
       settleComposerOperation(admitted);
       // Command failures are surfaced through the Rust-owned error/event path.
     }
@@ -5336,8 +5335,6 @@ export function App() {
     const localRevisionAtSubmission = threadComposerOverlayRef.current?.revision ?? null;
     let response;
     try {
-      // Issue #450: key any schedule-time rejection to this thread target.
-      lastScheduleTargetKeyRef.current = threadTimelineKey(account.userId, roomId, rootEventId);
       response = await api.scheduleSend(
         account,
         admitted.lease.leaseId,
@@ -5348,7 +5345,6 @@ export function App() {
         draftRevision
       );
     } catch {
-      lastScheduleTargetKeyRef.current = null;
       settleComposerOperation(admitted);
       return;
     }
@@ -5357,9 +5353,6 @@ export function App() {
     const accepted =
       response.acceptedRevision !== null &&
       compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
-    if (accepted) {
-      lastScheduleTargetKeyRef.current = null;
-    }
     const hasNewerDraft =
       threadComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
     if (accepted && !hasNewerDraft) {

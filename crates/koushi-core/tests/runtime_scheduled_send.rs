@@ -727,6 +727,11 @@ async fn scheduled_recognized_unavailable_command_is_rejected_before_acceptance(
     let event = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             match conn.recv_event().await.expect("runtime event stream") {
+                event @ CoreEvent::Room(
+                    koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. },
+                ) => {
+                    break event;
+                }
                 event @ CoreEvent::OperationFailed {
                     request_id: failed_request_id,
                     ..
@@ -740,12 +745,7 @@ async fn scheduled_recognized_unavailable_command_is_rejected_before_acceptance(
     assert!(
         matches!(
             &event,
-            CoreEvent::OperationFailed {
-                failure: CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::UnsupportedSlashCommand,
-                },
-                ..
-            }
+            CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. })
         ),
         "unexpected event: {event:?}"
     );
@@ -816,6 +816,11 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
     let event = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             match conn.recv_event().await.expect("runtime event stream") {
+                event @ CoreEvent::Room(
+                    koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. },
+                ) => {
+                    break event;
+                }
                 event @ CoreEvent::OperationFailed {
                     request_id: failed_request_id,
                     ..
@@ -828,12 +833,7 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
     .expect("reschedule rejection should be correlated");
     assert!(matches!(
         &event,
-        CoreEvent::OperationFailed {
-            failure: CoreFailure::TimelineOperationFailed {
-                kind: TimelineFailureKind::UnsupportedSlashCommand,
-            },
-            ..
-        }
+        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. })
     ));
     // The existing item is preserved with its original body.
     let snapshot = conn.snapshot();

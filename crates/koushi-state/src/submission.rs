@@ -35,6 +35,19 @@ impl ComposerTarget {
             Self::Main { room_id } | Self::Thread { room_id, .. } => room_id,
         }
     }
+
+    /// Build the composer target a scheduled item belongs to (issue #450).
+    pub fn from_scheduled_item(item: &crate::ScheduledSendItem) -> Self {
+        match &item.thread_root_event_id {
+            Some(root_event_id) => Self::Thread {
+                room_id: item.room_id.clone(),
+                root_event_id: root_event_id.clone(),
+            },
+            None => Self::Main {
+                room_id: item.room_id.clone(),
+            },
+        }
+    }
 }
 
 pub type ComposerSubmissionTarget = ComposerTarget;

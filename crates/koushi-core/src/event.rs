@@ -733,6 +733,12 @@ pub enum RoomEvent {
         stage: RoomKeyRequestStage,
         withheld_code: Option<RoomKeyRequestWithheldCode>,
     },
+    /// Issue #450: a recognized-but-unavailable slash command (/join, /invite)
+    /// was rejected for a composer target; the key names which composer should
+    /// show the localized notice.
+    ComposerSlashCommandRejected {
+        key: TimelineKey,
+    },
     MarkedAsRead {
         request_id: RequestId,
         room_id: String,
@@ -947,7 +953,7 @@ impl fmt::Debug for RoomEvent {
                 .field("outcome", outcome)
                 .finish(),
             Self::RoomKeyRequestStateChanged {
-                key,
+                key: _,
                 event_id: _,
                 request_id: _,
                 stage,
@@ -958,6 +964,10 @@ impl fmt::Debug for RoomEvent {
                 .field("event_id", &"EventId(..)")
                 .field("stage", stage)
                 .field("withheld_code", withheld_code)
+                .finish(),
+            Self::ComposerSlashCommandRejected { key: _ } => formatter
+                .debug_struct("ComposerSlashCommandRejected")
+                .field("key", &"TimelineKey(..)")
                 .finish(),
             Self::MarkedAsRead { request_id, .. } => formatter
                 .debug_struct("MarkedAsRead")
@@ -2265,6 +2275,7 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
         | RoomEvent::RoomMemberRoleUpdated { .. }
         | RoomEvent::RoomKeyReshared { .. }
         | RoomEvent::RoomKeyRequestStateChanged { .. }
+        | RoomEvent::ComposerSlashCommandRejected { .. }
         | RoomEvent::MarkedAsRead { .. }
         | RoomEvent::MarkedAsUnread { .. }
         | RoomEvent::ReportCompleted { .. } => {}

@@ -623,6 +623,7 @@ export type RoomEvent =
         withheld_code: RoomKeyRequestWithheldCode | null;
       };
     }
+  | { ComposerSlashCommandRejected: { key: TimelineKey } }
   | { PinnedEventsUpdated: { room_id: string; pinned: PinnedEvent[] } }
   | { PinEventCompleted: { request_id: RequestId; room_id: string } }
   | { UnpinEventCompleted: { request_id: RequestId; room_id: string } }
