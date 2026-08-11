@@ -2602,6 +2602,13 @@ mod submission_settlement_tests {
             .await,
             Err("composer draft acceptance was rejected".to_owned())
         );
+        // Both events were consumed: the unrelated keyed rejection was skipped
+        // (continue) and the matching one terminated the wait. If the waiter
+        // terminated on ANY keyed rejection, this assertion fails.
+        assert!(
+            source.events.is_empty(),
+            "waiter must consume the unrelated rejection before the matching one"
+        );
     }
 
     #[tokio::test]
