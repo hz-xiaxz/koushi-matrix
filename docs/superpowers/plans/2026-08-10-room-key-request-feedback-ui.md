@@ -1,5 +1,16 @@
 # Room-Key Request Progress and Refusal Feedback UI — Implementation Plan (issue #460)
 
+> **SUPERSEDED by the landed contract.** The final implementation differs from
+> this plan where noted inline: the wire event is a `CoreEvent::Room`
+> (`RoomKeyRequestStateChanged`) not an `AppAction`; the stage set is the six
+> closed stages below with **no public `awaiting` stage** (coalesced duplicates
+> stay `sent`/`automatic`); the event carries the command `request_id`
+> (`Some` for all external commands, `None` only for actor-internal automatic
+> work); automatic thread requests are admitted by the actor itself (not by
+> React), and repeat clicks while a request is pending dispatch no duplicate
+> command. See `docs/architecture/state-machine.md` "Timeline Room-Key Request
+> Feedback (#460)" for the normative lifecycle.
+
 > **For agentic workers:** Implement verify-first: add the failing headless check
 > before the fix and let the same check turn green.
 

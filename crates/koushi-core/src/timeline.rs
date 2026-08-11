@@ -15947,9 +15947,12 @@ impl TimelineActor {
                     }
                     // Non-current requests (already timed out / settled) still
                     // surface the refusal when the observation arrives late.
+                    // Terminal stages are not regressed: a recovered event stays
+                    // recovered and a send failure stays failed.
                     let should_publish =
                         self.key_request_states.get(&event_id).is_some_and(|state| {
-                            state.stage != "withheld" || state.withheld_code.is_none()
+                            state.stage != "withheld"
+                                && !matches!(state.stage, "decryption_recovered" | "send_failed")
                         });
                     if !should_publish {
                         continue;
@@ -18123,6 +18126,14 @@ impl TimelineActor {
     }
 
     fn publish_key_request_state(&self, event_id: &str, state: &KeyRequestUiState) {
+        // Generation fence: a replaced actor must not publish outcomes for a
+        // batch the UI has already discarded (same gate as timeline events).
+        let Some(_lease) = self
+            .timeline_actor_generations
+            .try_acquire(&self.key, self.actor_generation)
+        else {
+            return;
+        };
         let _ = self.event_tx.send(CoreEvent::Room(
             crate::event::RoomEvent::RoomKeyRequestStateChanged {
                 room_id: self.key.room_id().to_owned(),
@@ -18217,6 +18228,19 @@ impl TimelineActor {
                 backup_observation.current.recovery,
             ),
         ) else {
+            // Issue #460: coalesced duplicate — the request for this event is
+            // already in flight. Republish the current state correlated to
+            // this accepted command so every accepted command retains its
+            // request_id (the frontend apply is idempotent).
+            if let Some(state) = self.key_request_states.get(&requested_event_id) {
+                let correlated = KeyRequestUiState {
+                    stage: state.stage,
+                    withheld_code: state.withheld_code,
+                    session_id: state.session_id.clone(),
+                    request_id: request_id.clone(),
+                };
+                self.publish_key_request_state(&requested_event_id, &correlated);
+            }
             return;
         };
         let Some(original_json) = event_item.original_json().cloned() else {
@@ -19872,10 +19896,29 @@ impl TimelineActor {
                 if event.content().is_unable_to_decrypt() {
                     continue;
                 }
+                let mut recovered = false;
                 if let Some(state) = self.key_request_states.get_mut(&event_id) {
-                    if state.stage != "decryption_recovered" {
+                    // Terminal send failure is not regressed by a late key.
+                    if state.stage != "decryption_recovered" && state.stage != "send_failed" {
                         state.stage = "decryption_recovered";
+                        recovered = true;
                     }
+                }
+                // Issue #460: a late recovery after the operational timeout is
+                // published as the correlated Room event (the diff updates the
+                // DTO, but only this event carries the request_id). The active
+                // settlement path publishes for the current operation, so skip
+                // it here to avoid a duplicate publication.
+                if recovered
+                    && decrypt_retry_settlement_operation(
+                        &self.decrypt_retry,
+                        self.actor_generation,
+                        &event_id,
+                    )
+                    .is_none()
+                    && let Some(state) = self.key_request_states.get(&event_id)
+                {
+                    self.publish_key_request_state(&event_id, state);
                 }
             }
         }

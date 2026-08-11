@@ -1393,8 +1393,10 @@ Guard notes:
   closed token from the SDK store (`blacklisted | unverified | unauthorised |
   unavailable`); unknown/custom codes render the generic refusal copy.
 - **Publication**: every transition publishes `RoomKeyRequestStateChanged`
-  with the command `request_id` (`Some` for user commands, `None` for
-  automatic), so accepted commands retain their correlation.
+  with the command `request_id` (`Some` for every externally-issued command
+  including public `Automatic` requests; `None` only for actor-internal
+  automatic work), so accepted commands retain their correlation. Coalesced
+  duplicates republish the in-flight state with the duplicate command's id.
 - **Stale generations**: settlement is fenced by the actor generation; a stale
   actor cannot publish outcomes for its replaced batch.
 - **React contract**: local optimistic marker + toast on the user's click only;
