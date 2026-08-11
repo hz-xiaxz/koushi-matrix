@@ -18126,11 +18126,14 @@ impl TimelineActor {
                 Ok(()) => {}
                 Err(tokio::sync::mpsc::error::TrySendError::Full(message)) => {
                     match message {
-                        TimelineActorMessage::RequestRoomKey { event_id, .. } => {
+                        TimelineActorMessage::RequestRoomKey { event_id, .. }
+                            if !self.pending_auto_key_requests.contains(&event_id) =>
+                        {
+                            // Dedup: repeated Reset batches re-scan the same
+                            // events; the pending set stays bounded by the
+                            // number of distinct requestable events.
                             self.pending_auto_key_requests.push(event_id);
                         }
-                        // Only automatic key-request messages are dispatched
-                        // through this helper.
                         _ => {}
                     }
                 }

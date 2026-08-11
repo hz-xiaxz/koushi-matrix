@@ -4329,16 +4329,23 @@ export const TimelineView = memo(function TimelineView({
   const onRequestRoomKey = useCallback(
     (targetRoomId: string, eventId: string) => {
       // User-triggered "Request keys and retry" action: immediate visible
-      // acknowledgment, then the Rust command confirms the lifecycle. On
-      // rejection (IPC/command failure) the optimistic marker and toast are
-      // reverted so the UI never shows a stuck "waiting" state.
+      // acknowledgment, then the Rust command confirms the lifecycle. While a
+      // request for this event is already pending locally, a repeat click only
+      // re-shows the toast — no duplicate command is dispatched (the pending
+      // marker is exactly the in-flight command marker). On rejection
+      // (IPC/command failure) the optimistic marker and toast are reverted so
+      // the UI never shows a stuck "waiting" state.
+      const pendingKey = `event:${eventId}`;
       if (targetRoomId === roomId) {
+        setKeyRequestToast(t("timeline.keyRequestToast"));
+        if (pendingKeyRequests.has(pendingKey)) {
+          return;
+        }
         setPendingKeyRequests((current) => {
           const next = new Set(current);
-          next.add(`event:${eventId}`);
+          next.add(pendingKey);
           return next;
         });
-        setKeyRequestToast(t("timeline.keyRequestToast"));
       }
       void transport
         .requestRoomKey(targetRoomId, eventId, "user", timelineKey)
@@ -4346,14 +4353,14 @@ export const TimelineView = memo(function TimelineView({
           if (targetRoomId === roomId) {
             setPendingKeyRequests((current) => {
               const next = new Set(current);
-              next.delete(`event:${eventId}`);
+              next.delete(pendingKey);
               return next;
             });
             setKeyRequestToast(null);
           }
         });
     },
-    [roomId, t, timelineKey, transport]
+    [pendingKeyRequests, roomId, t, timelineKey, transport]
   );
   const onForwardMessage = useCallback(
     (targetRoomId: string, sourceEventId: string, destinationRoomId: string) => {

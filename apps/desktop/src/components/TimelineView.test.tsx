@@ -11494,8 +11494,9 @@ describe("room key request feedback (#460)", () => {
       });
     });
     const button = await screen.findByRole("button", { name: "Request keys and retry" });
-    // Click twice: the toast/pending marker must not duplicate, and both
-    // commands reach Rust, whose retry controller coalesces repeats.
+    // Click twice: the toast/pending marker must not duplicate, and a repeat
+    // click while the request is pending dispatches no duplicate command
+    // (plan: no duplicate commands while pending; Rust also coalesces).
     fireEvent.click(button);
     fireEvent.click(button);
     await waitFor(() => {
@@ -11506,13 +11507,66 @@ describe("room key request feedback (#460)", () => {
     });
     expect(screen.getAllByText(/Decryption key requested/)).toHaveLength(1);
     expect(screen.getAllByText(/Waiting for the decryption key/)).toHaveLength(1);
-    expect(requestRoomKey).toHaveBeenCalledTimes(2);
+    expect(requestRoomKey).toHaveBeenCalledTimes(1);
     expect(requestRoomKey).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$click",
       "user",
       KEY
     );
+  });
+
+  it("keyboard activation requests keys and announces the toast in an ARIA-live status region", async () => {
+    let emit: (payload: unknown) => void = () => undefined;
+    const requestRoomKey = vi.fn(async () => undefined);
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey,
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [utdItem("$kb", null)]
+          }
+        }
+      });
+    });
+    const button = await screen.findByRole("button", { name: "Request keys and retry" });
+    // The action is a native <button> (browser-activated by Enter/Space);
+    // jsdom does not synthesize the Enter->click translation, so activate it
+    // while focused and assert the IPC payload + ARIA-live announcement.
+    expect(button.tagName).toBe("BUTTON");
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(requestRoomKey).toHaveBeenCalledWith(
+        "!room:example.invalid",
+        "$kb",
+        "user",
+        KEY
+      );
+    });
+    const status = screen.getByRole("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toContain("Decryption key requested");
   });
 
   it("a Rust-published transition clears the local pending marker and shows the terminal copy", async () => {
