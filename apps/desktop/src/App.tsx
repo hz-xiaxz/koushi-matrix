@@ -78,7 +78,8 @@ import {
   focusedTimelineKey,
   isUnsupportedSlashCommandRejection,
   roomTimelineKey,
-  threadTimelineKey
+  threadTimelineKey,
+  timelineKeyEquals
 } from "./domain/coreEvents";
 import {
   applyGlobalResync,
@@ -1843,19 +1844,16 @@ export function App() {
     message: string;
   } | null>(null);
   const composerNoticeTimerRef = useRef<number | null>(null);
-  const showComposerNoticeRef = useRef<{
-    key: TimelineKey;
-    message: string;
-  } | null>(null);
+  // Keyless OperationFailed rejections (e.g. schedule-time validation) fall
+  // back to the composer target of the most recent schedule attempt.
+  const lastScheduleTargetKeyRef = useRef<TimelineKey | null>(null);
   const showComposerNotice = useCallback((key: TimelineKey, message: string) => {
-    showComposerNoticeRef.current = { key, message };
     setComposerNotice({ key, message });
     if (composerNoticeTimerRef.current !== null) {
       window.clearTimeout(composerNoticeTimerRef.current);
     }
     composerNoticeTimerRef.current = window.setTimeout(() => {
       setComposerNotice(null);
-      showComposerNoticeRef.current = null;
       composerNoticeTimerRef.current = null;
     }, 4000);
   }, []);
@@ -2789,15 +2787,25 @@ export function App() {
             // /join, /invite) is rejected before any Matrix send; surface the
             // localized explanation near the composer instead of appearing
             // inert. Transient: auto-dismissed. The OperationFailed envelope
-            // carries no key, so the notice keys to the active main room.
+            // carries no key, so the notice keys to the target of the most
+            // recent schedule attempt (or the active main room as a fallback).
             if (isUnsupportedSlashCommandRejection(payload)) {
-              const activeRoomId = snapshotRef.current?.state.ui.timeline.room_id;
-              if (activeRoomId) {
-                const account = readyComposerDraftAccountOwner(snapshotRef.current);
-                showComposerNotice(
-                  roomTimelineKey(account ? composerDraftAccountOwnerKey(account) : "main", activeRoomId),
-                  t("composer.slashCommandUnavailable")
-                );
+              const scheduledTarget = lastScheduleTargetKeyRef.current;
+              if (scheduledTarget) {
+                showComposerNotice(scheduledTarget, t("composer.slashCommandUnavailable"));
+                lastScheduleTargetKeyRef.current = null;
+              } else {
+                const activeRoomId = snapshotRef.current?.state.ui.timeline.room_id;
+                if (activeRoomId) {
+                  const account = readyComposerDraftAccountOwner(snapshotRef.current);
+                  showComposerNotice(
+                    roomTimelineKey(
+                      account ? composerDraftAccountOwnerKey(account) : "main",
+                      activeRoomId
+                    ),
+                    t("composer.slashCommandUnavailable")
+                  );
+                }
               }
             }
             continue;
@@ -4598,6 +4606,7 @@ export function App() {
     }
 
     const target: ComposerTarget = { kind: "main", room_id: roomId };
+    lastScheduleTargetKeyRef.current = roomTimelineKey(accountOwner, roomId);
     const scope = composerDraftScope(account, target);
     const admitted = beginComposerOperation(scope);
     if (!admitted) return;
@@ -5309,6 +5318,7 @@ export function App() {
     ) {
       return;
     }
+    lastScheduleTargetKeyRef.current = threadTimelineKey(accountOwner, roomId, rootEventId);
     const target: ComposerTarget = {
       kind: "thread",
       room_id: roomId,
@@ -6364,7 +6374,16 @@ export function App() {
             composerNotice={
               composerNotice &&
               "Room" in composerNotice.key.kind &&
-              composerNotice.key.kind.Room.room_id === snapshot.state.ui.timeline.room_id
+              composerNotice.key.kind.Room.room_id === snapshot.state.ui.timeline.room_id &&
+              (() => {
+                const account = readyComposerDraftAccountOwner(snapshot);
+                return account
+                  ? timelineKeyEquals(
+                      composerNotice.key,
+                      roomTimelineKey(composerDraftAccountOwnerKey(account), snapshot.state.ui.timeline.room_id ?? "")
+                    )
+                  : true;
+              })()
                 ? composerNotice.message
                 : null
             }
@@ -6657,8 +6676,14 @@ export function App() {
             composerNotice &&
             activeThreadTarget &&
             "Thread" in composerNotice.key.kind &&
-            composerNotice.key.kind.Thread.room_id === activeThreadTarget.room_id &&
-            composerNotice.key.kind.Thread.root_event_id === activeThreadTarget.root_event_id
+            timelineKeyEquals(
+              composerNotice.key,
+              threadTimelineKey(
+                currentComposerAccount ? composerDraftAccountOwnerKey(currentComposerAccount) : "main",
+                activeThreadTarget.room_id,
+                activeThreadTarget.root_event_id
+              )
+            )
               ? composerNotice.message
               : null
           }

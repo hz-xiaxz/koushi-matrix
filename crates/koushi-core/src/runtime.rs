@@ -4165,6 +4165,21 @@ impl AppActor {
                     body,
                     send_at_ms,
                 } => {
+                    // Issue #450: rescheduling must apply the same slash
+                    // validation as the initial schedule — otherwise a
+                    // recognized-but-unavailable command (/join, /invite)
+                    // could be stored and enter the permanent dispatch/retry
+                    // loop. Reject terminally and leave the existing item
+                    // untouched.
+                    if let Err(kind) =
+                        crate::timeline::validate_composer_body_for_timeline_send(&body)
+                    {
+                        self.emit(CoreEvent::OperationFailed {
+                            request_id,
+                            failure: CoreFailure::TimelineOperationFailed { kind },
+                        });
+                        return false;
+                    }
                     if let Some(item) = self.state.scheduled_sends.items.get(&scheduled_id).cloned()
                         && let ScheduledSendHandle::Server { delay_id } = item.handle
                     {
