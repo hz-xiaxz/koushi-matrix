@@ -18214,11 +18214,23 @@ impl TimelineActor {
         // Issue #460: automatic (thread auto-recovery) requests are one-shot
         // per event — once a request state exists, repeats are refused so a
         // settled still-waiting/withheld event is not re-spammed on every
-        // render. Explicit user clicks are always admitted (Rust coalesces
-        // concurrent repeats via the retry controller).
+        // render. Externally issued commands still retain correlation: when a
+        // concrete request id is present, republish the in-flight state with
+        // it (silent return only for actor-internal None).
         if origin == crate::command::KeyRequestOrigin::Automatic
             && self.key_request_states.contains_key(&requested_event_id)
         {
+            if let Some(request_id) = request_id
+                && let Some(state) = self.key_request_states.get(&requested_event_id)
+            {
+                let correlated = KeyRequestUiState {
+                    stage: state.stage,
+                    withheld_code: state.withheld_code,
+                    session_id: state.session_id.clone(),
+                    request_id: Some(request_id),
+                };
+                self.publish_key_request_state(&requested_event_id, &correlated);
+            }
             return;
         }
         let Some(pending) = self.begin_decrypt_retry(
