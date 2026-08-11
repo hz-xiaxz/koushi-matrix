@@ -2426,7 +2426,6 @@ export const TimelineView = memo(function TimelineView({
 }: {
   timelineKey: TimelineKey;
   roomId: string;
-  keyRequestPending?: boolean;
   presentationContext?: "room" | "thread" | "focused";
   transport: TimelineTransport;
   onReply: TimelineRowActionHandlers["onReply"];
@@ -3310,19 +3309,14 @@ export const TimelineView = memo(function TimelineView({
         "RoomKeyRequestStateChanged" in payload.event
       ) {
         const change = payload.event.RoomKeyRequestStateChanged;
-        const currentKey = timelineKeyRef.current;
-        const matchesRoom =
-          ("Room" in currentKey.kind && currentKey.kind.Room.room_id === change.room_id) ||
-          ("Thread" in currentKey.kind && currentKey.kind.Thread.room_id === change.room_id) ||
-          ("Focused" in currentKey.kind && currentKey.kind.Focused.room_id === change.room_id);
-        if (!matchesRoom) {
+        if (!timelineKeyEquals(timelineKeyRef.current, change.key)) {
           return;
         }
         if (!isAppLevelStore) {
           setStore((current) => {
             const next = applyRoomKeyRequestStateChanged(
               current,
-              change.room_id,
+              change.key,
               change.event_id,
               change.stage,
               change.withheld_code
@@ -4375,7 +4369,9 @@ export const TimelineView = memo(function TimelineView({
       void transport
         .requestRoomKey(targetRoomId, eventId, "user", timelineKey)
         .catch(() => {
-          if (targetRoomId === roomId) {
+          // Fence by timeline key: a delayed rejection from a previous
+          // account/room must not clear the current view's marker/toast.
+          if (targetRoomId === roomId && timelineKeyHashRef.current === timelineKeyHash) {
             setPendingKeyRequests((current) => {
               const next = new Set(current);
               next.delete(pendingKey);

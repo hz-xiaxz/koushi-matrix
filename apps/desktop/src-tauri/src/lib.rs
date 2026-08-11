@@ -3293,7 +3293,7 @@ mod tests {
             .expect("serialize room key reshare outcome");
         let room_key_request_state_changed =
             serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyRequestStateChanged {
-                room_id: "!r:example.test".to_owned(),
+                key: key.clone(),
                 event_id: "$e1".to_owned(),
                 request_id: Some(request_id),
                 stage: RoomKeyRequestStage::Withheld,

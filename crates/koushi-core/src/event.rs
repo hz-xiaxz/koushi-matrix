@@ -727,7 +727,7 @@ pub enum RoomEvent {
         outcome: RoomKeyReshareOutcome,
     },
     RoomKeyRequestStateChanged {
-        room_id: String,
+        key: TimelineKey,
         event_id: String,
         request_id: Option<RequestId>,
         stage: RoomKeyRequestStage,
@@ -947,14 +947,14 @@ impl fmt::Debug for RoomEvent {
                 .field("outcome", outcome)
                 .finish(),
             Self::RoomKeyRequestStateChanged {
-                room_id: _,
+                key,
                 event_id: _,
                 request_id: _,
                 stage,
                 withheld_code,
             } => formatter
                 .debug_struct("RoomKeyRequestStateChanged")
-                .field("room_id", &"RoomId(..)")
+                .field("key", &"TimelineKey(..)")
                 .field("event_id", &"EventId(..)")
                 .field("stage", stage)
                 .field("withheld_code", withheld_code)

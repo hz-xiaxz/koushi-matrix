@@ -272,20 +272,58 @@ describe("timeline store — diff application", () => {
         }
       });
     }
+    // Each published transition targets exactly the named timeline key
+    // (account-inclusive), never sibling keys for the same room/event.
     store = applyRoomKeyRequestStateChanged(
       store,
-      "!room:example.invalid",
+      roomKey,
       "$target:example.invalid",
       "withheld",
       "unavailable"
     );
-    for (const key of [roomKey, threadKey, focusedKey]) {
-      expect(getItems(store, key)[0].request_state).toEqual({
-        stage: "withheld",
-        withheldCode: "unavailable"
-      });
-    }
-    // Non-matching room is untouched by the first call.
+    expect(getItems(store, roomKey)[0].request_state).toEqual({
+      stage: "withheld",
+      withheldCode: "unavailable"
+    });
+    expect(getItems(store, threadKey)[0].request_state).toBeUndefined();
+    expect(getItems(store, focusedKey)[0].request_state).toBeUndefined();
+    store = applyRoomKeyRequestStateChanged(
+      store,
+      threadKey,
+      "$target:example.invalid",
+      "withheld",
+      "unavailable"
+    );
+    expect(getItems(store, threadKey)[0].request_state).toEqual({
+      stage: "withheld",
+      withheldCode: "unavailable"
+    });
+    store = applyRoomKeyRequestStateChanged(
+      store,
+      focusedKey,
+      "$target:example.invalid",
+      "withheld",
+      "unavailable"
+    );
+    expect(getItems(store, focusedKey)[0].request_state).toEqual({
+      stage: "withheld",
+      withheldCode: "unavailable"
+    });
+    // Cross-account: the same room/event under another account is untouched.
+    const otherAccountKey = roomTimelineKey(
+      "@other-account:example.invalid",
+      "!room:example.invalid"
+    );
+    store = applyTimelineEvent(store, {
+      InitialItems: {
+        request_id: null,
+        key: otherAccountKey,
+        generation: 1,
+        items: [item]
+      }
+    });
+    expect(getItems(store, otherAccountKey)[0].request_state).toBeUndefined();
+    // A transition for a different room updates only its own items.
     const otherKey = roomTimelineKey(ACCOUNT_KEY, "!other:example.invalid");
     store = applyTimelineEvent(store, {
       InitialItems: {
@@ -296,10 +334,9 @@ describe("timeline store — diff application", () => {
       }
     });
     expect(getItems(store, otherKey)[0].request_state).toBeUndefined();
-    // A transition published for the other room updates only its own items.
     store = applyRoomKeyRequestStateChanged(
       store,
-      "!other:example.invalid",
+      otherKey,
       "$target:example.invalid",
       "withheld",
       "unavailable"

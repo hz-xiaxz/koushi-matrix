@@ -616,7 +616,7 @@ export type RoomEvent =
   | { RoomTagRemoved: { request_id: RequestId; room_id: string; tag: RoomTagKind } }
   | {
       RoomKeyRequestStateChanged: {
-        room_id: string;
+        key: TimelineKey;
         event_id: string;
         request_id: RequestId | null;
         stage: RoomKeyRequestStage;

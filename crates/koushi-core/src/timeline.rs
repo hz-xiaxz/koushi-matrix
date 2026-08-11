@@ -18137,7 +18137,7 @@ impl TimelineActor {
         };
         let _ = self.event_tx.send(CoreEvent::Room(
             crate::event::RoomEvent::RoomKeyRequestStateChanged {
-                room_id: self.key.room_id().to_owned(),
+                key: self.key.clone(),
                 event_id: event_id.to_owned(),
                 request_id: state.request_id.clone(),
                 stage: key_request_stage_token(state.stage),
@@ -43380,13 +43380,17 @@ mod tests {
     #[test]
     fn room_key_request_state_changed_debug_redacts_identifiers() {
         let event = CoreEvent::Room(crate::event::RoomEvent::RoomKeyRequestStateChanged {
-            room_id: "!secret-room:example.invalid".to_owned(),
+            key: TimelineKey::room(
+                crate::ids::AccountKey("@secret-account:example.invalid".to_owned()),
+                "!secret-room:example.invalid",
+            ),
             event_id: "$secret-event:example.invalid".to_owned(),
             request_id: None,
             stage: RoomKeyRequestStage::Withheld,
             withheld_code: Some(RoomKeyRequestWithheldCode::Unverified),
         });
         let rendered = format!("{event:?}");
+        assert!(!rendered.contains("secret-account"));
         assert!(!rendered.contains("secret-room"));
         assert!(!rendered.contains("secret-event"));
         assert!(rendered.contains("withheld"));

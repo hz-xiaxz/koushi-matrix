@@ -510,51 +510,38 @@ export function applyGlobalResync(store: TimelineStoreState): TimelineStoreState
 
 /**
  * Apply a Rust-published room-key request state transition (issue #460) to
- * every matching room timeline in the store. The DTO is Rust-owned and closed;
- * this only updates the displayed item, never infers outcomes.
+ * exactly the timeline the event names. The event carries the authoritative
+ * `TimelineKey` (including the account), so a transition published for one
+ * account can never mutate another account's same room/event. The DTO is
+ * Rust-owned and closed; this only updates the displayed item.
  */
 export function applyRoomKeyRequestStateChanged(
   store: TimelineStoreState,
-  roomId: string,
+  key: TimelineKey,
   eventId: string,
   stage: RoomKeyRequestStage,
   withheldCode: RoomKeyRequestWithheldCode | null
 ): TimelineStoreState {
-  let changed = false;
+  const targetKey = keyStr(key);
+  const keyState = store.keys.get(targetKey);
+  if (!keyState) {
+    return store;
+  }
   const requestState: RoomKeyRequestStateDto = { stage, withheldCode };
-  const next = new Map(store.keys);
-  for (const [key, keyState] of next) {
-    // Store keys are `timelineKeyIdentity` JSON: [account, kind, ...ids].
-    let identityRoomId: string | null = null;
-    try {
-      const parsed: unknown = JSON.parse(key);
-      if (
-        Array.isArray(parsed) &&
-        (parsed[1] === "Room" || parsed[1] === "Thread" || parsed[1] === "Focused")
-      ) {
-        identityRoomId = typeof parsed[2] === "string" ? parsed[2] : null;
-      }
-    } catch {
-      identityRoomId = null;
-    }
-    if (identityRoomId !== roomId) {
-      continue;
-    }
-    let keyChanged = false;
-    const items = keyState.items.map((item) => {
-      if (timelineItemDomId(item.id) !== eventId) {
-        return item;
-      }
-      keyChanged = true;
-      return { ...item, request_state: requestState };
-    });
-    if (!keyChanged) {
-      continue;
+  let changed = false;
+  const items = keyState.items.map((item) => {
+    if (timelineItemDomId(item.id) !== eventId) {
+      return item;
     }
     changed = true;
-    next.set(key, { ...keyState, items });
+    return { ...item, request_state: requestState };
+  });
+  if (!changed) {
+    return store;
   }
-  return changed ? { ...store, keys: next } : store;
+  const next = new Map(store.keys);
+  next.set(targetKey, { ...keyState, items });
+  return { ...store, keys: next };
 }
 
 export function pruneTimelineStore(

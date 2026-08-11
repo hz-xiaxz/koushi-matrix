@@ -2761,7 +2761,7 @@ export function App() {
             const change = payload.event.RoomKeyRequestStateChanged;
             next = applyRoomKeyRequestStateChanged(
               next,
-              change.room_id,
+              change.key,
               change.event_id,
               change.stage,
               change.withheld_code

@@ -11521,8 +11521,12 @@ describe("room key request feedback (#460)", () => {
         kind: "Room",
         event: {
           RoomKeyRequestStateChanged: {
-            room_id: "!room:example.invalid",
+            key: {
+              account_key: "@alice:example.invalid",
+              kind: { Room: { room_id: "!room:example.invalid" } }
+            },
             event_id: "$click",
+            request_id: null,
             stage: "sent",
             withheld_code: null
           }
@@ -11631,8 +11635,12 @@ describe("room key request feedback (#460)", () => {
         kind: "Room",
         event: {
           RoomKeyRequestStateChanged: {
-            room_id: "!room:example.invalid",
+            key: {
+              account_key: "@alice:example.invalid",
+              kind: { Room: { room_id: "!room:example.invalid" } }
+            },
             event_id: "$click",
+            request_id: null,
             stage: "withheld",
             withheld_code: "unavailable"
           }
