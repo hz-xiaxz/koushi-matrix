@@ -1,0 +1,88 @@
+# Build an unsigned Windows x64 NSIS trial artifact (issue #441 Phase A).
+#
+# Manual dispatch only for now. The installer is an unsigned trial build:
+# it is uploaded as an authenticated Actions artifact (14-day retention) and
+# is NEVER published to a public release or `latest-windows` tag.
+#
+# Reference mechanics borrowed from shinaoka/Element-dev build-windows-desktop.yml:
+# manual dispatch, windows-latest, pinned toolchain, recursive submodules,
+# deterministic build, artifact validation and retention. None of Element's
+# Electron/Seshat/pnpm/NASM/Tcl/Perl workarounds apply: this is Tauri/Rust.
+
+name: Build Windows (unsigned trial NSIS)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read # least privilege: no release/tag writes in Phase A
+
+jobs:
+  build-windows:
+    name: Windows x64 unsigned NSIS trial build
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Vendored Matrix SDK is a single-level public submodule.
+          submodules: recursive
+
+      - name: Install Rust toolchain (1.96.0 + MSVC x64)
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache (Windows-specific key)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          shared-key: koushi-windows-build-ci
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # Dependency-security gates before any npm-backed build (engineering-rules).
+      - name: npm audit (lockfile, before install)
+        run: npm --prefix apps/desktop audit --package-lock-only --audit-level=high
+      - name: npm ci
+        run: npm --prefix apps/desktop ci
+      - name: npm audit (full)
+        run: npm --prefix apps/desktop audit --audit-level=high
+      - name: npm audit (runtime deps only)
+        run: npm --prefix apps/desktop audit --omit=dev --audit-level=high
+
+      - name: Submodule sync guard
+        run: node scripts/check-sdk-submodule.mjs
+
+      # Runs release preflight, tauri build --bundles nsis, then validates
+      # exactly one fresh non-empty installer and prints its SHA-256.
+      - name: Windows build entry point
+        run: npm --prefix apps/desktop run build:windows
+
+      - name: Write SHA-256 manifest
+        run: |
+          $exe = Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis" -Filter *.exe | Select-Object -First 1
+          if (-not $exe) { throw "No NSIS installer found" }
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $exe.FullName).Hash.ToLower()
+          "$hash  $($exe.Name)" | Set-Content -Path "target/koushi-windows-nsis.sha256" -Encoding ascii
+
+      - name: Upload installer + checksum (unsigned trial artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: koushi-windows-x64-nsis-unsigned
+          path: |
+            target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            target/koushi-windows-nsis.sha256
+          if-no-files-found: error
+          retention-days: 14
