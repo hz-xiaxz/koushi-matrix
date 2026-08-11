@@ -611,18 +611,13 @@ function documentOffsetFromDomPoint(
   offset: number
 ): number {
   if (container === control) {
-    const children = Array.from(control.childNodes);
-    const total = children
+    // Issue #471: the trailing newline lives inside the last text span, so
+    // the sentinel <br> contributes zero and the after-sentinel point maps
+    // to the same document offset as the end of that span (the empty final
+    // line has no document width). No special case is needed.
+    return Array.from(control.childNodes)
       .slice(0, offset)
-      .reduce((sum, child) => sum + editorNodeLength(child), 0);
-    // Issue #471: a caret placed after the sentinel <br> represents the
-    // trailing newline itself, which the sentinel's zero length would
-    // otherwise hide on the next read-back.
-    const atEnd = offset >= children.length;
-    if (atEnd && children.length > 0 && isSentinelBr(children[children.length - 1])) {
-      return total + 1;
-    }
-    return total;
+      .reduce((total, child) => total + editorNodeLength(child), 0);
   }
   const child = Array.from(control.childNodes).find(
     (candidate) => candidate === container || candidate.contains?.(container)

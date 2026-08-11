@@ -183,6 +183,37 @@ describe("trailing newline rendering (#471)", () => {
     const selection = ref.current?.selection();
     expect(selection?.start).toBe(4);
   });
+
+  it("maps a caret placed after the sentinel back to the document end (collapsed and range)", () => {
+    const ref = createRef<ImeInlineMentionEditorHandle>();
+    render(
+      <ImeInlineMentionEditor
+        aria-label={EDITOR_LABEL}
+        ref={ref}
+        document={{ version: 2, inlines: [{ kind: "text", text: "foo\n" }] }}
+        syncKey="message-a"
+        onDocumentChange={() => undefined}
+      />
+    );
+    const control = screen.getByRole("textbox", { name: "message" });
+    const sentinel = control.querySelector("br[data-composer-sentinel]");
+    expect(sentinel).not.toBeNull();
+    // The browser may place the caret after the sentinel when the user clicks
+    // the empty final line; that point must read as documentLength (4), never
+    // past it.
+    setSelection(control, control.childNodes.length);
+    const caret = control.ownerDocument.getSelection()?.getRangeAt(0);
+    expect(caret?.startContainer).toBe(control);
+    expect(caret?.startOffset).toBe(control.childNodes.length);
+    const collapsed = ref.current?.selection();
+    expect(collapsed?.start).toBe(4);
+    expect(collapsed?.end).toBe(4);
+    // Range ending after the sentinel.
+    setSelection(control, 0, control, control.childNodes.length);
+    const rangeSel = ref.current?.selection();
+    expect(rangeSel?.start).toBe(0);
+    expect(rangeSel?.end).toBe(4);
+  });
 });
 
   it.each([
