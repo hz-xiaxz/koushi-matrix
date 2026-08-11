@@ -81,6 +81,7 @@ import {
 } from "./domain/coreEvents";
 import {
   applyGlobalResync,
+  applyRoomKeyRequestStateChanged,
   applyTimelineEventWithProjectionResultAndRetention,
   createTimelineStore,
   pruneTimelineStore,
@@ -2748,6 +2749,22 @@ export function App() {
             next = pruneTimelineStore(
               applyGlobalResync(next),
               retainedTimelineKeyIdsRef.current
+            );
+            continue;
+          }
+          if (
+            payload.kind === "Room" &&
+            typeof payload.event === "object" &&
+            payload.event !== null &&
+            "RoomKeyRequestStateChanged" in payload.event
+          ) {
+            const change = payload.event.RoomKeyRequestStateChanged;
+            next = applyRoomKeyRequestStateChanged(
+              next,
+              change.room_id,
+              change.event_id,
+              change.stage,
+              change.withheld_code
             );
             continue;
           }

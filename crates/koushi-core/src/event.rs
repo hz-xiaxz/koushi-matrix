@@ -729,8 +729,8 @@ pub enum RoomEvent {
     RoomKeyRequestStateChanged {
         room_id: String,
         event_id: String,
-        stage: String,
-        withheld_code: Option<String>,
+        stage: RoomKeyRequestStage,
+        withheld_code: Option<RoomKeyRequestWithheldCode>,
     },
     MarkedAsRead {
         request_id: RequestId,
@@ -946,8 +946,8 @@ impl fmt::Debug for RoomEvent {
                 .field("outcome", outcome)
                 .finish(),
             Self::RoomKeyRequestStateChanged {
-                room_id,
-                event_id,
+                room_id: _,
+                event_id: _,
                 stage,
                 withheld_code,
             } => formatter
@@ -1880,11 +1880,35 @@ pub struct TimelineItem {
 
 /// Rust-owned room-key request presentation state for a timeline item
 /// (issue #460). Only closed tokens cross the wire.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoomKeyRequestStage {
+    Sent,
+    Automatic,
+    Awaiting,
+    StillWaiting,
+    Withheld,
+    DecryptionRecovered,
+    SendFailed,
+}
+
+/// Closed `m.room_key.withheld` codes correlatable from the SDK store
+/// (issue #460). The SDK retains exactly these four codes; everything else
+/// renders the generic refusal copy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoomKeyRequestWithheldCode {
+    Blacklisted,
+    Unverified,
+    Unauthorised,
+    Unavailable,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomKeyRequestStateDto {
-    pub stage: String,
-    pub withheld_code: Option<String>,
+    pub stage: RoomKeyRequestStage,
+    pub withheld_code: Option<RoomKeyRequestWithheldCode>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

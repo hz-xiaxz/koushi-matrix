@@ -35,6 +35,9 @@ import type {
   MediaTransferProgress,
   PaginationDirection,
   PaginationState,
+  RoomKeyRequestStage,
+  RoomKeyRequestStateDto,
+  RoomKeyRequestWithheldCode,
   TimelineDiff,
   TimelineEvent,
   TimelineItem,
@@ -503,6 +506,52 @@ export function applyGlobalResync(store: TimelineStoreState): TimelineStoreState
   // retained terminal root snapshots must survive until that replay restores
   // their reply activity. True window exits still flow through `withKeys`.
   return { ...store, keys: next };
+}
+
+/**
+ * Apply a Rust-published room-key request state transition (issue #460) to
+ * every matching room timeline in the store. The DTO is Rust-owned and closed;
+ * this only updates the displayed item, never infers outcomes.
+ */
+export function applyRoomKeyRequestStateChanged(
+  store: TimelineStoreState,
+  roomId: string,
+  eventId: string,
+  stage: RoomKeyRequestStage,
+  withheldCode: RoomKeyRequestWithheldCode | null
+): TimelineStoreState {
+  let changed = false;
+  const requestState: RoomKeyRequestStateDto = { stage, withheldCode };
+  const next = new Map(store.keys);
+  for (const [key, keyState] of next) {
+    // Store keys are `timelineKeyIdentity` JSON: [account, kind, ...ids].
+    let identityRoomId: string | null = null;
+    try {
+      const parsed: unknown = JSON.parse(key);
+      if (Array.isArray(parsed) && (parsed[1] === "Room" || parsed[1] === "Thread")) {
+        identityRoomId = typeof parsed[2] === "string" ? parsed[2] : null;
+      }
+    } catch {
+      identityRoomId = null;
+    }
+    if (identityRoomId !== roomId) {
+      continue;
+    }
+    let keyChanged = false;
+    const items = keyState.items.map((item) => {
+      if (timelineItemDomId(item.id) !== eventId) {
+        return item;
+      }
+      keyChanged = true;
+      return { ...item, request_state: requestState };
+    });
+    if (!keyChanged) {
+      continue;
+    }
+    changed = true;
+    next.set(key, { ...keyState, items });
+  }
+  return changed ? { ...store, keys: next } : store;
 }
 
 export function pruneTimelineStore(

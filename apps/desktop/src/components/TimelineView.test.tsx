@@ -43,7 +43,10 @@ import type {
   RoomLatestEventSummary,
   TimelineContinuityState
 } from "../domain/types";
-import type { RoomKeyRequestStateDto } from "../domain/coreEvents";
+import type {
+  RoomKeyRequestStateDto,
+  RoomKeyRequestWithheldCode
+} from "../domain/coreEvents";
 import type { MentionCandidate } from "../app/uiShared";
 import { documentFromText } from "../domain/composerDocument";
 import { resetTimelineTransportStats } from "../domain/timelineTransportStats";
@@ -11439,12 +11442,11 @@ describe("room key request feedback (#460)", () => {
   }
 
   it("renders localized copy for each closed withheld code", () => {
-    const cases: Array<[string | null, RegExp]> = [
+    const cases: Array<[RoomKeyRequestWithheldCode | null, RegExp]> = [
       ["unavailable", /The requested device does not have this decryption key/],
       ["unauthorised", /Sharing the decryption key was not permitted/],
       ["unverified", /This device is unverified, so the key was not shared/],
       ["blacklisted", /This device is excluded from key sharing/],
-      ["custom", /The decryption key could not be obtained/],
       [null, /The decryption key could not be obtained/]
     ];
     for (const [code, expected] of cases) {
@@ -11468,7 +11470,7 @@ describe("room key request feedback (#460)", () => {
     expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
   });
 
-  it("clicking Request keys shows an immediate toast and pending copy, coalescing repeats", async () => {
+  it("clicking Request keys shows an immediate toast and pending copy; repeated clicks reach Rust for coalescing", async () => {
     let emit: (payload: unknown) => void = () => undefined;
     const requestRoomKey = vi.fn(async () => undefined);
     const transport = {
@@ -11501,23 +11503,83 @@ describe("room key request feedback (#460)", () => {
       });
     });
     const button = await screen.findByRole("button", { name: "Request keys and retry" });
+    // Click twice: the toast/pending marker must not duplicate, and both
+    // commands reach Rust, whose retry controller coalesces repeats.
     fireEvent.click(button);
-    // Immediate visible acknowledgment (toast) on the click.
+    fireEvent.click(button);
     await waitFor(() => {
       expect(document.body.textContent).toContain("Decryption key requested");
     });
-    // Pending copy appears immediately.
     await waitFor(() => {
       expect(document.body.textContent).toContain("Waiting for the decryption key");
     });
-    // Coalescing: the Rust side admits duplicates; the frontend sends the
-    // typed command once per distinct event.
-    expect(requestRoomKey).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText(/Decryption key requested/)).toHaveLength(1);
+    expect(screen.getAllByText(/Waiting for the decryption key/)).toHaveLength(1);
+    expect(requestRoomKey).toHaveBeenCalledTimes(2);
     expect(requestRoomKey).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$click",
       "user",
       KEY
     );
+  });
+
+  it("a Rust-published transition clears the local pending marker and shows the terminal copy", async () => {
+    let emit: (payload: unknown) => void = () => undefined;
+    const transport = {
+      listenCoreEvents(nextListener: (p: unknown) => void) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      requestRoomKey: vi.fn(async () => undefined),
+      ensureSubscribed: vi.fn(async () => undefined)
+    } as never;
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [utdItem("$click", null)]
+          }
+        }
+      });
+    });
+    const button = await screen.findByRole("button", { name: "Request keys and retry" });
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Waiting for the decryption key");
+    });
+    // Rust settles the request as refused (withheld) via the typed event.
+    act(() => {
+      emit({
+        kind: "Room",
+        event: {
+          RoomKeyRequestStateChanged: {
+            room_id: "!room:example.invalid",
+            event_id: "$click",
+            stage: "withheld",
+            withheld_code: "unavailable"
+          }
+        }
+      });
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/The requested device does not have this decryption key/)
+      ).toBeTruthy();
+    });
+    // The local pending marker is gone once the terminal state is rendered.
+    expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
   });
 });

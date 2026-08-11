@@ -135,15 +135,15 @@ use crate::command::{
 };
 use crate::event::{
     CoreEvent, LinkPreview, LinkPreviewState, LiveSignalsEvent, PaginationDirection,
-    PaginationState, ReactionGroup, ReactionSender, RoomKeyRequestStateDto,
-    ThreadRootProjectionDto, ThreadRootProjectionSourceDto, ThreadRootProjectionStateDto,
-    ThreadSummaryDto, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineGapId,
-    TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind,
-    TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions, TimelineMessageKind,
-    TimelineMessageSource, TimelineNavigationSnapshot, TimelineNoticeI18n, TimelineNoticeI18nKey,
-    TimelineResyncReason, TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan,
-    TimelineUnableToDecrypt, TimelineUnableToDecryptReason, TimelineUnreadPosition,
-    TimelineViewportObservation, message_actions_for_timeline_item,
+    PaginationState, ReactionGroup, ReactionSender, RoomKeyRequestStage, RoomKeyRequestStateDto,
+    RoomKeyRequestWithheldCode, ThreadRootProjectionDto, ThreadRootProjectionSourceDto,
+    ThreadRootProjectionStateDto, ThreadSummaryDto, TimelineAnchorRestoreStatus, TimelineDiff,
+    TimelineEvent, TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia,
+    TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions,
+    TimelineMessageKind, TimelineMessageSource, TimelineNavigationSnapshot, TimelineNoticeI18n,
+    TimelineNoticeI18nKey, TimelineResyncReason, TimelineSendFailureReason, TimelineSendState,
+    TimelineSpoilerSpan, TimelineUnableToDecrypt, TimelineUnableToDecryptReason,
+    TimelineUnreadPosition, TimelineViewportObservation, message_actions_for_timeline_item,
     message_source_for_timeline_item,
 };
 use crate::executor;
@@ -14088,6 +14088,7 @@ fn next_decrypt_retry_operation() -> u64 {
 struct KeyRequestUiState {
     stage: &'static str,
     withheld_code: Option<&'static str>,
+    session_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -15884,7 +15885,33 @@ impl TimelineActor {
                 session_id,
                 code,
             } => {
-                self.withheld_codes.insert((room_id, session_id), code);
+                self.withheld_codes
+                    .insert((room_id.clone(), session_id.clone()), code);
+                // Issue #460: a withheld observation for a session that a
+                // pending request is waiting on settles that presentation and
+                // publishes immediately (the to-device event carries no
+                // timeline diff, so without this the refusal stays invisible).
+                let pending_event_ids: Vec<String> = self
+                    .key_request_states
+                    .iter()
+                    .filter(|(_, state)| state.session_id.as_deref() == Some(session_id.as_str()))
+                    .map(|(event_id, _)| event_id.clone())
+                    .collect();
+                for event_id in pending_event_ids {
+                    let should_publish = self
+                        .key_request_states
+                        .get(&event_id)
+                        .is_some_and(|state| state.withheld_code.is_none());
+                    if !should_publish {
+                        continue;
+                    }
+                    if let Some(state) = self.key_request_states.get_mut(&event_id) {
+                        state.withheld_code = Some(code);
+                    }
+                    if let Some(state) = self.key_request_states.get(&event_id) {
+                        self.publish_key_request_state(&event_id, state);
+                    }
+                }
             }
             TimelineActorMessage::DecryptRetryTimeout {
                 operation,
@@ -17985,7 +18012,6 @@ impl TimelineActor {
         );
         // Issue #460: update the presentation state for the affected event.
         let event_id = settlement.pending.event_id.clone();
-        let withheld_code = self.withheld_code_for_event(&event_id);
         let stage = match settlement.result {
             DecryptRetrySettledResult::Decrypted => Some("decryption_recovered"),
             DecryptRetrySettledResult::Withheld => Some("withheld"),
@@ -17996,8 +18022,22 @@ impl TimelineActor {
             _ => None,
         };
         if let Some(stage) = stage {
+            // Resolve a closed withheld code from the observed to-device
+            // `m.room_key.withheld` for this event's session, if known.
+            let existing_session = self
+                .key_request_states
+                .get(&event_id)
+                .and_then(|state| state.session_id.clone());
+            let withheld_code: Option<&'static str> = None;
+            let withheld_code = withheld_code.or_else(|| {
+                existing_session.as_deref().and_then(|session| {
+                    self.withheld_codes
+                        .get(&(self.key.room_id().to_owned(), session.to_owned()))
+                        .copied()
+                })
+            });
             self.key_request_states
-                .entry(event_id)
+                .entry(event_id.clone())
                 .and_modify(|state| {
                     state.stage = stage;
                     state.withheld_code = withheld_code;
@@ -18005,7 +18045,14 @@ impl TimelineActor {
                 .or_insert(KeyRequestUiState {
                     stage,
                     withheld_code,
+                    session_id: None,
                 });
+            // Issue #460: every settle transition is published so the UI can
+            // reflect withheld / still-waiting / send-failure even when no
+            // timeline diff follows (static timeline, to-device withheld).
+            if let Some(state) = self.key_request_states.get(&event_id) {
+                self.publish_key_request_state(&event_id, state);
+            }
         }
     }
 
@@ -18014,19 +18061,13 @@ impl TimelineActor {
             crate::event::RoomEvent::RoomKeyRequestStateChanged {
                 room_id: self.key.room_id().to_owned(),
                 event_id: event_id.to_owned(),
-                stage: state.stage.to_owned(),
-                withheld_code: state.withheld_code.map(ToOwned::to_owned),
+                stage: key_request_stage_token(state.stage),
+                withheld_code: state.withheld_code.map(key_request_withheld_code_token),
             },
         ));
     }
 
     /// Closed withheld code for an event's session, if observed (issue #460).
-    fn withheld_code_for_event(&self, _event_id: &str) -> Option<&'static str> {
-        // Resolved during projection from the UTD session when needed; kept
-        // simple: look up by scanning the withheld map is done at projection.
-        None
-    }
-
     async fn handle_request_room_key(
         &mut self,
         request_id: RequestId,
@@ -18051,6 +18092,16 @@ impl TimelineActor {
         }
         let retry_reason = decrypt_retry_reason_from_content(event_item.content());
         let backup_observation = self.session.observe_secure_backup_state();
+        // Issue #460: automatic (thread auto-recovery) requests are one-shot
+        // per event — once a request state exists, repeats are refused so a
+        // settled still-waiting/withheld event is not re-spammed on every
+        // render. Explicit user clicks are always admitted (Rust coalesces
+        // concurrent repeats via the retry controller).
+        if origin == crate::command::KeyRequestOrigin::Automatic
+            && self.key_request_states.contains_key(&requested_event_id)
+        {
+            return;
+        }
         let Some(pending) = self.begin_decrypt_retry(
             &requested_event_id,
             retry_reason,
@@ -18086,6 +18137,7 @@ impl TimelineActor {
                     "automatic"
                 },
                 withheld_code: None,
+                session_id: session_id.clone(),
             },
         );
         let Some(session_id) = session_id else {
@@ -19698,6 +19750,7 @@ impl TimelineActor {
                     let published = KeyRequestUiState {
                         stage: "decryption_recovered",
                         withheld_code: state.withheld_code,
+                        session_id: state.session_id.clone(),
                     };
                     self.publish_key_request_state(&event_id, &published);
                 }
@@ -19715,6 +19768,13 @@ impl TimelineActor {
                 })
             })
         });
+        // Issue #460: settle BEFORE the conversion below so the emitted batch
+        // carries the settled request state (withheld/decryption_recovered) in
+        // the same diff the UI applies — otherwise a static timeline would
+        // never learn the outcome.
+        if let Some((operation, result)) = decrypt_retry_resolution {
+            self.settle_decrypt_retry(operation, result);
+        }
         let sdk_diffs = diffs;
         let has_historical_gap_repair_projection = gap_repair_projections
             .iter()
@@ -19843,10 +19903,6 @@ impl TimelineActor {
         ) else {
             return;
         };
-
-        if let Some((operation, result)) = decrypt_retry_resolution {
-            self.settle_decrypt_retry(operation, result);
-        }
 
         if let Some(AppAction::LiveRoomReceiptsUpdated {
             room_id,
@@ -24573,7 +24629,7 @@ pub fn sdk_item_to_timeline_item(
 }
 
 /// Build the closed room-key request presentation state for an event
-/// (issue #460).
+/// (issue #460). Only closed tokens cross the wire.
 fn request_state_for_item(
     key_request_states: Option<&std::collections::BTreeMap<String, KeyRequestUiState>>,
     withheld_codes: Option<&std::collections::BTreeMap<(String, String), &'static str>>,
@@ -24582,28 +24638,59 @@ fn request_state_for_item(
 ) -> Option<RoomKeyRequestStateDto> {
     let event_id = event_item.event_id()?.to_string();
     let state = key_request_states?.get(&event_id)?;
-    let withheld_code = state.withheld_code.map(ToOwned::to_owned).or_else(|| {
-        let session = event_item
-            .content()
-            .as_unable_to_decrypt()
-            .and_then(|utd| {
-                let matrix_sdk_ui::timeline::EncryptedMessage::MegolmV1AesSha2 {
-                    session_id, ..
-                } = utd
-                else {
-                    return None;
-                };
-                Some(session_id.as_str())
-            })?;
-        withheld_codes?
-            .get(&(key.room_id().to_owned(), session.to_owned()))
-            .copied()
-            .map(ToOwned::to_owned)
-    });
+    let withheld_code = state
+        .withheld_code
+        .map(key_request_withheld_code_token)
+        .or_else(|| {
+            let session = event_item
+                .content()
+                .as_unable_to_decrypt()
+                .and_then(|utd| {
+                    let matrix_sdk_ui::timeline::EncryptedMessage::MegolmV1AesSha2 {
+                        session_id,
+                        ..
+                    } = utd
+                    else {
+                        return None;
+                    };
+                    Some(session_id.as_str())
+                })?;
+            withheld_codes?
+                .get(&(key.room_id().to_owned(), session.to_owned()))
+                .copied()
+                .map(key_request_withheld_code_token)
+        });
     Some(RoomKeyRequestStateDto {
-        stage: state.stage.to_owned(),
+        stage: key_request_stage_token(state.stage),
         withheld_code,
     })
+}
+
+/// Map an internal stage literal to the closed wire token. Internal stages
+/// are compile-time literals only; the fallback keeps the wire contract closed
+/// even if a future literal is added before the mapping is extended.
+fn key_request_stage_token(stage: &str) -> RoomKeyRequestStage {
+    match stage {
+        "sent" => RoomKeyRequestStage::Sent,
+        "automatic" => RoomKeyRequestStage::Automatic,
+        "awaiting" => RoomKeyRequestStage::Awaiting,
+        "still_waiting" => RoomKeyRequestStage::StillWaiting,
+        "withheld" => RoomKeyRequestStage::Withheld,
+        "decryption_recovered" => RoomKeyRequestStage::DecryptionRecovered,
+        "send_failed" => RoomKeyRequestStage::SendFailed,
+        _ => RoomKeyRequestStage::Awaiting,
+    }
+}
+
+/// Map an internal withheld-code literal to the closed wire token.
+fn key_request_withheld_code_token(code: &str) -> RoomKeyRequestWithheldCode {
+    match code {
+        "blacklisted" => RoomKeyRequestWithheldCode::Blacklisted,
+        "unverified" => RoomKeyRequestWithheldCode::Unverified,
+        "unauthorised" => RoomKeyRequestWithheldCode::Unauthorised,
+        "unavailable" => RoomKeyRequestWithheldCode::Unavailable,
+        _ => RoomKeyRequestWithheldCode::Unavailable,
+    }
 }
 
 fn sdk_item_to_timeline_item_with_send_states(
@@ -42989,6 +43076,58 @@ mod tests {
                 .settle_if_current(second.operation, 7, DecryptRetrySettledResult::Timeout)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn room_key_request_state_tokens_are_closed_and_serde_stable() {
+        // Every internal stage literal maps to a closed wire token, and the
+        // DTO serializes with the exact tokens the TypeScript union declares.
+        let stage_cases = [
+            ("sent", "sent"),
+            ("automatic", "automatic"),
+            ("awaiting", "awaiting"),
+            ("still_waiting", "still_waiting"),
+            ("withheld", "withheld"),
+            ("decryption_recovered", "decryption_recovered"),
+            ("send_failed", "send_failed"),
+        ];
+        for (literal, wire) in stage_cases {
+            let serialized = serde_json::to_string(&key_request_stage_token(literal)).unwrap();
+            assert_eq!(serialized, format!("\"{wire}\""));
+        }
+        let code_cases = [
+            ("blacklisted", "blacklisted"),
+            ("unverified", "unverified"),
+            ("unauthorised", "unauthorised"),
+            ("unavailable", "unavailable"),
+        ];
+        for (literal, wire) in code_cases {
+            let serialized =
+                serde_json::to_string(&key_request_withheld_code_token(literal)).unwrap();
+            assert_eq!(serialized, format!("\"{wire}\""));
+        }
+        let dto = RoomKeyRequestStateDto {
+            stage: key_request_stage_token("withheld"),
+            withheld_code: Some(key_request_withheld_code_token("unavailable")),
+        };
+        assert_eq!(
+            serde_json::to_string(&dto).unwrap(),
+            "{\"stage\":\"withheld\",\"withheldCode\":\"unavailable\"}"
+        );
+    }
+
+    #[test]
+    fn room_key_request_state_changed_debug_redacts_identifiers() {
+        let event = CoreEvent::Room(crate::event::RoomEvent::RoomKeyRequestStateChanged {
+            room_id: "!secret-room:example.invalid".to_owned(),
+            event_id: "$secret-event:example.invalid".to_owned(),
+            stage: RoomKeyRequestStage::Withheld,
+            withheld_code: Some(RoomKeyRequestWithheldCode::Unverified),
+        });
+        let rendered = format!("{event:?}");
+        assert!(!rendered.contains("secret-room"));
+        assert!(!rendered.contains("secret-event"));
+        assert!(rendered.contains("withheld"));
     }
 
     #[test]

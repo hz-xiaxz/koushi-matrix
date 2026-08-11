@@ -126,6 +126,7 @@ import {
 } from "../domain/coreEvents";
 import {
   applyGlobalResync,
+  applyRoomKeyRequestStateChanged,
   applyTimelineEvent,
   batchContainsPrepend,
   createTimelineStore,
@@ -2675,7 +2676,6 @@ export const TimelineView = memo(function TimelineView({
   const autoReturnToLiveIdentityRef = useRef<string | null>(null);
   const autoReturnToLiveKeyRef = useRef<string | null>(null);
   const downloadedEventIdsRef = useRef<Set<string>>(new Set());
-  const autoRequestedRoomKeyIdsRef = useRef<Set<string>>(new Set());
   const requestedImagePreviewEventIdsRef = useRef<Set<string>>(new Set());
   const relevantAvatarMxcsRef = useRef<Set<string>>(new Set());
   const requestedAvatarMxcsRef = useRef<Set<string>>(new Set());
@@ -2716,9 +2716,8 @@ export const TimelineView = memo(function TimelineView({
   const readSignalThreadRootEventId =
     "Thread" in timelineKey.kind ? timelineKey.kind.Thread.root_event_id : null;
   const items = getItems(store, timelineKey);
-  const timelineStoreKey = useMemo(() => timelineStoreKeyId(timelineKey), [timelineKeyHash]);
   // Issue #460: immediate acknowledgment on the user's "Request keys and
-  // retry" click: a toast + a local pending marker, until Rust confirms a
+  // retry" click: a toast + a local pending marker, until Rust publishes a
   // terminal request state via the timeline DTO. Presentation-only.
   const [keyRequestToast, setKeyRequestToast] = useState<string | null>(null);
   const [pendingKeyRequests, setPendingKeyRequests] = useState<Set<string>>(new Set());
@@ -2737,7 +2736,7 @@ export const TimelineView = memo(function TimelineView({
     const settled = new Set<string>();
     for (const key of pendingKeyRequests) {
       for (const item of items) {
-        if (timelineItemDomId(item.id) !== key) {
+        if (`event:${timelineItemDomId(item.id)}` !== key) {
           continue;
         }
         if (
@@ -2813,6 +2812,9 @@ export const TimelineView = memo(function TimelineView({
     if (!("Thread" in timelineKey.kind)) {
       return;
     }
+    // Issue #460: automatic one-shot recovery on thread load. Rust refuses
+    // repeats for events that already have a request state, so this effect
+    // may fire on every items change without re-spamming settled events.
     for (const item of items) {
       if (!item.unable_to_decrypt?.can_request_keys) {
         continue;
@@ -2821,16 +2823,11 @@ export const TimelineView = memo(function TimelineView({
       if (eventId === null) {
         continue;
       }
-      const requestKey = `${timelineStoreKey}\u0000${eventId}`;
-      if (autoRequestedRoomKeyIdsRef.current.has(requestKey)) {
-        continue;
-      }
-      autoRequestedRoomKeyIdsRef.current.add(requestKey);
       void transport
         .requestRoomKey(roomId, eventId, "automatic", timelineKey)
         .catch(() => undefined);
     }
-  }, [emitDiagnosticLog, items, roomId, timelineKey, timelineStoreKey, transport]);
+  }, [items, roomId, timelineKey, transport]);
   useLayoutEffect(() => {
     if (!("Thread" in timelineKey.kind) || !timelineKeyState) {
       return;
@@ -3302,6 +3299,42 @@ export const TimelineView = memo(function TimelineView({
         }
         emitDiagnosticLog("timeline.avatar", avatarThumbnailLogMessage(thumbnail));
         setAvatarThumbnails((current) => ({ ...current, [mxc_uri]: thumbnail }));
+        return;
+      }
+      // Issue #460: Rust-published room-key request transitions update the
+      // displayed item directly (a static timeline emits no diff for the
+      // to-device withheld / operational-timeout outcomes).
+      if (
+        payload.kind === "Room" &&
+        typeof payload.event === "object" &&
+        payload.event !== null &&
+        "RoomKeyRequestStateChanged" in payload.event
+      ) {
+        const change = payload.event.RoomKeyRequestStateChanged;
+        const currentKey = timelineKeyRef.current;
+        const matchesRoom =
+          ("Room" in currentKey.kind && currentKey.kind.Room.room_id === change.room_id) ||
+          ("Thread" in currentKey.kind && currentKey.kind.Thread.room_id === change.room_id) ||
+          ("Focused" in currentKey.kind && currentKey.kind.Focused.room_id === change.room_id);
+        if (!matchesRoom) {
+          return;
+        }
+        if (!isAppLevelStore) {
+          setStore((current) => {
+            const next = applyRoomKeyRequestStateChanged(
+              current,
+              change.room_id,
+              change.event_id,
+              change.stage,
+              change.withheld_code
+            );
+            relevantAvatarMxcsRef.current = timelineAvatarMxcsForItems(
+              getItems(next, timelineKeyRef.current),
+              profileUsersRef.current
+            );
+            return next;
+          });
+        }
         return;
       }
       if (payload.kind !== "Timeline") {
