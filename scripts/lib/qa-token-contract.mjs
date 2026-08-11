@@ -68,8 +68,15 @@ export function assertNoLocalPaths(output, label) {
 export function assertNoRawSdkErrors(output, label) {
   const text = String(output);
   const rawSdkPattern =
-    /\b(?:matrix_sdk::|ruma::|reqwest::|hyper::|SdkError|HttpError|ClientApiError|StoreError|ServerError|M_[A-Z0-9_]+)\b/;
-  if (rawSdkPattern.test(text)) {
-    throw new Error(`${label}: raw SDK diagnostic leaked into QA output`);
+    /\b(?:matrix_sdk(?:_\w+)*::|ruma::|reqwest::|hyper::|SdkError|HttpError|ClientApiError|StoreError|ServerError|M_[A-Z0-9_]+)\b/;
+  const match = text.match(rawSdkPattern);
+  if (match) {
+    const line = text
+      .split(/\r?\n/)
+      .find((candidate) => candidate.includes(match[0]))
+      ?.trim();
+    throw new Error(
+      `${label}: raw SDK diagnostic leaked into QA output: ${JSON.stringify(line ?? match[0])}`
+    );
   }
 }
