@@ -1006,9 +1006,6 @@ stateDiagram-v2
     Queued --> Empty: ScheduledSendDispatched [known Local handle] / route SendText
     Queued --> Empty: RoomListUpdated [room pruned] / retain joined rooms
     Queued --> Empty: LogoutRequested/SessionCleared
-    [*] --> Rejected: ScheduleSend/RescheduleScheduledSend [UnsupportedSlashCommand]
-    Queued --> Rejected: RescheduleScheduledSend [UnsupportedSlashCommand] / item preserved
-    Rejected --> [*]
 ```
 
 - **Issue #450 guards**: `ScheduleSend` and `RescheduleScheduledSend` validate

@@ -742,13 +742,14 @@ async fn scheduled_recognized_unavailable_command_is_rejected_before_acceptance(
     })
     .await
     .expect("scheduled rejection should be correlated");
-    let rejected_key = match &event {
+    let (rejected_key, rejected_request_id) = match &event {
         CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
             key,
-            ..
-        }) => key,
+            request_id,
+        }) => (key, *request_id),
         other => panic!("unexpected event: {other:?}"),
     };
+    assert_eq!(rejected_request_id, request_id);
     // Keyed to the main room under the canonical account.
     assert_eq!(
         rejected_key,
@@ -851,13 +852,14 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
     })
     .await
     .expect("reschedule rejection should be correlated");
-    let rejected_key = match &event {
+    let (rejected_key, rejected_request_id) = match &event {
         CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
             key,
-            ..
-        }) => key,
+            request_id,
+        }) => (key, *request_id),
         other => panic!("unexpected event: {other:?}"),
     };
+    assert_eq!(rejected_request_id, request_id);
     // The item is a THREAD item but the reschedule rejection is keyed to the
     // item's room (main-pane scheduled list) under the canonical account —
     // visible without the thread being open.

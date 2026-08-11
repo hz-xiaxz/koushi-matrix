@@ -2553,6 +2553,58 @@ mod submission_settlement_tests {
     }
 
     #[tokio::test]
+    async fn composer_acceptance_wait_stops_only_on_the_correlated_keyed_slash_rejection() {
+        // Issue #450: the schedule waiter must ignore unrelated keyed
+        // rejections and terminate on the matching request id.
+        let target = koushi_state::ComposerTarget::Main {
+            room_id: "!room-a:test".to_owned(),
+        };
+        let expected_request_id = request_id(42);
+        let mut source = ScriptedSource {
+            state: koushi_state::AppState::default(),
+            events: VecDeque::from([
+                (
+                    Ok(CoreEvent::Room(
+                        koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+                            key: koushi_core::TimelineKey::room(
+                                koushi_core::AccountKey("@a:test".to_owned()),
+                                "!room-a:test",
+                            ),
+                            request_id: request_id(7),
+                        },
+                    )),
+                    None,
+                ),
+                (
+                    Ok(CoreEvent::Room(
+                        koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+                            key: koushi_core::TimelineKey::room(
+                                koushi_core::AccountKey("@a:test".to_owned()),
+                                "!room-a:test",
+                            ),
+                            request_id: expected_request_id,
+                        },
+                    )),
+                    None,
+                ),
+            ]),
+            pending_on_empty: true,
+        };
+
+        assert_eq!(
+            wait_for_composer_draft_acceptance(
+                &mut source,
+                expected_request_id,
+                &target,
+                1.into(),
+                Duration::from_secs(1),
+            )
+            .await,
+            Err("composer draft acceptance was rejected".to_owned())
+        );
+    }
+
+    #[tokio::test]
     async fn waits_for_global_reducer_acceptance_after_active_room_switch() {
         let expected = SubmissionId::new("expected");
         let mut switched_state = koushi_state::AppState::default();
