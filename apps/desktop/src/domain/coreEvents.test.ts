@@ -114,9 +114,14 @@ describe("composer notice routing (#450)", () => {
     expect(
       noticeMatchesThreadComposer(threadKey, "!room:example.invalid", "$root:example.invalid", userId)
     ).toBe(true);
+    // Wrong room and wrong root never match.
+    expect(
+      noticeMatchesThreadComposer(threadKey, "!other-room:example.invalid", "$root:example.invalid", userId)
+    ).toBe(false);
     expect(
       noticeMatchesThreadComposer(threadKey, "!room:example.invalid", "$other-root:example.invalid", userId)
     ).toBe(false);
+    // Cross-account: the same thread under another account never matches.
     expect(
       noticeMatchesThreadComposer(
         { ...threadKey, account_key: "@bob:example.invalid" },
@@ -124,6 +129,10 @@ describe("composer notice routing (#450)", () => {
         "$root:example.invalid",
         userId
       )
+    ).toBe(false);
+    // Cross-kind: a room key never matches the thread composer.
+    expect(
+      noticeMatchesThreadComposer(roomKey, "!room:example.invalid", "$root:example.invalid", userId)
     ).toBe(false);
     expect(noticeMatchesMainComposer(threadKey, "!room:example.invalid", userId)).toBe(false);
   });

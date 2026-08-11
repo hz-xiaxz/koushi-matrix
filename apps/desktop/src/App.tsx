@@ -2789,11 +2789,14 @@ export function App() {
             // (schedule-time rejections use the keyed
             // ComposerSlashCommandRejected event instead).
             if (isUnsupportedSlashCommandRejection(payload)) {
+              // The keyless OperationFailed surface is the legacy send path;
+              // only show the notice when a ready account exists (the key
+              // must be canonical to route at all).
+              const account = readyComposerDraftAccountOwner(snapshotRef.current);
               const activeRoomId = snapshotRef.current?.state.ui.timeline.room_id;
-              if (activeRoomId) {
-                const account = readyComposerDraftAccountOwner(snapshotRef.current);
+              if (account && activeRoomId) {
                 showComposerNotice(
-                  roomTimelineKey(account ? account.userId : "main", activeRoomId),
+                  roomTimelineKey(account.userId, activeRoomId),
                   t("composer.slashCommandUnavailable")
                 );
               }

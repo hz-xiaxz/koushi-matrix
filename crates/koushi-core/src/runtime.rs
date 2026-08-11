@@ -4206,8 +4206,11 @@ impl AppActor {
                     // validation as the initial schedule — otherwise a
                     // recognized-but-unavailable command (/join, /invite)
                     // could be stored and enter the permanent dispatch/retry
-                    // loop. Reject terminally (keyed to the target) and leave
-                    // the existing item untouched.
+                    // loop. Reject terminally and leave the existing item
+                    // untouched. Scheduled items are edited from the main-pane
+                    // scheduled list (thread items included), so the notice is
+                    // keyed to the item's room — visible without the thread
+                    // being open.
                     if let Err(kind) =
                         crate::timeline::validate_composer_body_for_timeline_send(&body)
                     {
@@ -4220,7 +4223,9 @@ impl AppActor {
                                     .and_then(|item| {
                                         self.composer_target_notice_key(
                                             &account,
-                                            &ComposerTarget::from_scheduled_item(item),
+                                            &ComposerTarget::Main {
+                                                room_id: item.room_id.clone(),
+                                            },
                                         )
                                     })
                             });

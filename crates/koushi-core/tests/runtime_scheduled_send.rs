@@ -742,12 +742,17 @@ async fn scheduled_recognized_unavailable_command_is_rejected_before_acceptance(
     })
     .await
     .expect("scheduled rejection should be correlated");
-    assert!(
-        matches!(
-            &event,
-            CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. })
-        ),
-        "unexpected event: {event:?}"
+    let rejected_key = match &event {
+        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected { key }) => key,
+        other => panic!("unexpected event: {other:?}"),
+    };
+    // Keyed to the main room under the canonical account.
+    assert_eq!(
+        rejected_key,
+        &koushi_core::TimelineKey::room(
+            koushi_core::AccountKey(session_key().user_id),
+            "!room:example.test",
+        )
     );
     let snapshot = conn.snapshot();
     // Nothing was scheduled and the draft survives untouched.
@@ -831,10 +836,19 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
     })
     .await
     .expect("reschedule rejection should be correlated");
-    assert!(matches!(
-        &event,
-        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. })
-    ));
+    let rejected_key = match &event {
+        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected { key }) => key,
+        other => panic!("unexpected event: {other:?}"),
+    };
+    // Keyed to the scheduled item's room (main pane) under the canonical
+    // account — visible without the thread being open.
+    assert_eq!(
+        rejected_key,
+        &koushi_core::TimelineKey::room(
+            koushi_core::AccountKey(session_key().user_id),
+            "!room:example.test",
+        )
+    );
     // The existing item is preserved with its original body.
     let snapshot = conn.snapshot();
     assert_eq!(
