@@ -17356,6 +17356,7 @@ fn assert_hide_redacted_projection() -> Result<(), String> {
 
 fn projection_timeline_item(event_id: &str, is_redacted: bool) -> TimelineItem {
     TimelineItem {
+        request_state: None,
         id: TimelineItemId::Event {
             event_id: event_id.to_owned(),
         },
@@ -18411,6 +18412,7 @@ mod tests {
     fn finds_timeline_item_in_initial_items_by_body_substring() {
         let items = vec![
             koushi_core::event::TimelineItem {
+                request_state: None,
                 id: koushi_core::event::TimelineItemId::Synthetic {
                     synthetic_id: "skip".to_owned(),
                 },
@@ -18442,6 +18444,7 @@ mod tests {
                 unable_to_decrypt: None,
             },
             koushi_core::event::TimelineItem {
+                request_state: None,
                 id: koushi_core::event::TimelineItemId::Event {
                     event_id: "$thread:test".to_owned(),
                 },
@@ -18484,6 +18487,7 @@ mod tests {
     #[test]
     fn thread_reply_missing_from_initial_items_requires_paginate_backfill() {
         let initial_items = vec![koushi_core::event::TimelineItem {
+            request_state: None,
             id: koushi_core::event::TimelineItemId::Synthetic {
                 synthetic_id: "placeholder".to_owned(),
             },
@@ -18524,6 +18528,7 @@ mod tests {
     #[test]
     fn thread_reply_present_in_initial_items_does_not_require_backfill() {
         let initial_items = vec![koushi_core::event::TimelineItem {
+            request_state: None,
             id: koushi_core::event::TimelineItemId::Synthetic {
                 synthetic_id: "thread-reply".to_owned(),
             },
@@ -18575,6 +18580,7 @@ mod tests {
         thread_summary: Option<ThreadSummaryDto>,
     ) -> TimelineItem {
         TimelineItem {
+            request_state: None,
             id: TimelineItemId::Event {
                 event_id: event_id.to_owned(),
             },
@@ -18873,6 +18879,7 @@ mod tests {
     #[test]
     fn find_timeline_item_with_body_finds_thread_reply_in_one_batch() {
         let items = vec![koushi_core::event::TimelineItem {
+            request_state: None,
             id: koushi_core::event::TimelineItemId::Synthetic {
                 synthetic_id: "thread-reply".to_owned(),
             },
@@ -18915,6 +18922,7 @@ mod tests {
     #[test]
     fn find_timeline_item_with_body_returns_none_when_missing() {
         let items = vec![koushi_core::event::TimelineItem {
+            request_state: None,
             id: koushi_core::event::TimelineItemId::Synthetic {
                 synthetic_id: "placeholder".to_owned(),
             },
@@ -18984,6 +18992,7 @@ mod tests {
                 batch_id: koushi_core::ids::TimelineBatchId(1),
                 diffs: vec![koushi_core::event::TimelineDiff::PushBack {
                     item: koushi_core::event::TimelineItem {
+                        request_state: None,
                         id: koushi_core::event::TimelineItemId::Transaction {
                             transaction_id: "sdk-txn-1".to_owned(),
                         },
@@ -19048,6 +19057,7 @@ mod tests {
                 batch_id: koushi_core::ids::TimelineBatchId(1),
                 diffs: vec![koushi_core::event::TimelineDiff::PushBack {
                     item: koushi_core::event::TimelineItem {
+                        request_state: None,
                         id: koushi_core::event::TimelineItemId::Transaction {
                             transaction_id: "sdk-txn-1".to_owned(),
                         },
@@ -19113,6 +19123,7 @@ mod tests {
                 batch_id: koushi_core::ids::TimelineBatchId(1),
                 diffs: vec![koushi_core::event::TimelineDiff::PushBack {
                     item: koushi_core::event::TimelineItem {
+                        request_state: None,
                         id: koushi_core::event::TimelineItemId::Transaction {
                             transaction_id: "sdk-txn-1".to_owned(),
                         },
