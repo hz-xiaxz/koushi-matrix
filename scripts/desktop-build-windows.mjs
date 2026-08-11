@@ -24,6 +24,10 @@ const nsisDir = join(
   "nsis"
 );
 const args = new Set(process.argv.slice(2));
+// Windows has no bare npm executable: route child processes through cmd.exe
+// (shell: true) so .cmd shims like npm.cmd resolve via PATHEXT. spawnSync
+// returns {error} on ENOENT instead of throwing, so surface it explicitly.
+const isWindows = process.platform === "win32";
 
 if (args.has("--help")) {
   printUsage();
@@ -87,8 +91,13 @@ function run(command, commandArgs, cwd) {
   const result = spawnSync(command, commandArgs, {
     cwd,
     stdio: "inherit",
-    env: process.env
+    env: process.env,
+    shell: isWindows
   });
+  if (result.error) {
+    console.error(`desktop-build-windows: failed to spawn ${command}: ${result.error.message}`);
+    process.exit(1);
+  }
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }

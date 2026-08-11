@@ -38,6 +38,13 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 url = "2"
 zeroize = "1"
 
+# Windows has no system sqlite3.lib, so the plain `sqlite` feature cannot link
+# there (LNK1181: cannot open input file 'sqlite3.lib', issue #441). Compile
+# SQLite from source on Windows via bundled-sqlite; Linux/macOS keep system
+# SQLite from the workspace `sqlite` feature. Features unify across the build.
+[target.'cfg(windows)'.dependencies]
+matrix-sdk = { workspace = true, features = ["bundled-sqlite"] }
+
 [dev-dependencies]
 matrix-sdk = { workspace = true, features = ["testing"] }
 matrix-sdk-test = { workspace = true }
