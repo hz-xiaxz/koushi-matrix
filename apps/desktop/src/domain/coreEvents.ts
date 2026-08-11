@@ -1226,6 +1226,29 @@ export type CoreEventPayload =
   /** Emitted by the Tauri adapter when EventStreamLag is detected. */
   | { kind: "ResyncMarker" };
 
+/**
+ * Issue #450: whether a CoreEvent reports a recognized-but-unavailable slash
+ * command rejection (e.g. /join, /invite). Both the OperationFailed surface
+ * and the production submission-path SubmissionRejected surface count.
+ */
+export function isUnsupportedSlashCommandRejection(
+  payload: CoreEventPayload
+): boolean {
+  if (payload.kind === "OperationFailed") {
+    const failure = payload.failure;
+    return (
+      !!failure &&
+      typeof failure === "object" &&
+      "TimelineOperationFailed" in failure &&
+      failure.TimelineOperationFailed.kind === "UnsupportedSlashCommand"
+    );
+  }
+  if (payload.kind === "Timeline" && "SubmissionRejected" in payload.event) {
+    return payload.event.SubmissionRejected.kind === "UnsupportedSlashCommand";
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

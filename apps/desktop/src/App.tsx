@@ -76,6 +76,7 @@ import {
   type CoreEventPayload,
   type TimelineKey,
   focusedTimelineKey,
+  isUnsupportedSlashCommandRejection,
   roomTimelineKey,
   threadTimelineKey
 } from "./domain/coreEvents";
@@ -2779,13 +2780,7 @@ export function App() {
             // /join, /invite) is rejected before any Matrix send; surface the
             // localized explanation near the composer instead of appearing
             // inert. Transient: auto-dismissed.
-            const failure = payload.failure;
-            if (
-              failure &&
-              typeof failure === "object" &&
-              "TimelineOperationFailed" in failure &&
-              failure.TimelineOperationFailed.kind === "UnsupportedSlashCommand"
-            ) {
+            if (isUnsupportedSlashCommandRejection(payload)) {
               showComposerNoticeRef.current(t("composer.slashCommandUnavailable"));
             }
             continue;
@@ -2808,6 +2803,12 @@ export function App() {
           }
           if (payload.kind !== "Timeline") {
             continue;
+          }
+          if (isUnsupportedSlashCommandRejection(payload)) {
+            // Issue #450: the production submission path rejects recognized
+            // but unavailable slash commands via SubmissionRejected (not
+            // OperationFailed); surface the localized notice near the composer.
+            showComposerNoticeRef.current(t("composer.slashCommandUnavailable"));
           }
           const applied = applyTimelineEventWithProjectionResultAndRetention(
             next,
