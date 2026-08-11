@@ -4050,6 +4050,20 @@ impl AppActor {
                         });
                         return false;
                     }
+                    // Issue #450: validate slash semantics BEFORE either
+                    // scheduled-send acceptance path clears the draft — a
+                    // recognized-but-unavailable command (/join, /invite) is
+                    // rejected terminally here instead of being scheduled and
+                    // entering a permanent dispatch/retry loop.
+                    if let Err(kind) =
+                        crate::timeline::validate_composer_body_for_timeline_send(&body)
+                    {
+                        self.emit(CoreEvent::OperationFailed {
+                            request_id,
+                            failure: CoreFailure::TimelineOperationFailed { kind },
+                        });
+                        return false;
+                    }
                     if self.state.scheduled_sends.capability
                         != ScheduledSendCapability::LocalFallback
                     {

@@ -1836,21 +1836,30 @@ export function App() {
   const [rightPanelWidth, setRightPanelWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
   const [qaSendStatus, setQaSendStatus] = useState<QaSendSmokeStatus>("idle");
   // Issue #450: transient localized notice for recognized-but-unavailable
-  // slash commands (e.g. /join, /invite), rendered above the main composer.
-  const [composerNotice, setComposerNotice] = useState<string | null>(null);
+  // slash commands (e.g. /join, /invite), rendered above the composer that
+  // owns the rejected target (main vs thread, keyed by the event's key).
+  const [composerNotice, setComposerNotice] = useState<{
+    key: TimelineKey;
+    message: string;
+  } | null>(null);
   const composerNoticeTimerRef = useRef<number | null>(null);
-  const showComposerNoticeRef = useRef<(message: string) => void>(() => undefined);
+  const showComposerNoticeRef = useRef<{
+    key: TimelineKey;
+    message: string;
+  } | null>(null);
+  const showComposerNotice = useCallback((key: TimelineKey, message: string) => {
+    showComposerNoticeRef.current = { key, message };
+    setComposerNotice({ key, message });
+    if (composerNoticeTimerRef.current !== null) {
+      window.clearTimeout(composerNoticeTimerRef.current);
+    }
+    composerNoticeTimerRef.current = window.setTimeout(() => {
+      setComposerNotice(null);
+      showComposerNoticeRef.current = null;
+      composerNoticeTimerRef.current = null;
+    }, 4000);
+  }, []);
   useEffect(() => {
-    showComposerNoticeRef.current = (message: string) => {
-      setComposerNotice(message);
-      if (composerNoticeTimerRef.current !== null) {
-        window.clearTimeout(composerNoticeTimerRef.current);
-      }
-      composerNoticeTimerRef.current = window.setTimeout(() => {
-        setComposerNotice(null);
-        composerNoticeTimerRef.current = null;
-      }, 4000);
-    };
     return () => {
       if (composerNoticeTimerRef.current !== null) {
         window.clearTimeout(composerNoticeTimerRef.current);
@@ -2779,9 +2788,17 @@ export function App() {
             // Issue #450: a recognized-but-unavailable slash command (e.g.
             // /join, /invite) is rejected before any Matrix send; surface the
             // localized explanation near the composer instead of appearing
-            // inert. Transient: auto-dismissed.
+            // inert. Transient: auto-dismissed. The OperationFailed envelope
+            // carries no key, so the notice keys to the active main room.
             if (isUnsupportedSlashCommandRejection(payload)) {
-              showComposerNoticeRef.current(t("composer.slashCommandUnavailable"));
+              const activeRoomId = snapshotRef.current?.state.ui.timeline.room_id;
+              if (activeRoomId) {
+                const account = readyComposerDraftAccountOwner(snapshotRef.current);
+                showComposerNotice(
+                  roomTimelineKey(account ? composerDraftAccountOwnerKey(account) : "main", activeRoomId),
+                  t("composer.slashCommandUnavailable")
+                );
+              }
             }
             continue;
           }
@@ -2807,8 +2824,14 @@ export function App() {
           if (isUnsupportedSlashCommandRejection(payload)) {
             // Issue #450: the production submission path rejects recognized
             // but unavailable slash commands via SubmissionRejected (not
-            // OperationFailed); surface the localized notice near the composer.
-            showComposerNoticeRef.current(t("composer.slashCommandUnavailable"));
+            // OperationFailed); surface the localized notice near the
+            // composer that owns the rejected target (keyed by the event).
+            if ("SubmissionRejected" in payload.event) {
+              showComposerNotice(
+                payload.event.SubmissionRejected.key,
+                t("composer.slashCommandUnavailable")
+              );
+            }
           }
           const applied = applyTimelineEventWithProjectionResultAndRetention(
             next,
@@ -6338,7 +6361,13 @@ export function App() {
           <TimelinePane
             activeRoomName={activeRoom?.display_label ?? t("room.noRoomSelected")}
             composerDocument={composerDocument}
-            composerNotice={composerNotice}
+            composerNotice={
+              composerNotice &&
+              "Room" in composerNotice.key.kind &&
+              composerNotice.key.kind.Room.room_id === snapshot.state.ui.timeline.room_id
+                ? composerNotice.message
+                : null
+            }
             composerDraftKey={mainComposerDraftImeKey}
             composerMode={composerModeProp(snapshot.state.ui.timeline.composer.mode)}
             canEdit={!encryptedComposerBlocked}
@@ -6624,6 +6653,15 @@ export function App() {
           }}
           threadComposerDraftImeKey={threadComposerDraftImeKey}
           threadComposerDocumentOverride={threadComposerDocumentOverride}
+          threadComposerNotice={
+            composerNotice &&
+            activeThreadTarget &&
+            "Thread" in composerNotice.key.kind &&
+            composerNotice.key.kind.Thread.room_id === activeThreadTarget.room_id &&
+            composerNotice.key.kind.Thread.root_event_id === activeThreadTarget.root_event_id
+              ? composerNotice.message
+              : null
+          }
           onThreadMentionQueryChange={(roomId, query) => {
             if (query !== null) {
               void applyLatestTextSnapshot(`mention-thread:${roomId}`, async () => {

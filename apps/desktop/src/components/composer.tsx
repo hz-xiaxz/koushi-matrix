@@ -856,6 +856,7 @@ function ThreadComposer({
   isSending,
   mentionCandidates = [],
   mentionCandidatesLoading = false,
+  notice = null,
   roomName = t("panel.thread"),
   resolveComposerKeyAction,
   onAttachFiles,
@@ -871,6 +872,7 @@ function ThreadComposer({
   isSending: boolean;
   mentionCandidates?: MentionCandidate[];
   mentionCandidatesLoading?: boolean;
+  notice?: string | null;
   roomName?: string;
   resolveComposerKeyAction: ResolveComposerKeyAction;
   onAttachFiles?: (files: File[]) => void | Promise<void>;
@@ -888,6 +890,7 @@ function ThreadComposer({
       isSending={isSending}
       mentionCandidates={mentionCandidates}
       mentionCandidatesLoading={mentionCandidatesLoading}
+      notice={notice}
       resolveComposerKeyAction={resolveComposerKeyAction}
       draftKey={draftKey}
       ariaLabel={t("timeline.threadComposer")}

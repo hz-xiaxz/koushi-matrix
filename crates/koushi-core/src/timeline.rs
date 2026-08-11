@@ -7044,7 +7044,9 @@ fn newest_provable_receipt_event_id(
         .unwrap_or_else(|| requested_event_id.to_owned())
 }
 
-fn validate_composer_body_for_timeline_send(body: &str) -> Result<(), TimelineFailureKind> {
+pub(crate) fn validate_composer_body_for_timeline_send(
+    body: &str,
+) -> Result<(), TimelineFailureKind> {
     match resolve_composer_send_intent(body, MentionIntent::default()) {
         ComposerSendIntent::LocalFailure { .. }
         | ComposerSendIntent::SlashCommand {

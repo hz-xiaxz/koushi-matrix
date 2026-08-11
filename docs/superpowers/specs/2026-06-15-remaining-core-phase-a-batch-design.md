@@ -105,8 +105,11 @@ Rust-owned decisions:
   but it does not decide final `m.mentions`.
 - Markdown/rich-text conversion and sanitization are Rust-owned send-path
   semantics. React may offer toolbar controls but dispatches typed intent.
-- Slash commands parse in Rust before Matrix commands are emitted. Unknown or
-  unsupported commands settle as structured local failures, not UI heuristics.
+- Slash commands parse in Rust before Matrix commands are emitted. Issue #450
+  SUPERSEDES the "unknown commands settle as structured local failures" line:
+  unknown leading-slash tokens are ordinary content and send literally (slash
+  preserved); only recognized-but-unavailable commands (/join, /invite) settle
+  as structured local failures surfaced near the composer.
 - Reply quote, pinned-event, permalink, source, forward, and preview data cross
   the GUI boundary only as app-owned DTOs.
 

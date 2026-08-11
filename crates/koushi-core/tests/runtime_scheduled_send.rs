@@ -677,3 +677,80 @@ where
     }
     panic!("state predicate was not satisfied within {timeout:?}");
 }
+
+#[tokio::test]
+async fn scheduled_recognized_unavailable_command_is_rejected_before_acceptance() {
+    // Issue #450: a recognized-but-unavailable slash command (/join, /invite)
+    // must be rejected terminally at schedule time — never accepted, never
+    // cleared from the draft, and never scheduled for a dispatch/retry loop.
+    let (runtime, mut conn, _, _data_dir, _credential_dir) =
+        ready_room_conn("!room:example.test").await;
+    runtime
+        .inject_actions(vec![AppAction::ScheduledSendCapabilityChanged {
+            capability: ScheduledSendCapability::LocalFallback,
+        }])
+        .await;
+    submit_composer_command(
+        &conn,
+        CoreCommand::App(AppCommand::SetComposerDraft {
+            request_id: conn.next_request_id(),
+            expected_account: session_key(),
+            room_id: "!room:example.test".to_owned(),
+            document: "keep draft".into(),
+            revision: ComposerDraftRevision::from_u64(7),
+        }),
+    )
+    .await
+    .expect("seed scheduled draft");
+    wait_for_state(&mut conn, |state| {
+        state.timeline.composer.draft == "keep draft"
+            && state.timeline.scheduled_send_capability == ScheduledSendCapability::LocalFallback
+    })
+    .await;
+
+    let request_id = conn.next_request_id();
+    submit_composer_command(
+        &conn,
+        CoreCommand::App(AppCommand::ScheduleSend {
+            request_id,
+            expected_account: session_key(),
+            room_id: "!room:example.test".to_owned(),
+            thread_root_event_id: None,
+            body: "/join #room:example.test".to_owned(),
+            send_at_ms: future_epoch_ms(Duration::from_secs(60)),
+            draft_revision: ComposerDraftRevision::from_u64(7),
+        }),
+    )
+    .await
+    .expect("submit recognized-unavailable scheduled send");
+
+    let event = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match conn.recv_event().await.expect("runtime event stream") {
+                event @ CoreEvent::OperationFailed {
+                    request_id: failed_request_id,
+                    ..
+                } if failed_request_id == request_id => break event,
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("scheduled rejection should be correlated");
+    assert!(
+        matches!(
+            &event,
+            CoreEvent::OperationFailed {
+                failure: CoreFailure::TimelineOperationFailed {
+                    kind: TimelineFailureKind::UnsupportedSlashCommand,
+                },
+                ..
+            }
+        ),
+        "unexpected event: {event:?}"
+    );
+    let snapshot = conn.snapshot();
+    // Nothing was scheduled and the draft survives untouched.
+    assert!(snapshot.timeline.scheduled_sends.is_empty());
+    assert_eq!(snapshot.timeline.composer.draft, "keep draft");
+}
