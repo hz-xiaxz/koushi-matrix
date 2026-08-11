@@ -24,6 +24,8 @@ const nsisDir = join(
   "nsis"
 );
 const args = new Set(process.argv.slice(2));
+// Windows has no bare npm executable: spawnSync must use the .cmd shim.
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 if (args.has("--help")) {
   printUsage();
@@ -57,7 +59,7 @@ if (!args.has("--skip-preflight")) {
 }
 
 const buildStartMs = Date.now();
-run("npm", buildCommand, desktopDir);
+run(npmCommand, buildCommand, desktopDir);
 
 const installers = listNsisInstallers();
 if (installers.length !== 1) {
