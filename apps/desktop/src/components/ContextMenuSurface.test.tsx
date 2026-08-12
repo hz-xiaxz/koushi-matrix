@@ -109,5 +109,40 @@ describe("ContextMenuSurface", () => {
       fireEvent.keyDown(menu, { key: "Escape" });
       expect(onClose).toHaveBeenCalled();
     });
+
+    it("keeps roving inside a nested submenu's own items", () => {
+      const { container } = renderMenu();
+      const menu = container.querySelector(".context-menu") as HTMLElement;
+      const [first] = menuitems();
+
+      // A nested submenu (forward destinations) with its own items.
+      const submenu = document.createElement("div");
+      submenu.setAttribute("role", "menu");
+      const subItem = (label: string) => {
+        const button = document.createElement("button");
+        button.setAttribute("role", "menuitem");
+        button.type = "button";
+        button.textContent = label;
+        submenu.append(button);
+        return button;
+      };
+      const subFirst = subItem("Destination A");
+      const subSecond = subItem("Destination B");
+      menu.append(submenu);
+
+      // Arrow Down from a submenu item must move within the submenu, not
+      // jump to the parent's next top-level item.
+      subFirst.focus();
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(subSecond);
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(subFirst);
+
+      // From a top-level item, roving ignores the nested submenu's items.
+      first.focus();
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(document.activeElement).not.toBe(subFirst);
+      expect(document.activeElement).not.toBe(subSecond);
+    });
   });
 });
