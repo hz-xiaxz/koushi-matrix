@@ -6,6 +6,7 @@ import {
   Download,
   Edit3,
   EyeOff,
+  ExternalLink,
   History,
   Image,
   KeyRound,
@@ -121,6 +122,8 @@ export function UserSettingsPanel({
   onStartCrawlRoom,
   onStopCrawlRoom,
   onDisplayDensityChange = () => undefined,
+  accountManagementUrl = null,
+  onManageAccount = () => undefined,
   rooms
 }: {
   currentSession: SavedSessionInfo | null;
@@ -179,6 +182,8 @@ export function UserSettingsPanel({
   onStartCrawlRoom?: (roomId: string) => void;
   onStopCrawlRoom?: (roomId: string) => void;
   onDisplayDensityChange?: (density: DisplayDensity) => void;
+  accountManagementUrl?: string | null;
+  onManageAccount?: () => void;
   rooms?: RoomSummary[];
 }) {
   useEffect(() => {
@@ -721,10 +726,12 @@ export function UserSettingsPanel({
       <AccountManagementSection
         accountManagement={accountManagement}
         accountManagementCapabilities={accountManagementCapabilities}
+        accountManagementUrl={accountManagementUrl}
         currentSession={currentSession}
         onLoadAccountManagementCapabilities={onLoadAccountManagementCapabilities}
         onChangePassword={onChangePassword}
         onDeactivateAccount={onDeactivateAccount}
+        onManageAccount={onManageAccount}
         onSubmitAccountManagementUia={onSubmitAccountManagementUia}
       />
 
@@ -1211,18 +1218,22 @@ function SessionsSection({
 function AccountManagementSection({
   accountManagement,
   accountManagementCapabilities,
+  accountManagementUrl,
   currentSession,
   onLoadAccountManagementCapabilities,
   onChangePassword,
   onDeactivateAccount,
+  onManageAccount,
   onSubmitAccountManagementUia
 }: {
   accountManagement: AccountManagementState;
   accountManagementCapabilities: AccountManagementCapabilities;
+  accountManagementUrl: string | null;
   currentSession: SavedSessionInfo | null;
   onLoadAccountManagementCapabilities: () => void;
   onChangePassword: (newPassword: string) => void;
   onDeactivateAccount: (eraseData: boolean) => void;
+  onManageAccount: () => void;
   onSubmitAccountManagementUia: (flowId: number, password: string) => void;
 }) {
   useEffect(() => {
@@ -1295,6 +1306,21 @@ function AccountManagementSection({
       <div className="settings-section-heading">
         <h3>{t("settings.accountManagement")}</h3>
       </div>
+
+      {accountManagementUrl ? (
+        <div className="manage-account-row">
+          <button
+            className="trust-action-button"
+            type="button"
+            onClick={onManageAccount}
+            data-testid="manage-account-button"
+          >
+            <ExternalLink size={14} aria-hidden="true" />
+            <span>{t("settings.manageAccount")}</span>
+          </button>
+          <p className="profile-settings-hint">{t("settings.manageAccountHint")}</p>
+        </div>
+      ) : null}
 
       {accountManagement.kind === "awaitingUia" && (isChangePassword || isDeactivate) ? (
         <AccountManagementUiaForm

@@ -721,6 +721,7 @@ pub use sliding_sync_discovery::{
 };
 
 const LOGIN_DISCOVERY_PATH: &str = "_matrix/client/v3/login";
+const WELL_KNOWN_CLIENT_PATH: &str = ".well-known/matrix/client";
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const SYNC_INVITE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const SYNC_INVITE_PROBE_CONNECTION_ID: &str = "koushi-invite";
@@ -5882,6 +5883,18 @@ impl Homeserver {
             .join(LOGIN_DISCOVERY_PATH)
             .expect("login discovery path should be relative")
     }
+
+    /// `/.well-known/matrix/client` at the origin root (the homeserver
+    /// scheme+host, not the client-server base path).
+    pub fn well_known_client_url(&self) -> Url {
+        let mut origin = self.base_url.clone();
+        origin.set_path("");
+        origin.set_query(None);
+        origin.set_fragment(None);
+        origin
+            .join(WELL_KNOWN_CLIENT_PATH)
+            .expect("well-known client path should be relative")
+    }
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -6982,8 +6995,38 @@ pub fn discover_login_flows(homeserver: &str) -> Result<LoginDiscovery, LoginDis
     Ok(LoginDiscovery {
         homeserver: homeserver.normalized(),
         flows,
-        delegated: DelegatedAuthLinks::default(),
+        // #475: delegated account-management/registration links come from the
+        // well-known client document; failure to fetch or parse it must never
+        // block login (the links are a nicety, so this fails open to empty).
+        delegated: discover_delegated_auth_links(&homeserver),
     })
+}
+
+/// Fetch and parse the `/.well-known/matrix/client` delegated-auth metadata.
+/// Any error (network, status, malformed body, missing metadata, unsupported
+/// scheme) yields empty links so login discovery never depends on it.
+fn discover_delegated_auth_links(homeserver: &Homeserver) -> DelegatedAuthLinks {
+    match fetch_well_known_client(homeserver) {
+        Some(links) => links,
+        None => DelegatedAuthLinks::default(),
+    }
+}
+
+fn fetch_well_known_client(homeserver: &Homeserver) -> Option<DelegatedAuthLinks> {
+    let response = reqwest::blocking::Client::builder()
+        .timeout(DISCOVERY_TIMEOUT)
+        .user_agent("matrix-desktop-prelogin/0.1")
+        .build()
+        .ok()?
+        .get(homeserver.well_known_client_url())
+        .send()
+        .ok()?;
+    if response.status().as_u16() != 200 {
+        return None;
+    }
+    let body = response.text().ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&body).ok()?;
+    Some(parse_well_known_client(&value))
 }
 
 pub fn login_with_password_blocking(
@@ -12249,6 +12292,39 @@ pub fn parse_login_discovery(
     value: &serde_json::Value,
 ) -> Result<Vec<LoginFlow>, LoginDiscoveryError> {
     Ok(map_login_flows_to_desktop(parse_matrix_login_flows(value)?))
+}
+
+/// Parse the delegated-auth links from a `/.well-known/matrix/client`
+/// document (#475). Both the finalized `m.authentication` key and the older
+/// `org.matrix.msc2965.authentication` key are accepted (matrix.org still
+/// serves the latter). Only http/https URLs are trusted; malformed values,
+/// missing metadata, or unsupported schemes yield empty links (unavailable).
+pub fn parse_well_known_client(value: &serde_json::Value) -> DelegatedAuthLinks {
+    let authentication = value
+        .get("m.authentication")
+        .or_else(|| value.get("org.matrix.msc2965.authentication"));
+    let Some(authentication) = authentication else {
+        return DelegatedAuthLinks::default();
+    };
+    DelegatedAuthLinks {
+        registration_url: parse_discovered_http_url(authentication.get("registration")),
+        account_management_url: parse_discovered_http_url(authentication.get("account")),
+    }
+}
+
+/// A discovered URL is usable only when it parses and uses http/https.
+/// Anything else (missing, malformed, `javascript:`, `file:`, …) is None so
+/// the UI never renders a broken or dangerous link.
+fn parse_discovered_http_url(value: Option<&serde_json::Value>) -> Option<String> {
+    let raw = value?.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let url = Url::parse(raw).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    Some(url.to_string())
 }
 
 pub fn parse_matrix_login_flows(

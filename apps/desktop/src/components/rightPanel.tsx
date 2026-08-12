@@ -71,6 +71,7 @@ export function ContextualRightPanel({
   activeRoom,
   activeSpace,
   activeSpaceName,
+  accountManagementUrl = null,
   displayDensity = "comfortable",
   encryptedComposerBlocked = false,
   isRecoveryBusy,
@@ -112,6 +113,7 @@ export function ContextualRightPanel({
   onPaginateThreadsList,
   onOpenKeyboardSettings,
   onOpenRecovery,
+  onManageAccount = () => undefined,
   onProbeLocalEncryption,
   onResetLocalData,
   onLogout = () => undefined,
@@ -234,6 +236,8 @@ export function ContextualRightPanel({
   onPaginateThreadsList: (scope: ThreadsListScope) => void;
   onOpenKeyboardSettings: () => void;
   onOpenRecovery: () => void;
+  onManageAccount?: () => void;
+  accountManagementUrl?: string | null;
   onProbeLocalEncryption: () => void;
   onResetLocalData: () => void;
   onLogout?: () => void;
@@ -461,6 +465,8 @@ export function ContextualRightPanel({
           deviceSessions={snapshot.state.domain.device_sessions}
           accountManagement={snapshot.state.domain.account_management}
           accountManagementCapabilities={snapshot.state.domain.account_management_capabilities}
+          accountManagementUrl={accountManagementUrl}
+          onManageAccount={onManageAccount}
           onQueryDevices={onQueryDevices ?? (() => undefined)}
           onRenameDevice={onRenameDevice ?? (() => undefined)}
           onDeleteDevices={onDeleteDevices ?? (() => undefined)}

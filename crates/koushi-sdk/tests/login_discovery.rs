@@ -5,7 +5,6 @@ use std::{
     net::TcpListener,
     thread,
 };
-
 #[test]
 fn parses_password_sso_and_token_flows() {
     let response = serde_json::json!({
@@ -174,6 +173,124 @@ fn maps_non_successful_http_response_to_discovery_error() {
 }
 
 #[test]
+fn parses_account_management_url_from_well_known_delegated_auth() {
+    let well_known = serde_json::json!({
+        "m.homeserver": { "base_url": "https://matrix.example.test" },
+        "m.authentication": {
+            "issuer": "https://auth.example.test/",
+            "account": "https://auth.example.test/account",
+            "registration": "https://auth.example.test/register"
+        }
+    });
+
+    let links = koushi_sdk::parse_well_known_client(&well_known);
+
+    assert_eq!(
+        links.account_management_url.as_deref(),
+        Some("https://auth.example.test/account")
+    );
+    assert_eq!(
+        links.registration_url.as_deref(),
+        Some("https://auth.example.test/register")
+    );
+}
+
+#[test]
+fn parses_account_url_from_msc2965_prefixed_well_known_key() {
+    // matrix.org still serves the org.matrix.msc2965.authentication spelling.
+    let well_known = serde_json::json!({
+        "org.matrix.msc2965.authentication": {
+            "issuer": "https://account.example.test/",
+            "account": "https://account.example.test/account/"
+        }
+    });
+
+    let links = koushi_sdk::parse_well_known_client(&well_known);
+
+    assert_eq!(
+        links.account_management_url.as_deref(),
+        Some("https://account.example.test/account/")
+    );
+    assert!(links.registration_url.is_none());
+}
+
+#[test]
+fn well_known_without_delegated_auth_metadata_is_unavailable() {
+    let well_known =
+        serde_json::json!({ "m.homeserver": { "base_url": "https://matrix.example.test" } });
+
+    let links = koushi_sdk::parse_well_known_client(&well_known);
+
+    assert!(links.account_management_url.is_none());
+    assert!(links.registration_url.is_none());
+}
+
+#[test]
+fn malformed_or_unsupported_scheme_discovery_values_are_unavailable() {
+    let well_known = serde_json::json!({
+        "m.authentication": {
+            "account": "not a url",
+            "registration": "javascript:alert(1)"
+        }
+    });
+
+    let links = koushi_sdk::parse_well_known_client(&well_known);
+
+    assert!(links.account_management_url.is_none());
+    assert!(links.registration_url.is_none());
+}
+
+#[test]
+fn non_string_discovery_values_are_unavailable() {
+    let well_known = serde_json::json!({
+        "m.authentication": {
+            "account": 42,
+            "registration": ["https://auth.example.test/register"]
+        }
+    });
+
+    let links = koushi_sdk::parse_well_known_client(&well_known);
+
+    assert!(links.account_management_url.is_none());
+    assert!(links.registration_url.is_none());
+}
+
+#[test]
+fn discovers_delegated_account_management_url_over_http() {
+    let homeserver = spawn_discovery_with_well_known_server(
+        200,
+        r#"{"flows":[{"type":"m.login.password"}]}"#,
+        Some(
+            r#"{"m.homeserver":{"base_url":"https://matrix.example.test"},"m.authentication":{"issuer":"https://auth.example.test/","account":"https://auth.example.test/account"}}"#,
+        ),
+    );
+
+    let discovery =
+        koushi_sdk::discover_login_flows(&homeserver).expect("discovery should succeed");
+
+    assert_eq!(
+        discovery.delegated.account_management_url.as_deref(),
+        Some("https://auth.example.test/account")
+    );
+}
+
+#[test]
+fn login_discovery_fails_open_when_well_known_is_missing() {
+    let homeserver = spawn_discovery_with_well_known_server(
+        200,
+        r#"{"flows":[{"type":"m.login.password"}]}"#,
+        // The server returns 404 for the well-known path; login still works
+        // and the account-management capability is simply unavailable.
+        None,
+    );
+
+    let discovery =
+        koushi_sdk::discover_login_flows(&homeserver).expect("discovery should succeed");
+
+    assert!(discovery.delegated.account_management_url.is_none());
+}
+
+#[test]
 fn discovers_login_flows_over_http() {
     let homeserver = spawn_login_discovery_server(
         200,
@@ -215,29 +332,57 @@ fn starts_legacy_sso_login_when_discovery_has_plain_sso_flow() {
 }
 
 fn spawn_login_discovery_server(status: u16, body: &'static str) -> String {
+    spawn_discovery_with_well_known_server(status, body, None)
+}
+
+fn spawn_discovery_with_well_known_server(
+    status: u16,
+    login_body: &'static str,
+    well_known_body: Option<&'static str>,
+) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
     let addr = listener
         .local_addr()
         .expect("test server should have an address");
 
     thread::spawn(move || {
-        let (mut stream, _) = listener
-            .accept()
-            .expect("test server should accept a request");
-        let mut request = [0_u8; 2048];
-        let bytes_read = stream
-            .read(&mut request)
-            .expect("test server should read request");
-        let request = String::from_utf8_lossy(&request[..bytes_read]);
-        assert!(request.starts_with("GET /_matrix/client/v3/login HTTP/1.1"));
+        for _ in 0..2 {
+            let (mut stream, _) = listener
+                .accept()
+                .expect("test server should accept a request");
+            let mut request = [0_u8; 2048];
+            let bytes_read = stream
+                .read(&mut request)
+                .expect("test server should read request");
+            let request = String::from_utf8_lossy(&request[..bytes_read]);
+            let (response_status, body): (u16, Vec<u8>) =
+                if request.starts_with("GET /_matrix/client/v3/login HTTP/1.1") {
+                    (status, login_body.as_bytes().to_vec())
+                } else if request.starts_with("GET /.well-known/matrix/client HTTP/1.1") {
+                    match well_known_body {
+                        Some(well_known) => (200, well_known.as_bytes().to_vec()),
+                        None => (
+                            404,
+                            b"{\"errcode\":\"M_NOT_FOUND\",\"error\":\"not found\"}".to_vec(),
+                        ),
+                    }
+                } else {
+                    (
+                        404,
+                        b"{\"errcode\":\"M_NOT_FOUND\",\"error\":\"not found\"}".to_vec(),
+                    )
+                };
 
-        let response = format!(
-            "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        stream
-            .write_all(response.as_bytes())
-            .expect("test server should write response");
+            let response = format!(
+                "HTTP/1.1 {response_status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let mut bytes = response.into_bytes();
+            bytes.extend_from_slice(&body);
+            stream
+                .write_all(&bytes)
+                .expect("test server should write response");
+        }
     });
 
     format!("http://{addr}")
