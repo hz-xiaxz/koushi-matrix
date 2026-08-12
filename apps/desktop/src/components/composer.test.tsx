@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { useState } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MentionCandidate } from "../domain/projectionTypes";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
@@ -966,6 +966,123 @@ describe("Composer", () => {
     expect(
       screen.getByRole("option", { name: "@room Notify the whole room" }).getAttribute("aria-selected")
     ).toBe("true");
+  });
+
+  describe("inline edit emoji surface (#498)", () => {
+    beforeEach(() => {
+      // The picker persists recent emojis to localStorage; keep each test's
+      // picker grid deterministic.
+      localStorage.removeItem("koushi-recent-emojis");
+    });
+
+    afterEach(() => {
+      localStorage.removeItem("koushi-recent-emojis");
+    });
+
+    function renderEditComposer(onDocumentChange = vi.fn(), draftKey = "edit:a") {
+      const rendered = render(
+        <Composer
+          editorOnly
+          surface="edit"
+          composerMode={{ kind: "plain" }}
+          isSending={false}
+          roomName=""
+          document={documentFromText("Hello world")}
+          draftKey={draftKey}
+          onCancel={() => undefined}
+          onCancelReply={() => undefined}
+          onSend={textSend(() => undefined)}
+          onDocumentChange={onDocumentChange}
+        />
+      );
+      const editor = rendered.container.querySelector(".composer-inline-editor") as HTMLDivElement;
+      return { ...rendered, editor, onDocumentChange };
+    }
+
+    it("exposes the shared emoji picker on the edit surface without edit-inappropriate controls", () => {
+      const { container } = renderEditComposer();
+
+      const emojiButton = screen.getByRole("button", { name: "Emoji" });
+      expect(emojiButton).toBeTruthy();
+      expect(emojiButton.getAttribute("aria-haspopup")).toBe("dialog");
+      expect(emojiButton.getAttribute("aria-expanded")).toBe("false");
+      expect(container.querySelector(".composer-edit-aux")).not.toBeNull();
+      // Attachment, scheduled-send, and send controls stay out of edits.
+      expect(screen.queryByRole("button", { name: "Attach file" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    });
+
+    it("inserts a selected emoji at the caret in one mutation, closes the picker, and restores editor focus", async () => {
+      const { editor, onDocumentChange } = renderEditComposer();
+      changeEditorText(editor, "Hello world");
+      // Caret after "Hello " (position 6).
+      setInlineMentionEditorSelection(editor, 6, 6);
+
+      const emojiButton = screen.getByRole("button", { name: "Emoji" });
+      fireEvent.click(emojiButton);
+      expect(emojiButton.getAttribute("aria-expanded")).toBe("true");
+      const picker = screen.getByRole("dialog", { name: "Emoji" });
+      fireEvent.click(within(picker).getAllByRole("button", { name: /grinning face$/i })[0]!);
+
+      const nextDocument = onDocumentChange.mock.lastCall?.[0] as ComposerDocument;
+      expect(plainBodyFromDocument(nextDocument)).toBe("Hello 😀world");
+      expect(screen.queryByRole("dialog", { name: "Emoji" })).toBeNull();
+      await waitFor(() => expect(document.activeElement).toBe(editor));
+    });
+
+    it("replaces a selected range with the chosen emoji", () => {
+      const { editor, onDocumentChange } = renderEditComposer();
+      changeEditorText(editor, "Hello world");
+      // Select "world" (6..11).
+      setInlineMentionEditorSelection(editor, 6, 11);
+
+      fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
+      const picker = screen.getByRole("dialog", { name: "Emoji" });
+      fireEvent.click(within(picker).getAllByRole("button", { name: /grinning face$/i })[0]!);
+
+      const document = onDocumentChange.mock.lastCall?.[0] as ComposerDocument;
+      expect(plainBodyFromDocument(document)).toBe("Hello 😀");
+    });
+
+    it("never reuses a selection captured for a previous draft after the draft key changes", () => {
+      const onDocumentChange = vi.fn();
+      const { container, rerender } = renderEditComposer(onDocumentChange, "edit:a");
+      const editor = container.querySelector(".composer-inline-editor") as HTMLDivElement;
+      changeEditorText(editor, "old body");
+      setInlineMentionEditorSelection(editor, 4, 4);
+      fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
+
+      // The same composer is reused for a different edit target while the
+      // picker is still open; the old selection must not apply to the new
+      // draft.
+      rerender(
+        <Composer
+          editorOnly
+          surface="edit"
+          composerMode={{ kind: "plain" }}
+          isSending={false}
+          roomName=""
+          document={documentFromText("new body")}
+          draftKey="edit:b"
+          onCancel={() => undefined}
+          onCancelReply={() => undefined}
+          onSend={textSend(() => undefined)}
+          onDocumentChange={onDocumentChange}
+        />
+      );
+      const newEditor = container.querySelector(".composer-inline-editor") as HTMLDivElement;
+      changeEditorText(newEditor, "new body");
+      // Caret at the end of the new draft.
+      setInlineMentionEditorSelection(newEditor, 8, 8);
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Emoji" })).getAllByRole("button", {
+          name: /grinning face$/i
+        })[0]!
+      );
+
+      const document = onDocumentChange.mock.lastCall?.[0] as ComposerDocument;
+      expect(plainBodyFromDocument(document)).toBe("new body😀");
+    });
   });
 
   describe("mention autocomplete keyboard visibility (#480)", () => {

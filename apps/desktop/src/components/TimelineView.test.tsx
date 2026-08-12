@@ -993,6 +993,130 @@ describe("TimelineView", () => {
     );
   });
 
+  describe("inline edit emoji surface (#498)", () => {
+    afterEach(() => {
+      // Selecting an emoji persists to the shared recent list in
+      // localStorage; clear it so later picker tests stay deterministic.
+      localStorage.removeItem("koushi-recent-emojis");
+    });
+
+    it.each([
+      ["text", message("$edit-emoji", "old body")],
+      ["media caption", { ...imageMessage("$edit-emoji"), body: "old body" }]
+    ])(
+      "opens the shared emoji picker in %s edit and saves a structured document with the emoji",
+      async (_surface, item) => {
+        const editMessage = vi.fn(async () => undefined);
+        const editable = {
+          ...item,
+          can_edit: true,
+          actions: {
+            can_copy: true,
+            can_forward: true,
+            can_reply: true,
+            can_permalink: true,
+            can_view_source: true,
+            editable_document: documentFromText("old body")
+          }
+        };
+        const store = applyTimelineEvent(createTimelineStore(), {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [editable]
+          }
+        });
+
+        render(
+          <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+            <TimelineView
+              timelineKey={KEY}
+              roomId="!room:example.invalid"
+              transport={baseTransport({ editMessage })}
+              onReply={vi.fn()}
+            />
+          </TimelineStoreContext.Provider>
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
+        const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLDivElement;
+        changeInlineEditorText(textarea, "old body");
+        // Caret after "old " (position 4).
+        setInlineMentionEditorSelection(textarea, 4, 4);
+
+        fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
+        const picker = await screen.findByRole("dialog", { name: "Emoji" });
+        fireEvent.click(within(picker).getAllByRole("button", { name: /grinning face$/i })[0]!);
+        expect(textarea.textContent).toBe("old 😀body");
+        expect(screen.queryByRole("dialog", { name: "Emoji" })).toBeNull();
+
+        fireEvent.click(screen.getByRole("button", { name: /save edit/i }));
+        expect(editMessage).toHaveBeenCalledWith(
+          "!room:example.invalid",
+          "$edit-emoji",
+          documentFromText("old 😀body")
+        );
+      }
+    );
+
+    it("cancel does not submit and reopening edit starts from the authoritative document", () => {
+      const editMessage = vi.fn(async () => undefined);
+      const editable = {
+        ...message("$edit-emoji-cancel", "old body"),
+        can_edit: true,
+        actions: {
+          can_copy: true,
+          can_forward: true,
+          can_reply: true,
+          can_permalink: true,
+          can_view_source: true,
+          editable_document: documentFromText("old body")
+        }
+      };
+      const store = applyTimelineEvent(createTimelineStore(), {
+        InitialItems: {
+          request_id: null,
+          key: KEY,
+          generation: 1,
+          items: [editable]
+        }
+      });
+
+      render(
+        <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+          <TimelineView
+            timelineKey={KEY}
+            roomId="!room:example.invalid"
+            transport={baseTransport({ editMessage })}
+            onReply={vi.fn()}
+          />
+        </TimelineStoreContext.Provider>
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
+      const textarea = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLDivElement;
+      changeInlineEditorText(textarea, "old body");
+      setInlineMentionEditorSelection(textarea, 4, 4);
+      fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Emoji" })).getAllByRole("button", {
+          name: /grinning face$/i
+        })[0]!
+      );
+      expect(textarea.textContent).toBe("old 😀body");
+
+      fireEvent.click(screen.getByRole("button", { name: /cancel edit/i }));
+      expect(editMessage).not.toHaveBeenCalled();
+      expect(screen.queryByRole("textbox", { name: /edit.*body/i })).toBeNull();
+
+      // Reopening starts from the authoritative editable document.
+      fireEvent.click(screen.getByRole("button", { name: /edit message/i }));
+      const reopened = screen.getByRole("textbox", { name: /edit.*body/i }) as HTMLDivElement;
+      expect(reopened.textContent).toBe("old body");
+    });
+  });
+
   it("keeps an existing mention when its projected label is only an MXID fallback", () => {
     const editMessage = vi.fn(async () => undefined);
     const editable = {
