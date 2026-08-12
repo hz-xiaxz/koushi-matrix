@@ -117,8 +117,10 @@ exposed seven integration-test expectation failures that an earlier
 
 ## Diff self-review
 
-There is no external review tool. Before opening a PR, read the branch's own
-finished diff and judge it against the canon yourself.
+Before opening a PR or requesting a review, read the branch's own finished
+diff and judge it against the canon yourself, using the `preflight-review`
+skill checklist (production-path trace, contract mirrors, async/ownership,
+terminal semantics, verify-first integrity, local gate matrix).
 
 ```bash
 git diff origin/main...HEAD
