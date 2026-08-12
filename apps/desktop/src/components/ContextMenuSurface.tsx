@@ -40,18 +40,28 @@ function clamp(value: number, min: number, max: number) {
  * Roving focus over a menu's `[role="menuitem"]` children (#480 audit).
  * Arrow Up/Down move and wrap, Home/End jump to the ends. The browser keeps
  * the focused item visible, so no manual scroll management is needed.
+ *
+ * Roving stays within the focused item's own menu level: when focus is inside
+ * a nested `[role="menu"]` (e.g. a forwarding submenu), navigation applies to
+ * that submenu's items only, so a submenu keeps its own focus ownership.
  */
 export function moveRovingMenuFocus(
   container: HTMLElement,
   target: "next" | "previous" | "first" | "last"
 ): void {
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const activeMenu = active?.closest<HTMLElement>('[role="menu"]') ?? null;
+  const scope =
+    activeMenu && container.contains(activeMenu) && activeMenu !== container
+      ? activeMenu
+      : container;
   const items = Array.from(
-    container.querySelectorAll<HTMLElement>('[role="menuitem"]:not([hidden])')
-  );
+    scope.querySelectorAll<HTMLElement>('[role="menuitem"]:not([hidden])')
+  ).filter((item) => item.closest('[role="menu"]') === scope);
   if (items.length === 0) {
     return;
   }
-  const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+  const currentIndex = active ? items.indexOf(active) : -1;
   let nextIndex: number;
   switch (target) {
     case "first":
@@ -113,9 +123,27 @@ export function ContextMenuSurface({
   onClose: () => void;
 }) {
   const firstItemRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Opener captured during the first render, before the menu's own focus
+  // moves, so focus can be returned to the invoking element on close.
+  const openerRef = useRef<HTMLElement | null>(null);
+  if (openerRef.current === null) {
+    openerRef.current = document.activeElement as HTMLElement | null;
+  }
 
   useEffect(() => {
     firstItemRef.current?.focus();
+    return () => {
+      // Restore focus to the opener only when the menu really unmounted:
+      // React StrictMode rehearses effects with the menu still connected, and
+      // the opener may have been removed (e.g. its panel closed), in which
+      // case forcing focus would drop it onto the body.
+      const menu = menuRef.current;
+      if (menu && !menu.isConnected && openerRef.current?.isConnected) {
+        openerRef.current.focus();
+      }
+    };
   }, []);
 
   if (!items.length) {
@@ -134,6 +162,7 @@ export function ContextMenuSurface({
     <div className="context-menu-backdrop" onClick={onClose}>
       <div
         className="context-menu"
+        ref={menuRef}
         role="menu"
         style={{ left: position.left, top: position.top }}
         onClick={(event) => event.stopPropagation()}

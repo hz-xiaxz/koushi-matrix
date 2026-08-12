@@ -9,7 +9,7 @@
  *
  * These tests seed 30 mention candidates through the real snapshot and drive
  * the real composer with Arrow keys, then measure popup `scrollTop` (must
- * change) and `window.scrollY` (must stay 0).
+ * change) while neither the page nor a scrollable timeline ancestor moves.
  */
 
 import { expect, test, type Page } from "@playwright/test";
@@ -69,8 +69,20 @@ async function popupScrollTop(page: Page): Promise<number> {
   return page.locator(".composer-autocomplete").evaluate((element) => element.scrollTop);
 }
 
-async function pageScrollY(page: Page): Promise<number> {
-  return page.evaluate(() => window.scrollY);
+/**
+ * Scroll positions that must never move while the popup scrolls: the page
+ * itself and the timeline message scroller (the popup's real scrollable
+ * ancestors — `window.scrollY` alone is vacuous because the body cannot
+ * scroll).
+ */
+async function outerScrollPositions(page: Page): Promise<{ page: number; timeline: number }> {
+  return page.evaluate(() => {
+    const timeline = document.querySelector<HTMLElement>(".timeline-scroll");
+    return {
+      page: window.scrollY,
+      timeline: timeline?.scrollTop ?? 0
+    };
+  });
 }
 
 /** Is the active option fully inside the popup's visible box? */
@@ -114,7 +126,7 @@ test("mention popup scrolls to keep the active option visible; the page never sc
   await expect(listbox.getByRole("option")).toHaveCount(CANDIDATE_COUNT);
 
   expect(await popupScrollTop(page)).toBe(0);
-  expect(await pageScrollY(page)).toBe(0);
+  expect(await outerScrollPositions(page)).toEqual({ page: 0, timeline: 0 });
 
   // Arrow Down past the popup's lower edge: the popup must scroll, the page
   // must not.
@@ -123,7 +135,7 @@ test("mention popup scrolls to keep the active option visible; the page never sc
   }
   await expect.poll(() => popupScrollTop(page)).toBeGreaterThan(0);
   expect(await activeOptionVisible(page)).toBe(true);
-  expect(await pageScrollY(page)).toBe(0);
+  expect(await outerScrollPositions(page)).toEqual({ page: 0, timeline: 0 });
 
   // Wraparound from the last option back to the first: the active option is
   // fully visible again, back in the top region of the popup (the first option
@@ -140,11 +152,11 @@ test("mention popup scrolls to keep the active option visible; the page never sc
     return first ? element.scrollTop < first.offsetHeight : element.scrollTop === 0;
   });
   expect(topRegion, "wraparound must return the list to its top region").toBe(true);
-  expect(await pageScrollY(page)).toBe(0);
+  expect(await outerScrollPositions(page)).toEqual({ page: 0, timeline: 0 });
 
   // Wraparound from the first option up to the last scrolls to the bottom.
   await page.keyboard.press("ArrowUp");
   await expect.poll(() => popupScrollTop(page)).toBeGreaterThan(0);
   expect(await activeOptionVisible(page)).toBe(true);
-  expect(await pageScrollY(page)).toBe(0);
+  expect(await outerScrollPositions(page)).toEqual({ page: 0, timeline: 0 });
 });

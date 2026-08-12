@@ -31,11 +31,12 @@ export default defineConfig({
     headless: true,
     // Some headless environments (e.g. machines without a GPU/driver) stall
     // Chromium's compositor unless software GL is forced. Opt-in only via
-    // PLAYWRIGHT_EXTRA_ARGS so the default run stays byte-identical:
-    //   PLAYWRIGHT_EXTRA_ARGS="--disable-gpu --enable-unsafe-swiftshader" \
+    // KOUSHI_PLAYWRIGHT_EXTRA_ARGS (Koushi-prefixed per engineering-rules) so
+    // the default run stays byte-identical:
+    //   KOUSHI_PLAYWRIGHT_EXTRA_ARGS="--disable-gpu --enable-unsafe-swiftshader" \
     //     npx playwright test
-    launchOptions: process.env.PLAYWRIGHT_EXTRA_ARGS
-      ? { args: process.env.PLAYWRIGHT_EXTRA_ARGS.split(" ") }
+    launchOptions: process.env.KOUSHI_PLAYWRIGHT_EXTRA_ARGS
+      ? { args: process.env.KOUSHI_PLAYWRIGHT_EXTRA_ARGS.split(" ") }
       : undefined
   },
   webServer: {
