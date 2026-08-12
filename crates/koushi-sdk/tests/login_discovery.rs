@@ -148,6 +148,59 @@ fn rejects_homeserver_url_with_unsupported_scheme() {
 }
 
 #[test]
+fn well_known_client_url_is_origin_root_based_regardless_of_base_path() {
+    let homeserver = koushi_sdk::Homeserver::parse("https://matrix.example.org/matrix")
+        .expect("base-path homeserver should parse");
+
+    assert_eq!(
+        homeserver.well_known_client_url().as_str(),
+        "https://matrix.example.org/.well-known/matrix/client"
+    );
+    // The login discovery path stays relative to the base path.
+    assert_eq!(
+        homeserver.login_discovery_url().as_str(),
+        "https://matrix.example.org/matrix/_matrix/client/v3/login"
+    );
+}
+
+#[test]
+fn discovered_urls_reject_embedded_credentials() {
+    let homeserver = koushi_sdk::Homeserver::parse("https://user:pass@matrix.example.org")
+        .expect_err("homeserver URL with credentials should be rejected");
+    assert_eq!(
+        homeserver.to_string(),
+        "homeserver URL is invalid: homeserver URL must not include credentials"
+    );
+
+    let well_known = serde_json::json!({
+        "m.authentication": {
+            "account": "https://user:secret@account.example.test/account",
+            "registration": "https://account.example.test/register"
+        }
+    });
+    let links = koushi_sdk::parse_well_known_client(&well_known);
+    assert!(links.account_management_url.is_none());
+    assert_eq!(
+        links.registration_url.as_deref(),
+        Some("https://account.example.test/register")
+    );
+}
+
+#[test]
+fn well_known_debug_redacts_url_values() {
+    let well_known = serde_json::json!({
+        "m.authentication": {
+            "account": "https://account.example.test/account?token=secret"
+        }
+    });
+    let links = koushi_sdk::parse_well_known_client(&well_known);
+    let debug = format!("{links:?}");
+    assert!(!debug.contains("account.example.test"));
+    assert!(!debug.contains("secret"));
+    assert!(debug.contains("Url(..)"));
+}
+
+#[test]
 fn rejects_plain_http_for_non_loopback_homeserver() {
     let error = koushi_sdk::Homeserver::parse("http://matrix.example.org")
         .expect_err("non-loopback HTTP homeserver should be rejected");
@@ -350,11 +403,37 @@ fn spawn_discovery_with_well_known_server(
             let (mut stream, _) = listener
                 .accept()
                 .expect("test server should accept a request");
-            let mut request = [0_u8; 2048];
-            let bytes_read = stream
-                .read(&mut request)
-                .expect("test server should read request");
-            let request = String::from_utf8_lossy(&request[..bytes_read]);
+            // Read until the request is complete: headers end at \r\n\r\n and
+            // a body, if any, has the declared Content-Length (header names
+            // are case-insensitive). A single read() can stop mid-request on
+            // a split TCP segment.
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 2048];
+            loop {
+                let count = stream
+                    .read(&mut buffer)
+                    .expect("test server should read request");
+                if count == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..count]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let declared_length = text
+                        .split("\r\n")
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + declared_length {
+                        break;
+                    }
+                }
+            }
+            let request = String::from_utf8_lossy(&request);
             let (response_status, body): (u16, Vec<u8>) =
                 if request.starts_with("GET /_matrix/client/v3/login HTTP/1.1") {
                     (status, login_body.as_bytes().to_vec())

@@ -722,6 +722,9 @@ pub use sliding_sync_discovery::{
 
 const LOGIN_DISCOVERY_PATH: &str = "_matrix/client/v3/login";
 const WELL_KNOWN_CLIENT_PATH: &str = ".well-known/matrix/client";
+/// The well-known document is a nicety (account-management links); it must
+/// never delay login, so it gets a much shorter budget than flow discovery.
+const WELL_KNOWN_CLIENT_TIMEOUT: Duration = Duration::from_secs(3);
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const SYNC_INVITE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const SYNC_INVITE_PROBE_CONNECTION_ID: &str = "koushi-invite";
@@ -5852,6 +5855,11 @@ impl Homeserver {
                 "homeserver URL is missing a host".to_owned(),
             ));
         }
+        if !base_url.username().is_empty() || base_url.password().is_some() {
+            return Err(LoginDiscoveryError::InvalidHomeserver(
+                "homeserver URL must not include credentials".to_owned(),
+            ));
+        }
         if base_url.scheme() == "http" && !is_loopback_homeserver(&base_url) {
             return Err(LoginDiscoveryError::InsecureHomeserverScheme);
         }
@@ -7014,7 +7022,7 @@ fn discover_delegated_auth_links(homeserver: &Homeserver) -> DelegatedAuthLinks 
 
 fn fetch_well_known_client(homeserver: &Homeserver) -> Option<DelegatedAuthLinks> {
     let response = reqwest::blocking::Client::builder()
-        .timeout(DISCOVERY_TIMEOUT)
+        .timeout(WELL_KNOWN_CLIENT_TIMEOUT)
         .user_agent("matrix-desktop-prelogin/0.1")
         .build()
         .ok()?
@@ -12322,6 +12330,10 @@ fn parse_discovered_http_url(value: Option<&serde_json::Value>) -> Option<String
     }
     let url = Url::parse(raw).ok()?;
     if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    // Never let embedded credentials cross the discovery/snapshot boundary.
+    if !url.username().is_empty() || url.password().is_some() {
         return None;
     }
     Some(url.to_string())
