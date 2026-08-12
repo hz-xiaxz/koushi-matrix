@@ -505,7 +505,14 @@ function useDialogFocusTrap(overlayRef: RefObject<HTMLDivElement | null>): void 
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      triggerRef.current?.focus();
+      // Only restore the trigger when the overlay really unmounted: React
+      // StrictMode rehearses effects with the overlay still connected, and a
+      // return-to-invite flow can close the panel that held the trigger, so
+      // restoring focus while the dialog is open (or to a detached element)
+      // would drop focus onto the body.
+      if (!overlay.isConnected && triggerRef.current?.isConnected) {
+        triggerRef.current.focus();
+      }
     };
   }, [overlayRef]);
 }

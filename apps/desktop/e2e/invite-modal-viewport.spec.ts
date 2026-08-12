@@ -47,7 +47,7 @@ function fullWorkflow({ candidates = 12, selected = true }: WorkflowSeed = {}) {
       explicit_user_id: null
     },
     selected_targets: selected
-      ? [{ user_id: "@ada:example.invalid", display_label: "Ada Lovelace", avatar: null }]
+      ? [{ user_id: "@member-1:example.invalid", display_label: "Member 1", avatar: null }]
       : [],
     scope_plan: {
       room_id: ROOM_ID,
@@ -266,9 +266,10 @@ test("Tab, Shift+Tab, Escape, and focus restoration keep the dialog usable", asy
   await expect(searchField).toBeFocused();
 
   // Tab cycles through every control inside the modal (no escape to the page
-  // or browser chrome), and Cancel is reachable. The dialog has many
-  // controls, so walk with a bound and fail if focus ever leaves the overlay.
-  const cancel = page.getByRole("button", { name: t("action.cancel") });
+  // or browser chrome), and the last action — Send invite — is reachable.
+  // The dialog has many controls, so walk with a bound and fail if focus ever
+  // leaves the overlay.
+  const sendInvite = page.getByRole("button", { name: t("dialog.sendInvite") });
   for (let index = 0; index < 40; index += 1) {
     await page.keyboard.press("Tab");
     const active = await page.evaluate(() => {
@@ -276,22 +277,22 @@ test("Tab, Shift+Tab, Escape, and focus restoration keep the dialog usable", asy
       return { insideModal: Boolean(element?.closest(".dialog-overlay")), label: element?.textContent ?? "" };
     });
     expect(active.insideModal, "Tab escaped the modal").toBe(true);
-    const cancelFocused = await cancel.evaluate((el) => el === document.activeElement);
-    if (cancelFocused) {
+    const sendFocused = await sendInvite.evaluate((el) => el === document.activeElement);
+    if (sendFocused) {
       break;
     }
   }
-  await expect(cancel).toBeFocused();
+  await expect(sendInvite).toBeFocused();
 
-  // Shift+Tab walks back and returns to the search field.
-  for (let index = 0; index < 40; index += 1) {
-    await page.keyboard.press("Shift+Tab");
-    const searchFocused = await searchField.evaluate((el) => el === document.activeElement);
-    if (searchFocused) {
-      break;
-    }
-  }
-  await expect(searchField).toBeFocused();
+  // Tab past the last control wraps back to the first control (the Remove
+  // invite target button, which precedes the search field in DOM order).
+  const removeTarget = page.getByRole("button", { name: t("dialog.removeInviteTarget") });
+  await page.keyboard.press("Tab");
+  await expect(removeTarget).toBeFocused();
+
+  // Shift+Tab past the first control wraps to the last (Send invite).
+  await page.keyboard.press("Shift+Tab");
+  await expect(sendInvite).toBeFocused();
 
   // Escape closes the modal.
   await page.keyboard.press("Escape");
