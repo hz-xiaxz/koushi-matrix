@@ -1,5 +1,6 @@
 import type { ContextMenuActionId, ContextMenuItem } from "../domain/contextMenus";
 import { t } from "../i18n/messages";
+import { useEffect, useRef } from "react";
 
 const MENU_WIDTH = 184;
 const MENU_ITEM_HEIGHT = 34;
@@ -35,6 +36,69 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+/**
+ * Roving focus over a menu's `[role="menuitem"]` children (#480 audit).
+ * Arrow Up/Down move and wrap, Home/End jump to the ends. The browser keeps
+ * the focused item visible, so no manual scroll management is needed.
+ */
+export function moveRovingMenuFocus(
+  container: HTMLElement,
+  target: "next" | "previous" | "first" | "last"
+): void {
+  const items = Array.from(
+    container.querySelectorAll<HTMLElement>('[role="menuitem"]:not([hidden])')
+  );
+  if (items.length === 0) {
+    return;
+  }
+  const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+  let nextIndex: number;
+  switch (target) {
+    case "first":
+      nextIndex = 0;
+      break;
+    case "last":
+      nextIndex = items.length - 1;
+      break;
+    case "next":
+      nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+      break;
+    case "previous":
+      nextIndex =
+        currentIndex < 0 ? items.length - 1 : (currentIndex + items.length - 1) % items.length;
+      break;
+  }
+  items[nextIndex].focus();
+}
+
+/** Keydown handler for a menu container: arrows rove, Escape bubbles to the caller. */
+export function onMenuKeyDown(
+  event: React.KeyboardEvent<HTMLElement>,
+  container: HTMLElement | null
+): void {
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    if (container) {
+      moveRovingMenuFocus(container, "next");
+    }
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    if (container) {
+      moveRovingMenuFocus(container, "previous");
+    }
+  } else if (event.key === "Home") {
+    event.preventDefault();
+    if (container) {
+      moveRovingMenuFocus(container, "first");
+    }
+  } else if (event.key === "End") {
+    event.preventDefault();
+    if (container) {
+      moveRovingMenuFocus(container, "last");
+    }
+  }
+}
+
 export function ContextMenuSurface({
   items,
   x,
@@ -48,6 +112,12 @@ export function ContextMenuSurface({
   onAction: (actionId: ContextMenuActionId) => void;
   onClose: () => void;
 }) {
+  const firstItemRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    firstItemRef.current?.focus();
+  }, []);
+
   if (!items.length) {
     return null;
   }
@@ -67,11 +137,20 @@ export function ContextMenuSurface({
         role="menu"
         style={{ left: position.left, top: position.top }}
         onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+            return;
+          }
+          onMenuKeyDown(event, event.currentTarget);
+        }}
       >
-        {items.map((item) => (
+        {items.map((item, index) => (
           <button
             className={`context-menu-item ${item.destructive ? "destructive" : ""}`.trim()}
             key={item.id}
+            ref={index === 0 ? firstItemRef : undefined}
             role="menuitem"
             type="button"
             onClick={() => onAction(item.id)}

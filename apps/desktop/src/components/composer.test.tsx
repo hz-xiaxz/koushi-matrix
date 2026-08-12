@@ -967,4 +967,152 @@ describe("Composer", () => {
       screen.getByRole("option", { name: "@room Notify the whole room" }).getAttribute("aria-selected")
     ).toBe("true");
   });
+
+  describe("mention autocomplete keyboard visibility (#480)", () => {
+    const manyCandidates: MentionCandidate[] = Array.from({ length: 20 }, (_, index) => ({
+      key: `@user-${index}:example.invalid`,
+      label: `User ${index}`,
+      target: {
+        kind: "user" as const,
+        user_id: `@user-${index}:example.invalid`,
+        display_label: `User ${index}`
+      }
+    }));
+
+    // Simulate a 100px-tall popup whose options are 40px tall (20 options
+    // overflow it). Option rects move up as the popup scrolls, mirroring real
+    // layout, so the scrollTop values converge like a real browser's.
+    function mockOverflowingPopup(container: HTMLElement) {
+      const popup = container.querySelector<HTMLElement>(".composer-autocomplete");
+      if (!popup) {
+        throw new Error("mention autocomplete popup not rendered");
+      }
+      const optionHeight = 40;
+      const popupHeight = 100;
+      Object.defineProperty(popup, "clientHeight", { value: popupHeight, configurable: true });
+      popup.getBoundingClientRect = () =>
+        ({
+          top: 0,
+          bottom: popupHeight,
+          height: popupHeight
+        }) as DOMRect;
+      popup.querySelectorAll(".composer-autocomplete-option").forEach((option) => {
+        const element = option as HTMLElement;
+        // Read the live id: React reuses option nodes across candidate
+        // refreshes, so the flat index must be resolved at call time.
+        element.getBoundingClientRect = () => {
+          const index = Number(element.id.split("-option-").at(-1));
+          return {
+            top: index * optionHeight - popup.scrollTop,
+            height: optionHeight
+          } as DOMRect;
+        };
+      });
+      return popup;
+    }
+
+    function renderComposerWithMentions(
+      surface: "main" | "thread" | "edit",
+      candidates = manyCandidates
+    ) {
+      const rendered = render(
+        <Composer
+          surface={surface}
+          composerMode={{ kind: "plain" }}
+          isSending={false}
+          mentionCandidates={candidates}
+          roomName="Direct room"
+          document={documentFromText("@")}
+          onCancelReply={() => undefined}
+          onSend={textSend(() => undefined)}
+          onDocumentChange={textChange(() => undefined)}
+        />
+      );
+      const editor = rendered.container.querySelector(".composer-inline-editor");
+      if (!editor) {
+        throw new Error("composer editor not rendered");
+      }
+      return { ...rendered, editor };
+    }
+
+    function activeOptionVisible(popup: HTMLElement): boolean {
+      const active = popup.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!active) {
+        return false;
+      }
+      const popupRect = popup.getBoundingClientRect();
+      const optionRect = active.getBoundingClientRect();
+      const optionTop = optionRect.top - popupRect.top + popup.scrollTop;
+      const optionBottom = optionTop + optionRect.height;
+      return optionTop >= popup.scrollTop - 1 && optionBottom <= popup.scrollTop + popup.clientHeight + 1;
+    }
+
+    it.each(["main", "thread", "edit"] as const)(
+      "scrolls the %s composer popup to keep the active option visible",
+      (surface) => {
+        // jsdom omits scrollIntoView; install a stub so a regression that
+        // scrolls the outer page fails this spy instead of throwing.
+        if (typeof Element.prototype.scrollIntoView !== "function") {
+          Element.prototype.scrollIntoView = () => undefined;
+        }
+        const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+        const { container, editor } = renderComposerWithMentions(surface);
+        const popup = mockOverflowingPopup(container);
+        expect(popup.scrollTop).toBe(0);
+
+        // Arrow Down across the lower edge: index 3's option (top 120, bottom
+        // 160) cannot fit in the 100px popup, so the popup scrolls to 60.
+        for (let step = 0; step < 3; step += 1) {
+          fireEvent.keyDown(editor, { key: "ArrowDown", code: "ArrowDown" });
+        }
+        expect(popup.scrollTop).toBe(60);
+        expect(activeOptionVisible(popup)).toBe(true);
+        expect(scrollIntoView).not.toHaveBeenCalled();
+
+        // Arrow Down to the last option pins the popup at its maximum scroll.
+        for (let step = 0; step < 16; step += 1) {
+          fireEvent.keyDown(editor, { key: "ArrowDown", code: "ArrowDown" });
+        }
+        expect(popup.scrollTop).toBe(700);
+
+        // Wraparound from last back to first scrolls back to the top.
+        fireEvent.keyDown(editor, { key: "ArrowDown", code: "ArrowDown" });
+        expect(popup.scrollTop).toBe(0);
+
+        // Wraparound from first up to last scrolls to the bottom again.
+        fireEvent.keyDown(editor, { key: "ArrowUp", code: "ArrowUp" });
+        expect(popup.scrollTop).toBe(700);
+        expect(activeOptionVisible(popup)).toBe(true);
+        expect(scrollIntoView).not.toHaveBeenCalled();
+      }
+    );
+
+    it("keeps the active option visible when candidates are refreshed", () => {
+      const { container, editor, rerender } = renderComposerWithMentions("main");
+      const popup = mockOverflowingPopup(container);
+      for (let step = 0; step < 3; step += 1) {
+        fireEvent.keyDown(editor, { key: "ArrowDown", code: "ArrowDown" });
+      }
+      expect(activeOptionVisible(popup)).toBe(true);
+
+      // A refreshed candidate list replaces the options; the active index is
+      // clamped and the popup keeps the resulting active option visible.
+      const refreshed = manyCandidates.slice(2, 8);
+      rerender(
+        <Composer
+          surface="main"
+          composerMode={{ kind: "plain" }}
+          isSending={false}
+          mentionCandidates={refreshed}
+          roomName="Direct room"
+          document={documentFromText("@")}
+          onCancelReply={() => undefined}
+          onSend={textSend(() => undefined)}
+          onDocumentChange={textChange(() => undefined)}
+        />
+      );
+      const refreshedPopup = mockOverflowingPopup(container);
+      expect(activeOptionVisible(refreshedPopup)).toBe(true);
+    });
+  });
 });
