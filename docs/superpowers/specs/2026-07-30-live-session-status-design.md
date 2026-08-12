@@ -85,8 +85,11 @@ diagnostic records the coarse outcome, and live session status shows the
 authoritative unresolved name.
 
 Password and SSO login continue to send their existing requested device display
-name. The conditional post-login repair applies to OAuth because that flow is
-the reproduced empty-name path.
+name. The conditional post-login repair applies to OAuth **and password**
+logins: the password path was the reproduced empty-name path (#474) when the
+login form sent no device name, so the same repair runs after a password login
+(with the empty default now left to Rust rather than sent as "Koushi"). A
+user-customized name is never rewritten in either flow.
 
 ### Account-management destination reuses discovery
 
