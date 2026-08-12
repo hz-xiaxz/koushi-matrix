@@ -253,6 +253,83 @@ describe("UserSettingsPanel", () => {
     expect(markup).not.toContain("TARGETDEVICE");
   });
 
+  test("shows Manage account only when a discovered account-management URL exists", () => {
+    const withoutUrl = renderToStaticMarkup(
+      <UserSettingsPanel
+        currentSession={{
+          homeserver: "https://matrix.org",
+          user_id: "@demo-user:example.invalid",
+          device_id: "FAKEDEVICE"
+        }}
+        e2eeTrust={e2eeTrust}
+        localEncryption={{ kind: "healthy" }}
+        platform="linux"
+        deviceSessions={idleDeviceSessions}
+        accountManagement={idleAccountManagement}
+        accountManagementCapabilities={idleAccountManagementCapabilities}
+        accountManagementUrl={null}
+        savedSessions={[]}
+        profile={profile}
+        settings={settings}
+        {...handlers}
+      />
+    );
+    expect(withoutUrl).not.toContain("Manage account");
+
+    const withUrl = renderToStaticMarkup(
+      <UserSettingsPanel
+        currentSession={{
+          homeserver: "https://matrix.org",
+          user_id: "@demo-user:example.invalid",
+          device_id: "FAKEDEVICE"
+        }}
+        e2eeTrust={e2eeTrust}
+        localEncryption={{ kind: "healthy" }}
+        platform="linux"
+        deviceSessions={idleDeviceSessions}
+        accountManagement={idleAccountManagement}
+        accountManagementCapabilities={idleAccountManagementCapabilities}
+        accountManagementUrl="https://account.example.test/account"
+        savedSessions={[]}
+        profile={profile}
+        settings={settings}
+        {...handlers}
+      />
+    );
+    expect(withUrl).toContain("Manage account");
+    expect(withUrl).toContain("Opens the account-management page");
+  });
+
+  test("dispatches the manage-account open action from the account section", () => {
+    const onManageAccount = vi.fn();
+
+    render(
+      <UserSettingsPanel
+        currentSession={{
+          homeserver: "https://matrix.org",
+          user_id: "@demo-user:example.invalid",
+          device_id: "FAKEDEVICE"
+        }}
+        e2eeTrust={e2eeTrust}
+        localEncryption={{ kind: "healthy" }}
+        platform="linux"
+        deviceSessions={idleDeviceSessions}
+        accountManagement={idleAccountManagement}
+        accountManagementCapabilities={idleAccountManagementCapabilities}
+        accountManagementUrl="https://account.example.test/account"
+        savedSessions={[]}
+        profile={profile}
+        settings={settings}
+        {...handlers}
+        onManageAccount={onManageAccount}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("manage-account-button"));
+
+    expect(onManageAccount).toHaveBeenCalledTimes(1);
+  });
+
   test("dispatches logout from the session settings section", () => {
     const onLogout = vi.fn();
 

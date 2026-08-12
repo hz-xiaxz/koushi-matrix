@@ -592,6 +592,8 @@ export type MessageId =
   | "settings.securityPrivacy"
   | "settings.sessions"
   | "settings.accountManagement"
+  | "settings.manageAccount"
+  | "settings.manageAccountHint"
   | "settings.changePassword"
   | "settings.changePasswordLabel"
   | "settings.changePasswordConfirm"
@@ -1879,6 +1881,8 @@ const en: Catalog = {
   "settings.securityPrivacy": "Security & Privacy",
   "settings.sessions": "Sessions",
   "settings.accountManagement": "Account management",
+  "settings.manageAccount": "Manage account",
+  "settings.manageAccountHint": "Opens the account-management page for this server in your browser.",
   "settings.changePassword": "Change password",
   "settings.changePasswordLabel": "New password",
   "settings.changePasswordConfirm": "Confirm new password",
@@ -3052,6 +3056,8 @@ const ja: Catalog = {
   "settings.securityPrivacy": "セキュリティとプライバシー",
   "settings.sessions": "セッション",
   "settings.accountManagement": "アカウント管理",
+  "settings.manageAccount": "アカウントを管理",
+  "settings.manageAccountHint": "このサーバーのアカウント管理ページをブラウザで開きます。",
   "settings.changePassword": "パスワードを変更",
   "settings.changePasswordLabel": "新しいパスワード",
   "settings.changePasswordConfirm": "新しいパスワード（確認）",

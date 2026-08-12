@@ -6528,6 +6528,11 @@ export function App() {
           activeRoom={activeRoom ?? null}
           activeSpace={activeSpace ?? null}
           activeSpaceName={activeSpaceName}
+          accountManagementUrl={
+            snapshot.state.domain.auth.kind === "ready"
+              ? snapshot.state.domain.auth.delegated.account_management_url
+              : null
+          }
           displayDensity={displayDensity}
           encryptedComposerBlocked={encryptedComposerBlocked}
           isRecoveryBusy={isBusy}
@@ -6628,6 +6633,14 @@ export function App() {
           }}
           onOpenRecovery={() => {
             void setRightPanelModeClosingFocusedContext("recovery");
+          }}
+          onManageAccount={() => {
+            if (snapshot.state.domain.auth.kind === "ready") {
+              const url = snapshot.state.domain.auth.delegated.account_management_url;
+              if (url) {
+                void openExternalHttpUrl(url);
+              }
+            }
           }}
           onProbeLocalEncryption={() => {
             void probeLocalEncryptionHealth();
