@@ -184,6 +184,39 @@ describe("desktop notification candidate", () => {
     expect(diagnostic).toHaveBeenCalledWith("attention_badge_set count=5");
   });
 
+  test("prefers the packaged native badge backend over the webview window bridge", async () => {
+    const windowMock = {
+      setTitle: vi.fn().mockResolvedValue(undefined),
+      setBadgeCount: vi.fn().mockResolvedValue(undefined)
+    };
+    const nativeBadge = {
+      setBadgeCount: vi.fn().mockResolvedValue("applied" as const)
+    };
+    const diagnostic = vi.fn();
+
+    await applyDesktopAttentionToWindow(
+      windowMock,
+      "Koushi · 3 unread",
+      3,
+      {
+        notifications: "available",
+        badge: "available",
+        overlay_icon: "unavailable",
+        sound: "available",
+        tray: "unavailable",
+        activation: "unavailable"
+      },
+      diagnostic,
+      nativeBadge
+    );
+
+    expect(nativeBadge.setBadgeCount).toHaveBeenCalledWith(3);
+    expect(windowMock.setBadgeCount).not.toHaveBeenCalled();
+    expect(diagnostic).toHaveBeenCalledWith(
+      "attention_badge_native_backend outcome=applied count=3"
+    );
+  });
+
   test("routes Windows overlay icon through the native attention capability DTO", async () => {
     const windowMock = {
       setTitle: vi.fn().mockResolvedValue(undefined),

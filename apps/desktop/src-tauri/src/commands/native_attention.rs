@@ -1,6 +1,16 @@
 use super::*;
 use koushi_state::{NativeAttentionDispatchId, NativeAttentionSoundOutcome};
 
+const NATIVE_BADGE_APPLY_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum NativeAttentionBadgeOutcome {
+    Applied,
+    Unsupported,
+    Mismatch,
+}
+
 trait NativeAttentionSoundBackend {
     async fn play(&self) -> NativeAttentionSoundOutcome;
 }
@@ -29,6 +39,118 @@ pub(crate) async fn play_native_attention_sound(
             .await
             .0,
     )
+}
+
+/// Apply the Rust-owned unread count at the native application boundary.
+///
+/// On macOS this bypasses the webview window bridge and updates `NSDockTile`
+/// on the AppKit main thread. The value is read back before the command settles,
+/// so `Applied` means the native backend accepted the expected label; it does
+/// not claim that the user's system badge preference made it visually visible.
+#[tauri::command]
+pub(crate) async fn set_native_attention_badge(
+    app: AppHandle,
+    count: Option<u64>,
+) -> Result<NativeAttentionBadgeOutcome, &'static str> {
+    let count = count.filter(|count| *count > 0);
+    record(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Info,
+            "desktop.native_badge",
+            "apply_requested",
+        )
+        .field(DiagnosticField::count("count", count.unwrap_or(0))),
+    );
+
+    let outcome = apply_native_attention_badge(&app, count).await?;
+    record(
+        DiagnosticEvent::new(
+            if outcome == NativeAttentionBadgeOutcome::Applied {
+                DiagnosticLevel::Info
+            } else {
+                DiagnosticLevel::Warn
+            },
+            "desktop.native_badge",
+            "apply_settled",
+        )
+        .field(DiagnosticField::token(
+            "outcome",
+            native_attention_badge_outcome_token(outcome),
+        ))
+        .field(DiagnosticField::count("count", count.unwrap_or(0))),
+    );
+    Ok(outcome)
+}
+
+#[cfg(target_os = "macos")]
+async fn apply_native_attention_badge(
+    app: &AppHandle,
+    count: Option<u64>,
+) -> Result<NativeAttentionBadgeOutcome, &'static str> {
+    let expected_label = native_attention_badge_label(count);
+    let label_for_main_thread = expected_label.clone();
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        let _ = sender.send(apply_macos_dock_badge_now(label_for_main_thread));
+    })
+    .map_err(|_| "native badge main-thread dispatch failed")?;
+
+    tokio::time::timeout(NATIVE_BADGE_APPLY_TIMEOUT, receiver)
+        .await
+        .map_err(|_| "native badge main-thread dispatch timed out")?
+        .map_err(|_| "native badge main-thread result was dropped")
+}
+
+#[cfg(target_os = "macos")]
+fn apply_macos_dock_badge_now(expected_label: Option<String>) -> NativeAttentionBadgeOutcome {
+    use objc2_foundation::NSString;
+
+    let Some(main_thread_marker) = objc2::MainThreadMarker::new() else {
+        return NativeAttentionBadgeOutcome::Unsupported;
+    };
+    let application = objc2_app_kit::NSApplication::sharedApplication(main_thread_marker);
+    let dock_tile = application.dockTile();
+    let native_label = expected_label.as_deref().map(NSString::from_str);
+
+    dock_tile.setShowsApplicationBadge(true);
+    dock_tile.setBadgeLabel(native_label.as_deref());
+    dock_tile.display();
+
+    let observed_label = dock_tile.badgeLabel().map(|label| label.to_string());
+    if observed_label == expected_label {
+        NativeAttentionBadgeOutcome::Applied
+    } else {
+        NativeAttentionBadgeOutcome::Mismatch
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn apply_native_attention_badge(
+    app: &AppHandle,
+    count: Option<u64>,
+) -> Result<NativeAttentionBadgeOutcome, &'static str> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Err("native badge main window unavailable");
+    };
+    let count = count.map(|count| i64::try_from(count).unwrap_or(i64::MAX));
+    window
+        .set_badge_count(count)
+        .map_err(|_| "native badge backend failed")?;
+    Ok(NativeAttentionBadgeOutcome::Applied)
+}
+
+fn native_attention_badge_label(count: Option<u64>) -> Option<String> {
+    count
+        .filter(|count| *count > 0)
+        .map(|count| count.to_string())
+}
+
+fn native_attention_badge_outcome_token(outcome: NativeAttentionBadgeOutcome) -> &'static str {
+    match outcome {
+        NativeAttentionBadgeOutcome::Applied => "applied",
+        NativeAttentionBadgeOutcome::Unsupported => "unsupported",
+        NativeAttentionBadgeOutcome::Mismatch => "mismatch",
+    }
 }
 
 async fn dispatch_native_attention_sound(
@@ -218,6 +340,29 @@ mod tests {
         assert_eq!(
             serde_json::to_value(NativeAttentionSoundOutcome::Unsupported).unwrap(),
             "unsupported"
+        );
+    }
+
+    #[test]
+    fn native_badge_labels_clear_zero_and_preserve_positive_counts() {
+        assert_eq!(native_attention_badge_label(None), None);
+        assert_eq!(native_attention_badge_label(Some(0)), None);
+        assert_eq!(native_attention_badge_label(Some(7)), Some("7".to_owned()));
+    }
+
+    #[test]
+    fn native_badge_outcomes_are_typed_and_private_safe() {
+        assert_eq!(
+            serde_json::to_value(NativeAttentionBadgeOutcome::Applied).unwrap(),
+            "applied"
+        );
+        assert_eq!(
+            serde_json::to_value(NativeAttentionBadgeOutcome::Unsupported).unwrap(),
+            "unsupported"
+        );
+        assert_eq!(
+            serde_json::to_value(NativeAttentionBadgeOutcome::Mismatch).unwrap(),
+            "mismatch"
         );
     }
 
