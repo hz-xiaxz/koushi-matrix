@@ -28,7 +28,15 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${HARNESS_PORT}`,
-    headless: true
+    headless: true,
+    // Some headless environments (e.g. machines without a GPU/driver) stall
+    // Chromium's compositor unless software GL is forced. Opt-in only via
+    // PLAYWRIGHT_EXTRA_ARGS so the default run stays byte-identical:
+    //   PLAYWRIGHT_EXTRA_ARGS="--disable-gpu --enable-unsafe-swiftshader" \
+    //     npx playwright test
+    launchOptions: process.env.PLAYWRIGHT_EXTRA_ARGS
+      ? { args: process.env.PLAYWRIGHT_EXTRA_ARGS.split(" ") }
+      : undefined
   },
   webServer: {
     command: `npx vite --port ${HARNESS_PORT}`,
