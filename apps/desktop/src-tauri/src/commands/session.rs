@@ -107,6 +107,7 @@ pub async fn submit_login(
     username: String,
     password: String,
     device_display_name: Option<String>,
+    platform: DisplayPlatform,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
@@ -116,7 +117,7 @@ pub async fn submit_login(
         password: AuthSecret::new(password),
         device_display_name,
     };
-    submit_login_request(app, state.inner(), login_request).await?;
+    submit_login_request(app, state.inner(), login_request, platform).await?;
     current_snapshot(state.inner()).await
 }
 

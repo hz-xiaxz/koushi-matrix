@@ -276,6 +276,7 @@ async fn normal_runtime_waits_for_full_all_rooms_reconciliation_and_reuses_one_s
                 password: AuthSecret::new("synthetic-password"),
                 device_display_name: None,
             },
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .expect("submit runtime login");

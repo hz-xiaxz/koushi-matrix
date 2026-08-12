@@ -396,7 +396,8 @@ test("auth form defaults to matrix.org and submits custom ports in the homeserve
       homeserver: "https://example.org:8448",
       username: "alice",
       password: "[REDACTED]",
-      deviceDisplayName: "Koushi Test Device"
+      deviceDisplayName: "Koushi Test Device",
+      platform: "linux"
     });
   await expect(page.locator('input[name="port"]')).toHaveCount(0);
 });

@@ -90,6 +90,7 @@ async fn provisional_verification_hands_one_encryption_sync_owner_to_normal_runt
                 password: AuthSecret::new("synthetic-password"),
                 device_display_name: None,
             },
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .expect("submit login");

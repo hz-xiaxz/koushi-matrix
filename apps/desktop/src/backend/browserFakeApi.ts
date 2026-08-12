@@ -15,6 +15,7 @@ import type {
   AvatarThumbnailState,
   TimelineMediaSource
 } from "../domain/coreEvents";
+import type { DisplayPlatform } from "../domain/types";
 import type { LinkPreview, LinkPreviewImage, LinkPreviewState } from "../domain/linkPreview";
 import type {
   ActivityMarkReadTarget,
@@ -105,7 +106,8 @@ export interface DesktopApi {
     homeserver: string,
     username: string,
     password: string,
-    deviceDisplayName: string
+    deviceDisplayName: string,
+    platform: DisplayPlatform
   ): Promise<DesktopSnapshot>;
   submitSoftLogoutReauth(password: string): Promise<DesktopSnapshot>;
   listSavedSessions(): Promise<SavedSessionInfo[]>;
@@ -740,7 +742,8 @@ class BrowserFakeApi implements DesktopApi {
     homeserver: string,
     username: string,
     password: string,
-    deviceDisplayName: string
+    deviceDisplayName: string,
+    platform: DisplayPlatform
   ): Promise<DesktopSnapshot> {
     const attempt_id = this.nextRequestId();
     this.snapshot.state.domain.session = {
@@ -755,6 +758,7 @@ class BrowserFakeApi implements DesktopApi {
     void username;
     void password;
     void deviceDisplayName;
+    void platform;
 
     this.snapshot.state.domain.session = { kind: "signedOut" };
     this.snapshot.state.ui.errors.push({

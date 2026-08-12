@@ -1161,6 +1161,7 @@ pub enum AccountCommand {
     LoginPassword {
         request_id: RequestId,
         request: LoginRequest,
+        platform: DisplayPlatform,
     },
     RestoreSession {
         request_id: RequestId,
@@ -1470,10 +1471,12 @@ impl fmt::Debug for AccountCommand {
             Self::LoginPassword {
                 request_id,
                 request,
+                platform,
             } => formatter
                 .debug_struct("LoginPassword")
                 .field("request_id", request_id)
                 .field("request", request)
+                .field("platform", platform)
                 .finish(),
             Self::RestoreSession {
                 request_id,

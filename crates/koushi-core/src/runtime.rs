@@ -6796,6 +6796,7 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         AccountCommand::LoginPassword {
             request_id,
             request,
+            ..
         } => Some(AppAction::AuthenticationStarted {
             attempt_id: LoginAttemptId::new(request_id.connection_id.0, request_id.sequence),
             homeserver: request.homeserver.clone(),
@@ -10753,6 +10754,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: Some("Runtime Trust Test".to_owned()),
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await
             .expect("login command");

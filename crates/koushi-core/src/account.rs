@@ -4377,8 +4377,10 @@ impl AccountActor {
             AccountCommand::LoginPassword {
                 request_id,
                 request,
+                platform,
             } => {
-                self.handle_login_password(request_id, request).await;
+                self.handle_login_password(request_id, request, platform)
+                    .await;
             }
             AccountCommand::RestoreSession {
                 request_id,
@@ -7493,7 +7495,7 @@ impl AccountActor {
             }
         };
 
-        let device_name_outcome = koushi_sdk::ensure_oauth_device_display_name(
+        let device_name_outcome = koushi_sdk::ensure_device_display_name(
             &login_session,
             platform.oauth_device_display_name(),
         )
@@ -7567,7 +7569,12 @@ impl AccountActor {
         .await;
     }
 
-    async fn handle_login_password(&mut self, request_id: RequestId, request: LoginRequest) {
+    async fn handle_login_password(
+        &mut self,
+        request_id: RequestId,
+        request: LoginRequest,
+        platform: koushi_state::DisplayPlatform,
+    ) {
         if self.pending_session_teardown.is_some() {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
@@ -7607,6 +7614,17 @@ impl AccountActor {
                 &request.password,
             )
             .await;
+
+        // #474: a fresh or re-login device gets a descriptive display name
+        // ("Koushi on macOS/Windows/Linux") when its authoritative name is
+        // empty; a user-customized name is never overwritten. Cosmetic only:
+        // a failure is recorded and login continues untouched.
+        let device_name_outcome = koushi_sdk::ensure_device_display_name(
+            &login_session,
+            platform.oauth_device_display_name(),
+        )
+        .await;
+        record_oauth_device_name_outcome(device_name_outcome);
 
         // Build a restorable in-memory session shape without writing the
         // active credential index or last-session pointer before verification.
@@ -14107,6 +14125,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         while !matches!(
@@ -14221,6 +14240,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         while !matches!(
@@ -14235,6 +14255,95 @@ mod tests {
         assert!(tokens.contains(&"provisional_encryption_sync_terminated"));
         assert!(tokens.contains(&"current_session_released"));
         assert_no_logout_finished(&mut action_rx);
+        while let Ok(event) = event_rx.try_recv() {
+            assert!(!matches!(
+                event,
+                CoreEvent::Account(AccountEvent::LoggedOut { .. })
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn password_login_names_an_unnamed_device_with_the_platform_default() {
+        let (homeserver, rename_bodies) = spawn_device_naming_password_server();
+        let cred_dir = tempdir().expect("tempdir");
+        let data_dir = tempdir().expect("tempdir");
+        let (handle, mut action_rx, mut event_rx) =
+            spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
+        handle
+            .send(AccountMessage::Command(AccountCommand::LoginPassword {
+                request_id: test_request_id(),
+                request: LoginRequest {
+                    homeserver,
+                    username: "fixture-user".to_owned(),
+                    password: koushi_state::AuthSecret::new("synthetic-password"),
+                    device_display_name: None,
+                },
+                platform: koushi_state::DisplayPlatform::Linux,
+            }))
+            .await;
+        while !matches!(
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
+        ) {}
+
+        // The cosmetic device rename ran exactly once with the platform
+        // default and contained no private identifiers.
+        let bodies = rename_bodies.lock().expect("rename record");
+        assert_eq!(bodies.len(), 1, "device rename should run once");
+        assert!(
+            bodies[0].contains(r#""display_name":"Koushi on Linux""#),
+            "rename body was: {}",
+            bodies[0]
+        );
+        assert!(!bodies[0].contains("fixture-token"));
+        assert!(!bodies[0].contains("synthetic-password"));
+        drop(bodies);
+        shutdown_and_ack(&handle).await;
+        while let Ok(event) = event_rx.try_recv() {
+            assert!(!matches!(
+                event,
+                CoreEvent::Account(AccountEvent::LoggedOut { .. })
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn password_login_preserves_a_customized_device_name() {
+        let (homeserver, rename_bodies) = spawn_device_naming_password_server();
+        let cred_dir = tempdir().expect("tempdir");
+        let data_dir = tempdir().expect("tempdir");
+        let (handle, mut action_rx, mut event_rx) =
+            spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
+        handle
+            .send(AccountMessage::Command(AccountCommand::LoginPassword {
+                request_id: test_request_id(),
+                request: LoginRequest {
+                    homeserver,
+                    username: "fixture-user".to_owned(),
+                    password: koushi_state::AuthSecret::new("synthetic-password"),
+                    device_display_name: Some("My Laptop".to_owned()),
+                },
+                platform: koushi_state::DisplayPlatform::Macos,
+            }))
+            .await;
+        while !matches!(
+            recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx)
+                .await
+                .as_slice(),
+            [AppAction::LoginSucceeded { .. }]
+        ) {}
+
+        let bodies = rename_bodies.lock().expect("rename record");
+        assert_eq!(
+            bodies.len(),
+            0,
+            "a customized device name must not be rewritten"
+        );
+        drop(bodies);
+        shutdown_and_ack(&handle).await;
         while let Ok(event) = event_rx.try_recv() {
             assert!(!matches!(
                 event,
@@ -14264,6 +14373,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         acknowledge_next_verified_projection(&handle, &mut action_rx).await;
@@ -14298,6 +14408,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         while !matches!(
@@ -14323,6 +14434,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         recv_probe_with_sliding_sync_effects(
@@ -14596,6 +14708,7 @@ mod tests {
                         password: koushi_state::AuthSecret::new("synthetic-password"),
                         device_display_name: Some("Quarantine Test".to_owned()),
                     },
+                    platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await
         );
@@ -14673,6 +14786,7 @@ mod tests {
                         password: koushi_state::AuthSecret::new("synthetic-password"),
                         device_display_name: None,
                     },
+                    platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await
         );
@@ -14863,6 +14977,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         while !matches!(
@@ -15106,6 +15221,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         while !matches!(
@@ -15952,6 +16068,7 @@ mod tests {
                         password: koushi_state::AuthSecret::new("synthetic-password"),
                         device_display_name: Some("Quarantine Test".to_owned()),
                     },
+                    platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await
         );
@@ -16053,6 +16170,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: Some("Teardown Retry Test".to_owned()),
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         while !matches!(
@@ -16137,6 +16255,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         while !matches!(
@@ -16185,6 +16304,7 @@ mod tests {
                             password: koushi_state::AuthSecret::new("synthetic-password"),
                             device_display_name: Some("Replacement Barrier Test".to_owned()),
                         },
+                        platform: koushi_state::DisplayPlatform::Linux,
                     }))
                     .await
             );
@@ -16229,6 +16349,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         while !matches!(
@@ -16255,6 +16376,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         recv_probe_with_sliding_sync_effects(
@@ -16283,6 +16405,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("not-used"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         loop {
@@ -16345,6 +16468,7 @@ mod tests {
                         password: koushi_state::AuthSecret::new("synthetic-password"),
                         device_display_name: None,
                     },
+                    platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await;
             acknowledge_next_verified_projection(&handle, &mut action_rx).await;
@@ -16422,6 +16546,7 @@ mod tests {
                         password: koushi_state::AuthSecret::new("synthetic-password"),
                         device_display_name: None,
                     },
+                    platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await;
             acknowledge_next_verified_projection(&handle, &mut action_rx).await;
@@ -16900,6 +17025,114 @@ mod tests {
 
     fn spawn_quarantine_password_server() -> String {
         spawn_named_quarantine_password_server("@fixture-user:example.invalid", "FIXTUREDEVICE")
+    }
+
+    /// Password-login fixture server that also serves the devices list (with
+    /// the current device unnamed) and records `PUT /devices/…` rename bodies,
+    /// so the #474 password-login device-naming path is provable end-to-end.
+    fn spawn_device_naming_password_server()
+    -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{Read, Write};
+        let rename_bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let recorder = std::sync::Arc::clone(&rename_bodies);
+        let requested_name = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+        let name_writer = std::sync::Arc::clone(&requested_name);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("address");
+        std::thread::spawn(move || {
+            'accept: while let Ok((mut stream, _)) = listener.accept() {
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                loop {
+                    let count = match stream.read(&mut buffer) {
+                        Ok(0) => continue 'accept,
+                        Ok(count) => count,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::ConnectionReset
+                                    | std::io::ErrorKind::BrokenPipe
+                                    | std::io::ErrorKind::UnexpectedEof
+                            ) =>
+                        {
+                            continue 'accept;
+                        }
+                        Err(error) => panic!("read: {error}"),
+                    };
+                    request.extend_from_slice(&buffer[..count]);
+                    let text = String::from_utf8_lossy(&request);
+                    let Some(end) = text.find("\r\n\r\n") else {
+                        continue;
+                    };
+                    let length = text
+                        .lines()
+                        .find_map(|line| line.strip_prefix("Content-Length: "))
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+                let text = String::from_utf8_lossy(&request);
+                let body = if text.starts_with("GET /_matrix/client/versions ") {
+                    r#"{"versions":["v1.7"],"unstable_features":{"org.matrix.simplified_msc3575":true}}"#
+                        .to_owned()
+                } else if text.contains("/_matrix/client/") && text.contains("login") {
+                    // Remember an explicit initial device name so the devices
+                    // list can report it back (a customized name must read as
+                    // present and never be rewritten).
+                    let requested_name = text
+                        .split("\r\n\r\n")
+                        .nth(1)
+                        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+                        .and_then(|value| {
+                            value
+                                .get("initial_device_display_name")
+                                .and_then(|name| name.as_str())
+                                .map(|name| name.to_owned())
+                        })
+                        .filter(|name| !name.trim().is_empty());
+                    if let Some(name) = requested_name {
+                        *name_writer.lock().unwrap() = Some(name);
+                    }
+                    r#"{"access_token":"fixture-token","device_id":"FIXTUREDEVICE","user_id":"@fixture-user:example.invalid"}"#
+                        .to_owned()
+                } else if text.contains("GET /_matrix/client/v3/devices ") {
+                    // The current device is authoritative; it is unnamed unless
+                    // the login request explicitly named it.
+                    match name_writer.lock().unwrap().clone() {
+                        Some(name) => format!(
+                            r#"{{"devices":[{{"device_id":"FIXTUREDEVICE","display_name":"{name}"}}]}}"#
+                        ),
+                        None => {
+                            r#"{"devices":[{"device_id":"FIXTUREDEVICE","display_name":null}]}"#
+                                .to_owned()
+                        }
+                    }
+                } else if text.contains("PUT /_matrix/client/v3/devices/") {
+                    let json_start = text.find("\r\n\r\n").map(|index| index + 4).unwrap_or(0);
+                    recorder
+                        .lock()
+                        .unwrap()
+                        .push(text[json_start..].trim_end().to_owned());
+                    r#"{}"#.to_owned()
+                } else if text.contains("/_matrix/client/") && text.contains("/keys/query") {
+                    r#"{"device_keys":{},"failures":{}}"#.to_owned()
+                } else if text.contains("/_matrix/client/") && text.contains("/sync") {
+                    r#"{"next_batch":"batch","device_lists":{"changed":[],"left":[]},"rooms":{"invite":{},"join":{},"leave":{},"knock":{}},"to_device":{"events":[]},"presence":{"events":[]},"account_data":{"events":[]},"device_one_time_keys_count":{}}"#
+                        .to_owned()
+                } else {
+                    r#"{"errcode":"M_NOT_FOUND","error":"not found"}"#.to_owned()
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).expect("write");
+            }
+        });
+        (format!("http://{addr}"), rename_bodies)
     }
 
     #[derive(Default)]
@@ -17662,6 +17895,7 @@ mod tests {
                     password: koushi_state::AuthSecret::new("synthetic-password"),
                     device_display_name: None,
                 },
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await;
         acknowledge_next_verified_projection(&handle, &mut action_rx).await;

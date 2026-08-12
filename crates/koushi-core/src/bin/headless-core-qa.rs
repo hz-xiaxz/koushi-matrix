@@ -1215,6 +1215,7 @@ async fn run_gate_no_proof_stage(config: &QaConfig) -> Result<(), String> {
             password: AuthSecret::new(config.password_a.clone()),
             device_display_name: Some("Koushi No Proof Core".to_owned()),
         },
+    platform: koushi_state::DisplayPlatform::Linux,
     }))
     .await
     .map_err(|_| "no-proof Core login submit failed".to_owned())?;
@@ -1276,6 +1277,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A2".to_owned()),
             },
+        platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative login submit: {error}"))?;
@@ -1319,6 +1321,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A3".to_owned()),
             },
+        platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative A3 login submit: {error}"))?;
@@ -1361,6 +1364,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A4".to_owned()),
             },
+        platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative A4 login submit: {error}"))?;
@@ -1403,6 +1407,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A5".to_owned()),
             },
+        platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative A5 login submit: {error}"))?;
@@ -1455,6 +1460,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A6".to_owned()),
             },
+        platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative A6 login submit: {error}"))?;
@@ -1659,6 +1665,7 @@ async fn login_until_device_cleanup_offered(
             password: AuthSecret::new(config.password_a.clone()),
             device_display_name: Some("Koushi Device Cleanup QA".to_owned()),
         },
+    platform: koushi_state::DisplayPlatform::Linux,
     }))
     .await
     .map_err(|error| format!("{label}: login submit failed: {error}"))?;
@@ -2807,6 +2814,7 @@ async fn run_e2ee_trust_stage(
                     password: AuthSecret::new(config.password_a.clone()),
                     device_display_name: Some("Koushi Core QA A2".to_owned()),
                 },
+            platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await
             .map_err(|e| format!("submit login A2: {e}"))?;
@@ -4220,6 +4228,7 @@ async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), String> {
             password: AuthSecret::new(config.password_a.clone()),
             device_display_name: Some("Koushi Core QA Cache Restore".to_owned()),
         },
+    platform: koushi_state::DisplayPlatform::Linux,
     }))
     .await
     .map_err(|e| format!("cache_restore: submit login failed: {e}"))?;
@@ -5184,6 +5193,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Core QA Timeline Reconnect A".to_owned()),
             },
+        platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|e| format!("timeline_reconnect: submit login A failed: {e}"))?;
@@ -5220,6 +5230,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
                 password: AuthSecret::new(config.password_b.clone()),
                 device_display_name: Some("Koushi Core QA Timeline Reconnect B".to_owned()),
             },
+        platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|e| format!("timeline_reconnect: submit login B failed: {e}"))?;
@@ -6394,6 +6405,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some(DEVICE_A.to_owned()),
             },
+        platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|e| format!("submit login A: {e}"))?;
@@ -6449,6 +6461,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
                         password: AuthSecret::new(config.password_b.clone()),
                         device_display_name: Some(DEVICE_B.to_owned()),
                     },
+                platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await
                 .map_err(|e| format!("timeline_stress replay: submit login B failed: {e}"))?;
@@ -11981,6 +11994,7 @@ async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
                         password: AuthSecret::new(config.password_b.clone()),
                         device_display_name: Some("Koushi Core QA B2".to_owned()),
                     },
+                platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await
                 .map_err(|error| format!("e2ee login B2 submit: {error}"))?;
@@ -12038,6 +12052,7 @@ async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
                     password: AuthSecret::new(config.password_b.clone()),
                     device_display_name: Some("Koushi Core QA B3 Unverified".to_owned()),
                 },
+            platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await
             .map_err(|error| format!("e2ee unverified peer login submit: {error}"))?;
@@ -12439,6 +12454,7 @@ async fn login_synced_participant_for_qa(
                     password: AuthSecret::new(password.to_owned()),
                     device_display_name: Some(device_display_name.to_owned()),
                 },
+            platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await
             .map_err(|e| format!("{label}: submit login failed: {e}"))?;

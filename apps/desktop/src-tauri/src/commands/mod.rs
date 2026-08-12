@@ -314,8 +314,9 @@ pub(crate) async fn submit_login_request(
     app: AppHandle,
     state: &CoreRuntimeState,
     login_request: LoginRequest,
+    platform: DisplayPlatform,
 ) -> Result<(), String> {
-    submit_login_and_wait_for_authenticated(app, state, login_request).await?;
+    submit_login_and_wait_for_authenticated(app, state, login_request, platform).await?;
     Ok(())
 }
 
@@ -350,6 +351,7 @@ async fn submit_login_and_wait_for_authenticated(
     app: AppHandle,
     state: &CoreRuntimeState,
     login_request: LoginRequest,
+    platform: DisplayPlatform,
 ) -> Result<(), String> {
     // Use a dedicated connection so the event cursor is attached before the
     // login command is submitted and the correlated LoggedIn event cannot be
@@ -357,7 +359,11 @@ async fn submit_login_and_wait_for_authenticated(
     let mut event_conn = state.runtime.attach();
     let login_request_id = event_conn.next_request_id();
     event_conn
-        .command(build_submit_login_command(login_request_id, login_request))
+        .command(build_submit_login_command(
+            login_request_id,
+            login_request,
+            platform,
+        ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
 
@@ -1306,10 +1312,12 @@ async fn wait_for_room_joined(
 pub(crate) fn build_submit_login_command(
     request_id: koushi_core::RequestId,
     login_request: LoginRequest,
+    platform: DisplayPlatform,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::LoginPassword {
         request_id,
         request: login_request,
+        platform,
     })
 }
 
@@ -3360,7 +3368,13 @@ pub(crate) fn spawn_qa_login_pipe_reader(app: AppHandle, pipe_path: PathBuf) {
             }
         };
         let state = app.state::<CoreRuntimeState>();
-        if let Err(message) = submit_login_request(app.clone(), state.inner(), request.login).await
+        if let Err(message) = submit_login_request(
+            app.clone(),
+            state.inner(),
+            request.login,
+            DisplayPlatform::Linux,
+        )
+        .await
         {
             record_qa_login_failure(&app, &message).await;
             return;
@@ -3820,8 +3834,8 @@ mod tests {
         LocaleSettings, SettingsPatch, TextDirectionPreference, ThemePreference,
     };
     use koushi_state::{
-        AppState, AuthSecret, ComposerDocument, IdentityResetAuthRequest, LoginRequest,
-        SessionInfo, SessionState, ThreadOpenIntent, VerificationCancelReason,
+        AppState, AuthSecret, ComposerDocument, DisplayPlatform, IdentityResetAuthRequest,
+        LoginRequest, SessionInfo, SessionState, ThreadOpenIntent, VerificationCancelReason,
     };
 
     use super::QaControlCommand;
@@ -4300,16 +4314,19 @@ mod tests {
                 password: AuthSecret::new("password-123"),
                 device_display_name: Some("Laptop".to_owned()),
             },
+            DisplayPlatform::Linux,
         ) {
             CoreCommand::Account(AccountCommand::LoginPassword {
                 request_id,
                 request,
+                platform,
             }) => {
                 assert_eq!(request_id, fake_request_id(1));
                 assert_eq!(request.homeserver, "https://matrix.example.org");
                 assert_eq!(request.username, "alice");
                 assert_eq!(request.password.expose_secret(), "password-123");
                 assert_eq!(request.device_display_name.as_deref(), Some("Laptop"));
+                assert_eq!(platform, DisplayPlatform::Linux);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -8027,6 +8044,7 @@ mod tests {
                 password: AuthSecret::new("password-123"),
                 device_display_name: Some("Laptop".to_owned()),
             },
+            DisplayPlatform::Linux,
         );
         let recovery =
             build_submit_recovery_command(fake_request_id(17), AuthSecret::new("recovery-123"));

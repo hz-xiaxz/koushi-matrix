@@ -51,6 +51,7 @@ import type {
   ComposerDraftLeaseSnapshot,
   ComposerDraftScope
 } from "../domain/composerDraftLifecycle";
+import type { DisplayPlatform } from "../domain/types";
 
 export function createDesktopApi(): DesktopApi {
   if (isTauriRuntime()) {
@@ -88,13 +89,17 @@ class TauriDesktopApi implements DesktopApi {
     homeserver: string,
     username: string,
     password: string,
-    deviceDisplayName: string
+    deviceDisplayName: string,
+    platform: DisplayPlatform
   ): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("submit_login", {
       homeserver,
       username,
       password,
-      deviceDisplayName
+      // An empty device name must not reach the server: the Rust core then
+      // applies the platform-aware default ("Koushi on …") after login.
+      deviceDisplayName: deviceDisplayName.trim() || undefined,
+      platform
     });
   }
 
