@@ -221,6 +221,19 @@ describe("UserSettingsPanel", () => {
     expect(markup).toContain("Badges");
     expect(markup).toContain("Send read receipts");
     expect(markup).toContain("Send typing notifications");
+    const notificationsSection = markup.match(
+      /<section id="settings-notifications"[\s\S]*?<\/section>/
+    )?.[0];
+    const messagingPrivacySection = markup.match(
+      /<section id="settings-messaging-privacy"[\s\S]*?<\/section>/
+    )?.[0];
+    expect(notificationsSection).toContain("Desktop notifications");
+    expect(notificationsSection).toContain("Sound");
+    expect(notificationsSection).toContain("Badges");
+    expect(notificationsSection).not.toContain("Send read receipts");
+    expect(notificationsSection).not.toContain("Send typing notifications");
+    expect(messagingPrivacySection).toContain("Send read receipts");
+    expect(messagingPrivacySection).toContain("Send typing notifications");
     expect(markup).toContain('role="switch"');
     expect(markup).toContain("Inter");
     expect(markup).toContain("Twemoji COLR");

@@ -536,6 +536,12 @@ const tauriAttentionTransientTransport = isTauriRuntime()
         invoke<"played" | "unsupported" | "failed" | "skipped">("play_native_attention_sound")
     )
   : null;
+const tauriNativeBadgeTransport = isTauriRuntime()
+  ? {
+      setBadgeCount: (count?: number) =>
+        invoke<"applied" | "unsupported" | "mismatch">("set_native_attention_badge", { count })
+    }
+  : null;
 const desktopAttentionTransientDispatcher = createDesktopAttentionTransientDispatcher();
 type ReportDialogState =
   | { kind: "user"; userId: string }
@@ -2506,7 +2512,8 @@ export function App() {
         timestampMs: Date.now(),
         source: "native.attention",
         message: token
-      })
+      }),
+      tauriNativeBadgeTransport ?? undefined
     );
   }, [
     attentionCapabilities,
