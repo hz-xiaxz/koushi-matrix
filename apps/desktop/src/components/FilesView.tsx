@@ -65,7 +65,7 @@ export function FilesView({ filesView, onChangeFilterSort }: FilesViewProps) {
       ) : filesView.items.length === 0 ? (
         <div className="files-view-empty">{t("files.empty")}</div>
       ) : (
-        <ul className="files-view-list" role="listbox" aria-label={t("files.title")}>
+        <ul className="files-view-list" aria-label={t("files.title")}>
           {filesView.items.map((item) => (
             <FilesViewRow key={item.event_id} item={item} />
           ))}
@@ -153,7 +153,7 @@ function FilesViewRow({ item }: { item: AttachmentResult }) {
   const date = item.timestamp_ms == null ? null : formatDate(item.timestamp_ms);
 
   return (
-    <li className="files-view-row" role="option">
+    <li className="files-view-row">
       <span className="files-view-row-icon" aria-hidden="true">
         <Icon size={18} />
       </span>

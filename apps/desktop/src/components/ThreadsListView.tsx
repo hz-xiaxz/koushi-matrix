@@ -41,7 +41,7 @@ export function ThreadsListView({
         <div className="threads-list-empty">{t("threads.empty")}</div>
       ) : (
         <>
-          <ul className="threads-list" role="listbox" aria-label={t("threads.title")}>
+          <ul className="threads-list" aria-label={t("threads.title")}>
             {threadsList.items.map((item) => (
               <ThreadsListRow
                 key={`${item.room_id}:${item.root_event_id}`}
@@ -78,7 +78,7 @@ function ThreadsListRow({
   onClick: () => void;
 }) {
   return (
-    <li className="threads-list-row" role="option">
+    <li className="threads-list-row">
       <button className="threads-list-row-button" type="button" onClick={onClick}>
         <span className="threads-list-row-icon" aria-hidden="true">
           <MessageCircle size={18} />

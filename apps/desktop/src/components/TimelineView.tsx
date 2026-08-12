@@ -78,6 +78,7 @@ import {
 import { useRecoverableImageSource } from "./avatarImage";
 import { findQueryHighlightRange } from "./searchHighlight";
 import { Tooltip } from "./Tooltip";
+import { onMenuKeyDown } from "./ContextMenuSurface";
 import {
   contextMenuItems,
   type ContextMenuItem
@@ -7122,7 +7123,9 @@ export function TimelineItemRow({
                   if (event.key === "Escape") {
                     event.preventDefault();
                     closeActionMenu();
+                    return;
                   }
+                  onMenuKeyDown(event, event.currentTarget);
                 }}
               >
                 {senderAliasTarget ? (
@@ -8451,7 +8454,9 @@ function TimelineMediaViewer({
                       if (event.key === "Escape") {
                         event.preventDefault();
                         closeActionMenu();
+                        return;
                       }
+                      onMenuKeyDown(event, event.currentTarget);
                     }}
                   >
                     {canForward ? (

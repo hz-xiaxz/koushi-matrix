@@ -929,12 +929,39 @@ export function MentionAutocomplete({
   onAccept: (candidate: MentionCandidate) => void;
   onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  // #480: keep the keyboard-selected option visible inside the popup without
+  // scrolling any ancestor. Only the popup's own scrollTop is adjusted, so the
+  // timeline, composer, and page never jump. Runs again when candidates change
+  // so a refreshed/reordered list also keeps the active option visible.
+  useEffect(() => {
+    const popup = popupRef.current;
+    if (!popup) {
+      return;
+    }
+    const activeOption = popup.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!activeOption) {
+      return;
+    }
+    const popupRect = popup.getBoundingClientRect();
+    const optionRect = activeOption.getBoundingClientRect();
+    const optionTop = optionRect.top - popupRect.top + popup.scrollTop;
+    const optionBottom = optionTop + optionRect.height;
+    if (optionTop < popup.scrollTop) {
+      popup.scrollTop = optionTop;
+    } else if (optionBottom > popup.scrollTop + popup.clientHeight) {
+      popup.scrollTop = optionBottom - popup.clientHeight;
+    }
+  }, [activeIndex, candidates]);
+
   if (!open) {
     return null;
   }
   return (
     <div
       id={listboxId}
+      ref={popupRef}
       className="composer-autocomplete"
       role="listbox"
       aria-label={t("composer.mentionSuggestions")}

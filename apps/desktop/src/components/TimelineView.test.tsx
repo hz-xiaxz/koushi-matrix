@@ -1796,6 +1796,59 @@ describe("TimelineView", () => {
     );
   });
 
+  it("navigates the message action menu with arrow keys", () => {
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [
+          {
+            ...message("$arrows", "Arrow me"),
+            can_edit: true,
+            actions: {
+              can_copy: true,
+              can_forward: true,
+              can_reply: true,
+              can_permalink: true,
+              can_view_source: true
+            }
+          }
+        ]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const row = screen.getByText("Arrow me").closest("article");
+    expect(row).not.toBeNull();
+
+    fireEvent.click(within(row!).getByRole("button", { name: "Message actions" }));
+    const menu = within(row!).getByRole("menu");
+    const items = within(row!).getAllByRole("menuitem");
+    expect(items.length).toBeGreaterThanOrEqual(2);
+
+    // The first item is focused when the menu opens; arrows rove and wrap.
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[2 % items.length]);
+    fireEvent.keyDown(menu, { key: "Home" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(document.activeElement).toBe(items[items.length - 1]);
+  });
+
   it("shrinks the reaction emoji picker to the visible space instead of clipping it", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
       this: HTMLElement
