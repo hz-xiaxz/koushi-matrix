@@ -334,10 +334,28 @@ pub enum AuthDiscoveryState {
     },
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DelegatedAuthLinks {
     pub registration_url: Option<String>,
     pub account_management_url: Option<String>,
+}
+
+/// Redact the URL values from Debug: they cross the snapshot/browser boundary
+/// and may contain sensitive query data even though credentials are rejected.
+impl std::fmt::Debug for DelegatedAuthLinks {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DelegatedAuthLinks")
+            .field(
+                "registration_url",
+                &self.registration_url.as_deref().map(|_| "Url(..)"),
+            )
+            .field(
+                "account_management_url",
+                &self.account_management_url.as_deref().map(|_| "Url(..)"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
