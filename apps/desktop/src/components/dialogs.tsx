@@ -3,7 +3,9 @@
 
 import {
   type KeyboardEvent,
+  type RefObject,
   useEffect,
+  useRef,
   useState
 } from "react";
 import {
@@ -456,6 +458,58 @@ export function UserIdDialog({
 
 // ===== InviteTargetsDialog =====
 
+/**
+ * Modal focus containment for dialogs: remembers the element focused when the
+ * dialog opened, wraps Tab/Shift+Tab at the edges of the overlay, and restores
+ * focus to the trigger when the dialog unmounts (#488).
+ */
+function useDialogFocusTrap(overlayRef: RefObject<HTMLDivElement | null>): void {
+  // Captured during the first render, before the dialog's own autoFocus runs,
+  // so it is the trigger element rather than the freshly-focused search field.
+  const triggerRef = useRef<HTMLElement | null>(null);
+  if (triggerRef.current === null) {
+    triggerRef.current = document.activeElement as HTMLElement | null;
+  }
+
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) {
+      return;
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Tab") {
+        return;
+      }
+      const currentOverlay = overlayRef.current;
+      if (!currentOverlay) {
+        return;
+      }
+      const focusables = Array.from(
+        currentOverlay.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (focusables.length === 0) {
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      triggerRef.current?.focus();
+    };
+  }, [overlayRef]);
+}
+
 export function InviteTargetsDialog({
   isBusy,
   query,
@@ -483,6 +537,7 @@ export function InviteTargetsDialog({
   onSelectCandidate: (userId: string) => void;
   onSubmit: () => void;
 }) {
+  const overlayRef = useRef<HTMLDivElement>(null);
   const isPending = workflow.operation.kind === "pending";
   const canSubmit = workflow.selected_targets.length > 0 && !isBusy && !isPending;
   const historyPolicy = workflow.history_policy;
@@ -490,6 +545,8 @@ export function InviteTargetsDialog({
   const selectedScope = workflow.selected_scope ?? workflow.scope_plan?.default_scope ?? {
     kind: "roomOnly" as const
   };
+
+  useDialogFocusTrap(overlayRef);
 
   function onDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
@@ -501,6 +558,7 @@ export function InviteTargetsDialog({
   return (
     <div
       className="dialog-overlay"
+      ref={overlayRef}
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -516,6 +574,7 @@ export function InviteTargetsDialog({
         }}
       >
         <div className="dialog-title">{title}</div>
+        <div className="invite-dialog-body">
         {workflow.operation.kind === "completed" && workflow.operation.notice ? (
           <div className="invite-target-notice" role="status">
             {workflow.operation.notice}
@@ -641,6 +700,7 @@ export function InviteTargetsDialog({
             })}
           </div>
         ) : null}
+        </div>
         <div className="dialog-actions">
           <button className="dialog-button" type="button" aria-label={t("action.cancel")} onClick={onCancel}>
             {t("action.cancel")}
