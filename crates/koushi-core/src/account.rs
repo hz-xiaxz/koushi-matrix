@@ -165,6 +165,9 @@ const SERVER_LOGOUT_TIMEOUT: Duration = Duration::from_secs(10);
 const ACCOUNT_HYDRATION_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFICATION_METHOD_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 const RECOVERY_TRUST_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(20);
+/// The device display-name repair is cosmetic: never let a hanging devices
+/// endpoint hold up login on the critical path (#474 review).
+const DEVICE_NAME_TIMEOUT: Duration = Duration::from_secs(5);
 const RECOVERY_TRUST_SETTLEMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const IDENTITY_RESET_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 const DEVICE_CLEANUP_REMOTE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -429,18 +432,18 @@ fn current_device_trust_token(trust: koushi_state::CurrentDeviceTrustState) -> &
     }
 }
 
-fn record_oauth_device_name_outcome(outcome: koushi_sdk::MatrixOauthDeviceNameOutcome) {
-    use koushi_sdk::MatrixOauthDeviceNameOutcome;
+fn record_device_name_outcome(outcome: koushi_sdk::MatrixDeviceNameOutcome) {
+    use koushi_sdk::MatrixDeviceNameOutcome;
 
     let (inspection, rename) = match outcome {
-        MatrixOauthDeviceNameOutcome::Present => ("present", None),
-        MatrixOauthDeviceNameOutcome::Renamed => ("empty", Some("success")),
-        MatrixOauthDeviceNameOutcome::RenameFailed => ("empty", Some("failed")),
-        MatrixOauthDeviceNameOutcome::CurrentDeviceMissing
-        | MatrixOauthDeviceNameOutcome::InspectionFailed => ("failed", None),
+        MatrixDeviceNameOutcome::Present => ("present", None),
+        MatrixDeviceNameOutcome::Renamed => ("empty", Some("success")),
+        MatrixDeviceNameOutcome::RenameFailed => ("empty", Some("failed")),
+        MatrixDeviceNameOutcome::CurrentDeviceMissing
+        | MatrixDeviceNameOutcome::InspectionFailed => ("failed", None),
     };
     record(
-        DiagnosticEvent::new(DiagnosticLevel::Info, "oauth_device_name", "inspected")
+        DiagnosticEvent::new(DiagnosticLevel::Info, "device_name", "inspected")
             .field(DiagnosticField::token("outcome", inspection)),
     );
     if let Some(rename) = rename {
@@ -451,7 +454,7 @@ fn record_oauth_device_name_outcome(outcome: koushi_sdk::MatrixOauthDeviceNameOu
                 } else {
                     DiagnosticLevel::Warn
                 },
-                "oauth_device_name",
+                "device_name",
                 "rename_settled",
             )
             .field(DiagnosticField::token("outcome", rename)),
@@ -7495,12 +7498,19 @@ impl AccountActor {
             }
         };
 
-        let device_name_outcome = koushi_sdk::ensure_device_display_name(
-            &login_session,
-            platform.oauth_device_display_name(),
+        let device_name_outcome = match tokio::time::timeout(
+            DEVICE_NAME_TIMEOUT,
+            koushi_sdk::ensure_device_display_name(
+                &login_session,
+                platform.oauth_device_display_name(),
+            ),
         )
-        .await;
-        record_oauth_device_name_outcome(device_name_outcome);
+        .await
+        {
+            Ok(outcome) => outcome,
+            Err(_) => koushi_sdk::MatrixDeviceNameOutcome::InspectionFailed,
+        };
+        record_device_name_outcome(device_name_outcome);
 
         let info = login_session.info.clone();
         let key_id = session_key_id_from_info(&info);
@@ -7619,12 +7629,19 @@ impl AccountActor {
         // ("Koushi on macOS/Windows/Linux") when its authoritative name is
         // empty; a user-customized name is never overwritten. Cosmetic only:
         // a failure is recorded and login continues untouched.
-        let device_name_outcome = koushi_sdk::ensure_device_display_name(
-            &login_session,
-            platform.oauth_device_display_name(),
+        let device_name_outcome = match tokio::time::timeout(
+            DEVICE_NAME_TIMEOUT,
+            koushi_sdk::ensure_device_display_name(
+                &login_session,
+                platform.oauth_device_display_name(),
+            ),
         )
-        .await;
-        record_oauth_device_name_outcome(device_name_outcome);
+        .await
+        {
+            Ok(outcome) => outcome,
+            Err(_) => koushi_sdk::MatrixDeviceNameOutcome::InspectionFailed,
+        };
+        record_device_name_outcome(device_name_outcome);
 
         // Build a restorable in-memory session shape without writing the
         // active credential index or last-session pointer before verification.
@@ -14290,16 +14307,16 @@ mod tests {
         ) {}
 
         // The cosmetic device rename ran exactly once with the platform
-        // default and contained no private identifiers.
+        // default. Exact JSON equality proves the body is only the display
+        // name — no username, device id, token, or other private identifier.
         let bodies = rename_bodies.lock().expect("rename record");
         assert_eq!(bodies.len(), 1, "device rename should run once");
-        assert!(
-            bodies[0].contains(r#""display_name":"Koushi on Linux""#),
-            "rename body was: {}",
-            bodies[0]
+        let parsed: serde_json::Value =
+            serde_json::from_str(&bodies[0]).expect("rename body should be JSON");
+        assert_eq!(
+            parsed,
+            serde_json::json!({ "display_name": "Koushi on Linux" })
         );
-        assert!(!bodies[0].contains("fixture-token"));
-        assert!(!bodies[0].contains("synthetic-password"));
         drop(bodies);
         shutdown_and_ack(&handle).await;
         while let Ok(event) = event_rx.try_recv() {
@@ -17064,10 +17081,17 @@ mod tests {
                     let Some(end) = text.find("\r\n\r\n") else {
                         continue;
                     };
+                    // Header names are case-insensitive; parse the declared
+                    // Content-Length so a split segment is never mistaken for
+                    // the full request.
                     let length = text
-                        .lines()
-                        .find_map(|line| line.strip_prefix("Content-Length: "))
-                        .and_then(|value| value.parse::<usize>().ok())
+                        .split("\r\n")
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        })
                         .unwrap_or(0);
                     if request.len() >= end + 4 + length {
                         break;

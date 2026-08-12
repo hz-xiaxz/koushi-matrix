@@ -197,7 +197,7 @@ impl MatrixSecureBackupInspection {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MatrixOauthDeviceNameOutcome {
+pub enum MatrixDeviceNameOutcome {
     Present,
     Renamed,
     CurrentDeviceMissing,
@@ -208,24 +208,24 @@ pub enum MatrixOauthDeviceNameOutcome {
 pub async fn ensure_device_display_name(
     session: &MatrixClientSession,
     display_name: &str,
-) -> MatrixOauthDeviceNameOutcome {
+) -> MatrixDeviceNameOutcome {
     let response = match session.client().devices().await {
         Ok(response) => response,
-        Err(_) => return MatrixOauthDeviceNameOutcome::InspectionFailed,
+        Err(_) => return MatrixDeviceNameOutcome::InspectionFailed,
     };
     let Some(current_device) = response
         .devices
         .into_iter()
         .find(|device| device.device_id.as_str() == session.info.device_id)
     else {
-        return MatrixOauthDeviceNameOutcome::CurrentDeviceMissing;
+        return MatrixDeviceNameOutcome::CurrentDeviceMissing;
     };
     if current_device
         .display_name
         .as_deref()
         .is_some_and(|name| !name.trim().is_empty())
     {
-        return MatrixOauthDeviceNameOutcome::Present;
+        return MatrixDeviceNameOutcome::Present;
     }
 
     match session
@@ -233,8 +233,8 @@ pub async fn ensure_device_display_name(
         .rename_device(&current_device.device_id, display_name)
         .await
     {
-        Ok(_) => MatrixOauthDeviceNameOutcome::Renamed,
-        Err(_) => MatrixOauthDeviceNameOutcome::RenameFailed,
+        Ok(_) => MatrixDeviceNameOutcome::Renamed,
+        Err(_) => MatrixDeviceNameOutcome::RenameFailed,
     }
 }
 
@@ -5335,7 +5335,7 @@ mod current_session_status_tests {
 
     use super::{
         CurrentSessionBackupState, MatrixClientSession, MatrixCurrentSessionInspectionError,
-        MatrixOauthDeviceNameOutcome, OwnIdentityVerification, SessionInfo,
+        MatrixDeviceNameOutcome, OwnIdentityVerification, SessionInfo,
         classify_current_session_backup, classify_own_identity_verification,
         ensure_device_display_name,
     };
@@ -5556,7 +5556,7 @@ mod current_session_status_tests {
 
         assert_eq!(
             ensure_device_display_name(&session, "Koushi on Linux").await,
-            MatrixOauthDeviceNameOutcome::Renamed
+            MatrixDeviceNameOutcome::Renamed
         );
     }
 
@@ -5567,7 +5567,7 @@ mod current_session_status_tests {
         let _devices = mount_device(&named_server, Some("Custom device")).await;
         assert_eq!(
             ensure_device_display_name(&named_session, "Koushi on Linux").await,
-            MatrixOauthDeviceNameOutcome::Present
+            MatrixDeviceNameOutcome::Present
         );
         assert!(
             named_server
@@ -5588,7 +5588,7 @@ mod current_session_status_tests {
             .mount_as_scoped(failed_server.server())
             .await;
         let outcome = ensure_device_display_name(&failed_session, "Koushi on Linux").await;
-        assert_eq!(outcome, MatrixOauthDeviceNameOutcome::RenameFailed);
+        assert_eq!(outcome, MatrixDeviceNameOutcome::RenameFailed);
         assert!(!format!("{outcome:?}").contains("private raw failure"));
     }
 
