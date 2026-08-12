@@ -5063,6 +5063,14 @@ mark {
   padding: 0 8px 8px;
 }
 
+/* #498: inline message edits keep the shared emoji picker in a compact
+   auxiliary row while attachment/schedule/send controls stay hidden. */
+.composer-edit-aux {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 4px 4px;
+}
+
 .composer-file-input {
   position: absolute;
   width: 1px;

@@ -5,6 +5,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   memo,
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -131,6 +132,21 @@ export const Composer = memo(function Composer({
   onMentionQueryChangeRef.current = onMentionQueryChange;
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  // #498: capture the editor selection when the emoji picker opens so the
+  // picker's own focus (search input, grid) never loses the caret/selection
+  // the emoji must be inserted at.
+  const emojiInsertionSelectionRef = useRef<DocumentSelection | null>(null);
+  const toggleEmojiPicker = useCallback(() => {
+    // Capture before the picker takes focus (search input, grid) so the caret
+    // is never lost; the picker opening state change itself stays pure.
+    if (!emojiPickerOpen) {
+      emojiInsertionSelectionRef.current = selectionRange();
+    }
+    setEmojiPickerOpen((open) => !open);
+  }, [emojiPickerOpen]);
+  const closeEmojiPicker = useCallback(() => {
+    setEmojiPickerOpen(false);
+  }, []);
   const [scheduleValue, setScheduleValue] = useState(() => defaultScheduleDateTimeValue());
   const [localDocument, setLocalDocument] = useState(document);
   const [localDraftKey, setLocalDraftKey] = useState(draftKey);
@@ -152,6 +168,8 @@ export const Composer = memo(function Composer({
     setLocalDocument(document);
     setDocumentSelection({ start: end, end });
     documentEpochRef.current += 1;
+    // A different draft must never reuse a selection captured for the old one.
+    emojiInsertionSelectionRef.current = null;
   }
   const localValue = plainBodyFromDocument(localDocument);
   const mentionQueryText = localDocument.inlines
@@ -303,8 +321,13 @@ export const Composer = memo(function Composer({
   }
 
   function insertEmoji(emoji: string) {
-    const { start, end } = selectionRange();
+    const captured = emojiInsertionSelectionRef.current;
+    const { start, end } = captured ?? selectionRange();
+    emojiInsertionSelectionRef.current = null;
     replaceTextRange(start, end, emoji);
+    requestAnimationFrame(() => {
+      editorRef.current?.focus();
+    });
   }
 
   function acceptMention(candidate: MentionCandidate) {
@@ -522,6 +545,29 @@ export const Composer = memo(function Composer({
       });
   }
 
+  const emojiControl = (
+    <span className="composer-emoji-anchor">
+      <button
+        ref={emojiButtonRef}
+        className="icon-button"
+        type="button"
+        aria-label={t("composer.emoji")}
+        aria-expanded={emojiPickerOpen}
+        aria-haspopup="dialog"
+        onClick={toggleEmojiPicker}
+      >
+        <Smile size={ICON_SIZE.control} />
+      </button>
+      {emojiPickerOpen ? (
+        <EmojiPicker
+          anchorRef={emojiButtonRef}
+          onSelect={insertEmoji}
+          onClose={closeEmojiPicker}
+        />
+      ) : null}
+    </span>
+  );
+
   return (
     <section
       className={`composer${editorOnly ? " is-editor-only" : ""}${fileDragActive ? " is-file-drag-over" : ""}`}
@@ -681,26 +727,7 @@ export const Composer = memo(function Composer({
           >
             <AtSign size={ICON_SIZE.control} />
           </button>
-          <span className="composer-emoji-anchor">
-            <button
-              ref={emojiButtonRef}
-              className="icon-button"
-              type="button"
-              aria-label={t("composer.emoji")}
-              aria-expanded={emojiPickerOpen}
-              aria-haspopup="dialog"
-              onClick={() => setEmojiPickerOpen((open) => !open)}
-            >
-              <Smile size={ICON_SIZE.control} />
-            </button>
-            {emojiPickerOpen ? (
-              <EmojiPicker
-                anchorRef={emojiButtonRef}
-                onSelect={insertEmoji}
-                onClose={() => setEmojiPickerOpen(false)}
-              />
-            ) : null}
-          </span>
+          {emojiControl}
           {onScheduleSend ? (
             <button
               className="icon-button"
@@ -722,7 +749,11 @@ export const Composer = memo(function Composer({
         >
           <Send size={ICON_SIZE.input} />
         </button>
-      </div> : null}
+      </div> : (
+        // #498: inline edits keep the shared emoji picker while attachment,
+        // scheduled-send, and send controls stay out of the edit surface.
+        <div className="composer-edit-aux">{emojiControl}</div>
+      )}
       {scheduleOpen && onScheduleSend ? (
         <ImeSafeForm className="scheduled-send-form" onSubmit={submitSchedule}>
           <label className="scheduled-send-field">
