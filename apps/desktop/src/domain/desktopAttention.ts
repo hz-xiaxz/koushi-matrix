@@ -36,6 +36,12 @@ export interface DesktopWindowLike {
   setTrayBadgeCount?(count?: number): Promise<void>;
 }
 
+export type NativeAttentionBadgeOutcome = "applied" | "unsupported" | "mismatch";
+
+export interface DesktopNativeBadgeLike {
+  setBadgeCount(count?: number): Promise<NativeAttentionBadgeOutcome>;
+}
+
 export interface DesktopAttentionTransientLike {
   playAttentionSound?(): Promise<NativeAttentionSoundOutcome>;
   requestUserAttention?(requestType: typeof DESKTOP_ATTENTION_REQUEST_TYPE): Promise<void>;
@@ -70,7 +76,8 @@ export async function applyDesktopAttentionToWindow(
   title: string,
   badgeCount: number,
   capabilities?: NativeAttentionCapabilities,
-  diagnostic?: DesktopAttentionDiagnosticSink
+  diagnostic?: DesktopAttentionDiagnosticSink,
+  nativeBadge?: DesktopNativeBadgeLike
 ): Promise<void> {
   const normalizedBadgeCount = normalizeAttentionCount(badgeCount);
   diagnostic?.(
@@ -93,12 +100,11 @@ export async function applyDesktopAttentionToWindow(
   ];
 
   if (capabilities?.badge === "available") {
-    operations.push(runNativeOperation(
-      () => windowLike.setBadgeCount(normalizedBadgeCount > 0 ? normalizedBadgeCount : undefined),
-      "attention_badge_failed",
-      diagnostic,
-      undefined,
-      `attention_badge_set count=${normalizedBadgeCount}`
+    operations.push(applyDesktopBadge(
+      windowLike,
+      nativeBadge,
+      normalizedBadgeCount,
+      diagnostic
     ));
   } else {
     diagnostic?.(`attention_badge_skipped capability=${capabilityToken(capabilities?.badge)}`);
@@ -139,6 +145,34 @@ export async function applyDesktopAttentionToWindow(
   }
 
   await Promise.allSettled(operations);
+}
+
+async function applyDesktopBadge(
+  windowLike: DesktopWindowLike,
+  nativeBadge: DesktopNativeBadgeLike | undefined,
+  count: number,
+  diagnostic?: DesktopAttentionDiagnosticSink
+): Promise<void> {
+  const requestedCount = count > 0 ? count : undefined;
+  if (nativeBadge) {
+    try {
+      const outcome = await nativeBadge.setBadgeCount(requestedCount);
+      diagnostic?.(`attention_badge_native_backend outcome=${outcome} count=${count}`);
+      if (outcome === "applied") {
+        return;
+      }
+    } catch {
+      diagnostic?.("attention_badge_native_backend_failed");
+    }
+  }
+
+  await runNativeOperation(
+    () => windowLike.setBadgeCount(requestedCount),
+    "attention_badge_failed",
+    diagnostic,
+    undefined,
+    `attention_badge_set count=${count}`
+  );
 }
 
 async function runNativeOperation(

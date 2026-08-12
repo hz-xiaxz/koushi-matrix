@@ -12,6 +12,8 @@ import {
   Keyboard,
   Link,
   LogOut,
+  MessageCircle,
+  Monitor,
   RefreshCcw,
   RotateCcw,
   Search,
@@ -256,25 +258,49 @@ export function UserSettingsPanel({
         <button
           className="settings-list-item"
           type="button"
-          onClick={() => scrollToSection("settings-security")}
+          onClick={() => scrollToSection("settings-appearance")}
         >
           <span className="settings-list-label">
             <span className="settings-list-icon" aria-hidden="true">
-              <ShieldCheck size={16} />
+              <SlidersHorizontal size={16} />
             </span>
-            <span>{t("settings.securityPrivacy")}</span>
+            <span>{t("settings.appearance")}</span>
           </span>
         </button>
         <button
           className="settings-list-item"
           type="button"
-          onClick={() => scrollToSection("settings-sessions")}
+          onClick={() => scrollToSection("settings-display")}
         >
           <span className="settings-list-label">
             <span className="settings-list-icon" aria-hidden="true">
-              <Smartphone size={16} />
+              <Monitor size={16} />
             </span>
-            <span>{t("settings.sessions")}</span>
+            <span>{t("settings.display")}</span>
+          </span>
+        </button>
+        <button
+          className="settings-list-item"
+          type="button"
+          onClick={() => scrollToSection("settings-notifications")}
+        >
+          <span className="settings-list-label">
+            <span className="settings-list-icon" aria-hidden="true">
+              <Bell size={16} />
+            </span>
+            <span>{t("settings.notifications")}</span>
+          </span>
+        </button>
+        <button
+          className="settings-list-item"
+          type="button"
+          onClick={() => scrollToSection("settings-messaging-privacy")}
+        >
+          <span className="settings-list-label">
+            <span className="settings-list-icon" aria-hidden="true">
+              <MessageCircle size={16} />
+            </span>
+            <span>{t("settings.messagingPrivacy")}</span>
           </span>
         </button>
         <button
@@ -316,13 +342,25 @@ export function UserSettingsPanel({
         <button
           className="settings-list-item"
           type="button"
-          onClick={() => scrollToSection("settings-appearance")}
+          onClick={() => scrollToSection("settings-security")}
         >
           <span className="settings-list-label">
             <span className="settings-list-icon" aria-hidden="true">
-              <SlidersHorizontal size={16} />
+              <ShieldCheck size={16} />
             </span>
-            <span>{t("settings.preferences")}</span>
+            <span>{t("settings.securityPrivacy")}</span>
+          </span>
+        </button>
+        <button
+          className="settings-list-item"
+          type="button"
+          onClick={() => scrollToSection("settings-sessions")}
+        >
+          <span className="settings-list-label">
+            <span className="settings-list-icon" aria-hidden="true">
+              <Smartphone size={16} />
+            </span>
+            <span>{t("settings.sessions")}</span>
           </span>
         </button>
       </div>
@@ -580,35 +618,53 @@ export function UserSettingsPanel({
           {isSaving ? <span className="settings-save-state">{t("settings.saving")}</span> : null}
         </div>
         <div className="settings-toggle-list">
-          <NotificationToggle
+          <NotificationSettingToggle
             label={t("settings.notificationDesktop")}
             settingKey="desktop_notifications"
             current={selectedNotifications}
             onSelect={onUpdateSettings}
+            icon={<Bell size={15} aria-hidden="true" />}
           />
-          <NotificationToggle
+          <NotificationSettingToggle
             label={t("settings.notificationSound")}
             settingKey="sound"
             current={selectedNotifications}
             onSelect={onUpdateSettings}
+            icon={<Bell size={15} aria-hidden="true" />}
           />
-          <NotificationToggle
+          <NotificationSettingToggle
             label={t("settings.notificationBadges")}
             settingKey="badges"
             current={selectedNotifications}
             onSelect={onUpdateSettings}
+            icon={<Bell size={15} aria-hidden="true" />}
           />
-          <NotificationToggle
+        </div>
+      </section>
+
+      <section
+        id="settings-messaging-privacy"
+        className="settings-section"
+        aria-label={t("settings.messagingPrivacy")}
+      >
+        <div className="settings-section-heading">
+          <h3>{t("settings.messagingPrivacy")}</h3>
+          {isSaving ? <span className="settings-save-state">{t("settings.saving")}</span> : null}
+        </div>
+        <div className="settings-toggle-list">
+          <NotificationSettingToggle
             label={t("settings.sendReadReceipts")}
             settingKey="send_read_receipts"
             current={selectedNotifications}
             onSelect={onUpdateSettings}
+            icon={<Check size={15} aria-hidden="true" />}
           />
-          <NotificationToggle
+          <NotificationSettingToggle
             label={t("settings.sendTypingNotifications")}
             settingKey="send_typing_notifications"
             current={selectedNotifications}
             onSelect={onUpdateSettings}
+            icon={<Edit3 size={15} aria-hidden="true" />}
           />
         </div>
       </section>
@@ -2807,16 +2863,18 @@ function EmojiButton({
   );
 }
 
-function NotificationToggle({
+function NotificationSettingToggle({
   label,
   settingKey,
   current,
-  onSelect
+  onSelect,
+  icon
 }: {
   label: string;
   settingKey: keyof NotificationSettings;
   current: NotificationSettings;
   onSelect: (patch: SettingsPatch) => void;
+  icon: ReactNode;
 }) {
   const checked = current[settingKey];
   return (
@@ -2837,7 +2895,7 @@ function NotificationToggle({
     >
       <span className="settings-toggle-copy">
         <span className="settings-toggle-label">
-          <Bell size={15} aria-hidden="true" />
+          {icon}
           <span>{label}</span>
         </span>
       </span>
