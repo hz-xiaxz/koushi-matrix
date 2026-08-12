@@ -575,6 +575,7 @@ export type MessageId =
   | "settings.localEncryptionUnavailable"
   | "settings.localEncryptionUnknown"
   | "settings.matrixAccount"
+  | "settings.messagingPrivacy"
   | "settings.notRestored"
   | "settings.openRecovery"
   | "settings.preferences"
@@ -1861,6 +1862,7 @@ const en: Catalog = {
   "settings.localStore": "Separate encrypted namespace",
   "settings.localStoreLabel": "Local store",
   "settings.matrixAccount": "Matrix account",
+  "settings.messagingPrivacy": "Messaging & privacy",
   "settings.notRestored": "Not restored",
   "settings.openRecovery": "Open recovery",
   "settings.preferences": "Preferences",
@@ -3033,6 +3035,7 @@ const ja: Catalog = {
   "settings.localStore": "分離された暗号化名前空間",
   "settings.localStoreLabel": "ローカルストア",
   "settings.matrixAccount": "Matrixアカウント",
+  "settings.messagingPrivacy": "メッセージとプライバシー",
   "settings.notRestored": "未復元",
   "settings.openRecovery": "リカバリーを開く",
   "settings.preferences": "環境設定",
