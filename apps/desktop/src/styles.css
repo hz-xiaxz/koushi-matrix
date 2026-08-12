@@ -5475,7 +5475,21 @@ mark {
 }
 
 .invite-target-dialog {
+  /* #488: a true foreground modal — the box is bounded by the viewport and
+     only the body scrolls, so the title and Cancel / Send invite actions stay
+     reachable at every window height. vh fallback for engines without dvh. */
+  display: flex;
+  flex-direction: column;
   width: min(460px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+}
+
+.invite-dialog-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .invite-target-notice {
