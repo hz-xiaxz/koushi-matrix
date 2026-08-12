@@ -1833,7 +1833,7 @@ export function App() {
   }, [snapshot]);
   const [loginHomeserver, setLoginHomeserver] = useState(DEFAULT_HOMESERVER);
   const [loginUsername, setLoginUsername] = useState("");
-  const [loginDeviceName, setLoginDeviceName] = useState("Koushi");
+  const [loginDeviceName, setLoginDeviceName] = useState("");
   const [loginPasswordFilled, setLoginPasswordFilled] = useState(false);
   const [recoverySecretFilled, setRecoverySecretFilled] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>("closed");
@@ -3149,7 +3149,8 @@ export function App() {
               loginHomeserver,
               loginUsername,
               password,
-              loginDeviceName
+              loginDeviceName,
+              snapshot?.state.domain.locale_profile.platform ?? "linux"
             );
       setLoginTransportError(await settleLoginTransport(login, () => api.getSnapshot(), setSnapshot));
     } finally {

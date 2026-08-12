@@ -31,6 +31,7 @@ async fn password_command_projects_authentication_before_account_actor_completio
                 password: AuthSecret::new("synthetic-password"),
                 device_display_name: None,
             },
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .expect("submit");
@@ -95,6 +96,7 @@ async fn password_login_capability_gate_round_trips_through_reducer_effects() {
                 password: AuthSecret::new("synthetic-password"),
                 device_display_name: None,
             },
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .expect("submit login");
@@ -223,6 +225,7 @@ async fn submit_runtime_password_login(
                 password: AuthSecret::new("synthetic-password"),
                 device_display_name: None,
             },
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .expect("submit password login");
@@ -285,6 +288,7 @@ async fn active_session_rejects_a_new_password_login_before_account_routing() {
                 password: AuthSecret::new("synthetic-password"),
                 device_display_name: None,
             },
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .expect("submit");

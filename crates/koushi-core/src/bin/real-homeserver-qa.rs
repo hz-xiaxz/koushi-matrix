@@ -537,6 +537,7 @@ async fn run_async_inner(
             password: creds.password.clone(),
             device_display_name: Some(creds.device_display_name.clone()),
         },
+    platform: koushi_state::DisplayPlatform::Linux,
     }))
     .await
     .map_err(|e| format!("login command submit failed: {e}"))?;
@@ -2707,6 +2708,7 @@ async fn run_startup_latency_scenario(
                         password: creds.password.clone(),
                         device_display_name: Some(creds.device_display_name.clone()),
                     },
+                platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await
                 .map_err(|e| format!("startup_latency login command submit failed: {e}"))?;

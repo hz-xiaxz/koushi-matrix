@@ -1906,6 +1906,7 @@ async fn run_fast_send_queue_feedback() {
                 password: AuthSecret::new("fast-send-queue-password"),
                 device_display_name: Some("Fast Send Queue QA".to_owned()),
             },
+            platform: koushi_state::DisplayPlatform::Linux,
         })),
     )
     .await

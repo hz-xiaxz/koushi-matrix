@@ -27,6 +27,7 @@ fn secret_bearing_commands_redact_debug() {
             password: AuthSecret::new(PASSWORD),
             device_display_name: Some("Alice Laptop".to_owned()),
         },
+        platform: koushi_state::DisplayPlatform::Linux,
     });
     let recovery = CoreCommand::Account(AccountCommand::SubmitRecovery {
         request_id: fake_request_id(),
