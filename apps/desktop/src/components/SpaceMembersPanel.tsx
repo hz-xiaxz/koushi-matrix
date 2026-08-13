@@ -1,7 +1,8 @@
-import { X } from "lucide-react";
+import { UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import type {
+  InviteTargetCandidate,
   SpaceInviteAvailabilityReason,
   SpaceInviteCancellationAvailabilityReason,
   SpaceMemberEntry,
@@ -14,6 +15,8 @@ import { t } from "../i18n/messages";
 import { ICON_SIZE, type OpenContextMenu } from "../app/uiShared";
 import { ImeTextField } from "./ImeTextControl";
 import { EntityAvatar } from "./Shell";
+
+const noopSearchInviteTargets = async (): Promise<InviteTargetCandidate[]> => [];
 
 export type {
   SpaceInviteAvailabilityReason,
@@ -28,6 +31,11 @@ export interface SpaceMembersPanelProps {
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void>;
   childRoomLabels?: ReadonlyMap<string, string>;
   onInviteUser: (userId: string) => void;
+  /** Invite a brand-new user to the Space (space-only membership, #508). */
+  onInviteSearchCandidate?: (userId: string) => void;
+  onSearchInviteTargets?: (query: string) => Promise<InviteTargetCandidate[]>;
+  /** Resets the shared Rust-owned invite-workflow state the space search uses. */
+  onResetInviteSearch?: () => void;
   onCancelInvite?: (userId: string) => void;
   onOpenProfile: (userId: string) => void;
   onOpenContextMenu?: OpenContextMenu;
@@ -160,6 +168,9 @@ export function SpaceMembersPanel({
   onRequestAvatarThumbnail,
   childRoomLabels = new Map<string, string>(),
   onInviteUser,
+  onInviteSearchCandidate = () => undefined,
+  onSearchInviteTargets = noopSearchInviteTargets,
+  onResetInviteSearch = () => undefined,
   onCancelInvite = () => undefined,
   onOpenProfile,
   onOpenContextMenu,
@@ -170,6 +181,13 @@ export function SpaceMembersPanel({
   cancelInviteFailure = false
 }: SpaceMembersPanelProps) {
   const [query, setQuery] = useState("");
+  // #508: space-only invite search — inviting a brand-new user to the Space
+  // room (space membership only, no child-room membership).
+  const [inviteMode, setInviteMode] = useState(false);
+  const [inviteQuery, setInviteQuery] = useState("");
+  const [inviteCandidates, setInviteCandidates] = useState<InviteTargetCandidate[]>([]);
+  const [inviteSearching, setInviteSearching] = useState(false);
+  const inviteSearchRequestRef = useRef(0);
   const panelRef = useRef<HTMLElement | null>(null);
   const sections = useMemo<SpaceMembersSection[]>(
     () => [
@@ -227,6 +245,45 @@ export function SpaceMembersPanel({
     state.space_joined.length
   ]);
 
+  // #508: leaving the invite search (cancel, panel close, unmount) resets the
+  // shared Rust-owned invite-workflow state so a later room invite dialog never
+  // inherits this space search's query or candidates.
+  useEffect(() => {
+    return () => {
+      onResetInviteSearch();
+    };
+  }, [onResetInviteSearch]);
+
+  // #508: debounced invite-target search; stale responses are discarded by
+  // the request counter so an older query can never overwrite newer results.
+  useEffect(() => {
+    const requestId = ++inviteSearchRequestRef.current;
+    const trimmed = inviteQuery.trim();
+    if (!inviteMode) {
+      setInviteCandidates([]);
+      setInviteSearching(false);
+      return;
+    }
+    if (!trimmed) {
+      setInviteCandidates([]);
+      setInviteSearching(false);
+      return;
+    }
+    setInviteSearching(true);
+    const timer = window.setTimeout(() => {
+      void onSearchInviteTargets(trimmed).then((candidates) => {
+        if (inviteSearchRequestRef.current !== requestId) {
+          return;
+        }
+        setInviteCandidates(candidates);
+        setInviteSearching(false);
+      });
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [inviteMode, inviteQuery, onSearchInviteTargets]);
+
   return (
     <section
       className="space-members-panel"
@@ -240,6 +297,17 @@ export function SpaceMembersPanel({
         })}>
           {state.space_joined.length}
         </span>
+        {canInvite && !inviteMode ? (
+          <button
+            className="icon-button space-members-invite-trigger"
+            type="button"
+            aria-label={t("room.invitePeople")}
+            title={t("room.invitePeople")}
+            onClick={() => setInviteMode(true)}
+          >
+            <UserPlus size={ICON_SIZE.control} />
+          </button>
+        ) : null}
         <button
           className="icon-button space-members-close"
           type="button"
@@ -250,19 +318,83 @@ export function SpaceMembersPanel({
         </button>
       </header>
 
-      <div className="space-members-search" role="search">
-        <label className="visually-hidden" htmlFor="space-members-search-input">
-          {t("spaceMembers.search")}
-        </label>
-        <ImeTextField
-          id="space-members-search-input"
-          type="search"
-          aria-label={t("spaceMembers.search")}
-          placeholder={t("spaceMembers.search")}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
+      {inviteMode ? (
+        <div className="space-members-invite" role="search">
+          <label className="visually-hidden" htmlFor="space-members-invite-input">
+            {t("dialog.inviteSearch")}
+          </label>
+          <ImeTextField
+            id="space-members-invite-input"
+            type="search"
+            autoFocus
+            aria-label={t("dialog.inviteSearch")}
+            placeholder={t("dialog.inviteSearch")}
+            value={inviteQuery}
+            onChange={(event) => setInviteQuery(event.target.value)}
+          />
+          <button
+            className="space-members-invite-back"
+            type="button"
+            onClick={() => {
+              setInviteMode(false);
+              setInviteQuery("");
+              setInviteCandidates([]);
+              onResetInviteSearch();
+            }}
+          >
+            {t("action.cancel")}
+          </button>
+        </div>
+      ) : (
+        <div className="space-members-search" role="search">
+          <label className="visually-hidden" htmlFor="space-members-search-input">
+            {t("spaceMembers.search")}
+          </label>
+          <ImeTextField
+            id="space-members-search-input"
+            type="search"
+            aria-label={t("spaceMembers.search")}
+            placeholder={t("spaceMembers.search")}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+      )}
+
+      {inviteMode ? (
+        <div className="space-members-invite-results" aria-label={t("dialog.inviteCandidates")}>
+          {inviteSearching && inviteCandidates.length === 0 ? (
+            <p className="space-members-empty" role="status">
+              {t("activity.loading")}
+            </p>
+          ) : inviteCandidates.length === 0 && inviteQuery.trim() ? (
+            <p className="space-members-empty" role="status">
+              {t("spaceMembers.noResults")}
+            </p>
+          ) : null}
+          {inviteCandidates.map((candidate) => {
+            const selectable = candidate.status === "selectable";
+            return (
+              <button
+                className="space-members-invite-candidate"
+                type="button"
+                key={candidate.user_id}
+                disabled={!selectable || hasPendingOperation(state)}
+                onClick={() => {
+                  if (selectable) {
+                    onInviteSearchCandidate(candidate.user_id);
+                  }
+                }}
+              >
+                <span>{candidate.display_label}</span>
+                <span className="space-members-invite-candidate-id" dir="auto">
+                  {candidate.user_id}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {failedOperation !== null || cancelInviteFailure ? (
         <p className="space-members-invite-failure" role="alert">
@@ -280,45 +412,47 @@ export function SpaceMembersPanel({
         </p>
       ) : null}
 
-      <div className="space-members-sections">
-        {filteredSections.map((section) => (
-          <section
-            className="space-members-section"
-            data-space-members-section={section.id}
-            key={section.id}
-            aria-labelledby={`space-members-section-${section.id}`}
-          >
-            <h3 id={`space-members-section-${section.id}`}>{section.label}</h3>
-            {section.entries.length > 0 ? (
-              <ul className="space-members-list" aria-label={section.label}>
-                {section.entries.map((entry) => (
-                  <SpaceMemberRow
-                    key={entry.user_id}
-                    entry={entry}
-                    sectionId={section.id}
-                    state={state}
-                    canInvite={canInvite}
-                    canCancelInvite={canCancelInvite}
-                    childRoomLabels={childRoomLabels}
-                    profileUsers={profileUsers}
-                    avatarViewportRef={panelRef}
-                    onInviteUser={onInviteUser}
-                    onOpenProfile={onOpenProfile}
-                    onOpenContextMenu={onOpenContextMenu}
-                    onDiagnostic={onDiagnostic}
-                    inviteAvailabilityReason={inviteAvailabilityReason}
-                    cancelAvailabilityReason={cancelAvailabilityReason}
-                    onCancelInvite={onCancelInvite}
-                    onRequestAvatarThumbnail={onRequestAvatarThumbnail}
-                  />
-                ))}
-              </ul>
-            ) : null}
-          </section>
-        ))}
-      </div>
+      {!inviteMode ? (
+        <div className="space-members-sections">
+          {filteredSections.map((section) => (
+            <section
+              className="space-members-section"
+              data-space-members-section={section.id}
+              key={section.id}
+              aria-labelledby={`space-members-section-${section.id}`}
+            >
+              <h3 id={`space-members-section-${section.id}`}>{section.label}</h3>
+              {section.entries.length > 0 ? (
+                <ul className="space-members-list" aria-label={section.label}>
+                  {section.entries.map((entry) => (
+                    <SpaceMemberRow
+                      key={entry.user_id}
+                      entry={entry}
+                      sectionId={section.id}
+                      state={state}
+                      canInvite={canInvite}
+                      canCancelInvite={canCancelInvite}
+                      childRoomLabels={childRoomLabels}
+                      profileUsers={profileUsers}
+                      avatarViewportRef={panelRef}
+                      onInviteUser={onInviteUser}
+                      onOpenProfile={onOpenProfile}
+                      onOpenContextMenu={onOpenContextMenu}
+                      onDiagnostic={onDiagnostic}
+                      inviteAvailabilityReason={inviteAvailabilityReason}
+                      cancelAvailabilityReason={cancelAvailabilityReason}
+                      onCancelInvite={onCancelInvite}
+                      onRequestAvatarThumbnail={onRequestAvatarThumbnail}
+                    />
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ))}
+        </div>
+      ) : null}
 
-      {!hasResults ? (
+      {!inviteMode && !hasResults ? (
         <p className="space-members-empty" role="status">
           {t("spaceMembers.noResults")}
         </p>

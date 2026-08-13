@@ -252,7 +252,7 @@ import type {
 
 type ActivityOpenTrigger = "home_rail" | "activity_sidebar" | "initial_home" | "other";
 type SpaceMembersOpenTrigger = "sidebar" | "space_info";
-type SpaceMemberInviteTrigger = "inline" | "context";
+type SpaceMemberInviteTrigger = "inline" | "context" | "search";
 type SpaceMemberCancelTrigger = "inline";
 type SpaceMemberFence = { spaceId: string; generation: number };
 
@@ -5648,6 +5648,29 @@ export function App() {
     }
   }
 
+  // #508: stable callback for the Space members invite search. Reads the
+  // latest snapshot via refs so the identity never changes across renders
+  // (which would re-trigger the panel's debounced effect indefinitely) and
+  // merges the Rust-owned exact-MXID candidate into the result list.
+  const searchSpaceInviteTargets = useCallback(async (query: string) => {
+    const fence = spaceMembersFenceForSnapshot(snapshotRef.current);
+    if (!fence) {
+      return [];
+    }
+    const nextSnapshot = await api.searchInviteTargets(fence.spaceId, query);
+    setSnapshot(nextSnapshot);
+    const inviteQuery = nextSnapshot.state.domain.invite_workflow?.query;
+    const candidates = inviteQuery?.candidates ?? [];
+    if (!inviteQuery?.explicit_user_id) {
+      return candidates;
+    }
+    return candidates.some(
+      (candidate) => candidate.user_id === inviteQuery.explicit_user_id!.user_id
+    )
+      ? candidates
+      : [...candidates, inviteQuery.explicit_user_id];
+  }, []);
+
   async function inviteUserToSpace(
     userId: string,
     trigger: SpaceMemberInviteTrigger,
@@ -5658,10 +5681,20 @@ export function App() {
     const settings = fence ? exactRoomSettingsForRoom(currentSnapshot, fence.spaceId) : null;
     const members = currentSnapshot?.state.domain.space_members;
     const childOnlyEntry = members?.child_room_only.find((entry) => entry.user_id === userId);
+    const alreadyInSpace =
+      members?.space_joined.some((entry) => entry.user_id === userId) ||
+      members?.space_invited.some((entry) => entry.user_id === userId);
     const operationPending =
       members?.operation.kind === "loading" ||
       members?.operation.kind === "inviting" ||
       members?.operation.kind === "cancellingInvite";
+    // #508: the search flow invites brand-new users to the Space (space
+    // membership only); the inline/context flows keep the child-room-only
+    // invite-up semantics.
+    const inviteUpBlocked =
+      trigger === "search"
+        ? alreadyInSpace
+        : !childOnlyEntry || childOnlyEntry.invite_pending;
     const availabilityReason: SpaceInviteAvailabilityReason =
       !fence || !spaceMembersSnapshotMatches(currentSnapshot, fence)
         ? "settings_unavailable"
@@ -5671,8 +5704,10 @@ export function App() {
             ? "permission_denied"
             : operationPending
               ? "operation_pending"
-              : !childOnlyEntry || childOnlyEntry.invite_pending
-                ? "invite_pending"
+              : inviteUpBlocked
+                ? trigger === "search"
+                  ? "already_in_space"
+                  : "invite_pending"
                 : "available";
     appendSpaceMembersDiagnosticLog(
       `invite trigger=${trigger} availability_reason=${availabilityReason}`
@@ -5682,8 +5717,7 @@ export function App() {
       !spaceMembersSnapshotMatches(currentSnapshot, fence) ||
       !settings?.permissions.can_invite ||
       operationPending ||
-      !childOnlyEntry ||
-      childOnlyEntry.invite_pending
+      inviteUpBlocked
     ) {
       return;
     }
@@ -6692,6 +6726,13 @@ export function App() {
           onDiagnostic={appendSpaceMembersDiagnosticLog}
           onInviteUserToSpace={(userId) => {
             void inviteUserToSpace(userId, "inline");
+          }}
+          onInviteSearchCandidateToSpace={(userId) => {
+            void inviteUserToSpace(userId, "search");
+          }}
+          onSearchSpaceInviteTargets={searchSpaceInviteTargets}
+          onResetSpaceInviteSearch={() => {
+            void api.closeInviteWorkflow();
           }}
           canInviteToSpace={canInviteToSpace}
           spaceInviteAvailabilityReason={spaceInviteAvailabilityReason}

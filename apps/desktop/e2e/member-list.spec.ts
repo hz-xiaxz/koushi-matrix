@@ -343,3 +343,78 @@ test("Space Members Profile preserves the Space member context", async ({ page }
   await expect(panel).toContainText(HARNESS_MEMBERS[2].label);
   await expect(panel).toContainText(HARNESS_MEMBERS[2].userId);
 });
+
+test("Space Members can invite a brand-new user to the Space via the invite search", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await openSpaceMembersFromSpaceInfo(page);
+  await clearInvocations(page);
+
+  // The harness's room-invite search returns candidates; override it so the
+  // Space members panel's invite search resolves a brand-new user.
+  await page.evaluate(({ spaceId }) => {
+    const candidates = [
+      {
+        user_id: "@brand-new:example.invalid",
+        display_label: "Brand New Person",
+        original_display_label: "Brand New Person",
+        avatar: null,
+        source: "profile",
+        status: "selectable",
+        status_message: null
+      }
+    ];
+    window.__harness.setCommandResponse("search_invite_targets", ({ roomId }) => {
+      const snapshot = window.__harness.currentSnapshot();
+      const next = {
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          domain: {
+            ...snapshot.state.domain,
+            invite_workflow: {
+              query: {
+                room_id: roomId,
+                query: "brand",
+                candidates,
+                explicit_user_id: null
+              },
+              selected_targets: [],
+              scope_plan: null,
+              selected_scope: null,
+              history_policy: null,
+              operation: { kind: "idle" }
+            }
+          }
+        }
+      };
+      window.__harness.setSnapshot(next);
+      return next;
+    });
+  }, { spaceId: HARNESS_SPACE_ID });
+
+  const panel = contextPanel(page);
+  await panel.getByRole("button", { name: t("room.invitePeople") }).click();
+  const search = panel.getByRole("searchbox", { name: t("dialog.inviteSearch") });
+  await search.fill("brand");
+  await expect(panel.getByRole("button", { name: /Brand New Person/ })).toBeVisible();
+  await panel.getByRole("button", { name: /Brand New Person/ }).click();
+
+  await expect.poll(() => invocationCount(page, "invite_user_to_space")).toBe(1);
+  const args = await firstInvocationArgs<{
+    spaceId: string;
+    userId: string;
+    generation: number;
+  }>(page, "invite_user_to_space");
+  expect(args).toEqual({
+    spaceId: HARNESS_SPACE_ID,
+    userId: "@brand-new:example.invalid",
+    generation: 2
+  });
+
+  // Leaving the invite search resets the shared invite workflow so a later
+  // room invite dialog never inherits this space search.
+  await panel.getByRole("button", { name: t("action.cancel") }).click();
+  await expect.poll(() => invocationCount(page, "close_invite_workflow")).toBeGreaterThanOrEqual(1);
+});
