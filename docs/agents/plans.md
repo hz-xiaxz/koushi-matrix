@@ -46,6 +46,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Timeline navigation aids (#41) | [2026-06-16-timeline-navigation-phase-a.md](../superpowers/plans/2026-06-16-timeline-navigation-phase-a.md) | — |
 | Account work scheduler | [2026-07-25-account-work-scheduler-phase-a.md](../superpowers/plans/2026-07-25-account-work-scheduler-phase-a.md) | — |
 | Startup latency observability (#123) | [2026-06-23-startup-latency-observability-phase-a.md](../superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md) | — |
+| Initial index-0 key-share diagnostics (#509) | [2026-08-13-index0-share-diagnostics.md](../superpowers/plans/2026-08-13-index0-share-diagnostics.md) | — |
 
 Font asset loading and any bundled font package must update
 `THIRD_PARTY_NOTICES.md` with version, local path, license, and provenance — see
