@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  InviteTargetCandidate,
   SpaceMemberEntry,
   SpaceMembersState,
   UserProfile
@@ -59,6 +60,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 function member(
@@ -115,6 +117,184 @@ function profile(userId: string, avatar: UserProfile["avatar"]): UserProfile {
     avatar
   };
 }
+
+describe("SpaceMembersPanel space invite search (#508)", () => {
+  const candidate = (
+    status: InviteTargetCandidate["status"] = "selectable"
+  ): InviteTargetCandidate => ({
+    user_id: "@new:example.invalid",
+    display_label: "New Person",
+    original_display_label: "New Person",
+    avatar: null,
+    source: "profile",
+    status,
+    status_message: null
+  });
+
+  it("opens the invite search, resolves candidates, and invites a brand-new user", async () => {
+    const onInviteUser = vi.fn();
+    const onInviteSearchCandidate = vi.fn();
+    const onSearchInviteTargets = vi.fn(async () => [candidate()]);
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={onInviteUser}
+        onInviteSearchCandidate={onInviteSearchCandidate}
+        onSearchInviteTargets={onSearchInviteTargets}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite people" }));
+    const input = screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" });
+    fireEvent.change(input, { target: { value: "new" } });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /New Person/ })).toBeTruthy()
+    );
+    expect(onSearchInviteTargets).toHaveBeenCalledWith("new");
+
+    fireEvent.click(screen.getByRole("button", { name: /New Person/ }));
+    expect(onInviteSearchCandidate).toHaveBeenCalledWith("@new:example.invalid");
+    expect(onInviteUser).not.toHaveBeenCalled();
+  });
+
+  it("hides the invite trigger without permission and disables non-selectable candidates", async () => {
+    const onInviteUser = vi.fn();
+    const onInviteSearchCandidate = vi.fn();
+    const onSearchInviteTargets = vi.fn(async () => [
+      candidate("alreadyInDestination"),
+      candidate()
+    ]);
+    const { rerender } = render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={false}
+        onInviteUser={onInviteUser}
+        onInviteSearchCandidate={onInviteSearchCandidate}
+        onSearchInviteTargets={onSearchInviteTargets}
+        onOpenProfile={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole("button", { name: "Invite people" })).toBeNull();
+
+    rerender(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={onInviteUser}
+        onSearchInviteTargets={onSearchInviteTargets}
+        onOpenProfile={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Invite people" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" }), {
+      target: { value: "new" }
+    });
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /New Person/ }).length).toBeGreaterThan(0));
+    const buttons = screen.getAllByRole("button", { name: /New Person/ });
+    expect(buttons[0]).toHaveProperty("disabled", true);
+    expect(buttons[1]).toHaveProperty("disabled", false);
+    fireEvent.click(buttons[0]!);
+    expect(onInviteSearchCandidate).not.toHaveBeenCalled();
+  });
+
+  it("debounces the invite search and sends only the latest query", async () => {
+    vi.useFakeTimers();
+    const onSearchInviteTargets = vi.fn(async () => []);
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onSearchInviteTargets={onSearchInviteTargets}
+        onOpenProfile={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Invite people" }));
+    const input = screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" });
+
+    fireEvent.change(input, { target: { value: "a" } });
+    fireEvent.change(input, { target: { value: "ab" } });
+    // Typing before the debounce elapses must not fire the search.
+    await act(async () => {
+      vi.advanceTimersByTime(249);
+    });
+    expect(onSearchInviteTargets).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(onSearchInviteTargets).toHaveBeenCalledTimes(1);
+    expect(onSearchInviteTargets).toHaveBeenCalledWith("ab");
+  });
+
+  it("discards a stale search response when a newer query wins", async () => {
+    vi.useFakeTimers();
+    const resolvers: Array<(value: InviteTargetCandidate[]) => void> = [];
+    const onSearchInviteTargets = vi.fn(
+      () => new Promise<InviteTargetCandidate[]>((resolve) => resolvers.push(resolve))
+    );
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onSearchInviteTargets={onSearchInviteTargets}
+        onOpenProfile={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Invite people" }));
+    const input = screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" });
+
+    fireEvent.change(input, { target: { value: "first" } });
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
+    fireEvent.change(input, { target: { value: "second" } });
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(resolvers.length).toBe(2);
+
+    // The older response resolves after the newer one's query was sent: its
+    // result must be discarded.
+    await act(async () => {
+      resolvers[0]!([candidate("selectable")]);
+    });
+    expect(screen.queryByRole("button", { name: /New Person/ })).toBeNull();
+
+    await act(async () => {
+      resolvers[1]!([
+        {
+          ...candidate("selectable"),
+          user_id: "@winner:example.invalid",
+          display_label: "Winner"
+        }
+      ]);
+    });
+    expect(screen.getByRole("button", { name: /Winner/ })).toBeTruthy();
+  });
+
+  it("cancels back out of invite search without inviting", async () => {
+    const onInviteUser = vi.fn();
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={true}
+        onInviteUser={onInviteUser}
+        onSearchInviteTargets={async () => []}
+        onOpenProfile={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Invite people" }));
+    expect(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("searchbox", { name: "Name, alias, or Matrix ID" })).toBeNull();
+    expect(onInviteUser).not.toHaveBeenCalled();
+  });
+});
 
 describe("SpaceMembersPanel", () => {
   it("renders cancellation only for invited rows and forwards the invited user", () => {

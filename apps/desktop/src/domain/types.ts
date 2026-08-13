@@ -799,7 +799,8 @@ export type SpaceInviteAvailabilityReason =
   | "settings_unavailable"
   | "permission_denied"
   | "operation_pending"
-  | "invite_pending";
+  | "invite_pending"
+  | "already_in_space";
 
 export type SpaceInviteCancellationAvailabilityReason =
   | "available"

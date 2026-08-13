@@ -11,6 +11,7 @@ import type {
   ComposerDocument,
   ResolveComposerKeyAction,
   RoomModerationAction,
+  InviteTargetCandidate,
   RoomKeyReshareOutcome,
   RoomNotificationMode,
   RoomSettingChange,
@@ -67,6 +68,9 @@ import { UploadStagingDialog, uploadStagingItemsAreSendable } from "./dialogs";
 import type { OpenContextMenu } from "../app/uiShared";
 import { useStableEvent } from "./useStableEvent";
 
+const noopSearchSpaceInviteTargets = async (): Promise<InviteTargetCandidate[]> => [];
+const noopResetSpaceInviteSearch = (): void => undefined;
+
 export function ContextualRightPanel({
   activeRoom,
   activeSpace,
@@ -120,6 +124,9 @@ export function ContextualRightPanel({
   onInviteUser = () => undefined,
   onReturnToInvite = () => undefined,
   onInviteUserToSpace = () => undefined,
+  onInviteSearchCandidateToSpace = () => undefined,
+  onSearchSpaceInviteTargets = noopSearchSpaceInviteTargets,
+  onResetSpaceInviteSearch = noopResetSpaceInviteSearch,
   canInviteToSpace = false,
   onModerateMember = () => undefined,
   onSetLocalUserAlias = () => undefined,
@@ -244,6 +251,9 @@ export function ContextualRightPanel({
   onInviteUser?: (roomId: string, title: string) => void;
   onReturnToInvite?: () => void;
   onInviteUserToSpace?: (userId: string) => void;
+  onInviteSearchCandidateToSpace?: (userId: string) => void;
+  onSearchSpaceInviteTargets?: (query: string) => Promise<InviteTargetCandidate[]>;
+  onResetSpaceInviteSearch?: () => void;
   canInviteToSpace?: boolean;
   onModerateMember?: (
     roomId: string,
@@ -588,6 +598,9 @@ export function ContextualRightPanel({
             onRequestAvatarThumbnail={onRequestMemberAvatarThumbnail}
             childRoomLabels={childRoomLabels}
             onInviteUser={onInviteUserToSpace}
+            onInviteSearchCandidate={onInviteSearchCandidateToSpace}
+            onSearchInviteTargets={onSearchSpaceInviteTargets}
+            onResetInviteSearch={onResetSpaceInviteSearch}
             onCancelInvite={onCancelInvite}
             canCancelInvite={canCancelInvite}
             onOpenProfile={onOpenProfile ?? (() => undefined)}
