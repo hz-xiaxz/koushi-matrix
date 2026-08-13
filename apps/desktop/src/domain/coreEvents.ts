@@ -165,6 +165,7 @@ export interface TimelineMessageSource {
   is_redacted: boolean;
   is_edited: boolean;
   has_media: boolean;
+  megolm_session_fingerprint?: string | null;
   original_json?: unknown | null;
 }
 

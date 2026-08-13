@@ -21133,6 +21133,11 @@ impl TimelineActor {
 
             let projected = sdk_item_to_timeline_item(&self.key, item, self.own_user_id.as_deref());
             let mut source = message_source_for_timeline_item(&projected)?;
+            source.megolm_session_fingerprint = event_item
+                .encryption_info()
+                .and_then(|info| info.session_id())
+                .filter(|session_id| !session_id.is_empty())
+                .map(megolm_session_fingerprint);
             source.original_json = original_json_for_event_item(event_item);
             return Some(source);
         }
@@ -24259,6 +24264,13 @@ fn original_json_for_event_item(event_item: &EventTimelineItem) -> Option<serde_
     event_item
         .original_json()
         .and_then(|raw| serde_json::from_str(raw.json().get()).ok())
+}
+
+fn megolm_session_fingerprint(session_id: &str) -> String {
+    // Matrix Megolm session IDs are random base64 strings. A 12-character
+    // prefix is compact while providing enough entropy to distinguish session
+    // rotation without exposing the complete identifier in the UI.
+    session_id.chars().take(12).collect()
 }
 
 fn effective_message_content(raw: &serde_json::Value) -> Option<&serde_json::Value> {
@@ -40977,6 +40989,17 @@ mod tests {
             thread_root_from_original_json(&original_json).as_deref(),
             Some("$thread-root:test")
         );
+    }
+
+    #[test]
+    fn megolm_session_fingerprint_is_stable_compact_and_distinguishes_rotation() {
+        let first = megolm_session_fingerprint("AbCdEfGhIjKlMnOpQrStUvWxYz0123456789");
+        let same = megolm_session_fingerprint("AbCdEfGhIjKlMnOpQrStUvWxYz0123456789");
+        let rotated = megolm_session_fingerprint("ZyXwVuTsRqPoNmLkJiHgFeDcBa9876543210");
+
+        assert_eq!(first, "AbCdEfGhIjKl");
+        assert_eq!(first, same);
+        assert_ne!(first, rotated);
     }
 
     #[test]
