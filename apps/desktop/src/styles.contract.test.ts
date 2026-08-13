@@ -151,6 +151,23 @@ describe("styles.css token system", () => {
     }
   });
 
+  test("upload staging panel bounds to available height with a dedicated scroll owner (#515)", () => {
+    const dialog = selectorBlock(".upload-staging-dialog");
+    // Three-row layout: header / minmax(0, 1fr) scroll body / footer.
+    expect(dialog).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/);
+    // Bounded to the available vertical space and never overflow-clipped
+    // without a scroll owner (the panel itself must not scroll the page).
+    expect(dialog).toMatch(/max-height:\s*min\(58vh,\s*460px\)/);
+    expect(dialog).toMatch(/overflow:\s*hidden/);
+
+    const list = selectorBlock(".upload-staging-list");
+    // The list is the vertical scroll owner: it can collapse below content
+    // size and scrolls, containing overscroll so the timeline never moves.
+    expect(list).toMatch(/min-height:\s*0/);
+    expect(list).toMatch(/overflow-y:\s*auto/);
+    expect(list).toMatch(/overscroll-behavior:\s*contain/);
+  });
+
   test("selected room row uses a logical brand start bar", () => {
     expect(css).toMatch(/border-inline-start-color:\s*var\(--brand\)/);
     expect(css).not.toContain("box-shadow: inset 3px 0 0 0 var(--brand)");

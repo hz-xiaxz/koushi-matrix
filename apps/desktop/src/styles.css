@@ -5148,10 +5148,16 @@ mark {
 }
 
 .upload-staging-dialog {
+  /* #515: three-row layout — header / scroll body / footer — bounded to the
+     available vertical space so a tall staging panel never pushes the send
+     action or the composer out of the window. */
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
   margin: 0 20px 10px;
   padding: 12px;
+  max-height: min(58vh, 460px);
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -5175,8 +5181,14 @@ mark {
 }
 
 .upload-staging-list {
+  /* #515: the staging list is the vertical scroll owner; min-height: 0 lets
+     the middle grid row collapse so the list scrolls instead of the panel
+     overflowing. Contain overscroll so the timeline behind it never moves. */
   display: grid;
   gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .upload-staging-item {
