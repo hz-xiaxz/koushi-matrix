@@ -186,6 +186,19 @@ impl fmt::Debug for StagedUploadItem {
     }
 }
 
+/// Attachments may be sent once every item has a prepared output and none is
+/// still recompressing (#500): the bytes that upload are the ones the UI shows.
+/// The empty list is vacuously sendable; callers reject an empty staging list
+/// separately when that matters.
+pub fn staged_uploads_are_sendable(items: &[StagedUploadItem]) -> bool {
+    items.iter().all(|item| {
+        matches!(
+            item.preparation,
+            StagedUploadPreparation::Ready { pending: None, .. }
+        )
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum StagedUploadKind {
@@ -1995,4 +2008,66 @@ pub enum ComposerMode {
     Reply {
         in_reply_to_event_id: String,
     },
+}
+
+#[cfg(test)]
+mod staged_upload_tests {
+    use super::*;
+
+    fn item(preparation: StagedUploadPreparation) -> StagedUploadItem {
+        StagedUploadItem {
+            staged_id: "s1".to_owned(),
+            room_id: "!room:example.test".to_owned(),
+            position: 0,
+            filename: "fixture.png".to_owned(),
+            mime_type: "image/png".to_owned(),
+            byte_count: 10,
+            kind: StagedUploadKind::File,
+            caption: None,
+            compression_choice: StagedUploadCompressionChoice::NotApplicable,
+            preparation,
+        }
+    }
+
+    fn ready(pending: Option<StagedUploadOutputSelection>) -> StagedUploadPreparation {
+        StagedUploadPreparation::Ready {
+            variants: Vec::new(),
+            selected: StagedUploadOutputSelection {
+                resize: StagedUploadResizeChoice::Original,
+                format: StagedUploadFormatChoice::Keep,
+            },
+            pending,
+            generation: 0,
+        }
+    }
+
+    #[test]
+    fn staged_uploads_are_sendable_requires_ready_without_pending() {
+        assert!(staged_uploads_are_sendable(&[item(ready(None))]));
+        assert!(!staged_uploads_are_sendable(&[item(ready(Some(
+            StagedUploadOutputSelection {
+                resize: StagedUploadResizeChoice::Half,
+                format: StagedUploadFormatChoice::Keep,
+            }
+        )))]));
+        assert!(!staged_uploads_are_sendable(&[item(
+            StagedUploadPreparation::Preparing
+        )]));
+        assert!(!staged_uploads_are_sendable(&[item(
+            StagedUploadPreparation::Failed {
+                failure_kind: MediaPreparationFailureKind::Empty,
+                can_use_original: false,
+            }
+        )]));
+        // One non-sendable item blocks the whole list.
+        assert!(!staged_uploads_are_sendable(&[
+            item(ready(None)),
+            item(StagedUploadPreparation::Preparing)
+        ]));
+    }
+
+    #[test]
+    fn empty_staging_list_is_vacuously_sendable() {
+        assert!(staged_uploads_are_sendable(&[]));
+    }
 }

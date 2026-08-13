@@ -63,7 +63,7 @@ import {
 } from "./SpaceMembersPanel";
 import { MessageArticle, PinnedEventsList, SearchResults } from "./mediaLists";
 import { ThreadComposer } from "./composer";
-import { UploadStagingDialog } from "./dialogs";
+import { UploadStagingDialog, uploadStagingItemsAreSendable } from "./dialogs";
 import type { OpenContextMenu } from "../app/uiShared";
 import { useStableEvent } from "./useStableEvent";
 
@@ -917,6 +917,12 @@ export function ContextualRightPanel({
         />
       ) : null}
       <ThreadComposer
+        stagedUploadsReady={uploadStagingItemsAreSendable(threadStagedUploads)}
+        onSendStagedUploads={() => {
+          if (threadRoomId && rootEventId) {
+            onThreadSendStagedAttachments(threadRoomId, rootEventId);
+          }
+        }}
         notice={threadComposerNotice}
         document={threadDocument}
         draftKey={

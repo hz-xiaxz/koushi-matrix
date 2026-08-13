@@ -204,6 +204,7 @@ pub use timeline::{
     TimelineGapRepairFailureKind, TimelineMediaGalleryItem, TimelineMediaGalleryMedia,
     TimelineMediaGallerySource, TimelineMediaGalleryThumbnail, TimelineMediaKind,
     TimelinePaneState, UploadStagingStore, staged_upload_item_with_completed_output,
+    staged_uploads_are_sendable,
 };
 
 // ── Re-exports: thread ──────────────────────────────────────────────────────
