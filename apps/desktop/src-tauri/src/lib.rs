@@ -3105,6 +3105,7 @@ mod tests {
                     is_redacted: false,
                     is_edited: true,
                     has_media: false,
+                    megolm_session_fingerprint: Some("AbCdEfGhIjKl".to_owned()),
                     original_json: None,
                 },
             }))

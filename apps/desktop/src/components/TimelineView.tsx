@@ -7604,6 +7604,11 @@ export function MessageSourceDialog({
   const copySource = useCallback(() => {
     void writeClipboardText(sourceText);
   }, [sourceText]);
+  const copyMegolmSessionFingerprint = useCallback(() => {
+    if (source.megolm_session_fingerprint) {
+      void writeClipboardText(source.megolm_session_fingerprint);
+    }
+  }, [source.megolm_session_fingerprint]);
 
   return (
     <div
@@ -7635,6 +7640,24 @@ export function MessageSourceDialog({
           <span>{t("timeline.copyEventId")}</span>
         </button>
       </div>
+      {source.megolm_session_fingerprint ? (
+        <section className="message-source-encryption" aria-label={t("timeline.encryptionDetails")}>
+          <h3>{t("timeline.encryptionDetails")}</h3>
+          <div className="message-source-encryption-row">
+            <span>{t("timeline.megolmSessionFingerprint")}</span>
+            <code>{source.megolm_session_fingerprint}</code>
+            <button
+              className="message-source-copy"
+              type="button"
+              aria-label={t("timeline.copyMegolmSessionFingerprint")}
+              onClick={copyMegolmSessionFingerprint}
+            >
+              <Copy size={15} aria-hidden="true" />
+              <span>{t("timeline.copyMegolmSessionFingerprint")}</span>
+            </button>
+          </div>
+        </section>
+      ) : null}
       <div className="message-source-section-header">
         <h3>{t("timeline.originalEventSource")}</h3>
         <button

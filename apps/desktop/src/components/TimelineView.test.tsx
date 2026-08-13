@@ -10662,6 +10662,7 @@ describe("TimelineView", () => {
       is_redacted: false,
       is_edited: false,
       has_media: false,
+      megolm_session_fingerprint: "AbCdEfGhIjKl",
       original_json: {
         type: "m.room.message",
         content: { body: "source body", msgtype: "m.text" }
@@ -10676,6 +10677,9 @@ describe("TimelineView", () => {
     expect(
       screen.getByRole("button", { name: "Copy original event source" }).textContent
     ).toContain("Copy original event source");
+    expect(
+      screen.getByRole("button", { name: "Copy Megolm session fingerprint" }).textContent
+    ).toContain("Copy");
   });
 
   it("renders the read marker after the Rust-derived display anchor for own messages after the marker", async () => {
