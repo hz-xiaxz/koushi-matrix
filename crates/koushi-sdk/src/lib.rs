@@ -7399,6 +7399,17 @@ async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
         "initial_share_first_event_pending",
         "initial_share_sessions_at_index0",
         "initial_share_sessions_after_index0",
+        // Index-0 duplicate share counters (issue #510).
+        "index0_reshare_sent",
+        "index0_reshare_failed",
+        "index0_reshare_deadline",
+        "index0_reshare_cancelled",
+        "index0_reshare_policy_blocked",
+        "index0_reshare_not_needed",
+        "index0_initial_share_accepted",
+        "index0_initial_share_failed",
+        "index0_initial_share_withheld",
+        "index0_initial_share_no_recipients",
     ] {
         koushi_diagnostics::reset_counter(counter);
     }
@@ -7423,6 +7434,9 @@ fn record_room_key_diagnostic(event: matrix_sdk::encryption::RoomKeyDiagnosticEv
         }
         RoomKeyDiagnosticEvent::InitialShareSession(event) => {
             record_initial_share_session_diagnostic(event)
+        }
+        RoomKeyDiagnosticEvent::Index0Reshare(event) => {
+            record_index0_reshare_diagnostic(event)
         }
     }
 }
@@ -7679,6 +7693,65 @@ fn record_initial_share_session_diagnostic(
             .field(DiagnosticField::boolean(
                 "created_at_index0",
                 event.created_at_index0,
+            ))
+            .field(DiagnosticField::milliseconds(
+                "elapsed_ms",
+                event.elapsed_ms.into(),
+            )),
+    );
+}
+
+fn record_index0_reshare_diagnostic(
+    event: matrix_sdk::encryption::Index0ReshareDiagnostic,
+) {
+    use matrix_sdk::encryption::{Index0InitialShareState as Share, Index0ReshareOutcome as Outcome};
+
+    let reshare = match event.reshare {
+        Outcome::Sent => "sent",
+        Outcome::Deadline => "deadline",
+        Outcome::Cancelled => "cancelled",
+        Outcome::PolicyBlocked => "policy_blocked",
+        Outcome::Failed => "failed",
+        Outcome::NotNeeded => "not_needed",
+    };
+    let initial_share = match event.initial_share {
+        Share::Accepted => "accepted",
+        Share::Failed => "failed",
+        Share::Withheld => "withheld",
+        Share::NoRecipients => "no_recipients",
+    };
+    let reshare_counter = match event.reshare {
+        Outcome::Sent => "index0_reshare_sent",
+        Outcome::Deadline => "index0_reshare_deadline",
+        Outcome::Cancelled => "index0_reshare_cancelled",
+        Outcome::PolicyBlocked => "index0_reshare_policy_blocked",
+        Outcome::Failed => "index0_reshare_failed",
+        Outcome::NotNeeded => "index0_reshare_not_needed",
+    };
+    let initial_share_counter = match event.initial_share {
+        Share::Accepted => "index0_initial_share_accepted",
+        Share::Failed => "index0_initial_share_failed",
+        Share::Withheld => "index0_initial_share_withheld",
+        Share::NoRecipients => "index0_initial_share_no_recipients",
+    };
+    koushi_diagnostics::increment_counter(reshare_counter);
+    koushi_diagnostics::increment_counter(initial_share_counter);
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.index0_reshare", "outcome")
+            .field(DiagnosticField::ordinal_alias(
+                "session_alias",
+                "session",
+                event.session.ordinal(),
+            ))
+            .field(DiagnosticField::token("initial_share", initial_share))
+            .field(DiagnosticField::token("reshare", reshare))
+            .field(DiagnosticField::count(
+                "eligible_own_bucket",
+                event.eligible_own_bucket as u64,
+            ))
+            .field(DiagnosticField::count(
+                "eligible_peer_bucket",
+                event.eligible_peer_bucket as u64,
             ))
             .field(DiagnosticField::milliseconds(
                 "elapsed_ms",
@@ -8044,6 +8117,9 @@ fn desktop_client_builder_defaults(
             ..Default::default()
         })
         .with_enable_share_history_on_invite(true)
+        // Issue #510: at most one bounded index-0 duplicate share before the
+        // first room event of a fresh outbound Megolm session.
+        .with_index0_duplicate_share(true)
         .with_threading_support(matrix_sdk::ThreadingSupport::Enabled {
             with_subscriptions: true,
         })
@@ -14969,5 +15045,119 @@ mod initial_share_diagnostics_tests {
         );
         assert_eq!(counter_value("initial_share_olm_encrypted"), 1);
         koushi_diagnostics::reset_counter("initial_share_olm_encrypted");
+    }
+}
+
+#[cfg(test)]
+mod index0_reshare_diagnostics_tests {
+    use super::record_index0_reshare_diagnostic;
+    use koushi_diagnostics::test_support;
+    use matrix_sdk::encryption::{
+        Index0InitialShareState as Share, Index0ReshareDiagnostic, Index0ReshareOutcome as Outcome,
+        RoomKeyDiagnosticAlias,
+    };
+
+    fn counter_value(name: &'static str) -> u64 {
+        let snapshot = koushi_diagnostics::snapshot();
+        snapshot
+            .records
+            .iter()
+            .find(|record| {
+                record.event.source == "core.room_key_summary"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "name"
+                            && field.value == koushi_diagnostics::DiagnosticValue::Token(name)
+                    })
+            })
+            .and_then(|record| {
+                record.event.fields.iter().find_map(|field| match field.value {
+                    koushi_diagnostics::DiagnosticValue::Count(count) if field.key == "count" => {
+                        Some(count)
+                    }
+                    _ => None,
+                })
+            })
+            .unwrap_or(0)
+    }
+
+    fn record(outcome: Outcome, initial_share: Share) {
+        record_index0_reshare_diagnostic(Index0ReshareDiagnostic {
+            session: RoomKeyDiagnosticAlias::new(7),
+            initial_share,
+            reshare: outcome,
+            eligible_own_bucket: 0,
+            eligible_peer_bucket: 1,
+            elapsed_ms: 12,
+        });
+    }
+
+    #[test]
+    fn index0_reshare_diagnostic_records_closed_tokens_and_counters() {
+        let _guard = test_support::lock();
+        for counter in [
+            "index0_reshare_sent",
+            "index0_reshare_failed",
+            "index0_reshare_deadline",
+            "index0_reshare_cancelled",
+            "index0_reshare_policy_blocked",
+            "index0_reshare_not_needed",
+            "index0_initial_share_accepted",
+            "index0_initial_share_failed",
+            "index0_initial_share_withheld",
+            "index0_initial_share_no_recipients",
+        ] {
+            koushi_diagnostics::reset_counter(counter);
+        }
+        let diagnostic_start = test_support::detail_snapshot().records.len();
+
+        record(Outcome::Sent, Share::Accepted);
+        record(Outcome::Failed, Share::Failed);
+        record(Outcome::Deadline, Share::Failed);
+        record(Outcome::Cancelled, Share::Failed);
+        record(Outcome::PolicyBlocked, Share::Failed);
+        record(Outcome::NotNeeded, Share::Withheld);
+        record(Outcome::NotNeeded, Share::NoRecipients);
+
+        assert_eq!(counter_value("index0_reshare_sent"), 1);
+        assert_eq!(counter_value("index0_reshare_failed"), 1);
+        assert_eq!(counter_value("index0_reshare_deadline"), 1);
+        assert_eq!(counter_value("index0_reshare_cancelled"), 1);
+        assert_eq!(counter_value("index0_reshare_policy_blocked"), 1);
+        assert_eq!(counter_value("index0_reshare_not_needed"), 2);
+        assert_eq!(counter_value("index0_initial_share_accepted"), 1);
+        assert_eq!(counter_value("index0_initial_share_failed"), 4);
+        assert_eq!(counter_value("index0_initial_share_withheld"), 1);
+        assert_eq!(counter_value("index0_initial_share_no_recipients"), 1);
+
+        let snapshot = test_support::detail_snapshot();
+        let records: Vec<_> = snapshot
+            .records
+            .iter()
+            .skip(diagnostic_start)
+            .filter(|record| record.event.source == "core.index0_reshare")
+            .collect();
+        assert_eq!(records.len(), 7);
+        for record in records {
+            let text = format!("{:?}", record.event);
+            assert!(
+                !text.contains('@') && !text.contains('!') && !text.contains("http"),
+                "privacy leak in index0 reshare diagnostic: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn index0_reshare_counters_survive_detail_ring_eviction() {
+        let _guard = test_support::lock();
+        koushi_diagnostics::reset_counter("index0_reshare_sent");
+        let detail_before = test_support::detail_snapshot().records.len();
+        koushi_diagnostics::increment_counter("index0_reshare_sent");
+        assert_eq!(
+            test_support::detail_snapshot().records.len(),
+            detail_before,
+            "the counter must not consume detail-ring capacity"
+        );
+        assert_eq!(counter_value("index0_reshare_sent"), 1);
+        koushi_diagnostics::reset_counter("index0_reshare_sent");
     }
 }
