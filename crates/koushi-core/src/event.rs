@@ -1648,6 +1648,8 @@ pub struct TimelineMessageSource {
     pub is_edited: bool,
     pub has_media: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub megolm_session_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_json: Option<JsonValue>,
 }
 
@@ -1671,6 +1673,13 @@ impl fmt::Debug for TimelineMessageSource {
             .field("is_edited", &self.is_edited)
             .field("has_media", &self.has_media)
             .field(
+                "megolm_session_fingerprint",
+                &self
+                    .megolm_session_fingerprint
+                    .as_ref()
+                    .map(|_| "MegolmSessionFingerprint(..)"),
+            )
+            .field(
                 "original_json",
                 &self.original_json.as_ref().map(|_| "OriginalEventJson(..)"),
             )
@@ -1693,6 +1702,7 @@ pub fn message_source_for_timeline_item(item: &TimelineItem) -> Option<TimelineM
         is_redacted: item.is_redacted,
         is_edited: item.is_edited,
         has_media: item.media.is_some(),
+        megolm_session_fingerprint: None,
         original_json: None,
     })
 }
@@ -3077,6 +3087,7 @@ mod tests {
             is_redacted: false,
             is_edited: true,
             has_media: false,
+            megolm_session_fingerprint: Some("AbCdEfGhIjKl".to_owned()),
             original_json: Some(json!({
                 "event_id": "$event:test",
                 "sender": "@alice:test",
@@ -3121,6 +3132,7 @@ mod tests {
                         "is_redacted": false,
                         "is_edited": true,
                         "has_media": false,
+                        "megolm_session_fingerprint": "AbCdEfGhIjKl",
                         "original_json": {
                             "content": {
                                 "body": "private source body",
@@ -3148,6 +3160,7 @@ mod tests {
             assert!(!debug.contains("$forwarded:test"), "{debug}");
             assert!(!debug.contains("!destination:test"), "{debug}");
             assert!(!debug.contains("txn-forward-private"), "{debug}");
+            assert!(!debug.contains("AbCdEfGhIjKl"), "{debug}");
         }
     }
 

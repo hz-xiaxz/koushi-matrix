@@ -7346,6 +7346,10 @@ async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
         "rotations_membership_or_device_change",
         "rotations_encryption_settings_changed",
         "rotations_explicit_discard",
+        "rotations_full_member_list_reload",
+        "rotations_room_subscription",
+        "rotations_limited_sync_response",
+        "rotations_key_share_failure",
         "rotations_store_missing",
         "rotations_invalidated",
         "rotations_unknown",
@@ -7667,6 +7671,10 @@ fn record_room_key_rotation_diagnostic(event: matrix_sdk::encryption::RoomKeyRot
         Reason::MembershipOrDeviceChange => "membership_or_device_change",
         Reason::EncryptionSettingsChanged => "encryption_settings_changed",
         Reason::ExplicitDiscard => "explicit_discard",
+        Reason::FullMemberListReload => "full_member_list_reload",
+        Reason::RoomSubscription => "room_subscription",
+        Reason::LimitedSyncResponse => "limited_sync_response",
+        Reason::KeyShareFailure => "key_share_failure",
         Reason::StoreMissing => "store_missing",
         Reason::Invalidated => "invalidated",
         Reason::Unknown => "unknown",
@@ -7730,6 +7738,18 @@ fn record_room_key_rotation_diagnostic(event: matrix_sdk::encryption::RoomKeyRot
         }
         Reason::ExplicitDiscard => {
             koushi_diagnostics::increment_counter("rotations_explicit_discard")
+        }
+        Reason::FullMemberListReload => {
+            koushi_diagnostics::increment_counter("rotations_full_member_list_reload")
+        }
+        Reason::RoomSubscription => {
+            koushi_diagnostics::increment_counter("rotations_room_subscription")
+        }
+        Reason::LimitedSyncResponse => {
+            koushi_diagnostics::increment_counter("rotations_limited_sync_response")
+        }
+        Reason::KeyShareFailure => {
+            koushi_diagnostics::increment_counter("rotations_key_share_failure")
         }
         Reason::StoreMissing => koushi_diagnostics::increment_counter("rotations_store_missing"),
         Reason::Invalidated => koushi_diagnostics::increment_counter("rotations_invalidated"),

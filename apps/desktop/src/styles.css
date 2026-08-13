@@ -3137,6 +3137,39 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.message-source-encryption {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-hover);
+}
+
+.message-source-encryption h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.message-source-encryption-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+}
+
+.message-source-encryption-row code {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.message-source-encryption-row .message-source-copy {
+  inline-size: auto;
+  margin-inline-start: auto;
+}
+
 .message-source-section-header {
   justify-content: space-between;
 }

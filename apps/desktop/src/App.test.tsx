@@ -2100,6 +2100,7 @@ describe("Timeline item row rendering", () => {
           is_redacted: false,
           is_edited: false,
           has_media: false,
+          megolm_session_fingerprint: "AbCdEfGhIjKl",
           original_json: {
             unsigned: {
               age: 648,
@@ -2125,6 +2126,9 @@ describe("Timeline item row rendering", () => {
     expect(markup).toContain("Event ID:");
     expect(markup).toContain("$event:example.invalid");
     expect(markup).toContain("Original event source");
+    expect(markup).toContain("Encryption details");
+    expect(markup).toContain("Megolm session fingerprint");
+    expect(markup).toContain("AbCdEfGhIjKl");
     expect(markup).toContain("&quot;unsigned&quot;");
     expect(markup).toContain("&quot;m.room.message&quot;");
     expect(markup).toContain("&quot;m.mentions&quot;");

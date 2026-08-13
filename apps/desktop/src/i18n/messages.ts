@@ -1031,6 +1031,9 @@ export type MessageId =
   | "timeline.closeMessageSource"
   | "timeline.sourceEventId"
   | "timeline.copyEventId"
+  | "timeline.encryptionDetails"
+  | "timeline.megolmSessionFingerprint"
+  | "timeline.copyMegolmSessionFingerprint"
   | "timeline.originalEventSource"
   | "timeline.copyOriginalEventSource"
   | "timeline.sourceSender"
@@ -2321,6 +2324,9 @@ const en: Catalog = {
   "timeline.closeMessageSource": "Close message source",
   "timeline.sourceEventId": "Event ID:",
   "timeline.copyEventId": "Copy event ID",
+  "timeline.encryptionDetails": "Encryption details",
+  "timeline.megolmSessionFingerprint": "Megolm session fingerprint",
+  "timeline.copyMegolmSessionFingerprint": "Copy Megolm session fingerprint",
   "timeline.originalEventSource": "Original event source",
   "timeline.copyOriginalEventSource": "Copy original event source",
   "timeline.sourceSender": "Sender",
@@ -3497,6 +3503,9 @@ const ja: Catalog = {
   "timeline.closeMessageSource": "メッセージソースを閉じる",
   "timeline.sourceEventId": "イベントID:",
   "timeline.copyEventId": "イベントIDをコピー",
+  "timeline.encryptionDetails": "暗号化情報",
+  "timeline.megolmSessionFingerprint": "Megolmセッション識別子",
+  "timeline.copyMegolmSessionFingerprint": "Megolmセッション識別子をコピー",
   "timeline.originalEventSource": "元イベントソース",
   "timeline.copyOriginalEventSource": "元イベントソースをコピー",
   "timeline.sourceSender": "送信者",
