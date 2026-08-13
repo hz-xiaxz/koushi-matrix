@@ -234,6 +234,7 @@ import {
   DirectoryPreviewDialog,
   InviteTargetsDialog,
   ReportReasonDialog,
+  uploadStagingItemsAreSendable,
   UserIdDialog
 } from "./components/dialogs";
 import {
@@ -1932,6 +1933,9 @@ export function App() {
   const searchTimer = useRef<number | null>(null);
   const qaSendStarted = useRef(false);
   const qaSendPending = useRef(false);
+  // #500: the send shortcut and the staging button share this path; one
+  // staged-upload send in flight must not be re-entered (double Enter).
+  const stagedUploadSendInFlightRef = useRef(false);
   const qaSendTargetRequested = useRef(false);
   const qaSendTargetSelectionRequested = useRef<string | null>(null);
   const qaSendBaselineErrorCount = useRef(0);
@@ -4417,6 +4421,18 @@ export function App() {
    * sent, or cleared here, just as `sendText` never dispatches attachments.
    */
   async function sendStagedAttachments() {
+    if (stagedUploadSendInFlightRef.current) {
+      return;
+    }
+    stagedUploadSendInFlightRef.current = true;
+    try {
+      await sendStagedAttachmentsInner();
+    } finally {
+      stagedUploadSendInFlightRef.current = false;
+    }
+  }
+
+  async function sendStagedAttachmentsInner() {
     const roomId = snapshot?.state.ui.timeline.room_id;
     const account = readyComposerDraftAccountOwner(snapshot);
     const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
@@ -4425,7 +4441,7 @@ export function App() {
     if (!roomId || !target || !account || !accountOwner || uploads.length === 0) {
       return;
     }
-    if (uploads.some((item) => item.preparation.kind !== "ready")) {
+    if (!uploadStagingItemsAreSendable(uploads)) {
       return;
     }
     const scope = composerDraftScope(account, target);
@@ -5068,6 +5084,18 @@ export function App() {
 
   /** Sends the open thread's staged attachments only; the draft is untouched. */
   async function sendThreadStagedAttachments(roomId: string, rootEventId: string) {
+    if (stagedUploadSendInFlightRef.current) {
+      return;
+    }
+    stagedUploadSendInFlightRef.current = true;
+    try {
+      await sendThreadStagedAttachmentsInner(roomId, rootEventId);
+    } finally {
+      stagedUploadSendInFlightRef.current = false;
+    }
+  }
+
+  async function sendThreadStagedAttachmentsInner(roomId: string, rootEventId: string) {
     const thread = snapshot?.state.ui.thread;
     const account = readyComposerDraftAccountOwner(snapshot);
     const accountOwner = account ? composerDraftAccountOwnerKey(account) : null;
@@ -5081,7 +5109,7 @@ export function App() {
     if (!account || !accountOwner || uploads.length === 0) {
       return;
     }
-    if (uploads.some((item) => item.preparation.kind !== "ready")) return;
+    if (!uploadStagingItemsAreSendable(uploads)) return;
     const scope = composerDraftScope(account, target);
     const admitted = beginComposerOperation(scope);
     if (!admitted) return;

@@ -66,7 +66,7 @@ import {
   SearchResults
 } from "./mediaLists";
 import { Composer } from "./composer";
-import { UploadStagingDialog } from "./dialogs";
+import { UploadStagingDialog, uploadStagingItemsAreSendable } from "./dialogs";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import { useStableEvent } from "./useStableEvent";
 
@@ -832,6 +832,9 @@ export function TimelinePane({
     [pinnedEvents]
   );
   const stagedUploads = snapshot.state.ui.timeline.staged_uploads ?? [];
+  // Same guard as the staging panel's Send button: every item prepared and
+  // none still recompressing (#500).
+  const stagedUploadsReady = uploadStagingItemsAreSendable(stagedUploads);
   const mediaGallery = snapshot.state.ui.timeline.media_gallery ?? [];
   const mediaDownloads = snapshot.state.ui.timeline.media_downloads ?? {};
   const forwardDestinations = useAppStore(selectForwardDestinations);
@@ -1075,6 +1078,8 @@ export function TimelinePane({
         canEdit={canEdit}
         composerMode={composerModeForComposer}
         hasStagedUploads={stagedUploads.length > 0}
+        stagedUploadsReady={stagedUploadsReady}
+        onSendStagedUploads={onSendStagedAttachmentsStable}
         isSending={Boolean(snapshot.state.ui.timeline.composer.pending_transaction_id)}
         mathModeEnabled={snapshot.state.domain.settings.values.composer?.math_mode ?? true}
         mentionCandidates={mentionCandidates}

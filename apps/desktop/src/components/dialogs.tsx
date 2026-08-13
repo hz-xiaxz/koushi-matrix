@@ -942,7 +942,7 @@ export function UploadStagingDialog({
  * Attachments may be sent once every item has a prepared output and none is
  * still recompressing, so the bytes that upload are the ones the dialog shows.
  */
-function uploadStagingItemsAreSendable(items: StagedUploadItem[]): boolean {
+export function uploadStagingItemsAreSendable(items: StagedUploadItem[]): boolean {
   return (
     items.length > 0 &&
     items.every(

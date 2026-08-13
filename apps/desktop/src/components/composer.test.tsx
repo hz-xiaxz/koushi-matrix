@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MentionCandidate } from "../domain/projectionTypes";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
-import type { ComposerDocument } from "../domain/types";
+import type {
+  ComposerDocument,
+  ComposerResolvedAction,
+  ComposerResolverOptions,
+  ResolveComposerKeyAction
+} from "../domain/types";
 import { Composer, ThreadComposer } from "./composer";
 import {
   inlineMentionEditorSelection,
@@ -1082,6 +1087,187 @@ describe("Composer", () => {
 
       const document = onDocumentChange.mock.lastCall?.[0] as ComposerDocument;
       expect(plainBodyFromDocument(document)).toBe("new body😀");
+    });
+  });
+
+  describe("unified send key for staged attachments (#send-key-unification)", () => {
+    function renderComposerWithResolver(
+      resolver: ResolveComposerKeyAction,
+      overrides: {
+        stagedUploadsReady?: boolean;
+        hasStagedUploads?: boolean;
+        document?: ComposerDocument;
+      } = {}
+    ) {
+      const onSendSpy = vi.fn();
+      const onSend = textSend(onSendSpy);
+      const onSendStagedUploads = vi.fn();
+      const rendered = render(
+        <Composer
+          composerMode={{ kind: "plain" }}
+          isSending={false}
+          hasStagedUploads={overrides.hasStagedUploads ?? Boolean(overrides.stagedUploadsReady)}
+          stagedUploadsReady={overrides.stagedUploadsReady ?? false}
+          roomName="Direct room"
+          document={overrides.document ?? documentFromText("")}
+          onCancelReply={() => undefined}
+          resolveComposerKeyAction={resolver}
+          onSend={onSend}
+          onSendStagedUploads={onSendStagedUploads}
+          onDocumentChange={textChange(vi.fn())}
+        />
+      );
+      const editor = rendered.container.querySelector(".composer-inline-editor");
+      return { ...rendered, editor: editor as HTMLDivElement, onSend: onSendSpy, onSendStagedUploads };
+    }
+
+    it("routes the send shortcut to the staged-attachment send when uploads are ready", async () => {
+      const resolver = vi.fn(async (_s: unknown, _e: unknown, options: ComposerResolverOptions) =>
+        options.send_enabled ? ("send" as const) : ("noop" as const)
+      );
+      const { editor, onSend, onSendStagedUploads } = renderComposerWithResolver(resolver, {
+        stagedUploadsReady: true,
+        document: documentFromText("")
+      });
+
+      fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+
+      await waitFor(() => expect(onSendStagedUploads).toHaveBeenCalledTimes(1));
+      expect(onSend).not.toHaveBeenCalled();
+      expect(resolver).toHaveBeenCalledWith(
+        "main",
+        expect.anything(),
+        expect.objectContaining({ send_enabled: true })
+      );
+    });
+
+    it("routes the send shortcut to the normal send when there are no staged uploads", async () => {
+      const resolver = vi.fn(async (_s: unknown, _e: unknown, options: ComposerResolverOptions) =>
+        options.send_enabled ? ("send" as const) : ("noop" as const)
+      );
+      const { editor, onSend, onSendStagedUploads } = renderComposerWithResolver(resolver, {
+        stagedUploadsReady: false,
+        document: documentFromText("hello")
+      });
+
+      fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSendStagedUploads).not.toHaveBeenCalled();
+    });
+
+    it("keeps the send shortcut disabled for uploads that are not ready", async () => {
+      const resolver = vi.fn(async (_s: unknown, _e: unknown, options: ComposerResolverOptions) =>
+        options.send_enabled ? ("send" as const) : ("noop" as const)
+      );
+      const { editor, onSend, onSendStagedUploads } = renderComposerWithResolver(resolver, {
+        stagedUploadsReady: false,
+        hasStagedUploads: true,
+        document: documentFromText("")
+      });
+
+      fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(onSend).not.toHaveBeenCalled();
+      expect(onSendStagedUploads).not.toHaveBeenCalled();
+      expect(resolver).toHaveBeenCalledWith(
+        "main",
+        expect.anything(),
+        expect.objectContaining({ send_enabled: false })
+      );
+    });
+
+    it("still inserts a newline on Shift+Enter with staged uploads", async () => {
+      const resolver = vi.fn(async () => "insertNewline" as const);
+      const { container, editor, onSend, onSendStagedUploads } = renderComposerWithResolver(
+        resolver,
+        {
+          stagedUploadsReady: true,
+          document: documentFromText("line one")
+        }
+      );
+
+      fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13, shiftKey: true });
+
+      await waitFor(() =>
+        expect(container.querySelector(".composer-inline-editor")?.textContent).toBe("line one\n")
+      );
+      expect(onSend).not.toHaveBeenCalled();
+      expect(onSendStagedUploads).not.toHaveBeenCalled();
+    });
+
+    it("gives a non-empty composer body normal-send precedence over staged uploads", async () => {
+      const resolver = vi.fn(async (_s: unknown, _e: unknown, options: ComposerResolverOptions) =>
+        options.send_enabled ? ("send" as const) : ("noop" as const)
+      );
+      const { editor, onSend, onSendStagedUploads } = renderComposerWithResolver(resolver, {
+        stagedUploadsReady: true,
+        document: documentFromText("typed message")
+      });
+
+      fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSendStagedUploads).not.toHaveBeenCalled();
+    });
+
+    it("does not route to the staged send when text was typed during key resolution", async () => {
+      let resolveAction!: (action: ComposerResolvedAction) => void;
+      const resolver = vi.fn(
+        () =>
+          new Promise<ComposerResolvedAction>((resolve) => {
+            resolveAction = resolve;
+          })
+      );
+      const { editor, onSend, onSendStagedUploads } = renderComposerWithResolver(resolver, {
+        stagedUploadsReady: true,
+        document: documentFromText("")
+      });
+
+      fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+      // Text lands while the resolver is still pending.
+      changeEditorText(editor, "typed during resolution");
+      await act(async () => {
+        resolveAction("send");
+      });
+
+      // The stale empty-body routing must not fire the staged send (which
+      // would clear the freshly typed draft), nor send the captured empty doc.
+      expect(onSendStagedUploads).not.toHaveBeenCalled();
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it("keeps staged readiness out of send_enabled when no staged-send callback exists", async () => {
+      const resolver = vi.fn(async (_s: unknown, _e: unknown, options: ComposerResolverOptions) =>
+        options.send_enabled ? ("send" as const) : ("noop" as const)
+      );
+      const onSendSpy = vi.fn();
+      const rendered = render(
+        <Composer
+          composerMode={{ kind: "plain" }}
+          isSending={false}
+          hasStagedUploads
+          stagedUploadsReady
+          roomName="Direct room"
+          document={documentFromText("")}
+          onCancelReply={() => undefined}
+          resolveComposerKeyAction={resolver}
+          onSend={textSend(onSendSpy)}
+          onDocumentChange={textChange(vi.fn())}
+        />
+      );
+      const editor = rendered.container.querySelector(".composer-inline-editor") as HTMLDivElement;
+
+      fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(onSendSpy).not.toHaveBeenCalled();
+      expect(resolver).toHaveBeenCalledWith(
+        "main",
+        expect.anything(),
+        expect.objectContaining({ send_enabled: false })
+      );
     });
   });
 

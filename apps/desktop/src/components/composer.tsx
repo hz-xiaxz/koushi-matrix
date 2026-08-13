@@ -79,6 +79,7 @@ export const Composer = memo(function Composer({
   canEdit = true,
   composerMode,
   hasStagedUploads = false,
+  stagedUploadsReady = false,
   isSending,
   mathModeEnabled = true,
   mentionCandidates = [],
@@ -97,6 +98,7 @@ export const Composer = memo(function Composer({
   onMentionQueryChange = () => undefined,
   onScheduleSend,
   onSend,
+  onSendStagedUploads,
   notice = null
 }: {
   surface?: ComposerSurface;
@@ -104,6 +106,7 @@ export const Composer = memo(function Composer({
   canEdit?: boolean;
   composerMode: ComposerModeProp;
   hasStagedUploads?: boolean;
+  stagedUploadsReady?: boolean;
   isSending: boolean;
   mathModeEnabled?: boolean;
   mentionCandidates?: MentionCandidate[];
@@ -122,6 +125,9 @@ export const Composer = memo(function Composer({
   onMentionQueryChange?: (query: string | null) => void;
   onScheduleSend?: (sendAtMs: number, document: ComposerDocument) => void | Promise<void>;
   onSend: (document: ComposerDocument) => void | Promise<void>;
+  /** #send-key-unification: routed when the send shortcut is pressed while
+   *  staged uploads are ready, instead of sending the composer body. */
+  onSendStagedUploads?: () => void;
   /** Localized transient notice rendered above the composer (issue #450). */
   notice?: string | null;
 }) {
@@ -497,9 +503,16 @@ export const Composer = memo(function Composer({
     const keyEvent = composerKeyEventFromDom(event, intentSelection);
     const resolverOptions = {
       autocomplete_open: autocompleteOpen,
-      // Text-only: staged attachments are sent from the staging panel, so
-      // Enter must never dispatch them implicitly.
-      send_enabled: canEdit && !isSending && intentValue.trim().length > 0
+      // #send-key-unification: the send shortcut fires for staged attachments
+      // when they are ready, exactly like it fires for a normal message. A
+      // non-empty composer body keeps normal-send precedence so a typed
+      // message is never silently dropped by the attachment send; the
+      // composer body itself stays text-only.
+      send_enabled:
+        canEdit &&
+        !isSending &&
+        (intentValue.trim().length > 0 ||
+          (stagedUploadsReady && Boolean(onSendStagedUploads)))
     };
     if (shouldLetNativeImeHandleComposerKeyEvent(keyEvent)) {
       void resolveComposerKeyAction(surface, keyEvent, resolverOptions).catch(() => undefined);
@@ -512,7 +525,18 @@ export const Composer = memo(function Composer({
       .then((action) => {
         if (!mountedRef.current) return;
         if (action === "send") {
-          void onSend(intentDocument);
+          // Staged attachments send only when the composer body was empty at
+          // keypress and nothing was typed while the resolver was in flight:
+          // a stale routing would send the attachments and then clear the
+          // freshly typed draft. A typed message keeps normal-send precedence.
+          if (stagedUploadsReady && onSendStagedUploads && !intentValue.trim()) {
+            if (documentEpochRef.current !== intentEpoch) {
+              return;
+            }
+            onSendStagedUploads();
+          } else {
+            void onSend(intentDocument);
+          }
           return;
         }
         if (documentEpochRef.current !== intentEpoch) return;
@@ -884,6 +908,7 @@ function ThreadComposer({
   document,
   draftKey,
   hasStagedUploads = false,
+  stagedUploadsReady = false,
   isSending,
   mentionCandidates = [],
   mentionCandidatesLoading = false,
@@ -894,12 +919,14 @@ function ThreadComposer({
   onDocumentChange,
   onMentionQueryChange,
   onScheduleSend,
-  onSend
+  onSend,
+  onSendStagedUploads
 }: {
   canEdit: boolean;
   document: ComposerDocument;
   draftKey: string;
   hasStagedUploads?: boolean;
+  stagedUploadsReady?: boolean;
   isSending: boolean;
   mentionCandidates?: MentionCandidate[];
   mentionCandidatesLoading?: boolean;
@@ -911,6 +938,7 @@ function ThreadComposer({
   onMentionQueryChange?: (query: string | null) => void;
   onScheduleSend?: (sendAtMs: number, document: ComposerDocument) => void | Promise<void>;
   onSend: (document: ComposerDocument) => void | Promise<void>;
+  onSendStagedUploads?: () => void;
 }) {
   return (
     <Composer
@@ -918,6 +946,7 @@ function ThreadComposer({
       canEdit={canEdit}
       composerMode={{ kind: "plain" }}
       hasStagedUploads={hasStagedUploads}
+      stagedUploadsReady={stagedUploadsReady}
       isSending={isSending}
       mentionCandidates={mentionCandidates}
       mentionCandidatesLoading={mentionCandidatesLoading}
@@ -934,6 +963,7 @@ function ThreadComposer({
       onMentionQueryChange={onMentionQueryChange}
       onScheduleSend={onScheduleSend}
       onSend={onSend}
+      onSendStagedUploads={onSendStagedUploads}
     />
   );
 }

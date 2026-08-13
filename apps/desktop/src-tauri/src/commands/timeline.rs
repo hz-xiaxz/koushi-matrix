@@ -1208,14 +1208,7 @@ pub async fn send_prepared_uploads(
     let staged_items = staged_uploads_for_target(&snapshot, &target)
         .unwrap_or_default()
         .to_vec();
-    if staged_items.is_empty()
-        || staged_items.iter().any(|item| {
-            !matches!(
-                item.preparation,
-                koushi_state::StagedUploadPreparation::Ready { .. }
-            )
-        })
-    {
+    if staged_items.is_empty() || !koushi_state::staged_uploads_are_sendable(&staged_items) {
         return Ok(ComposerDraftAcceptanceResponse {
             accepted_revision: None,
             snapshot: current_snapshot(state.inner()).await?,
