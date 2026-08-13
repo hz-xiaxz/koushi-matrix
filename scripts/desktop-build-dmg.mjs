@@ -22,6 +22,7 @@ if (process.platform !== "darwin" && !args.has("--print-command")) {
 printStorageNotice();
 
 const bundleVersion = macOSBundleVersion();
+const buildEnvironment = localSigningEnvironment();
 const buildCommand = [
   "run",
   "tauri",
@@ -68,11 +69,61 @@ function run(command, commandArgs, cwd) {
   const result = spawnSync(command, commandArgs, {
     cwd,
     stdio: "inherit",
-    env: process.env
+    env: buildEnvironment
   });
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+}
+
+function localSigningEnvironment() {
+  const environment = { ...process.env };
+  if (process.platform !== "darwin") {
+    return environment;
+  }
+
+  const identities = spawnSync("security", ["find-identity", "-v", "-p", "codesigning"], {
+    encoding: "utf8"
+  });
+  if (identities.status !== 0) {
+    if (environment.APPLE_SIGNING_IDENTITY) {
+      console.error("desktop-build-dmg: could not validate APPLE_SIGNING_IDENTITY");
+      process.exit(1);
+    }
+    console.warn("desktop-build-dmg: no usable signing identity; falling back to ad-hoc signing");
+    return environment;
+  }
+  // `security find-identity -v` returns only identities whose certificate and
+  // private key currently form a valid code-signing identity.  Keep both the
+  // fingerprint and display name so an explicit environment value can use
+  // either representation without bypassing validation.
+  const validIdentities = [...identities.stdout.matchAll(/\b([0-9A-F]{40})\s+"([^"]+)"/g)]
+    .map((match) => ({ fingerprint: match[1], name: match[2] }));
+  if (environment.APPLE_SIGNING_IDENTITY) {
+    const requested = environment.APPLE_SIGNING_IDENTITY;
+    if (!validIdentities.some(({ fingerprint, name }) => requested === fingerprint || requested === name)) {
+      console.error("desktop-build-dmg: APPLE_SIGNING_IDENTITY is not a valid local code-signing identity");
+      process.exit(1);
+    }
+    console.log("desktop-build-dmg: using validated APPLE_SIGNING_IDENTITY from the environment");
+    return environment;
+  }
+
+  const developerIds = validIdentities
+    .map(({ name }) => name)
+    .filter((name) => name.startsWith("Developer ID Application: "));
+  const uniqueDeveloperIds = [...new Set(developerIds)];
+  if (uniqueDeveloperIds.length !== 1) {
+    console.warn(
+      `desktop-build-dmg: expected one Developer ID Application identity, found ${uniqueDeveloperIds.length}; ` +
+        "set APPLE_SIGNING_IDENTITY to select one, otherwise this build is ad-hoc signed"
+    );
+    return environment;
+  }
+
+  environment.APPLE_SIGNING_IDENTITY = uniqueDeveloperIds[0];
+  console.log("desktop-build-dmg: using the locally installed Developer ID Application identity");
+  return environment;
 }
 
 function listDmgArtifacts() {
