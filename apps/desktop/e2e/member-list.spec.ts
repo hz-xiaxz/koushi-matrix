@@ -415,6 +415,7 @@ test("Space Members can invite a brand-new user to the Space via the invite sear
 
   // Leaving the invite search resets the shared invite workflow so a later
   // room invite dialog never inherits this space search.
+  await clearInvocations(page);
   await panel.getByRole("button", { name: t("action.cancel") }).click();
-  await expect.poll(() => invocationCount(page, "close_invite_workflow")).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => invocationCount(page, "close_invite_workflow")).toBe(1);
 });

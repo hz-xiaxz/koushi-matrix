@@ -69,6 +69,7 @@ import type { OpenContextMenu } from "../app/uiShared";
 import { useStableEvent } from "./useStableEvent";
 
 const noopSearchSpaceInviteTargets = async (): Promise<InviteTargetCandidate[]> => [];
+const noopResetSpaceInviteSearch = (): void => undefined;
 
 export function ContextualRightPanel({
   activeRoom,
@@ -125,7 +126,7 @@ export function ContextualRightPanel({
   onInviteUserToSpace = () => undefined,
   onInviteSearchCandidateToSpace = () => undefined,
   onSearchSpaceInviteTargets = noopSearchSpaceInviteTargets,
-  onResetSpaceInviteSearch = () => undefined,
+  onResetSpaceInviteSearch = noopResetSpaceInviteSearch,
   canInviteToSpace = false,
   onModerateMember = () => undefined,
   onSetLocalUserAlias = () => undefined,

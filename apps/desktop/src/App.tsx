@@ -5652,12 +5652,26 @@ export function App() {
   // latest snapshot via refs so the identity never changes across renders
   // (which would re-trigger the panel's debounced effect indefinitely) and
   // merges the Rust-owned exact-MXID candidate into the result list.
+  // #508: invalidates in-flight space invite searches when the panel leaves
+  // invite mode, so a stale response can never re-dirty the shared workflow.
+  const spaceInviteSearchRequestRef = useRef(0);
+
+  const resetSpaceInviteSearch = useCallback(async () => {
+    spaceInviteSearchRequestRef.current += 1;
+    const nextSnapshot = await api.closeInviteWorkflow();
+    setSnapshot(nextSnapshot);
+  }, []);
+
   const searchSpaceInviteTargets = useCallback(async (query: string) => {
     const fence = spaceMembersFenceForSnapshot(snapshotRef.current);
     if (!fence) {
       return [];
     }
+    const requestId = spaceInviteSearchRequestRef.current;
     const nextSnapshot = await api.searchInviteTargets(fence.spaceId, query);
+    if (spaceInviteSearchRequestRef.current !== requestId) {
+      return [];
+    }
     setSnapshot(nextSnapshot);
     const inviteQuery = nextSnapshot.state.domain.invite_workflow?.query;
     const candidates = inviteQuery?.candidates ?? [];
@@ -6731,9 +6745,7 @@ export function App() {
             void inviteUserToSpace(userId, "search");
           }}
           onSearchSpaceInviteTargets={searchSpaceInviteTargets}
-          onResetSpaceInviteSearch={() => {
-            void api.closeInviteWorkflow();
-          }}
+          onResetSpaceInviteSearch={resetSpaceInviteSearch}
           canInviteToSpace={canInviteToSpace}
           spaceInviteAvailabilityReason={spaceInviteAvailabilityReason}
           onCancelInvite={(userId) => {
