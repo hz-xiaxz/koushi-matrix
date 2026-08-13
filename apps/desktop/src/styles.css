@@ -3166,6 +3166,7 @@ button:disabled {
 }
 
 .message-source-encryption-row .message-source-copy {
+  inline-size: auto;
   margin-inline-start: auto;
 }
 
