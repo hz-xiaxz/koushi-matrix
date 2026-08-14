@@ -361,3 +361,25 @@ request feedback (issue #460):
   `history_not_shared`, and custom codes are not correlatable from this stream.
 - `room_key_withheld_codes(room_id)` — maps stored withheld entries to
   `(session, closed code)` via `get_withheld_sessions_by_room_id`.
+
+## 2026-08-14: full-member-reload rotation correlation diagnostics
+
+Koushi needs to distinguish normal first-use Megolm creation from replacement
+sessions caused by a full member-list reload. The vendored SDK therefore adds a
+minimal observation-only diagnostic seam across `matrix-sdk`,
+`matrix-sdk-base`, and `matrix-sdk-crypto`:
+
+- process-local member-invalidation provenance is retained until the next
+  successful full `/members` reload;
+- the reload emits a typed event containing a closed reason, bounded count
+  buckets, request/processing timing, and the discard outcome;
+- the reload and later rotation reuse the existing anonymous room alias; and
+- an explicit discard retains its timestamp so replacement-session creation
+  can report `discard_elapsed_ms`.
+
+No Matrix identifiers, device identifiers, session identifiers, keys, event
+content, URLs, or raw errors cross the observer boundary. The patch does not
+change when member lists are fetched or when outbound Megolm sessions are
+discarded. Upstreaming intent: propose the typed observer as an optional debug
+contract if other SDK consumers need to diagnose unexpected rotation churn;
+otherwise keep it as a narrow downstream patch.
