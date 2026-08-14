@@ -95,7 +95,7 @@ use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSetti
 use matrix_sdk::room::Receipts;
 use matrix_sdk::room::edit::EditedContent;
 use matrix_sdk::room::reply::{EnforceThread, Reply};
-use matrix_sdk::ruma::UserId;
+use matrix_sdk::ruma::{OwnedRoomId, UserId};
 use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType as SendReceiptType;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::message::FormattedBody;
@@ -2819,6 +2819,10 @@ pub struct TimelineManagerActor {
     room_list_service: Option<Arc<matrix_sdk_ui::room_list_service::RoomListService>>,
     room_subscription_checkpoint_task: Option<executor::JoinHandle<()>>,
     room_subscription_service_epoch: u64,
+    /// Refcounted room-ID leases for live Sliding Sync room subscriptions
+    /// (issue #518). Room, Thread, and Focused timelines all contribute a
+    /// lease for their room; the room stays subscribed while any lease lives.
+    subscribed_room_leases: BTreeMap<OwnedRoomId, usize>,
     global_response_commit: Option<GlobalResponseCommit>,
     timelines: HashMap<TimelineKey, TimelineActorHandle>,
     accepted_submissions: SubmissionAdmissionLedger,
@@ -2928,6 +2932,31 @@ impl SubmissionAdmissionLedger {
     }
 }
 
+/// Why one subscription reconciliation was requested (issue #518).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SubscriptionReconcileTrigger {
+    RoomSelected,
+    ThreadOpened,
+    FocusedOpened,
+    TimelineRebuild,
+    SyncStarted,
+    Unsubscribe,
+}
+
+impl SubscriptionReconcileTrigger {
+    fn token(self) -> &'static str {
+        match self {
+            Self::RoomSelected => "room_selected",
+            Self::ThreadOpened => "thread_opened",
+            Self::FocusedOpened => "focused_opened",
+            Self::TimelineRebuild => "timeline_rebuild",
+            Self::SyncStarted => "sync_started",
+            Self::Unsubscribe => "unsubscribe",
+        }
+    }
+}
+
+
 impl TimelineManagerActor {
     pub(crate) fn spawn(
         action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -2944,6 +2973,7 @@ impl TimelineManagerActor {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines: HashMap::new(),
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -3017,6 +3047,7 @@ impl TimelineManagerActor {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines: HashMap::new(),
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -4357,31 +4388,62 @@ impl TimelineManagerActor {
         .await;
     }
 
+    /// Add a room-ID lease for a live Timeline actor.
+    fn lease_room(&mut self, room_id: OwnedRoomId) {
+        *self.subscribed_room_leases.entry(room_id).or_default() += 1;
+    }
+
+    /// Release one room-ID lease; returns true when the last lease was dropped.
+    fn release_room_lease(&mut self, room_id: &OwnedRoomId) -> bool {
+        let Some(count) = self.subscribed_room_leases.get_mut(room_id) else {
+            return false;
+        };
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            self.subscribed_room_leases.remove(room_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Whether a room currently has live lease coverage.
+    fn room_is_leased(&self, room_id: &str) -> bool {
+        matrix_sdk::ruma::RoomId::parse(room_id)
+            .ok()
+            .is_some_and(|room_id| self.subscribed_room_leases.contains_key(&room_id))
+    }
+
+    /// Atomically reconcile the live Sliding Sync room-subscription set to the
+    /// desired set derived from room-ID leases (issue #518). Exact-set
+    /// reconciles are true no-ops: retained rooms are never invalidated and
+    /// presentation-only timeline changes never replace a live subscription.
+    async fn reconcile_subscriptions(&mut self, trigger: SubscriptionReconcileTrigger) {
+        let Some(service) = &self.room_list_service else {
+            return;
+        };
+        let generation_before = service.subscription_generation().get();
+        let desired: Vec<&matrix_sdk::ruma::RoomId> = self
+            .subscribed_room_leases
+            .keys()
+            .map(|room_id| room_id.as_ref())
+            .collect();
+        let result = service
+            .reconcile_room_subscriptions_with_generation(&desired)
+            .await;
+        record_subscription_reconcile(trigger.token(), generation_before, &result);
+    }
+
     async fn subscribe_existing_timeline_rooms(
         &mut self,
         service: &Arc<matrix_sdk_ui::room_list_service::RoomListService>,
     ) {
-        let mut seen_room_ids = HashSet::new();
-        let mut room_ids = Vec::new();
-        for key in self.timelines.keys() {
-            let room_id = key.room_id().to_owned();
-            if !seen_room_ids.insert(room_id.clone()) {
-                continue;
-            }
-            if let Ok(parsed_room_id) = matrix_sdk::ruma::RoomId::parse(room_id.as_str()) {
-                room_ids.push(parsed_room_id);
-            }
-        }
-        if room_ids.is_empty() {
-            return;
-        }
-
-        let room_refs = room_ids
-            .iter()
-            .map(|room_id| room_id.as_ref())
-            .collect::<Vec<_>>();
-        record_subscribe_stage("sync_started_existing_rooms", Some(room_refs.len()));
-        service.subscribe_to_rooms(&room_refs).await;
+        self.room_list_service = Some(service.clone());
+        // SyncStarted performs one deduplicated reconcile of the full desired
+        // set derived from the live leases; per-actor rebuilds must not
+        // re-subscribe (issue #518 finding 3).
+        self.reconcile_subscriptions(SubscriptionReconcileTrigger::SyncStarted)
+            .await;
     }
 
     async fn rebuild_existing_room_timelines_after_sync_started(&mut self) {
@@ -4405,8 +4467,17 @@ impl TimelineManagerActor {
             .timeline_actor_generations
             .activate_after_quiescence(&key)
             .await;
+        let subscription_generation = self
+            .room_list_service
+            .as_ref()
+            .map(|service| service.subscription_generation().get());
         match self
-            .build_timeline_actor_handle(request_id, &key, activation.generation)
+            .build_timeline_actor_handle(
+                request_id,
+                &key,
+                activation.generation,
+                subscription_generation,
+            )
             .await
         {
             Ok(handle) => {
@@ -4594,6 +4665,19 @@ impl TimelineManagerActor {
                 }
                 if let Some(handle) = self.timelines.remove(&key) {
                     handle.stop().await;
+                }
+                // Issue #518: release the room-ID lease. The room stays
+                // subscribed while any other TimelineKey (Room/Thread/Focused
+                // in the same room) still holds a lease; the reconcile is a
+                // true no-op otherwise and removes the room only when the last
+                // lease is gone.
+                if let Ok(room_id) = key.room_id().parse::<OwnedRoomId>() {
+                    if self.release_room_lease(&room_id) {
+                        self.reconcile_subscriptions(
+                            SubscriptionReconcileTrigger::Unsubscribe,
+                        )
+                        .await;
+                    }
                 }
             }
             TimelineCommand::Paginate {
@@ -5415,6 +5499,34 @@ impl TimelineManagerActor {
             return;
         };
 
+        // Issue #518: the retained actor's room must be proven present in the
+        // live Sliding Sync room-subscription set before the cheap replay path
+        // is trusted. A presentation-only rebuild elsewhere must never leave a
+        // retained actor subscribed to a room the live set no longer covers.
+        let subscribed_room_id = key
+            .room_id()
+            .parse::<OwnedRoomId>()
+            .ok()
+            .filter(|room_id| {
+                let present = self
+                    .room_list_service
+                    .as_ref()
+                    .is_some_and(|service| service.active_room_subscriptions().contains(room_id));
+                if present {
+                    koushi_diagnostics::increment_counter("subscription_coverage_present");
+                } else {
+                    koushi_diagnostics::increment_counter("subscription_coverage_missing");
+                }
+                !present
+            });
+        if let Some(room_id) = &subscribed_room_id {
+            // Restore the missing room coverage through the lease owner before
+            // replaying, so the actor's live-tail contract holds.
+            self.lease_room(room_id.clone());
+            self.reconcile_subscriptions(SubscriptionReconcileTrigger::TimelineRebuild)
+                .await;
+        }
+
         // Idempotency: if the identical key is already subscribed, do NOT drop
         // and rebuild the SDK subscription.  The full rebuild was 4-8 expensive
         // `subscribe_to_rooms` / timeline-build cycles per room on snapshot
@@ -5465,8 +5577,32 @@ impl TimelineManagerActor {
             .timeline_actor_generations
             .activate_after_quiescence(&key)
             .await;
+
+        // Issue #518: the room-ID lease is the single subscription owner. Add
+        // the lease and reconcile the full desired set once before the actor
+        // build; a failed build rolls the lease back so no room stays
+        // subscribed without a live actor.
+        let reconcile_trigger = match &key.kind {
+            TimelineKind::Room { .. } => SubscriptionReconcileTrigger::RoomSelected,
+            TimelineKind::Thread { .. } => SubscriptionReconcileTrigger::ThreadOpened,
+            TimelineKind::Focused { .. } => SubscriptionReconcileTrigger::FocusedOpened,
+        };
+        let lease_room_id = key.room_id().parse::<OwnedRoomId>().ok();
+        if let Some(room_id) = &lease_room_id {
+            self.lease_room(room_id.clone());
+        }
+        self.reconcile_subscriptions(reconcile_trigger).await;
+        let subscription_generation = self
+            .room_list_service
+            .as_ref()
+            .map(|service| service.subscription_generation().get());
         match self
-            .build_timeline_actor_handle(request_id, &key, activation.generation)
+            .build_timeline_actor_handle(
+                request_id,
+                &key,
+                activation.generation,
+                subscription_generation,
+            )
             .await
         {
             Ok(handle) => {
@@ -5480,6 +5616,10 @@ impl TimelineManagerActor {
                 trace("subscribed_done");
             }
             Err(kind) => {
+                if let Some(room_id) = &lease_room_id {
+                    self.release_room_lease(room_id);
+                }
+                self.reconcile_subscriptions(reconcile_trigger).await;
                 self.timeline_actor_generations
                     .restore_failed_activation(&key, activation);
                 self.emit_subscription_failure(request_id, &key, kind, emit_failure_terminal)
@@ -5493,6 +5633,7 @@ impl TimelineManagerActor {
         request_id: RequestId,
         key: &TimelineKey,
         actor_generation: u64,
+        subscription_generation: Option<u64>,
     ) -> Result<TimelineActorHandle, TimelineFailureKind> {
         let trace = |stage: &str| {
             record_subscribe_stage(stage, None);
@@ -5517,23 +5658,11 @@ impl TimelineManagerActor {
             None => return Err(TimelineFailureKind::Sdk),
         };
 
-        // On the sliding-sync backend, subscribing a timeline must also
-        // subscribe its room with the live RoomListService so the server
-        // streams the room's NEW timeline events; the all-rooms list alone
-        // only guarantees the initial window on some servers.
-        // This is the Element X room-open pattern.
-        let mut subscription_generation = None;
-        if let Some(service) = &self.room_list_service {
-            trace("subscribe_rooms_begin");
-            let generation = service
-                .subscribe_to_rooms_with_generation(&[&room_id])
-                .await;
-            if matches!(key.kind, TimelineKind::Room { .. }) {
-                subscription_generation = Some(generation.get());
-            }
-            trace("subscribe_rooms_done");
-        }
-
+        // Issue #518: building a Timeline actor must NOT mutate the live
+        // room-subscription set. The room was already subscribed through the
+        // room-ID lease + reconciliation in `handle_subscribe` (or, for sync
+        // rebuilds, by `handle_sync_started`). The caller passes the current
+        // subscription generation for checkpoint matching.
         let focus = match &key.kind {
             TimelineKind::Room { .. } => TimelineFocus::Live {
                 hide_threaded_events: false,
@@ -7868,6 +7997,68 @@ fn record_subscribe_stage(stage: &str, count: Option<usize>) {
         }
         koushi_diagnostics::record_and_stderr(event);
     }
+}
+
+/// Record one closed-token subscription reconciliation (issue #518). Counts
+/// and the no-op flag are bucketed/counted as aggregates that survive
+/// detail-ring eviction; no room identifiers are exported.
+fn record_subscription_reconcile(
+    trigger_token: &'static str,
+    generation_before: u64,
+    result: &matrix_sdk_ui::room_list_service::RoomSubscriptionReconcile,
+) {
+    let buckets = |count: usize| match count {
+        0 => 0u8,
+        1 => 1,
+        2..=5 => 2,
+        6..=20 => 3,
+        _ => 4,
+    };
+    koushi_diagnostics::increment_counter(if result.noop {
+        "subscription_reconcile_noop"
+    } else {
+        "subscription_reconcile_changed"
+    });
+    match trigger_token {
+        "room_selected" => koushi_diagnostics::increment_counter(
+            "subscription_reconcile_trigger_room_selected",
+        ),
+        "thread_opened" => koushi_diagnostics::increment_counter(
+            "subscription_reconcile_trigger_thread_opened",
+        ),
+        "focused_opened" => koushi_diagnostics::increment_counter(
+            "subscription_reconcile_trigger_focused_opened",
+        ),
+        "timeline_rebuild" => koushi_diagnostics::increment_counter(
+            "subscription_reconcile_trigger_timeline_rebuild",
+        ),
+        "sync_started" => koushi_diagnostics::increment_counter(
+            "subscription_reconcile_trigger_sync_started",
+        ),
+        "unsubscribe" => koushi_diagnostics::increment_counter(
+            "subscription_reconcile_trigger_unsubscribe",
+        ),
+        _ => {}
+    }
+    if !result.noop {
+        koushi_diagnostics::increment_counter("subscription_reconcile_added");
+        koushi_diagnostics::increment_counter("subscription_reconcile_removed");
+        koushi_diagnostics::increment_counter("subscription_reconcile_retained");
+    }
+    let mut event = DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "core.subscription",
+        "reconcile",
+    )
+    .field(DiagnosticField::token("trigger", trigger_token))
+    .field(DiagnosticField::boolean("exact_set_noop", result.noop))
+    .field(DiagnosticField::count("added_bucket", buckets(result.added) as u64))
+    .field(DiagnosticField::count("removed_bucket", buckets(result.removed) as u64))
+    .field(DiagnosticField::count("retained_bucket", buckets(result.retained) as u64))
+    .field(DiagnosticField::count("generation_before", generation_before))
+    .field(DiagnosticField::count("generation_after", result.generation.get()))
+    .field(DiagnosticField::boolean("checkpoints_retained", result.checkpoints_retained));
+    koushi_diagnostics::record(event);
 }
 
 fn record_thread_projection(
@@ -31496,6 +31687,7 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines: HashMap::from([(key.clone(), test_timeline_actor_handle())]),
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -32945,6 +33137,7 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines: HashMap::from([(key.clone(), test_timeline_actor_handle())]),
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -33680,6 +33873,7 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines,
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -33713,6 +33907,154 @@ mod tests {
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             test_session_available: true,
         }
+    }
+
+    #[tokio::test]
+    async fn lease_and_release_room_leases_refcount_by_room() {
+        let mut manager = live_tail_test_manager(HashMap::new());
+        let room_a = matrix_sdk::ruma::room_id!("!a:test").to_owned();
+
+        manager.lease_room(room_a.clone());
+        manager.lease_room(room_a.clone());
+        assert_eq!(manager.subscribed_room_leases.get(&room_a), Some(&2));
+
+        // Removing one of two leases keeps the room subscribed.
+        assert!(!manager.release_room_lease(&room_a));
+        assert_eq!(manager.subscribed_room_leases.get(&room_a), Some(&1));
+        assert!(manager.room_is_leased("!a:test"));
+
+        // Removing the final lease drops the room.
+        assert!(manager.release_room_lease(&room_a));
+        assert!(!manager.subscribed_room_leases.contains_key(&room_a));
+        assert!(!manager.room_is_leased("!a:test"));
+    }
+
+    #[tokio::test]
+    async fn reconcile_subscriptions_derives_the_desired_set_from_leases() {
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_ui::room_list_service::RoomListService;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let room_list = Arc::new(RoomListService::new(client.clone()).await.unwrap());
+
+        let mut manager = live_tail_test_manager(HashMap::new());
+        manager.room_list_service = Some(room_list.clone());
+
+        let room_a = matrix_sdk::ruma::room_id!("!a:test").to_owned();
+        let room_b = matrix_sdk::ruma::room_id!("!b:test").to_owned();
+
+        // Room A is leased (e.g. by a Room timeline and a Thread timeline).
+        manager.lease_room(room_a.clone());
+        manager.lease_room(room_a.clone());
+        manager.lease_room(room_b.clone());
+        manager
+            .reconcile_subscriptions(SubscriptionReconcileTrigger::RoomSelected)
+            .await;
+
+        // The live set matches the deduplicated lease set exactly; a second
+        // reconcile of the same set is a true no-op.
+        assert_eq!(
+            room_list.active_room_subscriptions(),
+            BTreeSet::from([room_a.clone(), room_b.clone()])
+        );
+        let generation_before = room_list.subscription_generation();
+        manager
+            .reconcile_subscriptions(SubscriptionReconcileTrigger::ThreadOpened)
+            .await;
+        assert_eq!(
+            room_list.subscription_generation(),
+            generation_before,
+            "identical lease set must be a true no-op"
+        );
+
+        // Releasing B's lease removes only B; A stays (still leased twice).
+        assert!(manager.release_room_lease(&room_b));
+        manager
+            .reconcile_subscriptions(SubscriptionReconcileTrigger::Unsubscribe)
+            .await;
+        assert_eq!(
+            room_list.active_room_subscriptions(),
+            BTreeSet::from([room_a.clone()])
+        );
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_releases_the_room_lease_only_at_zero() {
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_ui::room_list_service::RoomListService;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let room_list = Arc::new(RoomListService::new(client.clone()).await.unwrap());
+
+        let mut manager = live_tail_test_manager(HashMap::new());
+        manager.room_list_service = Some(room_list.clone());
+        let room_a = matrix_sdk::ruma::room_id!("!a:test").to_owned();
+        let key_room = TimelineKey::room(AccountKey("@a:test".to_owned()), "!a:test");
+        let key_thread = TimelineKey {
+            account_key: AccountKey("@a:test".to_owned()),
+            kind: TimelineKind::Thread {
+                room_id: "!a:test".to_owned(),
+                root_event_id: "$root:test".to_owned(),
+            },
+        };
+
+        manager.lease_room(room_a.clone());
+        manager.lease_room(room_a.clone());
+        manager
+            .reconcile_subscriptions(SubscriptionReconcileTrigger::RoomSelected)
+            .await;
+
+        // Removing one TimelineKey keeps the room subscribed.
+        manager
+            .handle_command(TimelineCommand::Unsubscribe {
+                request_id: fake_rid(60_001),
+                key: key_room.clone(),
+            })
+            .await;
+        assert_eq!(
+            room_list.active_room_subscriptions(),
+            BTreeSet::from([room_a.clone()]),
+            "one remaining lease must keep the room subscribed"
+        );
+
+        // Removing the final TimelineKey removes the room exactly once.
+        manager
+            .handle_command(TimelineCommand::Unsubscribe {
+                request_id: fake_rid(60_002),
+                key: key_thread,
+            })
+            .await;
+        assert!(
+            room_list.active_room_subscriptions().is_empty(),
+            "the final lease removal must unsubscribe the room"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_started_reconciles_the_full_lease_set_once() {
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_ui::room_list_service::RoomListService;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let room_list = Arc::new(RoomListService::new(client.clone()).await.unwrap());
+
+        let mut manager = live_tail_test_manager(HashMap::new());
+        let room_a = matrix_sdk::ruma::room_id!("!a:test").to_owned();
+        let room_b = matrix_sdk::ruma::room_id!("!b:test").to_owned();
+        manager.lease_room(room_a.clone());
+        manager.lease_room(room_b.clone());
+
+        manager.handle_sync_started(room_list.clone(), 1).await;
+        manager.room_subscription_checkpoint_task.take().map(|task| task.abort());
+
+        // The full deduplicated lease set is restored in one reconciliation.
+        assert_eq!(
+            room_list.active_room_subscriptions(),
+            BTreeSet::from([room_a, room_b])
+        );
     }
 
     async fn poll_manager_enqueue_workers_once(manager: &mut TimelineManagerActor) {
@@ -36251,6 +36593,7 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -36638,6 +36981,7 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -36725,6 +37069,7 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -38448,6 +38793,7 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -38645,6 +38991,7 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            subscribed_room_leases: BTreeMap::new(),
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -40629,10 +40976,6 @@ mod tests {
         // The new-key (full subscribe) path must still delegate to the actor
         // builder, which subscribes the room with a generation checkpoint and
         // builds a fresh timeline.
-        let new_key_path = handle_subscribe_source
-            .split("let client = session.client()")
-            .nth(1)
-            .expect("new-key SDK path must follow the existing-key branch");
         let build_helper_source = source
             .split("async fn build_timeline_actor_handle")
             .nth(1)
@@ -40642,12 +40985,16 @@ mod tests {
             .expect("route helper should follow timeline actor build helper");
 
         assert!(
-            build_helper_source.contains("subscribe_to_rooms_with_generation"),
-            "a new (not yet subscribed) key must still call subscribe_to_rooms_with_generation"
+            !build_helper_source.contains("subscribe_to_rooms_with_generation"),
+            "building a Timeline actor must not mutate the room-subscription set (issue #518)"
         );
         assert!(
-            new_key_path.contains("koushi_timeline_builder("),
-            "a new (not yet subscribed) key must still build an SDK timeline through the project helper"
+            handle_subscribe_source.contains("lease_room"),
+            "a new (not yet subscribed) key must lease its room before building"
+        );
+        assert!(
+            handle_subscribe_source.contains("reconcile_subscriptions"),
+            "a new (not yet subscribed) key must reconcile the room-subscription set"
         );
     }
 
@@ -40699,12 +41046,13 @@ mod tests {
             "late SyncStarted must rebuild already-open room live timelines so fresh InitialItems repair events missed before the live RoomListService handoff"
         );
         assert!(
-            sync_started_handler.contains("self.timelines.keys()"),
-            "existing timeline room subscriptions must be derived from the active timeline keys"
+            sync_started_handler.contains("subscribed_room_leases"),
+            "existing timeline room subscriptions must be derived from the room-ID lease owner"
         );
         assert!(
-            sync_started_handler.contains("service.subscribe_to_rooms"),
-            "existing timeline rooms must be handed to the live RoomListService"
+            sync_started_handler
+                .contains("reconcile_room_subscriptions_with_generation"),
+            "existing timeline rooms must be reconciled atomically with the live RoomListService"
         );
 
         let rebuild_handler = source

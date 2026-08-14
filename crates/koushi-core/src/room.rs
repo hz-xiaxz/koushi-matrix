@@ -6132,7 +6132,7 @@ pub mod tests {
     fn room_operation_records_without_environment_switch() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         trace_room_operation("create_room", "test_always_on", make_request_id(999));
-        assert!(koushi_diagnostics::snapshot().records.iter().any(|record| {
+        assert!(koushi_diagnostics::test_support::detail_snapshot().records.iter().any(|record| {
             record.event.source == "core.room" && record.event.stage == "test_always_on"
         }));
     }
@@ -8736,9 +8736,9 @@ pub mod tests {
     #[test]
     fn failed_space_member_diagnostics_do_not_fabricate_member_counts() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let before = koushi_diagnostics::snapshot().records.len();
+        let before = koushi_diagnostics::test_support::detail_snapshot().records.len();
         record_core_space_members_load_failure("sync_refresh", 7);
-        let record = koushi_diagnostics::snapshot()
+        let record = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
             .skip(before)
@@ -8802,7 +8802,7 @@ pub mod tests {
         record_core_space_members_projection("load", 4, &projection, "success");
         record_core_profile_resolution(&projection);
 
-        let snapshot = koushi_diagnostics::snapshot();
+        let snapshot = koushi_diagnostics::test_support::detail_snapshot();
         let encoded = serde_json::to_string(&snapshot).expect("diagnostics serialize");
         assert!(!encoded.contains("@alice:example.invalid"));
         assert!(!encoded.contains("Alice private"));
