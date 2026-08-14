@@ -4451,18 +4451,20 @@ impl TimelineManagerActor {
             .keys()
             .map(|room_id| room_id.as_ref())
             .collect();
-        let previous_active = service.active_room_subscriptions();
+        let previous_actual = service.actual_subscribed_rooms();
         let result = service
             .reconcile_room_subscriptions_with_generation(&desired)
             .await;
         if !result.noop {
-            // Rotation correlation: per-room continuous-coverage tokens. A
-            // retained room kept coverage; an added room that was seen before
-            // is a security-required re-add (coverage lost); a first-time add
-            // has unknown prior coverage.
+            // Rotation correlation: per-room continuous-coverage tokens
+            // derived from the ACTUAL pre-reconcile set (a session expiry
+            // clears the real map, so such rooms are re-adds, not retained).
+            // A retained room kept coverage; an added room that was seen
+            // before is a security-required re-add (coverage lost); a
+            // first-time add has unknown prior coverage.
             let desired_set: BTreeSet<OwnedRoomId> =
                 desired.iter().map(|room_id| (*room_id).to_owned()).collect();
-            for room_id in desired_set.intersection(&previous_active) {
+            for room_id in desired_set.intersection(&previous_actual) {
                 koushi_diagnostics::increment_counter("subscription_room_continuous");
                 record_subscription_room_coverage(
                     self.room_ordinal_for(room_id.clone()),
@@ -4470,7 +4472,7 @@ impl TimelineManagerActor {
                     "true",
                 );
             }
-            for room_id in desired_set.difference(&previous_active) {
+            for room_id in desired_set.difference(&previous_actual) {
                 let readded = self.subscription_room_seen.contains(room_id);
                 if readded {
                     koushi_diagnostics::increment_counter("subscription_room_readded");
@@ -5593,10 +5595,14 @@ impl TimelineManagerActor {
             .then(|| key.room_id().parse::<OwnedRoomId>().ok())
             .flatten()
             .filter(|room_id| {
+                // Verify against the ACTUAL Sliding Sync map, not the logical
+                // active set: a session expiry clears the real map without
+                // touching the logical set, so the retained actor must restore
+                // real coverage before replaying.
                 let present = self
                     .room_list_service
                     .as_ref()
-                    .is_some_and(|service| service.active_room_subscriptions().contains(room_id));
+                    .is_some_and(|service| service.actual_subscribed_rooms().contains(room_id));
                 if present {
                     koushi_diagnostics::increment_counter("subscription_coverage_present");
                 } else {
