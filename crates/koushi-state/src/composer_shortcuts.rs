@@ -293,23 +293,28 @@ pub(crate) fn format_markdown_subset_html(
     let mut changed = false;
     let lines = body.split('\n').collect::<Vec<_>>();
     let mut line_index = 0;
+    let mut previous_chunk = None;
 
     while line_index < lines.len() {
-        if line_index > 0 {
-            html.push('\n');
+        if lines[line_index].is_empty() {
+            line_index += 1;
+            continue;
         }
 
         if options.math_mode
             && let Some((block_body, closing_index)) = math_block_body(&lines, line_index)
                 .or_else(|| latex_display_block(&lines, line_index))
         {
+            push_chunk_boundary(&mut html, previous_chunk, line_index, true);
             push_math_html(&mut html, "div", &block_body);
             changed = true;
+            previous_chunk = Some((closing_index, true));
             line_index = closing_index + 1;
             continue;
         }
 
         if unordered_list_item_body(lines[line_index]).is_some() {
+            push_chunk_boundary(&mut html, previous_chunk, line_index, true);
             html.push_str("<ul>");
             while line_index < lines.len() {
                 let Some(item_body) = unordered_list_item_body(lines[line_index]) else {
@@ -322,14 +327,47 @@ pub(crate) fn format_markdown_subset_html(
                 line_index += 1;
             }
             html.push_str("</ul>");
+            previous_chunk = Some((line_index - 1, true));
             continue;
         }
 
+        push_chunk_boundary(&mut html, previous_chunk, line_index, false);
         changed = push_inline_markdown_subset(&mut html, lines[line_index], options) || changed;
+        previous_chunk = Some((line_index, false));
         line_index += 1;
     }
 
+    if let Some((previous_end, _)) = previous_chunk {
+        for _ in previous_end..lines.len() - 1 {
+            html.push_str("<br>");
+        }
+    }
+
     (html, changed)
+}
+
+fn push_chunk_boundary(
+    html: &mut String,
+    previous_chunk: Option<(usize, bool)>,
+    current_start: usize,
+    current_is_block: bool,
+) {
+    let Some((previous_end, previous_is_block)) = previous_chunk else {
+        for _ in 0..current_start {
+            html.push_str("<br>");
+        }
+        return;
+    };
+    let newline_count = current_start - previous_end;
+    if previous_is_block {
+        html.push('\n');
+    }
+    for _ in usize::from(previous_is_block || current_is_block)..newline_count {
+        html.push_str("<br>");
+    }
+    if current_is_block && !previous_is_block {
+        html.push('\n');
+    }
 }
 
 fn unordered_list_item_body(line: &str) -> Option<&str> {
