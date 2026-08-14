@@ -120,6 +120,73 @@ fn formatted_mentions_escape_cjk_labels_and_debug_redacts_content_and_identity()
 }
 
 #[test]
+fn formatted_mentions_preserve_authored_newlines_and_plain_fallback() {
+    let document = ComposerDocument::new(vec![
+        ComposerInline::Mention {
+            target: user("@alice:example.invalid", "Alice"),
+            display_label: "Alice".into(),
+        },
+        ComposerInline::Text {
+            text: "\nhttps://example.invalid/pull/7\n\nFeedback from the port".into(),
+        },
+    ]);
+
+    assert_eq!(
+        document.plain_body(),
+        "@Alice\nhttps://example.invalid/pull/7\n\nFeedback from the port"
+    );
+    assert_eq!(
+        document.formatted_body().as_deref(),
+        Some(
+            "<a href=\"https://matrix.to/#/%40alice%3Aexample.invalid\">@Alice</a><br>https://example.invalid/pull/7<br><br>Feedback from the port"
+        )
+    );
+}
+
+#[test]
+fn formatted_mentions_define_leading_trailing_and_repeated_newlines() {
+    let document = ComposerDocument::new(vec![
+        ComposerInline::Text { text: "\n".into() },
+        ComposerInline::Mention {
+            target: user("@alice:example.invalid", "Alice"),
+            display_label: "Alice".into(),
+        },
+        ComposerInline::Text {
+            text: "\n\n".into(),
+        },
+    ]);
+
+    assert_eq!(document.plain_body(), "\n@Alice\n\n");
+    assert_eq!(
+        document.formatted_body().as_deref(),
+        Some("<br><a href=\"https://matrix.to/#/%40alice%3Aexample.invalid\">@Alice</a><br><br>")
+    );
+}
+
+#[test]
+fn edit_shaped_mention_replacement_preserves_blank_line() {
+    let replacement = ComposerDocument::new(vec![
+        ComposerInline::Text {
+            text: "**Updated** ".into(),
+        },
+        ComposerInline::Mention {
+            target: user("@alice:example.invalid", "Alice"),
+            display_label: "Alice".into(),
+        },
+        ComposerInline::Text {
+            text: "\n\nReplacement detail".into(),
+        },
+    ]);
+
+    assert_eq!(
+        replacement.formatted_body().as_deref(),
+        Some(
+            "<strong>Updated</strong> <a href=\"https://matrix.to/#/%40alice%3Aexample.invalid\">@Alice</a><br><br>Replacement detail"
+        )
+    );
+}
+
+#[test]
 fn room_mentions_and_room_targets_are_deduplicated_by_identity() {
     let room = MentionTarget::Room {
         room_id: "!room:example.invalid".into(),

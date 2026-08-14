@@ -11189,6 +11189,57 @@ describe("TimelineView", () => {
     expect(body.querySelectorAll("br")).toHaveLength(1);
   });
 
+  it("renders authored mention newlines and blank lines from explicit formatted breaks", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+    const item: TimelineItem = {
+      ...message(
+        "$formatted-mention-breaks:example.invalid",
+        "@Alice\nhttps://example.invalid/pull/7\n\nFeedback from the port"
+      ),
+      formatted: {
+        html: '<a href="https://matrix.to/#/%40alice%3Aexample.invalid">@Alice</a><br>https://example.invalid/pull/7<br><br>Feedback from the port',
+        plain_text: "@Alice\nhttps://example.invalid/pull/7\n\nFeedback from the port",
+        code_blocks: []
+      }
+    };
+
+    const { container } = render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+    emit({
+      kind: "Timeline",
+      event: {
+        InitialItems: {
+          request_id: null,
+          key: KEY,
+          generation: 1,
+          items: [item]
+        }
+      }
+    });
+
+    const body = await waitFor(() => {
+      const next = container.querySelector(".message-formatted-body");
+      expect(next).not.toBeNull();
+      return next!;
+    });
+    expect(body.querySelectorAll("br")).toHaveLength(3);
+    expect(body.textContent).toBe(
+      "@Alicehttps://example.invalid/pull/7Feedback from the port"
+    );
+  });
+
   it("renders link preview cards as clickable anchors", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const hideLinkPreview = vi.fn(async () => undefined);

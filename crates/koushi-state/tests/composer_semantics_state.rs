@@ -114,6 +114,62 @@ fn composer_markdown_unordered_lists_are_rust_owned_formatted_body() {
 }
 
 #[test]
+fn composer_inline_markdown_uses_explicit_html_breaks() {
+    let draft = build_formatted_message_draft("**first**\nsecond", MentionIntent::default());
+
+    assert_eq!(draft.plain_body, "**first**\nsecond");
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<strong>first</strong><br>second")
+    );
+}
+
+#[test]
+fn plain_multiline_text_still_uses_only_the_plain_body() {
+    let draft = build_formatted_message_draft("first\n\nsecond", MentionIntent::default());
+
+    assert_eq!(draft.plain_body, "first\n\nsecond");
+    assert_eq!(draft.formatted_body, None);
+}
+
+#[test]
+fn composer_block_boundaries_preserve_only_authored_blank_lines() {
+    let cases = [
+        (
+            "before\n- one\n- two",
+            "before\n<ul><li>one</li><li>two</li></ul>",
+        ),
+        (
+            "- one\n- two\nafter",
+            "<ul><li>one</li><li>two</li></ul>\nafter",
+        ),
+        ("before\n\n- one", "before<br>\n<ul><li>one</li></ul>"),
+        ("- one\n\nafter", "<ul><li>one</li></ul>\n<br>after"),
+        (
+            "before\n$$\nx\ny\n$$",
+            "before\n<div data-mx-maths=\"x\ny\">x\ny</div>",
+        ),
+        (
+            "$$\nx\ny\n$$\nafter",
+            "<div data-mx-maths=\"x\ny\">x\ny</div>\nafter",
+        ),
+        (
+            "before\n\n$$\nx\ny\n$$",
+            "before<br>\n<div data-mx-maths=\"x\ny\">x\ny</div>",
+        ),
+        (
+            "$$\nx\ny\n$$\n\nafter",
+            "<div data-mx-maths=\"x\ny\">x\ny</div>\n<br>after",
+        ),
+    ];
+
+    for (body, expected) in cases {
+        let draft = build_formatted_message_draft(body, MentionIntent::default());
+        assert_eq!(draft.formatted_body.as_deref(), Some(expected), "{body:?}");
+    }
+}
+
+#[test]
 fn composer_math_markdown_uses_matrix_math_html_by_default() {
     let draft = build_formatted_message_draft(
         "Energy $E=mc^2$\n$$\n\\int_0^1 x dx\n$$",
