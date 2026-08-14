@@ -4431,6 +4431,18 @@ impl TimelineManagerActor {
         let result = service
             .reconcile_room_subscriptions_with_generation(&desired)
             .await;
+        if !result.noop {
+            // A generation change caused by another room must not make a
+            // retained room falsely stale: advance every retained Room actor's
+            // expected subscription generation so checkpoint matching keeps
+            // working (issue #518 generation ownership).
+            let generation = result.generation.get();
+            for (actor_key, handle) in self.timelines.iter_mut() {
+                if matches!(actor_key.kind, TimelineKind::Room { .. }) {
+                    handle.subscription_generation = Some(generation);
+                }
+            }
+        }
         record_subscription_reconcile(trigger.token(), generation_before, &result);
     }
 
@@ -4663,20 +4675,21 @@ impl TimelineManagerActor {
                         .invalidate_and_quiesce(&key)
                         .await;
                 }
-                if let Some(handle) = self.timelines.remove(&key) {
-                    handle.stop().await;
-                }
-                // Issue #518: release the room-ID lease. The room stays
+                let removed_actor = self.timelines.remove(&key);
+                // Issue #518: release the room-ID lease only when an actor was
+                // actually removed (the lease is per key). The room stays
                 // subscribed while any other TimelineKey (Room/Thread/Focused
                 // in the same room) still holds a lease; the reconcile is a
                 // true no-op otherwise and removes the room only when the last
                 // lease is gone.
-                if let Ok(room_id) = key.room_id().parse::<OwnedRoomId>() {
-                    if self.release_room_lease(&room_id) {
-                        self.reconcile_subscriptions(
-                            SubscriptionReconcileTrigger::Unsubscribe,
-                        )
-                        .await;
+                if let Some(handle) = removed_actor {
+                    if let Ok(room_id) = key.room_id().parse::<OwnedRoomId>() {
+                        if self.release_room_lease(&room_id) {
+                            self.reconcile_subscriptions(
+                                SubscriptionReconcileTrigger::Unsubscribe,
+                            )
+                            .await;
+                        }
                     }
                 }
             }
@@ -5521,8 +5534,11 @@ impl TimelineManagerActor {
             });
         if let Some(room_id) = &subscribed_room_id {
             // Restore the missing room coverage through the lease owner before
-            // replaying, so the actor's live-tail contract holds.
-            self.lease_room(room_id.clone());
+            // replaying. The key already holds its lease (acquired at actor
+            // creation); never double-lease on a coverage recovery.
+            if !self.room_is_leased(key.room_id()) {
+                self.lease_room(room_id.clone());
+            }
             self.reconcile_subscriptions(SubscriptionReconcileTrigger::TimelineRebuild)
                 .await;
         }
@@ -5588,9 +5604,17 @@ impl TimelineManagerActor {
             TimelineKind::Focused { .. } => SubscriptionReconcileTrigger::FocusedOpened,
         };
         let lease_room_id = key.room_id().parse::<OwnedRoomId>().ok();
-        if let Some(room_id) = &lease_room_id {
-            self.lease_room(room_id.clone());
-        }
+        // The lease is per TimelineKey, not per actor instance: a replacement
+        // (replay-failure rebuild) transfers the existing key lease, so only a
+        // genuinely new key acquires one.
+        let lease_added = lease_room_id.as_ref().is_some_and(|room_id| {
+            if self.timelines.contains_key(&key) {
+                false
+            } else {
+                self.lease_room(room_id.clone());
+                true
+            }
+        });
         self.reconcile_subscriptions(reconcile_trigger).await;
         let subscription_generation = self
             .room_list_service
@@ -5616,8 +5640,10 @@ impl TimelineManagerActor {
                 trace("subscribed_done");
             }
             Err(kind) => {
-                if let Some(room_id) = &lease_room_id {
-                    self.release_room_lease(room_id);
+                if lease_added {
+                    if let Some(room_id) = &lease_room_id {
+                        self.release_room_lease(room_id);
+                    }
                 }
                 self.reconcile_subscriptions(reconcile_trigger).await;
                 self.timeline_actor_generations
@@ -34000,13 +34026,17 @@ mod tests {
             },
         };
 
+        // One lease per live TimelineKey; both keys carry placeholder actors.
         manager.lease_room(room_a.clone());
         manager.lease_room(room_a.clone());
+        manager.timelines.insert(key_room.clone(), placeholder_actor_handle());
+        manager.timelines.insert(key_thread.clone(), placeholder_actor_handle());
         manager
             .reconcile_subscriptions(SubscriptionReconcileTrigger::RoomSelected)
             .await;
 
-        // Removing one TimelineKey keeps the room subscribed.
+        // Removing one TimelineKey (with an actor removed) keeps the room
+        // subscribed through the remaining lease.
         manager
             .handle_command(TimelineCommand::Unsubscribe {
                 request_id: fake_rid(60_001),
@@ -34030,6 +34060,37 @@ mod tests {
             room_list.active_room_subscriptions().is_empty(),
             "the final lease removal must unsubscribe the room"
         );
+
+        // A duplicate unsubscribe for an already-removed key (no actor to
+        // remove) must not release another surface's lease.
+        manager.lease_room(room_a.clone());
+        manager
+            .reconcile_subscriptions(SubscriptionReconcileTrigger::RoomSelected)
+            .await;
+        manager
+            .handle_command(TimelineCommand::Unsubscribe {
+                request_id: fake_rid(60_003),
+                key: key_room.clone(),
+            })
+            .await;
+        assert_eq!(
+            room_list.active_room_subscriptions(),
+            BTreeSet::from([room_a.clone()]),
+            "an unsubscribe without an actor must not release the lease"
+        );
+    }
+
+    fn placeholder_actor_handle() -> TimelineActorHandle {
+        let (tx, _rx) = mpsc::channel(1);
+        TimelineActorHandle {
+            tx,
+            control_tx: None,
+            position_rx: None,
+            task: None,
+            auxiliary_tasks: Vec::new(),
+            subscription_generation: None,
+            enqueue_context: None,
+        }
     }
 
     #[tokio::test]
