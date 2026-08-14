@@ -166,3 +166,29 @@ Then run the existing local `send_queue` core lane against both supported homese
 - Recipient-side delivery acknowledgements.
 - Persistence of repair obligations after message index 0 or across runtime restart.
 - Any custom Matrix protocol extension.
+
+## Implementation record (2026-08-14)
+
+- RED was reconstructed at pre-fix commit `b6c0fda`: the focused SDK integration
+  reproduction failed because only normal pre-share ran and no second targeted
+  `/keys/claim` was issued before index 0.
+- GPT-5.6 Luna (`max`) produced the initial vendored-SDK implementation in the
+  dedicated worktree. The supervising frontier agent completed the bounded
+  fence, exact forced targets, cancellation, error taxonomy, and diagnostic
+  fixes after independent review.
+- Vendored SDK implementation commit: `3a7f5663b` (`fix(crypto): repair initial
+  Megolm Olm gaps`). No custom wire event, persistence, or plaintext fallback
+  was added.
+- Focused GREEN evidence: 12 `matrix-sdk-crypto` issue-523 tests, 9
+  `matrix-sdk` issue-523 integration tests, 5 existing index-0 re-share tests,
+  7 Koushi initial/index-0/issue-523 diagnostic tests, and 4 Koushi core forced
+  re-share tests.
+- Two scoped `reviewer-gpt` final passes returned `PASS`: claim/error/fence and
+  policy/cancellation/diagnostics.
+- Full local gates also passed: 137 `koushi-sdk`, 1,003 `koushi-core`, 38
+  `koushi-state`, 147 `koushi-desktop`, and 1,352 Vitest tests, plus TypeScript,
+  lint, secret scan, SDK-submodule, and diff checks. Root `cargo fmt --check`
+  remains blocked only by pre-existing formatting drift in unrelated core QA and
+  account/store/timeline files; all touched files and the SDK format check pass.
+- Packaged Element/Koushi interoperability remains environment-dependent and is
+  not claimed by these reproducible SDK/core gates.
