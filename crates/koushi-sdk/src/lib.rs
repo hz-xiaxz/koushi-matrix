@@ -7353,6 +7353,14 @@ async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
         "rotations_store_missing",
         "rotations_invalidated",
         "rotations_unknown",
+        "member_reloads_room_subscription",
+        "member_reloads_limited_sync_response",
+        "member_reloads_membership_or_device_change",
+        "member_reloads_full_member_list_reload",
+        "member_reloads_unknown",
+        "member_reload_discarded",
+        "member_reload_no_active_session",
+        "member_reload_sdk_error",
         "rotation_creation_failures",
         "rotation_share_failures",
         "requester_send_started",
@@ -7440,6 +7448,9 @@ fn record_room_key_diagnostic(event: matrix_sdk::encryption::RoomKeyDiagnosticEv
             record_incoming_room_key_diagnostic(event)
         }
         RoomKeyDiagnosticEvent::Rotation(event) => record_room_key_rotation_diagnostic(event),
+        RoomKeyDiagnosticEvent::MemberReload(event) => {
+            record_room_key_member_reload_diagnostic(event)
+        }
         RoomKeyDiagnosticEvent::Receive(event) => record_room_key_receive_diagnostic(event),
         RoomKeyDiagnosticEvent::OlmRecovery(event) => record_olm_recovery_diagnostic(event),
         RoomKeyDiagnosticEvent::InitialShare(event) => record_initial_share_diagnostic(event),
@@ -8091,6 +8102,12 @@ fn record_room_key_rotation_diagnostic(event: matrix_sdk::encryption::RoomKeyRot
             new.ordinal(),
         ));
     }
+    if let Some(discard_elapsed_ms) = event.discard_elapsed_ms {
+        diagnostic = diagnostic.field(DiagnosticField::milliseconds(
+            "discard_elapsed_ms",
+            discard_elapsed_ms.into(),
+        ));
+    }
     record(diagnostic);
 
     match event.reason {
@@ -8129,6 +8146,96 @@ fn record_room_key_rotation_diagnostic(event: matrix_sdk::encryption::RoomKeyRot
     }
     if event.first_share_outcome == Share::Failed {
         koushi_diagnostics::increment_counter("rotation_share_failures");
+    }
+}
+
+fn record_room_key_member_reload_diagnostic(
+    event: matrix_sdk::encryption::RoomKeyMemberReloadDiagnostic,
+) {
+    use matrix_sdk::encryption::{
+        RoomKeyMemberReloadDiscardOutcome as Outcome, RoomKeyRotationReason as Reason,
+    };
+
+    let reason = match event.reason {
+        Reason::RoomSubscription => "room_subscription",
+        Reason::LimitedSyncResponse => "limited_sync_response",
+        Reason::MembershipOrDeviceChange => "membership_or_device_change",
+        Reason::FullMemberListReload => "full_member_list_reload",
+        _ => "unknown",
+    };
+    let discard_outcome = match event.discard_outcome {
+        Outcome::Discarded => "discarded",
+        Outcome::NoActiveSession => "no_active_session",
+        Outcome::SdkError => "sdk_error",
+    };
+    let mut diagnostic =
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_member_reload", "completed")
+            .field(DiagnosticField::ordinal_alias(
+                "room_alias",
+                "room",
+                event.room.ordinal(),
+            ))
+            .field(DiagnosticField::token("reason", reason))
+            .field(DiagnosticField::count(
+                "invalidation_count_bucket",
+                event.invalidation_count_bucket.into(),
+            ))
+            .field(DiagnosticField::count(
+                "response_member_count_bucket",
+                event.response_member_count_bucket.into(),
+            ))
+            .field(DiagnosticField::milliseconds(
+                "processing_elapsed_ms",
+                event.processing_elapsed_ms.into(),
+            ))
+            .field(DiagnosticField::token("discard_outcome", discard_outcome));
+    if let Some(were_synced) = event.members_were_synced_before_invalidation {
+        diagnostic = diagnostic.field(DiagnosticField::boolean(
+            "members_synced_before_invalidation",
+            were_synced,
+        ));
+    }
+    if let Some(invalidation_age_ms) = event.invalidation_age_ms {
+        diagnostic = diagnostic.field(DiagnosticField::milliseconds(
+            "invalidation_age_ms",
+            invalidation_age_ms.into(),
+        ));
+    }
+    if let Some(request_elapsed_ms) = event.request_elapsed_ms {
+        diagnostic = diagnostic.field(DiagnosticField::milliseconds(
+            "request_elapsed_ms",
+            request_elapsed_ms.into(),
+        ));
+    }
+    record(diagnostic);
+
+    match event.reason {
+        Reason::RoomSubscription => {
+            koushi_diagnostics::increment_counter("member_reloads_room_subscription")
+        }
+        Reason::LimitedSyncResponse => {
+            koushi_diagnostics::increment_counter("member_reloads_limited_sync_response")
+        }
+        Reason::MembershipOrDeviceChange => {
+            koushi_diagnostics::increment_counter(
+                "member_reloads_membership_or_device_change",
+            )
+        }
+        Reason::FullMemberListReload => {
+            koushi_diagnostics::increment_counter("member_reloads_full_member_list_reload")
+        }
+        _ => koushi_diagnostics::increment_counter("member_reloads_unknown"),
+    }
+    match event.discard_outcome {
+        Outcome::Discarded => {
+            koushi_diagnostics::increment_counter("member_reload_discarded")
+        }
+        Outcome::NoActiveSession => {
+            koushi_diagnostics::increment_counter("member_reload_no_active_session")
+        }
+        Outcome::SdkError => {
+            koushi_diagnostics::increment_counter("member_reload_sdk_error")
+        }
     }
 }
 
@@ -14964,6 +15071,75 @@ mod room_key_receive_diagnostics_tests {
                 "privacy leak in receive diagnostic: {text}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod room_key_member_reload_diagnostics_tests {
+    use super::{record_room_key_member_reload_diagnostic, record_room_key_rotation_diagnostic};
+    use koushi_diagnostics::{DiagnosticValue, test_support};
+    use matrix_sdk::encryption::{
+        RoomKeyCreationOutcome, RoomKeyDiagnosticAlias, RoomKeyFirstShareOutcome,
+        RoomKeyMemberReloadDiagnostic, RoomKeyMemberReloadDiscardOutcome,
+        RoomKeyRotationDiagnostic, RoomKeyRotationReason,
+    };
+
+    #[test]
+    fn member_reload_and_rotation_records_are_privacy_safe_and_correlated() {
+        let _guard = test_support::lock();
+        for counter in [
+            "member_reloads_room_subscription",
+            "member_reload_discarded",
+        ] {
+            koushi_diagnostics::reset_counter(counter);
+        }
+        let diagnostic_start = test_support::detail_snapshot().records.len();
+
+        record_room_key_member_reload_diagnostic(RoomKeyMemberReloadDiagnostic {
+            room: RoomKeyDiagnosticAlias::new(3),
+            reason: RoomKeyRotationReason::RoomSubscription,
+            members_were_synced_before_invalidation: Some(true),
+            invalidation_count_bucket: 2,
+            invalidation_age_ms: Some(42),
+            request_elapsed_ms: Some(17),
+            response_member_count_bucket: 4,
+            processing_elapsed_ms: 3,
+            discard_outcome: RoomKeyMemberReloadDiscardOutcome::Discarded,
+        });
+        record_room_key_rotation_diagnostic(RoomKeyRotationDiagnostic {
+            room: RoomKeyDiagnosticAlias::new(3),
+            previous_session: Some(RoomKeyDiagnosticAlias::new(7)),
+            new_session: Some(RoomKeyDiagnosticAlias::new(8)),
+            reason: RoomKeyRotationReason::RoomSubscription,
+            creation_outcome: RoomKeyCreationOutcome::Created,
+            first_share_outcome: RoomKeyFirstShareOutcome::Pending,
+            first_send_correlation_present: false,
+            discard_elapsed_ms: Some(9),
+            elapsed_ms: 1,
+        });
+
+        let snapshot = test_support::detail_snapshot();
+        let records: Vec<_> = snapshot.records.iter().skip(diagnostic_start).collect();
+        let reload = records
+            .iter()
+            .find(|record| record.event.source == "core.room_member_reload")
+            .expect("member reload diagnostic");
+        let rotation = records
+            .iter()
+            .find(|record| record.event.source == "core.room_key_rotation")
+            .expect("rotation diagnostic");
+        for record in [reload, rotation] {
+            assert!(record.event.fields.iter().any(|field| {
+                field.key == "room_alias"
+                    && field.value
+                        == DiagnosticValue::OrdinalAlias { kind: "room", ordinal: 3 }
+            }));
+            let debug = format!("{:?}", record.event);
+            assert!(!debug.contains('@') && !debug.contains('!') && !debug.contains("http"));
+        }
+        assert!(rotation.event.fields.iter().any(|field| {
+            field.key == "discard_elapsed_ms" && field.value == DiagnosticValue::Milliseconds(9)
+        }));
     }
 }
 
