@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-08-08.
+Last amended: 2026-08-14.
 
 ## Product Scope
 
@@ -1203,6 +1203,28 @@ architectural invariants:
   may claim exhaustive backup-wide restore
   until the exact supported restore scope is proven or split into an explicit
   follow-up.
+
+### Initial outbound Megolm delivery repair
+
+For a newly created outbound Megolm session, the SDK's normal pre-share remains
+first. If an eligible own or peer device is reported without an Olm session,
+the send path re-evaluates recipient policy and performs one immediate targeted
+`/keys/claim` repair before message index 0 is consumed. Only those still-
+eligible failed devices are claim/re-share candidates; pending, committed, and
+policy-excluded devices are neither claimed nor resent.
+
+The first-event fence is runtime-local and bounded. It permits at most one
+additional event-driven attempt after a matching device-key, one-time/fallback-
+key, or Olm recovery update, then settles or reaches its short deadline. It is
+cancelled by outbound-session replacement, room leave, policy/trust/blacklist
+change, logout, runtime replacement, or shutdown. Deadline never permits
+plaintext fallback. Own-device recovery through verified-device gossip or
+Secure Backup remains supplementary and is not counted as successful initial
+direct delivery; peer-user coverage is tracked separately so a peer user with
+zero covered eligible devices cannot be hidden by aggregate device success.
+Homeserver acceptance commits share state but never means recipient decryption
+acknowledgement. Diagnostics expose only runtime-local aliases, closed outcomes,
+counts/buckets, and elapsed time.
 
 ### Mandatory recoverable Secure Backup
 

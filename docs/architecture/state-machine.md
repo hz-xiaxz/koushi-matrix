@@ -8,7 +8,7 @@ fixture/demo backend contract mentioned below is historical (dev/demo only).
 The state-transition diagrams in this document are normative and must track the
 reducer; see [Maintenance Contract](#maintenance-contract).
 
-Date: 2026-07-31
+Date: 2026-08-14
 
 ## Contract
 
@@ -1356,6 +1356,55 @@ reaction counts, ownership, target eligibility, or toggle semantics.
   redact only when the projection says the matching own reaction event is
   present. If the projection does not support the requested transition, settle
   it as an invalid reaction failure instead of guessing from React state.
+
+## Initial Outbound Megolm Delivery Repair (#523)
+
+The first-event send path owns one runtime-local repair lifecycle for the active
+outbound Megolm session. This is SDK-internal security state, not React or
+reducer presentation state.
+
+```mermaid
+stateDiagram-v2
+    [*] --> InitialSharing
+    InitialSharing --> Settled: no eligible olm_missing recipient
+    InitialSharing --> Repairing: eligible olm_missing recipients
+    Repairing --> Settled: targeted claim + Olm share accepted
+    Repairing --> WaitingWake: claim empty/stale/no_olm and deadline remains
+    WaitingWake --> Repairing: matching device-key/OTK/Olm recovery update
+    WaitingWake --> Deadline: first-event deadline
+    Repairing --> Deadline: first-event deadline
+    InitialSharing --> Cancelled: session/policy/runtime invalidated
+    Repairing --> Cancelled: session/policy/runtime invalidated
+    WaitingWake --> Cancelled: session/policy/runtime invalidated
+    Settled --> [*]: consume message index 0
+    Deadline --> [*]: emit closed coverage outcome; consume message index 0
+    Cancelled --> [*]: remove stale work
+```
+
+Guard notes:
+
+- The normal pre-share runs first. Only exact recipients reported
+  `olm_missing`, still eligible after membership/history/trust/blacklist/
+  strategy re-evaluation, enter repair. Pending, committed, current-device,
+  and policy-excluded recipients are not claimed or resent.
+- The immediate attempt uses standard `/keys/claim` signed one-time/fallback
+  key handling, creates the Olm session, queues the same index-0
+  `m.room_key`, and commits share state only after homeserver acceptance.
+- One matching device-key, one-time/fallback-key, or Olm recovery update may
+  wake one additional attempt before the fixed short deadline. Duplicate sends
+  in the same session do not add schedules; there is no polling or unbounded
+  retry.
+- Rotation/discard, room leave, recipient-policy/trust/blacklist change,
+  logout, runtime replacement, and shutdown cancel the exact session's work.
+  Every attempt re-evaluates policy before encryption.
+- Deadline permits the encrypted room event to proceed at message index 0 and
+  emits a closed coverage outcome. It never permits plaintext fallback.
+- Coverage is separate for own other devices and peer users. At least one
+  accepted eligible device covers a peer user for later same-user recovery;
+  zero covered eligible devices remains an explicit terminal diagnostic.
+- Homeserver acceptance is not recipient decryption acknowledgement.
+  Diagnostics contain runtime-local aliases, closed tokens, buckets/counts,
+  and elapsed time only.
 
 ## Timeline Room-Key Request Feedback (#460)
 

@@ -48,6 +48,18 @@ or SDK boundary without logging private Matrix payloads.
 
 ## Upstreamable Patch Material
 
+- Initial outbound Megolm Olm-claim repair (issue #523, 2026-08-14): the
+  vendored crypto layer retains only the exact still-eligible devices that
+  failed the initial index-0 share, the matrix-sdk layer serializes one
+  targeted `/keys/claim` through the existing claim lock, and one sync-driven
+  wake is fenced by the existing short first-event deadline. The repair reuses
+  standard signed one-time/fallback-key verification and the normal encrypted
+  `m.room_key` path; homeserver acceptance still does not imply recipient
+  decryption. Closed diagnostics expose only runtime aliases, buckets, counts,
+  and elapsed time. Upstreaming intent: propose the smallest generic targeted
+  claim/retry API and keep the product-specific fence/diagnostic projection in
+  Koushi; no custom Matrix event or persistence should be upstreamed.
+
 - `matrix-sdk-search` now has a `SearchIndexConfig` surface with a validated ngram tokenizer configuration.
 - Invalid ngram bounds are rejected before index construction.
 - The tokenizer name includes the ngram bounds, so a future schema/version check can distinguish index layouts.

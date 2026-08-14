@@ -7418,6 +7418,19 @@ async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
         "index0_initial_share_failed",
         "index0_initial_share_withheld",
         "index0_initial_share_no_recipients",
+        "initial_repair_claim_not_needed",
+        "initial_repair_claim_requested",
+        "initial_repair_claim_accepted",
+        "initial_repair_claim_empty",
+        "initial_repair_claim_invalid",
+        "initial_repair_claim_network_failed",
+        "initial_repair_claim_sdk_failed",
+        "initial_repair_settled",
+        "initial_repair_waiting_wake",
+        "initial_repair_deadline",
+        "initial_repair_cancelled",
+        "initial_repair_no_recipients",
+        "initial_repair_failed",
     ] {
         koushi_diagnostics::reset_counter(counter);
     }
@@ -7440,14 +7453,13 @@ fn record_room_key_diagnostic(event: matrix_sdk::encryption::RoomKeyDiagnosticEv
         }
         RoomKeyDiagnosticEvent::Receive(event) => record_room_key_receive_diagnostic(event),
         RoomKeyDiagnosticEvent::OlmRecovery(event) => record_olm_recovery_diagnostic(event),
-        RoomKeyDiagnosticEvent::InitialShare(event) => {
-            record_initial_share_diagnostic(event)
-        }
+        RoomKeyDiagnosticEvent::InitialShare(event) => record_initial_share_diagnostic(event),
         RoomKeyDiagnosticEvent::InitialShareSession(event) => {
             record_initial_share_session_diagnostic(event)
         }
-        RoomKeyDiagnosticEvent::Index0Reshare(event) => {
-            record_index0_reshare_diagnostic(event)
+        RoomKeyDiagnosticEvent::Index0Reshare(event) => record_index0_reshare_diagnostic(event),
+        RoomKeyDiagnosticEvent::InitialShareRepair(event) => {
+            record_initial_share_repair_diagnostic(event)
         }
     }
 }
@@ -7591,20 +7603,25 @@ fn record_initial_share_diagnostic(event: matrix_sdk::encryption::InitialShareDe
         Stage::Eligible => ("eligible", "initial_share_eligible"),
         Stage::OlmMissing => ("olm_missing", "initial_share_olm_missing"),
         Stage::OlmEncrypted => ("olm_encrypted", "initial_share_olm_encrypted"),
-        Stage::OlmEncryptionFailed => {
-            ("olm_encryption_failed", "initial_share_olm_encryption_failed")
-        }
+        Stage::OlmEncryptionFailed => (
+            "olm_encryption_failed",
+            "initial_share_olm_encryption_failed",
+        ),
         Stage::Withheld => ("withheld", "initial_share_withheld"),
         Stage::RequestQueued => ("request_queued", "initial_share_request_queued"),
-        Stage::HomeserverAccepted => {
-            ("homeserver_accepted", "initial_share_homeserver_accepted")
-        }
+        Stage::HomeserverAccepted => ("homeserver_accepted", "initial_share_homeserver_accepted"),
         Stage::RequestFailed => ("request_failed", "initial_share_request_failed"),
         Stage::ShareStateCommitted { message_index } => {
             if message_index == 0 {
-                ("share_state_committed", "initial_share_share_committed_index0")
+                (
+                    "share_state_committed",
+                    "initial_share_share_committed_index0",
+                )
             } else {
-                ("share_state_committed", "initial_share_share_committed_after_index0")
+                (
+                    "share_state_committed",
+                    "initial_share_share_committed_after_index0",
+                )
             }
         }
     };
@@ -7622,24 +7639,23 @@ fn record_initial_share_diagnostic(event: matrix_sdk::encryption::InitialShareDe
         _ => {}
     }
 
-    let mut diagnostic =
-        DiagnosticEvent::new(DiagnosticLevel::Info, "core.initial_share", "stage")
-            .field(DiagnosticField::ordinal_alias(
-                "session_alias",
-                "session",
-                event.session.ordinal(),
-            ))
-            .field(DiagnosticField::ordinal_alias(
-                "device_alias",
-                "device",
-                event.device.ordinal(),
-            ))
-            .field(DiagnosticField::token("device_class", device_class))
-            .field(DiagnosticField::token("stage", stage))
-            .field(DiagnosticField::milliseconds(
-                "elapsed_ms",
-                event.elapsed_ms.into(),
-            ));
+    let mut diagnostic = DiagnosticEvent::new(DiagnosticLevel::Info, "core.initial_share", "stage")
+        .field(DiagnosticField::ordinal_alias(
+            "session_alias",
+            "session",
+            event.session.ordinal(),
+        ))
+        .field(DiagnosticField::ordinal_alias(
+            "device_alias",
+            "device",
+            event.device.ordinal(),
+        ))
+        .field(DiagnosticField::token("device_class", device_class))
+        .field(DiagnosticField::token("stage", stage))
+        .field(DiagnosticField::milliseconds(
+            "elapsed_ms",
+            event.elapsed_ms.into(),
+        ));
     if let Stage::ShareStateCommitted { message_index } = event.stage {
         diagnostic = diagnostic.field(DiagnosticField::count(
             "message_index",
@@ -7712,10 +7728,10 @@ fn record_initial_share_session_diagnostic(
     );
 }
 
-fn record_index0_reshare_diagnostic(
-    event: matrix_sdk::encryption::Index0ReshareDiagnostic,
-) {
-    use matrix_sdk::encryption::{Index0InitialShareState as Share, Index0ReshareOutcome as Outcome};
+fn record_index0_reshare_diagnostic(event: matrix_sdk::encryption::Index0ReshareDiagnostic) {
+    use matrix_sdk::encryption::{
+        Index0InitialShareState as Share, Index0ReshareOutcome as Outcome,
+    };
 
     let reshare = match event.reshare {
         Outcome::Sent => "sent",
@@ -7769,6 +7785,114 @@ fn record_index0_reshare_diagnostic(
                 event.elapsed_ms.into(),
             )),
     );
+}
+
+fn record_initial_share_repair_diagnostic(
+    event: matrix_sdk::encryption::InitialShareRepairDiagnostic,
+) {
+    use matrix_sdk::encryption::{
+        InitialShareRepairClaimOutcome as Claim, InitialShareRepairOlmState as Olm,
+        InitialShareRepairOutcome as Repair,
+    };
+
+    let initial_olm = match event.initial_olm {
+        Olm::Missing => "missing",
+        Olm::Present => "present",
+        Olm::Unknown => "unknown",
+    };
+    let claim = match event.claim {
+        Claim::NotNeeded => "not_needed",
+        Claim::Requested => "requested",
+        Claim::Accepted => "accepted",
+        Claim::Empty => "empty",
+        Claim::Invalid => "invalid",
+        Claim::NetworkFailed => "network_failed",
+        Claim::SdkFailed => "sdk_failed",
+    };
+    let repair = match event.repair {
+        Repair::Settled => "settled",
+        Repair::WaitingWake => "waiting_wake",
+        Repair::Deadline => "deadline",
+        Repair::Cancelled => "cancelled",
+        Repair::NoRecipients => "no_recipients",
+        Repair::Failed => "failed",
+    };
+    let claim_counter = match event.claim {
+        Claim::NotNeeded => "initial_repair_claim_not_needed",
+        Claim::Requested => "initial_repair_claim_requested",
+        Claim::Accepted => "initial_repair_claim_accepted",
+        Claim::Empty => "initial_repair_claim_empty",
+        Claim::Invalid => "initial_repair_claim_invalid",
+        Claim::NetworkFailed => "initial_repair_claim_network_failed",
+        Claim::SdkFailed => "initial_repair_claim_sdk_failed",
+    };
+    let repair_counter = match event.repair {
+        Repair::Settled => "initial_repair_settled",
+        Repair::WaitingWake => "initial_repair_waiting_wake",
+        Repair::Deadline => "initial_repair_deadline",
+        Repair::Cancelled => "initial_repair_cancelled",
+        Repair::NoRecipients => "initial_repair_no_recipients",
+        Repair::Failed => "initial_repair_failed",
+    };
+    if event.first_event_message_index.is_none() {
+        koushi_diagnostics::increment_counter(claim_counter);
+        koushi_diagnostics::increment_counter(repair_counter);
+    }
+    let mut diagnostic = DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "core.initial_share_repair",
+        "outcome",
+    )
+    .field(DiagnosticField::ordinal_alias(
+        "session_alias",
+        "session",
+        event.session.ordinal(),
+    ))
+    .field(DiagnosticField::token("initial_olm", initial_olm))
+    .field(DiagnosticField::token("claim", claim))
+    .field(DiagnosticField::token("repair", repair))
+    .field(DiagnosticField::count(
+        "own_coverage_bucket",
+        event.own_coverage_bucket as u64,
+    ))
+    .field(DiagnosticField::count(
+        "peer_users_covered_bucket",
+        event.peer_users_covered_bucket as u64,
+    ))
+    .field(DiagnosticField::count(
+        "peer_users_zero_coverage_bucket",
+        event.peer_users_zero_coverage_bucket as u64,
+    ))
+    .field(DiagnosticField::count(
+        "missing_devices_bucket",
+        event.missing_devices_bucket as u64,
+    ))
+    .field(DiagnosticField::boolean("same_session", event.same_session))
+    .field(DiagnosticField::boolean(
+        "first_event_index_known",
+        event.first_event_message_index.is_some(),
+    ))
+    .field(DiagnosticField::milliseconds(
+        "elapsed_ms",
+        event.elapsed_ms.into(),
+    ));
+    if let Some(fence) = match (event.first_event_message_index, event.repair) {
+        (Some(_), Repair::Settled) => Some("settled"),
+        (Some(_), Repair::NoRecipients) => Some("no_recipients"),
+        (Some(_), Repair::Failed) => Some("failed"),
+        (Some(_), Repair::Deadline) => Some("deadline"),
+        (_, Repair::Cancelled) => Some("cancelled"),
+        _ => None,
+    } {
+        diagnostic = diagnostic.field(DiagnosticField::token("first_event_fence", fence));
+    }
+    if let Some(index) = event.first_event_message_index {
+        diagnostic = diagnostic.field(DiagnosticField::count(
+            "first_event_message_index",
+            index as u64,
+        ));
+    }
+    koushi_diagnostics::record(diagnostic);
 }
 
 fn record_incoming_room_key_diagnostic(
@@ -8786,10 +8910,15 @@ pub async fn force_reshare_room_key(
             matrix_sdk::room::RoomKeyReshareResult::Sent {
                 request_count,
                 recipient_count,
+                failed_recipient_count: 0,
             } => MatrixRoomKeyReshareOutcome::Sent {
                 request_count,
                 recipient_count,
             },
+            matrix_sdk::room::RoomKeyReshareResult::Sent { .. }
+            | matrix_sdk::room::RoomKeyReshareResult::UnableToEncrypt { .. } => {
+                MatrixRoomKeyReshareOutcome::NoRecipients
+            }
             matrix_sdk::room::RoomKeyReshareResult::NoSession => {
                 MatrixRoomKeyReshareOutcome::NoSession
             }
@@ -15016,9 +15145,7 @@ mod room_key_member_reload_diagnostics_tests {
 
 #[cfg(test)]
 mod initial_share_diagnostics_tests {
-    use super::{
-        record_initial_share_diagnostic, record_initial_share_session_diagnostic,
-    };
+    use super::{record_initial_share_diagnostic, record_initial_share_session_diagnostic};
     use koushi_diagnostics::test_support;
     use matrix_sdk::encryption::{
         InitialShareDeviceClass as Class, InitialShareDeviceDiagnostic,
@@ -15038,12 +15165,18 @@ mod initial_share_diagnostics_tests {
                     })
             })
             .and_then(|record| {
-                record.event.fields.iter().find_map(|field| match field.value {
-                    koushi_diagnostics::DiagnosticValue::Count(count) if field.key == "count" => {
-                        Some(count)
-                    }
-                    _ => None,
-                })
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .find_map(|field| match field.value {
+                        koushi_diagnostics::DiagnosticValue::Count(count)
+                            if field.key == "count" =>
+                        {
+                            Some(count)
+                        }
+                        _ => None,
+                    })
             })
             .unwrap_or(0)
     }
@@ -15122,7 +15255,10 @@ mod initial_share_diagnostics_tests {
         assert_eq!(counter_value("initial_share_homeserver_accepted"), 1);
         assert_eq!(counter_value("initial_share_request_failed"), 1);
         assert_eq!(counter_value("initial_share_share_committed_index0"), 1);
-        assert_eq!(counter_value("initial_share_share_committed_after_index0"), 1);
+        assert_eq!(
+            counter_value("initial_share_share_committed_after_index0"),
+            1
+        );
         assert_eq!(counter_value("initial_share_first_event_all_settled"), 1);
         assert_eq!(counter_value("initial_share_first_event_pending"), 0);
         assert_eq!(counter_value("initial_share_sessions_at_index0"), 1);
@@ -15246,12 +15382,18 @@ mod index0_reshare_diagnostics_tests {
                     })
             })
             .and_then(|record| {
-                record.event.fields.iter().find_map(|field| match field.value {
-                    koushi_diagnostics::DiagnosticValue::Count(count) if field.key == "count" => {
-                        Some(count)
-                    }
-                    _ => None,
-                })
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .find_map(|field| match field.value {
+                        koushi_diagnostics::DiagnosticValue::Count(count)
+                            if field.key == "count" =>
+                        {
+                            Some(count)
+                        }
+                        _ => None,
+                    })
             })
             .unwrap_or(0)
     }
@@ -15335,5 +15477,122 @@ mod index0_reshare_diagnostics_tests {
         );
         assert_eq!(counter_value("index0_reshare_sent"), 1);
         koushi_diagnostics::reset_counter("index0_reshare_sent");
+    }
+}
+
+#[cfg(test)]
+mod initial_share_repair_diagnostics_tests {
+    use super::record_initial_share_repair_diagnostic;
+    use koushi_diagnostics::test_support;
+    use matrix_sdk::encryption::{
+        InitialShareRepairClaimOutcome as Claim, InitialShareRepairDiagnostic,
+        InitialShareRepairOlmState as Olm, InitialShareRepairOutcome as Repair,
+        RoomKeyDiagnosticAlias,
+    };
+
+    fn counter_value(name: &'static str) -> u64 {
+        let snapshot = koushi_diagnostics::snapshot();
+        snapshot
+            .records
+            .iter()
+            .find(|record| {
+                record.event.source == "core.room_key_summary"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "name"
+                            && field.value == koushi_diagnostics::DiagnosticValue::Token(name)
+                    })
+            })
+            .and_then(|record| {
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .find_map(|field| match field.value {
+                        koushi_diagnostics::DiagnosticValue::Count(count)
+                            if field.key == "count" =>
+                        {
+                            Some(count)
+                        }
+                        _ => None,
+                    })
+            })
+            .unwrap_or(0)
+    }
+
+    fn record(claim: Claim, repair: Repair) {
+        record_initial_share_repair_diagnostic(InitialShareRepairDiagnostic {
+            session: RoomKeyDiagnosticAlias::new(11),
+            initial_olm: Olm::Missing,
+            claim,
+            repair,
+            own_coverage_bucket: 1,
+            peer_users_covered_bucket: 1,
+            peer_users_zero_coverage_bucket: 1,
+            missing_devices_bucket: 1,
+            first_event_message_index: None,
+            same_session: true,
+            elapsed_ms: 9,
+        });
+    }
+
+    #[test]
+    fn issue_523_initial_share_repair_records_closed_tokens_without_identifiers() {
+        let _guard = test_support::lock();
+        for counter in [
+            "initial_repair_claim_not_needed",
+            "initial_repair_claim_requested",
+            "initial_repair_claim_accepted",
+            "initial_repair_claim_empty",
+            "initial_repair_claim_invalid",
+            "initial_repair_claim_network_failed",
+            "initial_repair_claim_sdk_failed",
+            "initial_repair_settled",
+            "initial_repair_waiting_wake",
+            "initial_repair_deadline",
+            "initial_repair_cancelled",
+            "initial_repair_no_recipients",
+            "initial_repair_failed",
+        ] {
+            koushi_diagnostics::reset_counter(counter);
+        }
+        let start = test_support::detail_snapshot().records.len();
+        record(Claim::NotNeeded, Repair::Settled);
+        record(Claim::Requested, Repair::WaitingWake);
+        record(Claim::Accepted, Repair::Deadline);
+        record(Claim::Empty, Repair::Cancelled);
+        record(Claim::Invalid, Repair::NoRecipients);
+        record(Claim::NetworkFailed, Repair::Failed);
+        record(Claim::SdkFailed, Repair::Failed);
+
+        for counter in [
+            "initial_repair_claim_not_needed",
+            "initial_repair_claim_requested",
+            "initial_repair_claim_accepted",
+            "initial_repair_claim_empty",
+            "initial_repair_claim_invalid",
+            "initial_repair_claim_network_failed",
+            "initial_repair_claim_sdk_failed",
+            "initial_repair_settled",
+            "initial_repair_waiting_wake",
+            "initial_repair_deadline",
+            "initial_repair_cancelled",
+            "initial_repair_no_recipients",
+            "initial_repair_failed",
+        ] {
+            let expected = if counter == "initial_repair_failed" {
+                2
+            } else {
+                1
+            };
+            assert_eq!(
+                counter_value(counter),
+                expected,
+                "missing counter {counter}"
+            );
+        }
+        for record in test_support::detail_snapshot().records.iter().skip(start) {
+            let text = format!("{:?}", record.event);
+            assert!(!text.contains('@') && !text.contains('!') && !text.contains("http"));
+        }
     }
 }
