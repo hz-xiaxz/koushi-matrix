@@ -4522,6 +4522,44 @@ impl TimelineManagerActor {
         service: &Arc<matrix_sdk_ui::room_list_service::RoomListService>,
     ) {
         self.room_list_service = Some(service.clone());
+        // A shared Sliding Sync position and its room-subscription map are one
+        // server-side session checkpoint. At cold process startup there may be
+        // no Timeline actors/leases yet; reconciling that transient empty set
+        // would immediately erase the restored coverage proof and make the
+        // first selected room look like a fresh subscription. Defer exactly
+        // this startup-empty reconcile. The first Timeline lease performs the
+        // normal atomic differential reconcile, retaining a restored room or
+        // conservatively adding an uncovered one. UnknownPos/session expiry
+        // clears the actual map, so it cannot take this path.
+        let restored_rooms = service.actual_subscribed_rooms();
+        let restored_from_shared_position = service.has_restored_room_subscriptions();
+        if should_defer_restored_subscription_reconcile(
+            self.subscribed_room_leases.len(),
+            restored_from_shared_position,
+            restored_rooms.len(),
+        ) {
+            koushi_diagnostics::increment_counter("subscription_restore_deferred_until_selection");
+            koushi_diagnostics::record(
+                DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "restore")
+                    .field(DiagnosticField::token("outcome", "restored"))
+                    .field(DiagnosticField::count(
+                        "restored_room_count_bucket",
+                        subscription_count_bucket(restored_rooms.len()),
+                    )),
+            );
+            return;
+        }
+        if self.subscribed_room_leases.is_empty() && !restored_from_shared_position {
+            koushi_diagnostics::increment_counter("subscription_restore_unproven");
+            koushi_diagnostics::record(
+                DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "restore")
+                    .field(DiagnosticField::token("outcome", "unproven"))
+                    .field(DiagnosticField::count(
+                        "restored_room_count_bucket",
+                        subscription_count_bucket(restored_rooms.len()),
+                    )),
+            );
+        }
         // SyncStarted performs one deduplicated reconcile of the full desired
         // set derived from the live leases; per-actor rebuilds must not
         // re-subscribe (issue #518 finding 3).
@@ -8110,9 +8148,31 @@ fn record_subscribe_stage(stage: &str, count: Option<usize>) {
 fn record_subscription_room_coverage(room_ordinal: u64, key: &'static str, token: &'static str) {
     koushi_diagnostics::record(
         DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "room")
-            .field(DiagnosticField::ordinal_alias("room_alias", "room", room_ordinal))
+            .field(DiagnosticField::ordinal_alias(
+                "room_alias",
+                "room",
+                room_ordinal,
+            ))
             .field(DiagnosticField::token(key, token)),
     );
+}
+
+fn subscription_count_bucket(count: usize) -> u64 {
+    match count {
+        0 => 0,
+        1 => 1,
+        2..=5 => 2,
+        6..=20 => 3,
+        _ => 4,
+    }
+}
+
+fn should_defer_restored_subscription_reconcile(
+    lease_count: usize,
+    restored_from_shared_position: bool,
+    actual_subscription_count: usize,
+) -> bool {
+    lease_count == 0 && restored_from_shared_position && actual_subscription_count > 0
 }
 
 fn record_subscription_reconcile(
@@ -8120,13 +8180,6 @@ fn record_subscription_reconcile(
     generation_before: u64,
     result: &matrix_sdk_ui::room_list_service::RoomSubscriptionReconcile,
 ) {
-    let buckets = |count: usize| match count {
-        0 => 0u8,
-        1 => 1,
-        2..=5 => 2,
-        6..=20 => 3,
-        _ => 4,
-    };
     koushi_diagnostics::increment_counter(if result.noop {
         "subscription_reconcile_noop"
     } else {
@@ -8163,15 +8216,15 @@ fn record_subscription_reconcile(
         .field(DiagnosticField::boolean("exact_set_noop", result.noop))
         .field(DiagnosticField::count(
             "added_bucket",
-            buckets(result.added) as u64,
+            subscription_count_bucket(result.added),
         ))
         .field(DiagnosticField::count(
             "removed_bucket",
-            buckets(result.removed) as u64,
+            subscription_count_bucket(result.removed),
         ))
         .field(DiagnosticField::count(
             "retained_bucket",
-            buckets(result.retained) as u64,
+            subscription_count_bucket(result.retained),
         ))
         .field(DiagnosticField::count(
             "generation_before",
@@ -34050,6 +34103,20 @@ mod tests {
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             test_session_available: true,
         }
+    }
+
+    #[test]
+    fn startup_empty_reconcile_is_deferred_only_for_proven_restored_coverage() {
+        assert!(should_defer_restored_subscription_reconcile(0, true, 1));
+
+        // Once a Timeline lease exists, normal differential reconciliation
+        // must run and select the desired subset of restored rooms.
+        assert!(!should_defer_restored_subscription_reconcile(1, true, 1));
+
+        // Missing/legacy/expired positions provide no coverage proof and stay
+        // on the conservative re-add path.
+        assert!(!should_defer_restored_subscription_reconcile(0, false, 1));
+        assert!(!should_defer_restored_subscription_reconcile(0, true, 0));
     }
 
     #[tokio::test]
