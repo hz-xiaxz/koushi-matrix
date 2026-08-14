@@ -95,7 +95,6 @@ use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSetti
 use matrix_sdk::room::Receipts;
 use matrix_sdk::room::edit::EditedContent;
 use matrix_sdk::room::reply::{EnforceThread, Reply};
-use matrix_sdk::ruma::{OwnedRoomId, UserId};
 use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType as SendReceiptType;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::message::FormattedBody;
@@ -109,6 +108,7 @@ use matrix_sdk::ruma::events::{
     Mentions, StateEventContentChange, room::name::RoomNameEventContent,
 };
 use matrix_sdk::ruma::html::{Html, SanitizerConfig};
+use matrix_sdk::ruma::{OwnedRoomId, UserId};
 use matrix_sdk::send_queue::{
     LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendHandle, SendQueueUpdate,
 };
@@ -2823,6 +2823,13 @@ pub struct TimelineManagerActor {
     /// (issue #518). Room, Thread, and Focused timelines all contribute a
     /// lease for their room; the room stays subscribed while any lease lives.
     subscribed_room_leases: BTreeMap<OwnedRoomId, usize>,
+    /// Rooms that were ever subscribed this runtime (used to distinguish a
+    /// security-required re-add from a first-time add for rotation
+    /// correlation diagnostics).
+    subscription_room_seen: BTreeSet<OwnedRoomId>,
+    /// Process-local room ordinals for identifier-free correlation records.
+    subscription_room_ordinals: BTreeMap<OwnedRoomId, u64>,
+    next_subscription_room_ordinal: u64,
     global_response_commit: Option<GlobalResponseCommit>,
     timelines: HashMap<TimelineKey, TimelineActorHandle>,
     accepted_submissions: SubmissionAdmissionLedger,
@@ -2956,7 +2963,6 @@ impl SubscriptionReconcileTrigger {
     }
 }
 
-
 impl TimelineManagerActor {
     pub(crate) fn spawn(
         action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -2974,6 +2980,9 @@ impl TimelineManagerActor {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines: HashMap::new(),
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -3048,6 +3057,9 @@ impl TimelineManagerActor {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines: HashMap::new(),
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -4388,6 +4400,17 @@ impl TimelineManagerActor {
         .await;
     }
 
+    /// Stable process-local ordinal for a room's coverage-correlation records.
+    fn room_ordinal_for(&mut self, room_id: OwnedRoomId) -> u64 {
+        if let Some(ordinal) = self.subscription_room_ordinals.get(&room_id) {
+            return *ordinal;
+        }
+        self.next_subscription_room_ordinal += 1;
+        let ordinal = self.next_subscription_room_ordinal;
+        self.subscription_room_ordinals.insert(room_id, ordinal);
+        ordinal
+    }
+
     /// Add a room-ID lease for a live Timeline actor.
     fn lease_room(&mut self, room_id: OwnedRoomId) {
         *self.subscribed_room_leases.entry(room_id).or_default() += 1;
@@ -4428,18 +4451,67 @@ impl TimelineManagerActor {
             .keys()
             .map(|room_id| room_id.as_ref())
             .collect();
+        let previous_active = service.active_room_subscriptions();
         let result = service
             .reconcile_room_subscriptions_with_generation(&desired)
             .await;
         if !result.noop {
+            // Rotation correlation: per-room continuous-coverage tokens. A
+            // retained room kept coverage; an added room that was seen before
+            // is a security-required re-add (coverage lost); a first-time add
+            // has unknown prior coverage.
+            let desired_set: BTreeSet<OwnedRoomId> =
+                desired.iter().map(|room_id| (*room_id).to_owned()).collect();
+            for room_id in desired_set.intersection(&previous_active) {
+                koushi_diagnostics::increment_counter("subscription_room_continuous");
+                record_subscription_room_coverage(
+                    self.room_ordinal_for(room_id.clone()),
+                    "continuous_coverage",
+                    "true",
+                );
+            }
+            for room_id in desired_set.difference(&previous_active) {
+                let readded = self.subscription_room_seen.contains(room_id);
+                if readded {
+                    koushi_diagnostics::increment_counter("subscription_room_readded");
+                    record_subscription_room_coverage(
+                        self.room_ordinal_for(room_id.clone()),
+                        "continuous_coverage",
+                        "false",
+                    );
+                } else {
+                    koushi_diagnostics::increment_counter("subscription_room_added_new");
+                    record_subscription_room_coverage(
+                        self.room_ordinal_for(room_id.clone()),
+                        "continuous_coverage",
+                        "unknown",
+                    );
+                }
+                self.subscription_room_seen.insert(room_id.clone());
+            }
+        }
+        if !result.noop {
             // A generation change caused by another room must not make a
             // retained room falsely stale: advance every retained Room actor's
             // expected subscription generation so checkpoint matching keeps
-            // working (issue #518 generation ownership).
+            // working (issue #518 generation ownership). The ordered update
+            // message reaches the actor before any new checkpoint the manager
+            // forwards afterwards (same FIFO channel).
             let generation = result.generation.get();
-            for (actor_key, handle) in self.timelines.iter_mut() {
-                if matches!(actor_key.kind, TimelineKind::Room { .. }) {
+            let retained_room_keys = self
+                .timelines
+                .iter()
+                .filter(|(actor_key, _)| matches!(actor_key.kind, TimelineKind::Room { .. }))
+                .map(|(actor_key, _)| actor_key.clone())
+                .collect::<Vec<_>>();
+            for actor_key in retained_room_keys {
+                if let Some(handle) = self.timelines.get_mut(&actor_key) {
                     handle.subscription_generation = Some(generation);
+                    let _ = handle
+                        .send(TimelineActorMessage::UpdateSubscriptionGeneration(
+                            generation,
+                        ))
+                        .await;
                 }
             }
         }
@@ -4685,10 +4757,8 @@ impl TimelineManagerActor {
                 if let Some(handle) = removed_actor {
                     if let Ok(room_id) = key.room_id().parse::<OwnedRoomId>() {
                         if self.release_room_lease(&room_id) {
-                            self.reconcile_subscriptions(
-                                SubscriptionReconcileTrigger::Unsubscribe,
-                            )
-                            .await;
+                            self.reconcile_subscriptions(SubscriptionReconcileTrigger::Unsubscribe)
+                                .await;
                         }
                     }
                 }
@@ -5516,10 +5586,12 @@ impl TimelineManagerActor {
         // live Sliding Sync room-subscription set before the cheap replay path
         // is trusted. A presentation-only rebuild elsewhere must never leave a
         // retained actor subscribed to a room the live set no longer covers.
-        let subscribed_room_id = key
-            .room_id()
-            .parse::<OwnedRoomId>()
-            .ok()
+        // The coverage check only applies to an already-retained actor: a
+        // genuinely new key is leased and reconciled by the build path below.
+        let existing_key = self.timelines.contains_key(&key);
+        let subscribed_room_id = existing_key
+            .then(|| key.room_id().parse::<OwnedRoomId>().ok())
+            .flatten()
             .filter(|room_id| {
                 let present = self
                     .room_list_service
@@ -7376,6 +7448,10 @@ struct TestGapRepairCompletionPause {
 
 enum TimelineActorMessage {
     RoomSubscriptionCheckpoint(MatrixRoomSubscriptionCheckpoint),
+    /// Ordered generation advance for a retained room whose subscription set
+    /// changed because another room was added/removed (issue #518). The actor
+    /// must accept new-generation checkpoints after this message is processed.
+    UpdateSubscriptionGeneration(u64),
     GlobalResponseCommitted(GlobalResponseCommit),
     StartLiveTailRefresh {
         epoch: u64,
@@ -8028,6 +8104,14 @@ fn record_subscribe_stage(stage: &str, count: Option<usize>) {
 /// Record one closed-token subscription reconciliation (issue #518). Counts
 /// and the no-op flag are bucketed/counted as aggregates that survive
 /// detail-ring eviction; no room identifiers are exported.
+fn record_subscription_room_coverage(room_ordinal: u64, key: &'static str, token: &'static str) {
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "room")
+            .field(DiagnosticField::ordinal_alias("room_alias", "room", room_ordinal))
+            .field(DiagnosticField::token(key, token)),
+    );
+}
+
 fn record_subscription_reconcile(
     trigger_token: &'static str,
     generation_before: u64,
@@ -8046,24 +8130,24 @@ fn record_subscription_reconcile(
         "subscription_reconcile_changed"
     });
     match trigger_token {
-        "room_selected" => koushi_diagnostics::increment_counter(
-            "subscription_reconcile_trigger_room_selected",
-        ),
-        "thread_opened" => koushi_diagnostics::increment_counter(
-            "subscription_reconcile_trigger_thread_opened",
-        ),
-        "focused_opened" => koushi_diagnostics::increment_counter(
-            "subscription_reconcile_trigger_focused_opened",
-        ),
-        "timeline_rebuild" => koushi_diagnostics::increment_counter(
-            "subscription_reconcile_trigger_timeline_rebuild",
-        ),
-        "sync_started" => koushi_diagnostics::increment_counter(
-            "subscription_reconcile_trigger_sync_started",
-        ),
-        "unsubscribe" => koushi_diagnostics::increment_counter(
-            "subscription_reconcile_trigger_unsubscribe",
-        ),
+        "room_selected" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_room_selected")
+        }
+        "thread_opened" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_thread_opened")
+        }
+        "focused_opened" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_focused_opened")
+        }
+        "timeline_rebuild" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_timeline_rebuild")
+        }
+        "sync_started" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_sync_started")
+        }
+        "unsubscribe" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_unsubscribe")
+        }
         _ => {}
     }
     if !result.noop {
@@ -8071,19 +8155,33 @@ fn record_subscription_reconcile(
         koushi_diagnostics::increment_counter("subscription_reconcile_removed");
         koushi_diagnostics::increment_counter("subscription_reconcile_retained");
     }
-    let mut event = DiagnosticEvent::new(
-        DiagnosticLevel::Info,
-        "core.subscription",
-        "reconcile",
-    )
-    .field(DiagnosticField::token("trigger", trigger_token))
-    .field(DiagnosticField::boolean("exact_set_noop", result.noop))
-    .field(DiagnosticField::count("added_bucket", buckets(result.added) as u64))
-    .field(DiagnosticField::count("removed_bucket", buckets(result.removed) as u64))
-    .field(DiagnosticField::count("retained_bucket", buckets(result.retained) as u64))
-    .field(DiagnosticField::count("generation_before", generation_before))
-    .field(DiagnosticField::count("generation_after", result.generation.get()))
-    .field(DiagnosticField::boolean("checkpoints_retained", result.checkpoints_retained));
+    let mut event = DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "reconcile")
+        .field(DiagnosticField::token("trigger", trigger_token))
+        .field(DiagnosticField::boolean("exact_set_noop", result.noop))
+        .field(DiagnosticField::count(
+            "added_bucket",
+            buckets(result.added) as u64,
+        ))
+        .field(DiagnosticField::count(
+            "removed_bucket",
+            buckets(result.removed) as u64,
+        ))
+        .field(DiagnosticField::count(
+            "retained_bucket",
+            buckets(result.retained) as u64,
+        ))
+        .field(DiagnosticField::count(
+            "generation_before",
+            generation_before,
+        ))
+        .field(DiagnosticField::count(
+            "generation_after",
+            result.generation.get(),
+        ))
+        .field(DiagnosticField::boolean(
+            "checkpoints_retained",
+            result.checkpoints_retained,
+        ));
     koushi_diagnostics::record(event);
 }
 
@@ -15835,6 +15933,13 @@ impl TimelineActor {
                     duration_ms,
                 )
                 .await;
+            }
+            TimelineActorMessage::UpdateSubscriptionGeneration(generation) => {
+                // The subscription set changed because another room was
+                // added/removed; this room stayed retained, so its expected
+                // generation advances. Ordered before any new checkpoint, so
+                // the actor accepts them.
+                self.subscription_generation = Some(generation);
             }
             TimelineActorMessage::RoomSubscriptionCheckpoint(checkpoint) => {
                 if self.key.room_id() == checkpoint.room_id()
@@ -31714,6 +31819,9 @@ mod tests {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines: HashMap::from([(key.clone(), test_timeline_actor_handle())]),
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -33164,6 +33272,9 @@ mod tests {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines: HashMap::from([(key.clone(), test_timeline_actor_handle())]),
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -33900,6 +34011,9 @@ mod tests {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines,
             accepted_submissions: SubmissionAdmissionLedger::default(),
@@ -34029,8 +34143,12 @@ mod tests {
         // One lease per live TimelineKey; both keys carry placeholder actors.
         manager.lease_room(room_a.clone());
         manager.lease_room(room_a.clone());
-        manager.timelines.insert(key_room.clone(), placeholder_actor_handle());
-        manager.timelines.insert(key_thread.clone(), placeholder_actor_handle());
+        manager
+            .timelines
+            .insert(key_room.clone(), placeholder_actor_handle());
+        manager
+            .timelines
+            .insert(key_thread.clone(), placeholder_actor_handle());
         manager
             .reconcile_subscriptions(SubscriptionReconcileTrigger::RoomSelected)
             .await;
@@ -34080,6 +34198,65 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn retained_room_actor_receives_generation_update_on_set_change() {
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_ui::room_list_service::RoomListService;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let room_list = Arc::new(RoomListService::new(client.clone()).await.unwrap());
+
+        let mut manager = live_tail_test_manager(HashMap::new());
+        manager.room_list_service = Some(room_list.clone());
+        let room_a = matrix_sdk::ruma::room_id!("!a:test").to_owned();
+        let room_b = matrix_sdk::ruma::room_id!("!b:test").to_owned();
+        let key_a = TimelineKey::room(AccountKey("@a:test".to_owned()), "!a:test");
+
+        // Retained Room actor A holds a live channel so the ordered
+        // generation-update message is observable.
+        let (tx, mut rx) = mpsc::channel(8);
+        manager.timelines.insert(
+            key_a.clone(),
+            TimelineActorHandle {
+                tx,
+                control_tx: None,
+                position_rx: None,
+                task: None,
+                auxiliary_tasks: Vec::new(),
+                subscription_generation: None,
+                enqueue_context: None,
+            },
+        );
+        manager.lease_room(room_a.clone());
+        manager.lease_room(room_b.clone());
+        manager
+            .reconcile_subscriptions(SubscriptionReconcileTrigger::RoomSelected)
+            .await;
+        let generation_after_first = room_list.subscription_generation().get();
+        // Drain the update sent by the first (also non-noop) reconcile.
+        while rx.try_recv().is_ok() {}
+
+        // Removing B changes the set; retained actor A must be told its
+        // expected generation advanced (before any new checkpoint arrives).
+        assert!(manager.release_room_lease(&room_b));
+        manager
+            .reconcile_subscriptions(SubscriptionReconcileTrigger::Unsubscribe)
+            .await;
+        let generation_after_change = room_list.subscription_generation().get();
+        assert_ne!(generation_after_first, generation_after_change);
+
+        let update = rx
+            .try_recv()
+            .expect("retained actor A must receive a generation update");
+        match update {
+            TimelineActorMessage::UpdateSubscriptionGeneration(generation) => {
+                assert_eq!(generation, generation_after_change);
+            }
+            _ => panic!("expected UpdateSubscriptionGeneration"),
+        }
+    }
+
     fn placeholder_actor_handle() -> TimelineActorHandle {
         let (tx, _rx) = mpsc::channel(1);
         TimelineActorHandle {
@@ -34109,7 +34286,10 @@ mod tests {
         manager.lease_room(room_b.clone());
 
         manager.handle_sync_started(room_list.clone(), 1).await;
-        manager.room_subscription_checkpoint_task.take().map(|task| task.abort());
+        manager
+            .room_subscription_checkpoint_task
+            .take()
+            .map(|task| task.abort());
 
         // The full deduplicated lease set is restored in one reconciliation.
         assert_eq!(
@@ -36655,6 +36835,9 @@ mod tests {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -37043,6 +37226,9 @@ mod tests {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -37131,6 +37317,9 @@ mod tests {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -38855,6 +39044,9 @@ mod tests {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -39053,6 +39245,9 @@ mod tests {
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
             subscribed_room_leases: BTreeMap::new(),
+            subscription_room_seen: BTreeSet::new(),
+            subscription_room_ordinals: BTreeMap::new(),
+            next_subscription_room_ordinal: 0,
             global_response_commit: None,
             timelines: HashMap::from([(
                 key.clone(),
@@ -41111,8 +41306,7 @@ mod tests {
             "existing timeline room subscriptions must be derived from the room-ID lease owner"
         );
         assert!(
-            sync_started_handler
-                .contains("reconcile_room_subscriptions_with_generation"),
+            sync_started_handler.contains("reconcile_room_subscriptions_with_generation"),
             "existing timeline rooms must be reconciled atomically with the live RoomListService"
         );
 
