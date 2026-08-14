@@ -1857,7 +1857,7 @@ mod tests {
     fn store_diagnostic_producer_records_typed_outcome_without_environment_switch() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         record_file_credential_store_active();
-        let record = koushi_diagnostics::snapshot()
+        let record = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
             .rev()
@@ -1961,7 +1961,7 @@ mod tests {
         let cred_dir = tempdir().expect("tempdir");
         let key_id = make_key_id();
         let actor = file_store_actor(&data_dir, &cred_dir);
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
 
         actor
             .account_store_config(&key_id)
@@ -1973,7 +1973,7 @@ mod tests {
             .account_store_config(&key_id)
             .expect("second store config reuses the unlock secret");
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let unlock_events = records
             .iter()
             .skip(diagnostic_start)

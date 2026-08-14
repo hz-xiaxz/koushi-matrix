@@ -13208,7 +13208,7 @@ mod tests {
     #[tokio::test]
     async fn actor_sas_settlement_emits_exactly_one_terminal_and_clears_runtime() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
         let cred_dir = tempdir().expect("credential tempdir");
         let data_dir = tempdir().expect("data tempdir");
         let store = StoreActor::with_backend(
@@ -13292,7 +13292,7 @@ mod tests {
                 "stale terminal duplicated flow {flow_id}"
             );
         }
-        let settled_flow_ids = koushi_diagnostics::snapshot().records[diagnostic_start..]
+        let settled_flow_ids = koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
             .iter()
             .filter(|record| {
                 record.event.source == "core.sas_verification" && record.event.stage == "settled"
@@ -13423,7 +13423,7 @@ mod tests {
             },
             "restore_session",
         );
-        let records = koushi_diagnostics::snapshot()
+        let records = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
             .filter(|record| record.event.stage == "test_account_typed_fields")
@@ -13507,7 +13507,7 @@ mod tests {
         );
         println!(
             "{}",
-            serde_json::to_string(&koushi_diagnostics::snapshot())
+            serde_json::to_string(&koushi_diagnostics::test_support::detail_snapshot())
                 .expect("diagnostic snapshot should serialize")
         );
     }
@@ -13560,7 +13560,7 @@ mod tests {
         );
         println!(
             "{}",
-            serde_json::to_string(&koushi_diagnostics::snapshot())
+            serde_json::to_string(&koushi_diagnostics::test_support::detail_snapshot())
                 .expect("diagnostic snapshot should serialize")
         );
     }
@@ -13619,7 +13619,7 @@ mod tests {
         record_sliding_sync_capability_persistence("failed");
         println!(
             "{}",
-            serde_json::to_string(&koushi_diagnostics::snapshot())
+            serde_json::to_string(&koushi_diagnostics::test_support::detail_snapshot())
                 .expect("diagnostic snapshot should serialize")
         );
     }
@@ -13818,7 +13818,7 @@ mod tests {
     #[tokio::test]
     async fn own_user_sas_start_helper_traces_started_pending_and_failed_results() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
 
         assert_eq!(
             run_own_user_sas_start(211, "request_ready", async {
@@ -13846,7 +13846,7 @@ mod tests {
             .is_err()
         );
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let events = records[diagnostic_start..]
             .iter()
             .filter(|record| record.event.source == "core.sas_verification")
@@ -13915,7 +13915,7 @@ mod tests {
         );
         println!(
             "{}",
-            serde_json::to_string(&koushi_diagnostics::snapshot())
+            serde_json::to_string(&koushi_diagnostics::test_support::detail_snapshot())
                 .expect("diagnostic snapshot should serialize")
         );
     }
@@ -13972,7 +13972,7 @@ mod tests {
         );
         response_rx.await.expect("cache-repair response");
 
-        let records = koushi_diagnostics::snapshot().records;
+        let records = koushi_diagnostics::test_support::detail_snapshot().records;
         let repair = records
             .iter()
             .rev()
@@ -14978,7 +14978,7 @@ mod tests {
     #[tokio::test]
     async fn verified_warm_restore_skips_restricted_and_full_state_preparation() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
         let homeserver = spawn_quarantine_password_server();
         let cred_dir = tempdir().expect("tempdir");
         let data_dir = tempdir().expect("tempdir");
@@ -15016,7 +15016,7 @@ mod tests {
             (false, false, true),
             "normal sync must be the sole owner after Ready projection acknowledgement"
         );
-        let snapshot = koushi_diagnostics::snapshot();
+        let snapshot = koushi_diagnostics::test_support::detail_snapshot();
         let stages = snapshot.records[diagnostic_start..]
             .iter()
             .filter(|record| record.event.source == "core.verification_admission")
@@ -15636,7 +15636,7 @@ mod tests {
     #[tokio::test]
     async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
         let (handle, mut action_rx) = login_gated_actor().await;
         let flow_id = 80;
         let request_id = incoming_verification_request_id(flow_id);
@@ -15685,7 +15685,7 @@ mod tests {
             "recovery trust timeout must not promote the session or leave normal runtime running"
         );
         assert!(
-            koushi_diagnostics::snapshot().records[diagnostic_start..]
+            koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
                 .iter()
                 .any(|record| {
                     record.event.source == "core.recovery_verification"
@@ -16020,10 +16020,10 @@ mod tests {
     #[tokio::test]
     async fn verification_to_normal_sync_handoff_has_one_owner() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
         let (handle, mut action_rx) = login_gated_actor().await;
         assert!(
-            koushi_diagnostics::snapshot().records[diagnostic_start..]
+            koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
                 .iter()
                 .any(|record| {
                     record.event.source == "core.verification_admission"
