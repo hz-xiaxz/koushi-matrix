@@ -48,6 +48,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Startup latency observability (#123) | [2026-06-23-startup-latency-observability-phase-a.md](../superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md) | — |
 | Initial index-0 key-share diagnostics (#509) | [2026-08-13-index0-share-diagnostics.md](../superpowers/plans/2026-08-13-index0-share-diagnostics.md) | — |
 | Bounded index-0 duplicate share (#510) | [2026-08-13-index0-reshare.md](../superpowers/plans/2026-08-13-index0-reshare.md) | — |
+| Initial Megolm Olm-claim repair (#523) | [2026-08-14-initial-megolm-olm-repair.md](../superpowers/plans/2026-08-14-initial-megolm-olm-repair.md) | — |
 | Room-subscription ownership (#518) | [2026-08-14-room-subscription-ownership.md](../superpowers/plans/2026-08-14-room-subscription-ownership.md) | — |
 
 Font asset loading and any bundled font package must update

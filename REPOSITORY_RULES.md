@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-08-07.
+Last amended: 2026-08-14.
 
 ## Read Order And Authority
 
@@ -302,6 +302,15 @@ conflict is being resolved.
   keeping unreadable encrypted data.
 - Key bytes and passphrases should use zeroizing containers where practical
   and should be kept out of long-lived UI state.
+- Before a newly created outbound Megolm session consumes message index 0,
+  every still-eligible device that failed initial sharing because no Olm
+  session existed receives one bounded targeted `/keys/claim` repair attempt.
+  Claim, encryption, and re-share results remain explicit per anonymous
+  recipient; a peer user with zero covered eligible devices must not be hidden
+  by aggregate device success. The fence ends on settlement or a short explicit
+  deadline and never downgrades to plaintext, broadens recipient policy,
+  invents recipient acknowledgements, or retries without bound. Homeserver
+  acceptance commits share state but is not proof of recipient decryption.
 
 ## QA Gates And Cleanup
 
