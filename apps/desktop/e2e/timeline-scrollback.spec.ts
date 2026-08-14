@@ -1486,6 +1486,84 @@ test("active upward input keeps the anchor stable when prepend arrives", async (
   );
 });
 
+test("active mixed large prepend preserves the pre-apply virtual anchor", async ({ page }) => {
+  await page.goto("/harness.html?variableHeights=true");
+  await page.waitForSelector("[data-testid=timeline-view]");
+  await page.addStyleTag({ path: DESKTOP_STYLES_PATH });
+  await waitAnimationFrames(page, 1);
+  await pushInitialTimelineItems(page, 1_000);
+
+  const container = page.locator("[data-testid=timeline-view]");
+  await expect(container).toHaveAttribute("data-virtualized", "true");
+  await container.evaluate((node) => {
+    node.scrollTop = 20_000;
+    node.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -80 }));
+    node.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await waitAnimationFrames(page, 3);
+
+  const anchorBefore = await container.evaluate((node) => {
+    node.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -4 }));
+    node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    const top = node.getBoundingClientRect().top;
+    for (const row of node.querySelectorAll<HTMLElement>("[data-item-id]")) {
+      if (row.getBoundingClientRect().bottom > top) {
+        return {
+          itemId: row.dataset["itemId"] ?? "",
+          offsetTop: row.getBoundingClientRect().top - top
+        };
+      }
+    }
+    return null;
+  });
+  expect(anchorBefore).not.toBeNull();
+
+  // After 100 PushFront operations, original row $m800 is at index 900.
+  // Hiding that far-below row makes this a mixed (not pure) projection without
+  // changing viewport content, so the active branch must use its pre-apply anchor.
+  await page.evaluate(
+    ({ key, items, hiddenItem }) => {
+      window.__harness.pushCoreEvent({
+        kind: "Timeline",
+        event: {
+          ItemsUpdated: {
+            key,
+            generation: 1,
+            batch_id: 1,
+            diffs: [
+              ...items.map((item) => ({ PushFront: { item } })),
+              { Set: { index: 900, item: hiddenItem } }
+            ]
+          }
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+    },
+    {
+      key: timelineKey(),
+      items: Array.from({ length: 100 }, (_, index) =>
+        index % 2 === 0
+          ? makeImageItem(`$mixed-old${index}`)
+          : makeItem(`$mixed-old${index}`, `mixed old ${index}`)
+      ),
+      hiddenItem: { ...makeItem("$m800", "message 800"), is_hidden: true }
+    }
+  );
+
+  await expect(container).toHaveAttribute("data-total-items", "1099");
+  await expect
+    .poll(async () => {
+      const offset = await container.evaluate((node, anchorId) => {
+        const row = node.querySelector<HTMLElement>(`[data-item-id="${anchorId}"]`);
+        return row
+          ? row.getBoundingClientRect().top - node.getBoundingClientRect().top
+          : null;
+      }, anchorBefore!.itemId);
+      return offset === null ? Number.POSITIVE_INFINITY : Math.abs(offset - anchorBefore!.offsetTop);
+    })
+    .toBeLessThanOrEqual(ANCHOR_PIXEL_TOLERANCE);
+});
+
 test("timeline keeps SDK diff order and ignores duplicate update batches", async ({ page }) => {
   await page.goto("/harness.html");
   await page.waitForSelector("[data-testid=timeline-view]");

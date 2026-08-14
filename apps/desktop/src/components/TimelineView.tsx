@@ -3034,7 +3034,8 @@ export const TimelineView = memo(function TimelineView({
       return false;
     }
     const container = containerRef.current;
-    const anchor = container ? captureFreeScrollAnchor(container) : null;
+    const anchor =
+      pendingAnchorRef.current ?? (container ? captureFreeScrollAnchor(container) : null);
     pendingAnchorRef.current = anchor;
     anchorRestorePendingRef.current = anchor !== null;
     deferredPrependPendingRef.current = false;
@@ -3526,12 +3527,14 @@ export const TimelineView = memo(function TimelineView({
         }
         if (batchContainsPrepend(event.ItemsUpdated.diffs)) {
           const container = containerRef.current;
+          if (container && !anchorRestorePendingRef.current) {
+            pendingAnchorRef.current = captureFreeScrollAnchor(container);
+          }
           if (scrollActivityRef.current === "active") {
             deferredPrependPendingRef.current = true;
             anchorRestorePendingRef.current = true;
           } else if (container) {
-            pendingAnchorRef.current = captureAnchor(container);
-            anchorRestorePendingRef.current = true;
+            anchorRestorePendingRef.current = pendingAnchorRef.current !== null;
           }
         }
         scheduleBackfillEvaluation("prepend_settled");
@@ -3848,8 +3851,6 @@ export const TimelineView = memo(function TimelineView({
     }
     if (deferredPrependPendingRef.current) {
       deferredPrependPendingRef.current = false;
-      pendingAnchorRef.current = null;
-      anchorRestorePendingRef.current = false;
     }
     committedVisibleRowsRef.current = {
       timelineKeyHash,
@@ -3868,6 +3869,15 @@ export const TimelineView = memo(function TimelineView({
   const captureProjectionLayoutTransaction = useCallback(
     (previous: TimelineProjectionSnapshot, next: TimelineProjectionSnapshot) => {
       if (!projectionStructureChanged(previous, next)) {
+        return;
+      }
+      if (anchorRestorePendingRef.current) {
+        if (projectionLayoutFrameRef.current !== null) {
+          projectionLayoutFrameRef.current.cancel();
+          projectionLayoutFrameRef.current = null;
+        }
+        pendingProjectionLayoutRef.current = null;
+        projectionLayoutRevisionRef.current += 1;
         return;
       }
       if (
@@ -4928,6 +4938,7 @@ export const TimelineView = memo(function TimelineView({
     if (anchorRestorePendingRef.current) {
       const anchor = pendingAnchorRef.current;
       let restored = false;
+      let followUpPending = false;
       if (container && anchor) {
         runWithScrollWriteReason("backfillCompensation", () => {
           restored = restoreAnchor(container, anchor);
@@ -4944,18 +4955,29 @@ export const TimelineView = memo(function TimelineView({
                 anchor.offsetTop
             );
           });
+          followUpPending = true;
           scheduleScrollFollowUpFrame(() => {
+            let followUpRestored = false;
             runWithScrollWriteReason("backfillCompensation", () => {
-              restoreAnchor(container, anchor);
+              followUpRestored = restoreAnchor(container, anchor);
             });
+            if (followUpRestored) {
+              freeScrollAnchorRef.current = anchor;
+            }
+            pendingAnchorRef.current = null;
+            anchorRestorePendingRef.current = false;
             updateViewportMetrics();
             reportViewportObservation();
+            setProjectionSettlementRevision((current) => current + 1);
+            scheduleBackfillEvaluation("layout_settled");
           });
         }
       }
-      pendingAnchorRef.current = null;
-      // Restoration complete: the next automatic fill request is allowed again.
-      anchorRestorePendingRef.current = false;
+      if (!followUpPending) {
+        pendingAnchorRef.current = null;
+        // Restoration complete: the next automatic fill request is allowed again.
+        anchorRestorePendingRef.current = false;
+      }
     }
     if (
       container &&
@@ -4995,6 +5017,7 @@ export const TimelineView = memo(function TimelineView({
     virtualWindow.virtualized,
     visibleRows,
     runWithScrollWriteReason,
+    scheduleBackfillEvaluation,
     scheduleScrollFollowUpFrame,
     setViewportIntentToLiveEdge,
     timelineKeyHash

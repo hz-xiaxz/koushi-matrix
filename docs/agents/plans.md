@@ -52,6 +52,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Room-subscription ownership (#518) | [2026-08-14-room-subscription-ownership.md](../superpowers/plans/2026-08-14-room-subscription-ownership.md) | — |
 | Room-key rotation correlation diagnostics | [2026-08-14-room-key-rotation-correlation-diagnostics.md](../superpowers/plans/2026-08-14-room-key-rotation-correlation-diagnostics.md) | — |
 | Formatted-body newline preservation (#522) | [2026-08-14-formatted-body-newlines.md](../superpowers/plans/2026-08-14-formatted-body-newlines.md) | — |
+| Active prepend anchor preservation (#520) | [2026-08-14-active-prepend-anchor.md](../superpowers/plans/2026-08-14-active-prepend-anchor.md) | — |
 
 Font asset loading and any bundled font package must update
 `THIRD_PARTY_NOTICES.md` with version, local path, license, and provenance — see
