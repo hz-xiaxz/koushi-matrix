@@ -2,6 +2,8 @@ use super::*;
 use koushi_state::{NativeAttentionDispatchId, NativeAttentionSoundOutcome};
 
 const NATIVE_BADGE_APPLY_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(target_os = "macos")]
+const MACOS_USER_PREFERRED_ALERT_SOUND_ID: u32 = 0x0000_1000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -228,10 +230,12 @@ impl NativeAttentionSoundBackend for PlatformNativeAttentionSoundBackend {
     async fn play(&self) -> NativeAttentionSoundOutcome {
         #[link(name = "AudioToolbox", kind = "framework")]
         unsafe extern "C" {
-            fn AudioServicesPlaySystemSound(sound_id: u32);
+            fn AudioServicesPlayAlertSound(sound_id: u32);
         }
-        // The system alert is an OS-owned native sound; no third-party asset is bundled.
-        unsafe { AudioServicesPlaySystemSound(1007) };
+        // Ask macOS to play the alert selected by the user in Sound settings.
+        // The constant is documented by AudioToolbox's AudioServices.h as
+        // kSystemSoundID_UserPreferredAlert; no third-party asset is bundled.
+        unsafe { AudioServicesPlayAlertSound(MACOS_USER_PREFERRED_ALERT_SOUND_ID) };
         NativeAttentionSoundOutcome::Played
     }
 }
@@ -364,6 +368,12 @@ mod tests {
             serde_json::to_value(NativeAttentionBadgeOutcome::Mismatch).unwrap(),
             "mismatch"
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_adapter_uses_the_user_preferred_alert_sound() {
+        assert_eq!(MACOS_USER_PREFERRED_ALERT_SOUND_ID, 0x0000_1000);
     }
 
     #[cfg(target_os = "linux")]
