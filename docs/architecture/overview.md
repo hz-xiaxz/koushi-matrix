@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-08-14.
+Last amended: 2026-08-15.
 
 ## Product Scope
 
@@ -282,8 +282,27 @@ An in-process actor system in `koushi-core`:
   backend generation proves connectivity, and ignores delayed projections from
   retired observers. Legacy first-response proof and SyncService-to-legacy
   fallback use the same generation-fenced contract.
-- `TimelineManager` (per account session) — timeline actor routing plus the
-  session-scoped outbound-send lifecycle. It directly polls supervised SDK
+- `TimelineManager` (per account session) — timeline actor routing, the
+  session-resident Sliding Sync room-subscription set, and the session-scoped
+  outbound-send lifecycle. It is the only Koushi caller that mutates the live
+  `RoomListService` room-subscription set. Opened timeline rooms, successfully
+  projected non-left room-list entries, and subscriptions restored with a valid
+  Sliding Sync position are unioned into one uncapped in-memory set. Actor
+  unsubscribe/rebuild, thread/focused navigation, cache eviction, and projection
+  replay never remove residency; only successful room leave removes one room,
+  while logout/account switch/reset/delete drops the account-session owner. A
+  manager-instance typed handle is atomically bound to its exact SDK session;
+  room membership operations require pointer identity with RoomActor's current
+  session, then snapshot an admitted permit before their SDK await, receive a
+  manager acknowledgement, settle existing reducer/events under that permit,
+  and drain before that
+  manager is retired. Session-local leave state blocks restore/visibility
+  resurrection until an admitted successful local rejoin or ordered SDK `left`
+  then `joined|invited` observation; observer coalescing preserves that order.
+  Visible-range intents are fenced by the current sync generation, and an
+  identical desired set is an SDK no-op. The set is not persisted separately and
+  never overrides the SDK's members-missing reload or Megolm rotation after real
+  coverage loss/UnknownPos. It directly polls supervised SDK
   enqueue futures, the sole client-global SDK send-queue terminal observer, and the
   composite `(room_id, sdk_transaction_id)` correlation back to the original
   `TimelineKey`, `RequestId`, and `SubmissionId`. Its lifetime spans
@@ -308,11 +327,13 @@ An in-process actor system in `koushi-core`:
   Room live timelines use
   `TimelineFocus::Live { hide_threaded_events: true }` so threaded replies
   are hidden from the main room timeline. Expanded threads use
-  `TimelineKind::Thread`. On the sliding-sync backend,
-  subscribing a timeline also subscribes its room with the live
-  `RoomListService` (`subscribe_to_rooms`, the Element X room-open pattern):
-  the all-rooms list alone only guarantees the initial window on some
-  servers. Thread backward pagination uses the same `TimelineKind::Thread {
+  `TimelineKind::Thread`. On the sliding-sync backend, timeline admission
+  submits its room ID to the manager-owned session residency coordinator, which
+  reconciles the one live `RoomListService` through the standard Element
+  X-style room-subscription API; individual `TimelineActor` lifetimes do not own
+  room subscription lifetime. The all-rooms list alone only guarantees the
+  initial window on some servers. Thread backward pagination uses the same
+  `TimelineKind::Thread {
   room_id, root_event_id }` key as the thread subscription. Plain sends,
   replies, media, edits, and redactions go through the SDK `Timeline` handle
   (not

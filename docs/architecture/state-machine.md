@@ -8,7 +8,7 @@ fixture/demo backend contract mentioned below is historical (dev/demo only).
 The state-transition diagrams in this document are normative and must track the
 reducer; see [Maintenance Contract](#maintenance-contract).
 
-Date: 2026-08-14
+Date: 2026-08-15
 
 ## Contract
 
@@ -719,6 +719,60 @@ stateDiagram-v2
   invite acceptance and DM start against a disposable local homeserver with the
   legacy sync backend forced for smoke determinism. SyncService invite
   projection remains covered by the Phase A core `invites_dm` local QA.
+
+## Room-Subscription Residency
+
+Room-subscription residency is actor-private Rust state owned once per account
+session by `TimelineManagerActor`; it is not a reducer/GUI DTO. The desired set
+is uncapped and in-memory only.
+
+```mermaid
+stateDiagram-v2
+    [*] --> NotResident
+    NotResident --> Resident: Opened/ValidVisible/ValidRestored/LocalJoinSucceeded
+    NotResident --> LeavePendingObservation: LeaveOrDeclineSucceeded [admitted manager ack]
+    NotResident --> NotResident: LeaveOrDeclineFailed/AdmissionRejected
+    Resident --> Resident: Duplicate/ActorUnsubscribe/Rebuild/Replay/UnknownPosIntentRetained
+    Resident --> Resident: LeaveOrDeclineFailed
+    Resident --> LeavePendingObservation: LeaveOrDeclineSucceeded [admitted manager ack]
+    LeavePendingObservation --> LeavePendingObservation: Visible/Restored/StaleGeneration/JoinedBeforeLeft
+    LeavePendingObservation --> LeftObserved: CurrentGenerationMembershipLeft
+    LeftObserved --> LeftObserved: Visible/Restored/DuplicateLeft/StaleGeneration
+    LeavePendingObservation --> Resident: LocalJoinOrAcceptSucceeded [admitted manager ack]
+    LeftObserved --> Resident: LocalJoinOrAcceptSucceeded [admitted manager ack]
+    LeavePendingObservation --> LeavePendingObservation: LocalJoinOrAcceptFailed/AdmissionRejected
+    LeftObserved --> LeftObserved: LocalJoinOrAcceptFailed/AdmissionRejected
+    LeftObserved --> Resident: CurrentGenerationMembershipJoinedOrInvited
+    Resident --> [*]: Logout/AccountSwitch/Reset/AccountDeletion
+    LeavePendingObservation --> [*]: Logout/AccountSwitch/Reset/AccountDeletion
+    LeftObserved --> [*]: Logout/AccountSwitch/Reset/AccountDeletion
+```
+
+- Opened timeline rooms, successfully delivered unique non-left room-list
+  entries, and SDK-restored rooms with matching Sliding Sync continuity are
+  additive inputs. Timeline actor closure and view changes never remove a room.
+- A successful direct leave or invite decline enters
+  `LeavePendingObservation`, removes the room from the desired SDK set, and
+  blocks both restored and visible evidence from re-adding it. A failed
+  operation leaves `Resident` unchanged.
+- External membership transitions preserve SDK receipt order. Only `left`
+  followed later by `joined|invited` clears leave state; `joined` before `left`,
+  duplicate updates, delayed projections, and stale core generations cannot.
+  Successful local accept/direct-join/directory-join may clear leave state
+  immediately because its admitted SDK operation is authoritative.
+- The private control binding carries the exact `Arc<MatrixClientSession>` plus
+  manager handle. Every local leave/decline/join/accept first requires pointer
+  identity with RoomActor's current session; mismatch during replacement fails
+  before the SDK call. It then snapshots a manager-instance operation permit,
+  waits for the residency acknowledgement, and holds the permit through the
+  handler's final success/failure reducer action and `CoreEvent`. Account teardown first closes
+  admission and drains permits while that manager is alive, then replaces or
+  drops it. This prevents an old completion from mutating a new account and
+  prevents a successful same-session operation from being lost.
+- UnknownPos clears actual SDK coverage, not the in-process desired intent. The
+  manager may reconcile that intent again, but the SDK still owns members-missing
+  invalidation, reload, and Megolm rotation. Session teardown drops all residency
+  and leave state; no separate persistence or LRU exists.
 
 ## Timeline And Thread
 

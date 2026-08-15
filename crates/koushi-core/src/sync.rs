@@ -25,6 +25,8 @@ use std::{
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixClientSession;
 use koushi_state::{AppAction, RoomListSource, SyncLifecycleStatus};
+#[cfg(feature = "test-hooks")]
+use matrix_sdk_ui::room_list_service::RoomListService;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::command::SyncCommand;
@@ -657,6 +659,41 @@ async fn start_timeline_observation(
         .await;
 }
 
+#[cfg(feature = "test-hooks")]
+pub(crate) async fn room_subscription_residency_start_order_for_testing(
+    session: Arc<MatrixClientSession>,
+    service: Arc<RoomListService>,
+) -> bool {
+    let (timeline_tx, mut timeline_rx) = mpsc::channel(1);
+    let (room_tx, mut room_rx) = mpsc::channel(1);
+
+    start_timeline_observation(&timeline_tx, service.clone(), 1).await;
+    let Some(crate::timeline::TimelineMessage::SyncStarted {
+        room_list_service,
+        core_generation,
+    }) = timeline_rx.recv().await
+    else {
+        return false;
+    };
+    if core_generation != 1 || !Arc::ptr_eq(&room_list_service, &service) {
+        return false;
+    }
+
+    if !start_room_observation(session.clone(), room_tx, service.clone(), 1).await {
+        return false;
+    }
+    matches!(
+        room_rx.recv().await,
+        Some(RoomMessage::SyncStarted {
+            session: observed_session,
+            room_list_service: observed_service,
+            source: RoomListSource::Live,
+            backend_generation: 1,
+        }) if Arc::ptr_eq(&observed_session, &session)
+            && Arc::ptr_eq(&observed_service, &service)
+    )
+}
+
 async fn forward_latest_timeline_response_commit(
     timeline_tx: &mpsc::Sender<crate::timeline::TimelineMessage>,
     core_generation: u64,
@@ -952,6 +989,12 @@ async fn observe_sync_service(
                         .await;
                 }
                 if !room_observation_started {
+                    start_timeline_observation(
+                        &timeline_tx,
+                        room_list_service.clone(),
+                        run_generation,
+                    )
+                    .await;
                     if !start_room_observation(
                         session.clone(),
                         room_tx.clone(),
@@ -965,12 +1008,6 @@ async fn observe_sync_service(
                             connected,
                         );
                     }
-                    start_timeline_observation(
-                        &timeline_tx,
-                        room_list_service.clone(),
-                        run_generation,
-                    )
-                    .await;
                     room_observation_started = true;
                 }
                 if !forward_latest_timeline_response_commit(

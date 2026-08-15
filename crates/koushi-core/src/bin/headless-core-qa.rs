@@ -114,6 +114,9 @@ const E2EE_EVENT_TIMEOUT: Duration = Duration::from_secs(90);
 // sends resume, so this lane needs a wider budget than generic event waits.
 const SEND_QUEUE_EVENT_TIMEOUT: Duration = Duration::from_secs(300);
 const TIMELINE_UNSUBSCRIBE_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
+const TIMELINE_RECONNECT_EXPECTED_BODY_COUNT: usize = 21;
+const TIMELINE_RECONNECT_MIN_INITIAL_BODIES: usize = 20;
+const TIMELINE_RECONNECT_PAGINATE_EVENT_COUNT: u16 = 64;
 
 type QaEventFuture<'a> =
     Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + 'a>>;
@@ -5299,7 +5302,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
         let room_id = create_room_for_qa(
             &mut conn_a,
             "QA Timeline Reconnect Room",
-            false,
+            true,
             "timeline_reconnect create room",
         )
         .await?;
@@ -5320,6 +5323,18 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
         .await?;
         accept_invite_for_qa(&mut conn_b, &room_id, "timeline_reconnect B accepts invite").await?;
         wait_for_room_in_room_list(&mut conn_b, &room_id, "timeline_reconnect B room list").await?;
+        wait_for_encrypted_room_projection_for_qa(
+            &mut conn_a,
+            &room_id,
+            "timeline_reconnect A encrypted room projection",
+        )
+        .await?;
+        wait_for_encrypted_room_projection_for_qa(
+            &mut conn_b,
+            &room_id,
+            "timeline_reconnect B encrypted room projection",
+        )
+        .await?;
         room_id
     };
 
@@ -5400,15 +5415,9 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
             }))
             .await
             .map_err(|e| format!("timeline_reconnect: submit B offline send failed: {e}"))?;
-        wait_for_send_flow_completion(
-            &mut conn_b,
-            send_b_id,
-            &key_b,
-            &txn,
-            body,
-            "timeline_reconnect B send while A offline",
-        )
-        .await?;
+        let send_label = format!("timeline_reconnect B send while A offline ordinal={index}");
+        wait_for_send_flow_completion(&mut conn_b, send_b_id, &key_b, &txn, body, &send_label)
+            .await?;
     }
 
     proxy.enable();
@@ -5840,7 +5849,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
             .await?
         }
     };
-    wait_for_all_items_with_bodies(
+    wait_for_reconnect_projection(
         &mut conn_a,
         &key_a,
         &reopened_items,
@@ -9247,6 +9256,57 @@ async fn wait_for_room_in_room_list(
     }
 }
 
+async fn wait_for_encrypted_room_projection_for_qa(
+    conn: &mut CoreConnection,
+    expected_room_id: &str,
+    label: &str,
+) -> Result<AppState, String> {
+    let contains_expected = |snapshot: &AppState| {
+        snapshot
+            .rooms
+            .iter()
+            .any(|room| room.room_id == expected_room_id && room.is_encrypted)
+    };
+
+    let snapshot = conn.snapshot();
+    if contains_expected(&snapshot) {
+        return Ok(snapshot);
+    }
+
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                let encrypted_rooms = snapshot
+                    .rooms
+                    .iter()
+                    .filter(|room| room.is_encrypted)
+                    .count();
+                format!(
+                    "{label}: timed out waiting for encrypted room projection \
+                     (rooms={}, encrypted_rooms={encrypted_rooms})",
+                    snapshot.rooms.len(),
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+                let snapshot = conn.snapshot();
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            CoreEvent::StateChanged(snapshot) if contains_expected(&snapshot) => {
+                return Ok(snapshot);
+            }
+            _ => {}
+        }
+    }
+}
+
 async fn wait_for_space_in_space_list(
     conn: &mut CoreConnection,
     expected_space_id: &str,
@@ -12589,10 +12649,12 @@ fn assert_no_decryption_failure_items(items: &[TimelineItem], label: &str) -> Re
 }
 
 fn timeline_item_is_decryption_failure(item: &TimelineItem) -> bool {
-    item.body
-        .as_ref()
-        .map(|body| body.contains("Unable to decrypt"))
-        .unwrap_or(false)
+    item.unable_to_decrypt.is_some()
+        || item
+            .body
+            .as_ref()
+            .map(|body| body.contains("Unable to decrypt"))
+            .unwrap_or(false)
 }
 
 #[derive(Debug)]
@@ -15863,43 +15925,212 @@ async fn wait_for_item_with_body(
     }
 }
 
-async fn wait_for_all_items_with_bodies(
+struct ReconnectProjection {
+    items: Vec<TimelineItem>,
+    expected_bodies: Vec<String>,
+}
+
+impl ReconnectProjection {
+    fn from_initial(
+        initial_items: &[TimelineItem],
+        expected_bodies: &[String],
+        label: &str,
+    ) -> Result<Self, String> {
+        let projection = Self {
+            items: initial_items.to_vec(),
+            expected_bodies: expected_bodies.to_vec(),
+        };
+        if projection.expected_bodies.len() != TIMELINE_RECONNECT_EXPECTED_BODY_COUNT
+            || projection
+                .expected_bodies
+                .iter()
+                .collect::<BTreeSet<_>>()
+                .len()
+                != TIMELINE_RECONNECT_EXPECTED_BODY_COUNT
+        {
+            return Err(format!(
+                "{label}: expected body contract invalid (expected_count={})",
+                projection.expected_bodies.len()
+            ));
+        }
+        projection.validate_items(label, true)?;
+        Ok(projection)
+    }
+
+    fn replace(&mut self, items: Vec<TimelineItem>, label: &str) -> Result<(), String> {
+        self.items = items;
+        self.validate_items(label, false)
+    }
+
+    fn apply_batch(&mut self, diffs: &[TimelineDiff], label: &str) -> Result<(), String> {
+        for diff in diffs {
+            apply_timeline_diff(&mut self.items, diff);
+        }
+        self.validate_items(label, false)
+    }
+
+    fn validate_items(&self, label: &str, require_initial_window: bool) -> Result<(), String> {
+        if self.items.iter().any(timeline_item_is_decryption_failure) {
+            return Err(format!(
+                "{label}: projection contains UTD (item_count={})",
+                self.items.len()
+            ));
+        }
+        let counts = self.body_counts();
+        let duplicate_indices = counts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, count)| (*count > 1).then_some(index))
+            .collect::<Vec<_>>();
+        if !duplicate_indices.is_empty() {
+            return Err(format!(
+                "{label}: duplicate expected bodies (item_count={}; duplicate_indices={duplicate_indices:?})",
+                self.items.len()
+            ));
+        }
+        if require_initial_window {
+            let oldest_count = counts.first().copied().unwrap_or_default();
+            let newest_window_count = counts
+                .get(1..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT)
+                .is_some_and(|window| {
+                    window.len() == TIMELINE_RECONNECT_MIN_INITIAL_BODIES
+                        && window.iter().all(|count| *count == 1)
+                });
+            if oldest_count != 0 || !newest_window_count {
+                return Err(format!(
+                    "{label}: initial projection must contain newest indices 1..=20 exactly once and omit index 0 (item_count={}; oldest_count={oldest_count}; newest_window_count={newest_window_count})",
+                    self.items.len()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn body_counts(&self) -> Vec<usize> {
+        self.expected_bodies
+            .iter()
+            .map(|expected| {
+                self.items
+                    .iter()
+                    .filter(|item| item.body.as_deref() == Some(expected.as_str()))
+                    .count()
+            })
+            .collect()
+    }
+
+    fn missing_indices(&self) -> Vec<usize> {
+        self.body_counts()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, count)| (*count == 0).then_some(index))
+            .collect()
+    }
+
+    fn is_complete(&self) -> bool {
+        self.body_counts().iter().all(|count| *count == 1)
+    }
+
+    fn timeout_error(&self, label: &str, saw_paginating: bool, terminal: bool) -> String {
+        format!(
+            "{label}: reconnect proof timed out (item_count={}; missing_indices={:?}; saw_paginating={saw_paginating}; terminal={terminal})",
+            self.items.len(),
+            self.missing_indices()
+        )
+    }
+}
+
+fn observe_reconnect_pagination_state(
+    request_id: Option<RequestId>,
+    expected_request_id: RequestId,
+    state: &PaginationState,
+    saw_paginating: &mut bool,
+    terminal: &mut bool,
+    label: &str,
+) -> Result<(), String> {
+    if request_id != Some(expected_request_id) {
+        return Ok(());
+    }
+    match state {
+        PaginationState::Paginating => *saw_paginating = true,
+        PaginationState::Idle | PaginationState::EndReached => {
+            if !*saw_paginating {
+                return Err(format!(
+                    "{label}: pagination terminal arrived before Paginating"
+                ));
+            }
+            *terminal = true;
+        }
+        PaginationState::Failed { .. } => {
+            return Err(format!("{label}: pagination failed"));
+        }
+    }
+    Ok(())
+}
+
+async fn wait_for_reconnect_projection(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     initial_items: &[TimelineItem],
     expected_bodies: &[String],
     label: &str,
 ) -> Result<(), String> {
-    let mut seen = seed_expected_body_observation(initial_items, expected_bodies);
+    let mut projection = ReconnectProjection::from_initial(initial_items, expected_bodies, label)?;
 
+    let deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
+    let request_id = conn.next_request_id();
+    tokio::time::timeout_at(
+        deadline,
+        conn.command(CoreCommand::Timeline(TimelineCommand::Paginate {
+            request_id,
+            key: key.clone(),
+            direction: PaginationDirection::Backward,
+            event_count: TIMELINE_RECONNECT_PAGINATE_EVENT_COUNT,
+        })),
+    )
+    .await
+    .map_err(|_| format!("{label}: pagination submit timed out"))?
+    .map_err(|_| format!("{label}: pagination submit failed"))?;
+
+    let mut saw_paginating = false;
+    let mut terminal = false;
     loop {
-        if seen.iter().all(|found| *found) {
+        if terminal && projection.is_complete() {
             return Ok(());
         }
-        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
             .await
-            .map_err(|_| missing_expected_body_timeout(label, &seen))?
+            .map_err(|_| projection.timeout_error(label, saw_paginating, terminal))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-
         match event {
             CoreEvent::Timeline(TimelineEvent::InitialItems {
                 key: ref event_key,
                 items,
                 ..
-            }) if event_key == key => {
-                for item in &items {
-                    observe_expected_bodies(item, expected_bodies, &mut seen);
-                }
-            }
+            }) if event_key == key => projection.replace(items, label)?,
             CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
                 key: ref event_key,
                 diffs,
                 ..
-            }) if event_key == key => {
-                visit_timeline_diff_items(&diffs, |item| {
-                    observe_expected_bodies(item, expected_bodies, &mut seen);
-                    Ok(())
-                })?;
+            }) if event_key == key => projection.apply_batch(&diffs, label)?,
+            CoreEvent::Timeline(TimelineEvent::PaginationStateChanged {
+                request_id: event_request_id,
+                key: ref event_key,
+                direction: PaginationDirection::Backward,
+                state,
+                ..
+            }) if event_key == key => observe_reconnect_pagination_state(
+                event_request_id,
+                request_id,
+                &state,
+                &mut saw_paginating,
+                &mut terminal,
+                label,
+            )?,
+            CoreEvent::OperationFailed {
+                request_id: event_request_id,
+                ..
+            } if event_request_id == request_id => {
+                return Err(format!("{label}: pagination operation failed"));
             }
             _ => {}
         }
@@ -16071,52 +16302,6 @@ async fn wait_for_exact_items_and_gap_release(
             pending_render_ack = None;
         }
     }
-}
-
-fn observe_expected_bodies(
-    item: &koushi_core::event::TimelineItem,
-    expected_bodies: &[String],
-    seen: &mut [bool],
-) {
-    let Some(body) = item.body.as_deref() else {
-        return;
-    };
-    for (index, expected) in expected_bodies.iter().enumerate() {
-        if body.contains(expected) {
-            seen[index] = true;
-        }
-    }
-}
-
-fn seed_expected_body_observation(
-    initial_items: &[TimelineItem],
-    expected_bodies: &[String],
-) -> Vec<bool> {
-    let mut seen = vec![false; expected_bodies.len()];
-    for item in initial_items {
-        observe_expected_bodies(item, expected_bodies, &mut seen);
-    }
-    seen
-}
-
-#[cfg(test)]
-fn missing_expected_body_count(seen: &[bool]) -> usize {
-    seen.iter().filter(|found| !**found).count()
-}
-
-fn missing_expected_body_indices(seen: &[bool]) -> Vec<usize> {
-    seen.iter()
-        .enumerate()
-        .filter_map(|(index, found)| (!found).then_some(index))
-        .collect()
-}
-
-fn missing_expected_body_timeout(label: &str, seen: &[bool]) -> String {
-    let missing_indices = missing_expected_body_indices(seen);
-    format!(
-        "{label}: timed out with {} expected rows still missing; missing_indices={missing_indices:?}",
-        missing_indices.len()
-    )
 }
 
 async fn wait_for_event_item_with_body(
@@ -17621,6 +17806,291 @@ mod tests {
     use super::*;
     use koushi_core::event::{ThreadSummaryDto, TimelineGapPosition, TimelineMessageActions};
 
+    fn reconnect_test_bodies() -> Vec<String> {
+        (0..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT)
+            .map(|index| format!("synthetic body {index:02}"))
+            .collect()
+    }
+
+    fn reconnect_test_items(indices: impl IntoIterator<Item = usize>) -> Vec<TimelineItem> {
+        let bodies = reconnect_test_bodies();
+        indices
+            .into_iter()
+            .map(|index| {
+                synthetic_timeline_item(
+                    &format!("$synthetic-{index:02}:example.invalid"),
+                    Some(&bodies[index]),
+                    None,
+                    None,
+                    None,
+                )
+            })
+            .collect()
+    }
+
+    fn reconnect_test_request(sequence: u64) -> RequestId {
+        RequestId {
+            connection_id: koushi_core::ids::RuntimeConnectionId(1),
+            sequence,
+        }
+    }
+
+    #[test]
+    fn active_reconnect_uses_encryption_gate_before_timeline_work() {
+        let source = include_str!("headless-core-qa.rs");
+        let stage = source
+            .split("async fn run_timeline_reconnect_scenario_impl")
+            .nth(1)
+            .and_then(|rest| rest.split("fn timeline_gap_count_for_qa").next())
+            .expect("timeline reconnect stage should exist");
+        let active = stage
+            .split("let room_id = if restart_with_persisted_gap")
+            .nth(1)
+            .and_then(|rest| rest.split("// Rebuild both SyncService instances").next())
+            .expect("active reconnect room setup should exist")
+            .split("} else {")
+            .nth(1)
+            .expect("active reconnect branch should exist");
+
+        assert!(
+            active.contains(
+                "create_room_for_qa(\n            &mut conn_a,\n            \"QA Timeline Reconnect Room\",\n            true,"
+            ),
+            "active reconnect must create an encrypted room"
+        );
+
+        let helper = source
+            .split("async fn wait_for_encrypted_room_projection_for_qa")
+            .nth(1)
+            .and_then(|rest| rest.split("async fn wait_for_space_in_space_list").next())
+            .expect("encrypted room projection helper should exist");
+        assert!(helper.contains("ROOM_LIST_EVENT_TIMEOUT"));
+        assert!(helper.contains("room.room_id == expected_room_id && room.is_encrypted"));
+        assert!(helper.contains("RoomEvent::RoomListUpdated"));
+        assert!(helper.contains("CoreEvent::StateChanged(snapshot)"));
+        assert!(helper.contains("tokio::time::timeout_at(deadline, conn.recv_event())"));
+        assert!(!helper.contains("tokio::time::sleep"));
+
+        let first_subscribe = stage
+            .find("subscribe_and_ack_active_timeline_projection_for_qa(")
+            .expect("reconnect must subscribe a timeline");
+        let first_send = stage
+            .find("TimelineCommand::SendText")
+            .expect("reconnect must send a timeline message");
+        let gate_a = stage
+            .find("wait_for_encrypted_room_projection_for_qa(\n            &mut conn_a")
+            .expect("reconnect must gate encryption projection for A");
+        let gate_b = stage
+            .find("wait_for_encrypted_room_projection_for_qa(\n            &mut conn_b")
+            .expect("reconnect must gate encryption projection for B");
+
+        assert!(gate_a < first_subscribe && gate_b < first_subscribe);
+        assert!(gate_a < first_send && gate_b < first_send);
+    }
+
+    #[test]
+    fn reconnect_initial_projection_rejects_missing_newest_body() {
+        let bodies = reconnect_test_bodies();
+        let error = ReconnectProjection::from_initial(
+            &reconnect_test_items(0..20),
+            &bodies,
+            "reconnect test",
+        )
+        .err()
+        .expect("an initial projection missing newest body 20 must be rejected");
+
+        assert!(error.contains("newest_window_count=false"));
+        assert!(!error.contains("synthetic body"));
+    }
+
+    #[test]
+    fn reconnect_initial_projection_rejects_oldest_present_before_page() {
+        let bodies = reconnect_test_bodies();
+        let error = ReconnectProjection::from_initial(
+            &reconnect_test_items(0..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
+            &bodies,
+            "reconnect test",
+        )
+        .err()
+        .expect("an initial projection containing oldest body 0 must be rejected");
+
+        assert!(error.contains("oldest_count=1"));
+        assert!(!error.contains("synthetic body"));
+    }
+
+    #[test]
+    fn reconnect_initial_projection_requires_mandatory_pagination() {
+        let error = ReconnectProjection::from_initial(
+            &reconnect_test_items(0..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
+            &reconnect_test_bodies(),
+            "reconnect test",
+        )
+        .err()
+        .expect("the all-21 shortcut fixture must be removed");
+
+        assert!(error.contains("initial projection"));
+        assert!(!error.contains("needs no pagination"));
+    }
+
+    #[test]
+    fn reconnect_pagination_requires_paginating_before_terminal() {
+        let request_id = reconnect_test_request(1);
+        let mut saw_paginating = false;
+        let mut terminal = false;
+
+        observe_reconnect_pagination_state(
+            Some(request_id),
+            request_id,
+            &PaginationState::Paginating,
+            &mut saw_paginating,
+            &mut terminal,
+            "reconnect test",
+        )
+        .expect("Paginating should be accepted");
+        assert!(saw_paginating);
+        assert!(!terminal);
+
+        observe_reconnect_pagination_state(
+            Some(request_id),
+            request_id,
+            &PaginationState::Idle,
+            &mut saw_paginating,
+            &mut terminal,
+            "reconnect test",
+        )
+        .expect("Idle after Paginating should be accepted");
+        assert!(terminal);
+    }
+
+    #[test]
+    fn reconnect_projection_applies_destructive_diffs_exactly_and_rejects_duplicates() {
+        let bodies = reconnect_test_bodies();
+        let mut projection = ReconnectProjection::from_initial(
+            &reconnect_test_items(1..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
+            &bodies,
+            "reconnect test",
+        )
+        .expect("newest-window initial projection should be valid");
+        projection
+            .apply_batch(&[TimelineDiff::Remove { index: 0 }], "reconnect test")
+            .expect("remove should be applied");
+        assert_eq!(projection.missing_indices(), vec![0, 1]);
+
+        let newest_window_first = reconnect_test_items([1]).remove(0);
+        projection
+            .apply_batch(
+                &[TimelineDiff::PushFront {
+                    item: newest_window_first,
+                }],
+                "reconnect test",
+            )
+            .expect("push front should restore the exact newest-window body");
+        let first = reconnect_test_items([0]).remove(0);
+        projection
+            .apply_batch(&[TimelineDiff::PushFront { item: first }], "reconnect test")
+            .expect("push front should recover the oldest body");
+        assert!(projection.is_complete());
+
+        let duplicate = reconnect_test_items([0]).remove(0);
+        let error = projection
+            .apply_batch(
+                &[TimelineDiff::Set {
+                    index: 1,
+                    item: duplicate,
+                }],
+                "reconnect test",
+            )
+            .expect_err("a destructive/set diff creating a duplicate must fail");
+        assert!(error.contains("duplicate_indices=[0]"));
+
+        projection
+            .apply_batch(
+                &[
+                    TimelineDiff::Clear,
+                    TimelineDiff::Reset {
+                        items: reconnect_test_items(0..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
+                    },
+                ],
+                "reconnect test",
+            )
+            .expect("clear/reset should rebuild the exact projection");
+        assert!(projection.is_complete());
+    }
+
+    #[test]
+    fn reconnect_terminal_before_paginating_is_rejected() {
+        let request_id = reconnect_test_request(2);
+        let mut saw_paginating = false;
+        let mut terminal = false;
+        let error = observe_reconnect_pagination_state(
+            Some(request_id),
+            request_id,
+            &PaginationState::EndReached,
+            &mut saw_paginating,
+            &mut terminal,
+            "reconnect test",
+        )
+        .expect_err("terminal before Paginating must fail");
+
+        assert!(error.contains("before Paginating"));
+        assert!(!terminal);
+    }
+
+    #[test]
+    fn reconnect_terminal_can_precede_the_final_diff() {
+        let bodies = reconnect_test_bodies();
+        let mut projection = ReconnectProjection::from_initial(
+            &reconnect_test_items(1..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
+            &bodies,
+            "reconnect test",
+        )
+        .expect("20-body newest-window initial projection should be valid");
+        let request_id = reconnect_test_request(3);
+        let mut saw_paginating = false;
+        let mut terminal = false;
+        observe_reconnect_pagination_state(
+            Some(request_id),
+            request_id,
+            &PaginationState::Paginating,
+            &mut saw_paginating,
+            &mut terminal,
+            "reconnect test",
+        )
+        .unwrap();
+        observe_reconnect_pagination_state(
+            Some(request_id),
+            request_id,
+            &PaginationState::EndReached,
+            &mut saw_paginating,
+            &mut terminal,
+            "reconnect test",
+        )
+        .unwrap();
+        assert!(terminal);
+        projection
+            .apply_batch(
+                &[TimelineDiff::PushBack {
+                    item: reconnect_test_items([0]).remove(0),
+                }],
+                "reconnect test",
+            )
+            .unwrap();
+        assert!(projection.is_complete());
+    }
+
+    #[test]
+    fn reconnect_projection_rejects_undecipherable_items() {
+        let bodies = reconnect_test_bodies();
+        let mut items = reconnect_test_items(1..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT);
+        items[0].body = Some("Unable to decrypt message".to_owned());
+        let error = ReconnectProjection::from_initial(&items, &bodies, "reconnect test")
+            .err()
+            .expect("UTD must fail closed");
+
+        assert!(error.contains("contains UTD"));
+        assert!(!error.contains("synthetic body"));
+    }
+
     #[test]
     fn trust_admission_timeout_summary_is_allowlisted_and_private_safe() {
         use koushi_diagnostics::{
@@ -18134,39 +18604,6 @@ mod tests {
         assert_eq!(selected.id, new_gap_id);
         assert_eq!(*actor_generation, 7);
         assert_eq!(*projection_generation, 41);
-    }
-
-    #[test]
-    fn expected_body_observation_composes_initial_items_with_future_diffs() {
-        let expected_bodies = vec![
-            "initial body".to_owned(),
-            "future body".to_owned(),
-            "truly absent body".to_owned(),
-        ];
-        let mut initial = projection_timeline_item("$initial:test", false);
-        initial.body = Some("initial body".to_owned());
-        let mut seen = seed_expected_body_observation(&[initial], &expected_bodies);
-        assert_eq!(missing_expected_body_count(&seen), 2);
-
-        let mut future = projection_timeline_item("$future:test", false);
-        future.body = Some("future body".to_owned());
-        visit_timeline_diff_items(&[TimelineDiff::PushBack { item: future }], |item| {
-            observe_expected_bodies(item, &expected_bodies, &mut seen);
-            Ok(())
-        })
-        .expect("future diff observation");
-
-        assert_eq!(seen, [true, true, false]);
-        assert_eq!(missing_expected_body_indices(&seen), vec![2]);
-        assert_eq!(
-            missing_expected_body_timeout("reconnect observation", &seen),
-            "reconnect observation: timed out with 1 expected rows still missing; missing_indices=[2]"
-        );
-        assert_eq!(
-            missing_expected_body_count(&seen),
-            1,
-            "an actually absent row must remain missing"
-        );
     }
 
     #[test]
