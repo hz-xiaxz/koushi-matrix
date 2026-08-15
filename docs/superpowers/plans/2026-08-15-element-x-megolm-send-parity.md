@@ -10,10 +10,10 @@
 
 - Element X-compatible upstream behavior is the production default.
 - `Room::preshare_room_key` remains unconditional for encrypted sends.
-- #510 remains an explicit SDK opt-in and Koushi stops enabling it.
+- #510's retained helper has no production caller; Koushi removes its stale builder opt-in while a testing-only caller keeps the implementation covered.
 - #523 gains an independent default-off builder option. Koushi does not enable it.
 - The SDK option is indispensable: #523 runs inside `matrix-sdk`'s private send future after standard pre-share, so neither a Koushi wrapper nor an existing public API can suppress it without bypassing the standard send path. Keep the addition to one boolean, one builder method, and one read at the owning branch; record the rationale and upstream disposition.
-- The two options stay independent: tests and future upstream work may enable either one without silently enabling the other.
+- The two configurations stay independent: the testing seam may exercise #510 without enabling #523, and #523 may be explicitly enabled without restoring #510's production caller.
 - Runtime-disable means builder configuration, not `cfg`, dead-code deletion, a product setting, or an environment-variable escape hatch.
 - Existing #510/#523 implementation and focused tests remain compiled and runnable through explicit test opt-in.
 - A disabled path must not start its timer, claim, duplicate to-device request, wake listener, or diagnostic outcome.
@@ -52,7 +52,7 @@
 Add the smallest deterministic tests:
 
 1. **#523 default-off RED:** build a default client with the existing issue-523 mock sequence. Assert normal pre-share occurs, but no second targeted `/keys/claim`, repair wake, or 1.5-second fence is created before index 0. This must fail before the gate because #523 currently runs unconditionally.
-2. **#510 Koushi-default RED:** exercise `desktop_client_builder_defaults` through the existing client construction seam and assert a fresh Koushi client performs no duplicate index-0 re-share. Avoid source-text assertions. This must fail because Koushi currently calls `.with_index0_duplicate_share(true)`.
+2. **#510 Koushi-default RED:** #523 deliberately removed #510's production caller, so default message sending is already behaviorally disabled even though Koushi still sets `.with_index0_duplicate_share(true)`. Add one `testing`-feature-only SDK helper that runs standard pre-share and then invokes the retained #510 helper exactly as its former production call did. Exercise that seam through `desktop_client_builder_defaults` and assert only standard pre-share. This must fail because the stale Koushi builder flag still enables the retained helper. The seam must not compile into normal SDK builds and must not expose cryptographic data. Avoid source-text assertions and do not restore a production caller.
 3. Assert disabled behavior does not emit #510/#523 terminal diagnostics while normal initial-share diagnostics remain.
 
 Only after recording those RED failures, add the explicit-opt-in continuity assertions with the production gate:
@@ -110,7 +110,8 @@ Run the mandatory aggregate local gate and the existing send-queue smoke against
 
 ```bash
 PATH=/tmp/koushi-desktop-local-qa-bin:$PATH \
-  npm --prefix apps/desktop run qa:headless-local -- --server=both
+  npm --prefix apps/desktop run qa:headless-local -- \
+    --server=both --timeout-ms=240000
 PATH=/tmp/koushi-desktop-local-qa-bin:$PATH \
   npm --prefix apps/desktop run qa:headless-local -- \
     --server=both --scenario=send_queue --core --timeout-ms=240000
@@ -134,9 +135,30 @@ The focused SDK integration test, not a new broad QA harness, proves absence of 
    - all local and GitHub check results.
 8. Merge only with all required GitHub checks green.
 
-## Review record
+## Review / implementation record
 
 - Pre-implementation design gate: `reviewer-gpt` — `Correct-to-merge` (2026-08-15), no findings.
+- Canon-first update completed before tests in `REPOSITORY_RULES.md`,
+  `docs/architecture/overview.md`, `docs/architecture/state-machine.md`, and
+  `docs/upstream/matrix-rust-sdk-feedback.md`; this plan was already indexed in
+  `docs/agents/plans.md`.
+- RED: `cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk --features testing,experimental-encrypted-state-events issue_523` — exit `101`; `9 passed, 1 failed`. The new default-off behavioral test timed out at the 1.5-second repair-fence assertion, proving #523 currently runs unconditionally.
+- #510 seam check: `cargo test -p koushi-sdk --lib koushi_default_builder_does_not_enable_index0_duplicate_share` — exit `0`; `1 passed`. This was not valid RED evidence: commit `3a7f5663b` deliberately removed #510's production caller when #523 superseded its blind duplicate, so ordinary sends cannot observe the stale `.with_index0_duplicate_share(true)` configuration.
+- Design amendment: permit one `testing`-feature-only SDK helper that reproduces the former pre-share → retained #510 helper boundary. The Koushi builder test must use it to expose the stale enabled flag behaviorally, fail before removing the flag, and pass afterward. The production caller remains absent.
+- Test-seam amendment gate: `reviewer-gpt` — `Correct-to-merge` (2026-08-15), no findings.
+- No production behavior changes or vendored SDK commit were made before that amendment approval; subsequent GREEN evidence is recorded below.
+- RED: `cargo test -p koushi-sdk --lib koushi_default_builder_does_not_enable_index0_duplicate_share` — exit `101`; the behavioral seam observed 2 encrypted to-device shares instead of the expected 1 (`left: 2`, `right: 1`), proving Koushi's stale #510 opt-in still activates the retained helper.
+- GREEN: `cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk --features testing,experimental-encrypted-state-events issue_523` — exit `0`; 10 passed.
+- GREEN: `cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk --features testing,experimental-encrypted-state-events index0_reshare` — exit `0`; 3 passed.
+- GREEN: `cd vendor/matrix-rust-sdk && cargo test -p matrix-sdk-crypto --features testing issue_523` — exit `0`; 12 passed.
+- GREEN: `cd vendor/matrix-rust-sdk && cargo fmt --all -- --check` — exit `0` (toolchain emitted only stable/nightly configuration warnings).
+- GREEN: `cargo test -p koushi-sdk --lib koushi_default_builder_does_not_enable_index0_duplicate_share` — exit `0`; 1 passed.
+- GREEN focused Koushi: `cargo test -p koushi-sdk --lib issue_523` — 1 passed; `index0_reshare` — 2 passed; `initial_share` — 4 passed; full `cargo test -p koushi-sdk --lib` — 139 passed.
+- GREEN regression: `cargo test -p koushi-core --lib` — exit `0`; 1000 passed, 8 ignored. Normal `cargo check -p koushi-sdk`, `node scripts/check-sdk-submodule.mjs`, and `git diff --check` also passed.
+- Parent integration reused the repository desktop dependencies: full Vitest, typecheck, lint, build, secret scan, agents-doc check, SDK-submodule guard, and root/submodule diff checks passed. `koushi-state`, `koushi-key`, `koushi-desktop`, `koushi-sdk`, and `koushi-core` tests passed; the policy's historical `koushi-auth` package name is absent from the current workspace. Vendored SDK formatting passed. Root `cargo fmt --all -- --check` remains blocked by pre-existing drift across unrelated core QA/account/room/store files and older `koushi-sdk` sections; the new Koushi test block was aligned to rustfmt output without reformatting unrelated code.
+- The first aggregate local QA attempt hit its default 90-second cold-start timeout. Re-running with the documented 240-second budget passed the aggregate lane against Tuwunel and Synapse. The `send_queue --core` lane also passed against both servers with `safety`, `login_sync`, `send_fail`, `resend`, `cancel_send`, `fifo`, `unsent_restart`, and `restore_cleanup` evidence.
+- Vendored SDK changes committed as focused submodule commit `5b55073fbbefd8a3c12f05ef2df599d2fe8d2abb` (`feat: disable optional Megolm send repairs by default`); parent review replaced the wall-time default-off assertion with a causal race between room send and a second repair claim, and the focused test passed. Root implementation and canon were committed after integration.
+- Final complete-diff gate: `reviewer-gpt` returned `Correct-to-merge` for the root diff after one documentation-record fix, and separate exhaustive production/test passes returned `Correct-to-merge` for every vendored SDK hunk. No blocking or nonblocking findings remain.
 
 ## Re-enable criteria
 

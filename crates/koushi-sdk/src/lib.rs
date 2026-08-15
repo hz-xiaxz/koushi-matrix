@@ -8348,12 +8348,136 @@ fn desktop_client_builder_defaults(
             ..Default::default()
         })
         .with_enable_share_history_on_invite(true)
-        // Issue #510: at most one bounded index-0 duplicate share before the
-        // first room event of a fresh outbound Megolm session.
-        .with_index0_duplicate_share(true)
         .with_threading_support(matrix_sdk::ThreadingSupport::Enabled {
             with_subscriptions: true,
         })
+}
+
+#[cfg(test)]
+mod megolm_send_parity_tests {
+    use std::sync::{Arc, Mutex};
+
+    use matrix_sdk::{
+        encryption::{RoomKeyDiagnosticEvent, RoomKeyDiagnosticObserver},
+        test_utils::mocks::MatrixMockServer,
+    };
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory, test_json};
+    use ruma::{
+        RoomVersionId, device_id, events::room::message::RoomMessageEventContent, room_id, user_id,
+    };
+    use wiremock::{
+        Mock, ResponseTemplate,
+        matchers::{method, path_regex},
+    };
+
+    const TO_DEVICE_PATH: &str = r"^/_matrix/client/.*/sendToDevice/m.room.encrypted/.*";
+    const ROOM_SEND_PATH: &str = r"^/_matrix/client/.*/rooms/.*/send/m.room.encrypted/.*";
+
+    #[tokio::test]
+    async fn koushi_default_builder_does_not_enable_index0_duplicate_share() {
+        let server = MatrixMockServer::new().await;
+        server.mock_crypto_endpoints_preset().await;
+        let alice_user_id = user_id!("@alice:example.org");
+        let bob_user_id = user_id!("@bob:example.org");
+        let alice_device_id = device_id!("ALICEDEVICE");
+        let bob_device_id = device_id!("BOBDEVICE");
+        let alice = server
+            .client_builder_for_crypto_end_to_end(alice_user_id, alice_device_id)
+            .on_builder(super::desktop_client_builder_defaults)
+            .build()
+            .await;
+        let bob = server
+            .client_builder_for_crypto_end_to_end(bob_user_id, bob_device_id)
+            .build()
+            .await;
+        server.exchange_e2ee_identities(&alice, &bob).await;
+
+        let room_id = room_id!("!koushi-megolm-default:example.org");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        let observer: RoomKeyDiagnosticObserver = Arc::new(move |event| {
+            captured.lock().unwrap().push(event);
+        });
+        alice
+            .encryption()
+            .set_room_key_diagnostic_observer(Some(observer))
+            .await;
+
+        let event_factory = EventFactory::new().sender(alice_user_id).room(room_id);
+        server
+            .mock_sync()
+            .ok_and_run(&alice, |builder| {
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(room_id)
+                        .add_state_event(event_factory.create(alice_user_id, RoomVersionId::V1))
+                        .add_state_event(event_factory.room_encryption())
+                        .add_state_event(event_factory.member(alice_user_id).into_raw())
+                        .add_state_event(event_factory.member(bob_user_id).into_raw()),
+                );
+            })
+            .await;
+        server
+            .mock_get_members()
+            .ok(vec![
+                event_factory.member(alice_user_id).into_raw(),
+                event_factory.member(bob_user_id).into_raw(),
+            ])
+            .mount()
+            .await;
+        Mock::given(method("PUT"))
+            .and(path_regex(TO_DEVICE_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&*test_json::EMPTY))
+            .mount(server.server())
+            .await;
+        Mock::given(method("PUT"))
+            .and(path_regex(ROOM_SEND_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&*test_json::EVENT_ID))
+            .mount(server.server())
+            .await;
+
+        let room = alice.get_room(&room_id).unwrap();
+        matrix_sdk::room::futures::ensure_room_encryption_ready_with_index0_duplicate_share_for_testing(
+            &room,
+        )
+        .await
+        .unwrap();
+        room.send(RoomMessageEventContent::text_plain("first"))
+            .await
+            .unwrap();
+
+        let requests = server.server().received_requests().await.unwrap();
+        let encrypted_to_device = requests
+            .iter()
+            .filter(|request| {
+                request
+                    .url
+                    .path()
+                    .contains("/sendToDevice/m.room.encrypted/")
+            })
+            .count();
+        assert_eq!(
+            encrypted_to_device, 1,
+            "Koushi defaults must keep standard pre-share only"
+        );
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                RoomKeyDiagnosticEvent::InitialShareSession(record)
+                    if record.first_event_message_index == 0
+            )
+        }));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, RoomKeyDiagnosticEvent::Index0Reshare(_)))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, RoomKeyDiagnosticEvent::InitialShareRepair(_)))
+        );
+    }
 }
 
 fn desktop_room_key_recipient_strategy() -> CollectStrategy {

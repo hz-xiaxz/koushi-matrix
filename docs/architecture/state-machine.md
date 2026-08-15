@@ -1357,11 +1357,15 @@ reaction counts, ownership, target eligibility, or toggle semantics.
   present. If the projection does not support the requested transition, settle
   it as an invalid reaction failure instead of guessing from React state.
 
-## Initial Outbound Megolm Delivery Repair (#523)
+## Optional Initial Outbound Megolm Delivery Repair (#523)
 
-The first-event send path owns one runtime-local repair lifecycle for the active
-outbound Megolm session. This is SDK-internal security state, not React or
-reducer presentation state.
+The first-event send path owns this runtime-local repair lifecycle only when the
+independent SDK builder option for #523 is explicitly enabled. The SDK and
+Koushi default to disabled, so the normal production path runs standard
+`preshare_room_key` and does not enter this machine. The retained #510 index-0
+duplicate-share helper has no production caller; its default-off builder flag is
+consumed only by the testing seam until a separately reviewed caller is restored.
+Neither path is React or reducer presentation state.
 
 ```mermaid
 stateDiagram-v2
