@@ -196,6 +196,40 @@ carry tokens and counts only. The full prohibited list is in
   semantics in the UI, because `Timeline::toggle_reaction` is only an internal
   Rust delegation detail behind the typed boundary.
 
+## Room-subscription residency
+
+- `TimelineManagerActor` is the only Koushi owner that mutates the live
+  `RoomListService` room-subscription set. It unions opened timeline rooms,
+  successfully projected non-left room-list entries, and valid restored
+  coverage into one account-session `BTreeSet`.
+- Residency is uncapped and in-memory only. Timeline actor unsubscribe/rebuild,
+  Thread/Focused navigation, cache eviction, and projection replay release actor
+  resources but never remove room residency. Successful leave removes that room;
+  logout, account switch/reset, or account deletion drops the session owner.
+- Room-list and leave intents are serialized through the manager mailbox.
+  Visible-range intents are fenced by the current sync generation; successful
+  leave uses a manager-instance typed handle installed before room operations
+  are enabled. Direct leave, invite decline, accept, direct join, and directory
+  join require pointer identity between RoomActor's current
+  `Arc<MatrixClientSession>` and the session atomically bound to the manager
+  handle, then snapshot one manager-instance permit before awaiting the SDK.
+  A replacement install→`SessionEstablished` mismatch fails before any SDK call;
+  permits remain held through existing success/failure reducer/event settlement,
+  then acknowledged admitted permits drain before that manager is
+  retired. Session-local leave state blocks restore/visibility resurrection;
+  only an admitted successful local rejoin or ordered SDK `left` then
+  `joined|invited` observation clears it. Observer coalescing must preserve the
+  receipt order of those membership transitions.
+  Repeating the same desired set is an SDK no-op; delayed retired-generation
+  observations are ignored.
+- UnknownPos remains genuine coverage loss. Koushi may re-submit its in-process
+  desired set but must not suppress the SDK's members-missing reload, Megolm
+  rotation, checkpoint, or recovery behavior. Do not add a second
+  `RoomListService`, an LRU/timer, a persistence format, or a crypto override.
+- Cross-actor checks live in
+  `crates/koushi-core/tests/room_subscription_residency.rs`; only pure helper
+  tests may stay inline.
+
 ## Timeline navigation
 
 - Timeline navigation semantics stay in Rust. React may report viewport facts
