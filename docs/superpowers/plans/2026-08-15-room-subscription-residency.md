@@ -444,3 +444,9 @@ rejection; proven-restore admission and unproven-restore rejection; UnknownPos
 conservative recovery; unchanged vendored SDK/security behavior;
 private-safe diagnostics; focused/full/local/CI green; final reviewer approval;
 PR merged; issue closed. Nothing may be deferred as follow-up debt.
+
+## Implementation gate record / worklog
+
+- Task 2A compile scaffold: `cargo test -p koushi-core --test room_subscription_residency --no-run` exited 0.
+- Slice A RED: `cargo test -p koushi-core --test room_subscription_residency` exited 101 with four assertion-level failures: final unsubscribe and shared Room/Thread/Focused retained `active_rooms=[]` instead of the synthetic room; build failure retained `desired_rooms=[]` instead of the admitted room; 140-room retention observed `active_rooms.len()=0` instead of 140. The binary ran 5 tests (the four behavior tests plus the compile probe); no compilation, zero-match, no-session, or harness failure occurred.
+- Slice A reviewer hardening: teardown checks now assert manager desired-room retention, each teardown admits a distinct extra room and verifies a subsequent real reconcile retains prior desired/active rooms, build failure asserts zero actors/leases, and Room/Thread/Focused asserts three actors/leases before the no-op generation check. `cargo test -p koushi-core --test room_subscription_residency` exited 0 with 5 passed; no production policy or harness policy was added.
