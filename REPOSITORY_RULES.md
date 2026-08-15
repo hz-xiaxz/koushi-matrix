@@ -302,15 +302,19 @@ conflict is being resolved.
   keeping unreadable encrypted data.
 - Key bytes and passphrases should use zeroizing containers where practical
   and should be kept out of long-lived UI state.
-- Before a newly created outbound Megolm session consumes message index 0,
-  every still-eligible device that failed initial sharing because no Olm
-  session existed receives one bounded targeted `/keys/claim` repair attempt.
-  Claim, encryption, and re-share results remain explicit per anonymous
-  recipient; a peer user with zero covered eligible devices must not be hidden
-  by aggregate device success. The fence ends on settlement or a short explicit
-  deadline and never downgrades to plaintext, broadens recipient policy,
-  invents recipient acknowledgements, or retries without bound. Homeserver
-  acceptance commits share state but is not proof of recipient decryption.
+- Standard outbound Megolm pre-share is the authoritative production path for
+  encrypted sends, including its normal `/keys/claim`, signed one-time/fallback-
+  key handling, per-device share state, encrypted `m.room_key`, and standard
+  recipient recovery through key requests, verified-device gossip, and configured
+  backup. Homeserver acceptance commits share state but is not proof of recipient
+  decryption. The retained Koushi-specific #510 index-0 duplicate helper has no
+  production caller, and #523 targeted initial-share repair is an independent
+  default-off SDK builder option; both are disabled in Koushi. Re-enabling #510
+  requires restoring a reviewed production caller, while re-enabling #523
+  requires explicit builder opt-in. Either also requires a new canon/product
+  decision supported by measured evidence. Disabled paths must not add their
+  fence, timer, claim, wake listener, duplicate to-device request, or terminal
+  diagnostic.
 
 ## QA Gates And Cleanup
 

@@ -1204,27 +1204,37 @@ architectural invariants:
   until the exact supported restore scope is proven or split into an explicit
   follow-up.
 
-### Initial outbound Megolm delivery repair
+### Initial outbound Megolm delivery
 
-For a newly created outbound Megolm session, the SDK's normal pre-share remains
-first. If an eligible own or peer device is reported without an Olm session,
-the send path re-evaluates recipient policy and performs one immediate targeted
-`/keys/claim` repair before message index 0 is consumed. Only those still-
-eligible failed devices are claim/re-share candidates; pending, committed, and
-policy-excluded devices are neither claimed nor resent.
+For a newly created outbound Megolm session, the SDK's standard pre-share is the
+authoritative production path and remains unconditional for encrypted sends. It
+uses the normal `/keys/claim`, signed one-time/fallback-key handling, per-device
+share-state update, encrypted `m.room_key`, recipient key-request and verified
+device-gossip recovery, and configured backup recovery. Homeserver acceptance
+commits share state but never means recipient decryption acknowledgement.
 
-The first-event fence is runtime-local and bounded. It permits at most one
-additional event-driven attempt after a matching device-key, one-time/fallback-
-key, or Olm recovery update, then settles or reaches its short deadline. It is
-cancelled by outbound-session replacement, room leave, policy/trust/blacklist
-change, logout, runtime replacement, or shutdown. Deadline never permits
-plaintext fallback. Own-device recovery through verified-device gossip or
-Secure Backup remains supplementary and is not counted as successful initial
-direct delivery; peer-user coverage is tracked separately so a peer user with
-zero covered eligible devices cannot be hidden by aggregate device success.
-Homeserver acceptance commits share state but never means recipient decryption
-acknowledgement. Diagnostics expose only runtime-local aliases, closed outcomes,
-counts/buckets, and elapsed time.
+Koushi retains two experimental hardening implementations from #510 and #523.
+The #510 bounded index-0 duplicate helper has no production caller; its builder
+flag and a testing-only caller remain solely to keep the implementation covered.
+The #523 targeted initial-share repair is an independent SDK builder option that
+defaults to disabled. Koushi's normal client builder enables neither, and no UI,
+environment, or product setting controls them. A disabled path creates no fence,
+timer, task, claim, wake listener, duplicate to-device request, or terminal
+diagnostic.
+
+When #523 is explicitly enabled, its first-event fence is runtime-local and
+bounded. It permits at most one additional event-driven attempt after a matching
+device-key, one-time/fallback-key, or Olm recovery update, then settles or
+reaches its short deadline. It is cancelled by outbound-session replacement,
+room leave, policy/trust/blacklist change, logout, runtime replacement, or
+shutdown. Deadline never permits plaintext fallback. Own-device recovery through
+verified-device gossip or Secure Backup remains supplementary and is not counted
+as successful initial direct delivery; peer-user coverage is tracked separately
+so a peer user with zero covered eligible devices cannot be hidden by aggregate
+device success. Its diagnostics expose only runtime-local aliases, closed
+outcomes, counts/buckets, and elapsed time. Re-enabling #510 requires restoring
+a reviewed production caller as well as opting in; neither path is active
+product behavior by default.
 
 ### Mandatory recoverable Secure Backup
 
