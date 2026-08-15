@@ -171,6 +171,11 @@ pub struct MissingSpaceChildLink {
 pub enum RoomMessage {
     /// Route a `RoomCommand` to the actor.
     Command(RoomCommand),
+    #[cfg(feature = "test-hooks")]
+    TestCommand {
+        command: RoomCommand,
+        processed: oneshot::Sender<()>,
+    },
     /// A store-backed session was established (login/restore/switch).
     /// Enables room operations; does NOT start the room-list observation —
     /// that starts on `SyncStarted` when its live `RoomListService` is known.
@@ -710,6 +715,11 @@ impl RoomActor {
                 }
                 RoomMessage::Command(command) => {
                     self.handle_command(command).await;
+                }
+                #[cfg(feature = "test-hooks")]
+                RoomMessage::TestCommand { command, processed } => {
+                    self.handle_command(command).await;
+                    let _ = processed.send(());
                 }
                 RoomMessage::SessionEstablished { session } => {
                     // Room operations become available; observation starts

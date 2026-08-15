@@ -484,9 +484,18 @@ impl RoomSubscriptionResidencyHarness {
 
     pub async fn lost_leave_acknowledgement(&mut self) -> RoomSubscriptionResidencyAckLossProbe {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+        let ack_diagnostic_before = koushi_diagnostics::test_support::detail_snapshot()
             .records
-            .len();
+            .into_iter()
+            .filter(|record| {
+                record.event.source == "core.room"
+                    && record.event.stage == "residency_ack"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "reason"
+                            && matches!(&field.value, DiagnosticValue::Token("manager_unavailable"))
+                    })
+            })
+            .count();
         let room_id = "!resident-lost-leave-ack:example.invalid".to_owned();
         let request_id = RequestId {
             connection_id: RuntimeConnectionId(532),
@@ -624,7 +633,6 @@ impl RoomSubscriptionResidencyHarness {
         let ack_diagnostic_count = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
-            .skip(diagnostic_start)
             .filter(|record| {
                 record.event.source == "core.room"
                     && record.event.stage == "residency_ack"
@@ -633,7 +641,8 @@ impl RoomSubscriptionResidencyHarness {
                             && matches!(&field.value, DiagnosticValue::Token("manager_unavailable"))
                     })
             })
-            .count();
+            .count()
+            .saturating_sub(ack_diagnostic_before);
 
         RoomSubscriptionResidencyAckLossProbe {
             operation_failed_sdk_count,
@@ -1413,9 +1422,21 @@ impl RoomSubscriptionResidencyHarness {
 
     pub async fn pre_sync_mismatch_probe(&mut self) -> RoomSubscriptionResidencyBindingProbe {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+        let mismatch_diagnostic_before = koushi_diagnostics::test_support::detail_snapshot()
             .records
-            .len();
+            .into_iter()
+            .filter(|record| {
+                record.event.source == "core.room"
+                    && record.event.stage == "residency_admission"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "reason"
+                            && matches!(
+                                &field.value,
+                                koushi_diagnostics::DiagnosticValue::Token("session_mismatch")
+                            )
+                    })
+            })
+            .count();
         let account = ResidencyAccountFixture::spawn();
         let resident_session = self.session.as_ref().expect("resident test session");
         let client = resident_session.client();
@@ -1487,33 +1508,22 @@ impl RoomSubscriptionResidencyHarness {
                 .await,
             "real LeaveRoom command must reach RoomActor during the install gap"
         );
-        let mismatch_probe = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let found = koushi_diagnostics::test_support::detail_snapshot()
-                    .records
-                    .into_iter()
-                    .skip(diagnostic_start)
-                    .any(|record| {
-                        record.event.source == "core.room"
-                            && record.event.stage == "residency_admission"
-                            && record.event.fields.into_iter().any(|field| {
-                                field.key == "reason"
-                                    && matches!(
-                                        field.value,
-                                        koushi_diagnostics::DiagnosticValue::Token(
-                                            "session_mismatch"
-                                        )
-                                    )
-                            })
-                    });
-                if found {
-                    break true;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("session mismatch diagnostic");
+        let mismatch_diagnostic_after = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .into_iter()
+            .filter(|record| {
+                record.event.source == "core.room"
+                    && record.event.stage == "residency_admission"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "reason"
+                            && matches!(
+                                &field.value,
+                                koushi_diagnostics::DiagnosticValue::Token("session_mismatch")
+                            )
+                    })
+            })
+            .count();
+        let mismatch_probe = mismatch_diagnostic_after == mismatch_diagnostic_before + 1;
 
         release_tx
             .send(())

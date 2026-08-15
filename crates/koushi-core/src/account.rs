@@ -1011,7 +1011,16 @@ impl AccountActorHandle {
     /// the deliberate install→SessionEstablished window.
     #[cfg(feature = "test-hooks")]
     pub async fn residency_test_room_command_at_install_gap(&self, command: RoomCommand) -> bool {
-        self.residency_test_room_command_direct(command).await
+        let (processed, acknowledged) = oneshot::channel();
+        if self
+            .residency_room_tx
+            .send(RoomMessage::TestCommand { command, processed })
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        acknowledged.await.is_ok()
     }
 
     #[cfg(feature = "test-hooks")]

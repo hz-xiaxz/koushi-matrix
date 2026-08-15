@@ -461,20 +461,26 @@ async fn room_subscription_residency_rapid_intents_serialize() {
 #[tokio::test]
 async fn room_subscription_residency_diagnostics_are_private_safe_and_closed() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+    let subscription_records_before = koushi_diagnostics::test_support::detail_snapshot()
         .records
-        .len();
+        .into_iter()
+        .filter(|record| record.event.source == "core.subscription")
+        .count();
     let (_server, mut harness) = harness().await;
     let room_a = room_id!("!resident-diagnostic:example.invalid").to_string();
     harness.admit_timeline_key(room_key(&room_a)).await;
     harness.leave_room(&room_a, true).await;
     harness.decline_invite(&room_a, true).await;
 
-    let records = koushi_diagnostics::test_support::detail_snapshot().records;
-    let records = records[diagnostic_start..]
-        .iter()
+    let records = koushi_diagnostics::test_support::detail_snapshot()
+        .records
+        .into_iter()
         .filter(|record| record.event.source == "core.subscription")
         .collect::<Vec<_>>();
+    assert!(
+        records.len() > subscription_records_before,
+        "residency operations must append subscription diagnostics"
+    );
     let approved_sources = [
         "opened",
         "visible_range",
