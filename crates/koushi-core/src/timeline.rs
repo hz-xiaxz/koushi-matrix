@@ -3291,7 +3291,7 @@ pub struct TimelineManagerActor {
     /// generation may touch the shared replay-known registry.
     timeline_actor_generations: Arc<TimelineActorGenerationGate>,
     live_tail_refreshes: LiveTailRefreshCoordinator<TimelineKey>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-hooks"))]
     test_session_available: bool,
 }
 
@@ -3450,7 +3450,7 @@ impl TimelineManagerActor {
             )),
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-hooks"))]
             test_session_available: false,
         };
         executor::spawn(actor.run());
@@ -3542,7 +3542,7 @@ impl TimelineManagerActor {
             )),
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-hooks"))]
             test_session_available: false,
         };
         executor::spawn(actor.run());
@@ -3624,7 +3624,7 @@ impl TimelineManagerActor {
             )),
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-hooks"))]
             test_session_available: true,
         }
     }
@@ -6554,11 +6554,9 @@ impl TimelineManagerActor {
             record_subscribe_stage(stage, None);
         };
         trace("start");
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-hooks"))]
         let session_missing = self.session.is_none() && !self.test_session_available;
-        #[cfg(all(feature = "test-hooks", not(test)))]
-        let session_missing = false;
-        #[cfg(all(not(test), not(feature = "test-hooks")))]
+        #[cfg(not(any(test, feature = "test-hooks")))]
         let session_missing = self.session.is_none();
         if session_missing {
             self.emit_subscription_failure(
