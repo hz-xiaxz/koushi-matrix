@@ -38,6 +38,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(feature = "test-hooks")]
+use std::sync::atomic::AtomicUsize;
+
 use futures_util::StreamExt;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_key::{SessionKeyId, StoredMatrixSession};
@@ -83,6 +86,8 @@ use crate::link_preview::LinkPreviewContext;
 use crate::renderable_thumbnail::{
     RenderableThumbnailKind, clear_renderable_thumbnail_cache, store_renderable_thumbnail,
 };
+#[cfg(feature = "test-hooks")]
+use crate::room::RoomOperationTestControl;
 use crate::room::{RoomActorHandle, RoomMessage};
 use crate::runtime::ForwardedComposerDraftPermit;
 use crate::search::SearchActorHandle;
@@ -515,7 +520,7 @@ fn record_restore_store_event(event: DiagnosticEvent) {
 }
 
 /// Messages routed to the AccountActor task.
-pub enum AccountMessage {
+pub(crate) enum AccountMessage {
     Command(AccountCommand),
     ContinueSlidingSyncAdmission {
         account_epoch: u64,
@@ -741,6 +746,48 @@ pub enum AccountMessage {
     SetCurrentDeviceTrustForTesting {
         trust: koushi_state::CurrentDeviceTrustState,
     },
+    #[cfg(feature = "test-hooks")]
+    ResidencyTestConfigureInstallGap {
+        reached: oneshot::Sender<(
+            Option<Arc<MatrixClientSession>>,
+            Option<Arc<MatrixClientSession>>,
+        )>,
+        release: oneshot::Receiver<()>,
+        configured: oneshot::Sender<()>,
+    },
+    #[cfg(feature = "test-hooks")]
+    ResidencyTestConfigureTeardownGap {
+        reached: oneshot::Sender<bool>,
+        release: oneshot::Receiver<()>,
+        configured: oneshot::Sender<()>,
+    },
+    #[cfg(feature = "test-hooks")]
+    ResidencyTestInstallSession {
+        session: Arc<MatrixClientSession>,
+        completed: oneshot::Sender<()>,
+    },
+    #[cfg(feature = "test-hooks")]
+    ResidencyTestRoomCommand {
+        command: RoomCommand,
+        accepted: oneshot::Sender<()>,
+    },
+    #[cfg(feature = "test-hooks")]
+    ResidencyTestConfigureRoomOperation {
+        control: RoomOperationTestControl,
+        configured: oneshot::Sender<bool>,
+    },
+    #[cfg(feature = "test-hooks")]
+    ResidencyTestTimelineSnapshot {
+        response: oneshot::Sender<(Vec<String>, Vec<String>)>,
+    },
+    #[cfg(feature = "test-hooks")]
+    ResidencyTestTimelineGateSnapshot {
+        response: oneshot::Sender<(bool, usize)>,
+    },
+    #[cfg(feature = "test-hooks")]
+    ResidencyTestShutdown {
+        acknowledged: oneshot::Sender<()>,
+    },
     #[cfg(test)]
     ConfigureSyntheticRecoveryTask {
         flow_id: u64,
@@ -852,11 +899,161 @@ pub enum AccountMessage {
 pub struct AccountActorHandle {
     tx: mpsc::Sender<AccountMessage>,
     navigation_projection: NavigationProjectionIngress,
+    #[cfg(feature = "test-hooks")]
+    residency_room_tx: mpsc::Sender<RoomMessage>,
+    #[cfg(feature = "test-hooks")]
+    residency_room_operation_reached_count: Arc<AtomicUsize>,
 }
 
 impl AccountActorHandle {
-    pub async fn send(&self, msg: AccountMessage) -> bool {
+    pub(crate) async fn send(&self, msg: AccountMessage) -> bool {
         self.tx.send(msg).await.is_ok()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub async fn configure_residency_install_gap(
+        &self,
+        reached: oneshot::Sender<(
+            Option<Arc<MatrixClientSession>>,
+            Option<Arc<MatrixClientSession>>,
+        )>,
+        release: oneshot::Receiver<()>,
+    ) -> bool {
+        let (configured, acknowledged) = oneshot::channel();
+        if !self
+            .send(AccountMessage::ResidencyTestConfigureInstallGap {
+                reached,
+                release,
+                configured,
+            })
+            .await
+        {
+            return false;
+        }
+        acknowledged.await.is_ok()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub async fn configure_residency_teardown_gap(
+        &self,
+        reached: oneshot::Sender<bool>,
+        release: oneshot::Receiver<()>,
+    ) -> bool {
+        let (configured, acknowledged) = oneshot::channel();
+        if !self
+            .send(AccountMessage::ResidencyTestConfigureTeardownGap {
+                reached,
+                release,
+                configured,
+            })
+            .await
+        {
+            return false;
+        }
+        acknowledged.await.is_ok()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub async fn install_residency_test_session(&self, session: Arc<MatrixClientSession>) -> bool {
+        let (completed, acknowledged) = oneshot::channel();
+        if !self
+            .send(AccountMessage::ResidencyTestInstallSession { session, completed })
+            .await
+        {
+            return false;
+        }
+        acknowledged.await.is_ok()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub async fn residency_test_room_command(&self, command: RoomCommand) -> bool {
+        let (accepted, acknowledged) = oneshot::channel();
+        if !self
+            .send(AccountMessage::ResidencyTestRoomCommand { command, accepted })
+            .await
+        {
+            return false;
+        }
+        acknowledged.await.is_ok()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) async fn configure_room_operation_test_control(
+        &self,
+        control: RoomOperationTestControl,
+    ) -> bool {
+        let (configured, acknowledged) = oneshot::channel();
+        if !self
+            .send(AccountMessage::ResidencyTestConfigureRoomOperation {
+                control,
+                configured,
+            })
+            .await
+        {
+            return false;
+        }
+        acknowledged.await.unwrap_or(false)
+    }
+
+    /// Send a room command directly to the real RoomActor without routing it
+    /// through AccountActor. Test-only lifecycle probes use this while the
+    /// account actor is blocked at a teardown barrier.
+    #[cfg(feature = "test-hooks")]
+    pub async fn residency_test_room_command_direct(&self, command: RoomCommand) -> bool {
+        self.residency_room_tx
+            .send(RoomMessage::Command(command))
+            .await
+            .is_ok()
+    }
+
+    /// Send a room command directly to the real RoomActor while the account
+    /// actor is held at the install-gap barrier. This is only needed to probe
+    /// the deliberate install→SessionEstablished window.
+    #[cfg(feature = "test-hooks")]
+    pub async fn residency_test_room_command_at_install_gap(&self, command: RoomCommand) -> bool {
+        self.residency_test_room_command_direct(command).await
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub fn residency_test_room_operation_reached_count(&self) -> usize {
+        self.residency_room_operation_reached_count
+            .load(Ordering::SeqCst)
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub async fn residency_test_timeline_snapshot(&self) -> Option<(Vec<String>, Vec<String>)> {
+        let (response, acknowledged) = oneshot::channel();
+        if !self
+            .send(AccountMessage::ResidencyTestTimelineSnapshot { response })
+            .await
+        {
+            return None;
+        }
+        acknowledged.await.ok()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub async fn residency_test_timeline_gate_snapshot(&self) -> Option<(bool, usize)> {
+        let (response, acknowledged) = oneshot::channel();
+        if !self
+            .send(AccountMessage::ResidencyTestTimelineGateSnapshot { response })
+            .await
+        {
+            return None;
+        }
+        acknowledged.await.ok()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub async fn shutdown_for_testing(&self) -> bool {
+        let (acknowledged, completion) = oneshot::channel();
+        if !self
+            .send(AccountMessage::ResidencyTestShutdown { acknowledged })
+            .await
+        {
+            return false;
+        }
+        completion.await.is_ok()
     }
 
     pub(crate) fn admit_navigation_projection(&self, intent: NavigationProjectionIntent) -> bool {
@@ -871,6 +1068,13 @@ impl AccountActorHandle {
         Self {
             tx,
             navigation_projection,
+            #[cfg(feature = "test-hooks")]
+            residency_room_tx: {
+                let (room_tx, _room_rx) = mpsc::channel(1);
+                room_tx
+            },
+            #[cfg(feature = "test-hooks")]
+            residency_room_operation_reached_count: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -1796,6 +2000,18 @@ pub struct AccountActor {
     teardown_retry_task: Option<crate::executor::JoinHandle<()>>,
     #[cfg(test)]
     lifecycle_probe: Option<mpsc::UnboundedSender<&'static str>>,
+    #[cfg(feature = "test-hooks")]
+    residency_install_gap: Option<(
+        oneshot::Sender<(
+            Option<Arc<MatrixClientSession>>,
+            Option<Arc<MatrixClientSession>>,
+        )>,
+        oneshot::Receiver<()>,
+    )>,
+    #[cfg(feature = "test-hooks")]
+    residency_teardown_gap: Option<(oneshot::Sender<bool>, oneshot::Receiver<()>)>,
+    #[cfg(feature = "test-hooks")]
+    residency_preserve_room_session: bool,
     #[cfg(any(test, feature = "test-hooks"))]
     trust_observation_override: std::sync::Mutex<Option<koushi_sdk::CurrentDeviceTrustObservation>>,
     #[cfg(any(test, feature = "test-hooks"))]
@@ -1987,6 +2203,10 @@ impl AccountActor {
             account_work.clone(),
             Some(navigation_projection_rx),
         );
+        #[cfg(feature = "test-hooks")]
+        let residency_room_tx = room_actor.tx.clone();
+        #[cfg(feature = "test-hooks")]
+        let residency_room_operation_reached_count = room_actor.operation_test_reached_count();
         let actor = AccountActor {
             session: None,
             session_key_id: None,
@@ -2032,6 +2252,12 @@ impl AccountActor {
             teardown_retry_task: None,
             #[cfg(test)]
             lifecycle_probe: None,
+            #[cfg(feature = "test-hooks")]
+            residency_install_gap: None,
+            #[cfg(feature = "test-hooks")]
+            residency_teardown_gap: None,
+            #[cfg(feature = "test-hooks")]
+            residency_preserve_room_session: false,
             #[cfg(any(test, feature = "test-hooks"))]
             trust_observation_override: std::sync::Mutex::new(None),
             #[cfg(any(test, feature = "test-hooks"))]
@@ -2098,12 +2324,16 @@ impl AccountActor {
         AccountActorHandle {
             tx,
             navigation_projection,
+            #[cfg(feature = "test-hooks")]
+            residency_room_tx,
+            #[cfg(feature = "test-hooks")]
+            residency_room_operation_reached_count,
         }
     }
 
     async fn run(mut self) {
-        #[cfg(test)]
-        let mut shutdown_ack = None;
+        #[cfg(any(test, feature = "test-hooks"))]
+        let mut shutdown_ack: Option<oneshot::Sender<()>> = None;
         while let Some(msg) = self.command_rx.recv().await {
             match msg {
                 AccountMessage::Shutdown => break,
@@ -2759,6 +2989,59 @@ impl AccountActor {
                     self.handle_current_device_trust(self.trust_generation, trust)
                         .await;
                 }
+                #[cfg(feature = "test-hooks")]
+                AccountMessage::ResidencyTestConfigureInstallGap {
+                    reached,
+                    release,
+                    configured,
+                } => {
+                    self.residency_install_gap = Some((reached, release));
+                    let _ = configured.send(());
+                }
+                #[cfg(feature = "test-hooks")]
+                AccountMessage::ResidencyTestConfigureTeardownGap {
+                    reached,
+                    release,
+                    configured,
+                } => {
+                    self.residency_teardown_gap = Some((reached, release));
+                    let _ = configured.send(());
+                }
+                #[cfg(feature = "test-hooks")]
+                AccountMessage::ResidencyTestInstallSession { session, completed } => {
+                    self.install_residency_test_session(session).await;
+                    let _ = completed.send(());
+                }
+                #[cfg(feature = "test-hooks")]
+                AccountMessage::ResidencyTestRoomCommand { command, accepted } => {
+                    self.route_room_command(command).await;
+                    let _ = accepted.send(());
+                }
+                #[cfg(feature = "test-hooks")]
+                AccountMessage::ResidencyTestConfigureRoomOperation {
+                    control,
+                    configured,
+                } => {
+                    let _ = configured
+                        .send(self.room_actor.install_room_operation_test_control(control));
+                }
+                #[cfg(feature = "test-hooks")]
+                AccountMessage::ResidencyTestTimelineSnapshot { response } => {
+                    let _ = self
+                        .timeline_manager
+                        .residency_snapshot_for_testing(response)
+                        .await;
+                }
+                #[cfg(feature = "test-hooks")]
+                AccountMessage::ResidencyTestTimelineGateSnapshot { response } => {
+                    let _ =
+                        response.send(self.timeline_manager.residency_gate_snapshot_for_testing());
+                }
+                #[cfg(feature = "test-hooks")]
+                AccountMessage::ResidencyTestShutdown { acknowledged } => {
+                    shutdown_ack = Some(acknowledged);
+                    break;
+                }
                 #[cfg(test)]
                 AccountMessage::ConfigureSyntheticRecoveryTask { flow_id, pending } => {
                     self.stop_recovery_task().await;
@@ -2963,7 +3246,7 @@ impl AccountActor {
         }
         self.shutdown_owned_runtime().await;
         self.stop_room_actor().await;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-hooks"))]
         if let Some(acknowledged) = shutdown_ack {
             let _ = acknowledged.send(());
         }
@@ -3791,8 +4074,14 @@ impl AccountActor {
         self.stop_search_actor().await;
         self.record_lifecycle_probe("shutdown_stop_sync_actor");
         self.stop_sync_actor().await;
-        self.record_lifecycle_probe("shutdown_clear_room_session");
-        self.clear_room_actor_session().await;
+        #[cfg(feature = "test-hooks")]
+        let clear_room_session = !self.residency_preserve_room_session;
+        #[cfg(not(feature = "test-hooks"))]
+        let clear_room_session = true;
+        if clear_room_session {
+            self.record_lifecycle_probe("shutdown_clear_room_session");
+            self.clear_room_actor_session().await;
+        }
         self.cancel_verification_handles().await;
         self.cancel_identity_reset_handle().await;
         self.invalidate_account_hydration();
@@ -3815,6 +4104,12 @@ impl AccountActor {
     /// Ordered shutdown of the TimelineManagerActor (step 2 of the shutdown
     /// sequence per Async rule 12 — timelines before search/room/sync).
     async fn stop_timeline_actor(&mut self) {
+        self.room_actor.clear_timeline_residency();
+        #[cfg(feature = "test-hooks")]
+        if let Some((reached, release)) = self.residency_teardown_gap.take() {
+            let _ = reached.send(self.room_actor.timeline_residency_snapshot().is_none());
+            let _ = release.await;
+        }
         let _ = self.timeline_manager.shutdown().await;
     }
 
@@ -3987,6 +4282,19 @@ impl AccountActor {
         }
     }
 
+    #[cfg(feature = "test-hooks")]
+    async fn install_residency_test_session(&mut self, session: Arc<MatrixClientSession>) {
+        if self.session.is_some() {
+            self.residency_preserve_room_session = true;
+            self.stop_current_session_runtime().await;
+            self.residency_preserve_room_session = false;
+        }
+        self.session = Some(session.clone());
+        self.session_key_id = None;
+        self.spawn_sync_actor(session.clone()).await;
+        let _ = self.room_actor.wait_for_session(&session).await;
+    }
+
     /// Spawn the SyncActor for the just-established store-backed session and
     /// notify the RoomActor so room operations become available.
     /// Also replace the TimelineManagerActor with one that holds the session.
@@ -4003,17 +4311,9 @@ impl AccountActor {
             trace_restore_simple("spawn_sync_actor", "already_owned");
             return;
         }
-        // Give the RoomActor the session so room ops work even before sync
-        // starts. The room-list observation starts later, on the SyncActor's
-        // RoomMessage::SyncStarted (which carries the live RoomListService on
-        // the SyncService backend).
-        let _ = self
-            .room_actor
-            .send(RoomMessage::SessionEstablished {
-                session: session.clone(),
-            })
-            .await;
-
+        // The exact session/manager binding is installed immediately before
+        // SessionEstablished below. Room operations therefore cannot observe
+        // the replacement gap with a mismatched manager.
         // Spawn SearchActor (Phase 6). The session already holds the search
         // index (configured in restore_into_store / the client builder). The
         // search actor gets an mpsc::Sender<SearchIndexMessage> which will be
@@ -4098,6 +4398,24 @@ impl AccountActor {
             self.account_work.clone(),
             Some(self.navigation_projection.subscribe()),
         );
+        self.room_actor
+            .bind_timeline_residency(session.clone(), self.timeline_manager.residency_handle());
+        #[cfg(feature = "test-hooks")]
+        if let Some((reached, release)) = self.residency_install_gap.take() {
+            let _ = reached.send((
+                self.room_actor.session_snapshot(),
+                self.room_actor
+                    .timeline_residency_snapshot()
+                    .map(|(session, _)| session),
+            ));
+            let _ = release.await;
+        }
+        let _ = self
+            .room_actor
+            .send(RoomMessage::SessionEstablished {
+                session: session.clone(),
+            })
+            .await;
 
         let handle = crate::sync::SyncActor::spawn(
             session.clone(),
@@ -13208,7 +13526,9 @@ mod tests {
     #[tokio::test]
     async fn actor_sas_settlement_emits_exactly_one_terminal_and_clears_runtime() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let cred_dir = tempdir().expect("credential tempdir");
         let data_dir = tempdir().expect("data tempdir");
         let store = StoreActor::with_backend(
@@ -13292,7 +13612,8 @@ mod tests {
                 "stale terminal duplicated flow {flow_id}"
             );
         }
-        let settled_flow_ids = koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+        let settled_flow_ids = koushi_diagnostics::test_support::detail_snapshot().records
+            [diagnostic_start..]
             .iter()
             .filter(|record| {
                 record.event.source == "core.sas_verification" && record.event.stage == "settled"
@@ -13818,7 +14139,9 @@ mod tests {
     #[tokio::test]
     async fn own_user_sas_start_helper_traces_started_pending_and_failed_results() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
 
         assert_eq!(
             run_own_user_sas_start(211, "request_ready", async {
@@ -14978,7 +15301,9 @@ mod tests {
     #[tokio::test]
     async fn verified_warm_restore_skips_restricted_and_full_state_preparation() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let homeserver = spawn_quarantine_password_server();
         let cred_dir = tempdir().expect("tempdir");
         let data_dir = tempdir().expect("tempdir");
@@ -15636,7 +15961,9 @@ mod tests {
     #[tokio::test]
     async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let (handle, mut action_rx) = login_gated_actor().await;
         let flow_id = 80;
         let request_id = incoming_verification_request_id(flow_id);
@@ -16020,7 +16347,9 @@ mod tests {
     #[tokio::test]
     async fn verification_to_normal_sync_handoff_has_one_owner() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let (handle, mut action_rx) = login_gated_actor().await;
         assert!(
             koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
@@ -18535,6 +18864,11 @@ mod tests {
             next_teardown_generation: 0,
             teardown_retry_task: None,
             lifecycle_probe: None,
+            residency_install_gap: None,
+            #[cfg(feature = "test-hooks")]
+            residency_teardown_gap: None,
+            #[cfg(feature = "test-hooks")]
+            residency_preserve_room_session: false,
             trust_observation_override: std::sync::Mutex::new(None),
             trust_observation_is_synthetic: false,
             recovery_download_override: std::sync::Mutex::new(None),

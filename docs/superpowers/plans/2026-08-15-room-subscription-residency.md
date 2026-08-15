@@ -165,8 +165,12 @@ any test or production implementation edit.
 (timeouts or findings, all corrected). Round 9 reviewed this complete plan plus
 `overview.md`, `state-machine.md`, `state-ownership.md`,
 `engineering-rules.md`, and the plan index and returned `Correct-to-merge` with
-no blocking or nonblocking findings. Implementation may now begin in the order
-below.
+no blocking or nonblocking findings. A later deterministic-test amendment
+replaced wiremock delay with test-hooks-only held results at the exact
+RoomActor→SDK call boundary; reviewer-gpt first returned findings for incomplete
+operation/teardown coverage, then approved the amended all-five-operation matrix
+and real AccountActor teardown race as `Correct-to-merge`. Implementation may
+proceed in the order below.
 
 ## Task 2 — RED: actor-independent session residency
 
@@ -203,8 +207,10 @@ must not reimplement the policy. Expose one `RoomSubscriptionResidencyHarness` w
 methods/barriers for: SyncStarted with restored evidence and a chosen core
  generation; real timeline admit/unsubscribe/build-failure; valid/invalid visible
 and membership intents through the production handles; SDK subscription expiry;
-wiremock-delayed real leave, decline, accept, direct-join, and directory-join
-operations; real AccountActor replacement/teardown barriers around handle clear,
+test-hooks-only held success/failure completions at the exact
+`koushi_sdk` membership-operation call boundary for leave, decline, accept,
+direct join, and directory join, while driving the real RoomActor handlers;
+real AccountActor replacement/teardown barriers around handle clear,
 permit drain, manager shutdown, replacement binding install, the deliberate
 install→`SessionEstablished` gap, and `SessionEstablished` completion;
 ordered per-update membership delivery in both directions; and an acknowledged
@@ -275,7 +281,7 @@ Add to the same feature integration binary before production edits:
 8. `room_subscription_residency_pre_sync_leave_blocks_restore_resurrection`:
    leave A before SyncStarted, then offer restored `{A,B}`; only B is imported.
 9. `room_subscription_residency_inflight_leave_drains_before_replacement`:
-   block the real SDK leave after admission, begin manager replacement, prove the
+   hold the injected SDK-boundary leave success after real admission, begin manager replacement, prove the
    old manager remains alive, complete leave, observe acknowledged removal plus
    all existing reducer/event settlements, then prove replacement completes and
    no old operation action/event arrives afterward or targets a new account.
@@ -289,14 +295,16 @@ Add to the same feature integration binary before production edits:
 12. `room_subscription_residency_stale_membership_cannot_clear_leave`: stale
     core-generation `left`, `joined`, and `invited` transitions neither advance
     pending leave state nor clear/re-add a left room.
-13. `room_subscription_residency_local_rejoin_is_replacement_fenced`: block each
-    real accept/direct-join/directory-join after operation admission, begin
+13. `room_subscription_residency_local_rejoin_is_replacement_fenced`: hold the
+    injected SDK-boundary success after real admission for invite decline,
+    accept, direct join, and directory join, begin
     AccountActor replacement, and prove acknowledgement plus every existing
     reducer/event settlement completes under the admitted permit before
     replacement; no old operation terminal may arrive afterward.
 14. `room_subscription_residency_failed_operations_settle_before_replacement`:
-    delay SDK failures for direct leave, invite decline, and directory join after
-    admission; prove every existing failure action/event settles under the old
+    table-drive held injected SDK-boundary failures after real admission for
+    direct leave, invite decline, accept, direct join, and directory join; prove
+    every existing failure action/event settles under the old
     permit before replacement and none arrives after replacement completion.
 15. `room_subscription_residency_final_permit_drop_cannot_miss_drain`: start
     close/drain with one active permit, assert a new `begin_operation` is rejected
@@ -306,7 +314,11 @@ Add to the same feature integration binary before production edits:
 16. `room_subscription_residency_timeline_setup_precedes_room_observation`:
     deterministically assert the manager accepts the generation before the room
     observer can submit visible IDs.
-17. `room_subscription_residency_manager_teardown_is_account_isolated`: a new
+17. `room_subscription_residency_manager_teardown_is_account_isolated`: with one
+    held admitted membership operation, drive real AccountActor teardown and
+    assert binding clear, post-close admission rejection, old-manager liveness
+    through operation acknowledgement plus reducer/event settlement, permit
+    drain before manager shutdown, and no late terminal; then prove a new
     manager/account starts empty and imports only its own valid restore evidence.
 18. `room_subscription_residency_rapid_intents_serialize`: interleaved visible
     and open intents converge to one deduplicated set.
@@ -371,8 +383,11 @@ Implement only the approved seams:
    generic cross-actor command access, or second `RoomListService`.
 11. Complete each test-hooks harness method/barrier only in Task 2A immediately
    before its named RED assertion; Task 4 must not introduce a new test control
-   after the matching production behavior. Keep the harness compiled out of
-   default builds and remove any scaffold control not used by a retained test.
+   after the matching production behavior. For membership-operation race tests,
+   inject only the awaited `koushi_sdk` result at the existing RoomActor call
+   boundary; admission, handler routing, residency acknowledgement, reducer
+   actions, CoreEvents, replacement, and teardown must all remain the real paths.
+   Keep the harness compiled out of default builds and remove unused controls.
 12. Update existing subscription diagnostics, carry `RoomRemovalCause` through
    the shared helper/message, and delete superseded lease-derived
    policy helpers/tests. Do not leave both ownership models active.
@@ -445,8 +460,197 @@ conservative recovery; unchanged vendored SDK/security behavior;
 private-safe diagnostics; focused/full/local/CI green; final reviewer approval;
 PR merged; issue closed. Nothing may be deferred as follow-up debt.
 
+## Post-implementation review correction (approve before corrective code)
+
+The complete-diff review found four correctness/evidence gaps. Correct them as
+one bounded amendment without changing the session-residency policy:
+
+1. `RoomActor` may forward visible-room residency only when the same complete
+   projection passes duplicate-identity authority validation. A duplicate
+   vector remains fail-closed for UI projection and adds no residency.
+2. Membership-operation admission also rejects a closed manager sender. The
+   admitted operation returns the real `room_left`/`room_rejoined`
+   acknowledgement. If the SDK succeeds but that acknowledgement is lost,
+   emit a correlated `RoomOperationFailed { Sdk }` plus a private-safe closed
+   `manager_unavailable` diagnostic and emit no success reducer action,
+   refresh, or success `CoreEvent`. The permit still drops only after this
+   failure settlement; normal replacement/teardown keeps the manager alive and
+   therefore continues to acknowledge.
+3. The integration harness spawns a real `RoomActor` bound to the same real
+   test manager. Leave/decline use the approved held SDK-boundary result and
+   real `RoomCommand`; visible and membership observations enter through
+   test-hooks-only `RoomActor` messages that call the same extracted production
+   duplicate validator and ordered typed-ingress forwarder used by the live
+   observer. Delete direct manager policy shortcuts and add a fresh duplicate
+   identity case that is not already resident.
+4. Diagnostics use only the approved source tokens
+   `opened|visible_range|restore|room_left|room_rejoined|membership|session_restart`.
+   Room/thread/focused/rebuild map to `opened`; sync-start reconciliation maps
+   to `session_restart`. Reconcile records include previous, desired, added,
+   removed, and retained count buckets plus generation fields. The diagnostic
+   integration test takes the diagnostics test lock and a start index and
+   inspects only records produced by that test. Delete the obsolete restored
+   lease-defer helper/test and unused trigger variant.
+
+Corrective RED evidence must prove the fresh duplicate is admitted by the old
+path, lost acknowledgement publishes success, direct-manager shortcuts can pass
+while RoomActor wiring is absent, and global diagnostics can satisfy the old
+assertion. The same focused checks then turn GREEN, followed by the full 25-test
+residency lane and core library. Reviewer-gpt reviewed this correction before
+corrective production edits and returned `Correct-to-merge` with no findings;
+it explicitly rejected inventing an extra account-fatal protocol.
+
+## Local-QA reconnect correction (approve before corrective code)
+
+The mandatory `timeline_reconnect` lane exposed one oldest event missing after
+reopening a retained room subscription. This is the expected boundary of the
+upstream Element X-compatible room-subscription window: the branch retains and
+immediately projects the newest 20/21 events, while `origin/main` projects only
+1/21 after destructive remove/re-add. Matrix Rust SDK intentionally drops the
+limited-response `prev_batch` when all 20 response events are already known,
+and its token-free live-tail refresh reconciles omissions newer than the cached
+suffix, not history older than that suffix. Re-arming that refresh therefore
+cannot recover event 1 and must not be added as speculative product machinery.
+
+Keep the vendored SDK and live-tail policy unchanged. Remove the attempted Room
+Subscribe/live-tail coordinator changes and their proposed state-machine
+additions. Beyond the approved residency fix, the only product correction is
+the narrow `timeline.rs` room-key-reshare task ownership change in item 2;
+the remaining changes update the deterministic QA proof to match normal
+Element X behavior. The active reconnect branch must create the
+room with encryption enabled and wait until the Rust room-list projection for
+the exact room reports `is_encrypted=true` before either account subscribes or
+sends; plaintext setup is a failed harness, not evidence.
+
+1. after reconnect and explicit Room Subscribe, require at least the newest 20
+   distinct encrypted synthetic bodies in the initial projection before any
+   pagination; this fails on `origin/main` and proves retained subscription
+   continuity rather than a coincidental re-add;
+2. generate each offline synthetic event through the typed send command and
+   require both the exact room/body local echo and its correlated
+   `SendCompleted`; a correlated `OperationFailed` or `NotSent` is terminal
+   failure. Encrypted RED proved a stable-manager deadlock: a delayed room-key
+   reshare message can enter `handle_room_key_reshare`, await the lower-priority
+   account-work permit (and then SDK network work) directly inside the manager,
+   while the next send holds the interactive guard; that guard releases only
+   after this same manager polls the global send terminal and ingress. Move the
+   permit plus SDK reshare call into a cancelable task owned by the existing
+   per-key/per-outbound-session `RoomKeyReshareSchedule`; return only a typed
+   completion message to the manager, revalidate exact key, actor generation,
+   and outbound-session token before recording or mutating schedule state, and
+   abort the owned task with schedule replacement, actor cleanup, or manager
+   teardown. The manager handler itself must never await account work or SDK
+   network I/O. Never substitute presentation `Sent` for the required command
+   terminal. Before implementation, add a compact table-driven RED proof for:
+   terminal progress while a reshare waits behind an interactive guard; one
+   valid completion; stale key, actor-generation, and outbound-token
+   completions; schedule replacement/unsubscribe cancellation; duplicate
+   completion; and manager shutdown abort with scheduler waiter/permit release;
+3. if one older body remains, issue one real typed backward
+   `TimelineCommand::Paginate` with a bounded page size of 64. Require the
+   matching key, request ID, and backward direction to emit `Paginating` before
+   accepting `Idle|EndReached`; a terminal without prior `Paginating` proves the
+   gap-repair skip path and fails. Under one absolute deadline, apply every
+   diff batch in order to one authoritative accumulated projection with full
+   `PushFront|PushBack|Insert|Set|Remove|Truncate|Clear|Reset` semantics before
+   evaluating counts; continue until both the correlated terminal and all 21
+   unique bodies exactly once are observed, since relay diffs may follow the
+   terminal. Any UTD row, operation failure, duplicate, timeout, or
+   `EndReached` with a missing body fails;
+4. preserve `live_catchup_checkpoint=ok` and
+   `live_catchup_gap_repaired=ok` only after the complete decrypted set is
+   proven on both supported servers.
+
+This is not a test-only fallback or weakened assertion: it separately proves
+session-resident newest-window continuity and standard SDK historical
+pagination, which is the actual user path beyond the upstream window. Do not
+change the SDK timeline limit, synthesize gaps, patch duplicate policy, weaken
+Megolm, or add a second history owner. A disposable experiment already proved
+that the real backward paginate recovers the 21st body and turns the Tuwunel
+lane GREEN; the retained test must now encode the correlated, duplicate-safe
+form above. Reviewer-gpt approved the pagination/encrypted-harness portion as a
+QA-only `Correct-to-merge` before implementation after requiring correlated
+`Paginating`, full authoritative diff semantics, and the explicit encrypted-room
+projection gate. That verdict does not cover the later product reshare-worker
+correction, which has its own required pre-implementation design gate.
+The encrypted Tuwunel RED reproduced four times: after 17–20 sequential sends,
+the exact local echo reached Rust `Sent` but the correlated `SendCompleted`
+never arrived and the command waited to deadline. An initial biased-select
+reorder plus deterministic unit test did not change the real lane (ordinal 18
+still failed) and is therefore reverted rather than retained speculatively.
+The confirmed cycle is the inline `handle_room_key_reshare` permit/SDK await
+against the next send's interactive guard and the manager-owned terminal poll.
+The correction above retains the canonical terminal requirement and moves only
+that auxiliary network work out of the stable session owner.
+
 ## Implementation gate record / worklog
 
 - Task 2A compile scaffold: `cargo test -p koushi-core --test room_subscription_residency --no-run` exited 0.
 - Slice A RED: `cargo test -p koushi-core --test room_subscription_residency` exited 101 with four assertion-level failures: final unsubscribe and shared Room/Thread/Focused retained `active_rooms=[]` instead of the synthetic room; build failure retained `desired_rooms=[]` instead of the admitted room; 140-room retention observed `active_rooms.len()=0` instead of 140. The binary ran 5 tests (the four behavior tests plus the compile probe); no compilation, zero-match, no-session, or harness failure occurred.
 - Slice A reviewer hardening: teardown checks now assert manager desired-room retention, each teardown admits a distinct extra room and verifies a subsequent real reconcile retains prior desired/active rooms, build failure asserts zero actors/leases, and Room/Thread/Focused asserts three actors/leases before the no-op generation check. `cargo test -p koushi-core --test room_subscription_residency` exited 0 with 5 passed; no production policy or harness policy was added.
+- Slice B RED (Task 3 source union/expiry): scaffold `cargo test -p koushi-core --test room_subscription_residency --no-run` exited 0. The exact binary then ran 10 tests and exited 101 with 5 assertion-level failures: opened/visible/restored retained only D, identical visible retained no A, invalid/stale visible retained no valid A, proven restore imported no B, and expiry reconciliation retained no A/B. No compile, zero-match, no-session, or harness failure occurred.
+- Slice B GREEN (Task 3 source union/expiry): the same `cargo test -p koushi-core --test room_subscription_residency` exited 0 with all 10 tests passed after the matching manager generation/restore/visibility/expiry implementation.
+- Slice B RED (Task 3 lifecycle/gate scaffold): `cargo test -p koushi-core --test room_subscription_residency --no-run` exited 0. The exact binary ran 24 tests and exited 101 with 13 assertion-level failures: leave/decline terminal, replacement binding mismatch, pre-sync tombstone, inflight drain, delayed projection, ordered rejoin, stale membership, local rejoin fence, failed-operation settlement, final permit drain, setup ordering, account isolation, and diagnostics. No compile, zero-match, no-session, or harness failure occurred.
+- Corrective Slice A RED (Findings 1/3 visible): the fresh duplicated valid room was admitted by the old direct-manager path, so the focused invalid/stale-visible test exited 101. After production authority gating and the shared real-RoomActor visible ingress, the focused test, three visible/union tests, and then-current 24-test lane exited 0.
+- Corrective Slice B RED (Finding 2): the real RoomActor acknowledgement-loss test exited 101 with `operation_failed_sdk_count=0` before the fix, and the narrow closed-receiver gate test exited 101 because `begin_operation` admitted after the receiver closed. Both failures were assertion-level, not harness or compile failures.
+- Corrective Slice B GREEN: the two focused tests exited 0; the full `room_subscription_residency` binary exited 0 with 25 passed, including all five held SDK-success operation paths; `cargo test -p koushi-core --lib` exited 0 with 1002 passed and 8 ignored; default `cargo check` and `git diff --check` exited 0.
+- Corrective Slice C RED (Finding 3 operations/membership): with the RoomActor binding deliberately cleared, the old direct-manager leave helper still tombstoned the room and the new focused guard exited 101. After real RoomCommand plus held SDK-boundary routing and shared ordered membership ingress replaced the shortcuts, the binding guard, leave/decline, pre-sync/delayed projection, ordered/stale membership, acknowledgement-loss, and then-current 25-test lane exited 0.
+- Corrective Slice D RED (Findings 4–6): after adding the isolated record-index assertion, `cargo test -p koushi-core --test room_subscription_residency room_subscription_residency_diagnostics_are_private_safe_and_closed` exited 101 on the old `room_selected`/other non-approved reconcile source token; the same pre-fix reconcile records did not contain `previous_bucket` or `desired_bucket` (the assertion was reached after the token failure was corrected). The failure was assertion-level, with the diagnostics lock held and only post-index `core.subscription` records inspected.
+- Corrective Slice D GREEN: the diagnostic test exited 0; the full `cargo test -p koushi-core --test room_subscription_residency` lane exited 0 with 25/25 passed; `cargo test -p koushi-core --lib subscription_` exited 0 with 5 passed; `cargo test -p koushi-core --lib` exited 0 with 1001 passed and 8 ignored; default `cargo check` exited 0; touched-file `rustfmt --edition 2024 --check` and `git diff --check` exited 0. Full core library validation was run, so no pending core-lib check remains for this slice.
+- Local-QA reconnect correction design approval: reviewer-gpt recorded `Correct-to-merge` for the QA-only change, with product code, vendored SDK, and live-tail behavior explicitly out of scope.
+- Local-QA reconnect correction RED: the focused `reconnect_initial_projection_requires_twenty_distinct_bodies` test ran against the passive boolean oracle and exited 101 on its assertion-level underfilled-window failure; no homeserver was run.
+- Local-QA reconnect correction GREEN: `cargo test -p koushi-core --features qa-bin --bin headless-core-qa` exited 0 with 127 passed; the final focused `reconnect_` run exited 0 with 8 passed; `rustfmt --edition 2024` was run on the touched QA binary and `git diff --check` exited 0. `timeline_reconnect --core` then exited 0 independently on Tuwunel and Synapse with `timeline_reconnect_recv_after_reconnect=ok`, `live_catchup_checkpoint=ok`, and `live_catchup_gap_repaired=ok`; the normal `timeline --core` and `send_queue --core` lanes also exited 0 with `--server=both`. The aggregate `all --core --server=both` attempt remains blocked before #532-specific assertions by a Synapse `session_status` settlement timeout reproduced unchanged in a detached `origin/main` worktree; this baseline evidence is retained rather than misreported as branch GREEN.
+- Final E2EE QA correction RED (reviewer plaintext finding): the focused `active_reconnect_uses_encryption_gate_before_timeline_work` source test exited 101 before the fix because the active reconnect branch created the room with `encrypted=false` and had no dual encryption-projection gates; no homeserver was run.
+- Final E2EE QA correction GREEN (local only): the focused source test exited 0, the full `cargo test -p koushi-core --features qa-bin --bin headless-core-qa` exited 0 with 128 passed, and `git diff --check` exited 0. No homeserver run or server-green claim is made for this correction.
+- Rejected send-terminal hypothesis: reviewer-gpt approved a narrow biased-select reorder and a ready-read-pressure proof, and the unit/full suites were GREEN, but the next real encrypted Tuwunel run still failed at ordinal 18 with the same missing terminal. The reorder and its test are therefore reverted; they are not retained as speculative product behavior or reported as the final fix.
+- Room-key-reshare deadlock RED: four real encrypted reproductions failed on the last sends (ordinals 17, 18, 19, and 20): the exact local echo reached Rust `Sent`, but the correlated `SendCompleted` terminal was missing until the flow deadline. Source inspection then identified the manager-inline reshare permit/SDK await cycle. QA removed the temporary send diagnostic snapshot/stage dump and ordinal-20 10-second timeout; `wait_for_send_flow_completion` still requires correlated `SendCompleted`. No homeserver green claim is made for this correction.
+
+## Approved room-key-reshare deadlock correction
+
+**Design approval:** The task approval for issue #532 authorizes this narrow
+`timeline.rs`-only product correction. The stable manager keeps only exact
+`TimelineKey`, actor-generation, outbound-session-token, and active-schedule
+validation. It starts one executor-owned task in the existing per-key schedule;
+the task owns `AccountWorkKind::RoomKeyReshare` admission and the SDK
+`force_reshare_room_key` await, maps to a private closed completion enum, and
+sends that completion back through `TimelineMessage`. The schedule retains
+per-attempt handle slots so replacement, unsubscribe/actor cleanup, normal
+shutdown, and abnormal manager drop abort every worker; completion takes its
+own worker handle before any schedule mutation, making duplicates/stale inputs
+inert and preventing self-abort. A second currentness check guards insertion;
+failed insertion aborts the new task. No SDK or protocol changes are allowed.
+
+**Rejected reorder removal:** The speculative biased-select reorder and its
+ready-read-pressure test were removed before this product correction. The
+manager select is back to the original control, navigation, reads/retries,
+terminal, enqueue/diagnostic, observer, mailbox order. The reorder is not a
+priority policy and must not return.
+
+**Deterministic RED before product code:**
+`cargo test -p koushi-core --lib room_key_reshare_handler_does_not_hold_the_manager_on_sdk_work`
+exited `101` after compiling the library; the test reached its assertion and
+failed because the old handler still contained the inline SDK/permit await.
+This is supplemental to the four encrypted local reproductions above; no
+homeserver was run for the focused unit RED.
+
+**Room-key-reshare GREEN:** the eight focused reshare tests exited 0, including
+actual correlated `SendCompleted` delivery while the reshare worker waited
+behind an interactive guard, exact-once/stale completion fences, schedule
+replacement/unsubscribe cancellation, and queued/admitted shutdown release.
+`cargo test -p koushi-core --lib` exited 0 with 1005 passed and 8 ignored;
+`cargo test -p koushi-core --features qa-bin --bin headless-core-qa` exited 0
+with 128 passed; the residency lane exited 0 with 25 passed; default
+`cargo check` and `git diff --check` exited 0. The real encrypted
+`timeline_reconnect --core` lane then exited 0 independently on Tuwunel and
+Synapse with `timeline_reconnect_recv_after_reconnect=ok`,
+`live_catchup_checkpoint=ok`, and `live_catchup_gap_repaired=ok`; all 21
+recognizable decrypted bodies were proven exactly once with no UTD.
+
+## Final review findings worklog
+
+- F1 RED: after replacing the reconnect assertions with the three required cases, `cargo test -p koushi-core --features qa-bin --bin headless-core-qa reconnect_initial_projection` exited 101 with three assertion-level failures: missing newest body, oldest present before pagination, and the all-21 no-pagination shortcut. No homeserver ran.
+- F1 GREEN: the same `reconnect_initial_projection` command exited 0 with 3 tests passed; the final `cargo test -p koushi-core --features qa-bin --bin headless-core-qa reconnect_` exited 0 with 10 tests passed. The helper now requires initial indices 1..=20 exactly once, rejects index 0, always issues one real backward page of 64, and requires the matching key/request/backward `Paginating` then terminal before final exact-once 21-body completion.
+- F2 review finding: cancellation coverage was nondeterministic because replacement, unsubscribe, and shutdown did not await whether the reshare worker was queued or admitted. The corrective test now uses cfg(test)-only one-shot acquire-entry/permit-admission signals, a held completion channel, both queued and admitted paths, explicit replacement/unsubscribe/shutdown cancellation, channel closure, and scheduler reuse; the production worker has none of those fields or hooks. `cargo test -p koushi-core --lib room_key_reshare` exited 0 with 8 passed, including the retained terminal-progress test.
+- F3 GREEN: `RoomKeyReshareCompletion` is private to `timeline.rs`; `cargo check` and the core library both compile it successfully.
+- F4 GREEN: removing `RoomSubscriptionResidencyHarness::new`, `compile_probe`, and the no-op compile test reduced the residency lane to the real 25 tests. `cargo test -p koushi-core --test room_subscription_residency` exited 0 with 25 passed.
+- Final requested gates: `cargo test -p koushi-core --features qa-bin --bin headless-core-qa` exited 0 with 129 passed; `cargo test -p koushi-core --lib` exited 0 with 1005 passed and 8 ignored; default `cargo check` exited 0; `git diff --check` exited 0. The final strict encrypted oracle then exited 0 independently on Tuwunel and Synapse, proving exact newest indices 1..=20 before a mandatory correlated backward page of 64 and exact decrypted indices 0..=20 afterward, with all three required success tokens and no UTD. No SDK files changed.

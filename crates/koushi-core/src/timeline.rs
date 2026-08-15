@@ -148,9 +148,10 @@ use crate::event::{
 };
 use crate::executor;
 use crate::failure::{CoreFailure, TimelineFailureKind};
+#[cfg(any(test, feature = "test-hooks"))]
+use crate::ids::AccountKey;
 use crate::ids::{
-    AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey,
-    TimelineKind,
+    RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind,
 };
 use crate::link_preview::{LinkPreviewContext, extract_link_ranges};
 use crate::live_catchup::{LiveCatchupGate, classify_live_catchup_gate};
@@ -293,6 +294,222 @@ impl TimelineSendTerminalIngress {
     }
 }
 
+/// The only successful local room-removal causes that may mutate session
+/// residency. Session teardown does not send a live removal message.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RoomRemovalCause {
+    DirectLeave,
+    InviteDecline,
+}
+
+impl RoomRemovalCause {
+    fn token(self) -> &'static str {
+        match self {
+            Self::DirectLeave => "room_left",
+            Self::InviteDecline => "invite_declined",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RoomMembershipTransitionKind {
+    Left,
+    Joined,
+    Invited,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RoomMembershipTransition {
+    pub(crate) room_id: OwnedRoomId,
+    pub(crate) kind: RoomMembershipTransitionKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct VisibleRoomObservation {
+    pub(crate) room_id: String,
+    pub(crate) non_left: bool,
+}
+
+struct MembershipOperationGateState {
+    accepting: bool,
+    active_count: usize,
+}
+
+#[derive(Clone)]
+struct MembershipOperationGate {
+    state: Arc<Mutex<MembershipOperationGateState>>,
+    active_count: watch::Sender<usize>,
+}
+
+pub(crate) struct TimelineSubscriptionResidencyPermit {
+    gate: MembershipOperationGate,
+}
+
+impl MembershipOperationGate {
+    fn new() -> Self {
+        let (active_count, _) = watch::channel(0_usize);
+        Self {
+            state: Arc::new(Mutex::new(MembershipOperationGateState {
+                accepting: true,
+                active_count: 0,
+            })),
+            active_count,
+        }
+    }
+
+    fn begin_operation(&self) -> Option<TimelineSubscriptionResidencyPermit> {
+        let mut state = self.state.lock().expect("membership operation gate lock");
+        if !state.accepting {
+            return None;
+        }
+        state.active_count += 1;
+        self.active_count.send_replace(state.active_count);
+        Some(TimelineSubscriptionResidencyPermit { gate: self.clone() })
+    }
+
+    async fn close_and_drain(&self) {
+        {
+            let mut state = self.state.lock().expect("membership operation gate lock");
+            state.accepting = false;
+        }
+        let mut active_count = self.active_count.subscribe();
+        let _ = active_count.wait_for(|count| *count == 0).await;
+    }
+
+    #[cfg(feature = "test-hooks")]
+    fn snapshot(&self) -> (bool, usize) {
+        let state = self.state.lock().expect("membership operation gate lock");
+        (state.accepting, state.active_count)
+    }
+}
+
+impl Drop for TimelineSubscriptionResidencyPermit {
+    fn drop(&mut self) {
+        let mut state = self
+            .gate
+            .state
+            .lock()
+            .expect("membership operation gate lock");
+        debug_assert!(state.active_count > 0);
+        state.active_count = state.active_count.saturating_sub(1);
+        self.gate.active_count.send_replace(state.active_count);
+    }
+}
+
+/// Cloneable, narrow residency ingress shared by the RoomActor and the
+/// session-owned timeline manager. It is intentionally not a generic timeline
+/// command authority.
+#[derive(Clone)]
+pub(crate) struct TimelineSubscriptionResidencyHandle {
+    tx: mpsc::Sender<TimelineMessage>,
+    gate: MembershipOperationGate,
+}
+
+impl TimelineSubscriptionResidencyHandle {
+    pub(crate) fn begin_operation(&self) -> Option<TimelineSubscriptionResidencyPermit> {
+        if self.tx.is_closed() {
+            return None;
+        }
+        self.gate.begin_operation()
+    }
+
+    pub(crate) async fn close_and_drain(&self) {
+        self.gate.close_and_drain().await;
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn gate_snapshot(&self) -> (bool, usize) {
+        self.gate.snapshot()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) async fn gate_probe_for_testing(&self) -> (bool, usize, bool, bool) {
+        let permit = self
+            .begin_operation()
+            .expect("test gate must initially accept");
+        let gate = self.clone();
+        let drain = executor::spawn(async move {
+            gate.close_and_drain().await;
+            gate.gate_snapshot()
+        });
+        // The final drop intentionally happens before the waiter is polled.
+        drop(permit);
+        let (accepting, active_count) = drain.await.expect("gate drain task");
+        let rejected = self.begin_operation().is_none();
+        (accepting, active_count, rejected, active_count == 0)
+    }
+
+    pub(crate) async fn visible_rooms_observed(
+        &self,
+        core_generation: u64,
+        room_ids: Vec<VisibleRoomObservation>,
+    ) -> bool {
+        self.tx
+            .send(TimelineMessage::VisibleRoomsObserved {
+                core_generation,
+                room_ids,
+            })
+            .await
+            .is_ok()
+    }
+
+    pub(crate) async fn membership_observed(
+        &self,
+        core_generation: u64,
+        transitions: Vec<RoomMembershipTransition>,
+    ) -> bool {
+        self.tx
+            .send(TimelineMessage::RoomMembershipObserved {
+                core_generation,
+                transitions,
+            })
+            .await
+            .is_ok()
+    }
+
+    pub(crate) async fn room_left(
+        &self,
+        _permit: &TimelineSubscriptionResidencyPermit,
+        room_id: OwnedRoomId,
+        cause: RoomRemovalCause,
+    ) -> bool {
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        if self
+            .tx
+            .send(TimelineMessage::RoomLeft {
+                room_id,
+                cause,
+                acknowledged,
+            })
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        acknowledgement.await.is_ok()
+    }
+
+    pub(crate) async fn room_rejoined(
+        &self,
+        _permit: &TimelineSubscriptionResidencyPermit,
+        room_id: OwnedRoomId,
+    ) -> bool {
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        if self
+            .tx
+            .send(TimelineMessage::RoomRejoined {
+                room_id,
+                acknowledged,
+            })
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        acknowledgement.await.is_ok()
+    }
+}
+
 /// Messages routed to the `TimelineManagerActor`.
 pub(crate) enum TimelineMessage {
     Command(TimelineCommand),
@@ -329,6 +546,27 @@ pub(crate) enum TimelineMessage {
     SyncStarted {
         room_list_service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
         core_generation: u64,
+    },
+    #[cfg(feature = "test-hooks")]
+    ResidencyTestSnapshot {
+        response: oneshot::Sender<(Vec<String>, Vec<String>)>,
+    },
+    VisibleRoomsObserved {
+        core_generation: u64,
+        room_ids: Vec<VisibleRoomObservation>,
+    },
+    RoomMembershipObserved {
+        core_generation: u64,
+        transitions: Vec<RoomMembershipTransition>,
+    },
+    RoomLeft {
+        room_id: OwnedRoomId,
+        cause: RoomRemovalCause,
+        acknowledged: oneshot::Sender<()>,
+    },
+    RoomRejoined {
+        room_id: OwnedRoomId,
+        acknowledged: oneshot::Sender<()>,
     },
     AllRoomsResponseCommitted {
         core_generation: u64,
@@ -380,6 +618,14 @@ pub(crate) enum TimelineMessage {
         actor_generation: u64,
         read_key: ReadStateKey,
         event_id: Option<String>,
+    },
+    RoomKeyReshareCompleted {
+        key: TimelineKey,
+        actor_generation: u64,
+        expected_session: MatrixOutboundGroupSessionToken,
+        target: MatrixRoomKeyReshareTarget,
+        attempt: u8,
+        outcome: RoomKeyReshareCompletion,
     },
     RunRoomKeyReshare {
         key: TimelineKey,
@@ -532,6 +778,7 @@ impl ReadPersistenceIngress {
 pub struct TimelineManagerHandle {
     tx: mpsc::Sender<TimelineMessage>,
     control_tx: mpsc::Sender<TimelineManagerControl>,
+    residency: TimelineSubscriptionResidencyHandle,
     #[cfg(test)]
     terminal_ingress: TimelineSendTerminalIngress,
 }
@@ -839,9 +1086,38 @@ fn spawn_delayed_timeline_message<T: Send + 'static>(
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RoomKeyReshareCompletion {
+    Sent {
+        request_count: usize,
+        recipient_count: usize,
+    },
+    NoSession,
+    NoRecipients,
+    StaleSession,
+    NetworkError,
+    SdkError,
+}
+
+struct RoomKeyReshareTaskSlot {
+    attempt: u8,
+    delayed: executor::JoinHandle<()>,
+    started: bool,
+    worker: Option<executor::JoinHandle<()>>,
+}
+
+impl RoomKeyReshareTaskSlot {
+    fn abort(&self) {
+        self.delayed.abort();
+        if let Some(worker) = &self.worker {
+            worker.abort();
+        }
+    }
+}
+
 struct RoomKeyReshareSchedule {
     session: MatrixOutboundGroupSessionToken,
-    tasks: Vec<executor::JoinHandle<()>>,
+    tasks: Vec<RoomKeyReshareTaskSlot>,
 }
 
 impl Drop for RoomKeyReshareSchedule {
@@ -850,6 +1126,109 @@ impl Drop for RoomKeyReshareSchedule {
             task.abort();
         }
     }
+}
+
+type RoomKeyReshareOperation =
+    Pin<Box<dyn Future<Output = RoomKeyReshareCompletion> + Send + 'static>>;
+
+#[cfg(test)]
+struct RoomKeyReshareTestSignals {
+    acquire_started: oneshot::Sender<()>,
+    permit_acquired: oneshot::Sender<()>,
+}
+
+fn map_room_key_reshare_completion(
+    outcome: Result<MatrixRoomKeyReshareOutcome, koushi_sdk::MatrixRoomOperationError>,
+) -> RoomKeyReshareCompletion {
+    match outcome {
+        Ok(MatrixRoomKeyReshareOutcome::Sent {
+            request_count,
+            recipient_count,
+        }) => RoomKeyReshareCompletion::Sent {
+            request_count,
+            recipient_count,
+        },
+        Ok(MatrixRoomKeyReshareOutcome::NoSession) => RoomKeyReshareCompletion::NoSession,
+        Ok(MatrixRoomKeyReshareOutcome::NoRecipients) => RoomKeyReshareCompletion::NoRecipients,
+        Ok(MatrixRoomKeyReshareOutcome::StaleSession) => RoomKeyReshareCompletion::StaleSession,
+        Err(error)
+            if error.failure_kind() == Some(koushi_sdk::MatrixRoomOperationFailureKind::Http) =>
+        {
+            RoomKeyReshareCompletion::NetworkError
+        }
+        Err(_) => RoomKeyReshareCompletion::SdkError,
+    }
+}
+
+fn spawn_room_key_reshare_task_with_operation(
+    account_work: AccountWorkScheduler,
+    manager_tx: mpsc::Sender<TimelineMessage>,
+    key: TimelineKey,
+    actor_generation: u64,
+    expected_session: MatrixOutboundGroupSessionToken,
+    target: MatrixRoomKeyReshareTarget,
+    attempt: u8,
+    operation: RoomKeyReshareOperation,
+    #[cfg(test)] test_signals: Option<RoomKeyReshareTestSignals>,
+) -> executor::JoinHandle<()> {
+    executor::spawn(async move {
+        #[cfg(test)]
+        let (acquire_started, permit_acquired) = test_signals
+            .map(|signals| (signals.acquire_started, signals.permit_acquired))
+            .unzip();
+        #[cfg(test)]
+        if let Some(signal) = acquire_started {
+            let _ = signal.send(());
+        }
+        let _permit = account_work.acquire(AccountWorkKind::RoomKeyReshare).await;
+        #[cfg(test)]
+        if let Some(signal) = permit_acquired {
+            let _ = signal.send(());
+        }
+        let outcome = operation.await;
+        let _ = manager_tx
+            .send(TimelineMessage::RoomKeyReshareCompleted {
+                key,
+                actor_generation,
+                expected_session,
+                target,
+                attempt,
+                outcome,
+            })
+            .await;
+    })
+}
+
+fn spawn_room_key_reshare_task(
+    account_work: AccountWorkScheduler,
+    session: Arc<MatrixClientSession>,
+    manager_tx: mpsc::Sender<TimelineMessage>,
+    key: TimelineKey,
+    actor_generation: u64,
+    expected_session: MatrixOutboundGroupSessionToken,
+    target: MatrixRoomKeyReshareTarget,
+    attempt: u8,
+) -> executor::JoinHandle<()> {
+    let expected_for_sdk = expected_session.clone();
+    let room_id = key.room_id().to_owned();
+    let operation: RoomKeyReshareOperation = Box::pin(async move {
+        map_room_key_reshare_completion(
+            koushi_sdk::force_reshare_room_key(&session, &room_id, Some(&expected_for_sdk), target)
+                .await,
+        )
+    });
+    spawn_room_key_reshare_task_with_operation(
+        account_work,
+        manager_tx,
+        key,
+        actor_generation,
+        expected_session,
+        target,
+        attempt,
+        operation,
+        #[cfg(test)]
+        None,
+    )
 }
 
 struct SendEnqueueWorkerSupervisor {
@@ -2780,7 +3159,30 @@ impl TimelineManagerHandle {
         self.tx.clone()
     }
 
+    pub(crate) fn residency_handle(&self) -> TimelineSubscriptionResidencyHandle {
+        self.residency.clone()
+    }
+
+    pub(crate) async fn close_membership_operations(&self) {
+        self.residency.close_and_drain().await;
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) async fn residency_snapshot_for_testing(
+        &self,
+        response: oneshot::Sender<(Vec<String>, Vec<String>)>,
+    ) -> bool {
+        self.send(TimelineMessage::ResidencyTestSnapshot { response })
+            .await
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn residency_gate_snapshot_for_testing(&self) -> (bool, usize) {
+        self.residency.gate_snapshot()
+    }
+
     pub(crate) async fn shutdown(&self) -> bool {
+        self.close_membership_operations().await;
         let (acknowledged, acknowledgement) = oneshot::channel();
         if self
             .control_tx
@@ -2812,6 +3214,15 @@ async fn receive_navigation_projection(
     active.borrow_and_update().clone()
 }
 
+/// Session-local leave state. Visibility and restore evidence never clear it;
+/// only an ordered SDK left→joined/invited observation or an admitted local
+/// rejoin may do so.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RoomLeaveState {
+    PendingLeftObservation,
+    LeftObserved,
+}
+
 /// Manages the `HashMap<TimelineKey, TimelineActorHandle>`.
 /// Colocated as a child task under `AccountActor` (spec: "actor deployment
 /// is flexible; boundaries define ownership not one task per actor").
@@ -2820,6 +3231,10 @@ pub struct TimelineManagerActor {
     room_list_service: Option<Arc<matrix_sdk_ui::room_list_service::RoomListService>>,
     room_subscription_checkpoint_task: Option<executor::JoinHandle<()>>,
     room_subscription_service_epoch: u64,
+    current_core_generation: Option<u64>,
+    room_leave_states: BTreeMap<OwnedRoomId, RoomLeaveState>,
+    #[cfg(feature = "test-hooks")]
+    restored_room_subscription_probe: Option<(bool, BTreeSet<OwnedRoomId>)>,
     /// Session-resident desired room subscriptions. This set outlives every
     /// presentation actor and is dropped with the manager/session.
     session_subscribed_rooms: BTreeSet<OwnedRoomId>,
@@ -2951,16 +3366,26 @@ enum SubscriptionReconcileTrigger {
     FocusedOpened,
     TimelineRebuild,
     SyncStarted,
+    VisibleRange,
+    Restore,
+    RoomLeft,
+    RoomRejoined,
+    Membership,
 }
 
 impl SubscriptionReconcileTrigger {
     fn token(self) -> &'static str {
         match self {
-            Self::RoomSelected => "room_selected",
-            Self::ThreadOpened => "thread_opened",
-            Self::FocusedOpened => "focused_opened",
-            Self::TimelineRebuild => "timeline_rebuild",
-            Self::SyncStarted => "sync_started",
+            Self::RoomSelected
+            | Self::ThreadOpened
+            | Self::FocusedOpened
+            | Self::TimelineRebuild => "opened",
+            Self::SyncStarted => "session_restart",
+            Self::VisibleRange => "visible_range",
+            Self::Restore => "restore",
+            Self::RoomLeft => "room_left",
+            Self::RoomRejoined => "room_rejoined",
+            Self::Membership => "membership",
         }
     }
 }
@@ -2976,11 +3401,19 @@ impl TimelineManagerActor {
         let (tx, msg_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let (control_tx, control_rx) = mpsc::channel(1);
         let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
+        let residency = TimelineSubscriptionResidencyHandle {
+            tx: tx.clone(),
+            gate: MembershipOperationGate::new(),
+        };
         let actor = TimelineManagerActor {
             session: None,
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -3024,6 +3457,7 @@ impl TimelineManagerActor {
         TimelineManagerHandle {
             tx,
             control_tx,
+            residency,
             #[cfg(test)]
             terminal_ingress,
         }
@@ -3047,6 +3481,10 @@ impl TimelineManagerActor {
         let (tx, msg_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let (control_tx, control_rx) = mpsc::channel(1);
         let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
+        let residency = TimelineSubscriptionResidencyHandle {
+            tx: tx.clone(),
+            gate: MembershipOperationGate::new(),
+        };
         let send_completion = SharedSendCompletionCoordinator::default();
         let global_send_completion_observer_future =
             Some(Box::pin(run_global_send_completion_observer(
@@ -3059,6 +3497,10 @@ impl TimelineManagerActor {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -3107,6 +3549,7 @@ impl TimelineManagerActor {
         TimelineManagerHandle {
             tx,
             control_tx,
+            residency,
             #[cfg(test)]
             terminal_ingress,
         }
@@ -3141,6 +3584,10 @@ impl TimelineManagerActor {
             room_list_service: Some(room_list_service),
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -3184,6 +3631,28 @@ impl TimelineManagerActor {
 
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
+    pub(crate) fn room_subscription_residency_test_handle(
+        &self,
+    ) -> TimelineSubscriptionResidencyHandle {
+        TimelineSubscriptionResidencyHandle {
+            tx: self.msg_tx.clone(),
+            gate: MembershipOperationGate::new(),
+        }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub(crate) async fn room_subscription_residency_test_gate_probe() -> (bool, usize, bool, bool) {
+        let (tx, _rx) = mpsc::channel(1);
+        let handle = TimelineSubscriptionResidencyHandle {
+            tx,
+            gate: MembershipOperationGate::new(),
+        };
+        handle.gate_probe_for_testing().await
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_admit_key(&mut self, key: TimelineKey) {
         self.handle_subscribe(internal_timeline_request_id(), key, false, false)
             .await;
@@ -3220,7 +3689,7 @@ impl TimelineManagerActor {
     #[doc(hidden)]
     pub(crate) fn room_subscription_residency_test_snapshot(
         &self,
-    ) -> (Vec<String>, Vec<String>, usize, usize, u64) {
+    ) -> (Vec<String>, Vec<String>, Vec<String>, usize, usize, u64) {
         let desired_rooms = self
             .session_subscribed_rooms
             .iter()
@@ -3243,13 +3712,125 @@ impl TimelineManagerActor {
             .as_ref()
             .map(|service| service.subscription_generation().get())
             .unwrap_or_default();
+        let tombstoned_rooms = self
+            .room_leave_states
+            .keys()
+            .map(ToString::to_string)
+            .collect();
         (
             desired_rooms,
             active_rooms,
+            tombstoned_rooms,
             self.timelines.len(),
             lease_count,
             sdk_generation,
         )
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub(crate) async fn room_subscription_residency_test_seed_sdk_subscriptions(
+        &mut self,
+        room_ids: &[&matrix_sdk::ruma::RoomId],
+    ) {
+        if let Some(service) = self.room_list_service.clone() {
+            let _ = service
+                .reconcile_room_subscriptions_with_generation(room_ids)
+                .await;
+        }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub(crate) async fn room_subscription_residency_test_expire_sdk_subscriptions(&mut self) {
+        if let Some(service) = self.room_list_service.clone() {
+            let empty: Vec<&matrix_sdk::ruma::RoomId> = Vec::new();
+            let _ = service
+                .reconcile_room_subscriptions_with_generation(&empty)
+                .await;
+        }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub(crate) async fn room_subscription_residency_test_pump_next_ingress(&mut self) {
+        loop {
+            let message = self.msg_rx.recv().await.expect("residency manager mailbox");
+            match message {
+                TimelineMessage::VisibleRoomsObserved {
+                    core_generation,
+                    room_ids,
+                } => {
+                    self.handle_visible_rooms_observed(core_generation, room_ids)
+                        .await;
+                    return;
+                }
+                TimelineMessage::RoomMembershipObserved {
+                    core_generation,
+                    transitions,
+                } => {
+                    self.handle_room_membership_observed(core_generation, transitions)
+                        .await;
+                    return;
+                }
+                TimelineMessage::RoomLeft {
+                    room_id,
+                    cause,
+                    acknowledged,
+                } => {
+                    self.handle_room_left(room_id, cause).await;
+                    let _ = acknowledged.send(());
+                    return;
+                }
+                TimelineMessage::RoomRejoined {
+                    room_id,
+                    acknowledged,
+                } => {
+                    self.handle_room_rejoined(room_id).await;
+                    let _ = acknowledged.send(());
+                    return;
+                }
+                TimelineMessage::RoomSubscriptionCheckpoint {
+                    service_epoch,
+                    checkpoint,
+                } => {
+                    self.handle_room_subscription_checkpoint(service_epoch, checkpoint)
+                        .await;
+                }
+                _ => panic!("unexpected residency manager mailbox message"),
+            }
+        }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub(crate) async fn room_subscription_residency_test_sync_started(
+        &mut self,
+        core_generation: u64,
+    ) {
+        self.current_core_generation = Some(core_generation);
+        if let Some(service) = self.room_list_service.clone() {
+            self.handle_sync_started(service, core_generation).await;
+        }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub(crate) async fn room_subscription_residency_test_offer_restore(
+        &mut self,
+        core_generation: u64,
+        room_ids: &[&str],
+        proven: bool,
+    ) {
+        let restored = room_ids
+            .iter()
+            .map(|room_id| room_id.parse().expect("synthetic room id"))
+            .collect();
+        self.restored_room_subscription_probe = Some((proven, restored));
+        self.current_core_generation = Some(core_generation);
+        if let Some(service) = self.room_list_service.clone() {
+            self.handle_sync_started(service, core_generation).await;
+        }
     }
 
     #[cfg(test)]
@@ -3507,6 +4088,40 @@ impl TimelineManagerActor {
                     self.handle_sync_started(room_list_service, core_generation)
                         .await;
                 }
+                #[cfg(feature = "test-hooks")]
+                TimelineMessage::ResidencyTestSnapshot { response } => {
+                    let (desired, active, ..) = self.room_subscription_residency_test_snapshot();
+                    let _ = response.send((desired, active));
+                }
+                TimelineMessage::VisibleRoomsObserved {
+                    core_generation,
+                    room_ids,
+                } => {
+                    self.handle_visible_rooms_observed(core_generation, room_ids)
+                        .await;
+                }
+                TimelineMessage::RoomMembershipObserved {
+                    core_generation,
+                    transitions,
+                } => {
+                    self.handle_room_membership_observed(core_generation, transitions)
+                        .await;
+                }
+                TimelineMessage::RoomLeft {
+                    room_id,
+                    cause,
+                    acknowledged,
+                } => {
+                    self.handle_room_left(room_id, cause).await;
+                    let _ = acknowledged.send(());
+                }
+                TimelineMessage::RoomRejoined {
+                    room_id,
+                    acknowledged,
+                } => {
+                    self.handle_room_rejoined(room_id).await;
+                    let _ = acknowledged.send(());
+                }
                 TimelineMessage::AllRoomsResponseCommitted {
                     core_generation,
                     response_sequence,
@@ -3605,6 +4220,24 @@ impl TimelineManagerActor {
                     )
                     .await;
                 }
+                TimelineMessage::RoomKeyReshareCompleted {
+                    key,
+                    actor_generation,
+                    expected_session,
+                    target,
+                    attempt,
+                    outcome,
+                } => {
+                    self.handle_room_key_reshare_completed(
+                        key,
+                        actor_generation,
+                        expected_session,
+                        target,
+                        attempt,
+                        outcome,
+                    )
+                    .await;
+                }
                 TimelineMessage::RunRoomKeyReshare {
                     key,
                     actor_generation,
@@ -3618,8 +4251,7 @@ impl TimelineManagerActor {
                         expected_session,
                         target,
                         attempt,
-                    )
-                    .await;
+                    );
                 }
                 TimelineMessage::Command(command) => {
                     self.handle_command(command).await;
@@ -3912,8 +4544,9 @@ impl TimelineManagerActor {
 
         let tasks = ROOM_KEY_RESHARE_ATTEMPTS
             .iter()
-            .map(|attempt| {
-                spawn_delayed_timeline_message(
+            .map(|attempt| RoomKeyReshareTaskSlot {
+                attempt: attempt.number,
+                delayed: spawn_delayed_timeline_message(
                     self.msg_tx.clone(),
                     attempt.delay,
                     TimelineMessage::RunRoomKeyReshare {
@@ -3923,7 +4556,9 @@ impl TimelineManagerActor {
                         target: attempt.target,
                         attempt: attempt.number,
                     },
-                )
+                ),
+                started: false,
+                worker: None,
             })
             .collect();
         self.send_enqueue_workers.room_key_reshares.insert(
@@ -3946,7 +4581,21 @@ impl TimelineManagerActor {
         }
     }
 
-    async fn handle_room_key_reshare(
+    fn room_key_reshare_is_current(
+        &self,
+        key: &TimelineKey,
+        actor_generation: u64,
+        expected_session: &MatrixOutboundGroupSessionToken,
+    ) -> bool {
+        self.send_enqueue_workers
+            .room_key_reshares
+            .get(key)
+            .is_some_and(|schedule| schedule.session == *expected_session)
+            && self.timelines.contains_key(key)
+            && self.timeline_actor_generations.current_generation(key) == Some(actor_generation)
+    }
+
+    fn handle_room_key_reshare(
         &mut self,
         key: TimelineKey,
         actor_generation: u64,
@@ -3954,6 +4603,94 @@ impl TimelineManagerActor {
         target: MatrixRoomKeyReshareTarget,
         attempt: u8,
     ) {
+        if !self.room_key_reshare_is_current(&key, actor_generation, &expected_session) {
+            return;
+        }
+        let Some(session) = self.session.as_ref().cloned() else {
+            return;
+        };
+
+        let task = spawn_room_key_reshare_task(
+            self.account_work.clone(),
+            session,
+            self.msg_tx.clone(),
+            key.clone(),
+            actor_generation,
+            expected_session.clone(),
+            target,
+            attempt,
+        );
+
+        // The manager is single-owner and has no await between validation and
+        // insertion, but revalidate the exact schedule and slot anyway. If a
+        // replacement/cleanup closed the slot before insertion, the new task
+        // must be aborted rather than left unowned.
+        if !self.room_key_reshare_is_current(&key, actor_generation, &expected_session) {
+            task.abort();
+            return;
+        }
+        let Some(schedule) = self.send_enqueue_workers.room_key_reshares.get_mut(&key) else {
+            task.abort();
+            return;
+        };
+        if schedule.session != expected_session {
+            task.abort();
+            return;
+        }
+        let Some(slot) = schedule
+            .tasks
+            .iter_mut()
+            .find(|slot| slot.attempt == attempt)
+        else {
+            task.abort();
+            return;
+        };
+        if slot.started {
+            task.abort();
+            return;
+        }
+        slot.started = true;
+        slot.worker = Some(task);
+    }
+
+    fn take_room_key_reshare_worker(
+        &mut self,
+        key: &TimelineKey,
+        expected_session: &MatrixOutboundGroupSessionToken,
+        attempt: u8,
+    ) -> Option<executor::JoinHandle<()>> {
+        let schedule = self.send_enqueue_workers.room_key_reshares.get_mut(key)?;
+        if schedule.session != *expected_session {
+            return None;
+        }
+        schedule
+            .tasks
+            .iter_mut()
+            .find(|slot| slot.attempt == attempt)
+            .and_then(|slot| slot.worker.take())
+    }
+
+    async fn handle_room_key_reshare_completed(
+        &mut self,
+        key: TimelineKey,
+        actor_generation: u64,
+        expected_session: MatrixOutboundGroupSessionToken,
+        target: MatrixRoomKeyReshareTarget,
+        attempt: u8,
+        outcome: RoomKeyReshareCompletion,
+    ) {
+        if !self.room_key_reshare_is_current(&key, actor_generation, &expected_session) {
+            return;
+        }
+        let Some(worker) = self.take_room_key_reshare_worker(&key, &expected_session, attempt)
+        else {
+            // The first completion takes the per-attempt handle. Duplicate
+            // completions therefore have no diagnostic or schedule effect.
+            return;
+        };
+        worker.abort();
+        let _ = worker.await;
+
         let trigger = match attempt {
             1 => "own_device_retry_1",
             2 => "peer_device_retry",
@@ -3963,50 +4700,11 @@ impl TimelineManagerActor {
             .iter()
             .find(|candidate| candidate.number == attempt)
             .map_or(0, |candidate| candidate.delay.as_secs());
-        let current = self
-            .send_enqueue_workers
-            .room_key_reshares
-            .get(&key)
-            .is_some_and(|schedule| schedule.session == expected_session)
-            && self.timelines.contains_key(&key)
-            && self.timeline_actor_generations.current_generation(&key) == Some(actor_generation);
-        if !current {
-            record_room_key_reshare(trigger, "cancelled", attempt, target, delay_seconds, 0, 0);
-            return;
-        }
-        let Some(session) = self.session.as_ref().cloned() else {
-            record_room_key_reshare(trigger, "cancelled", attempt, target, delay_seconds, 0, 0);
-            return;
-        };
-
-        let _permit = self
-            .account_work
-            .acquire(AccountWorkKind::RoomKeyReshare)
-            .await;
-        let still_current = self
-            .send_enqueue_workers
-            .room_key_reshares
-            .get(&key)
-            .is_some_and(|schedule| schedule.session == expected_session)
-            && self.timelines.contains_key(&key)
-            && self.timeline_actor_generations.current_generation(&key) == Some(actor_generation);
-        if !still_current {
-            record_room_key_reshare(trigger, "cancelled", attempt, target, delay_seconds, 0, 0);
-            return;
-        }
-
-        let outcome = koushi_sdk::force_reshare_room_key(
-            &session,
-            key.room_id(),
-            Some(&expected_session),
-            target,
-        )
-        .await;
         match outcome {
-            Ok(MatrixRoomKeyReshareOutcome::Sent {
+            RoomKeyReshareCompletion::Sent {
                 request_count,
                 recipient_count,
-            }) => record_room_key_reshare(
+            } => record_room_key_reshare(
                 trigger,
                 "sent",
                 attempt,
@@ -4015,7 +4713,7 @@ impl TimelineManagerActor {
                 request_count,
                 recipient_count,
             ),
-            Ok(MatrixRoomKeyReshareOutcome::NoSession) => {
+            RoomKeyReshareCompletion::NoSession => {
                 record_room_key_reshare(
                     trigger,
                     "no_session",
@@ -4027,7 +4725,7 @@ impl TimelineManagerActor {
                 );
                 self.send_enqueue_workers.room_key_reshares.remove(&key);
             }
-            Ok(MatrixRoomKeyReshareOutcome::NoRecipients) => record_room_key_reshare(
+            RoomKeyReshareCompletion::NoRecipients => record_room_key_reshare(
                 trigger,
                 "no_recipients",
                 attempt,
@@ -4036,23 +4734,22 @@ impl TimelineManagerActor {
                 0,
                 0,
             ),
-            Ok(MatrixRoomKeyReshareOutcome::StaleSession) => {
+            RoomKeyReshareCompletion::StaleSession => {
                 record_room_key_reshare(trigger, "cancelled", attempt, target, delay_seconds, 0, 0);
                 self.send_enqueue_workers.room_key_reshares.remove(&key);
             }
-            Err(error) => record_room_key_reshare(
+            RoomKeyReshareCompletion::NetworkError => record_room_key_reshare(
                 trigger,
-                if error.failure_kind() == Some(koushi_sdk::MatrixRoomOperationFailureKind::Http) {
-                    "network_error"
-                } else {
-                    "sdk_error"
-                },
+                "network_error",
                 attempt,
                 target,
                 delay_seconds,
                 0,
                 0,
             ),
+            RoomKeyReshareCompletion::SdkError => {
+                record_room_key_reshare(trigger, "sdk_error", attempt, target, delay_seconds, 0, 0)
+            }
         }
     }
 
@@ -4222,6 +4919,7 @@ impl TimelineManagerActor {
             task.abort();
         }
         self.room_list_service = Some(room_list_service.clone());
+        self.current_core_generation = Some(core_generation);
         self.global_response_commit = Some(GlobalResponseCommit::new(core_generation, 0));
         let replacement_starts = self
             .invalidate_live_tail_epoch_for_existing_rooms(service_epoch)
@@ -4256,6 +4954,100 @@ impl TimelineManagerActor {
         self.rebuild_existing_room_timelines_after_sync_started()
             .await;
         self.apply_live_tail_scheduler_actions(replacement_starts)
+            .await;
+    }
+
+    async fn handle_visible_rooms_observed(
+        &mut self,
+        core_generation: u64,
+        room_ids: Vec<VisibleRoomObservation>,
+    ) {
+        if self.current_core_generation != Some(core_generation) {
+            record_residency_intent("visible_range", "stale", 0, 0);
+            return;
+        }
+        let mut accepted = BTreeSet::new();
+        let mut rejected = 0_usize;
+        for observation in room_ids {
+            let Ok(room_id) = observation.room_id.parse::<OwnedRoomId>() else {
+                rejected += 1;
+                continue;
+            };
+            if !observation.non_left || self.room_leave_states.contains_key(&room_id) {
+                rejected += 1;
+                continue;
+            }
+            accepted.insert(room_id);
+        }
+        let accepted_count = accepted.len();
+        self.session_subscribed_rooms.extend(accepted);
+        record_residency_intent(
+            "visible_range",
+            if rejected == 0 {
+                "accepted"
+            } else {
+                "rejected"
+            },
+            accepted_count,
+            rejected,
+        );
+        // A valid current-generation observation is also the recovery wake
+        // after UnknownPos/session expiry, even when it adds no new intent.
+        self.reconcile_subscriptions(SubscriptionReconcileTrigger::VisibleRange)
+            .await;
+    }
+
+    async fn handle_room_membership_observed(
+        &mut self,
+        core_generation: u64,
+        transitions: Vec<RoomMembershipTransition>,
+    ) {
+        if self.current_core_generation != Some(core_generation) {
+            record_residency_intent("membership", "stale", 0, transitions.len());
+            return;
+        }
+        let mut changed = 0_usize;
+        for transition in transitions {
+            match transition.kind {
+                RoomMembershipTransitionKind::Left => {
+                    if self.room_leave_states.get(&transition.room_id)
+                        == Some(&RoomLeaveState::PendingLeftObservation)
+                    {
+                        self.room_leave_states
+                            .insert(transition.room_id, RoomLeaveState::LeftObserved);
+                        changed += 1;
+                    }
+                }
+                RoomMembershipTransitionKind::Joined | RoomMembershipTransitionKind::Invited => {
+                    if self.room_leave_states.get(&transition.room_id)
+                        == Some(&RoomLeaveState::LeftObserved)
+                    {
+                        self.room_leave_states.remove(&transition.room_id);
+                        self.session_subscribed_rooms.insert(transition.room_id);
+                        changed += 1;
+                    }
+                }
+            }
+        }
+        record_residency_intent("membership", "accepted", changed, 0);
+        self.reconcile_subscriptions(SubscriptionReconcileTrigger::Membership)
+            .await;
+    }
+
+    async fn handle_room_left(&mut self, room_id: OwnedRoomId, cause: RoomRemovalCause) {
+        self.room_leave_states
+            .insert(room_id.clone(), RoomLeaveState::PendingLeftObservation);
+        self.session_subscribed_rooms.remove(&room_id);
+        record_residency_intent("room_left", cause.token(), 0, 1);
+        self.reconcile_subscriptions(SubscriptionReconcileTrigger::RoomLeft)
+            .await;
+    }
+
+    async fn handle_room_rejoined(&mut self, room_id: OwnedRoomId) {
+        self.room_leave_states.remove(&room_id);
+        self.session_subscribed_rooms.insert(room_id);
+        record_residency_intent("room_rejoined", "acknowledged", 1, 0);
+        self.reconcile_subscriptions(SubscriptionReconcileTrigger::RoomRejoined)
             .await;
     }
 
@@ -4327,11 +5119,14 @@ impl TimelineManagerActor {
                         epoch,
                         operation_generation,
                         ..
-                    } if self.live_tail_refreshes.freshness(key)
-                        == Some(LiveTailFreshnessState::Refreshing {
-                            epoch: *epoch,
-                            operation_generation: *operation_generation,
-                        })
+                    } if matches!(
+                        self.live_tail_refreshes.freshness(key),
+                        Some(LiveTailFreshnessState::Refreshing {
+                            epoch: state_epoch,
+                            operation_generation: state_operation,
+                            ..
+                        }) if state_epoch == *epoch && state_operation == *operation_generation
+                    )
                 )
             })
             .into_iter()
@@ -4495,6 +5290,7 @@ impl TimelineManagerActor {
             Some(LiveTailFreshnessState::Refreshing {
                 epoch: running_epoch,
                 operation_generation: running_operation,
+                ..
             }) if running_epoch == epoch && running_operation == operation_generation
         ) {
             return;
@@ -4590,6 +5386,8 @@ impl TimelineManagerActor {
             return;
         };
         let generation_before = service.subscription_generation().get();
+        let previous_active_count = service.active_room_subscriptions().len();
+        let desired_count = self.session_subscribed_rooms.len();
         let desired: Vec<&matrix_sdk::ruma::RoomId> = self
             .session_subscribed_rooms
             .iter()
@@ -4658,7 +5456,13 @@ impl TimelineManagerActor {
                 }
             }
         }
-        record_subscription_reconcile(trigger.token(), generation_before, &result);
+        record_subscription_reconcile(
+            trigger.token(),
+            previous_active_count,
+            desired_count,
+            generation_before,
+            &result,
+        );
     }
 
     async fn subscribe_existing_timeline_rooms(
@@ -4666,34 +5470,39 @@ impl TimelineManagerActor {
         service: &Arc<matrix_sdk_ui::room_list_service::RoomListService>,
     ) {
         self.room_list_service = Some(service.clone());
-        // A shared Sliding Sync position and its room-subscription map are one
-        // server-side session checkpoint. At cold process startup there may be
-        // no timeline residency yet; reconciling that transient empty set
-        // would immediately erase the restored coverage proof and make the
-        // first selected room look like a fresh subscription. Defer exactly
-        // this startup-empty reconcile. The first timeline admission performs
-        // the normal atomic differential reconcile, retaining a restored room
-        // or conservatively adding an uncovered one. UnknownPos/session expiry
-        // clears the actual map, so it cannot take this path.
-        let restored_rooms = service.actual_subscribed_rooms();
-        let restored_from_shared_position = service.has_restored_room_subscriptions();
-        if should_defer_restored_subscription_reconcile(
-            self.session_subscribed_rooms.len(),
-            restored_from_shared_position,
-            restored_rooms.len(),
-        ) {
-            koushi_diagnostics::increment_counter("subscription_restore_deferred_until_selection");
+        // The SDK's actual room map is importable only when it was restored
+        // with the matching non-empty Sliding Sync position. UnknownPos and
+        // expiry clear that proof, so those rooms are deliberately ignored.
+        #[cfg(feature = "test-hooks")]
+        let (restored_from_shared_position, restored_rooms) = self
+            .restored_room_subscription_probe
+            .take()
+            .unwrap_or_else(|| {
+                (
+                    service.has_restored_room_subscriptions(),
+                    service.actual_subscribed_rooms(),
+                )
+            });
+        #[cfg(not(feature = "test-hooks"))]
+        let (restored_from_shared_position, restored_rooms) = (
+            service.has_restored_room_subscriptions(),
+            service.actual_subscribed_rooms(),
+        );
+        if restored_from_shared_position {
+            let imported = restored_rooms
+                .into_iter()
+                .filter(|room_id| !self.room_leave_states.contains_key(room_id));
+            self.session_subscribed_rooms.extend(imported);
+            koushi_diagnostics::increment_counter("subscription_restore_proven");
             koushi_diagnostics::record(
                 DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "restore")
-                    .field(DiagnosticField::token("outcome", "restored"))
+                    .field(DiagnosticField::token("outcome", "proven"))
                     .field(DiagnosticField::count(
                         "restored_room_count_bucket",
-                        subscription_count_bucket(restored_rooms.len()),
+                        subscription_count_bucket(self.session_subscribed_rooms.len()),
                     )),
             );
-            return;
-        }
-        if self.session_subscribed_rooms.is_empty() && !restored_from_shared_position {
+        } else if !restored_rooms.is_empty() {
             koushi_diagnostics::increment_counter("subscription_restore_unproven");
             koushi_diagnostics::record(
                 DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "restore")
@@ -4704,10 +5513,14 @@ impl TimelineManagerActor {
                     )),
             );
         }
-        // SyncStarted performs one deduplicated reconcile of the full
+        // SyncStarted performs one deduplicated reconcile of the complete
         // session-resident set; per-actor rebuilds must not re-subscribe.
-        self.reconcile_subscriptions(SubscriptionReconcileTrigger::SyncStarted)
-            .await;
+        self.reconcile_subscriptions(if restored_from_shared_position {
+            SubscriptionReconcileTrigger::Restore
+        } else {
+            SubscriptionReconcileTrigger::SyncStarted
+        })
+        .await;
     }
 
     async fn rebuild_existing_room_timelines_after_sync_started(&mut self) {
@@ -8315,16 +9128,31 @@ fn subscription_count_bucket(count: usize) -> u64 {
     }
 }
 
-fn should_defer_restored_subscription_reconcile(
-    resident_count: usize,
-    restored_from_shared_position: bool,
-    actual_subscription_count: usize,
-) -> bool {
-    resident_count == 0 && restored_from_shared_position && actual_subscription_count > 0
+fn record_residency_intent(
+    source: &'static str,
+    outcome: &'static str,
+    accepted: usize,
+    rejected: usize,
+) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "intent")
+            .field(DiagnosticField::token("source", source))
+            .field(DiagnosticField::token("outcome", outcome))
+            .field(DiagnosticField::count(
+                "accepted_bucket",
+                subscription_count_bucket(accepted),
+            ))
+            .field(DiagnosticField::count(
+                "rejected_bucket",
+                subscription_count_bucket(rejected),
+            )),
+    );
 }
 
 fn record_subscription_reconcile(
     trigger_token: &'static str,
+    previous_active_count: usize,
+    desired_count: usize,
     generation_before: u64,
     result: &matrix_sdk_ui::room_list_service::RoomSubscriptionReconcile,
 ) {
@@ -8334,20 +9162,24 @@ fn record_subscription_reconcile(
         "subscription_reconcile_changed"
     });
     match trigger_token {
-        "room_selected" => {
-            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_room_selected")
+        "opened" => koushi_diagnostics::increment_counter("subscription_reconcile_trigger_opened"),
+        "visible_range" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_visible_range")
         }
-        "thread_opened" => {
-            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_thread_opened")
+        "restore" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_restore")
         }
-        "focused_opened" => {
-            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_focused_opened")
+        "room_left" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_room_left")
         }
-        "timeline_rebuild" => {
-            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_timeline_rebuild")
+        "room_rejoined" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_room_rejoined")
         }
-        "sync_started" => {
-            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_sync_started")
+        "membership" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_membership")
+        }
+        "session_restart" => {
+            koushi_diagnostics::increment_counter("subscription_reconcile_trigger_session_restart")
         }
         _ => {}
     }
@@ -8356,9 +9188,17 @@ fn record_subscription_reconcile(
         koushi_diagnostics::increment_counter("subscription_reconcile_removed");
         koushi_diagnostics::increment_counter("subscription_reconcile_retained");
     }
-    let mut event = DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "reconcile")
+    let event = DiagnosticEvent::new(DiagnosticLevel::Info, "core.subscription", "reconcile")
         .field(DiagnosticField::token("trigger", trigger_token))
         .field(DiagnosticField::boolean("exact_set_noop", result.noop))
+        .field(DiagnosticField::count(
+            "previous_bucket",
+            subscription_count_bucket(previous_active_count),
+        ))
+        .field(DiagnosticField::count(
+            "desired_bucket",
+            subscription_count_bucket(desired_count),
+        ))
         .field(DiagnosticField::count(
             "added_bucket",
             subscription_count_bucket(result.added),
@@ -28344,6 +29184,20 @@ mod tests {
     use crate::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId};
     use crate::runtime::CoreRuntime;
 
+    #[cfg(feature = "test-hooks")]
+    #[tokio::test]
+    async fn begin_operation_rejects_when_message_receiver_is_closed() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let handle = TimelineSubscriptionResidencyHandle {
+            tx,
+            gate: MembershipOperationGate::new(),
+        };
+
+        assert!(handle.begin_operation().is_none());
+        assert_eq!(handle.gate_snapshot(), (true, 0));
+    }
+
     async fn assert_pending_on_first_poll<F: Future>(
         mut future: Pin<&mut F>,
         context: &'static str,
@@ -28385,6 +29239,327 @@ mod tests {
 
         assert!(rx.try_recv().is_err());
         assert!(task.await.expect_err("aborted timer").is_cancelled());
+    }
+
+    async fn assert_room_key_reshare_slot_released(scheduler: &AccountWorkScheduler) {
+        let permit = tokio::time::timeout(
+            Duration::from_secs(1),
+            scheduler.acquire(AccountWorkKind::RoomKeyReshare),
+        )
+        .await
+        .expect("room-key reshare work must release its scheduler slot");
+        drop(permit);
+    }
+
+    #[tokio::test]
+    async fn room_key_reshare_waiter_does_not_block_manager_terminal_progress() {
+        let fixture = room_key_reshare_fixture().await;
+        let key = fixture.key.clone();
+        let mut manager =
+            live_tail_test_manager(HashMap::from([(key.clone(), test_timeline_actor_handle())]));
+        manager.session = Some(fixture.session.clone());
+        let generation = manager
+            .timeline_actor_generations
+            .activate_after_quiescence(&key)
+            .await
+            .generation;
+        install_room_key_reshare_schedule(&mut manager, &key, fixture.token.clone());
+        let scheduler = manager.account_work.clone();
+        let _interactive = scheduler.begin_interactive(AccountWorkKind::MessageSend);
+        let terminal_ingress = manager.terminal_ingress.clone();
+        let mut event_rx = manager.event_tx.subscribe();
+        let (control_tx, control_rx) = mpsc::channel(1);
+        manager.control_rx = Some(control_rx);
+        let manager_tx = manager.msg_tx.clone();
+        let manager_task = executor::spawn(manager.run());
+
+        manager_tx
+            .send(TimelineMessage::RunRoomKeyReshare {
+                key: key.clone(),
+                actor_generation: generation,
+                expected_session: fixture.token.clone(),
+                target: MatrixRoomKeyReshareTarget::OwnOtherDevices,
+                attempt: 1,
+            })
+            .await
+            .expect("reshare wake must enter the manager mailbox");
+        let (processed_tx, processed_rx) = oneshot::channel();
+        manager_tx
+            .send(TimelineMessage::TestLiveTailDispatchState {
+                key: key.clone(),
+                epoch: 0,
+                response: processed_tx,
+            })
+            .await
+            .expect("manager probe must enter after the reshare wake");
+        tokio::time::timeout(Duration::from_secs(1), processed_rx)
+            .await
+            .expect("manager must keep polling while reshare waits")
+            .expect("manager probe response");
+
+        let terminal_request = fake_rid(92_000);
+        assert!(matches!(
+            terminal_ingress.admit(TimelineSendTerminalHandoff {
+                submission_id: None,
+                action: None,
+                completion: Some(TimelineSendCompletionDelivery {
+                    request_id: terminal_request,
+                    key: key.clone(),
+                    transaction_id: "reshare-terminal-progress".to_owned(),
+                    event_id: "$reshare-terminal-progress:test".to_owned(),
+                    diagnostic_correlation: None,
+                }),
+                failure: None,
+            }),
+            TimelineSendTerminalAdmission::Accepted
+        ));
+        let delivered = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let CoreEvent::Timeline(TimelineEvent::SendCompleted {
+                    request_id,
+                    key: completed_key,
+                    ..
+                }) = event_rx.recv().await.expect("manager event stream")
+                    && request_id == terminal_request
+                    && completed_key == key
+                {
+                    break;
+                }
+            }
+        })
+        .await;
+        assert!(
+            delivered.is_ok(),
+            "the manager must deliver a correlated send terminal while reshare waits"
+        );
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        control_tx
+            .send(TimelineManagerControl::Shutdown {
+                acknowledged: shutdown_tx,
+            })
+            .await
+            .expect("manager shutdown control");
+        tokio::time::timeout(Duration::from_secs(1), shutdown_rx)
+            .await
+            .expect("manager shutdown must not wait for the reshare permit")
+            .expect("manager shutdown acknowledgement");
+        manager_task.await.expect("manager task");
+        drop(_interactive);
+        assert_room_key_reshare_slot_released(&scheduler).await;
+    }
+
+    #[tokio::test]
+    async fn room_key_reshare_completion_is_exactly_once_and_stale_inputs_are_inert() {
+        let fixture = room_key_reshare_fixture().await;
+        let diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let mut manager = live_tail_test_manager(HashMap::from([(
+            fixture.key.clone(),
+            test_timeline_actor_handle(),
+        )]));
+        let generation = manager
+            .timeline_actor_generations
+            .activate_after_quiescence(&fixture.key)
+            .await
+            .generation;
+        install_pending_room_key_reshare_worker(
+            &mut manager,
+            &fixture.key,
+            generation,
+            fixture.token.clone(),
+            1,
+        );
+        let detail_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
+        manager
+            .handle_room_key_reshare_completed(
+                fixture.key.clone(),
+                generation,
+                fixture.token.clone(),
+                MatrixRoomKeyReshareTarget::OwnOtherDevices,
+                1,
+                RoomKeyReshareCompletion::Sent {
+                    request_count: 1,
+                    recipient_count: 1,
+                },
+            )
+            .await;
+        let detail_after_first = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .iter()
+            .skip(detail_start)
+            .filter(|record| record.event.source == "core.room_key_reshare")
+            .count();
+        manager
+            .handle_room_key_reshare_completed(
+                fixture.key.clone(),
+                generation,
+                fixture.token.clone(),
+                MatrixRoomKeyReshareTarget::OwnOtherDevices,
+                1,
+                RoomKeyReshareCompletion::Sent {
+                    request_count: 1,
+                    recipient_count: 1,
+                },
+            )
+            .await;
+        let detail_after_duplicate = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .iter()
+            .skip(detail_start)
+            .filter(|record| record.event.source == "core.room_key_reshare")
+            .count();
+        assert_eq!(detail_after_first, 1);
+        assert_eq!(detail_after_duplicate, detail_after_first);
+
+        for (label, key, stale_generation, stale_token) in [
+            (
+                "key",
+                TimelineKey::room(AccountKey("@stale:test".to_owned()), "!stale:test"),
+                generation,
+                fixture.token.clone(),
+            ),
+            (
+                "generation",
+                fixture.key.clone(),
+                generation + 1,
+                fixture.token.clone(),
+            ),
+            (
+                "token",
+                fixture.key.clone(),
+                generation,
+                fixture.other_token.clone(),
+            ),
+        ] {
+            let mut stale_manager = live_tail_test_manager(HashMap::from([(
+                fixture.key.clone(),
+                test_timeline_actor_handle(),
+            )]));
+            let current_generation = stale_manager
+                .timeline_actor_generations
+                .activate_after_quiescence(&fixture.key)
+                .await
+                .generation;
+            install_pending_room_key_reshare_worker(
+                &mut stale_manager,
+                &fixture.key,
+                current_generation,
+                fixture.token.clone(),
+                1,
+            );
+            let stale_manager_detail_start = koushi_diagnostics::test_support::detail_snapshot()
+                .records
+                .len();
+            stale_manager
+                .handle_room_key_reshare_completed(
+                    key,
+                    stale_generation,
+                    stale_token,
+                    MatrixRoomKeyReshareTarget::OwnOtherDevices,
+                    1,
+                    RoomKeyReshareCompletion::Sent {
+                        request_count: 1,
+                        recipient_count: 1,
+                    },
+                )
+                .await;
+            assert!(
+                stale_manager
+                    .send_enqueue_workers
+                    .room_key_reshares
+                    .get(&fixture.key)
+                    .and_then(|schedule| schedule.tasks[0].worker.as_ref())
+                    .is_some(),
+                "stale {label} completion must not consume the active task"
+            );
+            assert_eq!(
+                koushi_diagnostics::test_support::detail_snapshot()
+                    .records
+                    .iter()
+                    .skip(stale_manager_detail_start)
+                    .filter(|record| record.event.source == "core.room_key_reshare")
+                    .count(),
+                0,
+                "stale {label} completion must not record diagnostics"
+            );
+        }
+        drop(diagnostic_lock);
+    }
+
+    #[tokio::test]
+    async fn room_key_reshare_replacement_unsubscribe_and_shutdown_abort_owned_work() {
+        let fixture = room_key_reshare_fixture().await;
+
+        for admitted in [false, true] {
+            for cancellation in ["replacement", "unsubscribe", "shutdown"] {
+                let mut manager = live_tail_test_manager(if cancellation == "unsubscribe" {
+                    HashMap::from([(fixture.key.clone(), test_timeline_actor_handle())])
+                } else {
+                    HashMap::new()
+                });
+                let scheduler = manager.account_work.clone();
+                let interactive =
+                    (!admitted).then(|| scheduler.begin_interactive(AccountWorkKind::MessageSend));
+                let (mut completion_tx, acquire_started, permit_acquired) =
+                    install_controlled_room_key_reshare_worker(
+                        &mut manager,
+                        &fixture.key,
+                        1,
+                        fixture.token.clone(),
+                        1,
+                    );
+
+                acquire_started
+                    .await
+                    .expect("reshare worker must enter account-work acquire");
+                if admitted {
+                    permit_acquired
+                        .await
+                        .expect("reshare worker must acquire its permit");
+                }
+
+                match cancellation {
+                    "replacement" => {
+                        install_room_key_reshare_schedule(
+                            &mut manager,
+                            &fixture.key,
+                            fixture.other_token.clone(),
+                        );
+                    }
+                    "unsubscribe" => {
+                        manager
+                            .handle_command(TimelineCommand::Unsubscribe {
+                                request_id: fake_rid(92_001),
+                                key: fixture.key.clone(),
+                            })
+                            .await;
+                    }
+                    "shutdown" => {
+                        let (control_tx, control_rx) = mpsc::channel(1);
+                        manager.control_rx = Some(control_rx);
+                        let task = executor::spawn(manager.run());
+                        let (ack_tx, ack_rx) = oneshot::channel();
+                        control_tx
+                            .send(TimelineManagerControl::Shutdown {
+                                acknowledged: ack_tx,
+                            })
+                            .await
+                            .expect("shutdown control");
+                        ack_rx
+                            .await
+                            .expect("shutdown must acknowledge after cancellation");
+                        task.await.expect("shutdown manager task");
+                    }
+                    _ => unreachable!(),
+                }
+
+                completion_tx.closed().await;
+                drop(interactive);
+                assert_room_key_reshare_slot_released(&scheduler).await;
+            }
+        }
     }
 
     #[test]
@@ -28527,6 +29702,228 @@ mod tests {
             user_id: "@a:test".to_owned(),
             device_id: "DEVICE".to_owned(),
         }
+    }
+
+    struct RoomKeyReshareFixture {
+        _server: matrix_sdk::test_utils::mocks::MatrixMockServer,
+        session: Arc<MatrixClientSession>,
+        key: TimelineKey,
+        token: MatrixOutboundGroupSessionToken,
+        other_token: MatrixOutboundGroupSessionToken,
+    }
+
+    async fn room_key_reshare_fixture() -> RoomKeyReshareFixture {
+        use matrix_sdk::ruma::{RoomVersionId, device_id, room_id, user_id};
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+        use wiremock::{
+            Mock, ResponseTemplate,
+            matchers::{method, path_regex},
+        };
+
+        let server = MatrixMockServer::new().await;
+        server.mock_crypto_endpoints_preset().await;
+        let alice_id = user_id!("@alice:example.org");
+        let bob_id = user_id!("@bob:example.org");
+        let alice_device = device_id!("ALICEDEVICE");
+        let bob_device = device_id!("BOBDEVICE");
+        let alice = server
+            .client_builder_for_crypto_end_to_end(alice_id, alice_device)
+            .build()
+            .await;
+        let bob = server
+            .client_builder_for_crypto_end_to_end(bob_id, bob_device)
+            .build()
+            .await;
+        server.exchange_e2ee_identities(&alice, &bob).await;
+
+        let first_room = room_id!("!reshare-first:example.org");
+        let second_room = room_id!("!reshare-second:example.org");
+        server
+            .mock_sync()
+            .ok_and_run(&alice, |builder| {
+                for room_id in [first_room, second_room] {
+                    let factory = EventFactory::new().sender(alice_id).room(room_id);
+                    builder.add_joined_room(
+                        JoinedRoomBuilder::new(room_id)
+                            .add_state_event(factory.create(alice_id, RoomVersionId::V1))
+                            .add_state_event(factory.room_encryption())
+                            .add_state_event(factory.member(alice_id).into_raw())
+                            .add_state_event(factory.member(bob_id).into_raw()),
+                    );
+                }
+            })
+            .await;
+        let factory = EventFactory::new().sender(alice_id).room(first_room);
+        server
+            .mock_get_members()
+            .ok(vec![
+                factory.member(alice_id).into_raw(),
+                factory.member(bob_id).into_raw(),
+            ])
+            .mount()
+            .await;
+        Mock::given(method("PUT"))
+            .and(path_regex(
+                r"^/_matrix/client/.*/sendToDevice/m.room.encrypted/.*",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(server.server())
+            .await;
+        Mock::given(method("PUT"))
+            .and(path_regex(
+                r"^/_matrix/client/.*/rooms/.*/send/m.room.encrypted/.*",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "event_id": "$reshare-event:example.org" })),
+            )
+            .expect(2)
+            .mount(server.server())
+            .await;
+
+        for room_id in [first_room, second_room] {
+            alice
+                .get_room(room_id)
+                .expect("synthetic encrypted room")
+                .send(
+                    matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain(
+                        "synthetic reshare fixture",
+                    ),
+                )
+                .await
+                .expect("synthetic encrypted send");
+        }
+
+        let session = Arc::new(MatrixClientSession::from_client_for_testing(
+            alice.clone(),
+            koushi_state::SessionInfo {
+                homeserver: server.uri(),
+                user_id: alice_id.to_string(),
+                device_id: alice_device.to_string(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        ));
+        let token = koushi_sdk::current_outbound_group_session_token(&session, first_room.as_str())
+            .await
+            .expect("first outbound session lookup")
+            .expect("first outbound session");
+        let other_token =
+            koushi_sdk::current_outbound_group_session_token(&session, second_room.as_str())
+                .await
+                .expect("second outbound session lookup")
+                .expect("second outbound session");
+        RoomKeyReshareFixture {
+            _server: server,
+            session,
+            key: TimelineKey::room(AccountKey(alice_id.to_string()), first_room.as_str()),
+            token,
+            other_token,
+        }
+    }
+
+    fn install_room_key_reshare_schedule(
+        manager: &mut TimelineManagerActor,
+        key: &TimelineKey,
+        token: MatrixOutboundGroupSessionToken,
+    ) {
+        let tasks = ROOM_KEY_RESHARE_ATTEMPTS
+            .iter()
+            .map(|attempt| RoomKeyReshareTaskSlot {
+                attempt: attempt.number,
+                delayed: executor::spawn(async {}),
+                started: false,
+                worker: None,
+            })
+            .collect();
+        manager.send_enqueue_workers.room_key_reshares.insert(
+            key.clone(),
+            RoomKeyReshareSchedule {
+                session: token,
+                tasks,
+            },
+        );
+    }
+
+    fn install_pending_room_key_reshare_worker(
+        manager: &mut TimelineManagerActor,
+        key: &TimelineKey,
+        generation: u64,
+        token: MatrixOutboundGroupSessionToken,
+        attempt: u8,
+    ) {
+        let worker = spawn_room_key_reshare_task_with_operation(
+            manager.account_work.clone(),
+            manager.msg_tx.clone(),
+            key.clone(),
+            generation,
+            token.clone(),
+            MatrixRoomKeyReshareTarget::OwnOtherDevices,
+            attempt,
+            Box::pin(std::future::pending()),
+            None,
+        );
+        install_room_key_reshare_schedule(manager, key, token);
+        let schedule = manager
+            .send_enqueue_workers
+            .room_key_reshares
+            .get_mut(key)
+            .expect("reshare schedule");
+        let slot = schedule
+            .tasks
+            .iter_mut()
+            .find(|slot| slot.attempt == attempt)
+            .expect("reshare attempt slot");
+        slot.started = true;
+        slot.worker = Some(worker);
+    }
+
+    fn install_controlled_room_key_reshare_worker(
+        manager: &mut TimelineManagerActor,
+        key: &TimelineKey,
+        generation: u64,
+        token: MatrixOutboundGroupSessionToken,
+        attempt: u8,
+    ) -> (
+        oneshot::Sender<RoomKeyReshareCompletion>,
+        oneshot::Receiver<()>,
+        oneshot::Receiver<()>,
+    ) {
+        let (completion_tx, completion_rx) = oneshot::channel();
+        let (acquire_started_tx, acquire_started_rx) = oneshot::channel();
+        let (permit_acquired_tx, permit_acquired_rx) = oneshot::channel();
+        let worker = spawn_room_key_reshare_task_with_operation(
+            manager.account_work.clone(),
+            manager.msg_tx.clone(),
+            key.clone(),
+            generation,
+            token.clone(),
+            MatrixRoomKeyReshareTarget::OwnOtherDevices,
+            attempt,
+            Box::pin(async move {
+                completion_rx
+                    .await
+                    .unwrap_or(RoomKeyReshareCompletion::SdkError)
+            }),
+            Some(RoomKeyReshareTestSignals {
+                acquire_started: acquire_started_tx,
+                permit_acquired: permit_acquired_tx,
+            }),
+        );
+        install_room_key_reshare_schedule(manager, key, token);
+        let schedule = manager
+            .send_enqueue_workers
+            .room_key_reshares
+            .get_mut(key)
+            .expect("reshare schedule");
+        let slot = schedule
+            .tasks
+            .iter_mut()
+            .find(|slot| slot.attempt == attempt)
+            .expect("reshare attempt slot");
+        slot.started = true;
+        slot.worker = Some(worker);
+        (completion_tx, acquire_started_rx, permit_acquired_rx)
     }
 
     fn room_key() -> TimelineKey {
@@ -32019,6 +33416,10 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -33473,6 +34874,10 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -34213,6 +35618,10 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -34251,20 +35660,6 @@ mod tests {
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             test_session_available: true,
         }
-    }
-
-    #[test]
-    fn startup_empty_reconcile_is_deferred_only_for_proven_restored_coverage() {
-        assert!(should_defer_restored_subscription_reconcile(0, true, 1));
-
-        // Once a Timeline lease exists, normal differential reconciliation
-        // must run and select the desired subset of restored rooms.
-        assert!(!should_defer_restored_subscription_reconcile(1, true, 1));
-
-        // Missing/legacy/expired positions provide no coverage proof and stay
-        // on the conservative re-add path.
-        assert!(!should_defer_restored_subscription_reconcile(0, false, 1));
-        assert!(!should_defer_restored_subscription_reconcile(0, true, 0));
     }
 
     #[tokio::test]
@@ -37064,6 +38459,10 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -37456,6 +38855,10 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -37548,6 +38951,10 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -39276,6 +40683,10 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -39478,6 +40889,10 @@ mod tests {
             room_list_service: None,
             room_subscription_checkpoint_task: None,
             room_subscription_service_epoch: 0,
+            current_core_generation: None,
+            room_leave_states: BTreeMap::new(),
+            #[cfg(feature = "test-hooks")]
+            restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
             subscription_room_seen: BTreeSet::new(),
@@ -42616,6 +44031,26 @@ mod tests {
             "one client-global send terminal subscription belongs to the session manager"
         );
         assert!(!production.contains("SharedSendCompletionTracker"));
+    }
+
+    #[test]
+    fn room_key_reshare_handler_does_not_hold_the_manager_on_sdk_work() {
+        let source = include_str!("timeline.rs");
+        let handler = source
+            .split("fn handle_room_key_reshare(\n")
+            .nth(1)
+            .expect("room-key reshare handler")
+            .split("fn take_room_key_reshare_worker")
+            .next()
+            .expect("room-key reshare handler boundary");
+        assert!(
+            !handler.contains(".await") && !handler.contains("force_reshare_room_key"),
+            "the stable manager handler must only validate and launch owned work"
+        );
+        assert!(
+            source.contains("RoomKeyReshareCompleted"),
+            "reshare SDK results must return through a private completion message"
+        );
     }
 
     #[test]

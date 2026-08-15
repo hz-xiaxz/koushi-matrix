@@ -45,12 +45,16 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    future::Future,
     sync::{
         Arc, RwLock,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
+
+#[cfg(feature = "test-hooks")]
+use std::sync::{Mutex, atomic::AtomicUsize};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::{
@@ -79,7 +83,7 @@ use koushi_state::{
 #[cfg(test)]
 use koushi_state::{ProfileResolutionInput, ProfileResolutionSource, resolve_people_label};
 use matrix_sdk::ruma::events::direct::DirectEvent;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
@@ -89,6 +93,11 @@ use crate::executor;
 use crate::failure::{CoreFailure, RoomFailureKind};
 use crate::ids::{RequestId, RuntimeConnectionId};
 use crate::mention_candidates::{MentionMemberInput, project_candidates};
+use crate::timeline::{
+    RoomMembershipTransition, RoomMembershipTransitionKind, RoomRemovalCause,
+    TimelineSubscriptionResidencyHandle, TimelineSubscriptionResidencyPermit,
+    VisibleRoomObservation,
+};
 use crate::unread_trace;
 
 /// Fixed, content-free messages recorded in `AppState.errors` when a basic
@@ -245,6 +254,19 @@ pub enum RoomMessage {
     /// The actor reloads only the affected rooms so external pin/unpin actions
     /// become visible without polling every room.
     PinnedEventsChanged { room_ids: BTreeSet<String> },
+    #[cfg(feature = "test-hooks")]
+    TestVisibleRoomsObserved {
+        core_generation: u64,
+        reconciliation_is_complete: bool,
+        room_ids: Vec<VisibleRoomObservation>,
+        forwarded: oneshot::Sender<bool>,
+    },
+    #[cfg(feature = "test-hooks")]
+    TestMembershipObserved {
+        core_generation: u64,
+        transitions: Vec<RoomMembershipTransition>,
+        forwarded: oneshot::Sender<bool>,
+    },
     #[cfg(test)]
     InspectObservationGeneration {
         response: oneshot::Sender<Option<u64>>,
@@ -253,13 +275,198 @@ pub enum RoomMessage {
     Shutdown,
 }
 
+/// Closed membership-operation kinds used by the test-only result seam.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RoomOperationKind {
+    LeaveRoom,
+    DeclineInvite,
+    AcceptInvite,
+    JoinRoom,
+    JoinDirectoryRoom,
+}
+
+#[cfg(feature = "test-hooks")]
+pub(crate) struct RoomOperationTestControl {
+    pub(crate) kind: RoomOperationKind,
+    pub(crate) reached: oneshot::Sender<()>,
+    pub(crate) completion: oneshot::Receiver<Result<String, MatrixRoomOperationError>>,
+}
+
+#[cfg(feature = "test-hooks")]
+fn take_matching_room_operation_test_control(
+    control: &mut Option<RoomOperationTestControl>,
+    kind: RoomOperationKind,
+) -> Option<RoomOperationTestControl> {
+    if control.as_ref().is_some_and(|control| control.kind == kind) {
+        control.take()
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+type RoomOperationTestControlSlot = Arc<Mutex<Option<RoomOperationTestControl>>>;
+
+#[cfg(all(test, feature = "test-hooks"))]
+#[test]
+fn room_operation_test_control_matches_and_consumes_once() {
+    let (reached, _reached_rx) = oneshot::channel();
+    let (_completion, completion_rx) = oneshot::channel();
+    let mut control = Some(RoomOperationTestControl {
+        kind: RoomOperationKind::LeaveRoom,
+        reached,
+        completion: completion_rx,
+    });
+
+    assert!(
+        take_matching_room_operation_test_control(&mut control, RoomOperationKind::JoinRoom,)
+            .is_none()
+    );
+    assert!(control.is_some());
+    assert!(
+        take_matching_room_operation_test_control(&mut control, RoomOperationKind::LeaveRoom,)
+            .is_some()
+    );
+    assert!(
+        take_matching_room_operation_test_control(&mut control, RoomOperationKind::LeaveRoom,)
+            .is_none()
+    );
+}
+
+#[derive(Clone)]
+struct TimelineResidencyBinding {
+    session: Arc<MatrixClientSession>,
+    handle: TimelineSubscriptionResidencyHandle,
+}
+
 /// Handle to the RoomActor background task (owned by AccountActor).
 pub struct RoomActorHandle {
     pub(crate) tx: mpsc::Sender<RoomMessage>,
+    timeline_residency: watch::Sender<Option<TimelineResidencyBinding>>,
+    session: watch::Sender<Option<Arc<MatrixClientSession>>>,
+    #[cfg(feature = "test-hooks")]
+    room_operation_test_control: RoomOperationTestControlSlot,
+    #[cfg(feature = "test-hooks")]
+    room_operation_test_reached_count: Arc<AtomicUsize>,
     task: Option<executor::JoinHandle<()>>,
 }
 
 impl RoomActorHandle {
+    pub(crate) fn bind_timeline_residency(
+        &self,
+        session: Arc<MatrixClientSession>,
+        handle: TimelineSubscriptionResidencyHandle,
+    ) {
+        self.timeline_residency
+            .send_replace(Some(TimelineResidencyBinding { session, handle }));
+    }
+
+    pub(crate) fn clear_timeline_residency(&self) {
+        self.timeline_residency.send_replace(None);
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn operation_test_reached_count(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.room_operation_test_reached_count)
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn install_room_operation_test_control(
+        &self,
+        control: RoomOperationTestControl,
+    ) -> bool {
+        let mut slot = self
+            .room_operation_test_control
+            .lock()
+            .expect("room operation test control lock");
+        if slot.is_some() {
+            return false;
+        }
+        *slot = Some(control);
+        true
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn timeline_residency_snapshot(
+        &self,
+    ) -> Option<(
+        Arc<MatrixClientSession>,
+        TimelineSubscriptionResidencyHandle,
+    )> {
+        self.timeline_residency
+            .borrow()
+            .as_ref()
+            .map(|binding| (binding.session.clone(), binding.handle.clone()))
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn session_snapshot(&self) -> Option<Arc<MatrixClientSession>> {
+        self.session.borrow().clone()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) async fn wait_for_session(&self, expected: &Arc<MatrixClientSession>) -> bool {
+        let mut session = self.session.subscribe();
+        session
+            .wait_for(|current| {
+                current
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, expected))
+            })
+            .await
+            .is_ok()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) async fn room_subscription_residency_test_observe_visible(
+        &self,
+        core_generation: u64,
+        reconciliation_is_complete: bool,
+        room_ids: Vec<VisibleRoomObservation>,
+    ) -> bool {
+        let (forwarded_tx, forwarded_rx) = oneshot::channel();
+        if !self
+            .send(RoomMessage::TestVisibleRoomsObserved {
+                core_generation,
+                reconciliation_is_complete,
+                room_ids,
+                forwarded: forwarded_tx,
+            })
+            .await
+        {
+            return false;
+        }
+        forwarded_rx.await.unwrap_or(false)
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) async fn room_subscription_residency_test_observe_membership(
+        &self,
+        core_generation: u64,
+        transitions: Vec<RoomMembershipTransition>,
+    ) -> bool {
+        let (forwarded_tx, forwarded_rx) = oneshot::channel();
+        if !self
+            .send(RoomMessage::TestMembershipObserved {
+                core_generation,
+                transitions,
+                forwarded: forwarded_tx,
+            })
+            .await
+        {
+            return false;
+        }
+        forwarded_rx.await.unwrap_or(false)
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn clear_room_operation_test_control(&self) {
+        self.room_operation_test_control
+            .lock()
+            .expect("room operation test control lock")
+            .take();
+    }
+
     pub async fn send(&self, msg: RoomMessage) -> bool {
         self.tx.send(msg).await.is_ok()
     }
@@ -344,6 +551,12 @@ enum RoomListObservationCommand {
 
 pub struct RoomActor {
     session: Option<Arc<MatrixClientSession>>,
+    timeline_residency: watch::Receiver<Option<TimelineResidencyBinding>>,
+    session_slot: watch::Sender<Option<Arc<MatrixClientSession>>>,
+    #[cfg(feature = "test-hooks")]
+    room_operation_test_control: RoomOperationTestControlSlot,
+    #[cfg(feature = "test-hooks")]
+    room_operation_test_reached_count: Arc<AtomicUsize>,
     observation: Option<RoomListObservation>,
     room_list_generation: u64,
     room_list_source: Option<RoomListSource>,
@@ -393,6 +606,28 @@ struct SpaceMemberRefreshFence {
     refresh_generation: u64,
 }
 
+struct AdmittedRoomOperation {
+    session: Arc<MatrixClientSession>,
+    residency: TimelineSubscriptionResidencyHandle,
+    permit: TimelineSubscriptionResidencyPermit,
+}
+
+impl AdmittedRoomOperation {
+    async fn room_left(&self, room_id: &str, cause: RoomRemovalCause) -> bool {
+        let Ok(room_id) = room_id.parse() else {
+            return false;
+        };
+        self.residency.room_left(&self.permit, room_id, cause).await
+    }
+
+    async fn room_rejoined(&self, room_id: &str) -> bool {
+        let Ok(room_id) = room_id.parse() else {
+            return false;
+        };
+        self.residency.room_rejoined(&self.permit, room_id).await
+    }
+}
+
 impl RoomActor {
     pub fn spawn(
         action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -414,8 +649,20 @@ impl RoomActor {
         account_work: AccountWorkScheduler,
     ) -> RoomActorHandle {
         let (tx, command_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
+        let (timeline_residency, timeline_residency_rx) = watch::channel(None);
+        let (session_slot, _session_rx) = watch::channel(None);
+        #[cfg(feature = "test-hooks")]
+        let room_operation_test_control = Arc::new(Mutex::new(None));
+        #[cfg(feature = "test-hooks")]
+        let room_operation_test_reached_count = Arc::new(AtomicUsize::new(0));
         let actor = RoomActor {
             session: None,
+            timeline_residency: timeline_residency_rx,
+            session_slot: session_slot.clone(),
+            #[cfg(feature = "test-hooks")]
+            room_operation_test_control: room_operation_test_control.clone(),
+            #[cfg(feature = "test-hooks")]
+            room_operation_test_reached_count: room_operation_test_reached_count.clone(),
             observation: None,
             room_list_generation: 0,
             room_list_source: None,
@@ -444,6 +691,12 @@ impl RoomActor {
         let task = executor::spawn(actor.run());
         RoomActorHandle {
             tx,
+            timeline_residency,
+            session: session_slot,
+            #[cfg(feature = "test-hooks")]
+            room_operation_test_control,
+            #[cfg(feature = "test-hooks")]
+            room_operation_test_reached_count,
             task: Some(task),
         }
     }
@@ -462,7 +715,8 @@ impl RoomActor {
                     // Room operations become available; observation starts
                     // later on SyncStarted (backend then known).
                     self.reset_space_member_session();
-                    self.session = Some(session);
+                    self.session = Some(session.clone());
+                    self.session_slot.send_replace(Some(session));
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
                     self.clear_mention_candidates();
@@ -479,6 +733,7 @@ impl RoomActor {
                     self.stop_observation().await;
                     self.reset_space_member_session();
                     self.session = Some(session.clone());
+                    self.session_slot.send_replace(Some(session.clone()));
                     self.room_list_generation = self.room_list_generation.wrapping_add(1).max(1);
                     self.room_list_source = Some(source);
                     self.room_list_backend_generation = Some(backend_generation);
@@ -496,11 +751,18 @@ impl RoomActor {
                     // provides the initial snapshot, so no separate initial
                     // refresh is needed. Cached rows remain available until
                     // that generation settles.
+                    let timeline_residency = self
+                        .timeline_residency
+                        .borrow()
+                        .as_ref()
+                        .filter(|binding| Arc::ptr_eq(&binding.session, &session))
+                        .map(|binding| binding.handle.clone());
                     self.start_live_observation(
                         session,
                         room_list_service,
                         self.room_list_generation,
                         source,
+                        timeline_residency,
                     );
                 }
                 RoomMessage::ReconcileCommittedRange {
@@ -597,6 +859,7 @@ impl RoomActor {
                     self.stop_observation().await;
                     self.reset_space_member_session();
                     self.session = None;
+                    self.session_slot.send_replace(None);
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
                     self.clear_mention_candidates();
@@ -647,12 +910,93 @@ impl RoomActor {
                 RoomMessage::PinnedEventsChanged { room_ids } => {
                     self.handle_pinned_events_changed(room_ids).await;
                 }
+                #[cfg(feature = "test-hooks")]
+                RoomMessage::TestVisibleRoomsObserved {
+                    core_generation,
+                    reconciliation_is_complete,
+                    room_ids,
+                    forwarded,
+                } => {
+                    self.handle_test_visible_rooms_observed(
+                        core_generation,
+                        reconciliation_is_complete,
+                        room_ids,
+                        forwarded,
+                    )
+                    .await;
+                }
+                #[cfg(feature = "test-hooks")]
+                RoomMessage::TestMembershipObserved {
+                    core_generation,
+                    transitions,
+                    forwarded,
+                } => {
+                    self.handle_test_membership_observed(core_generation, transitions, forwarded)
+                        .await;
+                }
                 #[cfg(test)]
                 RoomMessage::InspectObservationGeneration { response } => {
                     let _ = response.send(self.room_list_backend_generation);
                 }
             }
         }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    async fn handle_test_visible_rooms_observed(
+        &mut self,
+        core_generation: u64,
+        reconciliation_is_complete: bool,
+        room_ids: Vec<VisibleRoomObservation>,
+        forwarded: oneshot::Sender<bool>,
+    ) {
+        let entries_count = room_ids.len();
+        let distinct_identity_count = room_ids
+            .iter()
+            .map(|observation| observation.room_id.as_str())
+            .collect::<BTreeSet<_>>()
+            .len();
+        let current_session = self.session.as_ref();
+        let timeline_residency = self
+            .timeline_residency
+            .borrow()
+            .as_ref()
+            .filter(|binding| {
+                current_session.is_some_and(|session| Arc::ptr_eq(&binding.session, session))
+            })
+            .map(|binding| binding.handle.clone());
+        let forwarded_result = forward_visible_rooms_if_authoritative(
+            timeline_residency.as_ref(),
+            core_generation,
+            reconciliation_is_complete,
+            entries_count,
+            distinct_identity_count,
+            room_ids,
+        )
+        .await;
+        let _ = forwarded.send(forwarded_result);
+    }
+
+    #[cfg(feature = "test-hooks")]
+    async fn handle_test_membership_observed(
+        &mut self,
+        core_generation: u64,
+        transitions: Vec<RoomMembershipTransition>,
+        forwarded: oneshot::Sender<bool>,
+    ) {
+        let current_session = self.session.as_ref();
+        let timeline_residency = self
+            .timeline_residency
+            .borrow()
+            .as_ref()
+            .filter(|binding| {
+                current_session.is_some_and(|session| Arc::ptr_eq(&binding.session, session))
+            })
+            .map(|binding| binding.handle.clone());
+        let forwarded_result =
+            forward_membership_batches(timeline_residency.as_ref(), core_generation, [transitions])
+                .await;
+        let _ = forwarded.send(forwarded_result);
     }
 
     /// Spawn the live-service observation loop (SyncService backend): relay
@@ -664,6 +1008,7 @@ impl RoomActor {
         service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
         generation: u64,
         source: RoomListSource,
+        timeline_residency: Option<TimelineSubscriptionResidencyHandle>,
     ) {
         let (stop_tx, stop_rx) = oneshot::channel::<()>();
         let (command_tx, command_rx) = mpsc::channel::<RoomListObservationCommand>(8);
@@ -681,6 +1026,7 @@ impl RoomActor {
             source,
             authoritative.clone(),
             self.sliding_sync_diagnostics.clone(),
+            timeline_residency,
         ));
         self.observation = Some(RoomListObservation {
             stop_tx,
@@ -1715,13 +2061,121 @@ impl RoomActor {
         }
     }
 
+    fn begin_residency_operation(&self) -> Result<AdmittedRoomOperation, ()> {
+        let Some(session) = self.session.as_ref() else {
+            return Err(());
+        };
+        let Some(binding) = self.timeline_residency.borrow().clone() else {
+            record_residency_admission_failure("binding_missing");
+            return Err(());
+        };
+        if !Arc::ptr_eq(session, &binding.session) {
+            record_residency_admission_failure("session_mismatch");
+            return Err(());
+        }
+        let Some(permit) = binding.handle.begin_operation() else {
+            record_residency_admission_failure("manager_closed");
+            return Err(());
+        };
+        Ok(AdmittedRoomOperation {
+            session: binding.session,
+            residency: binding.handle,
+            permit,
+        })
+    }
+
+    fn reject_residency_operation(&self, request_id: RequestId) {
+        self.emit_failure(
+            request_id,
+            CoreFailure::RoomOperationFailed {
+                kind: RoomFailureKind::Sdk,
+            },
+        );
+    }
+
+    fn reject_residency_ack(&self, request_id: RequestId) {
+        record_residency_ack_failure();
+        self.emit_failure(
+            request_id,
+            CoreFailure::RoomOperationFailed {
+                kind: RoomFailureKind::Sdk,
+            },
+        );
+    }
+
+    async fn call_room_operation<F>(
+        &self,
+        kind: RoomOperationKind,
+        real_call: F,
+    ) -> Result<String, MatrixRoomOperationError>
+    where
+        F: Future<Output = Result<String, MatrixRoomOperationError>>,
+    {
+        #[cfg(feature = "test-hooks")]
+        self.room_operation_test_reached_count
+            .fetch_add(1, Ordering::SeqCst);
+        #[cfg(feature = "test-hooks")]
+        let control = take_matching_room_operation_test_control(
+            &mut *self
+                .room_operation_test_control
+                .lock()
+                .expect("room operation test control lock"),
+            kind,
+        );
+        #[cfg(feature = "test-hooks")]
+        if let Some(control) = control {
+            let _ = control.reached.send(());
+            return match control.completion.await {
+                Ok(result) => result,
+                Err(_) => Err(koushi_sdk::MatrixRoomOperationError::Sdk(
+                    koushi_sdk::MatrixRoomOperationFailureKind::Sdk,
+                )),
+            };
+        }
+
+        let _ = kind;
+        real_call.await
+    }
+
+    async fn leave_room_with_residency(
+        &self,
+        kind: RoomOperationKind,
+        room_id: &str,
+    ) -> Option<(
+        AdmittedRoomOperation,
+        Result<String, koushi_sdk::MatrixRoomOperationError>,
+    )> {
+        let operation = self.begin_residency_operation().ok()?;
+        let result = self
+            .call_room_operation(kind, koushi_sdk::leave_room(&operation.session, room_id))
+            .await;
+        Some((operation, result))
+    }
+
     async fn handle_accept_invite(&self, request_id: RequestId, room_id: String) {
-        let Some(session) = &self.session else {
+        let Some(_session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
-        match koushi_sdk::join_room_by_id(session, &room_id).await {
+        let operation = match self.begin_residency_operation() {
+            Ok(operation) => operation,
+            Err(()) => {
+                self.reject_residency_operation(request_id);
+                return;
+            }
+        };
+        match self
+            .call_room_operation(
+                RoomOperationKind::AcceptInvite,
+                koushi_sdk::join_room_by_id(&operation.session, &room_id),
+            )
+            .await
+        {
             Ok(joined_room_id) => {
+                if !operation.room_rejoined(&joined_room_id).await {
+                    self.reject_residency_ack(request_id);
+                    return;
+                }
                 koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
                     DiagnosticLevel::Info,
                     "core.room_operation",
@@ -1752,12 +2206,26 @@ impl RoomActor {
     }
 
     async fn handle_decline_invite(&self, request_id: RequestId, room_id: String) {
-        let Some(session) = &self.session else {
+        let Some(_session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
-        match koushi_sdk::leave_room(session, &room_id).await {
+        let Some((operation, result)) = self
+            .leave_room_with_residency(RoomOperationKind::DeclineInvite, &room_id)
+            .await
+        else {
+            self.reject_residency_operation(request_id);
+            return;
+        };
+        match result {
             Ok(declined_room_id) => {
+                if !operation
+                    .room_left(&declined_room_id, RoomRemovalCause::InviteDecline)
+                    .await
+                {
+                    self.reject_residency_ack(request_id);
+                    return;
+                }
                 self.refresh_room_list();
                 self.emit(CoreEvent::Room(RoomEvent::InviteDeclined {
                     request_id,
@@ -1804,12 +2272,29 @@ impl RoomActor {
     }
 
     async fn handle_join_room(&self, request_id: RequestId, room_id: String) {
-        let Some(session) = &self.session else {
+        let Some(_session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
-        match koushi_sdk::join_room_by_id(session, &room_id).await {
+        let operation = match self.begin_residency_operation() {
+            Ok(operation) => operation,
+            Err(()) => {
+                self.reject_residency_operation(request_id);
+                return;
+            }
+        };
+        match self
+            .call_room_operation(
+                RoomOperationKind::JoinRoom,
+                koushi_sdk::join_room_by_id(&operation.session, &room_id),
+            )
+            .await
+        {
             Ok(joined_room_id) => {
+                if !operation.room_rejoined(&joined_room_id).await {
+                    self.reject_residency_ack(request_id);
+                    return;
+                }
                 self.emit(CoreEvent::Room(RoomEvent::RoomJoined {
                     request_id,
                     room_id: joined_room_id,
@@ -1948,7 +2433,7 @@ impl RoomActor {
             via_servers: via_servers.clone(),
         }])
         .await;
-        let Some(session) = &self.session else {
+        let Some(_session) = &self.session else {
             self.reduce_reliable(vec![AppAction::DirectoryJoinFailed {
                 request_id: request_id.sequence,
                 room_id_or_alias,
@@ -1959,13 +2444,44 @@ impl RoomActor {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
+        let operation = match self.begin_residency_operation() {
+            Ok(operation) => operation,
+            Err(()) => {
+                self.reduce_reliable(vec![AppAction::DirectoryJoinFailed {
+                    request_id: request_id.sequence,
+                    room_id_or_alias,
+                    via_servers,
+                    kind: OperationFailureKind::Sdk,
+                }])
+                .await;
+                self.reject_residency_operation(request_id);
+                return;
+            }
+        };
 
         let join_target = koushi_sdk::MatrixJoinTarget {
             room_id_or_alias: room_id_or_alias.clone(),
             via_servers: via_servers.clone(),
         };
-        match koushi_sdk::join_room_target(session, &join_target).await {
+        match self
+            .call_room_operation(
+                RoomOperationKind::JoinDirectoryRoom,
+                koushi_sdk::join_room_target(&operation.session, &join_target),
+            )
+            .await
+        {
             Ok(room_id) => {
+                if !operation.room_rejoined(&room_id).await {
+                    self.reduce_reliable(vec![AppAction::DirectoryJoinFailed {
+                        request_id: request_id.sequence,
+                        room_id_or_alias,
+                        via_servers,
+                        kind: OperationFailureKind::Sdk,
+                    }])
+                    .await;
+                    self.reject_residency_ack(request_id);
+                    return;
+                }
                 self.reduce_reliable(vec![AppAction::DirectoryJoinSucceeded {
                     request_id: request_id.sequence,
                     room_id: room_id.clone(),
@@ -2323,12 +2839,26 @@ impl RoomActor {
     }
 
     async fn handle_leave_room(&self, request_id: RequestId, room_id: String) {
-        let Some(session) = &self.session else {
+        let Some(_session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
-        match koushi_sdk::leave_room(session, &room_id).await {
+        let Some((operation, result)) = self
+            .leave_room_with_residency(RoomOperationKind::LeaveRoom, &room_id)
+            .await
+        else {
+            self.reject_residency_operation(request_id);
+            return;
+        };
+        match result {
             Ok(left_room_id) => {
+                if !operation
+                    .room_left(&left_room_id, RoomRemovalCause::DirectLeave)
+                    .await
+                {
+                    self.reject_residency_ack(request_id);
+                    return;
+                }
                 self.reduce_reliable(vec![AppAction::SpaceOrderPreferenceRemoved {
                     space_id: left_room_id.clone(),
                 }])
@@ -3334,6 +3864,48 @@ fn room_list_projection_admits_authority(
     reconciliation_is_complete && entries_count == distinct_identity_count
 }
 
+async fn forward_visible_rooms_if_authoritative(
+    timeline_residency: Option<&TimelineSubscriptionResidencyHandle>,
+    core_generation: u64,
+    reconciliation_is_complete: bool,
+    entries_count: usize,
+    distinct_identity_count: usize,
+    room_ids: Vec<VisibleRoomObservation>,
+) -> bool {
+    if !room_list_projection_admits_authority(
+        reconciliation_is_complete,
+        entries_count,
+        distinct_identity_count,
+    ) {
+        return false;
+    }
+    let Some(timeline_residency) = timeline_residency else {
+        return false;
+    };
+    timeline_residency
+        .visible_rooms_observed(core_generation, room_ids)
+        .await
+}
+
+async fn forward_membership_batches(
+    timeline_residency: Option<&TimelineSubscriptionResidencyHandle>,
+    core_generation: u64,
+    membership_batches: impl IntoIterator<Item = Vec<RoomMembershipTransition>>,
+) -> bool {
+    let Some(timeline_residency) = timeline_residency else {
+        return false;
+    };
+    let mut forwarded = false;
+    for transitions in membership_batches {
+        if !transitions.is_empty() {
+            forwarded |= timeline_residency
+                .membership_observed(core_generation, transitions)
+                .await;
+        }
+    }
+    forwarded
+}
+
 fn room_stop_matches_generation(active_generation: Option<u64>, stopped_generation: u64) -> bool {
     active_generation == Some(stopped_generation)
 }
@@ -3416,6 +3988,7 @@ async fn project_live_entries_and_ack_if_reconciled(
     source: RoomListSource,
     authoritative: &Arc<AtomicBool>,
     sliding_sync_diagnostics: &crate::SlidingSyncDiagnostics,
+    timeline_residency: Option<&TimelineSubscriptionResidencyHandle>,
 ) {
     let entries_count = current.len();
     let unique_ids = unique_room_id_count(current);
@@ -3463,6 +4036,23 @@ async fn project_live_entries_and_ack_if_reconciled(
         authoritative.store(false, Ordering::Release);
         return;
     }
+    let visible_rooms = current
+        .iter()
+        .map(|item| item.clone().into_inner())
+        .map(|room| VisibleRoomObservation {
+            room_id: room.room_id().to_string(),
+            non_left: room.state() != matrix_sdk::RoomState::Left,
+        })
+        .collect();
+    let _ = forward_visible_rooms_if_authoritative(
+        timeline_residency,
+        generation,
+        reconciliation_is_complete,
+        entries_count,
+        unique_ids,
+        visible_rooms,
+    )
+    .await;
     if projection_is_authoritative {
         if let Some((backend_generation, response_sequence, ack)) =
             reconciliation.finish_if_complete(current.len())
@@ -3717,6 +4307,7 @@ async fn run_live_room_list_observation(
     source: RoomListSource,
     authoritative: Arc<AtomicBool>,
     sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+    timeline_residency: Option<TimelineSubscriptionResidencyHandle>,
 ) {
     let direct_observer = session.client().observe_events::<DirectEvent, ()>();
     let direct_events = direct_observer.subscribe();
@@ -3751,6 +4342,7 @@ async fn run_live_room_list_observation(
         source,
         authoritative,
         sliding_sync_diagnostics,
+        timeline_residency,
         direct_observer,
         direct_events,
         direct_state,
@@ -3776,6 +4368,7 @@ async fn run_live_room_list_observation(
         source,
         authoritative,
         sliding_sync_diagnostics,
+        timeline_residency,
         direct_observer,
         direct_events,
         direct_state,
@@ -3799,6 +4392,7 @@ async fn run_live_room_list_observation_with_sources(
     source: RoomListSource,
     authoritative: Arc<AtomicBool>,
     sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+    timeline_residency: Option<TimelineSubscriptionResidencyHandle>,
     _direct_observer: matrix_sdk::event_handler::ObservableEventHandler<(DirectEvent, ())>,
     direct_events: matrix_sdk::event_handler::EventHandlerSubscriber<(DirectEvent, ())>,
     mut direct_state: DirectClassificationState,
@@ -4077,6 +4671,7 @@ async fn run_live_room_list_observation_with_sources(
                     source,
                     &authoritative,
                     &sliding_sync_diagnostics,
+                    timeline_residency.as_ref(),
                 ).await;
             }
             next_loading_state = loading_state.next() => {
@@ -4111,6 +4706,7 @@ async fn run_live_room_list_observation_with_sources(
                             source,
                             &authoritative,
                             &sliding_sync_diagnostics,
+                            timeline_residency.as_ref(),
                         ).await;
                     }
                 }
@@ -4143,6 +4739,7 @@ async fn run_live_room_list_observation_with_sources(
                         source,
                         &authoritative,
                         &sliding_sync_diagnostics,
+                        timeline_residency.as_ref(),
                     ).await;
                 }
             }
@@ -4187,6 +4784,7 @@ async fn run_live_room_list_observation_with_sources(
                         source,
                         &authoritative,
                         &sliding_sync_diagnostics,
+                        timeline_residency.as_ref(),
                     ).await;
                     #[cfg(test)]
                     emit_live_observer_test_event(
@@ -4206,9 +4804,11 @@ async fn run_live_room_list_observation_with_sources(
                 let mut invite_update_observed = false;
                 let mut invite_membership_changed = false;
                 let mut pinned_event_room_ids = BTreeSet::new();
+                let mut membership_batches = Vec::new();
                 match room_update {
                     Ok(updates) => {
                         update_count = 1;
+                        membership_batches.push(room_membership_transitions(&updates));
                         projection_required = room_updates_require_room_list_projection(&updates);
                         invite_update_observed =
                             !updates.invited.is_empty() || !updates.left.is_empty();
@@ -4227,6 +4827,7 @@ async fn run_live_room_list_observation_with_sources(
                     match room_updates_rx.try_recv() {
                         Ok(updates) => {
                             update_count = update_count.saturating_add(1);
+                            membership_batches.push(room_membership_transitions(&updates));
                             projection_required |= room_updates_require_room_list_projection(&updates);
                             invite_update_observed |=
                                 !updates.invited.is_empty() || !updates.left.is_empty();
@@ -4317,9 +4918,16 @@ async fn run_live_room_list_observation_with_sources(
                         source,
                         &authoritative,
                         &sliding_sync_diagnostics,
+                        timeline_residency.as_ref(),
                     )
                     .await;
                 }
+                let _ = forward_membership_batches(
+                    timeline_residency.as_ref(),
+                    generation,
+                    membership_batches,
+                )
+                .await;
                 if invite_update_observed {
                     let _ = room_tx
                         .send(RoomMessage::RefreshMembershipProjection {
@@ -4385,6 +4993,7 @@ async fn run_live_room_list_observation_with_sources(
                                 source,
                                 &authoritative,
                                 &sliding_sync_diagnostics,
+                                timeline_residency.as_ref(),
                             )
                             .await;
                             #[cfg(test)]
@@ -4442,6 +5051,51 @@ fn record_live_observer_exit(
             .field(DiagnosticField::count("rls_wake_count", rls_wake_count))
             .field(DiagnosticField::count("base_wake_count", base_wake_count)),
     );
+}
+
+fn record_residency_admission_failure(reason: &'static str) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Warn, "core.room", "residency_admission")
+            .field(DiagnosticField::token("reason", reason)),
+    );
+}
+
+fn record_residency_ack_failure() {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Warn, "core.room", "residency_ack")
+            .field(DiagnosticField::token("reason", "manager_unavailable")),
+    );
+}
+
+fn room_membership_transitions(
+    updates: &matrix_sdk_base::sync::RoomUpdates,
+) -> Vec<RoomMembershipTransition> {
+    updates
+        .left
+        .keys()
+        .map(|room_id| RoomMembershipTransition {
+            room_id: room_id.clone(),
+            kind: RoomMembershipTransitionKind::Left,
+        })
+        .chain(
+            updates
+                .joined
+                .keys()
+                .map(|room_id| RoomMembershipTransition {
+                    room_id: room_id.clone(),
+                    kind: RoomMembershipTransitionKind::Joined,
+                }),
+        )
+        .chain(
+            updates
+                .invited
+                .keys()
+                .map(|room_id| RoomMembershipTransition {
+                    room_id: room_id.clone(),
+                    kind: RoomMembershipTransitionKind::Invited,
+                }),
+        )
+        .collect()
 }
 
 fn room_updates_include_joined_state(updates: &matrix_sdk_base::sync::RoomUpdates) -> bool {
@@ -6108,6 +6762,7 @@ pub mod tests {
             RoomListSource::Live,
             Arc::new(AtomicBool::new(false)),
             crate::SlidingSyncDiagnostics::default(),
+            None,
             direct_observer,
             direct_events,
             direct_state,
@@ -6132,17 +6787,30 @@ pub mod tests {
     fn room_operation_records_without_environment_switch() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         trace_room_operation("create_room", "test_always_on", make_request_id(999));
-        assert!(koushi_diagnostics::test_support::detail_snapshot().records.iter().any(|record| {
-            record.event.source == "core.room" && record.event.stage == "test_always_on"
-        }));
+        assert!(
+            koushi_diagnostics::test_support::detail_snapshot()
+                .records
+                .iter()
+                .any(|record| {
+                    record.event.source == "core.room" && record.event.stage == "test_always_on"
+                })
+        );
     }
 
     #[tokio::test]
     async fn room_actor_shutdown_aborts_when_its_mailbox_cannot_accept_shutdown() {
         let (tx, _rx) = mpsc::channel(1);
         tx.send(RoomMessage::Shutdown).await.expect("fill mailbox");
+        let (timeline_residency, _timeline_residency_rx) = watch::channel(None);
+        let (session, _session_rx) = watch::channel(None);
         let mut handle = RoomActorHandle {
             tx,
+            timeline_residency,
+            session,
+            #[cfg(feature = "test-hooks")]
+            room_operation_test_control: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "test-hooks")]
+            room_operation_test_reached_count: Arc::new(AtomicUsize::new(0)),
             task: Some(executor::spawn(std::future::pending())),
         };
 
@@ -8736,7 +9404,9 @@ pub mod tests {
     #[test]
     fn failed_space_member_diagnostics_do_not_fabricate_member_counts() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-        let before = koushi_diagnostics::test_support::detail_snapshot().records.len();
+        let before = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         record_core_space_members_load_failure("sync_refresh", 7);
         let record = koushi_diagnostics::test_support::detail_snapshot()
             .records
