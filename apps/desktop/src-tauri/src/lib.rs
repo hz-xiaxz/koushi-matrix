@@ -3290,6 +3290,7 @@ mod tests {
                 outcome: RoomKeyReshareOutcome::Sent {
                     request_count: 2,
                     recipient_count: 3,
+                    failed_recipient_count: 0,
                 },
             }))
             .expect("serialize room key reshare outcome");

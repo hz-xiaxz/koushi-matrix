@@ -424,6 +424,89 @@ pub async fn reshare_room_key(
     }
 }
 
+/// Temporary dangerous encryption-debug control (issue #538): rotate the
+/// outbound Megolm session and confirm the fresh session is at index 0.
+#[tauri::command]
+pub async fn force_new_outbound_session(
+    room_id: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<EncryptionDebugOperationOutcome, String> {
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_force_new_outbound_session_command(
+            request_id,
+            room_id.clone(),
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
+            .await
+            .map_err(|_| "force new outbound session did not complete".to_owned())?;
+        match event {
+            Ok(CoreEvent::Room(RoomEvent::OutboundSessionForced {
+                request_id: event_request_id,
+                outcome,
+                ..
+            })) if event_request_id == request_id => return Ok(outcome),
+            Ok(CoreEvent::OperationFailed {
+                request_id: event_request_id,
+                failure,
+            }) if event_request_id == request_id => {
+                return Err(invoke_error_from_core_failure(
+                    "force new outbound session failed",
+                    failure,
+                ));
+            }
+            Ok(_) | Err(_) => {}
+        }
+    }
+}
+
+/// Temporary dangerous encryption-debug control (issue #538): share the
+/// current outbound session's index-0 room key to every eligible recipient
+/// device.
+#[tauri::command]
+pub async fn share_index0_room_key(
+    room_id: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<EncryptionDebugOperationOutcome, String> {
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_share_index0_room_key_command(
+            request_id,
+            room_id.clone(),
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
+            .await
+            .map_err(|_| "index-0 room key share did not complete".to_owned())?;
+        match event {
+            Ok(CoreEvent::Room(RoomEvent::Index0RoomKeyShared {
+                request_id: event_request_id,
+                outcome,
+                ..
+            })) if event_request_id == request_id => return Ok(outcome),
+            Ok(CoreEvent::OperationFailed {
+                request_id: event_request_id,
+                failure,
+            }) if event_request_id == request_id => {
+                return Err(invoke_error_from_core_failure(
+                    "index-0 room key share failed",
+                    failure,
+                ));
+            }
+            Ok(_) | Err(_) => {}
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn update_room_setting(
     room_id: String,

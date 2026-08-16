@@ -19,14 +19,15 @@ use std::{
 
 use koushi_core::{
     AccountCommand, AccountEvent, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent,
-    CoreFailure, CreateRoomOptions, EventStreamLag, ImageUploadCompressionPolicy,
-    ImageUploadCompressionState, ImageUploadDimensions, ImageUploadVariantKind, IntentNoOpReason,
-    IntentOutcome, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand, RoomEvent,
-    RoomKeyExportRequest, RoomKeyImportRequest, RoomKeyReshareOutcome, SearchCommand, SearchEvent,
-    SearchScope, SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
-    SyncCommand, TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId,
-    TimelineGeneration, TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind,
-    UploadMediaRequest, UploadMediaThumbnail,
+    CoreFailure, CreateRoomOptions, EncryptionDebugOperationOutcome, EventStreamLag,
+    ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
+    ImageUploadVariantKind, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
+    PaginationDirection, RequestId, RoomCommand, RoomEvent, RoomKeyExportRequest,
+    RoomKeyImportRequest, RoomKeyReshareOutcome, SearchCommand, SearchEvent, SearchScope,
+    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
+    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
+    TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind, UploadMediaRequest,
+    UploadMediaThumbnail,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
@@ -2718,6 +2719,26 @@ pub(crate) fn build_reshare_room_key_command(
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::ReshareRoomKey {
+        request_id,
+        room_id,
+    })
+}
+
+pub(crate) fn build_force_new_outbound_session_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::ForceNewOutboundSession {
+        request_id,
+        room_id,
+    })
+}
+
+pub(crate) fn build_share_index0_room_key_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::ShareIndex0RoomKey {
         request_id,
         room_id,
     })

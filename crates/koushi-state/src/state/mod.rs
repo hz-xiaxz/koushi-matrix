@@ -129,6 +129,7 @@ pub use invite_workflow::{
 
 // ── Re-exports: room_interactions ──────────────────────────────────────────
 pub use room_interactions::{
+    EncryptionDebugOperationKind, EncryptionDebugOperationOutcome, EncryptionDebugOperationState,
     PinOp, PinOperationState, PinnedEvent, PinnedEventState, ReplyQuote, ReplyQuoteCodeBlock,
     ReplyQuoteFormattedBody, ReplyQuoteState, RoomInteractionState,
 };

@@ -620,3 +620,120 @@ describe("RoomInfoPanel URL previews", () => {
     );
   });
 });
+
+describe("temporary dangerous encryption debugging controls", () => {
+  test("never exposes the controls in unencrypted rooms", () => {
+    render(
+      <RoomInfoPanel
+        room={baseRoom}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        onForceNewOutboundSession={vi.fn()}
+        onShareIndex0RoomKey={vi.fn()}
+      />
+    );
+
+    expect(
+      screen.queryByRole("heading", { name: "Dangerous encryption debugging" })
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Force new encryption session" })
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Share index-0 key with room recipients" })
+    ).toBeNull();
+  });
+
+  test("requires explicit confirmation before running each operation", () => {
+    const onForce = vi.fn().mockResolvedValue("completed");
+    const onShare = vi.fn().mockResolvedValue("completed");
+    render(
+      <RoomInfoPanel
+        room={{ ...baseRoom, is_encrypted: true }}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        onForceNewOutboundSession={onForce}
+        onShareIndex0RoomKey={onShare}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Force new encryption session" }));
+    expect(onForce).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(onForce).toHaveBeenCalledWith(baseRoom.room_id);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Share index-0 key with room recipients" })
+    );
+    expect(onShare).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(onShare).toHaveBeenCalledWith(baseRoom.room_id);
+  });
+
+  test("disables both buttons while either operation is pending", () => {
+    render(
+      <RoomInfoPanel
+        room={{ ...baseRoom, is_encrypted: true }}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        encryptionDebugOperation={{
+          state: "pending",
+          request_id: 1,
+          kind: "shareIndex0Key"
+        }}
+        onForceNewOutboundSession={vi.fn()}
+        onShareIndex0RoomKey={vi.fn()}
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Force new encryption session" }).hasAttribute(
+        "disabled"
+      )
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Share index-0 key with room recipients" })
+        .hasAttribute("disabled")
+    ).toBe(true);
+  });
+
+  test("renders the settled completed outcome from the Rust snapshot", () => {
+    render(
+      <RoomInfoPanel
+        room={{ ...baseRoom, is_encrypted: true }}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        encryptionDebugOperation={{
+          state: "settled",
+          request_id: 1,
+          kind: "forceNewOutboundSession",
+          outcome: "completed"
+        }}
+      />
+    );
+
+    expect(screen.getByText("Operation completed.")).toBeTruthy();
+  });
+
+  test("renders the refused-index-advanced failure from the Rust snapshot", () => {
+    render(
+      <RoomInfoPanel
+        room={{ ...baseRoom, is_encrypted: true }}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        encryptionDebugOperation={{
+          state: "failed",
+          kind: "shareIndex0Key",
+          outcome: "refusedIndexAdvanced"
+        }}
+      />
+    );
+
+    expect(
+      screen.getByText(/force a new encryption session first/i)
+    ).toBeTruthy();
+  });
+});
+

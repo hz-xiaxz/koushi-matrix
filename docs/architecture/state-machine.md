@@ -8,7 +8,7 @@ fixture/demo backend contract mentioned below is historical (dev/demo only).
 The state-transition diagrams in this document are normative and must track the
 reducer; see [Maintenance Contract](#maintenance-contract).
 
-Date: 2026-08-15
+Date: 2026-08-16
 
 ## Contract
 
@@ -1620,6 +1620,49 @@ stateDiagram-v2
   `reply_quote=ok pin_event=ok pinned_state=ok unpin_event=ok`. Its stdout must
   remain private-data-free. Message-action QA evidence must likewise use coarse
   tokens only; do not print Matrix IDs, message bodies, or generated permalinks.
+
+`AppState.room_interactions[room_id].encryption_debug_operation` is the
+Rust-owned state machine for the temporary dangerous encryption-debug
+controls (issue #538):
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Pending: EncryptionDebugOperationStarted [kind]
+    Settled --> Pending: EncryptionDebugOperationStarted [kind] (retry)
+    Failed --> Pending: EncryptionDebugOperationStarted [kind] (retry)
+    Pending --> Settled: EncryptionDebugOperationSettled [matching request_id + room + kind]
+    Pending --> Failed: EncryptionDebugOperationFailed [matching request_id + room + kind]
+    Idle --> [*]: LogoutRequested/LogoutFinished/SessionCleared/room leave/removal
+    Pending --> [*]: LogoutRequested/LogoutFinished/SessionCleared/room leave/removal
+    Settled --> [*]: LogoutRequested/LogoutFinished/SessionCleared/room leave/removal
+    Failed --> [*]: LogoutRequested/LogoutFinished/SessionCleared/room leave/removal
+```
+
+- Start admission is `Idle | Settled | Failed`; a start while `Pending` is
+  rejected (duplicate command dropped). Completion/failure settle only the
+  matching request_id + room + kind; stale or duplicate completions are
+  dropped. Logout, session replacement, room leave, and room removal reset
+  the per-room entry to `Idle`.
+- `RoomCommand::ForceNewOutboundSession` and `RoomCommand::ShareIndex0RoomKey`
+  route through `RoomActor` and `koushi-sdk`. The SDK owns all cryptographic
+  decisions: the manual executors hold the per-room transport lock shared
+  with the normal preshare path, check `cancellation` and the actor
+  validator before every HTTP effect, and are bounded by a monotonic
+  deadline; cleanup removes every owned un-marked request (durably) and
+  cancels the claim expectation on every non-completed exit. Only standard
+  Olm-encrypted `m.room_key` is used; no custom wire event,
+  `m.forwarded_room_key`, plaintext fallback, recipient widening, or
+  fabricated delivery acknowledgement. Index 0 is never consumed and no
+  room event is sent.
+- GUI code renders the snapshot and dispatches typed commands only; it never
+  derives busy state or interprets outcomes locally. Diagnostics record one
+  closed `core.room_key_debug` operation per click with the issue-538
+  allowlist (operation, outcome, fresh, index before/after, own/peer
+  eligible/accepted/missing buckets, peer users with zero accepted, claim
+  token, elapsed, room_event_sent=0, index0_consumed=0); no room/session/
+  user/device ids, identity keys, request/transaction ids, ciphertext, key
+  material, display names, homeservers, raw errors, or hashes are exported.
 
 ## Timeline Media
 

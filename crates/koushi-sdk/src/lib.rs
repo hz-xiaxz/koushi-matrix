@@ -8168,27 +8168,30 @@ fn record_room_key_member_reload_diagnostic(
         Outcome::NoActiveSession => "no_active_session",
         Outcome::SdkError => "sdk_error",
     };
-    let mut diagnostic =
-        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_member_reload", "completed")
-            .field(DiagnosticField::ordinal_alias(
-                "room_alias",
-                "room",
-                event.room.ordinal(),
-            ))
-            .field(DiagnosticField::token("reason", reason))
-            .field(DiagnosticField::count(
-                "invalidation_count_bucket",
-                event.invalidation_count_bucket.into(),
-            ))
-            .field(DiagnosticField::count(
-                "response_member_count_bucket",
-                event.response_member_count_bucket.into(),
-            ))
-            .field(DiagnosticField::milliseconds(
-                "processing_elapsed_ms",
-                event.processing_elapsed_ms.into(),
-            ))
-            .field(DiagnosticField::token("discard_outcome", discard_outcome));
+    let mut diagnostic = DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "core.room_member_reload",
+        "completed",
+    )
+    .field(DiagnosticField::ordinal_alias(
+        "room_alias",
+        "room",
+        event.room.ordinal(),
+    ))
+    .field(DiagnosticField::token("reason", reason))
+    .field(DiagnosticField::count(
+        "invalidation_count_bucket",
+        event.invalidation_count_bucket.into(),
+    ))
+    .field(DiagnosticField::count(
+        "response_member_count_bucket",
+        event.response_member_count_bucket.into(),
+    ))
+    .field(DiagnosticField::milliseconds(
+        "processing_elapsed_ms",
+        event.processing_elapsed_ms.into(),
+    ))
+    .field(DiagnosticField::token("discard_outcome", discard_outcome));
     if let Some(were_synced) = event.members_were_synced_before_invalidation {
         diagnostic = diagnostic.field(DiagnosticField::boolean(
             "members_synced_before_invalidation",
@@ -8217,9 +8220,7 @@ fn record_room_key_member_reload_diagnostic(
             koushi_diagnostics::increment_counter("member_reloads_limited_sync_response")
         }
         Reason::MembershipOrDeviceChange => {
-            koushi_diagnostics::increment_counter(
-                "member_reloads_membership_or_device_change",
-            )
+            koushi_diagnostics::increment_counter("member_reloads_membership_or_device_change")
         }
         Reason::FullMemberListReload => {
             koushi_diagnostics::increment_counter("member_reloads_full_member_list_reload")
@@ -8227,15 +8228,11 @@ fn record_room_key_member_reload_diagnostic(
         _ => koushi_diagnostics::increment_counter("member_reloads_unknown"),
     }
     match event.discard_outcome {
-        Outcome::Discarded => {
-            koushi_diagnostics::increment_counter("member_reload_discarded")
-        }
+        Outcome::Discarded => koushi_diagnostics::increment_counter("member_reload_discarded"),
         Outcome::NoActiveSession => {
             koushi_diagnostics::increment_counter("member_reload_no_active_session")
         }
-        Outcome::SdkError => {
-            koushi_diagnostics::increment_counter("member_reload_sdk_error")
-        }
+        Outcome::SdkError => koushi_diagnostics::increment_counter("member_reload_sdk_error"),
     }
 }
 
@@ -9004,6 +9001,10 @@ pub enum MatrixRoomKeyReshareOutcome {
     Sent {
         request_count: usize,
         recipient_count: usize,
+        /// Eligible devices whose share could not be Olm-encrypted (e.g. no
+        /// Olm session and no usable claimed key). Kept visible so failures
+        /// are not collapsed away.
+        failed_recipient_count: usize,
     },
     NoSession,
     NoRecipients,
@@ -9034,13 +9035,13 @@ pub async fn force_reshare_room_key(
             matrix_sdk::room::RoomKeyReshareResult::Sent {
                 request_count,
                 recipient_count,
-                failed_recipient_count: 0,
+                failed_recipient_count,
             } => MatrixRoomKeyReshareOutcome::Sent {
                 request_count,
                 recipient_count,
+                failed_recipient_count,
             },
-            matrix_sdk::room::RoomKeyReshareResult::Sent { .. }
-            | matrix_sdk::room::RoomKeyReshareResult::UnableToEncrypt { .. } => {
+            matrix_sdk::room::RoomKeyReshareResult::UnableToEncrypt { .. } => {
                 MatrixRoomKeyReshareOutcome::NoRecipients
             }
             matrix_sdk::room::RoomKeyReshareResult::NoSession => {
@@ -9054,6 +9055,218 @@ pub async fn force_reshare_room_key(
             }
         })
         .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
+/// Closed outcome of a manual index-0 room-key share (issue #538).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixIndex0ShareOutcome {
+    Completed,
+    RefusedNotEncrypted,
+    RefusedIndexAdvanced,
+    NoSession,
+    NoRecipients,
+    PolicyBlocked,
+    CancelledStale,
+    Deadline,
+    Failed,
+}
+
+/// Closed outcome of the keys-claim step of a manual index-0 share
+/// (issue #538).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixIndex0ClaimOutcome {
+    NotNeeded,
+    Succeeded,
+    Failed,
+    Deadline,
+}
+
+/// Closed aggregate summary of a manual index-0 share (issue #538). Counts
+/// are buckets only; no identifiers or key material cross the boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MatrixIndex0ShareSummary {
+    pub outcome: MatrixIndex0ShareOutcome,
+    pub message_index_before: Option<u32>,
+    pub message_index_after: Option<u32>,
+    pub own_eligible: usize,
+    pub own_accepted: usize,
+    pub own_missing: usize,
+    pub peer_eligible: usize,
+    pub peer_accepted: usize,
+    pub peer_missing: usize,
+    pub peer_users_with_zero_accepted: usize,
+    pub claim: MatrixIndex0ClaimOutcome,
+    pub elapsed_ms: u64,
+    pub room_event_sent: bool,
+    pub index0_consumed: bool,
+}
+
+/// Closed outcome of a manual force-new-outbound-session (issue #538).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixForceNewSessionOutcome {
+    Completed,
+    RefusedNotEncrypted,
+    CancelledStale,
+    Failed,
+    Deadline,
+}
+
+/// Closed summary of a manual force-new-outbound-session (issue #538).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MatrixForceNewSessionSummary {
+    pub outcome: MatrixForceNewSessionOutcome,
+    pub previous_session_exists: bool,
+    pub fresh_session_created: bool,
+    pub message_index: Option<u32>,
+    pub elapsed_ms: u64,
+}
+
+/// Discard the current outbound Megolm session for a room (issue #538).
+pub async fn discard_outbound_group_session(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<(), MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    room.discard_room_key()
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
+/// Create the outbound Megolm session if needed and pre-share it with all
+/// active members (issue #538). This is the normal preshare path, run with
+/// the per-room transport lock held.
+pub async fn preshare_outbound_group_session(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<(), MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    room.preshare_room_key()
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
+/// Return the current outbound session's message index, if a session exists
+/// (issue #538).
+pub async fn current_outbound_group_session_index(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<Option<u32>, MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    room.current_outbound_group_session_message_index()
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
+/// Manually share the current outbound session's index-0 room key to every
+/// eligible recipient device (issue #538 diagnostic control). `cancellation`
+/// and `validate` are checked before every HTTP effect.
+pub async fn share_index0_room_key(
+    session: &MatrixClientSession,
+    room_id: &str,
+    cancellation: &mut tokio::sync::broadcast::Receiver<()>,
+    validate: impl Fn() -> bool + Send + Sync,
+) -> Result<MatrixIndex0ShareSummary, MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    let summary = room
+        .share_index0_room_key(cancellation, validate)
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    Ok(MatrixIndex0ShareSummary {
+        outcome: match summary.outcome {
+            matrix_sdk_base::crypto::ManualIndex0ShareOutcome::Completed => {
+                MatrixIndex0ShareOutcome::Completed
+            }
+            matrix_sdk_base::crypto::ManualIndex0ShareOutcome::RefusedNotEncrypted => {
+                MatrixIndex0ShareOutcome::RefusedNotEncrypted
+            }
+            matrix_sdk_base::crypto::ManualIndex0ShareOutcome::RefusedIndexAdvanced => {
+                MatrixIndex0ShareOutcome::RefusedIndexAdvanced
+            }
+            matrix_sdk_base::crypto::ManualIndex0ShareOutcome::NoSession => {
+                MatrixIndex0ShareOutcome::NoSession
+            }
+            matrix_sdk_base::crypto::ManualIndex0ShareOutcome::NoRecipients => {
+                MatrixIndex0ShareOutcome::NoRecipients
+            }
+            matrix_sdk_base::crypto::ManualIndex0ShareOutcome::PolicyBlocked => {
+                MatrixIndex0ShareOutcome::PolicyBlocked
+            }
+            matrix_sdk_base::crypto::ManualIndex0ShareOutcome::CancelledStale => {
+                MatrixIndex0ShareOutcome::CancelledStale
+            }
+            matrix_sdk_base::crypto::ManualIndex0ShareOutcome::Deadline => {
+                MatrixIndex0ShareOutcome::Deadline
+            }
+            matrix_sdk_base::crypto::ManualIndex0ShareOutcome::Failed => {
+                MatrixIndex0ShareOutcome::Failed
+            }
+        },
+        message_index_before: summary.message_index_before,
+        message_index_after: summary.message_index_after,
+        own_eligible: summary.own_eligible,
+        own_accepted: summary.own_accepted,
+        own_missing: summary.own_missing,
+        peer_eligible: summary.peer_eligible,
+        peer_accepted: summary.peer_accepted,
+        peer_missing: summary.peer_missing,
+        peer_users_with_zero_accepted: summary.peer_users_with_zero_accepted,
+        claim: match summary.claim {
+            matrix_sdk_base::crypto::ManualClaimOutcome::NotNeeded => {
+                MatrixIndex0ClaimOutcome::NotNeeded
+            }
+            matrix_sdk_base::crypto::ManualClaimOutcome::Succeeded => {
+                MatrixIndex0ClaimOutcome::Succeeded
+            }
+            matrix_sdk_base::crypto::ManualClaimOutcome::Failed => MatrixIndex0ClaimOutcome::Failed,
+            matrix_sdk_base::crypto::ManualClaimOutcome::Deadline => {
+                MatrixIndex0ClaimOutcome::Deadline
+            }
+        },
+        elapsed_ms: summary.elapsed_ms,
+        room_event_sent: summary.room_event_sent,
+        index0_consumed: summary.index0_consumed,
+    })
+}
+
+/// Manually rotate the outbound Megolm session and confirm the fresh session
+/// is at message index 0 (issue #538 diagnostic control).
+pub async fn force_new_outbound_session(
+    session: &MatrixClientSession,
+    room_id: &str,
+    cancellation: &mut tokio::sync::broadcast::Receiver<()>,
+    validate: impl Fn() -> bool + Send + Sync,
+) -> Result<MatrixForceNewSessionSummary, MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    let summary = room
+        .force_new_outbound_session(cancellation, validate)
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    Ok(MatrixForceNewSessionSummary {
+        outcome: match summary.outcome {
+            matrix_sdk_base::crypto::ManualForceNewOutcome::Completed => {
+                MatrixForceNewSessionOutcome::Completed
+            }
+            matrix_sdk_base::crypto::ManualForceNewOutcome::RefusedNotEncrypted => {
+                MatrixForceNewSessionOutcome::RefusedNotEncrypted
+            }
+            matrix_sdk_base::crypto::ManualForceNewOutcome::CancelledStale => {
+                MatrixForceNewSessionOutcome::CancelledStale
+            }
+            matrix_sdk_base::crypto::ManualForceNewOutcome::Failed => {
+                MatrixForceNewSessionOutcome::Failed
+            }
+            matrix_sdk_base::crypto::ManualForceNewOutcome::Deadline => {
+                MatrixForceNewSessionOutcome::Deadline
+            }
+        },
+        previous_session_exists: summary.previous_session_exists,
+        fresh_session_created: summary.fresh_session_created,
+        message_index: summary.message_index,
+        elapsed_ms: summary.elapsed_ms,
+    })
 }
 
 pub async fn request_room_key_for_event(
@@ -15256,7 +15469,10 @@ mod room_key_member_reload_diagnostics_tests {
             assert!(record.event.fields.iter().any(|field| {
                 field.key == "room_alias"
                     && field.value
-                        == DiagnosticValue::OrdinalAlias { kind: "room", ordinal: 3 }
+                        == DiagnosticValue::OrdinalAlias {
+                            kind: "room",
+                            ordinal: 3,
+                        }
             }));
             let debug = format!("{:?}", record.event);
             assert!(!debug.contains('@') && !debug.contains('!') && !debug.contains("http"));
@@ -15719,4 +15935,114 @@ mod initial_share_repair_diagnostics_tests {
             assert!(!text.contains('@') && !text.contains('!') && !text.contains("http"));
         }
     }
+}
+
+#[cfg(test)]
+mod encryption_debug_dto_privacy_tests {
+    use super::*;
+
+    fn banned_fragments() -> &'static [&'static str] {
+        &[
+            "room_id",
+            "user_id",
+            "device_id",
+            "session_id",
+            "sender_key",
+            "session_key",
+            "ciphertext",
+            "event_id",
+            "txn",
+            "identity_key",
+            "homeserver",
+        ]
+    }
+
+    #[test]
+    fn index0_share_summary_serializes_without_identifiers_or_key_material() {
+        let summary = MatrixIndex0ShareSummary {
+            outcome: MatrixIndex0ShareOutcome::Completed,
+            message_index_before: Some(0),
+            message_index_after: Some(0),
+            own_eligible: 1,
+            own_accepted: 1,
+            own_missing: 0,
+            peer_eligible: 2,
+            peer_accepted: 1,
+            peer_missing: 1,
+            peer_users_with_zero_accepted: 1,
+            claim: MatrixIndex0ClaimOutcome::Succeeded,
+            elapsed_ms: 12,
+            room_event_sent: false,
+            index0_consumed: false,
+        };
+        let text = serde_json::to_string(&summary).unwrap();
+        for fragment in banned_fragments() {
+            assert!(
+                !text.contains(fragment),
+                "privacy leak: {fragment} in {text}"
+            );
+        }
+        assert!(
+            !text.contains('@') && !text.contains('!'),
+            "identifier leak: {text}"
+        );
+    }
+
+    #[test]
+    fn force_new_summary_serializes_without_identifiers_or_key_material() {
+        let summary = MatrixForceNewSessionSummary {
+            outcome: MatrixForceNewSessionOutcome::Completed,
+            previous_session_exists: true,
+            fresh_session_created: true,
+            message_index: Some(0),
+            elapsed_ms: 9,
+        };
+        let text = serde_json::to_string(&summary).unwrap();
+        for fragment in banned_fragments() {
+            assert!(
+                !text.contains(fragment),
+                "privacy leak: {fragment} in {text}"
+            );
+        }
+        assert!(
+            !text.contains('@') && !text.contains('!'),
+            "identifier leak: {text}"
+        );
+    }
+
+    #[test]
+    fn index0_share_outcome_and_claim_tokens_are_closed() {
+        for outcome in [
+            MatrixIndex0ShareOutcome::Completed,
+            MatrixIndex0ShareOutcome::RefusedNotEncrypted,
+            MatrixIndex0ShareOutcome::RefusedIndexAdvanced,
+            MatrixIndex0ShareOutcome::NoSession,
+            MatrixIndex0ShareOutcome::NoRecipients,
+            MatrixIndex0ShareOutcome::PolicyBlocked,
+            MatrixIndex0ShareOutcome::CancelledStale,
+            MatrixIndex0ShareOutcome::Deadline,
+            MatrixIndex0ShareOutcome::Failed,
+        ] {
+            let text = serde_json::to_string(&outcome).unwrap();
+            assert!(
+                text.starts_with('"') && text.ends_with('"'),
+                "open token: {text}"
+            );
+            assert!(
+                !text.contains('@') && !text.contains('!'),
+                "identifier leak: {text}"
+            );
+        }
+    }
+}
+
+/// Whether the room's current membership is joined (issue #538: the actor
+/// re-checks this when settling a manual encryption-debug completion, so a
+/// completion that lands after the user left the room fails closed).
+pub async fn room_is_joined(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<bool, MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    Ok(room.state() == matrix_sdk_base::RoomState::Joined)
 }
