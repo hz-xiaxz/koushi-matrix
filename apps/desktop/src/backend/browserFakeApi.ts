@@ -85,7 +85,8 @@ import type {
   UserProfile,
   SpaceMemberEntry,
   SpaceMembersState,
-  SecureBackupGateState
+  SecureBackupGateState,
+  type EncryptionDebugOperationOutcome
 } from "../domain/types";
 import {
   DEFAULT_SLIDING_SYNC_DIAGNOSTICS,
