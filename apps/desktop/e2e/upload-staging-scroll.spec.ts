@@ -1,8 +1,9 @@
 /**
  * Headless geometry regression: the Upload attachments staging panel must
  * stay inside the application viewport at short window heights, with the
- * dialog header and Send attachments action visible while the preview body
- * scrolls (#515).
+ * dialog header and Send attachments action visible. At ordinary sizes the
+ * controls precede a two-axis image viewport; at extreme sizes the staging
+ * list remains a fallback scroll owner (#515).
  *
  * Before the fix the staging dialog had no viewport-bounded max-height and no
  * internal scroll region, so with a tall portrait image the caption field,
@@ -20,6 +21,8 @@ import { t } from "../src/i18n/messages";
 
 /** Short viewport representative of the reported packaged window. */
 const SHORT_VIEWPORT = { width: 900, height: 520 };
+/** Ordinary desktop viewport where attachment controls must be visible immediately. */
+const STANDARD_VIEWPORT = { width: 1200, height: 800 };
 
 /** A small portrait image (240x640) so the preview keeps a tall aspect. */
 const PORTRAIT_PNG = Buffer.from(
@@ -90,10 +93,10 @@ function expectStagingBounded(
   }
 }
 
-test("main composer staging panel stays bounded and scrolls at a short viewport", async ({
+test("main composer keeps upload controls visible while only the preview pans", async ({
   page
 }) => {
-  await page.setViewportSize(SHORT_VIEWPORT);
+  await page.setViewportSize(STANDARD_VIEWPORT);
   await gotoReadyShell(page);
   // Production timelines can have a very large virtual scroll extent. The
   // flex parent must size the timeline from the remaining viewport height,
@@ -121,32 +124,61 @@ test("main composer staging panel stays bounded and scrolls at a short viewport"
   await expect(dialog.locator(".upload-preview-viewport")).toBeVisible();
   await expect(dialog.locator(".upload-output-toolbar")).toBeVisible();
 
+  const controlAndPreviewGeometry = await dialog.evaluate((element) => {
+    const toolbar = element.querySelector<HTMLElement>(".upload-output-toolbar");
+    const preview = element.querySelector<HTMLElement>(".upload-preview-viewport");
+    if (!toolbar || !preview) return null;
+    const toolbarBox = toolbar.getBoundingClientRect();
+    const previewBox = preview.getBoundingClientRect();
+    return {
+      toolbarBottom: toolbarBox.bottom,
+      previewTop: previewBox.top,
+      previewOverflowX: getComputedStyle(preview).overflowX,
+      previewOverflowY: getComputedStyle(preview).overflowY
+    };
+  });
+  expect(controlAndPreviewGeometry).not.toBeNull();
+  expect(controlAndPreviewGeometry!.toolbarBottom).toBeLessThanOrEqual(
+    controlAndPreviewGeometry!.previewTop
+  );
+  expect(controlAndPreviewGeometry!.previewOverflowX).toBe("auto");
+  expect(controlAndPreviewGeometry!.previewOverflowY).toBe("auto");
+
   const geometry = await stagingGeometry(page);
   expect(geometry).not.toBeNull();
   expectStagingBounded(geometry!, "main staging");
 
-  // The list owns vertical overflow: content overflows it and it scrolls.
+  // The list remains a fallback scroll owner for multi-file or exceptionally
+  // short layouts, but an ordinary single-image panel fits without moving it.
   expect(geometry!.list).not.toBeNull();
   const list = geometry!.list!;
   expect(list.overflow).toBe("auto");
-  expect(list.scrollHeight).toBeGreaterThan(list.height);
+  expect(list.scrollHeight).toBe(list.height);
 
-  // Header and Send attachments stay visible while the list scrolls.
+  // Header and Send attachments stay visible while inspecting the preview.
   await expect(dialog.getByRole("heading", { name: t("upload.dialogTitle") })).toBeVisible();
   await expect(
     dialog.getByRole("button", { name: t("upload.sendAttachments") })
   ).toBeVisible();
 
-  // Wheel-scrolling inside the list moves only the list, never the page.
-  const listLocator = page.locator(".upload-staging-list");
-  await listLocator.hover();
-  for (let index = 0; index < 4; index += 1) {
-    await page.mouse.wheel(0, 120);
-  }
+  // A large prepared image pans in both directions inside its own viewport;
+  // neither the staging list nor the page moves with it.
+  const previewLocator = dialog.locator(".upload-preview-viewport");
+  const previewImage = previewLocator.locator(".upload-staging-preview");
+  await expect(previewImage).toBeVisible();
+  await previewImage.evaluate((image) => {
+    image.style.inlineSize = "1200px";
+  });
+  await previewLocator.hover();
+  await page.mouse.wheel(160, 160);
   await expect
-    .poll(async () => (await stagingGeometry(page))!.list!.scrollTop)
+    .poll(async () => previewLocator.evaluate((preview) => preview.scrollTop))
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () => previewLocator.evaluate((preview) => preview.scrollLeft))
     .toBeGreaterThan(0);
   const after = await stagingGeometry(page);
+  expect(after!.list!.scrollTop).toBe(0);
   expect(after!.pageScrollY).toBe(0);
 });
 

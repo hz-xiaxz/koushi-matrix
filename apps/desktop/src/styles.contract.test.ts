@@ -171,6 +171,16 @@ describe("styles.css token system", () => {
     expect(list).toMatch(/min-height:\s*0/);
     expect(list).toMatch(/overflow-y:\s*auto/);
     expect(list).toMatch(/overscroll-behavior:\s*contain/);
+
+    const preview = selectorBlock(".upload-preview-viewport");
+    // A prepared image pans inside its own bounded surface; controls outside
+    // this viewport do not move when the user inspects a large image.
+    expect(preview).toMatch(/overflow:\s*auto/);
+    expect(preview).toMatch(/overscroll-behavior:\s*contain/);
+
+    const previewImage = selectorBlock(".upload-staging-preview");
+    expect(previewImage).toMatch(/max-inline-size:\s*none/);
+    expect(previewImage).toMatch(/max-block-size:\s*none/);
   });
 
   test("selected room row uses a logical brand start bar", () => {
