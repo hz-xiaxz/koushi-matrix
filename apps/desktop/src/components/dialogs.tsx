@@ -884,9 +884,6 @@ export function UploadStagingDialog({
                 {formatUploadBytes(item.byte_count)}
               </span>
             </div>
-            {item.kind.kind === "image" && item.preparation.kind === "ready" ? (
-              <PreparedUploadPreview item={item} loadPreview={loadPreview} />
-            ) : null}
             <label className="upload-staging-caption">
               <span>{t("upload.captionForFile", { filename: item.filename })}</span>
               <ImeTextField
@@ -920,6 +917,9 @@ export function UploadStagingDialog({
                 preparation={item.preparation}
                 onSelectOutput={onSelectOutput}
               />
+            ) : null}
+            {item.kind.kind === "image" && item.preparation.kind === "ready" ? (
+              <PreparedUploadPreview item={item} loadPreview={loadPreview} />
             ) : null}
           </article>
         ))}

@@ -152,6 +152,11 @@ describe("styles.css token system", () => {
   });
 
   test("upload staging panel bounds to available height with a dedicated scroll owner (#515)", () => {
+    const timeline = selectorBlock(".timeline-scroll");
+    // A long virtual timeline must consume the remaining height instead of
+    // shrinking composer siblings from its intrinsic scroll extent.
+    expect(timeline).toMatch(/flex:\s*1\s+1\s+0/);
+
     const dialog = selectorBlock(".upload-staging-dialog");
     // Three-row layout: header / minmax(0, 1fr) scroll body / footer.
     expect(dialog).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/);
@@ -166,6 +171,20 @@ describe("styles.css token system", () => {
     expect(list).toMatch(/min-height:\s*0/);
     expect(list).toMatch(/overflow-y:\s*auto/);
     expect(list).toMatch(/overscroll-behavior:\s*contain/);
+
+    const preview = selectorBlock(".upload-preview-viewport");
+    // A prepared image pans inside its own bounded surface; controls outside
+    // this viewport do not move when the user inspects a large image.
+    expect(preview).toMatch(/overflow:\s*auto/);
+    expect(preview).toMatch(/overscroll-behavior:\s*contain/);
+
+    const previewImage = selectorBlock(".upload-staging-preview");
+    // Prepared output dimensions must remain visible: forcing a 100% minimum
+    // would upscale resized variants and make them look unchanged but blurrier.
+    expect(previewImage).toMatch(/min-inline-size:\s*0/);
+    expect(previewImage).not.toMatch(/min-inline-size:\s*100%/);
+    expect(previewImage).toMatch(/max-inline-size:\s*none/);
+    expect(previewImage).toMatch(/max-block-size:\s*none/);
   });
 
   test("selected room row uses a logical brand start bar", () => {

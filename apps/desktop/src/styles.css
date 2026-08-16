@@ -22,7 +22,8 @@
   --upload-output-option-gap: 2px;
   --upload-output-group-padding: 3px;
   --upload-output-toolbar-gap: 8px;
-  --upload-preview-viewport-size: 240px;
+  --upload-preview-viewport-min-size: 120px;
+  --upload-preview-viewport-size: 180px;
   color-scheme: light dark;
 
   --font-system-ui:
@@ -2143,7 +2144,10 @@ button:disabled {
 }
 
 .timeline-scroll {
-  flex: 1 1 auto;
+  /* The timeline owns only the space left by fixed composer surfaces. Using
+     its intrinsic (virtual-scroll) height as the flex basis can shrink an
+     upload staging dialog down to its header in long rooms. */
+  flex: 1 1 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
@@ -5320,13 +5324,18 @@ mark {
   font-size: 11px;
 }
 
-/* One viewport that keeps its height across conversions: the preview is dimmed
-   while recompressing, never unmounted or collapsed. */
+/* Keep attachment decisions visible above a bounded pan surface. Large images
+   retain their prepared pixel dimensions inside this viewport so users can
+   inspect them by scrolling in either direction without moving the controls. */
 .upload-preview-viewport {
   position: relative;
-  display: grid;
-  block-size: var(--upload-preview-viewport-size);
-  overflow: hidden;
+  block-size: clamp(
+    var(--upload-preview-viewport-min-size),
+    14vh,
+    var(--upload-preview-viewport-size)
+  );
+  overflow: auto;
+  overscroll-behavior: contain;
   border-radius: 7px;
 }
 
@@ -5348,14 +5357,24 @@ mark {
   );
 }
 
-.upload-staging-preview,
+.upload-staging-preview {
+  display: block;
+  inline-size: auto;
+  min-inline-size: 0;
+  block-size: auto;
+  max-inline-size: none;
+  max-block-size: none;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
 .upload-staging-preview-placeholder {
-  width: 100%;
+  inline-size: 100%;
   block-size: 100%;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface);
-  object-fit: contain;
 }
 
 .upload-staging-status {
