@@ -179,6 +179,10 @@ describe("styles.css token system", () => {
     expect(preview).toMatch(/overscroll-behavior:\s*contain/);
 
     const previewImage = selectorBlock(".upload-staging-preview");
+    // Prepared output dimensions must remain visible: forcing a 100% minimum
+    // would upscale resized variants and make them look unchanged but blurrier.
+    expect(previewImage).toMatch(/min-inline-size:\s*0/);
+    expect(previewImage).not.toMatch(/min-inline-size:\s*100%/);
     expect(previewImage).toMatch(/max-inline-size:\s*none/);
     expect(previewImage).toMatch(/max-block-size:\s*none/);
   });
