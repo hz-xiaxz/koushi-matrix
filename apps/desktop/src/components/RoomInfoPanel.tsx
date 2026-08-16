@@ -27,6 +27,8 @@ import type {
   RoomNotificationSettings,
   RoomKeyReshareOutcome,
   RoomSettingChange,
+  EncryptionDebugOperationOutcome,
+  EncryptionDebugOperationState,
   RoomSummary,
   LinkPreviewSettingsState,
   SettingsState,
@@ -50,7 +52,10 @@ export function RoomInfoPanel({
   onRepairRoomTimeline,
   inviteHistoryPolicy,
   onOpenRecovery,
-  onReturnToInvite
+  onReturnToInvite,
+  onForceNewOutboundSession,
+  onShareIndex0RoomKey,
+  encryptionDebugOperation
 }: {
   room: RoomSummary | null;
   roomManagement?: RoomManagementState;
@@ -69,6 +74,13 @@ export function RoomInfoPanel({
   inviteHistoryPolicy?: InviteHistoryPolicy | null;
   onOpenRecovery?: () => void;
   onReturnToInvite?: () => void;
+  onForceNewOutboundSession?: (
+    roomId: string
+  ) => EncryptionDebugOperationOutcome | Promise<EncryptionDebugOperationOutcome>;
+  onShareIndex0RoomKey?: (
+    roomId: string
+  ) => EncryptionDebugOperationOutcome | Promise<EncryptionDebugOperationOutcome>;
+  encryptionDebugOperation?: EncryptionDebugOperationState;
 }) {
   const roomId = room?.room_id ?? "";
   const roomName = room?.display_label ?? "";
@@ -135,6 +147,46 @@ export function RoomInfoPanel({
       setReshareState(await onReshareRoomKey(roomId));
     } catch {
       setReshareState("error");
+    }
+  }
+
+  const [debugConfirm, setDebugConfirm] = useState<"force" | "share" | null>(null);
+  const debugPending = encryptionDebugOperation?.state === "pending";
+  const debugOutcome =
+    encryptionDebugOperation?.state === "settled" ||
+    encryptionDebugOperation?.state === "failed"
+      ? encryptionDebugOperation.outcome
+      : null;
+
+  useEffect(() => {
+    setDebugConfirm(null);
+  }, [roomId]);
+
+  function runDebugOperation(kind: "force" | "share") {
+    setDebugConfirm(null);
+    if (kind === "force") {
+      void onForceNewOutboundSession?.(roomId);
+    } else {
+      void onShareIndex0RoomKey?.(roomId);
+    }
+  }
+
+  function debugOutcomeLabel(outcome: EncryptionDebugOperationOutcome): string {
+    switch (outcome) {
+      case "completed":
+        return t("room.encryptionDebugOutcomeCompleted");
+      case "refusedNotEncrypted":
+        return t("room.encryptionDebugOutcomeRefusedNotEncrypted");
+      case "refusedIndexAdvanced":
+        return t("room.encryptionDebugOutcomeRefusedIndexAdvanced");
+      case "cancelledStale":
+        return t("room.encryptionDebugOutcomeCancelledStale");
+      case "policyBlocked":
+        return t("room.encryptionDebugOutcomePolicyBlocked");
+      case "deadline":
+        return t("room.encryptionDebugOutcomeDeadline");
+      case "failed":
+        return t("room.encryptionDebugOutcomeFailed");
     }
   }
 
@@ -262,6 +314,69 @@ export function RoomInfoPanel({
               <p className="profile-settings-hint error">{t("room.reshareRoomKeysError")}</p>
             ) : null}
           </div>
+        ) : null}
+        {isEncrypted ? (
+          <section className="settings-section" aria-label={t("room.dangerousEncryptionDebugging")}>
+            <h3>{t("room.dangerousEncryptionDebugging")}</h3>
+            <p className="profile-settings-hint">
+              {t("room.dangerousEncryptionDebuggingWarning")}
+            </p>
+            <div className="room-key-actions">
+              <button
+                className="profile-settings-action"
+                type="button"
+                disabled={debugPending || !onForceNewOutboundSession}
+                onClick={() => {
+                  setDebugConfirm("force");
+                }}
+              >
+                {t("room.forceNewEncryptionSession")}
+              </button>
+              <button
+                className="profile-settings-action"
+                type="button"
+                disabled={debugPending || !onShareIndex0RoomKey}
+                onClick={() => {
+                  setDebugConfirm("share");
+                }}
+              >
+                {t("room.shareIndex0Key")}
+              </button>
+            </div>
+            {debugConfirm ? (
+              <div className="settings-detail-row">
+                <p className="profile-settings-hint">
+                  {debugConfirm === "force"
+                    ? t("room.forceNewEncryptionSessionConfirm")
+                    : t("room.shareIndex0KeyConfirm")}
+                </p>
+                <button
+                  className="profile-settings-action"
+                  type="button"
+                  disabled={debugPending}
+                  onClick={() => {
+                    runDebugOperation(debugConfirm);
+                  }}
+                >
+                  {t("room.confirm")}
+                </button>
+                <button
+                  className="profile-settings-action"
+                  type="button"
+                  onClick={() => {
+                    setDebugConfirm(null);
+                  }}
+                >
+                  {t("room.cancel")}
+                </button>
+              </div>
+            ) : null}
+            {debugOutcome ? (
+              <p className="profile-settings-hint success">
+                {debugOutcomeLabel(debugOutcome)}
+              </p>
+            ) : null}
+          </section>
         ) : null}
       </section>
 

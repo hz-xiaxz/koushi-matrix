@@ -726,6 +726,16 @@ pub enum RoomEvent {
         room_id: String,
         outcome: RoomKeyReshareOutcome,
     },
+    OutboundSessionForced {
+        request_id: RequestId,
+        room_id: String,
+        outcome: EncryptionDebugOperationOutcome,
+    },
+    Index0RoomKeyShared {
+        request_id: RequestId,
+        room_id: String,
+        outcome: EncryptionDebugOperationOutcome,
+    },
     RoomKeyRequestStateChanged {
         key: TimelineKey,
         event_id: String,
@@ -763,11 +773,18 @@ pub enum RoomKeyReshareOutcome {
     Sent {
         request_count: usize,
         recipient_count: usize,
+        failed_recipient_count: usize,
     },
     NoSession,
     NoRecipients,
     StaleSession,
 }
+
+/// Closed outcome of a manual encryption-debug operation (issue #538).
+/// Re-exported from koushi-state; tokens mirror the diagnostic allowlist and
+/// the aggregate detail (own/peer buckets, claim outcome, elapsed) is
+/// carried by the diagnostics only.
+pub use koushi_state::EncryptionDebugOperationOutcome;
 
 impl fmt::Debug for RoomEvent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -950,6 +967,26 @@ impl fmt::Debug for RoomEvent {
                 ..
             } => formatter
                 .debug_struct("RoomKeyReshared")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .field("outcome", outcome)
+                .finish(),
+            Self::OutboundSessionForced {
+                request_id,
+                outcome,
+                ..
+            } => formatter
+                .debug_struct("OutboundSessionForced")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .field("outcome", outcome)
+                .finish(),
+            Self::Index0RoomKeyShared {
+                request_id,
+                outcome,
+                ..
+            } => formatter
+                .debug_struct("Index0RoomKeyShared")
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("outcome", outcome)
@@ -2287,6 +2324,8 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
         | RoomEvent::RoomMemberModerated { .. }
         | RoomEvent::RoomMemberRoleUpdated { .. }
         | RoomEvent::RoomKeyReshared { .. }
+        | RoomEvent::OutboundSessionForced { .. }
+        | RoomEvent::Index0RoomKeyShared { .. }
         | RoomEvent::RoomKeyRequestStateChanged { .. }
         | RoomEvent::ComposerSlashCommandRejected { .. }
         | RoomEvent::MarkedAsRead { .. }
@@ -3739,8 +3778,14 @@ mod tests {
                 RoomKeyReshareOutcome::Sent {
                     request_count: 2,
                     recipient_count: 3,
+                    failed_recipient_count: 1,
                 },
-                serde_json::json!({"kind": "sent", "request_count": 2, "recipient_count": 3}),
+                serde_json::json!({
+                    "kind": "sent",
+                    "request_count": 2,
+                    "recipient_count": 3,
+                    "failed_recipient_count": 1
+                }),
             ),
             (
                 RoomKeyReshareOutcome::NoSession,

@@ -317,6 +317,8 @@ export interface DesktopApi {
   pinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   unpinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   reshareRoomKey(roomId: string): Promise<RoomKeyReshareOutcome>;
+  forceNewOutboundSession(roomId: string): Promise<EncryptionDebugOperationOutcome>;
+  shareIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome>;
   openActivity(): Promise<DesktopSnapshot>;
   closeActivity(): Promise<DesktopSnapshot>;
   setActivityTab(tab: ActivityTab): Promise<DesktopSnapshot>;
@@ -3165,6 +3167,14 @@ class BrowserFakeApi implements DesktopApi {
             candidateTarget.surface !== surface
         )
         .concat(target);
+  }
+
+  async forceNewOutboundSession(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return "completed";
+  }
+
+  async shareIndex0RoomKey(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return "completed";
   }
 
   async reshareRoomKey(_roomId: string): Promise<RoomKeyReshareOutcome> {

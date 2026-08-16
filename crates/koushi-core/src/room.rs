@@ -70,8 +70,9 @@ use koushi_sdk::{
 use koushi_state::{
     AppAction, AvatarImage, AvatarThumbnailState, BasicOperationRequest,
     DirectoryPreviewJoinability, DirectoryPreviewMembership, DirectoryQuery, DirectoryRoomPreview,
-    DirectoryRoomSummary, INVITE_ALREADY_IN_SPACE_MESSAGE, InviteDestination,
-    InviteDestinationResult, InviteDestinationResultKind, InvitePreview, InviteScopeSelection,
+    DirectoryRoomSummary, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
+    INVITE_ALREADY_IN_SPACE_MESSAGE, InviteDestination, InviteDestinationResult,
+    InviteDestinationResultKind, InvitePreview, InviteScopeSelection,
     MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
     OperationFailureKind, PinnedEvent, PinnedEventState, RoomHistoryVisibility, RoomJoinRule,
     RoomListFailureKind, RoomListSource, RoomMemberRole, RoomMemberSummary, RoomMentionPermission,
@@ -88,7 +89,10 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
 use crate::direct_message_classification::{DirectAccountDataSource, DirectClassificationState};
-use crate::event::{CoreEvent, ReportKind, RoomEvent, RoomKeyReshareOutcome};
+use crate::event::{
+    CoreEvent, EncryptionDebugOperationOutcome as CoreEncryptionDebugOutcome, ReportKind,
+    RoomEvent, RoomKeyReshareOutcome,
+};
 use crate::executor;
 use crate::failure::{CoreFailure, RoomFailureKind};
 use crate::ids::{RequestId, RuntimeConnectionId};
@@ -116,9 +120,11 @@ fn room_key_reshare_outcome_from_sdk(
         koushi_sdk::MatrixRoomKeyReshareOutcome::Sent {
             request_count,
             recipient_count,
+            failed_recipient_count,
         } => RoomKeyReshareOutcome::Sent {
             request_count,
             recipient_count,
+            failed_recipient_count,
         },
         koushi_sdk::MatrixRoomKeyReshareOutcome::NoSession => RoomKeyReshareOutcome::NoSession,
         koushi_sdk::MatrixRoomKeyReshareOutcome::NoRecipients => {
@@ -131,14 +137,20 @@ fn room_key_reshare_outcome_from_sdk(
 }
 
 fn record_manual_room_key_reshare(outcome: &koushi_sdk::MatrixRoomKeyReshareOutcome) {
-    let (token, request_count, recipient_count) = match outcome {
+    let (token, request_count, recipient_count, failed_recipient_count) = match outcome {
         koushi_sdk::MatrixRoomKeyReshareOutcome::Sent {
             request_count,
             recipient_count,
-        } => ("sent", *request_count, *recipient_count),
-        koushi_sdk::MatrixRoomKeyReshareOutcome::NoSession => ("no_session", 0, 0),
-        koushi_sdk::MatrixRoomKeyReshareOutcome::NoRecipients => ("no_recipients", 0, 0),
-        koushi_sdk::MatrixRoomKeyReshareOutcome::StaleSession => ("cancelled", 0, 0),
+            failed_recipient_count,
+        } => (
+            "sent",
+            *request_count,
+            *recipient_count,
+            *failed_recipient_count,
+        ),
+        koushi_sdk::MatrixRoomKeyReshareOutcome::NoSession => ("no_session", 0, 0, 0),
+        koushi_sdk::MatrixRoomKeyReshareOutcome::NoRecipients => ("no_recipients", 0, 0, 0),
+        koushi_sdk::MatrixRoomKeyReshareOutcome::StaleSession => ("cancelled", 0, 0, 0),
     };
     record(
         DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
@@ -151,13 +163,20 @@ fn record_manual_room_key_reshare(outcome: &koushi_sdk::MatrixRoomKeyReshareOutc
             .field(DiagnosticField::count(
                 "recipient_count",
                 recipient_count.try_into().unwrap_or(u64::MAX),
+            ))
+            .field(DiagnosticField::count(
+                "failed_recipient_count",
+                failed_recipient_count.try_into().unwrap_or(u64::MAX),
             )),
     );
 }
 
 const SPACE_MEMBER_REFRESH_CONNECTION_ID: RuntimeConnectionId = RuntimeConnectionId(0);
 const ROOM_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
-const ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
+// Long enough to cover the SDK encryption-debug operations' 10s monotonic
+// deadline plus inline settlement/reset, so Shutdown never aborts the actor
+// mid-join of an encryption-debug fence (issue #538).
+const ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(30);
 const ROOM_OBSERVATION_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -227,8 +246,10 @@ pub enum RoomMessage {
         backend_generation: u64,
     },
     /// The active account is logging out/switching/resetting while the
-    /// RoomActor stays alive for future sessions.
-    SessionCleared,
+    /// RoomActor stays alive for future sessions. The oneshot acknowledges
+    /// that the actor completed the encryption-debug cancel/join/settle
+    /// sequence before clearing the session (issue #538).
+    SessionCleared { ack: oneshot::Sender<()> },
     /// Observer relay: parent-only space links discovered in a room-list
     /// snapshot. RoomActor owns dedupe, server writes, and retry policy.
     MissingSpaceChildLinks { links: Vec<MissingSpaceChildLink> },
@@ -580,6 +601,17 @@ pub struct RoomActor {
     space_member_session_generation: u64,
     space_member_refresh_in_flight: Option<SpaceMemberRefreshFence>,
     space_member_refresh_pending: bool,
+    /// In-flight temporary dangerous encryption-debug operations (issue
+    /// #538): at most one per room, keyed by room id and fenced by request
+    /// id. A start is rejected only when that same room already has an
+    /// in-flight operation.
+    encryption_debug_fences: std::collections::HashMap<String, EncryptionDebugFence>,
+    /// Reliable nonblocking completion ingress for the encryption-debug
+    /// operation task (issue #538). Unbounded so the join during teardown
+    /// cannot deadlock on a full mailbox, and lossless so the reducer never
+    /// stays pending.
+    encryption_debug_completion_rx: mpsc::UnboundedReceiver<EncryptionDebugCompletion>,
+    encryption_debug_completion_tx: mpsc::UnboundedSender<EncryptionDebugCompletion>,
     action_tx: mpsc::Sender<Vec<AppAction>>,
     event_tx: broadcast::Sender<CoreEvent>,
     sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
@@ -601,6 +633,31 @@ struct SpaceMemberDemand {
     generation: u64,
     child_room_ids: BTreeSet<String>,
     demand_generation: u64,
+}
+
+/// Fence for the in-flight temporary dangerous encryption-debug operation
+/// (issue #538). Holds the cancellation sender (so logout/leave can stop
+/// the SDK executor's wire effects), the actor session snapshot (post-check
+/// fails closed if the session changed), and the spawned task handle for
+/// bounded join on teardown.
+struct EncryptionDebugFence {
+    request_id: RequestId,
+    room_id: String,
+    kind: EncryptionDebugOperationKind,
+    session: Arc<koushi_sdk::MatrixClientSession>,
+    cancel: broadcast::Sender<()>,
+    /// Actor-owned lifecycle flag: set on logout/leave so the spawned task's
+    /// validator fails closed before further wire effects.
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    join: executor::JoinHandle<()>,
+}
+
+/// Reliable completion result of the encryption-debug operation task.
+struct EncryptionDebugCompletion {
+    room_id: String,
+    request_id: RequestId,
+    kind: EncryptionDebugOperationKind,
+    outcome: CoreEncryptionDebugOutcome,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -654,6 +711,8 @@ impl RoomActor {
         account_work: AccountWorkScheduler,
     ) -> RoomActorHandle {
         let (tx, command_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
+        let (encryption_debug_completion_tx, encryption_debug_completion_rx) =
+            mpsc::unbounded_channel::<EncryptionDebugCompletion>();
         let (timeline_residency, timeline_residency_rx) = watch::channel(None);
         let (session_slot, _session_rx) = watch::channel(None);
         #[cfg(feature = "test-hooks")]
@@ -686,6 +745,9 @@ impl RoomActor {
             space_member_session_generation: 0,
             space_member_refresh_in_flight: None,
             space_member_refresh_pending: false,
+            encryption_debug_fences: std::collections::HashMap::new(),
+            encryption_debug_completion_rx,
+            encryption_debug_completion_tx: encryption_debug_completion_tx.clone(),
             action_tx,
             event_tx,
             sliding_sync_diagnostics,
@@ -707,9 +769,44 @@ impl RoomActor {
     }
 
     async fn run(mut self) {
-        while let Some(msg) = self.command_rx.recv().await {
+        loop {
+            let msg = tokio::select! {
+                msg = self.command_rx.recv() => match msg {
+                    Some(msg) => msg,
+                    None => break,
+                },
+                completion = self.encryption_debug_completion_rx.recv() => {
+                    let Some(completion) = completion else { continue };
+                    self.handle_encryption_debug_completion(completion).await;
+                    continue;
+                }
+            };
             match msg {
                 RoomMessage::Shutdown => {
+                    // Cancel and join every in-flight encryption-debug
+                    // operation to completion (no abort) before the actor
+                    // exits (issue #538), then settle CancelledStale and
+                    // reset the state machine so no reducer entry is left
+                    // pending.
+                    let fences = std::mem::take(&mut self.encryption_debug_fences);
+                    for (room_id, fence) in fences {
+                        fence
+                            .cancelled
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                        let _ = fence.cancel.send(());
+                        let _ = fence.join.await;
+                        self.emit_encryption_debug_outcome(
+                            fence.request_id,
+                            room_id.clone(),
+                            fence.kind,
+                            CoreEncryptionDebugOutcome::CancelledStale,
+                        )
+                        .await;
+                        self.reduce_reliable(vec![AppAction::EncryptionDebugOperationReset {
+                            room_id,
+                        }])
+                        .await;
+                    }
                     self.stop_observation().await;
                     break;
                 }
@@ -865,7 +962,32 @@ impl RoomActor {
                         self.room_list_backend_generation = None;
                     }
                 }
-                RoomMessage::SessionCleared => {
+                RoomMessage::SessionCleared { ack } => {
+                    // Cancel and join every in-flight encryption-debug
+                    // operation to completion before clearing the session
+                    // (issue #538): the SDK executor stops at the next
+                    // wire-effect boundary and runs cleanup before the task
+                    // returns; we never detach it (the operation is bounded
+                    // by its monotonic deadline and the completion lane is
+                    // nonblocking, so the join cannot deadlock).
+                    let fences = std::mem::take(&mut self.encryption_debug_fences);
+                    for (_, fence) in fences {
+                        fence
+                            .cancelled
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                        let _ = fence.cancel.send(());
+                        let _ = fence.join.await;
+                        // Inline fenced settlement before the session reset:
+                        // the state machine settles CancelledStale, then the
+                        // lifecycle reset returns it to Idle.
+                        self.emit_encryption_debug_outcome(
+                            fence.request_id,
+                            fence.room_id,
+                            fence.kind,
+                            CoreEncryptionDebugOutcome::CancelledStale,
+                        )
+                        .await;
+                    }
                     self.stop_observation().await;
                     self.reset_space_member_session();
                     self.session = None;
@@ -873,7 +995,12 @@ impl RoomActor {
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
                     self.clear_mention_candidates();
+                    // Acknowledge the teardown so the account actor can
+                    // proceed with session teardown only after the
+                    // encryption-debug operation was cancelled and settled.
+                    let _ = ack.send(());
                 }
+
                 RoomMessage::MissingSpaceChildLinks { links } => {
                     self.handle_missing_space_child_links(links).await;
                 }
@@ -948,9 +1075,54 @@ impl RoomActor {
                 RoomMessage::InspectObservationGeneration { response } => {
                     let _ = response.send(self.room_list_backend_generation);
                 }
+                _ => {}
             }
         }
     }
+
+    /// Fence-verified settlement of a queued encryption-debug completion:
+    /// inspect the fence first and take it only after request/room/kind
+    /// match, so a stale completion cannot consume an unrelated replacement
+    /// fence. Re-checks joined membership and the session pointer before
+    /// settling.
+    async fn handle_encryption_debug_completion(&mut self, completion: EncryptionDebugCompletion) {
+        let EncryptionDebugCompletion {
+            room_id,
+            request_id,
+            kind,
+            outcome,
+        } = completion;
+        let Some(fence) = self.encryption_debug_fences.get(&room_id) else {
+            return;
+        };
+        if fence.request_id != request_id || fence.room_id != room_id || fence.kind != kind {
+            return;
+        }
+        let fence = self
+            .encryption_debug_fences
+            .remove(&room_id)
+            .expect("matched fence");
+        let joined = match koushi_sdk::room_is_joined(&fence.session, &room_id).await {
+            Ok(joined) => joined,
+            Err(_) => false,
+        };
+        let outcome = if joined
+            && self
+                .session
+                .as_ref()
+                .is_some_and(|current| std::sync::Arc::ptr_eq(current, &fence.session))
+        {
+            outcome
+        } else {
+            // The session changed or the user left the room while the
+            // operation ran; fail closed rather than apply the result.
+            CoreEncryptionDebugOutcome::CancelledStale
+        };
+        self.emit_encryption_debug_outcome(request_id, room_id, kind, outcome)
+            .await;
+    }
+
+    fn placeholder_never_called() {}
 
     #[cfg(feature = "test-hooks")]
     async fn handle_test_visible_rooms_observed(
@@ -1292,6 +1464,19 @@ impl RoomActor {
                 room_id,
             } => {
                 self.handle_reshare_room_key(request_id, room_id).await;
+            }
+            RoomCommand::ForceNewOutboundSession {
+                request_id,
+                room_id,
+            } => {
+                self.handle_force_new_outbound_session(request_id, room_id)
+                    .await;
+            }
+            RoomCommand::ShareIndex0RoomKey {
+                request_id,
+                room_id,
+            } => {
+                self.handle_share_index0_room_key(request_id, room_id).await;
             }
             RoomCommand::UpdateRoomSetting {
                 request_id,
@@ -2580,6 +2765,376 @@ impl RoomActor {
         }
     }
 
+    fn map_force_new_outcome(
+        outcome: koushi_sdk::MatrixForceNewSessionOutcome,
+    ) -> CoreEncryptionDebugOutcome {
+        match outcome {
+            koushi_sdk::MatrixForceNewSessionOutcome::Completed => {
+                CoreEncryptionDebugOutcome::Completed
+            }
+            koushi_sdk::MatrixForceNewSessionOutcome::RefusedNotEncrypted => {
+                CoreEncryptionDebugOutcome::RefusedNotEncrypted
+            }
+            koushi_sdk::MatrixForceNewSessionOutcome::CancelledStale => {
+                CoreEncryptionDebugOutcome::CancelledStale
+            }
+            koushi_sdk::MatrixForceNewSessionOutcome::Failed => CoreEncryptionDebugOutcome::Failed,
+            koushi_sdk::MatrixForceNewSessionOutcome::Deadline => {
+                CoreEncryptionDebugOutcome::Deadline
+            }
+        }
+    }
+
+    fn map_index0_share_outcome(
+        outcome: koushi_sdk::MatrixIndex0ShareOutcome,
+    ) -> CoreEncryptionDebugOutcome {
+        match outcome {
+            koushi_sdk::MatrixIndex0ShareOutcome::Completed => {
+                CoreEncryptionDebugOutcome::Completed
+            }
+            koushi_sdk::MatrixIndex0ShareOutcome::RefusedNotEncrypted => {
+                CoreEncryptionDebugOutcome::RefusedNotEncrypted
+            }
+            koushi_sdk::MatrixIndex0ShareOutcome::RefusedIndexAdvanced => {
+                CoreEncryptionDebugOutcome::RefusedIndexAdvanced
+            }
+            koushi_sdk::MatrixIndex0ShareOutcome::NoSession => CoreEncryptionDebugOutcome::Failed,
+            koushi_sdk::MatrixIndex0ShareOutcome::NoRecipients => {
+                CoreEncryptionDebugOutcome::Failed
+            }
+            koushi_sdk::MatrixIndex0ShareOutcome::PolicyBlocked => {
+                CoreEncryptionDebugOutcome::PolicyBlocked
+            }
+            koushi_sdk::MatrixIndex0ShareOutcome::CancelledStale => {
+                CoreEncryptionDebugOutcome::CancelledStale
+            }
+            koushi_sdk::MatrixIndex0ShareOutcome::Deadline => CoreEncryptionDebugOutcome::Deadline,
+            koushi_sdk::MatrixIndex0ShareOutcome::Failed => CoreEncryptionDebugOutcome::Failed,
+        }
+    }
+
+    fn force_new_outcome_token(outcome: koushi_sdk::MatrixForceNewSessionOutcome) -> &'static str {
+        match outcome {
+            koushi_sdk::MatrixForceNewSessionOutcome::Completed => "completed",
+            koushi_sdk::MatrixForceNewSessionOutcome::RefusedNotEncrypted => {
+                "refused_not_encrypted"
+            }
+            koushi_sdk::MatrixForceNewSessionOutcome::CancelledStale => "cancelled_stale",
+            koushi_sdk::MatrixForceNewSessionOutcome::Failed => "failed",
+            koushi_sdk::MatrixForceNewSessionOutcome::Deadline => "deadline",
+        }
+    }
+
+    fn index0_share_outcome_token(outcome: koushi_sdk::MatrixIndex0ShareOutcome) -> &'static str {
+        match outcome {
+            koushi_sdk::MatrixIndex0ShareOutcome::Completed => "completed",
+            koushi_sdk::MatrixIndex0ShareOutcome::RefusedNotEncrypted => "refused_not_encrypted",
+            koushi_sdk::MatrixIndex0ShareOutcome::RefusedIndexAdvanced => "refused_index_advanced",
+            koushi_sdk::MatrixIndex0ShareOutcome::NoSession => "failed",
+            koushi_sdk::MatrixIndex0ShareOutcome::NoRecipients => "failed",
+            koushi_sdk::MatrixIndex0ShareOutcome::PolicyBlocked => "policy_blocked",
+            koushi_sdk::MatrixIndex0ShareOutcome::CancelledStale => "cancelled_stale",
+            koushi_sdk::MatrixIndex0ShareOutcome::Deadline => "deadline",
+            koushi_sdk::MatrixIndex0ShareOutcome::Failed => "failed",
+        }
+    }
+
+    fn claim_outcome_token(outcome: koushi_sdk::MatrixIndex0ClaimOutcome) -> &'static str {
+        match outcome {
+            koushi_sdk::MatrixIndex0ClaimOutcome::NotNeeded => "not_needed",
+            koushi_sdk::MatrixIndex0ClaimOutcome::Succeeded => "succeeded",
+            koushi_sdk::MatrixIndex0ClaimOutcome::Failed => "failed",
+            koushi_sdk::MatrixIndex0ClaimOutcome::Deadline => "deadline",
+        }
+    }
+
+    fn record_force_new_outbound_session_diagnostic(
+        summary: &koushi_sdk::MatrixForceNewSessionSummary,
+    ) {
+        record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_debug", "operation")
+                .field(DiagnosticField::token(
+                    "operation",
+                    "force_new_outbound_session",
+                ))
+                .field(DiagnosticField::token(
+                    "outcome",
+                    Self::force_new_outcome_token(summary.outcome),
+                ))
+                .field(DiagnosticField::count(
+                    "fresh",
+                    u64::from(summary.fresh_session_created),
+                ))
+                .field(DiagnosticField::boolean(
+                    "index_after_set",
+                    summary.message_index.is_some(),
+                ))
+                .field(DiagnosticField::count(
+                    "index_after",
+                    summary.message_index.map(u64::from).unwrap_or(0),
+                ))
+                .field(DiagnosticField::count("elapsed_ms", summary.elapsed_ms))
+                .field(DiagnosticField::count("room_event_sent", 0))
+                .field(DiagnosticField::count("index0_consumed", 0)),
+        );
+    }
+
+    fn record_index0_share_diagnostic(summary: &koushi_sdk::MatrixIndex0ShareSummary) {
+        record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_debug", "operation")
+                .field(DiagnosticField::token("operation", "share_index0"))
+                .field(DiagnosticField::token(
+                    "outcome",
+                    Self::index0_share_outcome_token(summary.outcome),
+                ))
+                .field(DiagnosticField::boolean(
+                    "index_before_set",
+                    summary.message_index_before.is_some(),
+                ))
+                .field(DiagnosticField::count(
+                    "index_before",
+                    summary.message_index_before.map(u64::from).unwrap_or(0),
+                ))
+                .field(DiagnosticField::boolean(
+                    "index_after_set",
+                    summary.message_index_after.is_some(),
+                ))
+                .field(DiagnosticField::count(
+                    "index_after",
+                    summary.message_index_after.map(u64::from).unwrap_or(0),
+                ))
+                .field(DiagnosticField::count(
+                    "own_eligible",
+                    summary.own_eligible.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "own_accepted",
+                    summary.own_accepted.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "own_missing",
+                    summary.own_missing.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "peer_eligible",
+                    summary.peer_eligible.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "peer_accepted",
+                    summary.peer_accepted.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "peer_missing",
+                    summary.peer_missing.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "peer_users_zero_accepted",
+                    summary
+                        .peer_users_with_zero_accepted
+                        .try_into()
+                        .unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::token(
+                    "claim",
+                    Self::claim_outcome_token(summary.claim),
+                ))
+                .field(DiagnosticField::count("elapsed_ms", summary.elapsed_ms))
+                .field(DiagnosticField::count("room_event_sent", 0))
+                .field(DiagnosticField::count("index0_consumed", 0)),
+        );
+    }
+
+    fn record_encryption_debug_failed(operation: &'static str) {
+        record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_debug", "operation")
+                .field(DiagnosticField::token("operation", operation))
+                .field(DiagnosticField::token("outcome", "failed"))
+                .field(DiagnosticField::count("room_event_sent", 0))
+                .field(DiagnosticField::count("index0_consumed", 0)),
+        );
+    }
+
+    async fn handle_force_new_outbound_session(&mut self, request_id: RequestId, room_id: String) {
+        self.handle_encryption_debug_operation(
+            request_id,
+            room_id,
+            EncryptionDebugOperationKind::ForceNewOutboundSession,
+        )
+        .await;
+    }
+
+    async fn handle_share_index0_room_key(&mut self, request_id: RequestId, room_id: String) {
+        self.handle_encryption_debug_operation(
+            request_id,
+            room_id,
+            EncryptionDebugOperationKind::ShareIndex0Key,
+        )
+        .await;
+    }
+
+    /// Shared body of the two temporary dangerous encryption-debug controls
+    /// (issue #538). Runs the SDK operation (bounded by the SDK's monotonic
+    /// deadline), dispatches the Rust-owned state-machine actions (Started
+    /// then Settled/Failed), and emits the typed RoomEvent. The session must
+    /// still be the one the operation started with when it completes;
+    /// otherwise the outcome is `CancelledStale`.
+    async fn handle_encryption_debug_operation(
+        &mut self,
+        request_id: RequestId,
+        room_id: String,
+        kind: EncryptionDebugOperationKind,
+    ) {
+        // In-flight registry: at most one encryption-debug operation per
+        // room; a concurrent start for the same room is rejected, while
+        // other rooms remain usable (issue #538).
+        if self.encryption_debug_fences.contains_key(&room_id) {
+            self.emit_encryption_debug_outcome(
+                request_id,
+                room_id,
+                kind,
+                CoreEncryptionDebugOutcome::Failed,
+            )
+            .await;
+            return;
+        }
+        let Some(session) = &self.session else {
+            self.emit_encryption_debug_outcome(
+                request_id,
+                room_id,
+                kind,
+                CoreEncryptionDebugOutcome::CancelledStale,
+            )
+            .await;
+            return;
+        };
+        let task_session = std::sync::Arc::clone(session);
+        self.reduce_reliable(vec![AppAction::EncryptionDebugOperationStarted {
+            request_id: request_id.sequence,
+            room_id: room_id.clone(),
+            kind,
+        }])
+        .await;
+
+        // Cancellable task: the actor loop stays responsive while the SDK
+        // executor runs, so logout/leave can signal cancellation and join.
+        let (cancel_tx, mut cancel_rx) = broadcast::channel::<()>(1);
+        let cancelled_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let task_cancelled = std::sync::Arc::clone(&cancelled_flag);
+        let completion_tx = self.encryption_debug_completion_tx.clone();
+        let op_room_id = room_id.clone();
+        let op_request_id = request_id;
+        let session_for_fence = std::sync::Arc::clone(session);
+        let join = executor::spawn(async move {
+            let outcome = match kind {
+                EncryptionDebugOperationKind::ForceNewOutboundSession => {
+                    let validate: Box<dyn Fn() -> bool + Send + Sync> =
+                        Box::new(move || !task_cancelled.load(std::sync::atomic::Ordering::SeqCst));
+                    match koushi_sdk::force_new_outbound_session(
+                        &task_session,
+                        &op_room_id,
+                        &mut cancel_rx,
+                        validate,
+                    )
+                    .await
+                    {
+                        Ok(summary) => {
+                            RoomActor::record_force_new_outbound_session_diagnostic(&summary);
+                            RoomActor::map_force_new_outcome(summary.outcome)
+                        }
+                        Err(_) => {
+                            RoomActor::record_encryption_debug_failed("force_new_outbound_session");
+                            CoreEncryptionDebugOutcome::Failed
+                        }
+                    }
+                }
+                EncryptionDebugOperationKind::ShareIndex0Key => {
+                    let validate: Box<dyn Fn() -> bool + Send + Sync> =
+                        Box::new(move || !task_cancelled.load(std::sync::atomic::Ordering::SeqCst));
+                    match koushi_sdk::share_index0_room_key(
+                        &task_session,
+                        &op_room_id,
+                        &mut cancel_rx,
+                        validate,
+                    )
+                    .await
+                    {
+                        Ok(summary) => {
+                            RoomActor::record_index0_share_diagnostic(&summary);
+                            RoomActor::map_index0_share_outcome(summary.outcome)
+                        }
+                        Err(_) => {
+                            RoomActor::record_encryption_debug_failed("share_index0");
+                            CoreEncryptionDebugOutcome::Failed
+                        }
+                    }
+                }
+            };
+            // Reliable nonblocking completion lane (unbounded): the actor
+            // may be mid-teardown (SessionCleared joins this task); teardown
+            // settles inline, and a queued completion is consumed by the
+            // select loop and dropped as stale if the fence is gone.
+            let _ = completion_tx.send(EncryptionDebugCompletion {
+                room_id: op_room_id,
+                request_id: op_request_id,
+                kind,
+                outcome,
+            });
+        });
+        self.encryption_debug_fences.insert(
+            room_id.clone(),
+            EncryptionDebugFence {
+                request_id,
+                room_id,
+                kind,
+                session: session_for_fence,
+                cancel: cancel_tx,
+                cancelled: cancelled_flag,
+                join,
+            },
+        );
+    }
+
+    async fn emit_encryption_debug_outcome(
+        &self,
+        request_id: RequestId,
+        room_id: String,
+        kind: EncryptionDebugOperationKind,
+        outcome: CoreEncryptionDebugOutcome,
+    ) {
+        let event = match kind {
+            EncryptionDebugOperationKind::ForceNewOutboundSession => {
+                CoreEvent::Room(RoomEvent::OutboundSessionForced {
+                    request_id,
+                    room_id: room_id.clone(),
+                    outcome,
+                })
+            }
+            EncryptionDebugOperationKind::ShareIndex0Key => {
+                CoreEvent::Room(RoomEvent::Index0RoomKeyShared {
+                    request_id,
+                    room_id: room_id.clone(),
+                    outcome,
+                })
+            }
+        };
+        self.emit(event);
+        let action = match outcome {
+            CoreEncryptionDebugOutcome::Completed => AppAction::EncryptionDebugOperationSettled {
+                request_id: request_id.sequence,
+                room_id,
+                kind,
+                outcome,
+            },
+            _ => AppAction::EncryptionDebugOperationFailed {
+                request_id: request_id.sequence,
+                room_id,
+                kind,
+                outcome,
+            },
+        };
+        self.reduce_reliable(vec![action]).await;
+    }
+
     async fn handle_update_room_setting(
         &self,
         request_id: RequestId,
@@ -2848,7 +3403,33 @@ impl RoomActor {
         }
     }
 
-    async fn handle_leave_room(&self, request_id: RequestId, room_id: String) {
+    async fn handle_leave_room(&mut self, request_id: RequestId, room_id: String) {
+        // Cancel and join any in-flight encryption-debug operation for this
+        // room before the leave request (issue #538): the SDK executor stops
+        // at the next wire-effect boundary and runs cleanup, so no manual
+        // request survives into the leave.
+        if let Some(fence) = self.encryption_debug_fences.remove(&room_id) {
+            fence
+                .cancelled
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = fence.cancel.send(());
+            let _ = fence.join.await;
+            self.emit_encryption_debug_outcome(
+                fence.request_id,
+                fence.room_id,
+                fence.kind,
+                CoreEncryptionDebugOutcome::CancelledStale,
+            )
+            .await;
+        }
+        // Unconditionally reset the operation state machine for this room
+        // before the leave request (also when no fence exists, i.e. a
+        // previously Settled/Failed state) so a failed leave cannot strand
+        // Pending or keep a stale terminal state (issue #538).
+        self.reduce_reliable(vec![AppAction::EncryptionDebugOperationReset {
+            room_id: room_id.clone(),
+        }])
+        .await;
         let Some(_session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
@@ -9177,7 +9758,12 @@ pub mod tests {
                 .await
         );
         stop_ack_rx.await.expect("stop acknowledgement");
-        assert!(handle.send(RoomMessage::SessionCleared).await);
+        let (ack_tx, _ack_rx) = oneshot::channel();
+        assert!(
+            handle
+                .send(RoomMessage::SessionCleared { ack: ack_tx })
+                .await
+        );
         assert!(handle.send(RoomMessage::Shutdown).await);
         tokio::time::timeout(std::time::Duration::from_secs(5), handle.join())
             .await

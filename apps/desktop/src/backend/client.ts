@@ -700,6 +700,14 @@ class TauriDesktopApi implements DesktopApi {
     return invoke<RoomKeyReshareOutcome>("reshare_room_key", { roomId });
   }
 
+  async forceNewOutboundSession(roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return invoke<EncryptionDebugOperationOutcome>("force_new_outbound_session", { roomId });
+  }
+
+  async shareIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return invoke<EncryptionDebugOperationOutcome>("share_index0_room_key", { roomId });
+  }
+
   async loadRoomSettings(roomId: string): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("load_room_settings", { roomId });
   }

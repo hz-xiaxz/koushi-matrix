@@ -708,6 +708,26 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             room_id,
             kind,
         } => room::handle_unpin_event_failed(state, request_id, room_id, kind),
+        AppAction::EncryptionDebugOperationStarted {
+            request_id,
+            room_id,
+            kind,
+        } => room::handle_encryption_debug_started(state, request_id, room_id, kind),
+        AppAction::EncryptionDebugOperationSettled {
+            request_id,
+            room_id,
+            kind,
+            outcome,
+        } => room::handle_encryption_debug_settled(state, request_id, room_id, kind, outcome),
+        AppAction::EncryptionDebugOperationFailed {
+            request_id,
+            room_id,
+            kind,
+            outcome,
+        } => room::handle_encryption_debug_failed(state, request_id, room_id, kind, outcome),
+        AppAction::EncryptionDebugOperationReset { room_id } => {
+            room::handle_encryption_debug_reset(state, room_id)
+        }
         AppAction::RoomMarkedAsReadRequested {
             request_id,
             room_id,

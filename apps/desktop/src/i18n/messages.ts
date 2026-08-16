@@ -420,6 +420,21 @@ export type MessageId =
   | "room.reshareRoomKeysNoRecipients"
   | "room.reshareRoomKeysStaleSession"
   | "room.reshareRoomKeysError"
+  | "room.dangerousEncryptionDebugging"
+  | "room.dangerousEncryptionDebuggingWarning"
+  | "room.forceNewEncryptionSession"
+  | "room.shareIndex0Key"
+  | "room.forceNewEncryptionSessionConfirm"
+  | "room.shareIndex0KeyConfirm"
+  | "room.confirm"
+  | "room.cancel"
+  | "room.encryptionDebugOutcomeCompleted"
+  | "room.encryptionDebugOutcomeRefusedNotEncrypted"
+  | "room.encryptionDebugOutcomeRefusedIndexAdvanced"
+  | "room.encryptionDebugOutcomeCancelledStale"
+  | "room.encryptionDebugOutcomePolicyBlocked"
+  | "room.encryptionDebugOutcomeDeadline"
+  | "room.encryptionDebugOutcomeFailed"
   | "room.saveAccess"
   | "room.saveHistoryVisibility"
   | "room.saveJoinRule"
@@ -1698,6 +1713,27 @@ const en: Catalog = {
   "room.reshareRoomKeysNoRecipients": "No eligible devices need this room key.",
   "room.reshareRoomKeysStaleSession": "The active room key changed. Try again.",
   "room.reshareRoomKeysError": "Could not reshare room keys.",
+  "room.dangerousEncryptionDebugging": "Dangerous encryption debugging",
+  "room.dangerousEncryptionDebuggingWarning":
+    "Temporary diagnostic controls. Rotation affects subsequent encrypted messages; key sharing cannot prove that a recipient received or stored the key.",
+  "room.forceNewEncryptionSession": "Force new encryption session",
+  "room.shareIndex0Key": "Share index-0 key with room recipients",
+  "room.forceNewEncryptionSessionConfirm":
+    "This discards the current encryption session and creates a fresh one at message index 0. Repeated clicks may create additional sessions. Continue?",
+  "room.shareIndex0KeyConfirm":
+    "This shares the index-0 key of the current session with every eligible recipient device. It does not prove recipient receipt or storage. If the session has advanced past index 0, force a new session first. Continue?",
+  "room.confirm": "Confirm",
+  "room.cancel": "Cancel",
+  "room.encryptionDebugOutcomeCompleted": "Operation completed.",
+  "room.encryptionDebugOutcomeRefusedNotEncrypted": "This room is not encrypted.",
+  "room.encryptionDebugOutcomeRefusedIndexAdvanced":
+    "The session has advanced past index 0. Force a new encryption session first.",
+  "room.encryptionDebugOutcomeCancelledStale":
+    "The operation was cancelled because the session or room changed.",
+  "room.encryptionDebugOutcomePolicyBlocked":
+    "Recipient policy blocked the share.",
+  "room.encryptionDebugOutcomeDeadline": "The operation timed out.",
+  "room.encryptionDebugOutcomeFailed": "The operation failed.",
   "room.saveAccess": "Save access",
   "room.saveHistoryVisibility": "Save history visibility",
   "room.saveJoinRule": "Save join rule",
@@ -2877,6 +2913,26 @@ const ja: Catalog = {
   "room.reshareRoomKeysNoRecipients": "このルーム鍵を必要とする対象デバイスはありません。",
   "room.reshareRoomKeysStaleSession": "有効なルーム鍵が変わりました。もう一度お試しください。",
   "room.reshareRoomKeysError": "ルーム鍵を再共有できませんでした。",
+  "room.dangerousEncryptionDebugging": "危険な暗号化デバッグ",
+  "room.dangerousEncryptionDebuggingWarning":
+    "一時的な診断用コントロールです。ローテーションは以降の暗号化メッセージに影響します。鍵の共有は、受信者が鍵を受け取り・保存したことを証明するものではありません。",
+  "room.forceNewEncryptionSession": "新しい暗号化セッションを作成",
+  "room.shareIndex0Key": "インデックス0の鍵をルーム参加者に共有",
+  "room.forceNewEncryptionSessionConfirm":
+    "現在の暗号化セッションを破棄し、メッセージインデックス0の新しいセッションを作成します。繰り返しクリックすると追加のセッションが作成されることがあります。続行しますか？",
+  "room.shareIndex0KeyConfirm":
+    "現在のセッションのインデックス0の鍵を、対象となるすべての受信デバイスに共有します。受信者の受け取り・保存の証明にはなりません。セッションがインデックス0を過ぎている場合は、先に新しいセッションを作成してください。続行しますか？",
+  "room.confirm": "確認",
+  "room.cancel": "キャンセル",
+  "room.encryptionDebugOutcomeCompleted": "操作が完了しました。",
+  "room.encryptionDebugOutcomeRefusedNotEncrypted": "このルームは暗号化されていません。",
+  "room.encryptionDebugOutcomeRefusedIndexAdvanced":
+    "セッションはインデックス0を過ぎています。先に新しい暗号化セッションを作成してください。",
+  "room.encryptionDebugOutcomeCancelledStale":
+    "セッションまたはルームが変更されたため、操作はキャンセルされました。",
+  "room.encryptionDebugOutcomePolicyBlocked": "受信者ポリシーにより共有がブロックされました。",
+  "room.encryptionDebugOutcomeDeadline": "操作がタイムアウトしました。",
+  "room.encryptionDebugOutcomeFailed": "操作が失敗しました。",
   "room.saveAccess": "アクセス設定を保存",
   "room.saveHistoryVisibility": "履歴の表示範囲を保存",
   "room.saveJoinRule": "参加ルールを保存",
