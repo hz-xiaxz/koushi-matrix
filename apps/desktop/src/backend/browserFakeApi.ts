@@ -86,7 +86,7 @@ import type {
   SpaceMemberEntry,
   SpaceMembersState,
   SecureBackupGateState,
-  type EncryptionDebugOperationOutcome
+  EncryptionDebugOperationOutcome
 } from "../domain/types";
 import {
   DEFAULT_SLIDING_SYNC_DIAGNOSTICS,
@@ -3767,7 +3767,8 @@ class BrowserFakeApi implements DesktopApi {
 
     const entry = this.snapshot.state.domain.room_interactions[roomId] ?? {
       pinned_events: [],
-      pin_operation: { kind: "idle" as const }
+      pin_operation: { kind: "idle" as const },
+      encryption_debug_operation: { state: "idle" as const }
     };
     const alreadyPinned = entry.pinned_events.some((event) => event.event_id === eventId);
     this.snapshot.state.domain.room_interactions = {
@@ -3788,7 +3789,8 @@ class BrowserFakeApi implements DesktopApi {
                 thread_root_event_id: null
               }
             ],
-        pin_operation: { kind: "idle" }
+        pin_operation: { kind: "idle" },
+        encryption_debug_operation: { state: "idle" }
       }
     };
     return this.getSnapshot();
@@ -3801,13 +3803,15 @@ class BrowserFakeApi implements DesktopApi {
 
     const entry = this.snapshot.state.domain.room_interactions[roomId] ?? {
       pinned_events: [],
-      pin_operation: { kind: "idle" as const }
+      pin_operation: { kind: "idle" as const },
+      encryption_debug_operation: { state: "idle" as const }
     };
     this.snapshot.state.domain.room_interactions = {
       ...this.snapshot.state.domain.room_interactions,
       [roomId]: {
         pinned_events: entry.pinned_events.filter((event) => event.event_id !== eventId),
-        pin_operation: { kind: "idle" }
+        pin_operation: { kind: "idle" },
+        encryption_debug_operation: { state: "idle" }
       }
     };
     return this.getSnapshot();

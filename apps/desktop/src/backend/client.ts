@@ -43,7 +43,8 @@ import type {
   FilesViewScope,
   SubmissionResponse,
   ThreadOpenIntent,
-  ThreadsListScope
+  ThreadsListScope,
+  EncryptionDebugOperationOutcome
 } from "../domain/types";
 import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
 import type { RequestId, TimelineKey } from "../domain/coreEvents";

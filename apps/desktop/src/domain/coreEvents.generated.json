@@ -217,7 +217,7 @@
         "emojis": [
           {
             "description": "Dog",
-            "symbol": "🐶"
+            "symbol": "\ud83d\udc36"
           }
         ],
         "kind": "sasPresented",
@@ -423,7 +423,8 @@
         "outcome": {
           "kind": "sent",
           "recipient_count": 3,
-          "request_count": 2
+          "request_count": 2,
+          "failed_recipient_count": 0
         },
         "request_id": {
           "connection_id": 3,
@@ -911,7 +912,7 @@
             "reactions": [
               {
                 "count": 2,
-                "key": "👍",
+                "key": "\ud83d\udc4d",
                 "my_reaction_event_id": "$reaction:test",
                 "reacted_by_me": true,
                 "sender_preview": [
@@ -1024,7 +1025,7 @@
                 "reactions": [
                   {
                     "count": 2,
-                    "key": "👍",
+                    "key": "\ud83d\udc4d",
                     "my_reaction_event_id": "$reaction:test",
                     "reacted_by_me": true,
                     "sender_preview": [
