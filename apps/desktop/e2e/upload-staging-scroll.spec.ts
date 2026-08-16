@@ -95,6 +95,16 @@ test("main composer staging panel stays bounded and scrolls at a short viewport"
 }) => {
   await page.setViewportSize(SHORT_VIEWPORT);
   await gotoReadyShell(page);
+  // Production timelines can have a very large virtual scroll extent. The
+  // flex parent must size the timeline from the remaining viewport height,
+  // rather than using that virtual extent as its flex basis and shrinking the
+  // staging panel down to its header.
+  await page.evaluate(() => {
+    const timeline = document.querySelector<HTMLElement>(".timeline-scroll");
+    if (timeline) {
+      timeline.style.height = "100000px";
+    }
+  });
   await page.evaluate(() => {
     window.__harness.setCommandResponse("download_media", () => window.__harness.currentSnapshot());
     window.__harness.clearInvocations();
@@ -107,6 +117,9 @@ test("main composer staging panel stays bounded and scrolls at a short viewport"
 
   const dialog = page.getByRole("dialog", { name: t("upload.dialogTitle") });
   await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".upload-staging-list")).toBeVisible();
+  await expect(dialog.locator(".upload-preview-viewport")).toBeVisible();
+  await expect(dialog.locator(".upload-output-toolbar")).toBeVisible();
 
   const geometry = await stagingGeometry(page);
   expect(geometry).not.toBeNull();

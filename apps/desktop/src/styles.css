@@ -2143,7 +2143,10 @@ button:disabled {
 }
 
 .timeline-scroll {
-  flex: 1 1 auto;
+  /* The timeline owns only the space left by fixed composer surfaces. Using
+     its intrinsic (virtual-scroll) height as the flex basis can shrink an
+     upload staging dialog down to its header in long rooms. */
+  flex: 1 1 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;

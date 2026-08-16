@@ -152,6 +152,11 @@ describe("styles.css token system", () => {
   });
 
   test("upload staging panel bounds to available height with a dedicated scroll owner (#515)", () => {
+    const timeline = selectorBlock(".timeline-scroll");
+    // A long virtual timeline must consume the remaining height instead of
+    // shrinking composer siblings from its intrinsic scroll extent.
+    expect(timeline).toMatch(/flex:\s*1\s+1\s+0/);
+
     const dialog = selectorBlock(".upload-staging-dialog");
     // Three-row layout: header / minmax(0, 1fr) scroll body / footer.
     expect(dialog).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/);
