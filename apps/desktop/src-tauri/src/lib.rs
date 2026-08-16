@@ -1320,6 +1320,8 @@ pub fn run() {
             commands::settings::set_room_url_preview_override,
             commands::native_attention::play_native_attention_sound,
             commands::native_attention::set_native_attention_badge,
+            commands::room::force_new_outbound_session,
+            commands::room::share_index0_room_key,
             commands::room::select_room_list_filter,
             commands::room::mark_room_as_read,
             commands::room::mark_room_as_unread,

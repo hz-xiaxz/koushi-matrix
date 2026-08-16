@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-08-14.
+Last amended: 2026-08-16.
 
 ## Read Order And Authority
 
@@ -152,6 +152,16 @@ conflict is being resolved.
 - `apps/desktop/src-tauri` is a transport adapter. It holds `CoreRuntime`,
   sends commands, forwards events/snapshots, and does not call Matrix SDK
   wrapper APIs directly.
+- Every public Tauri command (`#[tauri::command]` in
+  `apps/desktop/src-tauri/src/commands/`) must be registered in
+  `tauri::generate_handler!` in `apps/desktop/src-tauri/src/lib.rs`.
+  An unregistered command compiles (only a "never used" warning) and
+  silently never reaches Rust from the WebView; UI tests that mock `invoke`
+  and headless core tests that call Rust directly bypass the IPC boundary
+  and cannot detect the omission. The exhaustive test
+  `every_tauri_command_is_registered_in_generate_handler` in
+  `apps/desktop/src-tauri/src/commands/mod.rs` enforces this; keep it green
+  when adding or renaming commands.
 - `koushi-sdk` is the low-level Matrix SDK adapter crate. It owns
   SDK-facing primitives only; app state, actor lifecycle, QA orchestration,
   and product opinions stay in `koushi-core` and
