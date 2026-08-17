@@ -234,6 +234,8 @@ pub enum RoomMessage {
         source: RoomListSource,
         room_generation: u64,
     },
+    /// Authoritative room-list removal invalidated in-flight room operations.
+    AuthoritativeRoomsRemoved { room_ids: BTreeSet<String> },
     /// Stop only the observation owned by this runtime generation and
     /// acknowledge after its task has joined.
     StopSyncObservation {
@@ -857,31 +859,12 @@ impl RoomActor {
                     // exits (issue #538), then settle CancelledStale and
                     // reset the state machine so no reducer entry is left
                     // pending.
-                    let fences = std::mem::take(&mut self.encryption_debug_fences);
-                    for (room_id, mut fence) in fences {
-                        fence
-                            .cancelled
-                            .store(true, std::sync::atomic::Ordering::SeqCst);
-                        let _ = fence.cancel.send(());
-                        if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join)
-                            .await
-                            .is_err()
-                        {
-                            fence.join.abort();
-                            let _ = fence.join.await;
-                        }
-                        self.emit_encryption_debug_outcome(
-                            fence.request_id,
-                            room_id.clone(),
-                            fence.kind,
-                            CoreEncryptionDebugOutcome::CancelledStale,
-                        )
-                        .await;
-                        self.reduce_reliable(vec![AppAction::EncryptionDebugOperationReset {
-                            room_id,
-                        }])
-                        .await;
-                    }
+                    let room_ids = self
+                        .encryption_debug_fences
+                        .keys()
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+                    self.cancel_encryption_debug_for_rooms(&room_ids).await;
                     self.stop_observation().await;
                     break;
                 }
@@ -1002,6 +985,9 @@ impl RoomActor {
                         self.refresh_room_list();
                     }
                 }
+                RoomMessage::AuthoritativeRoomsRemoved { room_ids } => {
+                    self.cancel_encryption_debug_for_rooms(&room_ids).await;
+                }
                 RoomMessage::StopSyncObservation {
                     backend_generation,
                     ack,
@@ -1045,30 +1031,14 @@ impl RoomActor {
                     // returns; we never detach it (the operation is bounded
                     // by its monotonic deadline and the completion lane is
                     // nonblocking, so the join cannot deadlock).
-                    let fences = std::mem::take(&mut self.encryption_debug_fences);
-                    for (_, mut fence) in fences {
-                        fence
-                            .cancelled
-                            .store(true, std::sync::atomic::Ordering::SeqCst);
-                        let _ = fence.cancel.send(());
-                        if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join)
-                            .await
-                            .is_err()
-                        {
-                            fence.join.abort();
-                            let _ = fence.join.await;
-                        }
-                        // Inline fenced settlement before the session reset:
-                        // the state machine settles CancelledStale, then the
-                        // lifecycle reset returns it to Idle.
-                        self.emit_encryption_debug_outcome(
-                            fence.request_id,
-                            fence.room_id,
-                            fence.kind,
-                            CoreEncryptionDebugOutcome::CancelledStale,
-                        )
-                        .await;
-                    }
+                    let room_ids = self
+                        .encryption_debug_fences
+                        .keys()
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+                    // Settle CancelledStale before clearing the session; the
+                    // helper also resets each room's reducer state.
+                    self.cancel_encryption_debug_for_rooms(&room_ids).await;
                     self.stop_observation().await;
                     self.reset_space_member_session();
                     self.session = None;
@@ -1342,6 +1312,41 @@ impl RoomActor {
                     let _kind = classify_room_error(&error);
                 }
             }
+        }
+    }
+
+    /// Cancel and settle encryption-debug operations invalidated by room
+    /// removal or account lifecycle changes.
+    async fn cancel_encryption_debug_for_rooms(&mut self, room_ids: &BTreeSet<String>) {
+        let fences = room_ids
+            .iter()
+            .filter_map(|room_id| {
+                self.encryption_debug_fences
+                    .remove(room_id)
+                    .map(|fence| (room_id.clone(), fence))
+            })
+            .collect::<Vec<_>>();
+        for (room_id, mut fence) in fences {
+            fence
+                .cancelled
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = fence.cancel.send(());
+            if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join)
+                .await
+                .is_err()
+            {
+                fence.join.abort();
+                let _ = fence.join.await;
+            }
+            self.emit_encryption_debug_outcome(
+                fence.request_id,
+                room_id.clone(),
+                fence.kind,
+                CoreEncryptionDebugOutcome::CancelledStale,
+            )
+            .await;
+            self.reduce_reliable(vec![AppAction::EncryptionDebugOperationReset { room_id }])
+                .await;
         }
     }
 
@@ -3277,6 +3282,7 @@ impl RoomActor {
         let op_room_id = room_id.clone();
         let op_request_id = request_id;
         let session_for_fence = std::sync::Arc::clone(session);
+        let known_room_ids = Arc::clone(&self.known_room_ids);
         #[cfg(feature = "test-hooks")]
         let test_control = take_encryption_debug_test_control(
             &mut *self
@@ -3323,8 +3329,13 @@ impl RoomActor {
             let outcome = std::panic::AssertUnwindSafe(async {
                 match kind {
                     EncryptionDebugOperationKind::ForceNewOutboundSession => {
+                        let task_known_room_ids = Arc::clone(&known_room_ids);
+                        let task_room_id = op_room_id.clone();
                         let validate: Box<dyn Fn() -> bool + Send + Sync> = Box::new(move || {
                             !task_cancelled.load(std::sync::atomic::Ordering::SeqCst)
+                                && task_known_room_ids
+                                    .read()
+                                    .is_ok_and(|room_ids| room_ids.contains(&task_room_id))
                         });
                         match koushi_sdk::force_new_outbound_session(
                             &task_session,
@@ -3347,8 +3358,13 @@ impl RoomActor {
                         }
                     }
                     EncryptionDebugOperationKind::ShareIndex0Key => {
+                        let task_known_room_ids = Arc::clone(&known_room_ids);
+                        let task_room_id = op_room_id.clone();
                         let validate: Box<dyn Fn() -> bool + Send + Sync> = Box::new(move || {
                             !task_cancelled.load(std::sync::atomic::Ordering::SeqCst)
+                                && task_known_room_ids
+                                    .read()
+                                    .is_ok_and(|room_ids| room_ids.contains(&task_room_id))
                         });
                         match koushi_sdk::share_index0_room_key(
                             &task_session,
@@ -3369,8 +3385,13 @@ impl RoomActor {
                         }
                     }
                     EncryptionDebugOperationKind::ResendIndex0Key => {
+                        let task_known_room_ids = Arc::clone(&known_room_ids);
+                        let task_room_id = op_room_id.clone();
                         let validate: Box<dyn Fn() -> bool + Send + Sync> = Box::new(move || {
                             !task_cancelled.load(std::sync::atomic::Ordering::SeqCst)
+                                && task_known_room_ids
+                                    .read()
+                                    .is_ok_and(|room_ids| room_ids.contains(&task_room_id))
                         });
                         match koushi_sdk::resend_index0_room_key(
                             &task_session,
@@ -3789,35 +3810,10 @@ impl RoomActor {
         // Cancel and join any in-flight encryption-debug operation for this
         // room before the leave request (issue #538): the SDK executor stops
         // at the next wire-effect boundary and runs cleanup, so no manual
-        // request survives into the leave.
-        if let Some(mut fence) = self.encryption_debug_fences.remove(&room_id) {
-            fence
-                .cancelled
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            let _ = fence.cancel.send(());
-            if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join)
-                .await
-                .is_err()
-            {
-                fence.join.abort();
-                let _ = fence.join.await;
-            }
-            self.emit_encryption_debug_outcome(
-                fence.request_id,
-                fence.room_id,
-                fence.kind,
-                CoreEncryptionDebugOutcome::CancelledStale,
-            )
+        // request survives into the leave. Reset even when no fence exists so
+        // a stale terminal state cannot survive a direct leave.
+        self.cancel_encryption_debug_for_rooms(&BTreeSet::from([room_id.clone()]))
             .await;
-        }
-        // Unconditionally reset the operation state machine for this room
-        // before the leave request (also when no fence exists, i.e. a
-        // previously Settled/Failed state) so a failed leave cannot strand
-        // Pending or keep a stale terminal state (issue #538).
-        self.reduce_reliable(vec![AppAction::EncryptionDebugOperationReset {
-            room_id: room_id.clone(),
-        }])
-        .await;
         let Some(_session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
@@ -5115,6 +5111,7 @@ fn projected_direct_room_count(
 async fn project_room_list_snapshot(
     snapshot: &koushi_sdk::MatrixRoomListSnapshot,
     known_room_ids: &Arc<RwLock<BTreeSet<String>>>,
+    room_tx: Option<&mpsc::Sender<RoomMessage>>,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
     event_tx: &broadcast::Sender<CoreEvent>,
     generation: u64,
@@ -5142,6 +5139,32 @@ async fn project_room_list_snapshot(
             )),
     );
     let projected_rooms = rooms.clone();
+    let previous_room_ids = known_room_ids
+        .read()
+        .map(|room_ids| room_ids.clone())
+        .unwrap_or_default();
+    let next_room_ids = projected_rooms
+        .iter()
+        .map(|room| room.room_id.clone())
+        .collect::<BTreeSet<_>>();
+    let removed_room_ids = if authoritative {
+        previous_room_ids
+            .difference(&next_room_ids)
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    } else {
+        BTreeSet::new()
+    };
+    if authoritative {
+        replace_known_room_ids(known_room_ids, &projected_rooms);
+        if let Some(room_tx) = room_tx {
+            let _ = room_tx
+                .send(RoomMessage::AuthoritativeRoomsRemoved {
+                    room_ids: removed_room_ids,
+                })
+                .await;
+        }
+    }
     let snapshot_action = if authoritative {
         AppAction::RoomListSnapshotAuthoritative {
             generation,
@@ -5170,11 +5193,8 @@ async fn project_room_list_snapshot(
         .is_ok();
     let has_payload =
         !projected_rooms.is_empty() || !snapshot.spaces.is_empty() || !snapshot.invites.is_empty();
-    if delivered {
-        if authoritative || has_payload {
-            replace_known_room_ids(known_room_ids, &projected_rooms);
-            let _ = event_tx.send(CoreEvent::Room(RoomEvent::RoomListUpdated));
-        }
+    if delivered && (authoritative || has_payload) {
+        let _ = event_tx.send(CoreEvent::Room(RoomEvent::RoomListUpdated));
     }
     delivered
 }
@@ -6248,6 +6268,7 @@ async fn normalize_and_project_entries(
     project_room_list_snapshot(
         &snapshot,
         known_room_ids,
+        Some(room_tx),
         action_tx,
         event_tx,
         generation,
@@ -8590,6 +8611,7 @@ pub mod tests {
         project_room_list_snapshot(
             &snapshot,
             &known_room_ids,
+            None,
             &action_tx,
             &event_tx,
             1,
@@ -8633,6 +8655,7 @@ pub mod tests {
         project_room_list_snapshot(
             &snapshot,
             &known_room_ids,
+            None,
             &action_tx,
             &event_tx,
             1,
@@ -9336,7 +9359,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn project_room_list_snapshot_does_not_update_known_rooms_when_actions_are_undelivered() {
+    async fn project_room_list_snapshot_updates_known_rooms_before_action_delivery() {
         let (action_tx, action_rx) = mpsc::channel(1);
         drop(action_rx);
         let (event_tx, _event_rx) = broadcast::channel(16);
@@ -9366,6 +9389,7 @@ pub mod tests {
         project_room_list_snapshot(
             &snapshot,
             &known_room_ids,
+            None,
             &action_tx,
             &event_tx,
             1,
@@ -9375,8 +9399,11 @@ pub mod tests {
         .await;
 
         assert!(
-            known_room_ids.read().expect("known rooms").is_empty(),
-            "RoomActor known-room book must advance only after reducer projection delivery"
+            known_room_ids
+                .read()
+                .expect("known rooms")
+                .contains("!room:example.test"),
+            "authoritative validators must fail closed before reducer delivery"
         );
     }
 
@@ -9950,7 +9977,7 @@ pub mod tests {
     }
 
     #[test]
-    fn room_list_projection_is_reliable_before_known_room_book_advances() {
+    fn room_list_projection_updates_known_book_before_reliable_delivery() {
         let source = include_str!("room.rs");
         let projection_body = source
             .split("async fn project_room_list_snapshot")
@@ -9971,8 +9998,8 @@ pub mod tests {
             "room-list projection must not drop reducer snapshots under action-channel pressure"
         );
         assert!(
-            send < known,
-            "RoomActor known-room book must advance only after reducer projection delivery"
+            known < send,
+            "authoritative known-room book must advance before reducer delivery so validators fail closed"
         );
     }
 
@@ -10264,6 +10291,114 @@ pub mod tests {
         assert!(
             event_rx.try_recv().is_err(),
             "late completion must be dropped"
+        );
+
+        assert!(handle.send(RoomMessage::Shutdown).await);
+        handle.join().await;
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[tokio::test]
+    async fn authoritative_room_removal_cancels_resend_and_rejects_replacement() {
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let _room = server
+            .sync_joined_room(
+                &client,
+                matrix_sdk::ruma::room_id!("!removed:example.invalid"),
+            )
+            .await;
+        let session = Arc::new(MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: server.uri(),
+                user_id: "@actor:example.invalid".to_owned(),
+                device_id: "ACTOR".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        ));
+        let (action_tx, _action_rx) = mpsc::channel(16);
+        let (event_tx, mut event_rx) = broadcast::channel(16);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
+        handle
+            .send(RoomMessage::SessionEstablished { session })
+            .await;
+        assert!(
+            handle
+                .install_known_rooms_for_test(BTreeSet::from([
+                    "!removed:example.invalid".to_owned()
+                ]))
+                .await
+        );
+
+        let (reached_tx, reached_rx) = oneshot::channel();
+        let (completion_tx, completion_rx) = oneshot::channel();
+        assert!(
+            handle.install_encryption_debug_test_control(EncryptionDebugTestControl {
+                kind: EncryptionDebugOperationKind::ResendIndex0Key,
+                reached: reached_tx,
+                completion: completion_rx,
+            })
+        );
+        let request_id = make_request_id(104);
+        handle
+            .send(RoomMessage::Command(RoomCommand::ResendIndex0RoomKey {
+                request_id,
+                room_id: "!removed:example.invalid".to_owned(),
+            }))
+            .await;
+        reached_rx.await.expect("resend reached test seam");
+        assert!(handle.install_known_rooms_for_test(BTreeSet::new()).await);
+        handle
+            .send(RoomMessage::AuthoritativeRoomsRemoved {
+                room_ids: BTreeSet::from(["!removed:example.invalid".to_owned()]),
+            })
+            .await;
+        completion_tx
+            .send(CoreEncryptionDebugOutcome::Completed)
+            .expect("cancelled resend must still settle its join");
+
+        let cancelled = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("removal cancellation timeout")
+            .expect("removal cancellation event");
+        assert!(matches!(
+            cancelled,
+            CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                request_id: got,
+                outcome: CoreEncryptionDebugOutcome::CancelledStale,
+                ..
+            }) if got == request_id
+        ));
+
+        let replacement = make_request_id(105);
+        handle
+            .send(RoomMessage::Command(RoomCommand::ResendIndex0RoomKey {
+                request_id: replacement,
+                room_id: "!removed:example.invalid".to_owned(),
+            }))
+            .await;
+        let rejected = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("replacement rejection timeout")
+            .expect("replacement rejection event");
+        assert!(matches!(
+            rejected,
+            CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                request_id: got,
+                outcome: CoreEncryptionDebugOutcome::Failed,
+                ..
+            }) if got == replacement
+        ));
+        assert!(
+            event_rx.try_recv().is_err(),
+            "room removal emits one terminal event"
         );
 
         assert!(handle.send(RoomMessage::Shutdown).await);

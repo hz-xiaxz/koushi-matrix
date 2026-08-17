@@ -1,8 +1,9 @@
 //! Reducer tests for the temporary dangerous encryption-debug operation
 //! state machine (issue #538).
 use koushi_state::{
-    AppAction, AppState, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
-    EncryptionDebugOperationState, RoomSummary, SessionInfo, SessionState, reduce,
+    AppAction, AppEffect, AppState, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
+    EncryptionDebugOperationState, RoomListSource, RoomSummary, SessionInfo, SessionState, UiEvent,
+    reduce,
 };
 
 fn ready_state() -> AppState {
@@ -250,6 +251,87 @@ fn failure_maps_to_failed_and_retry_is_admitted() {
         operation(&state, "!r:example.invalid").request_id(),
         Some(4)
     );
+}
+
+#[test]
+fn authoritative_room_removal_drops_interaction_and_notifies_the_ui() {
+    let mut state = ready_state();
+    with_room(&mut state, "!removed:example.invalid");
+    reduce(
+        &mut state,
+        AppAction::RoomListBootstrapStarted {
+            generation: 2,
+            source: RoomListSource::Live,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::EncryptionDebugOperationStarted {
+            request_id: 7,
+            room_id: "!removed:example.invalid".to_owned(),
+            kind: EncryptionDebugOperationKind::ResendIndex0Key,
+        },
+    );
+
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomListSnapshotAuthoritative {
+            generation: 2,
+            source: RoomListSource::Live,
+            spaces: Vec::new(),
+            rooms: Vec::new(),
+            invites: Vec::new(),
+        },
+    );
+
+    assert!(
+        !state
+            .room_interactions
+            .contains_key("!removed:example.invalid")
+    );
+    assert!(effects.iter().any(|effect| {
+        matches!(
+            effect,
+            AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged)
+        )
+    }));
+}
+
+#[test]
+fn provisional_room_removal_keeps_interaction_state() {
+    let mut state = ready_state();
+    with_room(&mut state, "!provisional:example.invalid");
+    reduce(
+        &mut state,
+        AppAction::RoomListBootstrapStarted {
+            generation: 2,
+            source: RoomListSource::Live,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::EncryptionDebugOperationStarted {
+            request_id: 8,
+            room_id: "!provisional:example.invalid".to_owned(),
+            kind: EncryptionDebugOperationKind::ResendIndex0Key,
+        },
+    );
+
+    reduce(
+        &mut state,
+        AppAction::RoomListSnapshotProvisional {
+            generation: 2,
+            source: RoomListSource::Live,
+            spaces: Vec::new(),
+            rooms: Vec::new(),
+            invites: Vec::new(),
+        },
+    );
+
+    assert!(matches!(
+        operation(&state, "!provisional:example.invalid"),
+        EncryptionDebugOperationState::Pending { request_id: 8, .. }
+    ));
 }
 
 #[test]
