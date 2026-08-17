@@ -2430,19 +2430,19 @@ mod tests {
             event::{
                 AccountEvent, ActivityEvent, CjkTextPolicyEvent, E2eeTrustEvent,
                 EncryptionDebugOperationOutcome, EventCacheFailureReasonClass,
-                EventCacheSubscribeStatus, IntentNoOpReason,
-                IntentOutcome, LinkPreview, LinkPreviewImage, LinkPreviewState, LiveSignalsEvent,
-                LocalEncryptionEvent, NativeAttentionEvent, PaginationDirection, PaginationState,
-                ReactionGroup, RoomEvent, RoomKeyRequestStage, RoomKeyRequestStateDto,
-                RoomKeyRequestWithheldCode, RoomKeyReshareOutcome, SearchEvent, SyncEvent,
-                ThreadRootProjectionDto, ThreadRootProjectionStateDto, ThreadSummaryDto,
-                ThreadsListEvent, TimelineAnchorRestoreStatus, TimelineCodeBlock,
-                TimelineDisplayLabelUpdate, TimelineEvent, TimelineFormattedBody, TimelineGapId,
-                TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia,
-                TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail,
-                TimelineMessageActions, TimelineMessageKind, TimelineMessageSource,
-                TimelineNavigationSnapshot, TimelineResyncReason, TimelineSendFailureReason,
-                TimelineSendState, TimelineSpoilerSpan, TimelineUnreadPosition,
+                EventCacheSubscribeStatus, IntentNoOpReason, IntentOutcome, LinkPreview,
+                LinkPreviewImage, LinkPreviewState, LiveSignalsEvent, LocalEncryptionEvent,
+                NativeAttentionEvent, PaginationDirection, PaginationState, ReactionGroup,
+                RoomEvent, RoomKeyRequestStage, RoomKeyRequestStateDto, RoomKeyRequestWithheldCode,
+                RoomKeyReshareOutcome, SearchEvent, SyncEvent, ThreadRootProjectionDto,
+                ThreadRootProjectionStateDto, ThreadSummaryDto, ThreadsListEvent,
+                TimelineAnchorRestoreStatus, TimelineCodeBlock, TimelineDisplayLabelUpdate,
+                TimelineEvent, TimelineFormattedBody, TimelineGapId, TimelineGapPosition,
+                TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind,
+                TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions,
+                TimelineMessageKind, TimelineMessageSource, TimelineNavigationSnapshot,
+                TimelineResyncReason, TimelineSendFailureReason, TimelineSendState,
+                TimelineSpoilerSpan, TimelineUnreadPosition,
             },
             failure::{CoreFailure, TimelineFailureKind},
             ids::{RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration},
@@ -3298,14 +3298,13 @@ mod tests {
                 },
             }))
             .expect("serialize room key reshare outcome");
-        let index0_room_key_resent = serialize_core_event(&CoreEvent::Room(
-            RoomEvent::Index0RoomKeyResent {
+        let index0_room_key_resent =
+            serialize_core_event(&CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
                 request_id,
                 room_id: "!r:example.test".to_owned(),
                 outcome: EncryptionDebugOperationOutcome::Completed,
-            },
-        ))
-        .expect("serialize index-0 room key resent event");
+            }))
+            .expect("serialize index-0 room key resent event");
         let room_key_request_state_changed =
             serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyRequestStateChanged {
                 key: key.clone(),

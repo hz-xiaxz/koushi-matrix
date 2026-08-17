@@ -11155,10 +11155,12 @@ async fn run_encryption_debug_stage(
     // the verified second-device prerequisite. Without this, the gate can
     // observe an intermediate ExistingIdentity snapshot with no SAS method.
     let bootstrap_id = conn.next_request_id();
-    conn.command(CoreCommand::Account(AccountCommand::BootstrapCrossSigning {
-        request_id: bootstrap_id,
-        auth: Some(AuthSecret::new(config.password_a.clone())),
-    }))
+    conn.command(CoreCommand::Account(
+        AccountCommand::BootstrapCrossSigning {
+            request_id: bootstrap_id,
+            auth: Some(AuthSecret::new(config.password_a.clone())),
+        },
+    ))
     .await
     .map_err(|e| format!("encryption-debug: bootstrap cross-signing failed: {e}"))?;
     let bootstrap_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
@@ -11168,10 +11170,10 @@ async fn run_encryption_debug_stage(
             .map_err(|_| "encryption-debug: cross-signing bootstrap timed out".to_owned())?
             .map_err(|_| "encryption-debug: event stream closed during bootstrap".to_owned())?
         {
-            CoreEvent::E2eeTrust(E2eeTrustEvent::CrossSigningChanged { account_key: got, status })
-                if got == *account_key
-                    && status == koushi_state::CrossSigningStatus::Trusted =>
-            {
+            CoreEvent::E2eeTrust(E2eeTrustEvent::CrossSigningChanged {
+                account_key: got,
+                status,
+            }) if got == *account_key && status == koushi_state::CrossSigningStatus::Trusted => {
                 break;
             }
             CoreEvent::OperationFailed { request_id, .. } if request_id == bootstrap_id => {
@@ -11196,180 +11198,180 @@ async fn run_encryption_debug_stage(
     // Guarded body: A2 is logged out and its runtime is stopped on BOTH the
     // success and every error path after its runtime exists (issue #538).
     let guarded: Result<(), String> = async {
-    let login_a2_id = conn_a2.next_request_id();
-    conn_a2
-        .command(CoreCommand::Account(AccountCommand::LoginPassword {
-            request_id: login_a2_id,
-            request: koushi_state::LoginRequest {
-                homeserver: config.homeserver.clone(),
-                username: config.user_a.clone(),
-                password: AuthSecret::new(config.password_a.clone()),
-                device_display_name: Some("Koushi Core QA encryption-debug A2".to_owned()),
-            },
-            platform: koushi_state::DisplayPlatform::Linux,
+        let login_a2_id = conn_a2.next_request_id();
+        conn_a2
+            .command(CoreCommand::Account(AccountCommand::LoginPassword {
+                request_id: login_a2_id,
+                request: koushi_state::LoginRequest {
+                    homeserver: config.homeserver.clone(),
+                    username: config.user_a.clone(),
+                    password: AuthSecret::new(config.password_a.clone()),
+                    device_display_name: Some("Koushi Core QA encryption-debug A2".to_owned()),
+                },
+                platform: koushi_state::DisplayPlatform::Linux,
+            }))
+            .await
+            .map_err(|e| format!("encryption-debug: submit login A2 failed: {e}"))?;
+        let session_a2 =
+            wait_for_existing_identity_gate(&mut conn_a2, "encryption-debug A2 gate").await?;
+        verify_provisional_second_device_for_qa(
+            conn,
+            &mut conn_a2,
+            &session_a,
+            &session_a2,
+            "encryption-debug A/A2",
+            SasQaOutcome::Success,
+        )
+        .await?;
+        let account_key_a2 =
+            wait_for_logged_in(&mut conn_a2, login_a2_id, "encryption-debug login A2").await?;
+        account_key_a2_for_cleanup = Some(account_key_a2.clone());
+
+        // A2 is a second verified device of the same user, so it is an eligible
+        // own-other device of the room without any invite/join (the room is
+        // creator-owned by the same user). The SAS flow above already settled to
+        // Done, so the share can target this verified own device directly.
+        println!("encryption_debug_recipient=ok");
+        let _ = account_key_a2;
+
+        // Force a new outbound session: the fresh session must settle Completed.
+        let force_id = conn.next_request_id();
+        conn.command(CoreCommand::Room(RoomCommand::ForceNewOutboundSession {
+            request_id: force_id,
+            room_id: room_id.clone(),
         }))
         .await
-        .map_err(|e| format!("encryption-debug: submit login A2 failed: {e}"))?;
-    let session_a2 =
-        wait_for_existing_identity_gate(&mut conn_a2, "encryption-debug A2 gate").await?;
-    verify_provisional_second_device_for_qa(
-        conn,
-        &mut conn_a2,
-        &session_a,
-        &session_a2,
-        "encryption-debug A/A2",
-        SasQaOutcome::Success,
-    )
-    .await?;
-    let account_key_a2 =
-        wait_for_logged_in(&mut conn_a2, login_a2_id, "encryption-debug login A2").await?;
-    account_key_a2_for_cleanup = Some(account_key_a2.clone());
-
-    // A2 is a second verified device of the same user, so it is an eligible
-    // own-other device of the room without any invite/join (the room is
-    // creator-owned by the same user). The SAS flow above already settled to
-    // Done, so the share can target this verified own device directly.
-    println!("encryption_debug_recipient=ok");
-    let _ = account_key_a2;
-
-    // Force a new outbound session: the fresh session must settle Completed.
-    let force_id = conn.next_request_id();
-    conn.command(CoreCommand::Room(RoomCommand::ForceNewOutboundSession {
-        request_id: force_id,
-        room_id: room_id.clone(),
-    }))
-    .await
-    .map_err(|e| format!("encryption-debug: submit force-new failed: {e}"))?;
-    let force_outcome = wait_for_encryption_debug_event(
-        conn,
-        force_id,
-        &room_id,
-        "force_new_outbound_session",
-        "OutboundSessionForced",
-    )
-    .await?;
-    if force_outcome != EncryptionDebugOperationOutcome::Completed {
-        return Err(format!(
-            "encryption-debug: force-new did not complete (got {force_outcome:?})"
-        ));
-    }
-    println!("force_new_outbound_session=ok");
-
-    // Share the index-0 key: it must complete without consuming index 0.
-    let share_id = conn.next_request_id();
-    conn.command(CoreCommand::Room(RoomCommand::ShareIndex0RoomKey {
-        request_id: share_id,
-        room_id: room_id.clone(),
-    }))
-    .await
-    .map_err(|e| format!("encryption-debug: submit share-index0 failed: {e}"))?;
-    let share_outcome = wait_for_encryption_debug_event(
-        conn,
-        share_id,
-        &room_id,
-        "share_index0_room_key",
-        "Index0RoomKeyShared",
-    )
-    .await?;
-    if share_outcome != EncryptionDebugOperationOutcome::Completed {
-        return Err(format!(
-            "encryption-debug: index-0 share did not complete (got {share_outcome:?})"
-        ));
-    }
-    println!("share_index0_room_key=ok");
-
-    // A Completed share outcome implies the session was still at index 0
-    // (otherwise the SDK refuses with RefusedIndexAdvanced). The SDK summary
-    // also records index_before/index_after in the diagnostics.
-    println!("index0_not_consumed=ok");
-
-    // Advance the same outbound session, then exercise issue #541's manual
-    // recovery resend. The resend must leave the index unchanged and target
-    // only the immutable original ledger.
-    let timeline_key = TimelineKey::room(account_key.clone(), room_id.clone());
-    let advance_id = conn.next_request_id();
-    let advance_txn = "encryption-debug-advance".to_owned();
-    conn.command(CoreCommand::Timeline(TimelineCommand::SendText {
-        request_id: advance_id,
-        key: timeline_key.clone(),
-        transaction_id: advance_txn.clone(),
-        document: koushi_state::ComposerDocument::from_plain_text(
-            "encryption-debug advance".to_owned(),
-        ),
-    }))
-    .await
-    .map_err(|e| format!("encryption-debug: submit advance failed: {e}"))?;
-    let _ = wait_for_send_flow_completion(
-        conn,
-        advance_id,
-        &timeline_key,
-        &advance_txn,
-        "encryption-debug advance",
-        "encryption-debug advance",
-    )
-    .await?;
-    println!("encryption_debug_index_advanced=ok");
-
-    let resend_id = conn.next_request_id();
-    conn.command(CoreCommand::Room(RoomCommand::ResendIndex0RoomKey {
-        request_id: resend_id,
-        room_id: room_id.clone(),
-    }))
-    .await
-    .map_err(|e| format!("encryption-debug: submit resend failed: {e}"))?;
-    let resend_outcome = wait_for_encryption_debug_event(
-        conn,
-        resend_id,
-        &room_id,
-        "resend_index0_room_key",
-        "Index0RoomKeyResent",
-    )
-    .await?;
-    if resend_outcome != EncryptionDebugOperationOutcome::Completed {
-        return Err(format!(
-            "encryption-debug: index-0 resend did not complete (got {resend_outcome:?})"
-        ));
-    }
-    println!("resend_index0_room_key=ok");
-    let diagnostics = koushi_diagnostics::snapshot();
-    let debug = diagnostics
-        .records
-        .iter()
-        .rev()
-        .map(|record| &record.event)
-        .find(|event| {
-            event.source == "core.room_key_debug"
-                && diagnostic_has_token(event, "operation", "resend_index0")
-        })
-        .ok_or_else(|| "encryption-debug: resend diagnostic missing".to_owned())?;
-    if diagnostic_token_field(debug, "outcome") != Some("completed")
-        || diagnostic_count_field(debug, "index_before").is_none_or(|index| index == 0)
-        || diagnostic_count_field(debug, "index_before")
-            != diagnostic_count_field(debug, "index_after")
-        || diagnostic_count_field(debug, "inbound_first_known_index") != Some(0)
-        || diagnostic_count_field(debug, "peer_accepted")
-            > diagnostic_count_field(debug, "peer_eligible")
-        || diagnostic_count_field(debug, "peer_missing")
-            > diagnostic_count_field(debug, "peer_eligible")
-        || diagnostic_count_field(debug, "peer_accepted").unwrap_or(0)
-            + diagnostic_count_field(debug, "peer_missing").unwrap_or(0)
-            != diagnostic_count_field(debug, "peer_eligible").unwrap_or(0)
-        || !matches!(
-            diagnostic_token_field(debug, "claim"),
-            Some("not_needed" | "succeeded")
+        .map_err(|e| format!("encryption-debug: submit force-new failed: {e}"))?;
+        let force_outcome = wait_for_encryption_debug_event(
+            conn,
+            force_id,
+            &room_id,
+            "force_new_outbound_session",
+            "OutboundSessionForced",
         )
-        || diagnostic_count_field(debug, "elapsed_ms").is_none_or(|elapsed| elapsed == 0)
-        || diagnostic_count_field(debug, "peer_ledger")
-            < diagnostic_count_field(debug, "peer_eligible")
-        || diagnostic_count_field(debug, "room_event_sent") != Some(0)
-        || diagnostic_count_field(debug, "index0_consumed") != Some(0)
-    {
-        return Err("encryption-debug: resend diagnostic invariants failed".to_owned());
-    }
-    println!("resend_index_unchanged=ok");
-    let _ = config;
-    let _ = account_key;
-    Ok(())
+        .await?;
+        if force_outcome != EncryptionDebugOperationOutcome::Completed {
+            return Err(format!(
+                "encryption-debug: force-new did not complete (got {force_outcome:?})"
+            ));
+        }
+        println!("force_new_outbound_session=ok");
+
+        // Share the index-0 key: it must complete without consuming index 0.
+        let share_id = conn.next_request_id();
+        conn.command(CoreCommand::Room(RoomCommand::ShareIndex0RoomKey {
+            request_id: share_id,
+            room_id: room_id.clone(),
+        }))
+        .await
+        .map_err(|e| format!("encryption-debug: submit share-index0 failed: {e}"))?;
+        let share_outcome = wait_for_encryption_debug_event(
+            conn,
+            share_id,
+            &room_id,
+            "share_index0_room_key",
+            "Index0RoomKeyShared",
+        )
+        .await?;
+        if share_outcome != EncryptionDebugOperationOutcome::Completed {
+            return Err(format!(
+                "encryption-debug: index-0 share did not complete (got {share_outcome:?})"
+            ));
+        }
+        println!("share_index0_room_key=ok");
+
+        // A Completed share outcome implies the session was still at index 0
+        // (otherwise the SDK refuses with RefusedIndexAdvanced). The SDK summary
+        // also records index_before/index_after in the diagnostics.
+        println!("index0_not_consumed=ok");
+
+        // Advance the same outbound session, then exercise issue #541's manual
+        // recovery resend. The resend must leave the index unchanged and target
+        // only the immutable original ledger.
+        let timeline_key = TimelineKey::room(account_key.clone(), room_id.clone());
+        let advance_id = conn.next_request_id();
+        let advance_txn = "encryption-debug-advance".to_owned();
+        conn.command(CoreCommand::Timeline(TimelineCommand::SendText {
+            request_id: advance_id,
+            key: timeline_key.clone(),
+            transaction_id: advance_txn.clone(),
+            document: koushi_state::ComposerDocument::from_plain_text(
+                "encryption-debug advance".to_owned(),
+            ),
+        }))
+        .await
+        .map_err(|e| format!("encryption-debug: submit advance failed: {e}"))?;
+        let _ = wait_for_send_flow_completion(
+            conn,
+            advance_id,
+            &timeline_key,
+            &advance_txn,
+            "encryption-debug advance",
+            "encryption-debug advance",
+        )
+        .await?;
+        println!("encryption_debug_index_advanced=ok");
+
+        let resend_id = conn.next_request_id();
+        conn.command(CoreCommand::Room(RoomCommand::ResendIndex0RoomKey {
+            request_id: resend_id,
+            room_id: room_id.clone(),
+        }))
+        .await
+        .map_err(|e| format!("encryption-debug: submit resend failed: {e}"))?;
+        let resend_outcome = wait_for_encryption_debug_event(
+            conn,
+            resend_id,
+            &room_id,
+            "resend_index0_room_key",
+            "Index0RoomKeyResent",
+        )
+        .await?;
+        if resend_outcome != EncryptionDebugOperationOutcome::Completed {
+            return Err(format!(
+                "encryption-debug: index-0 resend did not complete (got {resend_outcome:?})"
+            ));
+        }
+        println!("resend_index0_room_key=ok");
+        let diagnostics = koushi_diagnostics::snapshot();
+        let debug = diagnostics
+            .records
+            .iter()
+            .rev()
+            .map(|record| &record.event)
+            .find(|event| {
+                event.source == "core.room_key_debug"
+                    && diagnostic_has_token(event, "operation", "resend_index0")
+            })
+            .ok_or_else(|| "encryption-debug: resend diagnostic missing".to_owned())?;
+        if diagnostic_token_field(debug, "outcome") != Some("completed")
+            || diagnostic_count_field(debug, "index_before").is_none_or(|index| index == 0)
+            || diagnostic_count_field(debug, "index_before")
+                != diagnostic_count_field(debug, "index_after")
+            || diagnostic_count_field(debug, "inbound_first_known_index") != Some(0)
+            || diagnostic_count_field(debug, "peer_accepted")
+                > diagnostic_count_field(debug, "peer_eligible")
+            || diagnostic_count_field(debug, "peer_missing")
+                > diagnostic_count_field(debug, "peer_eligible")
+            || diagnostic_count_field(debug, "peer_accepted").unwrap_or(0)
+                + diagnostic_count_field(debug, "peer_missing").unwrap_or(0)
+                != diagnostic_count_field(debug, "peer_eligible").unwrap_or(0)
+            || !matches!(
+                diagnostic_token_field(debug, "claim"),
+                Some("not_needed" | "succeeded")
+            )
+            || diagnostic_count_field(debug, "elapsed_ms").is_none_or(|elapsed| elapsed == 0)
+            || diagnostic_count_field(debug, "peer_ledger")
+                < diagnostic_count_field(debug, "peer_eligible")
+            || diagnostic_count_field(debug, "room_event_sent") != Some(0)
+            || diagnostic_count_field(debug, "index0_consumed") != Some(0)
+        {
+            return Err("encryption-debug: resend diagnostic invariants failed".to_owned());
+        }
+        println!("resend_index_unchanged=ok");
+        let _ = config;
+        let _ = account_key;
+        Ok(())
     }
     .await;
     // Finally: attempt A2 logout and stop its runtime so no session leaks,
@@ -11377,7 +11379,9 @@ async fn run_encryption_debug_stage(
     // a scenario failure by itself).
     let logout_a2_id = conn_a2.next_request_id();
     if conn_a2
-        .command(CoreCommand::Account(AccountCommand::Logout { request_id: logout_a2_id }))
+        .command(CoreCommand::Account(AccountCommand::Logout {
+            request_id: logout_a2_id,
+        }))
         .await
         .is_ok()
     {

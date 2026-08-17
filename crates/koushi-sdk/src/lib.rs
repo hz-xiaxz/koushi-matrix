@@ -16145,10 +16145,19 @@ mod encryption_debug_dto_privacy_tests {
             index0_consumed: false,
         };
         let text = serde_json::to_string(&summary).unwrap();
-        for fragment in banned_fragments().iter().filter(|fragment| **fragment != "sender_key") {
-            assert!(!text.contains(fragment), "privacy leak: {fragment} in {text}");
+        for fragment in banned_fragments()
+            .iter()
+            .filter(|fragment| **fragment != "sender_key")
+        {
+            assert!(
+                !text.contains(fragment),
+                "privacy leak: {fragment} in {text}"
+            );
         }
-        assert!(!text.contains('@') && !text.contains('!'), "identifier leak: {text}");
+        assert!(
+            !text.contains('@') && !text.contains('!'),
+            "identifier leak: {text}"
+        );
     }
 
     #[test]

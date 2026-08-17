@@ -795,7 +795,10 @@ impl RoomActor {
                             .cancelled
                             .store(true, std::sync::atomic::Ordering::SeqCst);
                         let _ = fence.cancel.send(());
-                        if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join).await.is_err() {
+                        if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join)
+                            .await
+                            .is_err()
+                        {
                             fence.join.abort();
                             let _ = fence.join.await;
                         }
@@ -980,7 +983,10 @@ impl RoomActor {
                             .cancelled
                             .store(true, std::sync::atomic::Ordering::SeqCst);
                         let _ = fence.cancel.send(());
-                        if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join).await.is_err() {
+                        if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join)
+                            .await
+                            .is_err()
+                        {
                             fence.join.abort();
                             let _ = fence.join.await;
                         }
@@ -2837,7 +2843,9 @@ impl RoomActor {
             koushi_sdk::MatrixIndex0ResendOutcome::RefusedNotEncrypted => {
                 CoreEncryptionDebugOutcome::RefusedNotEncrypted
             }
-            koushi_sdk::MatrixIndex0ResendOutcome::NoSession => CoreEncryptionDebugOutcome::NoSession,
+            koushi_sdk::MatrixIndex0ResendOutcome::NoSession => {
+                CoreEncryptionDebugOutcome::NoSession
+            }
             koushi_sdk::MatrixIndex0ResendOutcome::InboundSessionMissing => {
                 CoreEncryptionDebugOutcome::InboundSessionMissing
             }
@@ -3153,7 +3161,12 @@ impl RoomActor {
             );
             return;
         }
-        if !self.known_room_ids.read().expect("known room ids lock").contains(&room_id) {
+        if !self
+            .known_room_ids
+            .read()
+            .expect("known room ids lock")
+            .contains(&room_id)
+        {
             self.emit_encryption_debug_rejection(
                 request_id,
                 room_id,
@@ -3191,69 +3204,74 @@ impl RoomActor {
         let join = executor::spawn(async move {
             let outcome = std::panic::AssertUnwindSafe(async {
                 match kind {
-                EncryptionDebugOperationKind::ForceNewOutboundSession => {
-                    let validate: Box<dyn Fn() -> bool + Send + Sync> =
-                        Box::new(move || !task_cancelled.load(std::sync::atomic::Ordering::SeqCst));
-                    match koushi_sdk::force_new_outbound_session(
-                        &task_session,
-                        &op_room_id,
-                        &mut cancel_rx,
-                        validate,
-                    )
-                    .await
-                    {
-                        Ok(summary) => {
-                            RoomActor::record_force_new_outbound_session_diagnostic(&summary);
-                            RoomActor::map_force_new_outcome(summary.outcome)
-                        }
-                        Err(_) => {
-                            RoomActor::record_encryption_debug_failed("force_new_outbound_session");
-                            CoreEncryptionDebugOutcome::Failed
-                        }
-                    }
-                }
-                EncryptionDebugOperationKind::ShareIndex0Key => {
-                    let validate: Box<dyn Fn() -> bool + Send + Sync> =
-                        Box::new(move || !task_cancelled.load(std::sync::atomic::Ordering::SeqCst));
-                    match koushi_sdk::share_index0_room_key(
-                        &task_session,
-                        &op_room_id,
-                        &mut cancel_rx,
-                        validate,
-                    )
-                    .await
-                    {
-                        Ok(summary) => {
-                            RoomActor::record_index0_share_diagnostic(&summary);
-                            RoomActor::map_index0_share_outcome(summary.outcome)
-                        }
-                        Err(_) => {
-                            RoomActor::record_encryption_debug_failed("share_index0");
-                            CoreEncryptionDebugOutcome::Failed
+                    EncryptionDebugOperationKind::ForceNewOutboundSession => {
+                        let validate: Box<dyn Fn() -> bool + Send + Sync> = Box::new(move || {
+                            !task_cancelled.load(std::sync::atomic::Ordering::SeqCst)
+                        });
+                        match koushi_sdk::force_new_outbound_session(
+                            &task_session,
+                            &op_room_id,
+                            &mut cancel_rx,
+                            validate,
+                        )
+                        .await
+                        {
+                            Ok(summary) => {
+                                RoomActor::record_force_new_outbound_session_diagnostic(&summary);
+                                RoomActor::map_force_new_outcome(summary.outcome)
+                            }
+                            Err(_) => {
+                                RoomActor::record_encryption_debug_failed(
+                                    "force_new_outbound_session",
+                                );
+                                CoreEncryptionDebugOutcome::Failed
+                            }
                         }
                     }
-                }
-                EncryptionDebugOperationKind::ResendIndex0Key => {
-                    let validate: Box<dyn Fn() -> bool + Send + Sync> =
-                        Box::new(move || !task_cancelled.load(std::sync::atomic::Ordering::SeqCst));
-                    match koushi_sdk::resend_index0_room_key(
-                        &task_session,
-                        &op_room_id,
-                        &mut cancel_rx,
-                        validate,
-                    )
-                    .await
-                    {
-                        Ok(summary) => {
-                            RoomActor::record_index0_resend_diagnostic(&summary);
-                            RoomActor::map_index0_resend_outcome(summary.outcome)
-                        }
-                        Err(_) => {
-                            RoomActor::record_index0_resend_failed();
-                            CoreEncryptionDebugOutcome::Failed
+                    EncryptionDebugOperationKind::ShareIndex0Key => {
+                        let validate: Box<dyn Fn() -> bool + Send + Sync> = Box::new(move || {
+                            !task_cancelled.load(std::sync::atomic::Ordering::SeqCst)
+                        });
+                        match koushi_sdk::share_index0_room_key(
+                            &task_session,
+                            &op_room_id,
+                            &mut cancel_rx,
+                            validate,
+                        )
+                        .await
+                        {
+                            Ok(summary) => {
+                                RoomActor::record_index0_share_diagnostic(&summary);
+                                RoomActor::map_index0_share_outcome(summary.outcome)
+                            }
+                            Err(_) => {
+                                RoomActor::record_encryption_debug_failed("share_index0");
+                                CoreEncryptionDebugOutcome::Failed
+                            }
                         }
                     }
-                }
+                    EncryptionDebugOperationKind::ResendIndex0Key => {
+                        let validate: Box<dyn Fn() -> bool + Send + Sync> = Box::new(move || {
+                            !task_cancelled.load(std::sync::atomic::Ordering::SeqCst)
+                        });
+                        match koushi_sdk::resend_index0_room_key(
+                            &task_session,
+                            &op_room_id,
+                            &mut cancel_rx,
+                            validate,
+                        )
+                        .await
+                        {
+                            Ok(summary) => {
+                                RoomActor::record_index0_resend_diagnostic(&summary);
+                                RoomActor::map_index0_resend_outcome(summary.outcome)
+                            }
+                            Err(_) => {
+                                RoomActor::record_index0_resend_failed();
+                                CoreEncryptionDebugOutcome::Failed
+                            }
+                        }
+                    }
                 }
             })
             .catch_unwind()
@@ -3309,13 +3327,25 @@ impl RoomActor {
         }
         let event = match kind {
             EncryptionDebugOperationKind::ForceNewOutboundSession => {
-                CoreEvent::Room(RoomEvent::OutboundSessionForced { request_id, room_id, outcome })
+                CoreEvent::Room(RoomEvent::OutboundSessionForced {
+                    request_id,
+                    room_id,
+                    outcome,
+                })
             }
             EncryptionDebugOperationKind::ShareIndex0Key => {
-                CoreEvent::Room(RoomEvent::Index0RoomKeyShared { request_id, room_id, outcome })
+                CoreEvent::Room(RoomEvent::Index0RoomKeyShared {
+                    request_id,
+                    room_id,
+                    outcome,
+                })
             }
             EncryptionDebugOperationKind::ResendIndex0Key => {
-                CoreEvent::Room(RoomEvent::Index0RoomKeyResent { request_id, room_id, outcome })
+                CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                    request_id,
+                    room_id,
+                    outcome,
+                })
             }
         };
         self.emit(event);
@@ -3647,7 +3677,10 @@ impl RoomActor {
                 .cancelled
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             let _ = fence.cancel.send(());
-            if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join).await.is_err() {
+            if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join)
+                .await
+                .is_err()
+            {
                 fence.join.abort();
                 let _ = fence.join.await;
             }

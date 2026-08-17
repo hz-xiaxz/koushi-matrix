@@ -1961,7 +1961,9 @@ mod tests {
         let cred_dir = tempdir().expect("tempdir");
         let key_id = make_key_id();
         let actor = file_store_actor(&data_dir, &cred_dir);
-        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot().records.len();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
 
         actor
             .account_store_config(&key_id)
