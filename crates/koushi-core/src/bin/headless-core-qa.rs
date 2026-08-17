@@ -647,6 +647,9 @@ fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "force_new_outbound_session=ok",
             "share_index0_room_key=ok",
             "index0_not_consumed=ok",
+            "encryption_debug_index_advanced=ok",
+            "resend_index0_room_key=ok",
+            "resend_index_unchanged=ok",
             "encryption_debug=ok",
         ],
         QaStage::E2eeTrust => &[
