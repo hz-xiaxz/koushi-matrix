@@ -50,7 +50,9 @@ Commands were run from the exact candidate tree unless noted otherwise:
 
 1. Resolve the A2 SAS prerequisite or obtain an accepted equivalent live
    encrypted-room evidence path; do not infer resend success from the current
-   failure.
+   failure. A fresh `e2ee_trust` core lane also stops at the same A2 gate before
+   its verification tokens, so this is a shared harness/gate blocker rather
+   than resend-stage evidence.
 2. Triage the unrelated full `matrix-sdk` Sliding Sync test failure if the
    vendored SDK full suite is required for this merge.
 
