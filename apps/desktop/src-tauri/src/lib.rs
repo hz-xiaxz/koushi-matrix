@@ -2429,7 +2429,8 @@ mod tests {
             AccountKey, CoreEvent, TimelineDiff, TimelineKey, build_state_delta,
             event::{
                 AccountEvent, ActivityEvent, CjkTextPolicyEvent, E2eeTrustEvent,
-                EventCacheFailureReasonClass, EventCacheSubscribeStatus, IntentNoOpReason,
+                EncryptionDebugOperationOutcome, EventCacheFailureReasonClass,
+                EventCacheSubscribeStatus, IntentNoOpReason,
                 IntentOutcome, LinkPreview, LinkPreviewImage, LinkPreviewState, LiveSignalsEvent,
                 LocalEncryptionEvent, NativeAttentionEvent, PaginationDirection, PaginationState,
                 ReactionGroup, RoomEvent, RoomKeyRequestStage, RoomKeyRequestStateDto,
@@ -3297,6 +3298,14 @@ mod tests {
                 },
             }))
             .expect("serialize room key reshare outcome");
+        let index0_room_key_resent = serialize_core_event(&CoreEvent::Room(
+            RoomEvent::Index0RoomKeyResent {
+                request_id,
+                room_id: "!r:example.test".to_owned(),
+                outcome: EncryptionDebugOperationOutcome::Completed,
+            },
+        ))
+        .expect("serialize index-0 room key resent event");
         let room_key_request_state_changed =
             serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyRequestStateChanged {
                 key: key.clone(),
@@ -3868,6 +3877,7 @@ mod tests {
             "roomInviteDeclined": room_invite_declined,
             "roomLeft": room_left,
             "roomKeyReshared": room_key_reshared,
+            "index0RoomKeyResent": index0_room_key_resent,
             "roomKeyRequestStateChanged": room_key_request_state_changed,
             "composerSlashCommandRejected": composer_slash_command_rejected,
             "roomMarkedAsRead": room_marked_as_read,
@@ -4011,6 +4021,7 @@ mod tests {
             "roomInviteDeclined",
             "roomLeft",
             "roomKeyReshared",
+            "index0RoomKeyResent",
             "roomKeyRequestStateChanged",
             "composerSlashCommandRejected",
             "roomMarkedAsRead",
