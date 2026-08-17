@@ -11210,7 +11210,6 @@ async fn run_encryption_debug_stage(
         }))
         .await
         .map_err(|e| format!("encryption-debug: submit login A2 failed: {e}"))?;
-    start_sync_for_qa(&mut conn_a2, "encryption-debug A2 preverification sync").await?;
     let session_a2 =
         wait_for_existing_identity_gate(&mut conn_a2, "encryption-debug A2 gate").await?;
     verify_provisional_second_device_for_qa(
