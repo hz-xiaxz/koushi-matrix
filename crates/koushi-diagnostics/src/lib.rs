@@ -92,6 +92,13 @@ impl DiagnosticField {
         }
     }
 
+    pub fn optional_count(key: &'static str, value: Option<u32>) -> Self {
+        match value {
+            Some(value) => Self::count(key, u64::from(value)),
+            None => Self::token(key, "none"),
+        }
+    }
+
     pub fn correlation(key: &'static str, value: u64) -> Self {
         Self {
             key,

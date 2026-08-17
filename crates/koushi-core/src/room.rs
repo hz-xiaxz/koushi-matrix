@@ -790,12 +790,15 @@ impl RoomActor {
                     // reset the state machine so no reducer entry is left
                     // pending.
                     let fences = std::mem::take(&mut self.encryption_debug_fences);
-                    for (room_id, fence) in fences {
+                    for (room_id, mut fence) in fences {
                         fence
                             .cancelled
                             .store(true, std::sync::atomic::Ordering::SeqCst);
                         let _ = fence.cancel.send(());
-                        let _ = tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, fence.join).await;
+                        if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join).await.is_err() {
+                            fence.join.abort();
+                            let _ = fence.join.await;
+                        }
                         self.emit_encryption_debug_outcome(
                             fence.request_id,
                             room_id.clone(),
@@ -972,12 +975,15 @@ impl RoomActor {
                     // by its monotonic deadline and the completion lane is
                     // nonblocking, so the join cannot deadlock).
                     let fences = std::mem::take(&mut self.encryption_debug_fences);
-                    for (_, fence) in fences {
+                    for (_, mut fence) in fences {
                         fence
                             .cancelled
                             .store(true, std::sync::atomic::Ordering::SeqCst);
                         let _ = fence.cancel.send(());
-                        let _ = tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, fence.join).await;
+                        if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join).await.is_err() {
+                            fence.join.abort();
+                            let _ = fence.join.await;
+                        }
                         // Inline fenced settlement before the session reset:
                         // the state machine settles CancelledStale, then the
                         // lifecycle reset returns it to Idle.
@@ -2906,21 +2912,13 @@ impl RoomActor {
                     "outcome",
                     Self::index0_resend_outcome_token(summary.outcome),
                 ))
-                .field(DiagnosticField::boolean(
-                    "index_before_set",
-                    summary.message_index_before.is_some(),
-                ))
-                .field(DiagnosticField::count(
+                .field(DiagnosticField::optional_count(
                     "index_before",
-                    summary.message_index_before.map(u64::from).unwrap_or(0),
+                    summary.message_index_before,
                 ))
-                .field(DiagnosticField::boolean(
-                    "index_after_set",
-                    summary.message_index_after.is_some(),
-                ))
-                .field(DiagnosticField::count(
+                .field(DiagnosticField::optional_count(
                     "index_after",
-                    summary.message_index_after.map(u64::from).unwrap_or(0),
+                    summary.message_index_after,
                 ))
                 .field(DiagnosticField::count(
                     "peer_ledger",
@@ -2949,16 +2947,9 @@ impl RoomActor {
                     "policy_blocked",
                     summary.policy_blocked.try_into().unwrap_or(u64::MAX),
                 ))
-                .field(DiagnosticField::boolean(
-                    "inbound_first_known_index_set",
-                    summary.inbound_first_known_index.is_some(),
-                ))
-                .field(DiagnosticField::count(
+                .field(DiagnosticField::optional_count(
                     "inbound_first_known_index",
-                    summary
-                        .inbound_first_known_index
-                        .map(u64::from)
-                        .unwrap_or(0),
+                    summary.inbound_first_known_index,
                 ))
                 .field(DiagnosticField::token(
                     "claim",
@@ -3163,7 +3154,7 @@ impl RoomActor {
             .await;
             return;
         }
-        if !self.known_room_ids.read().contains(&room_id) {
+        if !self.known_room_ids.read().expect("known room ids lock").contains(&room_id) {
             self.emit_encryption_debug_outcome(
                 request_id,
                 room_id,
@@ -3624,12 +3615,15 @@ impl RoomActor {
         // room before the leave request (issue #538): the SDK executor stops
         // at the next wire-effect boundary and runs cleanup, so no manual
         // request survives into the leave.
-        if let Some(fence) = self.encryption_debug_fences.remove(&room_id) {
+        if let Some(mut fence) = self.encryption_debug_fences.remove(&room_id) {
             fence
                 .cancelled
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             let _ = fence.cancel.send(());
-            let _ = tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, fence.join).await;
+            if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join).await.is_err() {
+                fence.join.abort();
+                let _ = fence.join.await;
+            }
             self.emit_encryption_debug_outcome(
                 fence.request_id,
                 fence.room_id,

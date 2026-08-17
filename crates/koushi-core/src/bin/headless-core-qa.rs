@@ -11312,6 +11312,12 @@ async fn run_encryption_debug_stage(
         || diagnostic_count_field(debug, "index_before")
             != diagnostic_count_field(debug, "index_after")
         || diagnostic_count_field(debug, "inbound_first_known_index") != Some(0)
+        || diagnostic_count_field(debug, "peer_accepted")
+            > diagnostic_count_field(debug, "peer_eligible")
+        || diagnostic_count_field(debug, "peer_missing")
+            > diagnostic_count_field(debug, "peer_eligible")
+        || diagnostic_count_field(debug, "peer_ledger")
+            < diagnostic_count_field(debug, "peer_eligible")
         || diagnostic_count_field(debug, "room_event_sent") != Some(0)
         || diagnostic_count_field(debug, "index0_consumed") != Some(0)
     {
