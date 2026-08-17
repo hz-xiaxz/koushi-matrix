@@ -85,7 +85,8 @@ import type {
   UserProfile,
   SpaceMemberEntry,
   SpaceMembersState,
-  SecureBackupGateState
+  SecureBackupGateState,
+  EncryptionDebugOperationOutcome
 } from "../domain/types";
 import {
   DEFAULT_SLIDING_SYNC_DIAGNOSTICS,
@@ -317,6 +318,9 @@ export interface DesktopApi {
   pinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   unpinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
   reshareRoomKey(roomId: string): Promise<RoomKeyReshareOutcome>;
+  forceNewOutboundSession(roomId: string): Promise<EncryptionDebugOperationOutcome>;
+  shareIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome>;
+  resendIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome>;
   openActivity(): Promise<DesktopSnapshot>;
   closeActivity(): Promise<DesktopSnapshot>;
   setActivityTab(tab: ActivityTab): Promise<DesktopSnapshot>;
@@ -3167,6 +3171,18 @@ class BrowserFakeApi implements DesktopApi {
         .concat(target);
   }
 
+  async forceNewOutboundSession(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return "completed";
+  }
+
+  async shareIndex0RoomKey(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return "completed";
+  }
+
+  async resendIndex0RoomKey(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return "completed";
+  }
+
   async reshareRoomKey(_roomId: string): Promise<RoomKeyReshareOutcome> {
     return { kind: "sent", request_count: 1, recipient_count: 1 };
   }
@@ -3756,7 +3772,8 @@ class BrowserFakeApi implements DesktopApi {
 
     const entry = this.snapshot.state.domain.room_interactions[roomId] ?? {
       pinned_events: [],
-      pin_operation: { kind: "idle" as const }
+      pin_operation: { kind: "idle" as const },
+      encryption_debug_operation: { state: "idle" as const }
     };
     const alreadyPinned = entry.pinned_events.some((event) => event.event_id === eventId);
     this.snapshot.state.domain.room_interactions = {
@@ -3777,7 +3794,8 @@ class BrowserFakeApi implements DesktopApi {
                 thread_root_event_id: null
               }
             ],
-        pin_operation: { kind: "idle" }
+        pin_operation: { kind: "idle" },
+        encryption_debug_operation: { state: "idle" }
       }
     };
     return this.getSnapshot();
@@ -3790,13 +3808,15 @@ class BrowserFakeApi implements DesktopApi {
 
     const entry = this.snapshot.state.domain.room_interactions[roomId] ?? {
       pinned_events: [],
-      pin_operation: { kind: "idle" as const }
+      pin_operation: { kind: "idle" as const },
+      encryption_debug_operation: { state: "idle" as const }
     };
     this.snapshot.state.domain.room_interactions = {
       ...this.snapshot.state.domain.room_interactions,
       [roomId]: {
         pinned_events: entry.pinned_events.filter((event) => event.event_id !== eventId),
-        pin_operation: { kind: "idle" }
+        pin_operation: { kind: "idle" },
+        encryption_debug_operation: { state: "idle" }
       }
     };
     return this.getSnapshot();

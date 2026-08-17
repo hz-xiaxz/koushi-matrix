@@ -9,6 +9,7 @@ import type {
   DesktopSnapshot,
   FilesViewScope,
   ComposerDocument,
+  EncryptionDebugOperationOutcome,
   ResolveComposerKeyAction,
   RoomModerationAction,
   InviteTargetCandidate,
@@ -134,6 +135,9 @@ export function ContextualRightPanel({
   onStartDirectMessage = () => undefined,
   onUpdateMemberRole = () => undefined,
   onReshareRoomKey,
+  onForceNewOutboundSession,
+  onShareIndex0RoomKey,
+  onResendIndex0RoomKey,
   onRecoverySecretPresenceChange,
   onReply,
   onResultSelect,
@@ -271,6 +275,15 @@ export function ContextualRightPanel({
     powerLevel: number
   ) => void;
   onReshareRoomKey?: (roomId: string) => Promise<RoomKeyReshareOutcome>;
+  onForceNewOutboundSession?: (
+    roomId: string
+  ) => Promise<EncryptionDebugOperationOutcome> | EncryptionDebugOperationOutcome;
+  onShareIndex0RoomKey?: (
+    roomId: string
+  ) => Promise<EncryptionDebugOperationOutcome> | EncryptionDebugOperationOutcome;
+  onResendIndex0RoomKey?: (
+    roomId: string
+  ) => Promise<EncryptionDebugOperationOutcome> | EncryptionDebugOperationOutcome;
   onRecoverySecretPresenceChange: (value: boolean) => void;
   onReply: TimelineRowActionHandlers["onReply"];
   onResultSelect: (roomId: string, eventId: string) => void;
@@ -524,6 +537,15 @@ export function ContextualRightPanel({
           }
           onSetRoomNotificationMode={onSetRoomNotificationMode}
           onReshareRoomKey={onReshareRoomKey}
+          onForceNewOutboundSession={onForceNewOutboundSession}
+          onShareIndex0RoomKey={onShareIndex0RoomKey}
+          onResendIndex0RoomKey={onResendIndex0RoomKey}
+          encryptionDebugOperation={
+            activeRoom
+              ? snapshot.state.domain.room_interactions[activeRoom.room_id]
+                  ?.encryption_debug_operation
+              : undefined
+          }
           onUpdateRoomSetting={onUpdateRoomSetting}
           inviteHistoryPolicy={
             snapshot.state.domain.invite_workflow?.query.room_id === activeRoom?.room_id

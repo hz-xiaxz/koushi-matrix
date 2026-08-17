@@ -1091,6 +1091,7 @@ enum RoomKeyReshareCompletion {
     Sent {
         request_count: usize,
         recipient_count: usize,
+        failed_recipient_count: usize,
     },
     NoSession,
     NoRecipients,
@@ -1144,9 +1145,11 @@ fn map_room_key_reshare_completion(
         Ok(MatrixRoomKeyReshareOutcome::Sent {
             request_count,
             recipient_count,
+            failed_recipient_count,
         }) => RoomKeyReshareCompletion::Sent {
             request_count,
             recipient_count,
+            failed_recipient_count,
         },
         Ok(MatrixRoomKeyReshareOutcome::NoSession) => RoomKeyReshareCompletion::NoSession,
         Ok(MatrixRoomKeyReshareOutcome::NoRecipients) => RoomKeyReshareCompletion::NoRecipients,
@@ -4577,6 +4580,7 @@ impl TimelineManagerActor {
                 attempt.delay.as_secs(),
                 0,
                 0,
+                0,
             );
         }
     }
@@ -4704,6 +4708,7 @@ impl TimelineManagerActor {
             RoomKeyReshareCompletion::Sent {
                 request_count,
                 recipient_count,
+                failed_recipient_count,
             } => record_room_key_reshare(
                 trigger,
                 "sent",
@@ -4712,6 +4717,7 @@ impl TimelineManagerActor {
                 delay_seconds,
                 request_count,
                 recipient_count,
+                failed_recipient_count,
             ),
             RoomKeyReshareCompletion::NoSession => {
                 record_room_key_reshare(
@@ -4720,6 +4726,7 @@ impl TimelineManagerActor {
                     attempt,
                     target,
                     delay_seconds,
+                    0,
                     0,
                     0,
                 );
@@ -4733,9 +4740,19 @@ impl TimelineManagerActor {
                 delay_seconds,
                 0,
                 0,
+                0,
             ),
             RoomKeyReshareCompletion::StaleSession => {
-                record_room_key_reshare(trigger, "cancelled", attempt, target, delay_seconds, 0, 0);
+                record_room_key_reshare(
+                    trigger,
+                    "cancelled",
+                    attempt,
+                    target,
+                    delay_seconds,
+                    0,
+                    0,
+                    0,
+                );
                 self.send_enqueue_workers.room_key_reshares.remove(&key);
             }
             RoomKeyReshareCompletion::NetworkError => record_room_key_reshare(
@@ -4746,10 +4763,18 @@ impl TimelineManagerActor {
                 delay_seconds,
                 0,
                 0,
+                0,
             ),
-            RoomKeyReshareCompletion::SdkError => {
-                record_room_key_reshare(trigger, "sdk_error", attempt, target, delay_seconds, 0, 0)
-            }
+            RoomKeyReshareCompletion::SdkError => record_room_key_reshare(
+                trigger,
+                "sdk_error",
+                attempt,
+                target,
+                delay_seconds,
+                0,
+                0,
+                0,
+            ),
         }
     }
 
@@ -7732,6 +7757,7 @@ fn record_room_key_reshare(
     delay_seconds: u64,
     request_count: usize,
     recipient_count: usize,
+    failed_recipient_count: usize,
 ) {
     record(
         DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
@@ -29380,6 +29406,7 @@ mod tests {
                 RoomKeyReshareCompletion::Sent {
                     request_count: 1,
                     recipient_count: 1,
+                    failed_recipient_count: 0,
                 },
             )
             .await;
@@ -29399,6 +29426,7 @@ mod tests {
                 RoomKeyReshareCompletion::Sent {
                     request_count: 1,
                     recipient_count: 1,
+                    failed_recipient_count: 0,
                 },
             )
             .await;
@@ -29460,6 +29488,7 @@ mod tests {
                     RoomKeyReshareCompletion::Sent {
                         request_count: 1,
                         recipient_count: 1,
+                        failed_recipient_count: 0,
                     },
                 )
                 .await;
@@ -45939,6 +45968,7 @@ mod tests {
             3,
             2,
             5,
+            1,
         );
 
         let diagnostics = koushi_diagnostics::test_support::detail_snapshot();

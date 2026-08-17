@@ -3427,6 +3427,17 @@ export function App() {
       throw error;
     }
   }
+  async function forceNewOutboundSession(roomId: string) {
+    return api.forceNewOutboundSession(roomId);
+  }
+
+  async function shareIndex0RoomKey(roomId: string) {
+    return api.shareIndex0RoomKey(roomId);
+  }
+
+  async function resendIndex0RoomKey(roomId: string) {
+    return api.resendIndex0RoomKey(roomId);
+  }
 
   async function chooseRoomKeyExportDestination(): Promise<string | null> {
     if (!isTauriRuntime()) {
@@ -6843,6 +6854,9 @@ export function App() {
             void updateRoomMemberRole(roomId, targetUserId, powerLevel);
           }}
           onReshareRoomKey={reshareRoomKey}
+          onForceNewOutboundSession={forceNewOutboundSession}
+          onShareIndex0RoomKey={shareIndex0RoomKey}
+          onResendIndex0RoomKey={resendIndex0RoomKey}
           onRecoverySecretPresenceChange={setRecoverySecretFilled}
           onReply={(roomId, eventId) => {
             void setComposerReplyTarget(roomId, eventId);

@@ -108,6 +108,25 @@ lockfile is the reproducible security boundary: changing only an existing
 isolated branch so other developers and `origin/main` are unaffected until the
 change is reviewed and merged.
 
+## Rust debug information and target cleanup
+
+Full debug symbols are not needed for ordinary Rust tests, headless QA, or local
+iteration. Prefer line tables so backtraces retain file/line locations without
+retaining full DWARF data; reserve full symbols for LLDB/GDB or other debugger
+work. Distribution builds should strip debug information.
+
+When a profile is being tuned, record the selected profile in the worklog. A
+large `target/` directory is disposable: after changing toolchains, profiles, or
+large feature matrices, remove the stale root target rather than preserving
+incompatible incremental artifacts:
+
+```bash
+rm -rf -- target
+```
+
+Do not use that cleanup for source files, `Cargo.lock`, `node_modules`, QA
+artifacts, or uncommitted work. Rebuild the needed target after cleanup.
+
 ## Reusing a debug build
 
 Build the debug app once, then reuse it with `--skip-build` (optionally

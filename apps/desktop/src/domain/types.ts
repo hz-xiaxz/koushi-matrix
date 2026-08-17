@@ -1037,7 +1037,48 @@ export type InviteDestinationResultKind = "invited" | "alreadyInSpace" | "failed
 export interface RoomInteractionState {
   pinned_events: PinnedEvent[];
   pin_operation: PinOperationState;
+  encryption_debug_operation: EncryptionDebugOperationState;
 }
+
+export type EncryptionDebugOperationKind =
+  | "forceNewOutboundSession"
+  | "shareIndex0Key"
+  | "resendIndex0Key";
+
+export type EncryptionDebugOperationOutcome =
+  | "completed"
+  | "refusedNotEncrypted"
+  | "refusedIndexAdvanced"
+  | "noSession"
+  | "noRecipients"
+  | "inboundSessionMissing"
+  | "inboundIndexAdvanced"
+  | "originalLedgerMissing"
+  | "staleIdentityRefused"
+  | "cancelledStale"
+  | "policyBlocked"
+  | "deadline"
+  | "failed";
+
+export type EncryptionDebugOperationState =
+  | { state: "idle" }
+  | {
+      state: "pending";
+      request_id: number;
+      kind: EncryptionDebugOperationKind;
+    }
+  | {
+      state: "settled";
+      request_id: number;
+      kind: EncryptionDebugOperationKind;
+      outcome: EncryptionDebugOperationOutcome;
+    }
+  | {
+      state: "failed";
+      request_id: number;
+      kind: EncryptionDebugOperationKind;
+      outcome: EncryptionDebugOperationOutcome;
+    };
 
 export interface PinnedEvent {
   event_id: string;

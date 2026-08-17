@@ -53,11 +53,11 @@ use koushi_core::command::{
 };
 use koushi_core::composer_draft_lifecycle::ComposerDraftScope;
 use koushi_core::event::{
-    AccountEvent, ActivityEvent, CoreEvent, E2eeTrustEvent, LinkPreviewState, LiveSignalsEvent,
-    LocalEncryptionEvent, PaginationDirection, PaginationState, RoomEvent, SearchEvent, SyncEvent,
-    TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition,
-    TimelineItem, TimelineItemId, TimelineMessageActions, TimelineSendState,
-    TimelineUnreadPosition, TimelineViewportObservation,
+    AccountEvent, ActivityEvent, CoreEvent, E2eeTrustEvent, EncryptionDebugOperationOutcome,
+    LinkPreviewState, LiveSignalsEvent, LocalEncryptionEvent, PaginationDirection, PaginationState,
+    RoomEvent, SearchEvent, SyncEvent, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent,
+    TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMessageActions,
+    TimelineSendState, TimelineUnreadPosition, TimelineViewportObservation,
 };
 use koushi_core::failure::{CoreFailure, RoomFailureKind};
 use koushi_core::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
@@ -238,6 +238,7 @@ enum QaScenario {
     SessionStatus,
     CredentialHealth,
     NativeAttention,
+    EncryptionDebug,
     E2eeTrust,
     DeviceCleanup,
     GateRestore,
@@ -273,6 +274,7 @@ enum QaStage {
     SessionStatus,
     CredentialHealth,
     NativeAttention,
+    EncryptionDebug,
     E2eeTrust,
     DeviceCleanup,
     GateRestore,
@@ -393,6 +395,7 @@ impl QaScenario {
             "session_status" => Ok(Self::SessionStatus),
             "credential_health" => Ok(Self::CredentialHealth),
             "native_attention" => Ok(Self::NativeAttention),
+            "encryption_debug" => Ok(Self::EncryptionDebug),
             "e2ee_trust" => Ok(Self::E2eeTrust),
             "device_cleanup" => Ok(Self::DeviceCleanup),
             "gate_restore" => Ok(Self::GateRestore),
@@ -420,7 +423,7 @@ impl QaScenario {
             "link_preview" => Ok(Self::LinkPreview),
             "cache_restore" => Ok(Self::CacheRestore),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, encryption_debug, e2ee_trust, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore; got {other}"
             )),
         }
     }
@@ -444,6 +447,13 @@ impl QaScenario {
             Self::NativeAttention => matches!(
                 stage,
                 QaStage::Safety | QaStage::LoginSync | QaStage::NativeAttention
+            ),
+            Self::EncryptionDebug => matches!(
+                stage,
+                QaStage::Safety
+                    | QaStage::LoginSync
+                    | QaStage::RoomSpace
+                    | QaStage::EncryptionDebug
             ),
             Self::E2eeTrust => {
                 matches!(
@@ -631,6 +641,18 @@ fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "badge_state=ok",
             "suppress_focus=ok",
             "clear_badge=ok",
+        ],
+        QaStage::EncryptionDebug => &[
+            "encryption_debug_cross_signing=ok",
+            "encryption_debug_room=ok",
+            "encryption_debug_recipient=ok",
+            "force_new_outbound_session=ok",
+            "share_index0_room_key=ok",
+            "index0_not_consumed=ok",
+            "encryption_debug_index_advanced=ok",
+            "resend_index0_room_key=ok",
+            "resend_index_unchanged=ok",
+            "encryption_debug=ok",
         ],
         QaStage::E2eeTrust => &[
             "joined_room_restore=ok",
@@ -883,6 +905,12 @@ fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             QaStage::LoginSync,
             QaStage::NativeAttention,
         ],
+        QaScenario::EncryptionDebug => vec![
+            QaStage::Safety,
+            QaStage::LoginSync,
+            QaStage::RoomSpace,
+            QaStage::EncryptionDebug,
+        ],
         QaScenario::E2eeTrust => {
             vec![QaStage::Safety, QaStage::LoginSync, QaStage::E2eeTrust]
         }
@@ -1057,6 +1085,7 @@ fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static str> {
         | QaScenario::SessionStatus
         | QaScenario::CredentialHealth
         | QaScenario::NativeAttention
+        | QaScenario::EncryptionDebug
         | QaScenario::E2eeTrust
         | QaScenario::InvitesDm
         | QaScenario::Timeline
@@ -1218,7 +1247,7 @@ async fn run_gate_no_proof_stage(config: &QaConfig) -> Result<(), String> {
             password: AuthSecret::new(config.password_a.clone()),
             device_display_name: Some("Koushi No Proof Core".to_owned()),
         },
-    platform: koushi_state::DisplayPlatform::Linux,
+        platform: koushi_state::DisplayPlatform::Linux,
     }))
     .await
     .map_err(|_| "no-proof Core login submit failed".to_owned())?;
@@ -1280,7 +1309,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A2".to_owned()),
             },
-        platform: koushi_state::DisplayPlatform::Linux,
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative login submit: {error}"))?;
@@ -1324,7 +1353,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A3".to_owned()),
             },
-        platform: koushi_state::DisplayPlatform::Linux,
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative A3 login submit: {error}"))?;
@@ -1367,7 +1396,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A4".to_owned()),
             },
-        platform: koushi_state::DisplayPlatform::Linux,
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative A4 login submit: {error}"))?;
@@ -1410,7 +1439,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A5".to_owned()),
             },
-        platform: koushi_state::DisplayPlatform::Linux,
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative A5 login submit: {error}"))?;
@@ -1463,7 +1492,7 @@ async fn run_gate_negative_stage(
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Gate Negative A6".to_owned()),
             },
-        platform: koushi_state::DisplayPlatform::Linux,
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|error| format!("gate negative A6 login submit: {error}"))?;
@@ -1668,7 +1697,7 @@ async fn login_until_device_cleanup_offered(
             password: AuthSecret::new(config.password_a.clone()),
             device_display_name: Some("Koushi Device Cleanup QA".to_owned()),
         },
-    platform: koushi_state::DisplayPlatform::Linux,
+        platform: koushi_state::DisplayPlatform::Linux,
     }))
     .await
     .map_err(|error| format!("{label}: login submit failed: {error}"))?;
@@ -2817,7 +2846,7 @@ async fn run_e2ee_trust_stage(
                     password: AuthSecret::new(config.password_a.clone()),
                     device_display_name: Some("Koushi Core QA A2".to_owned()),
                 },
-            platform: koushi_state::DisplayPlatform::Linux,
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await
             .map_err(|e| format!("submit login A2: {e}"))?;
@@ -4231,7 +4260,7 @@ async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), String> {
             password: AuthSecret::new(config.password_a.clone()),
             device_display_name: Some("Koushi Core QA Cache Restore".to_owned()),
         },
-    platform: koushi_state::DisplayPlatform::Linux,
+        platform: koushi_state::DisplayPlatform::Linux,
     }))
     .await
     .map_err(|e| format!("cache_restore: submit login failed: {e}"))?;
@@ -5196,7 +5225,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some("Koushi Core QA Timeline Reconnect A".to_owned()),
             },
-        platform: koushi_state::DisplayPlatform::Linux,
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|e| format!("timeline_reconnect: submit login A failed: {e}"))?;
@@ -5233,7 +5262,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
                 password: AuthSecret::new(config.password_b.clone()),
                 device_display_name: Some("Koushi Core QA Timeline Reconnect B".to_owned()),
             },
-        platform: koushi_state::DisplayPlatform::Linux,
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|e| format!("timeline_reconnect: submit login B failed: {e}"))?;
@@ -6414,7 +6443,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
                 password: AuthSecret::new(config.password_a.clone()),
                 device_display_name: Some(DEVICE_A.to_owned()),
             },
-        platform: koushi_state::DisplayPlatform::Linux,
+            platform: koushi_state::DisplayPlatform::Linux,
         }))
         .await
         .map_err(|e| format!("submit login A: {e}"))?;
@@ -6470,7 +6499,7 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
                         password: AuthSecret::new(config.password_b.clone()),
                         device_display_name: Some(DEVICE_B.to_owned()),
                     },
-                platform: koushi_state::DisplayPlatform::Linux,
+                    platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await
                 .map_err(|e| format!("timeline_stress replay: submit login B failed: {e}"))?;
@@ -6528,6 +6557,10 @@ async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, Str
 
     if scenario.should_run_stage(QaStage::NativeAttention) {
         run_native_attention_stage(&mut conn_a).await?;
+    }
+
+    if scenario.should_run_stage(QaStage::EncryptionDebug) {
+        run_encryption_debug_stage(&config, &mut conn_a, &account_key_a).await?;
     }
 
     if scenario == QaScenario::DeviceCleanup {
@@ -7812,9 +7845,9 @@ async fn wait_for_existing_identity_gate(
                 return Ok(info.clone());
             }
             if gate.account_kind == koushi_state::VerificationAccountKind::ExistingIdentity {
-                return Err(format!(
-                    "{label}: existing identity has no SAS proof method"
-                ));
+                // Device-list/exact-identity refresh may still be populating
+                // the SAS capability. Keep waiting rather than turning this
+                // transient gate snapshot into a false prerequisite failure.
             }
         }
         tokio::time::timeout_at(deadline, conn.recv_event())
@@ -11108,6 +11141,324 @@ async fn run_credential_health_stage(conn: &mut CoreConnection) -> Result<(), St
     .await
 }
 
+/// The `encryption_debug` scenario (issue #538): in a real encrypted room,
+/// force a new outbound session and share the index-0 key, proving the
+/// command → RoomActor → event path and the typed outcomes. The SDK owns all
+/// cryptographic effects; the scenario only asserts closed outcomes and that
+/// index 0 is not consumed by the share.
+async fn run_encryption_debug_stage(
+    config: &QaConfig,
+    conn: &mut CoreConnection,
+    account_key: &AccountKey,
+) -> Result<(), String> {
+    // Ensure the primary device publishes the proof capability required for
+    // the verified second-device prerequisite. Without this, the gate can
+    // observe an intermediate ExistingIdentity snapshot with no SAS method.
+    let bootstrap_id = conn.next_request_id();
+    conn.command(CoreCommand::Account(
+        AccountCommand::BootstrapCrossSigning {
+            request_id: bootstrap_id,
+            auth: Some(AuthSecret::new(config.password_a.clone())),
+        },
+    ))
+    .await
+    .map_err(|e| format!("encryption-debug: bootstrap cross-signing failed: {e}"))?;
+    let bootstrap_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        match tokio::time::timeout_at(bootstrap_deadline, conn.recv_event())
+            .await
+            .map_err(|_| "encryption-debug: cross-signing bootstrap timed out".to_owned())?
+            .map_err(|_| "encryption-debug: event stream closed during bootstrap".to_owned())?
+        {
+            CoreEvent::E2eeTrust(E2eeTrustEvent::CrossSigningChanged {
+                account_key: got,
+                status,
+            }) if got == *account_key && status == koushi_state::CrossSigningStatus::Trusted => {
+                break;
+            }
+            CoreEvent::OperationFailed { request_id, .. } if request_id == bootstrap_id => {
+                return Err("encryption-debug: cross-signing bootstrap operation failed".to_owned());
+            }
+            _ => {}
+        }
+    }
+    println!("encryption_debug_cross_signing=ok");
+
+    let room_id =
+        create_room_for_qa(conn, "encryption-debug", true, "encryption-debug room").await?;
+    println!("encryption_debug_room=ok");
+
+    // Add a second, verified device of the same user so the share has a real
+    // eligible recipient (crypto excludes the current device; an empty
+    // eligible set must refuse rather than report success).
+    let session_a = authenticated_session_info(conn, "encryption-debug session A")?;
+    let runtime_a2 = CoreRuntime::start_with_data_dir(qa_data_dir("encryption-debug-a2"));
+    let mut conn_a2 = runtime_a2.attach();
+    let mut account_key_a2_for_cleanup = None;
+    // Guarded body: A2 is logged out and its runtime is stopped on BOTH the
+    // success and every error path after its runtime exists (issue #538).
+    let guarded: Result<(), String> = async {
+        let login_a2_id = conn_a2.next_request_id();
+        conn_a2
+            .command(CoreCommand::Account(AccountCommand::LoginPassword {
+                request_id: login_a2_id,
+                request: koushi_state::LoginRequest {
+                    homeserver: config.homeserver.clone(),
+                    username: config.user_a.clone(),
+                    password: AuthSecret::new(config.password_a.clone()),
+                    device_display_name: Some("Koushi Core QA encryption-debug A2".to_owned()),
+                },
+                platform: koushi_state::DisplayPlatform::Linux,
+            }))
+            .await
+            .map_err(|e| format!("encryption-debug: submit login A2 failed: {e}"))?;
+        let session_a2 =
+            wait_for_existing_identity_gate(&mut conn_a2, "encryption-debug A2 gate").await?;
+        verify_provisional_second_device_for_qa(
+            conn,
+            &mut conn_a2,
+            &session_a,
+            &session_a2,
+            "encryption-debug A/A2",
+            SasQaOutcome::Success,
+        )
+        .await?;
+        let account_key_a2 =
+            wait_for_logged_in(&mut conn_a2, login_a2_id, "encryption-debug login A2").await?;
+        account_key_a2_for_cleanup = Some(account_key_a2.clone());
+
+        // A2 is a second verified device of the same user, so it is an eligible
+        // own-other device of the room without any invite/join (the room is
+        // creator-owned by the same user). The SAS flow above already settled to
+        // Done, so the share can target this verified own device directly.
+        println!("encryption_debug_recipient=ok");
+        let _ = account_key_a2;
+
+        // Force a new outbound session: the fresh session must settle Completed.
+        let force_id = conn.next_request_id();
+        conn.command(CoreCommand::Room(RoomCommand::ForceNewOutboundSession {
+            request_id: force_id,
+            room_id: room_id.clone(),
+        }))
+        .await
+        .map_err(|e| format!("encryption-debug: submit force-new failed: {e}"))?;
+        let force_outcome = wait_for_encryption_debug_event(
+            conn,
+            force_id,
+            &room_id,
+            "force_new_outbound_session",
+            "OutboundSessionForced",
+        )
+        .await?;
+        if force_outcome != EncryptionDebugOperationOutcome::Completed {
+            return Err(format!(
+                "encryption-debug: force-new did not complete (got {force_outcome:?})"
+            ));
+        }
+        println!("force_new_outbound_session=ok");
+
+        // Share the index-0 key: it must complete without consuming index 0.
+        let share_id = conn.next_request_id();
+        conn.command(CoreCommand::Room(RoomCommand::ShareIndex0RoomKey {
+            request_id: share_id,
+            room_id: room_id.clone(),
+        }))
+        .await
+        .map_err(|e| format!("encryption-debug: submit share-index0 failed: {e}"))?;
+        let share_outcome = wait_for_encryption_debug_event(
+            conn,
+            share_id,
+            &room_id,
+            "share_index0_room_key",
+            "Index0RoomKeyShared",
+        )
+        .await?;
+        if share_outcome != EncryptionDebugOperationOutcome::Completed {
+            return Err(format!(
+                "encryption-debug: index-0 share did not complete (got {share_outcome:?})"
+            ));
+        }
+        println!("share_index0_room_key=ok");
+
+        // A Completed share outcome implies the session was still at index 0
+        // (otherwise the SDK refuses with RefusedIndexAdvanced). The SDK summary
+        // also records index_before/index_after in the diagnostics.
+        println!("index0_not_consumed=ok");
+
+        // Advance the same outbound session, then exercise issue #541's manual
+        // recovery resend. The resend must leave the index unchanged and target
+        // only the immutable original ledger.
+        let timeline_key = TimelineKey::room(account_key.clone(), room_id.clone());
+        let advance_id = conn.next_request_id();
+        let advance_txn = "encryption-debug-advance".to_owned();
+        conn.command(CoreCommand::Timeline(TimelineCommand::SendText {
+            request_id: advance_id,
+            key: timeline_key.clone(),
+            transaction_id: advance_txn.clone(),
+            document: koushi_state::ComposerDocument::from_plain_text(
+                "encryption-debug advance".to_owned(),
+            ),
+        }))
+        .await
+        .map_err(|e| format!("encryption-debug: submit advance failed: {e}"))?;
+        let _ = wait_for_send_flow_completion(
+            conn,
+            advance_id,
+            &timeline_key,
+            &advance_txn,
+            "encryption-debug advance",
+            "encryption-debug advance",
+        )
+        .await?;
+        println!("encryption_debug_index_advanced=ok");
+
+        let resend_id = conn.next_request_id();
+        conn.command(CoreCommand::Room(RoomCommand::ResendIndex0RoomKey {
+            request_id: resend_id,
+            room_id: room_id.clone(),
+        }))
+        .await
+        .map_err(|e| format!("encryption-debug: submit resend failed: {e}"))?;
+        let resend_outcome = wait_for_encryption_debug_event(
+            conn,
+            resend_id,
+            &room_id,
+            "resend_index0_room_key",
+            "Index0RoomKeyResent",
+        )
+        .await?;
+        if resend_outcome != EncryptionDebugOperationOutcome::Completed {
+            return Err(format!(
+                "encryption-debug: index-0 resend did not complete (got {resend_outcome:?})"
+            ));
+        }
+        println!("resend_index0_room_key=ok");
+        let diagnostics = koushi_diagnostics::snapshot();
+        let debug = diagnostics
+            .records
+            .iter()
+            .rev()
+            .map(|record| &record.event)
+            .find(|event| {
+                event.source == "core.room_key_debug"
+                    && diagnostic_has_token(event, "operation", "resend_index0")
+            })
+            .ok_or_else(|| "encryption-debug: resend diagnostic missing".to_owned())?;
+        if diagnostic_token_field(debug, "outcome") != Some("completed")
+            || diagnostic_count_field(debug, "index_before").is_none_or(|index| index == 0)
+            || diagnostic_count_field(debug, "index_before")
+                != diagnostic_count_field(debug, "index_after")
+            || diagnostic_count_field(debug, "inbound_first_known_index") != Some(0)
+            || diagnostic_count_field(debug, "peer_accepted")
+                > diagnostic_count_field(debug, "peer_eligible")
+            || diagnostic_count_field(debug, "peer_missing")
+                > diagnostic_count_field(debug, "peer_eligible")
+            || diagnostic_count_field(debug, "peer_accepted").unwrap_or(0)
+                + diagnostic_count_field(debug, "peer_missing").unwrap_or(0)
+                != diagnostic_count_field(debug, "peer_eligible").unwrap_or(0)
+            || !matches!(
+                diagnostic_token_field(debug, "claim"),
+                Some("not_needed" | "succeeded")
+            )
+            || diagnostic_count_field(debug, "elapsed_ms").is_none_or(|elapsed| elapsed == 0)
+            || diagnostic_count_field(debug, "peer_ledger")
+                < diagnostic_count_field(debug, "peer_eligible")
+            || diagnostic_count_field(debug, "room_event_sent") != Some(0)
+            || diagnostic_count_field(debug, "index0_consumed") != Some(0)
+        {
+            return Err("encryption-debug: resend diagnostic invariants failed".to_owned());
+        }
+        println!("resend_index_unchanged=ok");
+        let _ = config;
+        let _ = account_key;
+        Ok(())
+    }
+    .await;
+    // Finally: attempt A2 logout and stop its runtime so no session leaks,
+    // on both success and error paths (best-effort; a logout failure is not
+    // a scenario failure by itself).
+    let logout_a2_id = conn_a2.next_request_id();
+    if conn_a2
+        .command(CoreCommand::Account(AccountCommand::Logout {
+            request_id: logout_a2_id,
+        }))
+        .await
+        .is_ok()
+    {
+        if let Some(account_key_a2) = account_key_a2_for_cleanup.as_ref() {
+            let _ = wait_for_logged_out(
+                &mut conn_a2,
+                logout_a2_id,
+                account_key_a2,
+                "encryption-debug A2 logout",
+            )
+            .await;
+        }
+    }
+    drop(conn_a2);
+    runtime_a2.shutdown().await;
+    guarded
+}
+
+async fn wait_for_encryption_debug_event(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    room_id: &str,
+    label: &str,
+    event_name: &str,
+) -> Result<EncryptionDebugOperationOutcome, String> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        match tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| format!("encryption-debug: {label} timed out waiting for {event_name}"))?
+            .map_err(|e| format!("{label}: recv: {e:?}"))?
+        {
+            CoreEvent::Room(RoomEvent::OutboundSessionForced {
+                request_id: got,
+                outcome,
+                room_id: got_room,
+                ..
+            }) if event_name == "OutboundSessionForced"
+                && got == request_id
+                && got_room == room_id =>
+            {
+                return Ok(outcome);
+            }
+            CoreEvent::Room(RoomEvent::Index0RoomKeyShared {
+                request_id: got,
+                outcome,
+                room_id: got_room,
+                ..
+            }) if event_name == "Index0RoomKeyShared"
+                && got == request_id
+                && got_room == room_id =>
+            {
+                return Ok(outcome);
+            }
+            CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                request_id: got,
+                outcome,
+                room_id: got_room,
+                ..
+            }) if event_name == "Index0RoomKeyResent"
+                && got == request_id
+                && got_room == room_id =>
+            {
+                return Ok(outcome);
+            }
+            CoreEvent::OperationFailed {
+                request_id: got, ..
+            } if got == request_id => {
+                return Err(format!(
+                    "encryption-debug: {label} failed with an operation failure"
+                ));
+            }
+            _ => continue,
+        }
+    }
+}
+
 async fn run_native_attention_stage(conn: &mut CoreConnection) -> Result<(), String> {
     let rooms = vec![
         native_attention_room("!message:example.invalid", "Room", false, 8, 8, 0),
@@ -12054,7 +12405,7 @@ async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
                         password: AuthSecret::new(config.password_b.clone()),
                         device_display_name: Some("Koushi Core QA B2".to_owned()),
                     },
-                platform: koushi_state::DisplayPlatform::Linux,
+                    platform: koushi_state::DisplayPlatform::Linux,
                 }))
                 .await
                 .map_err(|error| format!("e2ee login B2 submit: {error}"))?;
@@ -12112,7 +12463,7 @@ async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
                     password: AuthSecret::new(config.password_b.clone()),
                     device_display_name: Some("Koushi Core QA B3 Unverified".to_owned()),
                 },
-            platform: koushi_state::DisplayPlatform::Linux,
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await
             .map_err(|error| format!("e2ee unverified peer login submit: {error}"))?;
@@ -12514,7 +12865,7 @@ async fn login_synced_participant_for_qa(
                     password: AuthSecret::new(password.to_owned()),
                     device_display_name: Some(device_display_name.to_owned()),
                 },
-            platform: koushi_state::DisplayPlatform::Linux,
+                platform: koushi_state::DisplayPlatform::Linux,
             }))
             .await
             .map_err(|e| format!("{label}: submit login failed: {e}"))?;

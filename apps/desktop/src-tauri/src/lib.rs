@@ -1320,6 +1320,9 @@ pub fn run() {
             commands::settings::set_room_url_preview_override,
             commands::native_attention::play_native_attention_sound,
             commands::native_attention::set_native_attention_badge,
+            commands::room::force_new_outbound_session,
+            commands::room::share_index0_room_key,
+            commands::room::resend_index0_room_key,
             commands::room::select_room_list_filter,
             commands::room::mark_room_as_read,
             commands::room::mark_room_as_unread,
@@ -2426,19 +2429,20 @@ mod tests {
             AccountKey, CoreEvent, TimelineDiff, TimelineKey, build_state_delta,
             event::{
                 AccountEvent, ActivityEvent, CjkTextPolicyEvent, E2eeTrustEvent,
-                EventCacheFailureReasonClass, EventCacheSubscribeStatus, IntentNoOpReason,
-                IntentOutcome, LinkPreview, LinkPreviewImage, LinkPreviewState, LiveSignalsEvent,
-                LocalEncryptionEvent, NativeAttentionEvent, PaginationDirection, PaginationState,
-                ReactionGroup, RoomEvent, RoomKeyRequestStage, RoomKeyRequestStateDto,
-                RoomKeyRequestWithheldCode, RoomKeyReshareOutcome, SearchEvent, SyncEvent,
-                ThreadRootProjectionDto, ThreadRootProjectionStateDto, ThreadSummaryDto,
-                ThreadsListEvent, TimelineAnchorRestoreStatus, TimelineCodeBlock,
-                TimelineDisplayLabelUpdate, TimelineEvent, TimelineFormattedBody, TimelineGapId,
-                TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia,
-                TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail,
-                TimelineMessageActions, TimelineMessageKind, TimelineMessageSource,
-                TimelineNavigationSnapshot, TimelineResyncReason, TimelineSendFailureReason,
-                TimelineSendState, TimelineSpoilerSpan, TimelineUnreadPosition,
+                EncryptionDebugOperationOutcome, EventCacheFailureReasonClass,
+                EventCacheSubscribeStatus, IntentNoOpReason, IntentOutcome, LinkPreview,
+                LinkPreviewImage, LinkPreviewState, LiveSignalsEvent, LocalEncryptionEvent,
+                NativeAttentionEvent, PaginationDirection, PaginationState, ReactionGroup,
+                RoomEvent, RoomKeyRequestStage, RoomKeyRequestStateDto, RoomKeyRequestWithheldCode,
+                RoomKeyReshareOutcome, SearchEvent, SyncEvent, ThreadRootProjectionDto,
+                ThreadRootProjectionStateDto, ThreadSummaryDto, ThreadsListEvent,
+                TimelineAnchorRestoreStatus, TimelineCodeBlock, TimelineDisplayLabelUpdate,
+                TimelineEvent, TimelineFormattedBody, TimelineGapId, TimelineGapPosition,
+                TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind,
+                TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions,
+                TimelineMessageKind, TimelineMessageSource, TimelineNavigationSnapshot,
+                TimelineResyncReason, TimelineSendFailureReason, TimelineSendState,
+                TimelineSpoilerSpan, TimelineUnreadPosition,
             },
             failure::{CoreFailure, TimelineFailureKind},
             ids::{RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration},
@@ -3290,9 +3294,17 @@ mod tests {
                 outcome: RoomKeyReshareOutcome::Sent {
                     request_count: 2,
                     recipient_count: 3,
+                    failed_recipient_count: 0,
                 },
             }))
             .expect("serialize room key reshare outcome");
+        let index0_room_key_resent =
+            serialize_core_event(&CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                request_id,
+                room_id: "!r:example.test".to_owned(),
+                outcome: EncryptionDebugOperationOutcome::Completed,
+            }))
+            .expect("serialize index-0 room key resent event");
         let room_key_request_state_changed =
             serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyRequestStateChanged {
                 key: key.clone(),
@@ -3864,6 +3876,7 @@ mod tests {
             "roomInviteDeclined": room_invite_declined,
             "roomLeft": room_left,
             "roomKeyReshared": room_key_reshared,
+            "index0RoomKeyResent": index0_room_key_resent,
             "roomKeyRequestStateChanged": room_key_request_state_changed,
             "composerSlashCommandRejected": composer_slash_command_rejected,
             "roomMarkedAsRead": room_marked_as_read,
@@ -4007,6 +4020,7 @@ mod tests {
             "roomInviteDeclined",
             "roomLeft",
             "roomKeyReshared",
+            "index0RoomKeyResent",
             "roomKeyRequestStateChanged",
             "composerSlashCommandRejected",
             "roomMarkedAsRead",

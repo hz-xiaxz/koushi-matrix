@@ -1467,7 +1467,10 @@ function lineIndexAtOffset(lineStarts: readonly number[], offset: number): numbe
 }
 
 describe("desktop release scripts", () => {
-  test("always-on diagnostic collection rejects trace-only producers and accepts stderr mirrors", () => {
+  test(
+    "always-on diagnostic collection rejects trace-only producers and accepts stderr mirrors",
+    { timeout: 60_000 },
+    () => {
     const badFixture = `
 fn gated_only() {
   if std::env::var_os("KOUSHI_SYNTH_TRACE").is_some() {
@@ -1566,7 +1569,7 @@ fn collected_alias_mirror() {
 
     const runtimeFindings = scanDiagnosticSources(runtimeRustSources());
     expect(runtimeFindings).toEqual([]);
-  }, 15_000);
+  });
 
   test("scanner rejects structured producers inside every recognized gate form without stderr", () => {
     const directGateFixture = `

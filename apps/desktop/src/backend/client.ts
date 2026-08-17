@@ -43,7 +43,8 @@ import type {
   FilesViewScope,
   SubmissionResponse,
   ThreadOpenIntent,
-  ThreadsListScope
+  ThreadsListScope,
+  EncryptionDebugOperationOutcome
 } from "../domain/types";
 import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
 import type { RequestId, TimelineKey } from "../domain/coreEvents";
@@ -698,6 +699,18 @@ class TauriDesktopApi implements DesktopApi {
 
   async reshareRoomKey(roomId: string): Promise<RoomKeyReshareOutcome> {
     return invoke<RoomKeyReshareOutcome>("reshare_room_key", { roomId });
+  }
+
+  async forceNewOutboundSession(roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return invoke<EncryptionDebugOperationOutcome>("force_new_outbound_session", { roomId });
+  }
+
+  async shareIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return invoke<EncryptionDebugOperationOutcome>("share_index0_room_key", { roomId });
+  }
+
+  async resendIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return invoke<EncryptionDebugOperationOutcome>("resend_index0_room_key", { roomId });
   }
 
   async loadRoomSettings(roomId: string): Promise<DesktopSnapshot> {

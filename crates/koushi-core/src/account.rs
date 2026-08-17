@@ -4058,7 +4058,7 @@ impl AccountActor {
         }
     }
 
-    async fn stop_current_session_runtime(&mut self) {
+    async fn stop_current_session_runtime(&mut self) -> bool {
         self.set_secure_backup_send_admitted(false);
         self.recovery_key_delivery_pending = false;
         // Retire the renderer before any account-owned child can be replaced.
@@ -4087,9 +4087,10 @@ impl AccountActor {
         let clear_room_session = !self.residency_preserve_room_session;
         #[cfg(not(feature = "test-hooks"))]
         let clear_room_session = true;
+        let mut teardown_ok = true;
         if clear_room_session {
             self.record_lifecycle_probe("shutdown_clear_room_session");
-            self.clear_room_actor_session().await;
+            teardown_ok = self.clear_room_actor_session().await;
         }
         self.cancel_verification_handles().await;
         self.cancel_identity_reset_handle().await;
@@ -4102,6 +4103,7 @@ impl AccountActor {
         self.pending_ready_events.clear();
         self.pending_trust_transition = None;
         self.pending_recovery_completion = None;
+        teardown_ok
     }
 
     /// Ordered shutdown of the ThreadsListActor. Dropping the handle cancels
@@ -4678,8 +4680,37 @@ impl AccountActor {
         self.room_actor.shutdown().await;
     }
 
-    async fn clear_room_actor_session(&mut self) {
-        let _ = self.room_actor.send(RoomMessage::SessionCleared).await;
+    async fn clear_room_actor_session(&mut self) -> bool {
+        // Acknowledged teardown: wait for the RoomActor to cancel and settle
+        // any in-flight encryption-debug operation before clearing the
+        // session (issue #538). Failures are surfaced AND reported to the
+        // caller so account switch/session replacement can abort unless the
+        // dangerous operation is confirmed settled.
+        let (ack_tx, ack_rx) = oneshot::channel();
+        if self
+            .room_actor
+            .send(RoomMessage::SessionCleared { ack: ack_tx })
+            .await
+        {
+            match ack_rx.await {
+                Ok(()) => true,
+                Err(_) => {
+                    record(DiagnosticEvent::new(
+                        DiagnosticLevel::Warn,
+                        "core.room_key_debug",
+                        "teardown_ack_failed",
+                    ));
+                    false
+                }
+            }
+        } else {
+            record(DiagnosticEvent::new(
+                DiagnosticLevel::Warn,
+                "core.room_key_debug",
+                "teardown_send_failed",
+            ));
+            false
+        }
     }
 
     async fn handle_command(&mut self, command: AccountCommand) {
@@ -8793,6 +8824,16 @@ impl AccountActor {
             }
         };
 
+        // Acknowledge the debug-operation teardown (cancel + join + inline
+        // CancelledStale settlement) BEFORE the switch reset clears room
+        // interactions, so no pending operation is stranded by the reset
+        // (issue #538). Fail closed: unless the dangerous operation is
+        // confirmed settled, do not proceed with the account switch.
+        if !self.clear_room_actor_session().await {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        }
+
         // Project the switch intent so the reducer drives state
         // (SwitchingAccount → cleared views), then run the store-backed
         // restore of the target account.
@@ -9812,6 +9853,14 @@ impl AccountActor {
         self.stored_sliding_sync_admission = None;
         self.sliding_sync_revalidation_pending = None;
         self.set_secure_backup_send_admitted(false);
+
+        // Fail closed: run the acknowledged RoomActor teardown BEFORE taking
+        // the session, so a failure leaves the complete previous runtime
+        // intact (issue #538).
+        if !self.stop_current_session_runtime().await {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        }
         let session = match self.session.take() {
             Some(s) => s,
             None => {
@@ -9820,8 +9869,6 @@ impl AccountActor {
             }
         };
         let key_id = self.session_key_id.take();
-
-        self.stop_current_session_runtime().await;
 
         if server_logout {
             let _ = logout_server_best_effort(&session).await;
@@ -9973,7 +10020,19 @@ impl AccountActor {
         }
         if let Some(previous_session) = self.session.take() {
             let previous_key_id = self.session_key_id.take();
-            self.stop_current_session_runtime().await;
+            if !self.stop_current_session_runtime().await {
+                // Fail closed: do not replace the session unless the
+                // encryption-debug operation is confirmed settled. Restore
+                // the previous session and surface the failure.
+                self.session = Some(previous_session);
+                self.session_key_id = previous_key_id;
+                record(DiagnosticEvent::new(
+                    DiagnosticLevel::Warn,
+                    "core.room_key_debug",
+                    "session_replacement_aborted_teardown_unconfirmed",
+                ));
+                return;
+            }
             self.next_teardown_generation = self.next_teardown_generation.wrapping_add(1);
             let generation = self.next_teardown_generation;
             self.pending_session_teardown = Some(PendingSessionTeardown {
@@ -11153,7 +11212,23 @@ impl AccountActor {
             ));
         }
         record_device_cleanup_event(local_started);
-        self.stop_current_session_runtime().await;
+        if !self.stop_current_session_runtime().await {
+            // Fail closed: retain the pending cleanup state and report the
+            // failure instead of continuing to close stores or drop the
+            // session (issue #538).
+            record(DiagnosticEvent::new(
+                DiagnosticLevel::Warn,
+                "core.room_key_debug",
+                "device_cleanup_teardown_unconfirmed",
+            ));
+            // Refresh the retained generation: teardown bumped
+            // trust_generation, and a stale value would make the retry
+            // reject the pending entry as outdated (issue #538).
+            pending.trust_generation = self.trust_generation;
+            self.pending_device_cleanup = Some(pending);
+            self.send_device_cleanup_local_failure(request_id).await;
+            return;
+        }
         pending.trust_generation = self.trust_generation;
         let active_session = self.session.clone();
         let stores_closed = match active_session.as_deref() {
@@ -11238,7 +11313,22 @@ impl AccountActor {
         self.pending_sliding_sync_retry = None;
         self.stored_sliding_sync_admission = None;
         self.sliding_sync_revalidation_pending = None;
-        self.stop_current_session_runtime().await;
+        if !self.stop_current_session_runtime().await {
+            // Fail closed: do not close stores, take keys, drop the session,
+            // or delete persistence unless the encryption-debug operation is
+            // confirmed settled (issue #538).
+            record(DiagnosticEvent::new(
+                DiagnosticLevel::Warn,
+                "core.room_key_debug",
+                "local_data_reset_teardown_unconfirmed",
+            ));
+            self.send_actions(vec![AppAction::ResetLocalDataFailed {
+                request_id: request_id.sequence,
+            }])
+            .await;
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        }
         record_local_data_reset_event(
             local_data_reset_event("session_runtime_stop_finished", request_id).field(
                 DiagnosticField::milliseconds("elapsed_ms", started_at.elapsed().as_millis()),

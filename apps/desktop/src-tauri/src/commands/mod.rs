@@ -19,14 +19,15 @@ use std::{
 
 use koushi_core::{
     AccountCommand, AccountEvent, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent,
-    CoreFailure, CreateRoomOptions, EventStreamLag, ImageUploadCompressionPolicy,
-    ImageUploadCompressionState, ImageUploadDimensions, ImageUploadVariantKind, IntentNoOpReason,
-    IntentOutcome, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand, RoomEvent,
-    RoomKeyExportRequest, RoomKeyImportRequest, RoomKeyReshareOutcome, SearchCommand, SearchEvent,
-    SearchScope, SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
-    SyncCommand, TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId,
-    TimelineGeneration, TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind,
-    UploadMediaRequest, UploadMediaThumbnail,
+    CoreFailure, CreateRoomOptions, EncryptionDebugOperationOutcome, EventStreamLag,
+    ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
+    ImageUploadVariantKind, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
+    PaginationDirection, RequestId, RoomCommand, RoomEvent, RoomKeyExportRequest,
+    RoomKeyImportRequest, RoomKeyReshareOutcome, SearchCommand, SearchEvent, SearchScope,
+    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
+    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
+    TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind, UploadMediaRequest,
+    UploadMediaThumbnail,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
@@ -2718,6 +2719,36 @@ pub(crate) fn build_reshare_room_key_command(
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::ReshareRoomKey {
+        request_id,
+        room_id,
+    })
+}
+
+pub(crate) fn build_force_new_outbound_session_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::ForceNewOutboundSession {
+        request_id,
+        room_id,
+    })
+}
+
+pub(crate) fn build_share_index0_room_key_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::ShareIndex0RoomKey {
+        request_id,
+        room_id,
+    })
+}
+
+pub(crate) fn build_resend_index0_room_key_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::ResendIndex0RoomKey {
         request_id,
         room_id,
     })
@@ -6659,6 +6690,47 @@ mod tests {
                 "Tauri command should register {registration_name}"
             );
         }
+    }
+
+    #[test]
+    fn every_tauri_command_is_registered_in_generate_handler() {
+        let commands_source = commands_source();
+        let lib_source = include_str!("../lib.rs");
+        let handler_start = lib_source
+            .find("tauri::generate_handler![")
+            .expect("generate_handler must exist in lib.rs");
+        let handler_end = lib_source[handler_start..]
+            .find(']')
+            .map(|pos| handler_start + pos)
+            .expect("generate_handler must close");
+        let handler_block = &lib_source[handler_start..handler_end];
+
+        let marker = "#[tauri::command]";
+        let mut found = 0usize;
+        for (idx, _) in commands_source.match_indices(marker) {
+            let after = commands_source[idx + marker.len()..].trim_start();
+            let Some(fn_rest) = after.strip_prefix("pub async fn ") else {
+                continue;
+            };
+            let name: String = fn_rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if name.is_empty() {
+                continue;
+            }
+            found += 1;
+            assert!(
+                handler_block
+                    .lines()
+                    .any(|line| line.contains("commands::") && line.contains(&format!("::{name}"))),
+                "Tauri command {name} is defined with #[tauri::command] but is not registered                  in generate_handler! (lib.rs); add commands::<module>::{name} to the invoke handler"
+            );
+        }
+        assert!(
+            found > 0,
+            "no #[tauri::command] functions found in the command sources"
+        );
     }
 
     #[test]

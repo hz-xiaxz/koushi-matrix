@@ -1995,6 +1995,7 @@ mod tests {
                     event_id: "$pinned:example.invalid".to_owned(),
                     op: PinOp::Pin,
                 },
+                encryption_debug_operation: koushi_state::EncryptionDebugOperationState::Idle,
             },
         );
 
