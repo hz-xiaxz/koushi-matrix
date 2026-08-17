@@ -1,9 +1,9 @@
 # Issue #541 verification worklog
 
-Candidate tree:
+Tested implementation tree (later commits only update this record):
 
-- outer: `fad3fa1`
-- vendored SDK: `4f4bbc6`
+- outer: `8a89a18`
+- vendored SDK: `ee70108`
 
 The approved design was reviewed before implementation and received the
 recorded GPT `Correct-to-merge` sign-off. The latest implementation review was
@@ -30,7 +30,7 @@ Commands were run from the exact candidate tree unless noted otherwise:
 - `node scripts/check-agents-docs.mjs` — pass.
 - `git diff --check` — pass.
 - `cargo test -p koushi-core --features test-hooks` — **1171 passed, 8 ignored**.
-- `cargo test -p matrix-sdk --features testing --test integration encryption::index0_reshare` at SDK `4f4bbc6` — **7 passed**; this includes public `Room::resend_index0_room_key` success, claim failure, send-failure cleanup/retry, and controlled-deadline coverage.
+- `cargo test -p matrix-sdk --features testing --test integration encryption::index0_reshare` at SDK `ee70108` — **8 passed**; this includes public `Room::resend_index0_room_key` success, claim failure, partial-send cleanup/retry, send-failure cleanup/retry, and controlled-deadline coverage.
 
 ## Non-green evidence
 
@@ -48,16 +48,16 @@ Commands were run from the exact candidate tree unless noted otherwise:
 
 ## Remaining blockers
 
-1. Extend deterministic high-level SDK executor coverage to partial-send/
-   persistence paths; public resend claim failure, send-failure cleanup/retry,
-   and controlled deadline coverage now pass, and Core actor duplicate
-   admission, teardown cancellation, stale completion suppression, and
-   exactly-one terminal event coverage now pass.
-2. Resolve the A2 SAS prerequisite or obtain an accepted equivalent live
+1. Resolve the A2 SAS prerequisite or obtain an accepted equivalent live
    encrypted-room evidence path; do not infer resend success from the current
    failure.
-3. Triage the unrelated full `matrix-sdk` Sliding Sync test failure if the
+2. Triage the unrelated full `matrix-sdk` Sliding Sync test failure if the
    vendored SDK full suite is required for this merge.
+
+The public executor now has deterministic claim-failure, partial-send,
+cleanup/retry, and controlled-deadline coverage; Core actor duplicate admission,
+teardown cancellation, stale completion suppression, and exactly-one terminal
+event coverage also pass.
 
 No PR was created or merged because the implementation-review gate and live QA
 gate are not satisfied.
