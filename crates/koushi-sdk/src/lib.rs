@@ -9103,6 +9103,43 @@ pub struct MatrixIndex0ShareSummary {
     pub index0_consumed: bool,
 }
 
+/// Closed outcome of a manual current-session index-0 recovery resend (issue #541).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatrixIndex0ResendOutcome {
+    Completed,
+    RefusedNotEncrypted,
+    NoSession,
+    InboundSessionMissing,
+    InboundIndexAdvanced,
+    OriginalLedgerMissing,
+    NoRecipients,
+    PolicyBlocked,
+    StaleIdentityRefused,
+    CancelledStale,
+    Deadline,
+    Failed,
+}
+
+/// Closed aggregate summary of a manual current-session index-0 resend.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MatrixIndex0ResendSummary {
+    pub outcome: MatrixIndex0ResendOutcome,
+    pub message_index_before: Option<u32>,
+    pub message_index_after: Option<u32>,
+    pub peer_ledger: usize,
+    pub peer_sender_key_changed: usize,
+    pub peer_eligible: usize,
+    pub peer_accepted: usize,
+    pub peer_missing: usize,
+    pub policy_blocked: usize,
+    pub inbound_first_known_index: Option<u32>,
+    pub claim: MatrixIndex0ClaimOutcome,
+    pub elapsed_ms: u64,
+    pub room_event_sent: bool,
+    pub index0_consumed: bool,
+}
+
 /// Closed outcome of a manual force-new-outbound-session (issue #538).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -9213,6 +9250,85 @@ pub async fn share_index0_room_key(
         peer_accepted: summary.peer_accepted,
         peer_missing: summary.peer_missing,
         peer_users_with_zero_accepted: summary.peer_users_with_zero_accepted,
+        claim: match summary.claim {
+            matrix_sdk_base::crypto::ManualClaimOutcome::NotNeeded => {
+                MatrixIndex0ClaimOutcome::NotNeeded
+            }
+            matrix_sdk_base::crypto::ManualClaimOutcome::Succeeded => {
+                MatrixIndex0ClaimOutcome::Succeeded
+            }
+            matrix_sdk_base::crypto::ManualClaimOutcome::Failed => MatrixIndex0ClaimOutcome::Failed,
+            matrix_sdk_base::crypto::ManualClaimOutcome::Deadline => {
+                MatrixIndex0ClaimOutcome::Deadline
+            }
+        },
+        elapsed_ms: summary.elapsed_ms,
+        room_event_sent: summary.room_event_sent,
+        index0_consumed: summary.index0_consumed,
+    })
+}
+
+/// Manually resend index-0 recovery material for the current outbound session
+/// (issue #541 diagnostic control).
+pub async fn resend_index0_room_key(
+    session: &MatrixClientSession,
+    room_id: &str,
+    cancellation: &mut tokio::sync::broadcast::Receiver<()>,
+    validate: impl Fn() -> bool + Send + Sync,
+) -> Result<MatrixIndex0ResendSummary, MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    let summary = room
+        .resend_index0_room_key(cancellation, validate)
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    Ok(MatrixIndex0ResendSummary {
+        outcome: match summary.outcome {
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::Completed => {
+                MatrixIndex0ResendOutcome::Completed
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::RefusedNotEncrypted => {
+                MatrixIndex0ResendOutcome::RefusedNotEncrypted
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::NoSession => {
+                MatrixIndex0ResendOutcome::NoSession
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::InboundSessionMissing => {
+                MatrixIndex0ResendOutcome::InboundSessionMissing
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::InboundIndexAdvanced => {
+                MatrixIndex0ResendOutcome::InboundIndexAdvanced
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::OriginalLedgerMissing => {
+                MatrixIndex0ResendOutcome::OriginalLedgerMissing
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::NoRecipients => {
+                MatrixIndex0ResendOutcome::NoRecipients
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::PolicyBlocked => {
+                MatrixIndex0ResendOutcome::PolicyBlocked
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::StaleIdentityRefused => {
+                MatrixIndex0ResendOutcome::StaleIdentityRefused
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::CancelledStale => {
+                MatrixIndex0ResendOutcome::CancelledStale
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::Deadline => {
+                MatrixIndex0ResendOutcome::Deadline
+            }
+            matrix_sdk_base::crypto::ManualIndex0ResendOutcome::Failed => {
+                MatrixIndex0ResendOutcome::Failed
+            }
+        },
+        message_index_before: summary.message_index_before,
+        message_index_after: summary.message_index_after,
+        peer_ledger: summary.peer_ledger,
+        peer_sender_key_changed: summary.peer_sender_key_changed,
+        peer_eligible: summary.peer_eligible,
+        peer_accepted: summary.peer_accepted,
+        peer_missing: summary.peer_missing,
+        policy_blocked: summary.policy_blocked,
+        inbound_first_known_index: summary.inbound_first_known_index,
         claim: match summary.claim {
             matrix_sdk_base::crypto::ManualClaimOutcome::NotNeeded => {
                 MatrixIndex0ClaimOutcome::NotNeeded
@@ -15999,6 +16115,40 @@ mod encryption_debug_dto_privacy_tests {
         };
         let text = serde_json::to_string(&summary).unwrap();
         for fragment in banned_fragments() {
+            assert!(
+                !text.contains(fragment),
+                "privacy leak: {fragment} in {text}"
+            );
+        }
+        assert!(
+            !text.contains('@') && !text.contains('!'),
+            "identifier leak: {text}"
+        );
+    }
+
+    #[test]
+    fn index0_resend_summary_serializes_without_identifiers_or_key_material() {
+        let summary = MatrixIndex0ResendSummary {
+            outcome: MatrixIndex0ResendOutcome::Completed,
+            message_index_before: Some(8),
+            message_index_after: Some(8),
+            peer_ledger: 2,
+            peer_sender_key_changed: 0,
+            peer_eligible: 2,
+            peer_accepted: 2,
+            peer_missing: 0,
+            policy_blocked: 0,
+            inbound_first_known_index: Some(0),
+            claim: MatrixIndex0ClaimOutcome::NotNeeded,
+            elapsed_ms: 12,
+            room_event_sent: false,
+            index0_consumed: false,
+        };
+        let text = serde_json::to_string(&summary).unwrap();
+        for fragment in banned_fragments()
+            .iter()
+            .filter(|fragment| **fragment != "sender_key")
+        {
             assert!(
                 !text.contains(fragment),
                 "privacy leak: {fragment} in {text}"

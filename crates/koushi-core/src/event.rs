@@ -736,6 +736,11 @@ pub enum RoomEvent {
         room_id: String,
         outcome: EncryptionDebugOperationOutcome,
     },
+    Index0RoomKeyResent {
+        request_id: RequestId,
+        room_id: String,
+        outcome: EncryptionDebugOperationOutcome,
+    },
     RoomKeyRequestStateChanged {
         key: TimelineKey,
         event_id: String,
@@ -987,6 +992,16 @@ impl fmt::Debug for RoomEvent {
                 ..
             } => formatter
                 .debug_struct("Index0RoomKeyShared")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .field("outcome", outcome)
+                .finish(),
+            Self::Index0RoomKeyResent {
+                request_id,
+                outcome,
+                ..
+            } => formatter
+                .debug_struct("Index0RoomKeyResent")
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("outcome", outcome)
@@ -2326,6 +2341,7 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
         | RoomEvent::RoomKeyReshared { .. }
         | RoomEvent::OutboundSessionForced { .. }
         | RoomEvent::Index0RoomKeyShared { .. }
+        | RoomEvent::Index0RoomKeyResent { .. }
         | RoomEvent::RoomKeyRequestStateChanged { .. }
         | RoomEvent::ComposerSlashCommandRejected { .. }
         | RoomEvent::MarkedAsRead { .. }

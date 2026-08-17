@@ -424,13 +424,21 @@ export type MessageId =
   | "room.dangerousEncryptionDebuggingWarning"
   | "room.forceNewEncryptionSession"
   | "room.shareIndex0Key"
+  | "room.resendIndex0Key"
   | "room.forceNewEncryptionSessionConfirm"
   | "room.shareIndex0KeyConfirm"
+  | "room.resendIndex0KeyConfirm"
   | "room.confirm"
   | "room.cancel"
   | "room.encryptionDebugOutcomeCompleted"
   | "room.encryptionDebugOutcomeRefusedNotEncrypted"
   | "room.encryptionDebugOutcomeRefusedIndexAdvanced"
+  | "room.encryptionDebugOutcomeNoSession"
+  | "room.encryptionDebugOutcomeNoRecipients"
+  | "room.encryptionDebugOutcomeInboundSessionMissing"
+  | "room.encryptionDebugOutcomeInboundIndexAdvanced"
+  | "room.encryptionDebugOutcomeOriginalLedgerMissing"
+  | "room.encryptionDebugOutcomeStaleIdentityRefused"
   | "room.encryptionDebugOutcomeCancelledStale"
   | "room.encryptionDebugOutcomePolicyBlocked"
   | "room.encryptionDebugOutcomeDeadline"
@@ -1718,16 +1726,25 @@ const en: Catalog = {
     "Temporary diagnostic controls. Rotation affects subsequent encrypted messages; key sharing cannot prove that a recipient received or stored the key.",
   "room.forceNewEncryptionSession": "Force new encryption session",
   "room.shareIndex0Key": "Share index-0 key with room recipients",
+  "room.resendIndex0Key": "Resend index-0 recovery key",
   "room.forceNewEncryptionSessionConfirm":
     "This discards the current encryption session and creates a fresh one at message index 0. Repeated clicks may create additional sessions. Continue?",
   "room.shareIndex0KeyConfirm":
     "This shares the index-0 key of the current session with every eligible recipient device. It does not prove recipient receipt or storage. If the session has advanced past index 0, force a new session first. Continue?",
+  "room.resendIndex0KeyConfirm":
+    "This permanently grants decryption capability for this session to devices from the original share ledger. Shared keys cannot be revoked. This temporary control is for diagnosis only. Continue?",
   "room.confirm": "Confirm",
   "room.cancel": "Cancel",
   "room.encryptionDebugOutcomeCompleted": "Operation completed.",
   "room.encryptionDebugOutcomeRefusedNotEncrypted": "This room is not encrypted.",
   "room.encryptionDebugOutcomeRefusedIndexAdvanced":
     "The session has advanced past index 0. Force a new encryption session first.",
+  "room.encryptionDebugOutcomeNoSession": "No active outbound session is available.",
+  "room.encryptionDebugOutcomeNoRecipients": "No original recipient devices are eligible.",
+  "room.encryptionDebugOutcomeInboundSessionMissing": "The matching inbound session is missing.",
+  "room.encryptionDebugOutcomeInboundIndexAdvanced": "The inbound session cannot export index 0.",
+  "room.encryptionDebugOutcomeOriginalLedgerMissing": "The original sharing proof is unavailable.",
+  "room.encryptionDebugOutcomeStaleIdentityRefused": "A recipient device identity changed; sharing was refused.",
   "room.encryptionDebugOutcomeCancelledStale":
     "The operation was cancelled because the session or room changed.",
   "room.encryptionDebugOutcomePolicyBlocked":
@@ -2918,16 +2935,25 @@ const ja: Catalog = {
     "一時的な診断用コントロールです。ローテーションは以降の暗号化メッセージに影響します。鍵の共有は、受信者が鍵を受け取り・保存したことを証明するものではありません。",
   "room.forceNewEncryptionSession": "新しい暗号化セッションを作成",
   "room.shareIndex0Key": "インデックス0の鍵をルーム参加者に共有",
+  "room.resendIndex0Key": "インデックス0の復旧鍵を再送",
   "room.forceNewEncryptionSessionConfirm":
     "現在の暗号化セッションを破棄し、メッセージインデックス0の新しいセッションを作成します。繰り返しクリックすると追加のセッションが作成されることがあります。続行しますか？",
   "room.shareIndex0KeyConfirm":
     "現在のセッションのインデックス0の鍵を、対象となるすべての受信デバイスに共有します。受信者の受け取り・保存の証明にはなりません。セッションがインデックス0を過ぎている場合は、先に新しいセッションを作成してください。続行しますか？",
+  "room.resendIndex0KeyConfirm":
+    "このセッションの復号能力を、元の共有台帳にあるデバイスへ恒久的に付与します。共有した鍵は取り消せません。この一時的な操作は診断専用です。続行しますか？",
   "room.confirm": "確認",
   "room.cancel": "キャンセル",
   "room.encryptionDebugOutcomeCompleted": "操作が完了しました。",
   "room.encryptionDebugOutcomeRefusedNotEncrypted": "このルームは暗号化されていません。",
   "room.encryptionDebugOutcomeRefusedIndexAdvanced":
     "セッションはインデックス0を過ぎています。先に新しい暗号化セッションを作成してください。",
+  "room.encryptionDebugOutcomeNoSession": "有効な送信セッションがありません。",
+  "room.encryptionDebugOutcomeNoRecipients": "元の受信デバイスに適格な対象がありません。",
+  "room.encryptionDebugOutcomeInboundSessionMissing": "一致する受信セッションがありません。",
+  "room.encryptionDebugOutcomeInboundIndexAdvanced": "受信セッションからインデックス0を取り出せません。",
+  "room.encryptionDebugOutcomeOriginalLedgerMissing": "元の共有証明がありません。",
+  "room.encryptionDebugOutcomeStaleIdentityRefused": "受信デバイスの本人性が変わったため共有を拒否しました。",
   "room.encryptionDebugOutcomeCancelledStale":
     "セッションまたはルームが変更されたため、操作はキャンセルされました。",
   "room.encryptionDebugOutcomePolicyBlocked": "受信者ポリシーにより共有がブロックされました。",

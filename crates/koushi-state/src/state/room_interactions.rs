@@ -21,6 +21,7 @@ pub enum EncryptionDebugOperationKind {
     #[default]
     ForceNewOutboundSession,
     ShareIndex0Key,
+    ResendIndex0Key,
 }
 
 /// Closed outcome of a manual encryption-debug operation (issue #538).
@@ -32,6 +33,12 @@ pub enum EncryptionDebugOperationOutcome {
     Completed,
     RefusedNotEncrypted,
     RefusedIndexAdvanced,
+    NoSession,
+    NoRecipients,
+    InboundSessionMissing,
+    InboundIndexAdvanced,
+    OriginalLedgerMissing,
+    StaleIdentityRefused,
     CancelledStale,
     PolicyBlocked,
     Deadline,

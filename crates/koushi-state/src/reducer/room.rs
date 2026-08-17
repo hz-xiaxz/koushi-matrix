@@ -73,6 +73,15 @@ fn handle_room_list_updated_with_crawler(
     merge_new_spaces_into_preference(&mut state.navigation.space_order, &spaces);
     apply_space_order_preference(&mut spaces, &state.navigation.space_order);
     state.spaces = spaces;
+    let removed_room_interactions = if authoritative {
+        let before = state.room_interactions.len();
+        state
+            .room_interactions
+            .retain(|room_id, _| retained_room_ids.contains(room_id));
+        before != state.room_interactions.len()
+    } else {
+        false
+    };
     state.rooms = rooms;
     retain_navigation_room_memory(state, authoritative);
     recompute_room_list_projection(state);
@@ -85,6 +94,9 @@ fn handle_room_list_updated_with_crawler(
     refresh_timeline_media_gallery(state);
 
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
+    if removed_room_interactions {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged));
+    }
     let observation = if has_attention_increase {
         crate::state::NativeAttentionObservationKind::Live
     } else {

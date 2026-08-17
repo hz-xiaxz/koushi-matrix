@@ -212,7 +212,7 @@ async function runForServer(serverKind, scenario) {
   try {
     await waitForHomeserver(homeserver, serverProcess, timeoutMs, logPath);
 
-    if (scenario !== "timeline_stress") {
+    if (scenario !== "timeline_stress" && scenario !== "encryption_debug") {
       const sdkUsers = await registerQaUsers(homeserver, "sdk");
 
       const qaResult = runHeadlessQa({
@@ -224,7 +224,7 @@ async function runForServer(serverKind, scenario) {
       });
       console.log(qaResult.trim());
     } else {
-      console.log("headless SDK QA skipped for core-only scenario timeline_stress");
+      console.log(`headless SDK QA skipped for core-only scenario ${scenario}`);
     }
 
     if (runCoreQa) {
@@ -574,7 +574,7 @@ function safeTimestamp() {
 
 function printUsage() {
   console.log(
-    "Usage: desktop-headless-local-qa.mjs --run [--server=tuwunel|synapse|both] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_stress|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
+    "Usage: desktop-headless-local-qa.mjs --run [--server=tuwunel|synapse|both] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_stress|encryption_debug|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview[,scenario...]] [--core] [--cargo-profile=dev|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
   );
   console.log("Starts a disposable local homeserver and runs non-GUI Matrix SDK QA.");
   console.log("  --server=both  Runs the positive Sliding Sync fixtures: Tuwunel and Synapse.");

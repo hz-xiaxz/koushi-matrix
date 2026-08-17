@@ -1040,12 +1040,21 @@ export interface RoomInteractionState {
   encryption_debug_operation: EncryptionDebugOperationState;
 }
 
-export type EncryptionDebugOperationKind = "forceNewOutboundSession" | "shareIndex0Key";
+export type EncryptionDebugOperationKind =
+  | "forceNewOutboundSession"
+  | "shareIndex0Key"
+  | "resendIndex0Key";
 
 export type EncryptionDebugOperationOutcome =
   | "completed"
   | "refusedNotEncrypted"
   | "refusedIndexAdvanced"
+  | "noSession"
+  | "noRecipients"
+  | "inboundSessionMissing"
+  | "inboundIndexAdvanced"
+  | "originalLedgerMissing"
+  | "staleIdentityRefused"
   | "cancelledStale"
   | "policyBlocked"
   | "deadline"
@@ -1066,6 +1075,7 @@ export type EncryptionDebugOperationState =
     }
   | {
       state: "failed";
+      request_id: number;
       kind: EncryptionDebugOperationKind;
       outcome: EncryptionDebugOperationOutcome;
     };
