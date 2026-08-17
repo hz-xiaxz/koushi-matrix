@@ -2,8 +2,8 @@
 
 Candidate tree:
 
-- outer: `83dcc01`
-- vendored SDK: `55419db`
+- outer: `6189ca4`
+- vendored SDK: `4f4bbc6`
 
 The approved design was reviewed before implementation and received the
 recorded GPT `Correct-to-merge` sign-off. The latest implementation review was
@@ -30,7 +30,7 @@ Commands were run from the exact candidate tree unless noted otherwise:
 - `node scripts/check-agents-docs.mjs` — pass.
 - `git diff --check` — pass.
 - `cargo test -p koushi-core --features test-hooks` — **1171 passed, 8 ignored**.
-- `cargo test -p matrix-sdk --features testing --test integration encryption::index0_reshare` at SDK `55419db` — **6 passed**; this includes public `Room::resend_index0_room_key` success, send-failure cleanup/retry, and controlled-deadline coverage.
+- `cargo test -p matrix-sdk --features testing --test integration encryption::index0_reshare` at SDK `4f4bbc6` — **7 passed**; this includes public `Room::resend_index0_room_key` success, claim failure, send-failure cleanup/retry, and controlled-deadline coverage.
 
 ## Non-green evidence
 
@@ -48,11 +48,11 @@ Commands were run from the exact candidate tree unless noted otherwise:
 
 ## Remaining blockers
 
-1. Extend deterministic high-level SDK executor coverage to claim-failure and
-   partial-send/persistence paths; public resend failure cleanup/retry and
-   controlled deadline coverage now pass, and Core actor duplicate admission,
-   teardown cancellation, stale completion suppression, and exactly-one terminal
-   event coverage now pass.
+1. Extend deterministic high-level SDK executor coverage to partial-send/
+   persistence paths; public resend claim failure, send-failure cleanup/retry,
+   and controlled deadline coverage now pass, and Core actor duplicate
+   admission, teardown cancellation, stale completion suppression, and
+   exactly-one terminal event coverage now pass.
 2. Resolve the A2 SAS prerequisite or obtain an accepted equivalent live
    encrypted-room evidence path; do not infer resend success from the current
    failure.
