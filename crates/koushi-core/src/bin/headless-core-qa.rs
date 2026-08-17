@@ -7843,9 +7843,9 @@ async fn wait_for_existing_identity_gate(
                 return Ok(info.clone());
             }
             if gate.account_kind == koushi_state::VerificationAccountKind::ExistingIdentity {
-                return Err(format!(
-                    "{label}: existing identity has no SAS proof method"
-                ));
+                // Device-list/exact-identity refresh may still be populating
+                // the SAS capability. Keep waiting rather than turning this
+                // transient gate snapshot into a false prerequisite failure.
             }
         }
         tokio::time::timeout_at(deadline, conn.recv_event())
@@ -11316,6 +11316,14 @@ async fn run_encryption_debug_stage(
             > diagnostic_count_field(debug, "peer_eligible")
         || diagnostic_count_field(debug, "peer_missing")
             > diagnostic_count_field(debug, "peer_eligible")
+        || diagnostic_count_field(debug, "peer_accepted").unwrap_or(0)
+            + diagnostic_count_field(debug, "peer_missing").unwrap_or(0)
+            != diagnostic_count_field(debug, "peer_eligible").unwrap_or(0)
+        || !matches!(
+            diagnostic_token_field(debug, "claim"),
+            Some("not_needed" | "succeeded")
+        )
+        || diagnostic_count_field(debug, "elapsed_ms").is_none_or(|elapsed| elapsed == 0)
         || diagnostic_count_field(debug, "peer_ledger")
             < diagnostic_count_field(debug, "peer_eligible")
         || diagnostic_count_field(debug, "room_event_sent") != Some(0)
