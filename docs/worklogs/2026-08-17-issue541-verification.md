@@ -2,7 +2,7 @@
 
 Candidate tree:
 
-- outer: `6189ca4`
+- outer: `fad3fa1`
 - vendored SDK: `4f4bbc6`
 
 The approved design was reviewed before implementation and received the
@@ -15,7 +15,7 @@ regression tests and live encrypted-room evidence.
 Commands were run from the exact candidate tree unless noted otherwise:
 
 - `cargo fmt --all -- --check` — pass.
-- `cargo test --workspace --exclude koushi-backend --exclude sidebar-composition --exclude key-management` — **2336 passed, 12 ignored**.
+- `cargo test --workspace --exclude koushi-backend --exclude sidebar-composition --exclude key-management` — **2337 passed, 12 ignored**.
 - `cargo test -p matrix-sdk-crypto --lib` at SDK `cb164845` — **580 passed, 1 ignored**.
 - `cargo test -p koushi-sdk --lib` — **143 passed**.
 - `cargo test -p koushi-desktop --lib` — **148 passed, 1 ignored**.
