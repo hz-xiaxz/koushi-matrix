@@ -33,6 +33,8 @@ pub enum EncryptionDebugOperationOutcome {
     Completed,
     RefusedNotEncrypted,
     RefusedIndexAdvanced,
+    NoSession,
+    NoRecipients,
     InboundSessionMissing,
     InboundIndexAdvanced,
     OriginalLedgerMissing,

@@ -433,6 +433,8 @@ export type MessageId =
   | "room.encryptionDebugOutcomeCompleted"
   | "room.encryptionDebugOutcomeRefusedNotEncrypted"
   | "room.encryptionDebugOutcomeRefusedIndexAdvanced"
+  | "room.encryptionDebugOutcomeNoSession"
+  | "room.encryptionDebugOutcomeNoRecipients"
   | "room.encryptionDebugOutcomeInboundSessionMissing"
   | "room.encryptionDebugOutcomeInboundIndexAdvanced"
   | "room.encryptionDebugOutcomeOriginalLedgerMissing"
@@ -1737,6 +1739,8 @@ const en: Catalog = {
   "room.encryptionDebugOutcomeRefusedNotEncrypted": "This room is not encrypted.",
   "room.encryptionDebugOutcomeRefusedIndexAdvanced":
     "The session has advanced past index 0. Force a new encryption session first.",
+  "room.encryptionDebugOutcomeNoSession": "No active outbound session is available.",
+  "room.encryptionDebugOutcomeNoRecipients": "No original recipient devices are eligible.",
   "room.encryptionDebugOutcomeInboundSessionMissing": "The matching inbound session is missing.",
   "room.encryptionDebugOutcomeInboundIndexAdvanced": "The inbound session cannot export index 0.",
   "room.encryptionDebugOutcomeOriginalLedgerMissing": "The original sharing proof is unavailable.",
@@ -2944,6 +2948,8 @@ const ja: Catalog = {
   "room.encryptionDebugOutcomeRefusedNotEncrypted": "このルームは暗号化されていません。",
   "room.encryptionDebugOutcomeRefusedIndexAdvanced":
     "セッションはインデックス0を過ぎています。先に新しい暗号化セッションを作成してください。",
+  "room.encryptionDebugOutcomeNoSession": "有効な送信セッションがありません。",
+  "room.encryptionDebugOutcomeNoRecipients": "元の受信デバイスに適格な対象がありません。",
   "room.encryptionDebugOutcomeInboundSessionMissing": "一致する受信セッションがありません。",
   "room.encryptionDebugOutcomeInboundIndexAdvanced": "受信セッションからインデックス0を取り出せません。",
   "room.encryptionDebugOutcomeOriginalLedgerMissing": "元の共有証明がありません。",

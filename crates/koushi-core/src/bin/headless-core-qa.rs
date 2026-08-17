@@ -11304,8 +11304,10 @@ async fn run_encryption_debug_stage(
         })
         .ok_or_else(|| "encryption-debug: resend diagnostic missing".to_owned())?;
     if diagnostic_token_field(debug, "outcome") != Some("completed")
+        || diagnostic_count_field(debug, "index_before").is_none_or(|index| index == 0)
         || diagnostic_count_field(debug, "index_before")
             != diagnostic_count_field(debug, "index_after")
+        || diagnostic_count_field(debug, "inbound_first_known_index") != Some(0)
         || diagnostic_count_field(debug, "room_event_sent") != Some(0)
         || diagnostic_count_field(debug, "index0_consumed") != Some(0)
     {

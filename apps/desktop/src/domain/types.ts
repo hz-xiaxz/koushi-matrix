@@ -1049,6 +1049,8 @@ export type EncryptionDebugOperationOutcome =
   | "completed"
   | "refusedNotEncrypted"
   | "refusedIndexAdvanced"
+  | "noSession"
+  | "noRecipients"
   | "inboundSessionMissing"
   | "inboundIndexAdvanced"
   | "originalLedgerMissing"

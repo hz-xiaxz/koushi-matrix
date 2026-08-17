@@ -185,6 +185,10 @@ export function RoomInfoPanel({
         return t("room.encryptionDebugOutcomeRefusedNotEncrypted");
       case "refusedIndexAdvanced":
         return t("room.encryptionDebugOutcomeRefusedIndexAdvanced");
+      case "noSession":
+        return t("room.encryptionDebugOutcomeNoSession");
+      case "noRecipients":
+        return t("room.encryptionDebugOutcomeNoRecipients");
       case "inboundSessionMissing":
         return t("room.encryptionDebugOutcomeInboundSessionMissing");
       case "inboundIndexAdvanced":

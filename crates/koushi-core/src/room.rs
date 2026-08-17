@@ -2830,7 +2830,7 @@ impl RoomActor {
             koushi_sdk::MatrixIndex0ResendOutcome::RefusedNotEncrypted => {
                 CoreEncryptionDebugOutcome::RefusedNotEncrypted
             }
-            koushi_sdk::MatrixIndex0ResendOutcome::NoSession => CoreEncryptionDebugOutcome::Failed,
+            koushi_sdk::MatrixIndex0ResendOutcome::NoSession => CoreEncryptionDebugOutcome::NoSession,
             koushi_sdk::MatrixIndex0ResendOutcome::InboundSessionMissing => {
                 CoreEncryptionDebugOutcome::InboundSessionMissing
             }
@@ -2841,7 +2841,7 @@ impl RoomActor {
                 CoreEncryptionDebugOutcome::OriginalLedgerMissing
             }
             koushi_sdk::MatrixIndex0ResendOutcome::NoRecipients => {
-                CoreEncryptionDebugOutcome::Failed
+                CoreEncryptionDebugOutcome::NoRecipients
             }
             koushi_sdk::MatrixIndex0ResendOutcome::PolicyBlocked => {
                 CoreEncryptionDebugOutcome::PolicyBlocked
@@ -2861,7 +2861,7 @@ impl RoomActor {
         match outcome {
             koushi_sdk::MatrixIndex0ResendOutcome::Completed => "completed",
             koushi_sdk::MatrixIndex0ResendOutcome::RefusedNotEncrypted => "refused_not_encrypted",
-            koushi_sdk::MatrixIndex0ResendOutcome::NoSession => "failed",
+            koushi_sdk::MatrixIndex0ResendOutcome::NoSession => "no_session",
             koushi_sdk::MatrixIndex0ResendOutcome::InboundSessionMissing => {
                 "inbound_session_missing"
             }
