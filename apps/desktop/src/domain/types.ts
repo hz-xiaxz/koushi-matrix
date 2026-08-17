@@ -1040,12 +1040,19 @@ export interface RoomInteractionState {
   encryption_debug_operation: EncryptionDebugOperationState;
 }
 
-export type EncryptionDebugOperationKind = "forceNewOutboundSession" | "shareIndex0Key";
+export type EncryptionDebugOperationKind =
+  | "forceNewOutboundSession"
+  | "shareIndex0Key"
+  | "resendIndex0Key";
 
 export type EncryptionDebugOperationOutcome =
   | "completed"
   | "refusedNotEncrypted"
   | "refusedIndexAdvanced"
+  | "inboundSessionMissing"
+  | "inboundIndexAdvanced"
+  | "originalLedgerMissing"
+  | "staleIdentityRefused"
   | "cancelledStale"
   | "policyBlocked"
   | "deadline"

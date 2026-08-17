@@ -507,6 +507,48 @@ pub async fn share_index0_room_key(
     }
 }
 
+/// Temporary dangerous encryption-debug control (issue #541): resend the
+/// current session's index-0 recovery material to the immutable original
+/// recipient ledger.
+#[tauri::command]
+pub async fn resend_index0_room_key(
+    room_id: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<EncryptionDebugOperationOutcome, String> {
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_resend_index0_room_key_command(
+            request_id,
+            room_id.clone(),
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
+            .await
+            .map_err(|_| "index-0 room key resend did not complete".to_owned())?;
+        match event {
+            Ok(CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                request_id: event_request_id,
+                outcome,
+                ..
+            })) if event_request_id == request_id => return Ok(outcome),
+            Ok(CoreEvent::OperationFailed {
+                request_id: event_request_id,
+                failure,
+            }) if event_request_id == request_id => {
+                return Err(invoke_error_from_core_failure(
+                    "index-0 room key resend failed",
+                    failure,
+                ));
+            }
+            Ok(_) | Err(_) => {}
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn update_room_setting(
     room_id: String,

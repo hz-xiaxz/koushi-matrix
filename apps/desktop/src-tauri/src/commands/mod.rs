@@ -2744,6 +2744,16 @@ pub(crate) fn build_share_index0_room_key_command(
     })
 }
 
+pub(crate) fn build_resend_index0_room_key_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::ResendIndex0RoomKey {
+        request_id,
+        room_id,
+    })
+}
+
 pub(crate) fn build_update_room_setting_command(
     request_id: koushi_core::RequestId,
     room_id: String,

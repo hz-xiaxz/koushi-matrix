@@ -320,6 +320,7 @@ export interface DesktopApi {
   reshareRoomKey(roomId: string): Promise<RoomKeyReshareOutcome>;
   forceNewOutboundSession(roomId: string): Promise<EncryptionDebugOperationOutcome>;
   shareIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome>;
+  resendIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome>;
   openActivity(): Promise<DesktopSnapshot>;
   closeActivity(): Promise<DesktopSnapshot>;
   setActivityTab(tab: ActivityTab): Promise<DesktopSnapshot>;
@@ -3175,6 +3176,10 @@ class BrowserFakeApi implements DesktopApi {
   }
 
   async shareIndex0RoomKey(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
+    return "completed";
+  }
+
+  async resendIndex0RoomKey(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
     return "completed";
   }
 

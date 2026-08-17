@@ -647,6 +647,7 @@ describe("temporary dangerous encryption debugging controls", () => {
   test("requires explicit confirmation before running each operation", () => {
     const onForce = vi.fn().mockResolvedValue("completed");
     const onShare = vi.fn().mockResolvedValue("completed");
+    const onResend = vi.fn().mockResolvedValue("completed");
     render(
       <RoomInfoPanel
         room={{ ...baseRoom, is_encrypted: true }}
@@ -654,6 +655,7 @@ describe("temporary dangerous encryption debugging controls", () => {
         spaces={[]}
         onForceNewOutboundSession={onForce}
         onShareIndex0RoomKey={onShare}
+        onResendIndex0RoomKey={onResend}
       />
     );
 
@@ -669,6 +671,12 @@ describe("temporary dangerous encryption debugging controls", () => {
     expect(onShare).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
     expect(onShare).toHaveBeenCalledWith(baseRoom.room_id);
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend index-0 recovery key" }));
+    expect(onResend).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(onResend).toHaveBeenCalledWith(baseRoom.room_id);
   });
 
   test("disables both buttons while either operation is pending", () => {
@@ -684,6 +692,7 @@ describe("temporary dangerous encryption debugging controls", () => {
         }}
         onForceNewOutboundSession={vi.fn()}
         onShareIndex0RoomKey={vi.fn()}
+        onResendIndex0RoomKey={vi.fn()}
       />
     );
 
@@ -695,6 +704,11 @@ describe("temporary dangerous encryption debugging controls", () => {
     expect(
       screen
         .getByRole("button", { name: "Share index-0 key with room recipients" })
+        .hasAttribute("disabled")
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Resend index-0 recovery key" })
         .hasAttribute("disabled")
     ).toBe(true);
   });

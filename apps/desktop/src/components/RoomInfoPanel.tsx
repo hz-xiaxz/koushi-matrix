@@ -55,6 +55,7 @@ export function RoomInfoPanel({
   onReturnToInvite,
   onForceNewOutboundSession,
   onShareIndex0RoomKey,
+  onResendIndex0RoomKey,
   encryptionDebugOperation
 }: {
   room: RoomSummary | null;
@@ -78,6 +79,9 @@ export function RoomInfoPanel({
     roomId: string
   ) => EncryptionDebugOperationOutcome | Promise<EncryptionDebugOperationOutcome>;
   onShareIndex0RoomKey?: (
+    roomId: string
+  ) => EncryptionDebugOperationOutcome | Promise<EncryptionDebugOperationOutcome>;
+  onResendIndex0RoomKey?: (
     roomId: string
   ) => EncryptionDebugOperationOutcome | Promise<EncryptionDebugOperationOutcome>;
   encryptionDebugOperation?: EncryptionDebugOperationState;
@@ -150,7 +154,7 @@ export function RoomInfoPanel({
     }
   }
 
-  const [debugConfirm, setDebugConfirm] = useState<"force" | "share" | null>(null);
+  const [debugConfirm, setDebugConfirm] = useState<"force" | "share" | "resend" | null>(null);
   const debugPending = encryptionDebugOperation?.state === "pending";
   const debugOutcome =
     encryptionDebugOperation?.state === "settled" ||
@@ -162,12 +166,14 @@ export function RoomInfoPanel({
     setDebugConfirm(null);
   }, [roomId]);
 
-  function runDebugOperation(kind: "force" | "share") {
+  function runDebugOperation(kind: "force" | "share" | "resend") {
     setDebugConfirm(null);
     if (kind === "force") {
       void onForceNewOutboundSession?.(roomId);
-    } else {
+    } else if (kind === "share") {
       void onShareIndex0RoomKey?.(roomId);
+    } else {
+      void onResendIndex0RoomKey?.(roomId);
     }
   }
 
@@ -179,6 +185,14 @@ export function RoomInfoPanel({
         return t("room.encryptionDebugOutcomeRefusedNotEncrypted");
       case "refusedIndexAdvanced":
         return t("room.encryptionDebugOutcomeRefusedIndexAdvanced");
+      case "inboundSessionMissing":
+        return t("room.encryptionDebugOutcomeInboundSessionMissing");
+      case "inboundIndexAdvanced":
+        return t("room.encryptionDebugOutcomeInboundIndexAdvanced");
+      case "originalLedgerMissing":
+        return t("room.encryptionDebugOutcomeOriginalLedgerMissing");
+      case "staleIdentityRefused":
+        return t("room.encryptionDebugOutcomeStaleIdentityRefused");
       case "cancelledStale":
         return t("room.encryptionDebugOutcomeCancelledStale");
       case "policyBlocked":
@@ -342,13 +356,25 @@ export function RoomInfoPanel({
               >
                 {t("room.shareIndex0Key")}
               </button>
+              <button
+                className="profile-settings-action"
+                type="button"
+                disabled={debugPending || !onResendIndex0RoomKey}
+                onClick={() => {
+                  setDebugConfirm("resend");
+                }}
+              >
+                {t("room.resendIndex0Key")}
+              </button>
             </div>
             {debugConfirm ? (
               <div className="settings-detail-row">
                 <p className="profile-settings-hint">
                   {debugConfirm === "force"
                     ? t("room.forceNewEncryptionSessionConfirm")
-                    : t("room.shareIndex0KeyConfirm")}
+                    : debugConfirm === "share"
+                      ? t("room.shareIndex0KeyConfirm")
+                      : t("room.resendIndex0KeyConfirm")}
                 </p>
                 <button
                   className="profile-settings-action"

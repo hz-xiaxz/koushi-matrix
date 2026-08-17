@@ -1478,6 +1478,13 @@ impl RoomActor {
             } => {
                 self.handle_share_index0_room_key(request_id, room_id).await;
             }
+            RoomCommand::ResendIndex0RoomKey {
+                request_id,
+                room_id,
+            } => {
+                self.handle_resend_index0_room_key(request_id, room_id)
+                    .await;
+            }
             RoomCommand::UpdateRoomSetting {
                 request_id,
                 room_id,
@@ -2813,6 +2820,136 @@ impl RoomActor {
         }
     }
 
+    fn map_index0_resend_outcome(
+        outcome: koushi_sdk::MatrixIndex0ResendOutcome,
+    ) -> CoreEncryptionDebugOutcome {
+        match outcome {
+            koushi_sdk::MatrixIndex0ResendOutcome::Completed => {
+                CoreEncryptionDebugOutcome::Completed
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::RefusedNotEncrypted => {
+                CoreEncryptionDebugOutcome::RefusedNotEncrypted
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::NoSession => CoreEncryptionDebugOutcome::Failed,
+            koushi_sdk::MatrixIndex0ResendOutcome::InboundSessionMissing => {
+                CoreEncryptionDebugOutcome::InboundSessionMissing
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::InboundIndexAdvanced => {
+                CoreEncryptionDebugOutcome::InboundIndexAdvanced
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::OriginalLedgerMissing => {
+                CoreEncryptionDebugOutcome::OriginalLedgerMissing
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::NoRecipients => {
+                CoreEncryptionDebugOutcome::Failed
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::PolicyBlocked => {
+                CoreEncryptionDebugOutcome::PolicyBlocked
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::StaleIdentityRefused => {
+                CoreEncryptionDebugOutcome::StaleIdentityRefused
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::CancelledStale => {
+                CoreEncryptionDebugOutcome::CancelledStale
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::Deadline => CoreEncryptionDebugOutcome::Deadline,
+            koushi_sdk::MatrixIndex0ResendOutcome::Failed => CoreEncryptionDebugOutcome::Failed,
+        }
+    }
+
+    fn index0_resend_outcome_token(outcome: koushi_sdk::MatrixIndex0ResendOutcome) -> &'static str {
+        match outcome {
+            koushi_sdk::MatrixIndex0ResendOutcome::Completed => "completed",
+            koushi_sdk::MatrixIndex0ResendOutcome::RefusedNotEncrypted => "refused_not_encrypted",
+            koushi_sdk::MatrixIndex0ResendOutcome::NoSession => "failed",
+            koushi_sdk::MatrixIndex0ResendOutcome::InboundSessionMissing => {
+                "inbound_session_missing"
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::InboundIndexAdvanced => "inbound_index_advanced",
+            koushi_sdk::MatrixIndex0ResendOutcome::OriginalLedgerMissing => {
+                "original_ledger_missing"
+            }
+            koushi_sdk::MatrixIndex0ResendOutcome::NoRecipients => "no_recipients",
+            koushi_sdk::MatrixIndex0ResendOutcome::PolicyBlocked => "policy_blocked",
+            koushi_sdk::MatrixIndex0ResendOutcome::StaleIdentityRefused => "stale_identity_refused",
+            koushi_sdk::MatrixIndex0ResendOutcome::CancelledStale => "cancelled_stale",
+            koushi_sdk::MatrixIndex0ResendOutcome::Deadline => "deadline",
+            koushi_sdk::MatrixIndex0ResendOutcome::Failed => "failed",
+        }
+    }
+
+    fn record_index0_resend_diagnostic(summary: &koushi_sdk::MatrixIndex0ResendSummary) {
+        record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_debug", "operation")
+                .field(DiagnosticField::token("operation", "resend_index0"))
+                .field(DiagnosticField::token(
+                    "outcome",
+                    Self::index0_resend_outcome_token(summary.outcome),
+                ))
+                .field(DiagnosticField::boolean(
+                    "index_before_set",
+                    summary.message_index_before.is_some(),
+                ))
+                .field(DiagnosticField::count(
+                    "index_before",
+                    summary.message_index_before.map(u64::from).unwrap_or(0),
+                ))
+                .field(DiagnosticField::boolean(
+                    "index_after_set",
+                    summary.message_index_after.is_some(),
+                ))
+                .field(DiagnosticField::count(
+                    "index_after",
+                    summary.message_index_after.map(u64::from).unwrap_or(0),
+                ))
+                .field(DiagnosticField::count(
+                    "peer_ledger",
+                    summary.peer_ledger.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "peer_sender_key_changed",
+                    summary
+                        .peer_sender_key_changed
+                        .try_into()
+                        .unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "peer_eligible",
+                    summary.peer_eligible.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "peer_accepted",
+                    summary.peer_accepted.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "peer_missing",
+                    summary.peer_missing.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::count(
+                    "policy_blocked",
+                    summary.policy_blocked.try_into().unwrap_or(u64::MAX),
+                ))
+                .field(DiagnosticField::boolean(
+                    "inbound_first_known_index_set",
+                    summary.inbound_first_known_index.is_some(),
+                ))
+                .field(DiagnosticField::count(
+                    "inbound_first_known_index",
+                    summary
+                        .inbound_first_known_index
+                        .map(u64::from)
+                        .unwrap_or(0),
+                ))
+                .field(DiagnosticField::token(
+                    "claim",
+                    Self::claim_outcome_token(summary.claim),
+                ))
+                .field(DiagnosticField::count("elapsed_ms", summary.elapsed_ms))
+                .field(DiagnosticField::count("room_event_sent", 0))
+                .field(DiagnosticField::count("index0_consumed", 0)),
+        );
+    }
+
     fn force_new_outcome_token(outcome: koushi_sdk::MatrixForceNewSessionOutcome) -> &'static str {
         match outcome {
             koushi_sdk::MatrixForceNewSessionOutcome::Completed => "completed",
@@ -2972,7 +3109,16 @@ impl RoomActor {
         .await;
     }
 
-    /// Shared body of the two temporary dangerous encryption-debug controls
+    async fn handle_resend_index0_room_key(&mut self, request_id: RequestId, room_id: String) {
+        self.handle_encryption_debug_operation(
+            request_id,
+            room_id,
+            EncryptionDebugOperationKind::ResendIndex0Key,
+        )
+        .await;
+    }
+
+    /// Shared body of the temporary dangerous encryption-debug controls
     /// (issue #538). Runs the SDK operation (bounded by the SDK's monotonic
     /// deadline), dispatches the Rust-owned state-machine actions (Started
     /// then Settled/Failed), and emits the typed RoomEvent. The session must
@@ -3068,6 +3214,27 @@ impl RoomActor {
                         }
                     }
                 }
+                EncryptionDebugOperationKind::ResendIndex0Key => {
+                    let validate: Box<dyn Fn() -> bool + Send + Sync> =
+                        Box::new(move || !task_cancelled.load(std::sync::atomic::Ordering::SeqCst));
+                    match koushi_sdk::resend_index0_room_key(
+                        &task_session,
+                        &op_room_id,
+                        &mut cancel_rx,
+                        validate,
+                    )
+                    .await
+                    {
+                        Ok(summary) => {
+                            RoomActor::record_index0_resend_diagnostic(&summary);
+                            RoomActor::map_index0_resend_outcome(summary.outcome)
+                        }
+                        Err(_) => {
+                            RoomActor::record_encryption_debug_failed("resend_index0");
+                            CoreEncryptionDebugOutcome::Failed
+                        }
+                    }
+                }
             };
             // Reliable nonblocking completion lane (unbounded): the actor
             // may be mid-teardown (SessionCleared joins this task); teardown
@@ -3111,6 +3278,13 @@ impl RoomActor {
             }
             EncryptionDebugOperationKind::ShareIndex0Key => {
                 CoreEvent::Room(RoomEvent::Index0RoomKeyShared {
+                    request_id,
+                    room_id: room_id.clone(),
+                    outcome,
+                })
+            }
+            EncryptionDebugOperationKind::ResendIndex0Key => {
+                CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
                     request_id,
                     room_id: room_id.clone(),
                     outcome,

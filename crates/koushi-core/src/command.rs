@@ -188,6 +188,7 @@ impl CoreCommand {
                 | RoomCommand::ReshareRoomKey { request_id, .. }
                 | RoomCommand::ForceNewOutboundSession { request_id, .. }
                 | RoomCommand::ShareIndex0RoomKey { request_id, .. }
+                | RoomCommand::ResendIndex0RoomKey { request_id, .. }
                 | RoomCommand::UpdateRoomSetting { request_id, .. }
                 | RoomCommand::ModerateRoomMember { request_id, .. }
                 | RoomCommand::UpdateRoomMemberRole { request_id, .. }
@@ -2056,6 +2057,13 @@ pub enum RoomCommand {
         request_id: RequestId,
         room_id: String,
     },
+    /// Temporary dangerous encryption-debug control (issue #541): resend
+    /// index-0 recovery material for the current outbound session to the
+    /// immutable original recipient ledger.
+    ResendIndex0RoomKey {
+        request_id: RequestId,
+        room_id: String,
+    },
     UpdateRoomSetting {
         request_id: RequestId,
         room_id: String,
@@ -2326,6 +2334,11 @@ impl fmt::Debug for RoomCommand {
                 .finish(),
             Self::ShareIndex0RoomKey { request_id, .. } => formatter
                 .debug_struct("ShareIndex0RoomKey")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .finish(),
+            Self::ResendIndex0RoomKey { request_id, .. } => formatter
+                .debug_struct("ResendIndex0RoomKey")
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .finish(),

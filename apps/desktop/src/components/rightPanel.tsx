@@ -137,6 +137,7 @@ export function ContextualRightPanel({
   onReshareRoomKey,
   onForceNewOutboundSession,
   onShareIndex0RoomKey,
+  onResendIndex0RoomKey,
   onRecoverySecretPresenceChange,
   onReply,
   onResultSelect,
@@ -278,6 +279,9 @@ export function ContextualRightPanel({
     roomId: string
   ) => Promise<EncryptionDebugOperationOutcome> | EncryptionDebugOperationOutcome;
   onShareIndex0RoomKey?: (
+    roomId: string
+  ) => Promise<EncryptionDebugOperationOutcome> | EncryptionDebugOperationOutcome;
+  onResendIndex0RoomKey?: (
     roomId: string
   ) => Promise<EncryptionDebugOperationOutcome> | EncryptionDebugOperationOutcome;
   onRecoverySecretPresenceChange: (value: boolean) => void;
@@ -535,6 +539,7 @@ export function ContextualRightPanel({
           onReshareRoomKey={onReshareRoomKey}
           onForceNewOutboundSession={onForceNewOutboundSession}
           onShareIndex0RoomKey={onShareIndex0RoomKey}
+          onResendIndex0RoomKey={onResendIndex0RoomKey}
           encryptionDebugOperation={
             activeRoom
               ? snapshot.state.domain.room_interactions[activeRoom.room_id]

@@ -11244,6 +11244,56 @@ async fn run_encryption_debug_stage(
     // (otherwise the SDK refuses with RefusedIndexAdvanced). The SDK summary
     // also records index_before/index_after in the diagnostics.
     println!("index0_not_consumed=ok");
+
+    // Advance the same outbound session, then exercise issue #541's manual
+    // recovery resend. The resend must leave the index unchanged and target
+    // only the immutable original ledger.
+    let timeline_key = TimelineKey::room(account_key.clone(), room_id.clone());
+    let advance_id = conn.next_request_id();
+    let advance_txn = "encryption-debug-advance".to_owned();
+    conn.command(CoreCommand::Timeline(TimelineCommand::SendText {
+        request_id: advance_id,
+        key: timeline_key.clone(),
+        transaction_id: advance_txn.clone(),
+        document: koushi_state::ComposerDocument::from_plain_text(
+            "encryption-debug advance".to_owned(),
+        ),
+    }))
+    .await
+    .map_err(|e| format!("encryption-debug: submit advance failed: {e}"))?;
+    let _ = wait_for_send_flow_completion(
+        conn,
+        advance_id,
+        &timeline_key,
+        &advance_txn,
+        "encryption-debug advance",
+        "encryption-debug advance",
+    )
+    .await?;
+    println!("encryption_debug_index_advanced=ok");
+
+    let resend_id = conn.next_request_id();
+    conn.command(CoreCommand::Room(RoomCommand::ResendIndex0RoomKey {
+        request_id: resend_id,
+        room_id: room_id.clone(),
+    }))
+    .await
+    .map_err(|e| format!("encryption-debug: submit resend failed: {e}"))?;
+    let resend_outcome = wait_for_encryption_debug_event(
+        conn,
+        resend_id,
+        &room_id,
+        "resend_index0_room_key",
+        "Index0RoomKeyResent",
+    )
+    .await?;
+    if resend_outcome != EncryptionDebugOperationOutcome::Completed {
+        return Err(format!(
+            "encryption-debug: index-0 resend did not complete (got {resend_outcome:?})"
+        ));
+    }
+    println!("resend_index0_room_key=ok");
+    println!("resend_index_unchanged=ok");
     let _ = config;
     let _ = account_key;
     Ok(())
@@ -11292,6 +11342,17 @@ async fn wait_for_encryption_debug_event(
                 room_id: got_room,
                 ..
             }) if event_name == "Index0RoomKeyShared"
+                && got == request_id
+                && got_room == room_id =>
+            {
+                return Ok(outcome);
+            }
+            CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                request_id: got,
+                outcome,
+                room_id: got_room,
+                ..
+            }) if event_name == "Index0RoomKeyResent"
                 && got == request_id
                 && got_room == room_id =>
             {
