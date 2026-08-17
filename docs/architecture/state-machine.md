@@ -3370,7 +3370,9 @@ stateDiagram-v2
   the alert is set to "None", when the sound source cannot be loaded, when
   playback cannot start, when the main-thread dispatch fails, or when the
   bounded dispatch timeout expires; `played` only when `NSSound` accepted
-  playback. Outcome tokens and the dispatch state machine are unchanged. A deterministic
+  playback. The accepted `NSSound` remains retained on the AppKit thread so
+  asynchronous playback cannot be cut off by adapter return. Outcome tokens
+  and the dispatch state machine are unchanged. A deterministic
   three-second dispatcher cooldown coalesces successfully played candidate
   bursts independently of Rust candidate dedupe. Playback is synchronously
   reserved before awaiting the native adapter, so concurrent React dispatches
