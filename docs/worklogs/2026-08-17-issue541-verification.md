@@ -61,5 +61,5 @@ cleanup/retry, and controlled-deadline coverage; Core actor duplicate admission,
 teardown cancellation, stale completion suppression, and exactly-one terminal
 event coverage also pass.
 
-No PR was created or merged because the implementation-review gate and live QA
-gate are not satisfied.
+PR #545 is open and its required CI is green. It is not merged because the
+implementation review is blocked by the live A2 QA gate.
