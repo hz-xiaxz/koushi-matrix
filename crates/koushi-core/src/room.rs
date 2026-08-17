@@ -294,6 +294,11 @@ pub enum RoomMessage {
         transitions: Vec<RoomMembershipTransition>,
         forwarded: oneshot::Sender<bool>,
     },
+    #[cfg(feature = "test-hooks")]
+    TestKnownRooms {
+        room_ids: BTreeSet<String>,
+        forwarded: oneshot::Sender<()>,
+    },
     #[cfg(test)]
     InspectObservationGeneration {
         response: oneshot::Sender<Option<u64>>,
@@ -317,6 +322,28 @@ pub(crate) struct RoomOperationTestControl {
     pub(crate) kind: RoomOperationKind,
     pub(crate) reached: oneshot::Sender<()>,
     pub(crate) completion: oneshot::Receiver<Result<String, MatrixRoomOperationError>>,
+}
+
+#[cfg(feature = "test-hooks")]
+pub(crate) struct EncryptionDebugTestControl {
+    pub(crate) kind: EncryptionDebugOperationKind,
+    pub(crate) reached: oneshot::Sender<()>,
+    pub(crate) completion: oneshot::Receiver<CoreEncryptionDebugOutcome>,
+}
+
+#[cfg(feature = "test-hooks")]
+type EncryptionDebugTestControlSlot = Arc<Mutex<Option<EncryptionDebugTestControl>>>;
+
+#[cfg(feature = "test-hooks")]
+fn take_encryption_debug_test_control(
+    control: &mut Option<EncryptionDebugTestControl>,
+    kind: EncryptionDebugOperationKind,
+) -> Option<EncryptionDebugTestControl> {
+    if control.as_ref().is_some_and(|control| control.kind == kind) {
+        control.take()
+    } else {
+        None
+    }
 }
 
 #[cfg(feature = "test-hooks")]
@@ -375,6 +402,8 @@ pub struct RoomActorHandle {
     room_operation_test_control: RoomOperationTestControlSlot,
     #[cfg(feature = "test-hooks")]
     room_operation_test_reached_count: Arc<AtomicUsize>,
+    #[cfg(feature = "test-hooks")]
+    encryption_debug_test_control: EncryptionDebugTestControlSlot,
     task: Option<executor::JoinHandle<()>>,
 }
 
@@ -411,6 +440,37 @@ impl RoomActorHandle {
         }
         *slot = Some(control);
         true
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn install_encryption_debug_test_control(
+        &self,
+        control: EncryptionDebugTestControl,
+    ) -> bool {
+        let mut slot = self
+            .encryption_debug_test_control
+            .lock()
+            .expect("encryption-debug test control lock");
+        if slot.is_some() {
+            return false;
+        }
+        *slot = Some(control);
+        true
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) async fn install_known_rooms_for_test(&self, room_ids: BTreeSet<String>) -> bool {
+        let (forwarded_tx, forwarded_rx) = oneshot::channel();
+        if !self
+            .send(RoomMessage::TestKnownRooms {
+                room_ids,
+                forwarded: forwarded_tx,
+            })
+            .await
+        {
+            return false;
+        }
+        forwarded_rx.await.is_ok()
     }
 
     #[cfg(feature = "test-hooks")]
@@ -584,6 +644,8 @@ pub struct RoomActor {
     room_operation_test_control: RoomOperationTestControlSlot,
     #[cfg(feature = "test-hooks")]
     room_operation_test_reached_count: Arc<AtomicUsize>,
+    #[cfg(feature = "test-hooks")]
+    encryption_debug_test_control: EncryptionDebugTestControlSlot,
     observation: Option<RoomListObservation>,
     room_list_generation: u64,
     room_list_source: Option<RoomListSource>,
@@ -720,6 +782,8 @@ impl RoomActor {
         let room_operation_test_control = Arc::new(Mutex::new(None));
         #[cfg(feature = "test-hooks")]
         let room_operation_test_reached_count = Arc::new(AtomicUsize::new(0));
+        #[cfg(feature = "test-hooks")]
+        let encryption_debug_test_control = Arc::new(Mutex::new(None));
         let actor = RoomActor {
             session: None,
             timeline_residency: timeline_residency_rx,
@@ -728,6 +792,8 @@ impl RoomActor {
             room_operation_test_control: room_operation_test_control.clone(),
             #[cfg(feature = "test-hooks")]
             room_operation_test_reached_count: room_operation_test_reached_count.clone(),
+            #[cfg(feature = "test-hooks")]
+            encryption_debug_test_control: encryption_debug_test_control.clone(),
             observation: None,
             room_list_generation: 0,
             room_list_source: None,
@@ -765,6 +831,8 @@ impl RoomActor {
             room_operation_test_control,
             #[cfg(feature = "test-hooks")]
             room_operation_test_reached_count,
+            #[cfg(feature = "test-hooks")]
+            encryption_debug_test_control,
             task: Some(task),
         }
     }
@@ -1083,6 +1151,14 @@ impl RoomActor {
                 } => {
                     self.handle_test_membership_observed(core_generation, transitions, forwarded)
                         .await;
+                }
+                #[cfg(feature = "test-hooks")]
+                RoomMessage::TestKnownRooms {
+                    room_ids,
+                    forwarded,
+                } => {
+                    *self.known_room_ids.write().expect("known room ids lock") = room_ids;
+                    let _ = forwarded.send(());
                 }
                 #[cfg(test)]
                 RoomMessage::InspectObservationGeneration { response } => {
@@ -3201,6 +3277,48 @@ impl RoomActor {
         let op_room_id = room_id.clone();
         let op_request_id = request_id;
         let session_for_fence = std::sync::Arc::clone(session);
+        #[cfg(feature = "test-hooks")]
+        let test_control = take_encryption_debug_test_control(
+            &mut *self
+                .encryption_debug_test_control
+                .lock()
+                .expect("encryption-debug test control lock"),
+            kind,
+        );
+        #[cfg(feature = "test-hooks")]
+        if let Some(control) = test_control {
+            let (cancel_tx, _cancel_rx) = broadcast::channel::<()>(1);
+            let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let task_cancelled = Arc::clone(&cancelled);
+            let completion_tx = completion_tx.clone();
+            let op_room_id = op_room_id.clone();
+            let join = executor::spawn(async move {
+                let _ = control.reached.send(());
+                let outcome = control
+                    .completion
+                    .await
+                    .unwrap_or(CoreEncryptionDebugOutcome::CancelledStale);
+                let _ = completion_tx.send(EncryptionDebugCompletion {
+                    room_id: op_room_id,
+                    request_id: op_request_id,
+                    kind,
+                    outcome,
+                });
+            });
+            self.encryption_debug_fences.insert(
+                room_id.clone(),
+                EncryptionDebugFence {
+                    request_id,
+                    room_id,
+                    kind,
+                    session: session_for_fence,
+                    cancel: cancel_tx,
+                    cancelled: task_cancelled,
+                    join,
+                },
+            );
+            return;
+        }
         let join = executor::spawn(async move {
             let outcome = std::panic::AssertUnwindSafe(async {
                 match kind {
@@ -7672,6 +7790,8 @@ pub mod tests {
             room_operation_test_control: Arc::new(Mutex::new(None)),
             #[cfg(feature = "test-hooks")]
             room_operation_test_reached_count: Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "test-hooks")]
+            encryption_debug_test_control: Arc::new(Mutex::new(None)),
             task: Some(executor::spawn(std::future::pending())),
         };
 
@@ -10002,6 +10122,152 @@ pub mod tests {
             } => assert_eq!(ev_id, request_id),
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    #[tokio::test]
+    async fn resend_actor_rejects_duplicate_and_correlates_one_terminal_each() {
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let _room = server
+            .sync_joined_room(
+                &client,
+                matrix_sdk::ruma::room_id!("!resend:example.invalid"),
+            )
+            .await;
+        let session = Arc::new(MatrixClientSession::from_client_for_testing(
+            client,
+            SessionInfo {
+                homeserver: server.uri(),
+                user_id: "@actor:example.invalid".to_owned(),
+                device_id: "ACTOR".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        ));
+        let (action_tx, _action_rx) = mpsc::channel(16);
+        let (event_tx, mut event_rx) = broadcast::channel(16);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
+        handle
+            .send(RoomMessage::SessionEstablished {
+                session: session.clone(),
+            })
+            .await;
+        assert!(
+            handle
+                .install_known_rooms_for_test(BTreeSet::from(
+                    ["!resend:example.invalid".to_owned()]
+                ))
+                .await
+        );
+
+        let (reached_tx, reached_rx) = oneshot::channel();
+        let (completion_tx, completion_rx) = oneshot::channel();
+        assert!(
+            handle.install_encryption_debug_test_control(EncryptionDebugTestControl {
+                kind: EncryptionDebugOperationKind::ResendIndex0Key,
+                reached: reached_tx,
+                completion: completion_rx,
+            })
+        );
+        let first = make_request_id(101);
+        let second = make_request_id(102);
+        handle
+            .send(RoomMessage::Command(RoomCommand::ResendIndex0RoomKey {
+                request_id: first,
+                room_id: "!resend:example.invalid".to_owned(),
+            }))
+            .await;
+        reached_rx.await.expect("first resend reached test seam");
+        handle
+            .send(RoomMessage::Command(RoomCommand::ResendIndex0RoomKey {
+                request_id: second,
+                room_id: "!resend:example.invalid".to_owned(),
+            }))
+            .await;
+
+        let duplicate = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("duplicate terminal timeout")
+            .expect("duplicate terminal event");
+        assert!(matches!(
+            duplicate,
+            CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                request_id,
+                outcome: CoreEncryptionDebugOutcome::Failed,
+                ..
+            }) if request_id == second
+        ));
+
+        completion_tx
+            .send(CoreEncryptionDebugOutcome::Completed)
+            .expect("complete first resend");
+        let completed = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("completion terminal timeout")
+            .expect("completion terminal event");
+        match completed {
+            CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                request_id,
+                outcome: CoreEncryptionDebugOutcome::Completed,
+                ..
+            }) if request_id == first => {}
+            other => panic!("unexpected first terminal event: {other:?}"),
+        }
+        assert!(
+            event_rx.try_recv().is_err(),
+            "one terminal event per request"
+        );
+
+        let (reached_tx, reached_rx) = oneshot::channel();
+        let (completion_tx, completion_rx) = oneshot::channel();
+        assert!(
+            handle.install_encryption_debug_test_control(EncryptionDebugTestControl {
+                kind: EncryptionDebugOperationKind::ResendIndex0Key,
+                reached: reached_tx,
+                completion: completion_rx,
+            })
+        );
+        let teardown_request = make_request_id(103);
+        handle
+            .send(RoomMessage::Command(RoomCommand::ResendIndex0RoomKey {
+                request_id: teardown_request,
+                room_id: "!resend:example.invalid".to_owned(),
+            }))
+            .await;
+        reached_rx.await.expect("teardown resend reached test seam");
+        let (ack_tx, ack_rx) = oneshot::channel();
+        handle
+            .send(RoomMessage::SessionCleared { ack: ack_tx })
+            .await;
+        completion_tx
+            .send(CoreEncryptionDebugOutcome::Completed)
+            .expect("complete teardown resend after cancellation");
+        ack_rx.await.expect("session clear acknowledgement");
+        let teardown = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("teardown terminal timeout")
+            .expect("teardown terminal event");
+        assert!(matches!(
+            teardown,
+            CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
+                request_id,
+                outcome: CoreEncryptionDebugOutcome::CancelledStale,
+                ..
+            }) if request_id == teardown_request
+        ));
+        assert!(
+            event_rx.try_recv().is_err(),
+            "late completion must be dropped"
+        );
+
+        assert!(handle.send(RoomMessage::Shutdown).await);
+        handle.join().await;
     }
 
     // --- Observation lifecycle messages without a session are safe ---
