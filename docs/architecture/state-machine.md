@@ -3363,8 +3363,16 @@ stateDiagram-v2
   must not keep a separate notification preference or alter
   `NativeAttentionState` locally.
 - Sound playback crosses a typed Tauri command into a cfg-specific Rust native
-  adapter (macOS AudioToolbox, Windows User32; Linux explicitly unsupported).
-  No WebView audio or external process fallback is allowed. A deterministic
+  adapter (macOS AppKit NSSound, Windows User32; Linux explicitly unsupported).
+  No WebView audio or external process fallback is allowed. The macOS adapter
+  resolves the user's system alert-sound setting (NSGlobalDomain
+  `com.apple.sound.beep.sound`) and reports a truthful outcome: `failed` when
+  the alert is set to "None", when the sound source cannot be loaded, when
+  playback cannot start, when the main-thread dispatch fails, or when the
+  bounded dispatch timeout expires; `played` only when `NSSound` accepted
+  playback. The accepted `NSSound` remains retained on the AppKit thread so
+  asynchronous playback cannot be cut off by adapter return. Outcome tokens
+  and the dispatch state machine are unchanged. A deterministic
   three-second dispatcher cooldown coalesces successfully played candidate
   bursts independently of Rust candidate dedupe. Playback is synchronously
   reserved before awaiting the native adapter, so concurrent React dispatches

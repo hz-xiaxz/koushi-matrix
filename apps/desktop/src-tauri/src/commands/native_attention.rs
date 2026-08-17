@@ -3,7 +3,21 @@ use koushi_state::{NativeAttentionDispatchId, NativeAttentionSoundOutcome};
 
 const NATIVE_BADGE_APPLY_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(target_os = "macos")]
-const MACOS_USER_PREFERRED_ALERT_SOUND_ID: u32 = 0x0000_1000;
+const MACOS_ALERT_SOUND_DEFAULTS_KEY: &str = "com.apple.sound.beep.sound";
+#[cfg(target_os = "macos")]
+const MACOS_DEFAULT_ALERT_SOUND_NAME: &str = "Funk";
+#[cfg(target_os = "macos")]
+const MACOS_SOUND_DISPATCH_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[cfg(target_os = "macos")]
+thread_local! {
+    // `NSSound::play` starts asynchronous playback. Keep the object alive on
+    // the AppKit thread after `play` accepts it; dropping the final retain as
+    // this function returns can cut playback off before it becomes audible.
+    static ACTIVE_MACOS_ALERT_SOUND: std::cell::RefCell<
+        Option<objc2::rc::Retained<objc2_app_kit::NSSound>>,
+    > = const { std::cell::RefCell::new(None) };
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +31,12 @@ trait NativeAttentionSoundBackend {
     async fn play(&self) -> NativeAttentionSoundOutcome;
 }
 
+#[cfg(target_os = "macos")]
+struct PlatformNativeAttentionSoundBackend {
+    app: AppHandle,
+}
+
+#[cfg(not(target_os = "macos"))]
 struct PlatformNativeAttentionSoundBackend;
 static NATIVE_ATTENTION_SOUND_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -34,13 +54,18 @@ pub(crate) fn build_observe_native_window_focus_command(
 
 #[tauri::command]
 pub(crate) async fn play_native_attention_sound(
+    app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<NativeAttentionSoundOutcome, &'static str> {
-    Ok(
-        dispatch_native_attention_sound(&state.runtime, &PlatformNativeAttentionSoundBackend)
-            .await
-            .0,
-    )
+    #[cfg(target_os = "macos")]
+    let backend = PlatformNativeAttentionSoundBackend { app };
+    #[cfg(not(target_os = "macos"))]
+    let backend = PlatformNativeAttentionSoundBackend;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
+    Ok(dispatch_native_attention_sound(&state.runtime, &backend)
+        .await
+        .0)
 }
 
 /// Apply the Rust-owned unread count at the native application boundary.
@@ -228,16 +253,113 @@ async fn dispatch_native_attention_sound_with_lock(
 #[cfg(target_os = "macos")]
 impl NativeAttentionSoundBackend for PlatformNativeAttentionSoundBackend {
     async fn play(&self) -> NativeAttentionSoundOutcome {
-        #[link(name = "AudioToolbox", kind = "framework")]
-        unsafe extern "C" {
-            fn AudioServicesPlayAlertSound(sound_id: u32);
-        }
-        // Ask macOS to play the alert selected by the user in Sound settings.
-        // The constant is documented by AudioToolbox's AudioServices.h as
-        // kSystemSoundID_UserPreferredAlert; no third-party asset is bundled.
-        unsafe { AudioServicesPlayAlertSound(MACOS_USER_PREFERRED_ALERT_SOUND_ID) };
-        NativeAttentionSoundOutcome::Played
+        play_macos_alert_sound(&self.app).await
     }
+}
+
+/// The macOS alert-sound setting (NSGlobalDomain `com.apple.sound.beep.sound`)
+/// interpreted as the sound to play. The system stores an empty string when
+/// the user chose "None" for the alert sound, an absolute path for custom
+/// sounds, and a plain name for system sounds; the key is absent when the
+/// user kept the macOS default.
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum MacosAlertSoundSource {
+    /// The user set the alert sound to "None" (intentionally muted).
+    Muted,
+    /// A named system sound (resolved by `NSSound::soundNamed`).
+    Named(String),
+    /// An absolute path to a sound file.
+    Path(String),
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_macos_alert_sound_source(setting: Option<&str>) -> MacosAlertSoundSource {
+    match setting {
+        None => MacosAlertSoundSource::Named(MACOS_DEFAULT_ALERT_SOUND_NAME.to_owned()),
+        Some("") => MacosAlertSoundSource::Muted,
+        Some(value) if value.starts_with('/') => MacosAlertSoundSource::Path(value.to_owned()),
+        Some(value) => MacosAlertSoundSource::Named(value.to_owned()),
+    }
+}
+
+/// Truthful outcome mapping for the macOS adapter: `Played` only when a sound
+/// source was loaded and playback started; everything else is `Failed`.
+#[cfg(target_os = "macos")]
+fn macos_sound_outcome(loaded: bool, started: bool) -> NativeAttentionSoundOutcome {
+    if loaded && started {
+        NativeAttentionSoundOutcome::Played
+    } else {
+        NativeAttentionSoundOutcome::Failed
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn retain_started_macos_sound<T>(
+    slot: &mut Option<T>,
+    sound: T,
+    started: bool,
+) -> NativeAttentionSoundOutcome {
+    let outcome = macos_sound_outcome(true, started);
+    if outcome == NativeAttentionSoundOutcome::Played {
+        *slot = Some(sound);
+    }
+    outcome
+}
+
+#[cfg(target_os = "macos")]
+async fn play_macos_alert_sound(app: &AppHandle) -> NativeAttentionSoundOutcome {
+    use objc2_foundation::{NSString, NSUserDefaults};
+
+    let setting = NSUserDefaults::standardUserDefaults()
+        .stringForKey(&NSString::from_str(MACOS_ALERT_SOUND_DEFAULTS_KEY))
+        .map(|value| value.to_string());
+    match resolve_macos_alert_sound_source(setting.as_deref()) {
+        MacosAlertSoundSource::Muted => NativeAttentionSoundOutcome::Failed,
+        source => {
+            // NSSound is an AppKit object; create and play it on the main
+            // thread (same pattern as the Dock-badge path).
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            if app
+                .run_on_main_thread(move || {
+                    let _ = sender.send(play_macos_alert_sound_now(source));
+                })
+                .is_err()
+            {
+                return NativeAttentionSoundOutcome::Failed;
+            }
+            match tokio::time::timeout(MACOS_SOUND_DISPATCH_TIMEOUT, receiver).await {
+                Ok(Ok(outcome)) => outcome,
+                // The callback was dropped or the main thread never answered.
+                Ok(Err(_)) | Err(_) => NativeAttentionSoundOutcome::Failed,
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn play_macos_alert_sound_now(source: MacosAlertSoundSource) -> NativeAttentionSoundOutcome {
+    use objc2::AnyThread;
+    use objc2_app_kit::NSSound;
+    use objc2_foundation::NSString;
+
+    let sound = match source {
+        MacosAlertSoundSource::Named(name) => NSSound::soundNamed(&NSString::from_str(&name)),
+        MacosAlertSoundSource::Path(path) => NSSound::initWithContentsOfFile_byReference(
+            NSSound::alloc(),
+            &NSString::from_str(&path),
+            true,
+        ),
+        MacosAlertSoundSource::Muted => {
+            unreachable!("muted is handled before main-thread dispatch")
+        }
+    };
+    let Some(sound) = sound else {
+        return NativeAttentionSoundOutcome::Failed;
+    };
+    let started = sound.play();
+    ACTIVE_MACOS_ALERT_SOUND
+        .with(|slot| retain_started_macos_sound(&mut slot.borrow_mut(), sound, started))
 }
 
 #[cfg(target_os = "windows")]
@@ -372,8 +494,63 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_adapter_uses_the_user_preferred_alert_sound() {
-        assert_eq!(MACOS_USER_PREFERRED_ALERT_SOUND_ID, 0x0000_1000);
+    fn macos_alert_sound_source_resolution_handles_all_setting_rows() {
+        assert_eq!(
+            resolve_macos_alert_sound_source(None),
+            MacosAlertSoundSource::Named(MACOS_DEFAULT_ALERT_SOUND_NAME.to_owned())
+        );
+        assert_eq!(
+            resolve_macos_alert_sound_source(Some("")),
+            MacosAlertSoundSource::Muted
+        );
+        assert_eq!(
+            resolve_macos_alert_sound_source(Some("/System/Library/Sounds/Ping.aiff")),
+            MacosAlertSoundSource::Path("/System/Library/Sounds/Ping.aiff".to_owned())
+        );
+        assert_eq!(
+            resolve_macos_alert_sound_source(Some("Ping")),
+            MacosAlertSoundSource::Named("Ping".to_owned())
+        );
+        // Fail-closed: a malformed value is treated as a name, which fails to
+        // load and maps to `Failed` instead of silently playing.
+        assert_eq!(
+            resolve_macos_alert_sound_source(Some("  ")),
+            MacosAlertSoundSource::Named("  ".to_owned())
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_sound_outcome_maps_loaded_and_started_to_truthful_result() {
+        assert_eq!(
+            macos_sound_outcome(false, true),
+            NativeAttentionSoundOutcome::Failed
+        );
+        assert_eq!(
+            macos_sound_outcome(true, false),
+            NativeAttentionSoundOutcome::Failed
+        );
+        assert_eq!(
+            macos_sound_outcome(true, true),
+            NativeAttentionSoundOutcome::Played
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_started_sound_is_retained_for_asynchronous_playback() {
+        let mut slot = None;
+        assert_eq!(
+            retain_started_macos_sound(&mut slot, "rejected", false),
+            NativeAttentionSoundOutcome::Failed
+        );
+        assert_eq!(slot, None);
+
+        assert_eq!(
+            retain_started_macos_sound(&mut slot, "accepted", true),
+            NativeAttentionSoundOutcome::Played
+        );
+        assert_eq!(slot, Some("accepted"));
     }
 
     #[cfg(target_os = "linux")]
