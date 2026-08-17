@@ -643,6 +643,7 @@ fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "clear_badge=ok",
         ],
         QaStage::EncryptionDebug => &[
+            "encryption_debug_cross_signing=ok",
             "encryption_debug_room=ok",
             "encryption_debug_recipient=ok",
             "force_new_outbound_session=ok",
@@ -11150,6 +11151,37 @@ async fn run_encryption_debug_stage(
     conn: &mut CoreConnection,
     account_key: &AccountKey,
 ) -> Result<(), String> {
+    // Ensure the primary device publishes the proof capability required for
+    // the verified second-device prerequisite. Without this, the gate can
+    // observe an intermediate ExistingIdentity snapshot with no SAS method.
+    let bootstrap_id = conn.next_request_id();
+    conn.command(CoreCommand::Account(AccountCommand::BootstrapCrossSigning {
+        request_id: bootstrap_id,
+        auth: Some(AuthSecret::new(config.password_a.clone())),
+    }))
+    .await
+    .map_err(|e| format!("encryption-debug: bootstrap cross-signing failed: {e}"))?;
+    let bootstrap_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        match tokio::time::timeout_at(bootstrap_deadline, conn.recv_event())
+            .await
+            .map_err(|_| "encryption-debug: cross-signing bootstrap timed out".to_owned())?
+            .map_err(|_| "encryption-debug: event stream closed during bootstrap".to_owned())?
+        {
+            CoreEvent::E2eeTrust(E2eeTrustEvent::CrossSigningChanged { account_key: got, status })
+                if got == *account_key
+                    && status == koushi_state::CrossSigningStatus::Trusted =>
+            {
+                break;
+            }
+            CoreEvent::OperationFailed { request_id, .. } if request_id == bootstrap_id => {
+                return Err("encryption-debug: cross-signing bootstrap operation failed".to_owned());
+            }
+            _ => {}
+        }
+    }
+    println!("encryption_debug_cross_signing=ok");
+
     let room_id =
         create_room_for_qa(conn, "encryption-debug", true, "encryption-debug room").await?;
     println!("encryption_debug_room=ok");
@@ -11177,6 +11209,7 @@ async fn run_encryption_debug_stage(
         }))
         .await
         .map_err(|e| format!("encryption-debug: submit login A2 failed: {e}"))?;
+    start_sync_for_qa(&mut conn_a2, "encryption-debug A2 preverification sync").await?;
     let session_a2 =
         wait_for_existing_identity_gate(&mut conn_a2, "encryption-debug A2 gate").await?;
     verify_provisional_second_device_for_qa(

@@ -15,6 +15,7 @@ node scripts/desktop-headless-local-qa.mjs --run \
 
 Required private-data-free stdout tokens:
 
+- `encryption_debug_cross_signing=ok`
 - `encryption_debug_room=ok`
 - `encryption_debug_recipient=ok`
 - `force_new_outbound_session=ok`
