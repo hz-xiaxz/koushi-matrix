@@ -335,5 +335,15 @@ homeservers via the `encryption_debug` QA scenario which is extended):
   request-attribution, forwarded-session persistence, cleanup, and legacy
   migration findings. Design v5 must receive a fresh GPT `Correct-to-merge`
   verdict before implementation.
-- Implementation diff reviewed by GPT after implementation; Correct-to-merge
+- Implementation diff reviewed by GPT after implementation (round 1): five
+  Important findings — final identity revalidation could partially send,
+  finalization could widen targets, tuple/kind rollback and pickle snapshot
+  were incomplete, claim/elapsed diagnostics were inaccurate, and focused
+  security/rollback tests were missing. Addressed in SDK commit
+  `38a784266`: every prepared ledger identity is validated fail-closed before
+  any encryption, final policy is intersected with prepared targets, request
+  tuple+kind share one lock, mark/cleanup restore on persistence failure,
+  pickle captures one request-state snapshot, claim state/outcome and elapsed
+  are explicit, and the happy-path SDK/QA invariant coverage is extended.
+- A fresh GPT re-review is required after these fixes; `Correct-to-merge` is
   required before opening the PR.
