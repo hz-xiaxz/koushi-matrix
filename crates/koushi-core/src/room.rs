@@ -3145,33 +3145,30 @@ impl RoomActor {
         // room; a concurrent start for the same room is rejected, while
         // other rooms remain usable (issue #538).
         if self.encryption_debug_fences.contains_key(&room_id) {
-            self.emit_encryption_debug_outcome(
+            self.emit_encryption_debug_rejection(
                 request_id,
                 room_id,
                 kind,
                 CoreEncryptionDebugOutcome::Failed,
-            )
-            .await;
+            );
             return;
         }
         if !self.known_room_ids.read().expect("known room ids lock").contains(&room_id) {
-            self.emit_encryption_debug_outcome(
+            self.emit_encryption_debug_rejection(
                 request_id,
                 room_id,
                 kind,
                 CoreEncryptionDebugOutcome::Failed,
-            )
-            .await;
+            );
             return;
         }
         let Some(session) = &self.session else {
-            self.emit_encryption_debug_outcome(
+            self.emit_encryption_debug_rejection(
                 request_id,
                 room_id,
                 kind,
                 CoreEncryptionDebugOutcome::CancelledStale,
-            )
-            .await;
+            );
             return;
         };
         let task_session = std::sync::Arc::clone(session);
@@ -3292,6 +3289,27 @@ impl RoomActor {
                 join,
             },
         );
+    }
+
+    fn emit_encryption_debug_rejection(
+        &self,
+        request_id: RequestId,
+        room_id: String,
+        kind: EncryptionDebugOperationKind,
+        outcome: CoreEncryptionDebugOutcome,
+    ) {
+        let event = match kind {
+            EncryptionDebugOperationKind::ForceNewOutboundSession => {
+                CoreEvent::Room(RoomEvent::OutboundSessionForced { request_id, room_id, outcome })
+            }
+            EncryptionDebugOperationKind::ShareIndex0Key => {
+                CoreEvent::Room(RoomEvent::Index0RoomKeyShared { request_id, room_id, outcome })
+            }
+            EncryptionDebugOperationKind::ResendIndex0Key => {
+                CoreEvent::Room(RoomEvent::Index0RoomKeyResent { request_id, room_id, outcome })
+            }
+        };
+        self.emit(event);
     }
 
     async fn emit_encryption_debug_outcome(

@@ -57,7 +57,7 @@ or SDK boundary without logging private Matrix payloads.
   keep Koushi's dangerous UI, actor fence, diagnostics, and temporary manual
   enablement out of the SDK. No periodic or activity-triggered replay is
   included. Verification evidence: matrix-sdk-crypto focused resend tests and
-  the full crypto suite (568 passed); the local encrypted-room QA lane is
+  the full crypto suite (569 passed); the local encrypted-room QA lane is
   currently blocked before this operation by its existing A2 SAS proof-method
   prerequisite.
 

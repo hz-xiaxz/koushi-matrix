@@ -644,6 +644,7 @@ fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
         ],
         QaStage::EncryptionDebug => &[
             "encryption_debug_room=ok",
+            "encryption_debug_recipient=ok",
             "force_new_outbound_session=ok",
             "share_index0_room_key=ok",
             "index0_not_consumed=ok",

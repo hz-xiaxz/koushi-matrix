@@ -16127,6 +16127,31 @@ mod encryption_debug_dto_privacy_tests {
     }
 
     #[test]
+    fn index0_resend_summary_serializes_without_identifiers_or_key_material() {
+        let summary = MatrixIndex0ResendSummary {
+            outcome: MatrixIndex0ResendOutcome::Completed,
+            message_index_before: Some(8),
+            message_index_after: Some(8),
+            peer_ledger: 2,
+            peer_sender_key_changed: 0,
+            peer_eligible: 2,
+            peer_accepted: 2,
+            peer_missing: 0,
+            policy_blocked: 0,
+            inbound_first_known_index: Some(0),
+            claim: MatrixIndex0ClaimOutcome::NotNeeded,
+            elapsed_ms: 12,
+            room_event_sent: false,
+            index0_consumed: false,
+        };
+        let text = serde_json::to_string(&summary).unwrap();
+        for fragment in banned_fragments().iter().filter(|fragment| **fragment != "sender_key") {
+            assert!(!text.contains(fragment), "privacy leak: {fragment} in {text}");
+        }
+        assert!(!text.contains('@') && !text.contains('!'), "identifier leak: {text}");
+    }
+
+    #[test]
     fn index0_share_outcome_and_claim_tokens_are_closed() {
         for outcome in [
             MatrixIndex0ShareOutcome::Completed,
