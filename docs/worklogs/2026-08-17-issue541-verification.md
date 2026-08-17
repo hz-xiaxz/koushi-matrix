@@ -2,8 +2,8 @@
 
 Candidate tree:
 
-- outer: `4e7ad343716ddc8c862008e057e26551be2a839e`
-- vendored SDK: `cb1648458da243e09398f52e9fc1167344e1fe70`
+- outer: `83dcc01`
+- vendored SDK: `55419db`
 
 The approved design was reviewed before implementation and received the
 recorded GPT `Correct-to-merge` sign-off. The latest implementation review was
@@ -29,6 +29,8 @@ Commands were run from the exact candidate tree unless noted otherwise:
 - `node scripts/check-sdk-submodule.mjs` — pass.
 - `node scripts/check-agents-docs.mjs` — pass.
 - `git diff --check` — pass.
+- `cargo test -p koushi-core --features test-hooks` — **1171 passed, 8 ignored**.
+- `cargo test -p matrix-sdk --features testing --test integration encryption::index0_reshare` at SDK `55419db` — **6 passed**; this includes public `Room::resend_index0_room_key` success, send-failure cleanup/retry, and controlled-deadline coverage.
 
 ## Non-green evidence
 
@@ -46,9 +48,11 @@ Commands were run from the exact candidate tree unless noted otherwise:
 
 ## Remaining blockers
 
-1. Add deterministic high-level SDK executor and core actor tests for claim
-   failure, deadline, partial send, cleanup, duplicate admission, stale
-   validator/completion correlation, and exactly one terminal event.
+1. Extend deterministic high-level SDK executor coverage to claim-failure and
+   partial-send/persistence paths; public resend failure cleanup/retry and
+   controlled deadline coverage now pass, and Core actor duplicate admission,
+   teardown cancellation, stale completion suppression, and exactly-one terminal
+   event coverage now pass.
 2. Resolve the A2 SAS prerequisite or obtain an accepted equivalent live
    encrypted-room evidence path; do not infer resend success from the current
    failure.
