@@ -19,26 +19,26 @@ fn ready_state() -> AppState {
 
 fn with_room(state: &mut AppState, room_id: &str) {
     state.rooms.push(RoomSummary {
-            room_id: room_id.to_owned(),
-            display_name: "Room".to_owned(),
-            display_label: "Room".to_owned(),
-            original_display_label: "Room".to_owned(),
-            avatar: None,
-            is_dm: false,
-            dm_user_ids: Vec::new(),
-            tags: koushi_state::RoomTags::default(),
-            unread_count: 0,
-            notification_count: 0,
-            highlight_count: 0,
-            marked_unread: false,
-            recency_stamp: None,
-            conversation_activity: None,
-            latest_event: None,
-            parent_space_ids: Vec::new(),
-            dm_space_ids: Vec::new(),
-            is_encrypted: true,
-            joined_members: 1,
-        });
+        room_id: room_id.to_owned(),
+        display_name: "Room".to_owned(),
+        display_label: "Room".to_owned(),
+        original_display_label: "Room".to_owned(),
+        avatar: None,
+        is_dm: false,
+        dm_user_ids: Vec::new(),
+        tags: koushi_state::RoomTags::default(),
+        unread_count: 0,
+        notification_count: 0,
+        highlight_count: 0,
+        marked_unread: false,
+        recency_stamp: None,
+        conversation_activity: None,
+        latest_event: None,
+        parent_space_ids: Vec::new(),
+        dm_space_ids: Vec::new(),
+        is_encrypted: true,
+        joined_members: 1,
+    });
 }
 
 fn operation<'a>(state: &'a AppState, room_id: &str) -> &'a EncryptionDebugOperationState {
@@ -81,7 +81,10 @@ fn start_is_admitted_from_idle_and_pending_starts_are_rejected() {
         },
     );
     assert!(effects.is_empty());
-    assert_eq!(operation(&state, "!r:example.invalid").request_id(), Some(1));
+    assert_eq!(
+        operation(&state, "!r:example.invalid").request_id(),
+        Some(1)
+    );
 }
 
 #[test]
@@ -155,7 +158,52 @@ fn settle_requires_matching_request_and_kind() {
         },
     );
     assert!(!effects.is_empty());
-    assert_eq!(operation(&state, "!r:example.invalid").request_id(), Some(9));
+    assert_eq!(
+        operation(&state, "!r:example.invalid").request_id(),
+        Some(9)
+    );
+}
+
+#[test]
+fn resend_operation_is_fenced_by_reset_and_stale_settlement() {
+    let mut state = ready_state();
+    with_room(&mut state, "!r:example.invalid");
+    reduce(
+        &mut state,
+        AppAction::EncryptionDebugOperationStarted {
+            request_id: 41,
+            room_id: "!r:example.invalid".to_owned(),
+            kind: EncryptionDebugOperationKind::ResendIndex0Key,
+        },
+    );
+    assert_eq!(
+        operation(&state, "!r:example.invalid"),
+        &EncryptionDebugOperationState::Pending {
+            request_id: 41,
+            kind: EncryptionDebugOperationKind::ResendIndex0Key,
+        }
+    );
+
+    // Room/session teardown fences the in-flight resend before a completion
+    // can settle it.
+    reduce(
+        &mut state,
+        AppAction::EncryptionDebugOperationReset {
+            room_id: "!r:example.invalid".to_owned(),
+        },
+    );
+    assert!(operation(&state, "!r:example.invalid").is_idle());
+    let effects = reduce(
+        &mut state,
+        AppAction::EncryptionDebugOperationSettled {
+            request_id: 41,
+            room_id: "!r:example.invalid".to_owned(),
+            kind: EncryptionDebugOperationKind::ResendIndex0Key,
+            outcome: EncryptionDebugOperationOutcome::Completed,
+        },
+    );
+    assert!(effects.is_empty());
+    assert!(operation(&state, "!r:example.invalid").is_idle());
 }
 
 #[test]
@@ -198,7 +246,10 @@ fn failure_maps_to_failed_and_retry_is_admitted() {
         },
     );
     assert!(!effects.is_empty());
-    assert_eq!(operation(&state, "!r:example.invalid").request_id(), Some(4));
+    assert_eq!(
+        operation(&state, "!r:example.invalid").request_id(),
+        Some(4)
+    );
 }
 
 #[test]
@@ -259,6 +310,22 @@ fn outcomes_serialize_privately_without_identifiers() {
             "request_id": 1,
             "kind": "forceNewOutboundSession",
             "outcome": "refusedIndexAdvanced",
+        })
+    );
+
+    let failed = serde_json::to_value(EncryptionDebugOperationState::Failed {
+        request_id: 2,
+        kind: EncryptionDebugOperationKind::ResendIndex0Key,
+        outcome: EncryptionDebugOperationOutcome::CancelledStale,
+    })
+    .unwrap();
+    assert_eq!(
+        failed,
+        json!({
+            "state": "failed",
+            "request_id": 2,
+            "kind": "resendIndex0Key",
+            "outcome": "cancelledStale",
         })
     );
 }

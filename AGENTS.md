@@ -40,7 +40,7 @@ The runtime is one Element X-compatible Simplified Sliding Sync engine. Legacy
 
 | Open this | When |
 | --- | --- |
-| [docs/agents/environment.md](docs/agents/environment.md) | Setting up: SDK submodule, local homeserver binaries and `PATH`, local gates, debug-build reuse, Linux GUI container, CodeGraph, signed macOS DMG |
+| [docs/agents/environment.md](docs/agents/environment.md) | Setting up: SDK submodule, local homeserver binaries and `PATH`, local gates, debug-profile policy/reuse, target cleanup, Linux GUI container, CodeGraph, signed macOS DMG |
 | [docs/agents/verification.md](docs/agents/verification.md) | Before fixing anything: verify-first discipline, focused-test invocation, exit-status rules, what CI gates, diff self-review, agent delegation, IME input checks |
 | [docs/agents/qa-lanes.md](docs/agents/qa-lanes.md) | Running a lane: command shapes, every core and GUI scenario with its evidence tokens, browser-headless, real-account, startup latency |
 | [docs/agents/state-ownership.md](docs/agents/state-ownership.md) | Touching a feature area: who owns which state, the snapshot/DTO mirror checklist, and the per-area boundary rules |
@@ -73,6 +73,8 @@ npm --prefix apps/desktop run typecheck
 npm --prefix apps/desktop run lint
 cargo test -p koushi-state --lib
 ```
+
+Full Rust debug information is exceptional: prefer line tables for local tests/QA, reserve full symbols for debugger work, and use stripped builds for distribution. The profile and disposable-`target/` cleanup procedure is in [docs/agents/environment.md](docs/agents/environment.md#rust-debug-information-and-target-cleanup).
 
 ## Out of scope (deferred)
 

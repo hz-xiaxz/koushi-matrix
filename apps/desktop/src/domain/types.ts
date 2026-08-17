@@ -1075,6 +1075,7 @@ export type EncryptionDebugOperationState =
     }
   | {
       state: "failed";
+      request_id: number;
       kind: EncryptionDebugOperationKind;
       outcome: EncryptionDebugOperationOutcome;
     };

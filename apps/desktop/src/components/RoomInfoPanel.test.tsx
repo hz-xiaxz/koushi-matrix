@@ -739,6 +739,7 @@ describe("temporary dangerous encryption debugging controls", () => {
         spaces={[]}
         encryptionDebugOperation={{
           state: "failed",
+          request_id: 12,
           kind: "shareIndex0Key",
           outcome: "refusedIndexAdvanced"
         }}
