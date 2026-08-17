@@ -3163,6 +3163,16 @@ impl RoomActor {
             .await;
             return;
         }
+        if !self.known_room_ids.read().contains(&room_id) {
+            self.emit_encryption_debug_outcome(
+                request_id,
+                room_id,
+                kind,
+                CoreEncryptionDebugOutcome::Failed,
+            )
+            .await;
+            return;
+        }
         let Some(session) = &self.session else {
             self.emit_encryption_debug_outcome(
                 request_id,
