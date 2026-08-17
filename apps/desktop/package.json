@@ -72,6 +72,7 @@
     "webdriverio": "9.28.0"
   },
   "overrides": {
-    "@puppeteer/browsers": "$@puppeteer/browsers"
+    "@puppeteer/browsers": "$@puppeteer/browsers",
+    "deepmerge-ts": "8.0.1"
   }
 }

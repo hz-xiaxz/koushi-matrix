@@ -70,11 +70,15 @@ test("vendored Matrix SDK crates are consumed through root submodule paths", () 
 test("toolchain and dev dependency profile are pinned for stable incremental builds", () => {
   const rootCargo = readRepoFile("Cargo.toml");
   const toolchain = readRepoFile("rust-toolchain.toml");
+  const desktopPackage = JSON.parse(readRepoFile("apps/desktop/package.json"));
+  const desktopLock = JSON.parse(readRepoFile("apps/desktop/package-lock.json"));
 
   assert.match(toolchain, /channel = "1\.96\.0"/);
   assert.match(toolchain, /targets = \["wasm32-unknown-unknown"\]/);
   assert.match(rootCargo, /^\[profile\.dev\.package\."\*"\]$/m);
   assert.match(rootCargo, /^debug = false$/m);
+  assert.equal(desktopPackage.overrides["deepmerge-ts"], "8.0.1");
+  assert.equal(desktopLock.packages["node_modules/deepmerge-ts"].version, "8.0.1");
 });
 
 test("CI and npm scripts use the unified workspace contracts", () => {
