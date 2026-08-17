@@ -49,7 +49,7 @@ or SDK boundary without logging private Matrix payloads.
 ## Upstreamable Patch Material
 
 - Issue #541 manual current-session index-0 recovery (SDK topic commit
-  `b3a753d59`, 2026-08-17) adds an immutable initial-share proof ledger,
+  `bf9dc106b`, 2026-08-17) adds an immutable initial-share proof ledger,
   request ownership tags with legacy-pickle fail-closed migration, and the
   standard `m.forwarded_room_key` transport path for a bounded one-shot resend.
   Upstream intent: propose the smallest generic persisted initial-share

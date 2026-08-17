@@ -11192,6 +11192,7 @@ async fn run_encryption_debug_stage(
     let session_a = authenticated_session_info(conn, "encryption-debug session A")?;
     let runtime_a2 = CoreRuntime::start_with_data_dir(qa_data_dir("encryption-debug-a2"));
     let mut conn_a2 = runtime_a2.attach();
+    let mut account_key_a2_for_cleanup = None;
     // Guarded body: A2 is logged out and its runtime is stopped on BOTH the
     // success and every error path after its runtime exists (issue #538).
     let guarded: Result<(), String> = async {
@@ -11223,6 +11224,7 @@ async fn run_encryption_debug_stage(
     .await?;
     let account_key_a2 =
         wait_for_logged_in(&mut conn_a2, login_a2_id, "encryption-debug login A2").await?;
+    account_key_a2_for_cleanup = Some(account_key_a2.clone());
 
     // A2 is a second verified device of the same user, so it is an eligible
     // own-other device of the room without any invite/join (the room is
@@ -11374,12 +11376,24 @@ async fn run_encryption_debug_stage(
     // Finally: attempt A2 logout and stop its runtime so no session leaks,
     // on both success and error paths (best-effort; a logout failure is not
     // a scenario failure by itself).
-    let _ = conn_a2
-        .command(CoreCommand::Account(AccountCommand::Logout {
-            request_id: conn_a2.next_request_id(),
-        }))
-        .await;
-    drop(runtime_a2);
+    let logout_a2_id = conn_a2.next_request_id();
+    if conn_a2
+        .command(CoreCommand::Account(AccountCommand::Logout { request_id: logout_a2_id }))
+        .await
+        .is_ok()
+    {
+        if let Some(account_key_a2) = account_key_a2_for_cleanup.as_ref() {
+            let _ = wait_for_logged_out(
+                &mut conn_a2,
+                logout_a2_id,
+                account_key_a2,
+                "encryption-debug A2 logout",
+            )
+            .await;
+        }
+    }
+    drop(conn_a2);
+    runtime_a2.shutdown().await;
     guarded
 }
 

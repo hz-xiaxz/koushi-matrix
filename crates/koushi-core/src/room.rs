@@ -3298,6 +3298,15 @@ impl RoomActor {
         kind: EncryptionDebugOperationKind,
         outcome: CoreEncryptionDebugOutcome,
     ) {
+        match kind {
+            EncryptionDebugOperationKind::ResendIndex0Key => Self::record_index0_resend_failed(),
+            EncryptionDebugOperationKind::ForceNewOutboundSession => {
+                Self::record_encryption_debug_failed("force_new_outbound_session");
+            }
+            EncryptionDebugOperationKind::ShareIndex0Key => {
+                Self::record_encryption_debug_failed("share_index0");
+            }
+        }
         let event = match kind {
             EncryptionDebugOperationKind::ForceNewOutboundSession => {
                 CoreEvent::Room(RoomEvent::OutboundSessionForced { request_id, room_id, outcome })
