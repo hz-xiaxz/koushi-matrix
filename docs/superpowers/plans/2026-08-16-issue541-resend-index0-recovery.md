@@ -345,5 +345,10 @@ homeservers via the `encryption_debug` QA scenario which is extended):
   tuple+kind share one lock, mark/cleanup restore on persistence failure,
   pickle captures one request-state snapshot, claim state/outcome and elapsed
   are explicit, and the happy-path SDK/QA invariant coverage is extended.
-- A fresh GPT re-review is required after these fixes; `Correct-to-merge` is
-  required before opening the PR.
+- Subsequent GPT implementation reviews found and fixed: whole-operation
+  stale identity refusal, exact NoSession/NoRecipients outcomes, atomic
+  request-state pickle snapshots, forwarded encryption staging before queue
+  mutation, claim/elapsed preservation, cleanup claim cancellation, persisted
+  Manual-request quarantine on reload, rotation-required policy blocking,
+  complete wire artifact coverage, and QA report tokens. A fresh GPT
+  `Correct-to-merge` verdict is required before opening the PR.

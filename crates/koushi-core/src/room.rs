@@ -56,6 +56,7 @@ use std::{
 #[cfg(feature = "test-hooks")]
 use std::sync::{Mutex, atomic::AtomicUsize};
 
+use futures_util::FutureExt;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::{
     MatrixClientSession, MatrixCreateRoomOptions, MatrixCreateRoomParentSpace,
@@ -794,7 +795,7 @@ impl RoomActor {
                             .cancelled
                             .store(true, std::sync::atomic::Ordering::SeqCst);
                         let _ = fence.cancel.send(());
-                        let _ = fence.join.await;
+                        let _ = tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, fence.join).await;
                         self.emit_encryption_debug_outcome(
                             fence.request_id,
                             room_id.clone(),
@@ -976,7 +977,7 @@ impl RoomActor {
                             .cancelled
                             .store(true, std::sync::atomic::Ordering::SeqCst);
                         let _ = fence.cancel.send(());
-                        let _ = fence.join.await;
+                        let _ = tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, fence.join).await;
                         // Inline fenced settlement before the session reset:
                         // the state machine settles CancelledStale, then the
                         // lifecycle reset returns it to Idle.
@@ -2878,6 +2879,25 @@ impl RoomActor {
         }
     }
 
+    fn record_index0_resend_failed() {
+        Self::record_index0_resend_diagnostic(&koushi_sdk::MatrixIndex0ResendSummary {
+            outcome: koushi_sdk::MatrixIndex0ResendOutcome::Failed,
+            message_index_before: None,
+            message_index_after: None,
+            peer_ledger: 0,
+            peer_sender_key_changed: 0,
+            peer_eligible: 0,
+            peer_accepted: 0,
+            peer_missing: 0,
+            policy_blocked: 0,
+            inbound_first_known_index: None,
+            claim: koushi_sdk::MatrixIndex0ClaimOutcome::NotNeeded,
+            elapsed_ms: 0,
+            room_event_sent: false,
+            index0_consumed: false,
+        });
+    }
+
     fn record_index0_resend_diagnostic(summary: &koushi_sdk::MatrixIndex0ResendSummary) {
         record(
             DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_debug", "operation")
@@ -3171,7 +3191,8 @@ impl RoomActor {
         let op_request_id = request_id;
         let session_for_fence = std::sync::Arc::clone(session);
         let join = executor::spawn(async move {
-            let outcome = match kind {
+            let outcome = std::panic::AssertUnwindSafe(async {
+                match kind {
                 EncryptionDebugOperationKind::ForceNewOutboundSession => {
                     let validate: Box<dyn Fn() -> bool + Send + Sync> =
                         Box::new(move || !task_cancelled.load(std::sync::atomic::Ordering::SeqCst));
@@ -3230,12 +3251,23 @@ impl RoomActor {
                             RoomActor::map_index0_resend_outcome(summary.outcome)
                         }
                         Err(_) => {
-                            RoomActor::record_encryption_debug_failed("resend_index0");
+                            RoomActor::record_index0_resend_failed();
                             CoreEncryptionDebugOutcome::Failed
                         }
                     }
                 }
-            };
+                }
+            })
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| {
+                if kind == EncryptionDebugOperationKind::ResendIndex0Key {
+                    RoomActor::record_index0_resend_failed();
+                } else {
+                    RoomActor::record_encryption_debug_failed("encryption_debug_panic");
+                }
+                CoreEncryptionDebugOutcome::Failed
+            });
             // Reliable nonblocking completion lane (unbounded): the actor
             // may be mid-teardown (SessionCleared joins this task); teardown
             // settles inline, and a queued completion is consumed by the
@@ -3587,7 +3619,7 @@ impl RoomActor {
                 .cancelled
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             let _ = fence.cancel.send(());
-            let _ = fence.join.await;
+            let _ = tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, fence.join).await;
             self.emit_encryption_debug_outcome(
                 fence.request_id,
                 fence.room_id,

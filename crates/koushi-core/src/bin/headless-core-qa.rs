@@ -11296,7 +11296,8 @@ async fn run_encryption_debug_stage(
         ));
     }
     println!("resend_index0_room_key=ok");
-    let debug = koushi_diagnostics::snapshot()
+    let diagnostics = koushi_diagnostics::snapshot();
+    let debug = diagnostics
         .records
         .iter()
         .rev()

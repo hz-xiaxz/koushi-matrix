@@ -48,6 +48,19 @@ or SDK boundary without logging private Matrix payloads.
 
 ## Upstreamable Patch Material
 
+- Issue #541 manual current-session index-0 recovery (SDK topic commit
+  `0f02ed744`, 2026-08-17) adds an immutable initial-share proof ledger,
+  request ownership tags with legacy-pickle fail-closed migration, and the
+  standard `m.forwarded_room_key` transport path for a bounded one-shot resend.
+  Upstream intent: propose the smallest generic persisted initial-share
+  ledger/request-ownership and forwarded-key/session-persistence primitives;
+  keep Koushi's dangerous UI, actor fence, diagnostics, and temporary manual
+  enablement out of the SDK. No periodic or activity-triggered replay is
+  included. Verification evidence: matrix-sdk-crypto focused resend tests and
+  the full crypto suite (568 passed); the local encrypted-room QA lane is
+  currently blocked before this operation by its existing A2 SAS proof-method
+  prerequisite.
+
 - Initial outbound Megolm Olm-claim repair (issue #523, 2026-08-14) remains
   upstreamable patch material, retained in the vendored SDK behind an
   independent default-off builder option. The vendored crypto layer retains
