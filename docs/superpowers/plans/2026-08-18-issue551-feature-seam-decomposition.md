@@ -49,6 +49,36 @@ No universal line limit is introduced. A residual composition root is acceptable
 
 Each checkbox below is one PR unless the pre-implementation design proves it is not independently verifiable. Combining checkboxes requires reviewer approval; splitting one further is allowed.
 
+### Live Issue candidate coverage
+
+| Issue candidate | Planned disposition |
+| --- | --- |
+| `crates/koushi-core/src/timeline.rs` | Wave 3, projection through actor loop |
+| `crates/koushi-core/src/bin/headless-core-qa.rs` | Wave 2, infrastructure then scenario families |
+| `crates/koushi-core/src/account.rs` | Wave 3, pure mappings through actor loop |
+| `crates/koushi-sdk/src/lib.rs` | Wave 3, leaf feature modules with root re-exports |
+| `apps/desktop/src/components/TimelineView.test.tsx` | Wave 1B, shared support then feature suites |
+| `crates/koushi-core/src/room.rs` | Wave 3, normalization through actor loop |
+| `apps/desktop/e2e/basic-operations.spec.ts` | Wave 1B, support then feature specs |
+| `apps/desktop/src/components/TimelineView.tsx` | Wave 4, presentation then viewport/transport |
+| `apps/desktop/src-tauri/src/commands/mod.rs` | Wave 1D, builders/waiters into existing modules |
+| `scripts/desktop-linux-gui-qa.mjs` | Wave 2, runner/integration/evidence/scenarios |
+| `apps/desktop/src/scripts/releaseScripts.test.ts` | Wave 2, scanner/QA/package contracts |
+| `crates/koushi-core/src/command.rs` | Wave 1C, feature payloads; exhaustive enums central |
+| `crates/koushi-core/src/event.rs` | Wave 1C, feature events; exhaustive routing central |
+| `crates/koushi-core/src/store.rs` | Wave 1D, persisted domains and credential backend |
+| `crates/koushi-state/tests/session_state.rs` | Wave 1B, feature child modules |
+| `apps/desktop/src/components/UserSettingsPanel.tsx` | Wave 1A, section components |
+| `crates/koushi-state/tests/navigation_state.rs` | Wave 1B, feature child modules |
+| `crates/koushi-core/src/runtime.rs` | Wave 5 after actor seams |
+| `apps/desktop/src/App.tsx` | Wave 4 after transport/domain seams |
+| `apps/desktop/src/backend/browserFakeApi.ts` | Wave 4 after production DTO seams |
+| `apps/desktop/src-tauri/src/lib.rs` | Wave 5 after command extraction |
+| `crates/koushi-state/src/reducer/mod.rs` | Wave 5 after command/event seams |
+| `crates/koushi-core/src/bin/real-homeserver-qa.rs` | Wave 5 after shared QA support |
+| `apps/desktop/src/test/appHarnessMain.tsx` | Wave 4 after browser fake split |
+| `apps/desktop/src/i18n/messages.ts` | Deliberately centralized; schema-generation design only |
+
 ### Wave 1A — Pilot and presentation seams
 
 The pilot uses an already named component boundary with existing unit and browser coverage. It validates the move-only protocol without touching state ownership.
