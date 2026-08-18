@@ -14,7 +14,7 @@ Complete Issue #551 through small, behavior-preserving PRs that reduce change co
 - Do not add barrels, one-implementation traits, wrapper services, compatibility aliases, or duplicate helpers to make a move compile.
 - A behavior bug discovered during a move stops that PR; fix it verify-first in a separate issue/PR.
 - Implementer: `luna-implementer`, GPT-5.6 Luna, low thinking, write-capable. Tasks must be mechanical and narrowly scoped. Escalate rather than letting low-thinking implementation make architectural choices.
-- Reviewer: one user-selected different-model read-only reviewer for both the pre-implementation design and post-implementation full diff of each independently mergeable change.
+- Reviewer: `reviewer-flash` (DeepSeek V4 Flash, read-only), adopted as the recommended different-model default after the user instructed continued autonomous progress. It reviews both the pre-implementation design and post-implementation full diff of each independently mergeable change.
 
 ## Per-PR protocol
 
@@ -251,7 +251,7 @@ Before closing Issue #551:
 
 - Plan status: draft, awaiting independent design review.
 - Implementer selection: Luna low, selected by the user.
-- Reviewer selection: pending user choice.
+- Reviewer selection: `reviewer-flash` (DeepSeek V4 Flash, read-only); the recommended default was adopted when the user instructed continued autonomous progress after the eligible options were presented.
 - Non-gating advisory pre-audit: `reviewer-flash` found no Critical/Important issues and five documentation Minors; all five were incorporated. This does not satisfy the mandatory user-selected design-review gate.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
 - Merged PRs: none.
