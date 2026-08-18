@@ -155,7 +155,7 @@ fn room_list_composition_keeps_dms_global_and_preserves_multi_parent_rooms() {
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["!shared:example.invalid", "!loose:example.invalid"]
+        vec!["!loose:example.invalid", "!shared:example.invalid"]
     );
 }
 
