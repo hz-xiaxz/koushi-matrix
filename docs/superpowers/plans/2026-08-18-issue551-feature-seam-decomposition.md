@@ -112,10 +112,10 @@ Focused tests for every User Settings PR are the panel unit test plus the matchi
 #### Shared UIA prerequisite design slice
 
 - **Reason for ordering:** `SessionsSection` and `AccountManagementSection` both call `AccountManagementUiaForm`. Moving it with Sessions would make Account Management depend on a Sessions-owned secret form; moving it with Account Management first would create the reverse feature dependency. Extract the already shared form once before either section.
-- **Move exactly:** current `UserSettingsPanel.tsx:1536-1575`, containing only `AccountManagementUiaForm` and its unchanged DOM-ref password lifecycle.
+- **Move exactly:** current `UserSettingsPanel.tsx:1536-1575`, containing only `AccountManagementUiaForm` and its unchanged DOM-ref password lifecycle. After removal, collapse the two adjacent blank separators between `SessionRow` and `KeyManagementStatus` to one; do not move either neighboring symbol.
 - **Create:** `apps/desktop/src/components/user-settings/AccountManagementUiaForm.tsx`. Export only `AccountManagementUiaForm`; no index/barrel. Import only React `FormEvent`/`useRef`/`useState`, `Check`, `t`, `ImeSafeForm`, and `SecureImeTextField` through their existing paths.
 - **Modify:** `UserSettingsPanel.tsx` only to add the direct import and remove the moved block. No existing parent import becomes unused because all moved dependencies remain used by other sections/rows.
-- **Do not modify:** call sites, props, tests, CSS, i18n, domain types, account/session state, callback names, form classes, autocomplete, disabled logic, or clearing order.
+- **Do not modify:** call sites, props, tests, CSS, i18n, domain types, account/session state, callback names, form classes, autocomplete, disabled logic, or clearing order. The similar identity-reset password form inside `TrustSection` is deliberately outside this seam and remains untouched for the later Trust PR.
 - **Secret invariant:** the password remains only in the secure DOM ref, is passed directly to the typed callback, is cleared immediately after submission, and never enters React state, logs, diagnostics, or observable product state. `passwordFilled` remains boolean-only presentation state.
 - **Expected visibility delta:** one direct module export required by two parent call sites, with no package/barrel/public API export.
 - **Expected source effect:** 40 lines leave `UserSettingsPanel.tsx`; forwarding boilerplate is one import, with no duplicate implementation retained.
@@ -271,6 +271,7 @@ Before closing Issue #551:
 - Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
 - Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
+- Shared UIA prerequisite formal design review: `reviewer-flash` returned `Correct-to-merge`; its only new Minors (collapse the post-removal double blank and leave the similar Trust form untouched) were incorporated before implementation.
 - Shared UIA prerequisite pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused device-session-manager Playwright 1/1 passed; frontend typecheck and lint passed.
 - Pilot delivery PR: #560; focused and complete local gates passed, formal design/diff verdicts are `Correct-to-merge`, and the implementation CI run passed all seven required checks before final ledger update.
 - Merged PRs: #560 is the first delivery PR.
