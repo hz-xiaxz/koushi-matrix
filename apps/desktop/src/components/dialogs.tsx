@@ -1085,6 +1085,7 @@ function PreparedUploadPreview({
   loadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const activePreviewUrlRef = useRef<string | null>(null);
   // The preview follows the Rust-owned selection: find the prepared output for
   // the selected pair. While a pair is `pending` there is none yet, so the
   // previously loaded preview stays on screen.
@@ -1105,30 +1106,52 @@ function PreparedUploadPreview({
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
+    let pendingObjectUrl: string | null = null;
     if (!selectedVariantId) {
       // Keep the last valid preview on screen: clearing it here would blank the
       // viewport while a new pair is still encoding, or after a failure.
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
     void loadPreview(item.staged_id, selectedVariantId)
       .then((bytes) => {
         if (cancelled || bytes.length === 0) return;
-        objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: item.mime_type }));
+        const nextObjectUrl = URL.createObjectURL(
+          new Blob([new Uint8Array(bytes)], { type: item.mime_type })
+        );
+        if (cancelled) {
+          URL.revokeObjectURL(nextObjectUrl);
+          return;
+        }
+        pendingObjectUrl = nextObjectUrl;
         // Swap image and metadata together: the summary reads the same
         // Rust-owned prepared output this URL was built from.
-        setPreviewUrl((previous) => {
-          if (previous) URL.revokeObjectURL(previous);
-          return objectUrl;
-        });
-        objectUrl = null;
+        const previousObjectUrl = activePreviewUrlRef.current;
+        activePreviewUrlRef.current = nextObjectUrl;
+        setPreviewUrl(nextObjectUrl);
+        pendingObjectUrl = null;
+        if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) {
+          URL.revokeObjectURL(previousObjectUrl);
+        }
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (pendingObjectUrl) {
+        URL.revokeObjectURL(pendingObjectUrl);
+        pendingObjectUrl = null;
+      }
     };
   }, [item.mime_type, item.staged_id, loadPreview, selectedVariantId]);
+
+  useEffect(() => {
+    return () => {
+      const activeObjectUrl = activePreviewUrlRef.current;
+      activePreviewUrlRef.current = null;
+      if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
+    };
+  }, []);
 
   // One fixed-height viewport that never collapses: recompression dims the
   // current preview instead of unmounting it.

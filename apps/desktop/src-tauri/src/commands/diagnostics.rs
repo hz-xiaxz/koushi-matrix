@@ -38,14 +38,25 @@ fn map_snapshot(
     }
 }
 
-#[tauri::command]
-pub fn get_diagnostic_snapshot(
-    state: State<'_, CoreRuntimeState>,
+fn snapshot_with_media_memory_summaries(
+    thumbnail_stats: koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats,
+    media_stats: koushi_core::media_preparation::MediaPreparationStats,
+    sliding_sync: koushi_core::SlidingSyncDiagnosticsSnapshot,
 ) -> FrontendDiagnosticLogSnapshot {
-    map_snapshot(
-        koushi_diagnostics::snapshot(),
+    koushi_core::renderable_thumbnail::record_renderable_thumbnail_summary(thumbnail_stats);
+    koushi_core::media_preparation::record_media_preparation_summary(media_stats);
+    map_snapshot(koushi_diagnostics::snapshot(), sliding_sync)
+}
+
+#[tauri::command]
+pub async fn get_diagnostic_snapshot(
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDiagnosticLogSnapshot, String> {
+    Ok(snapshot_with_media_memory_summaries(
+        koushi_core::renderable_thumbnail::renderable_thumbnail_cache_stats(),
+        state.runtime.media_preparation().stats().await,
         state.runtime.sliding_sync_diagnostics(),
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -179,5 +190,75 @@ mod tests {
         }
         assert!(serialized.contains("query_bytes"));
         assert!(serialized.contains("query_chars"));
+    }
+
+    #[test]
+    fn diagnostic_snapshot_exports_current_media_memory_summaries() {
+        let _guard = koushi_diagnostics::test_support::lock();
+        let before = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
+        let exported = snapshot_with_media_memory_summaries(
+            koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats {
+                entry_count: 3,
+                retained_bytes: 300,
+                high_water_entry_count: 5,
+                high_water_bytes: 500,
+                eviction_count: 2,
+                clear_count: 1,
+                oversize_rejection_count: 4,
+            },
+            koushi_core::media_preparation::MediaPreparationStats {
+                source_count: 2,
+                source_bytes: 200,
+                variant_count: 3,
+                source_backed_variant_count: 2,
+                variant_bytes: 80,
+                selected_count: 2,
+                high_water_source_count: 4,
+                high_water_source_bytes: 400,
+                high_water_variant_count: 6,
+                high_water_variant_bytes: 160,
+            },
+            koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
+        );
+
+        let thumbnail = exported
+            .entries
+            .iter()
+            .rev()
+            .find(|entry| entry.source == "core.renderable_thumbnail")
+            .expect("renderable-thumbnail summary must be exported");
+        assert!(thumbnail.message.contains("stage=summary"));
+        assert!(thumbnail.message.contains("entry_count=3"));
+        let media = exported
+            .entries
+            .iter()
+            .rev()
+            .find(|entry| entry.source == "core.media_preparation")
+            .expect("media-preparation summary must be exported");
+        assert!(media.message.contains("stage=summary"));
+        assert!(media.message.contains("source_backed_variant_count=2"));
+
+        let details = koushi_diagnostics::test_support::detail_snapshot();
+        let summaries = &details.records[before..];
+        assert_eq!(summaries.len(), 2);
+        for record in summaries {
+            assert!(record.event.fields.iter().all(|field| matches!(
+                field.value,
+                koushi_diagnostics::DiagnosticValue::Count(_)
+                    | koushi_diagnostics::DiagnosticValue::Token(_)
+            )));
+        }
+        let serialized = serde_json::to_string(&exported).unwrap();
+        for forbidden in [
+            "!room:synthetic.invalid",
+            "@user:synthetic.invalid",
+            "$event:synthetic.invalid",
+            "/Users/alice/private",
+            "secret message",
+        ] {
+            assert!(!serialized.contains(forbidden));
+        }
     }
 }

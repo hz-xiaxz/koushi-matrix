@@ -16,6 +16,12 @@ use crate::renderable_thumbnail::{RenderableThumbnailKind, store_renderable_thum
 
 pub const MAX_LINK_PREVIEWS_PER_MESSAGE: usize = 3;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PreviewImageDownloadError {
+    Network,
+    TooLarge,
+}
+
 fn url_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r##"https?://[^\s<>"{}|\\^`\[\]]+"##).expect("valid url regex"))
@@ -419,7 +425,7 @@ async fn download_preview_image(
     session: &MatrixClientSession,
     uri: &matrix_sdk::ruma::OwnedMxcUri,
     url: &str,
-) -> Result<AvatarThumbnailState, ()> {
+) -> Result<AvatarThumbnailState, PreviewImageDownloadError> {
     let client = session.client();
     let bytes = client
         .media()
@@ -431,13 +437,10 @@ async fn download_preview_image(
             false,
         )
         .await
-        .map_err(|_| ())?;
+        .map_err(|_| PreviewImageDownloadError::Network)?;
 
-    Ok(store_renderable_thumbnail(
-        RenderableThumbnailKind::LinkPreview,
-        url,
-        bytes,
-    ))
+    store_renderable_thumbnail(RenderableThumbnailKind::LinkPreview, url, bytes)
+        .map_err(|_| PreviewImageDownloadError::TooLarge)
 }
 
 #[cfg(test)]
