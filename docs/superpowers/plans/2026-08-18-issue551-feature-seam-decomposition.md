@@ -88,7 +88,7 @@ The pilot uses an already named component boundary with existing unit and browse
   - Browser: `(cd apps/desktop && npx playwright test e2e/search-crawler-settings.spec.ts --workers=1)`
   - Layer: typecheck, lint, frontend Vitest, build.
 - [x] **User Settings shared UIA prerequisite** — move the existing `AccountManagementUiaForm` used by both Sessions and Account Management to one private module before either section; this avoids assigning the shared secret-handling boundary to the wrong feature.
-- [ ] **User Settings sessions** — after the shared UIA prerequisite, move `SessionsSection` and `SessionRow` together.
+- [x] **User Settings sessions** — after the shared UIA prerequisite, move `SessionsSection` and `SessionRow` together.
 - [ ] **User Settings account management** — after the shared UIA prerequisite, move `AccountManagementSection` and its local forms together.
 - [ ] **User Settings security and room-key management** — move `SecuritySection` and its private dialog/status helpers; secret-bearing values remain callback-local and never enter observable state.
 - [ ] **User Settings trust** — move `TrustSection`, verification/reset controls, trust rows, and trust-only label/tone helpers.
@@ -285,6 +285,9 @@ Before closing Issue #551:
 - Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
 - Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
+- Sessions implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved only the two approved blocks into one private direct module. Parent verification proved the 4,197-byte `SessionsSection` and 2,637-byte `SessionRow` bodies exact after accounting only for the required `export` keyword and inter-symbol separator.
+- Sessions formal full-diff review: `reviewer-flash` reviewed `/tmp/issue551-sessions.diff` (`sha256:c170d2e5a508c83eddbdfc0a196cbb38d624b82cf0755adb91ad7c7c309e2d48`) and returned `Correct-to-merge` with no code findings.
+- Sessions complete local gates: focused unit 25/25 and Playwright 1/1; frontend 1,366 Vitest and browser-headless 76 + 248; Rust workspace 2,393 passed / 13 ignored; QA binary 129; Tauri 154 passed / 1 ignored; npm audit/typecheck/lint/build, SDK, agents-doc, rustfmt, diff, and cargo-deny passed.
 - Sessions formal design review: `reviewer-flash` verified both exact ranges, all imports/call sites, the two-file allowlist, coverage, and behavior/privacy/lifecycle/Rust-state ownership, then returned `Correct-to-merge`. Its only new Minor (collapse the blank separators left by the non-contiguous `SessionRow` removal) was incorporated before implementation.
 - Sessions pre-edit baseline on merge base `db234d4c`: `UserSettingsPanel.test.tsx` 25/25, focused device-session-manager Playwright 1/1, frontend typecheck, and frontend lint all passed.
 - Shared UIA prerequisite implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the exact form and preserved its secret lifecycle.
