@@ -91,6 +91,7 @@ The pilot uses an already named component boundary with existing unit and browse
 - [x] **User Settings sessions** — after the shared UIA prerequisite, move `SessionsSection` and `SessionRow` together.
 - [x] **User Settings account management** — after the shared UIA prerequisite, move `AccountManagementSection` and its local forms together.
 - [x] **User Settings shared status-primitives prerequisite** — move the existing `TrustStatusRow`, `TrustActionButton`, `TrustTone`, and `DetailRow` used across the panel, Security, and Trust into one direct private shared module before either feature moves.
+- [ ] **User Settings shared failure-label prerequisite** — move the existing `failureKindLabel` shared by Security and Trust into the same concrete status module before either feature moves; do not expose a composition-root shim.
 - [ ] **User Settings security and room-key management** — after the shared status prerequisite, move `SecuritySection` and its private dialog/status helpers; secret-bearing values remain callback-local and never enter observable state.
 - [ ] **User Settings trust** — after the shared status prerequisite, move `TrustSection`, verification/reset controls, and trust-only label/tone helpers.
 - [ ] **User Settings appearance controls** — move theme/density/font/emoji buttons together; leave the top-level panel composition and section navigation in `UserSettingsPanel.tsx`.
@@ -163,6 +164,18 @@ Focused tests for every User Settings PR are the panel unit test plus the matchi
 - **Expected source effect:** 61 source lines leave `UserSettingsPanel.tsx`; forwarding boilerplate is one direct import, with no duplicate implementation retained.
 - **Allowed implementation files:** `UserSettingsPanel.tsx` and the new `user-settings/SettingsStatusPrimitives.tsx` only. Plan/completion records may be updated by the parent after verification.
 - **Baseline/post:** `UserSettingsPanel.test.tsx` 25/25; focused `basic-operations.spec.ts` Security/local-encryption, E2EE trust-controls, and room-key/secure-backup scenarios 3/3 using `CHOKIDAR_USEPOLLING=true`; frontend typecheck; frontend lint. All four pre-edit checks passed on merge base `c0121719`.
+
+#### Shared failure-label prerequisite design slice
+
+- **Reason for ordering:** Security's room-key/backup labels and Trust's cross-signing/key-backup/identity-reset/verification labels all call the same closed `failureKindLabel`. Leaving it in `UserSettingsPanel.tsx` would require a composition-root export shim; assigning it to Security or Trust would create the wrong feature dependency. Move the existing mapper into the already merged concrete status module before either feature moves.
+- **Move exactly:** the complete `failureKindLabel` block at current `origin/main` `UserSettingsPanel.tsx:1752-1769` (18 lines / parent-measured 535 bytes, to be re-proved after the move). Do not move neighboring `deviceTrustIcon`, tone helpers, any failure enum, or i18n catalog entry.
+- **Modify:** `apps/desktop/src/components/user-settings/SettingsStatusPrimitives.tsx` to import `t` from `../../i18n/messages` and the existing `TrustOperationFailureKind` type from `../../domain/types`, then append the exact mapper body with only the required `export` keyword. The module then directly exports five concrete shared presentation declarations; it remains a leaf implementation module, not a barrel.
+- **Modify parent:** add `failureKindLabel` to the existing direct status-primitives import, remove the moved block and now-unused parent `TrustOperationFailureKind` type import, and collapse the resulting adjacent blank separators to one. Keep all eight existing call sites byte-for-byte unchanged.
+- **Do not modify:** failure tokens, switch exhaustiveness, labels, call sites, tests, CSS, i18n, domain/Rust types, Security/Trust state, callbacks, or lifecycle.
+- **Ownership invariant:** this is a pure closed presentation-label mapping shared by two features. It adds no state, hook, effect, retry, timer, subscription, callback, logging, identifier rendering, or cleanup.
+- **Expected visibility/source effect:** one additional direct export/import; 18 source lines leave `UserSettingsPanel.tsx`; no wrapper, duplicate, compatibility shim, barrel, or package/public API.
+- **Allowed implementation files:** `UserSettingsPanel.tsx` and existing `user-settings/SettingsStatusPrimitives.tsx` only. Plan/completion records may be updated by the parent after verification.
+- **Baseline/post:** `UserSettingsPanel.test.tsx` 25/25; focused Security/Trust/room-key Playwright scenarios 3/3 with polling; frontend typecheck; frontend lint. All four pre-edit checks passed on merge base `9e8d5d40`.
 
 ### Wave 1B — Focused test suites
 
@@ -313,6 +326,8 @@ Before closing Issue #551:
 - Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
 - Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
+- Shared failure-label formal design review: `reviewer-flash` verified the exact 18-line range, 4 Security + 4 Trust call sites, sole parent type use, five-export leaf-module boundary, i18n/exhaustive switch, separator cleanup, and two-file allowlist, then returned `Correct-to-merge`. Its three new documentation Minors (name verification as the fourth Trust consumer, pin both relative import paths, and identify the 535-byte count as parent-measured/re-proved post-move) were incorporated before implementation.
+- Shared failure-label pre-edit baseline on merge base `9e8d5d40`: `UserSettingsPanel.test.tsx` 25/25, focused Security/Trust/room-key Playwright scenarios 3/3, frontend typecheck, and frontend lint all passed.
 - Shared status-primitives delivery PR: #564; focused and complete local gates passed, formal design/diff verdicts are `Correct-to-merge`, and the first implementation CI run passed all seven required checks before final ledger update.
 - Shared status-primitives implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved only the three approved ranges into one private direct module. Parent verification proved the 52-line/976-byte rows block, 1-line/73-byte tone, and 8-line/200-byte detail row exact after required exports.
 - Shared status-primitives formal full-diff review: `reviewer-flash` reviewed `/tmp/issue551-status-primitives.diff` (`sha256:127463fa510043cf353f9efbafe142c2079e73e897a9b0c763472d8e495964bd`) and returned `Correct-to-merge` with no findings.
