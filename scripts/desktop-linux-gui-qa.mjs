@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { open } from "node:fs/promises";
 import { createRequire } from "node:module";
 import * as net from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -26,6 +25,7 @@ import {
   waitForHomeserver
 } from "./lib/local-homeserver-qa.mjs";
 import { assertSdkSubmoduleSynced } from "./lib/sdk-submodule-status.mjs";
+import { writeSensitivePayloadToPath } from "./lib/sensitive-fifo.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopDir = join(repoRoot, "apps", "desktop");
@@ -4663,29 +4663,6 @@ function guiScenarioServerKind() {
     return serverOption;
   }
   throw new Error("--server must be tuwunel for local GUI scenarios");
-}
-
-// Write a sensitive payload directly to the FIFO via node:fs/promises. No
-// helper child process is spawned, so no parent environment is inherited by a
-// `tee`-style writer (security: credential payloads must not leak the parent
-// env to a child). `open(path, "w")` blocks until the reader opens the pipe,
-// so the write is bounded by `timeout`.
-async function writeSensitivePayloadToPath(path, payload, timeout) {
-  let handle;
-  const write = async () => {
-    handle = await open(path, "w");
-    await handle.writeFile(payload, "utf8");
-  };
-  try {
-    await Promise.race([
-      write(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("local GUI login FIFO write timed out")), timeout)
-      )
-    ]);
-  } finally {
-    await handle?.close();
-  }
 }
 
 function checkLinuxTools() {

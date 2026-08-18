@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures_util::{StreamExt, future::join_all};
 use koushi_state::{AppAction, OperationFailureKind, ThreadsListItem, ThreadsListScope};
@@ -20,6 +21,9 @@ use tokio::sync::{broadcast, mpsc};
 use crate::event::{CoreEvent, ThreadsListEvent, TimelineItem};
 use crate::executor;
 use crate::ids::RequestId;
+
+const THREADS_LIST_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
+const THREADS_LIST_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Exact reply activity that requires a root outside the Room timeline's
 /// canonical window. It is intentionally independent of `ThreadsListState`:
@@ -298,6 +302,7 @@ pub enum ThreadsListMessage {
 /// Handle to a `ThreadsListActor` background task.
 pub struct ThreadsListActorHandle {
     tx: mpsc::Sender<ThreadsListMessage>,
+    task: Option<executor::JoinHandle<()>>,
 }
 
 impl ThreadsListActorHandle {
@@ -317,11 +322,17 @@ impl ThreadsListActorHandle {
             .is_ok()
     }
 
-    pub async fn close(&self, request_id: RequestId) -> bool {
-        self.tx
-            .send(ThreadsListMessage::Close { request_id })
-            .await
-            .is_ok()
+    pub async fn close(mut self, request_id: RequestId) -> bool {
+        let closed = matches!(
+            executor::timeout(
+                THREADS_LIST_SHUTDOWN_SEND_TIMEOUT,
+                self.tx.send(ThreadsListMessage::Close { request_id }),
+            )
+            .await,
+            Ok(Ok(()))
+        );
+        let shutdown = self.shutdown_inner().await;
+        closed && shutdown
     }
 
     pub async fn paginate(&self, request_id: RequestId) -> bool {
@@ -329,6 +340,42 @@ impl ThreadsListActorHandle {
             .send(ThreadsListMessage::Paginate { request_id })
             .await
             .is_ok()
+    }
+
+    pub async fn shutdown(mut self) -> bool {
+        self.shutdown_inner().await
+    }
+
+    async fn shutdown_inner(&mut self) -> bool {
+        let sent = matches!(
+            executor::timeout(
+                THREADS_LIST_SHUTDOWN_SEND_TIMEOUT,
+                self.tx.send(ThreadsListMessage::Shutdown),
+            )
+            .await,
+            Ok(Ok(()))
+        );
+        let Some(mut task) = self.task.take() else {
+            return sent;
+        };
+        if sent
+            && executor::timeout(THREADS_LIST_SHUTDOWN_JOIN_TIMEOUT, &mut task)
+                .await
+                .is_ok()
+        {
+            return true;
+        }
+        task.abort();
+        let _ = task.await;
+        false
+    }
+}
+
+impl Drop for ThreadsListActorHandle {
+    fn drop(&mut self) {
+        if let Some(task) = &self.task {
+            task.abort();
+        }
     }
 }
 
@@ -352,8 +399,11 @@ impl ThreadsListActor {
             event_tx,
             msg_rx,
         };
-        executor::spawn(actor.run());
-        ThreadsListActorHandle { tx }
+        let task = executor::spawn(actor.run());
+        ThreadsListActorHandle {
+            tx,
+            task: Some(task),
+        }
     }
 
     async fn run(mut self) {
@@ -361,7 +411,9 @@ impl ThreadsListActor {
         while let Some(msg) = self.msg_rx.recv().await {
             match msg {
                 ThreadsListMessage::Shutdown | ThreadsListMessage::Close { .. } => {
-                    active = None;
+                    if let Some(subscription) = active.take() {
+                        subscription.shutdown().await;
+                    }
                     if matches!(msg, ThreadsListMessage::Shutdown) {
                         break;
                     }
@@ -371,6 +423,9 @@ impl ThreadsListActor {
                     scope,
                     room_ids,
                 } => {
+                    if let Some(subscription) = active.take() {
+                        subscription.shutdown().await;
+                    }
                     active = self.open_subscription(request_id, scope, room_ids).await;
                 }
                 ThreadsListMessage::Paginate { request_id } => {
@@ -380,7 +435,9 @@ impl ThreadsListActor {
                 }
             }
         }
-        // Dropping `active` cancels the SDK subscription background tasks.
+        if let Some(subscription) = active {
+            subscription.shutdown().await;
+        }
     }
 
     async fn open_subscription(
@@ -457,6 +514,12 @@ impl ThreadsListActor {
                 })
             })
             .collect::<Vec<_>>();
+        let mut tasks = SubscriptionTasks::new(
+            items_relay_handles
+                .into_iter()
+                .chain(pagination_relay_handles)
+                .collect(),
+        );
         drop(items_tx);
         drop(pagination_tx);
 
@@ -466,6 +529,7 @@ impl ThreadsListActor {
             }))
             .await;
         if initial_results.iter().any(|(_, result)| result.is_err()) {
+            tasks.shutdown().await;
             self.emit_failed(&scope, request_id, OperationFailureKind::Sdk)
                 .await;
             return None;
@@ -574,13 +638,12 @@ impl ThreadsListActor {
             }
         });
 
+        tasks.push(update_task);
         Some(ActiveSubscription {
             services,
             pagination_request_tx,
             pagination_failure_tx,
-            _items_relay: items_relay_handles,
-            _pagination_relay: pagination_relay_handles,
-            _update_task: update_task,
+            tasks,
         })
     }
 
@@ -640,9 +703,7 @@ struct ActiveSubscription {
     services: BTreeMap<String, Arc<ThreadListService>>,
     pagination_request_tx: mpsc::Sender<RequestId>,
     pagination_failure_tx: mpsc::Sender<(RequestId, OperationFailureKind)>,
-    _items_relay: Vec<executor::JoinHandle<()>>,
-    _pagination_relay: Vec<executor::JoinHandle<()>>,
-    _update_task: executor::JoinHandle<()>,
+    tasks: SubscriptionTasks,
 }
 
 impl ActiveSubscription {
@@ -656,6 +717,41 @@ impl ActiveSubscription {
                 .pagination_failure_tx
                 .send((request_id, classify_thread_list_error(&error)))
                 .await;
+        }
+    }
+
+    async fn shutdown(mut self) {
+        self.tasks.shutdown().await;
+    }
+}
+
+struct SubscriptionTasks {
+    tasks: Vec<executor::JoinHandle<()>>,
+}
+
+impl SubscriptionTasks {
+    fn new(tasks: Vec<executor::JoinHandle<()>>) -> Self {
+        Self { tasks }
+    }
+
+    fn push(&mut self, task: executor::JoinHandle<()>) {
+        self.tasks.push(task);
+    }
+
+    async fn shutdown(&mut self) {
+        for task in &self.tasks {
+            task.abort();
+        }
+        for task in self.tasks.drain(..) {
+            let _ = task.await;
+        }
+    }
+}
+
+impl Drop for SubscriptionTasks {
+    fn drop(&mut self) {
+        for task in &self.tasks {
+            task.abort();
         }
     }
 }
@@ -732,15 +828,68 @@ fn body_preview(content: Option<&matrix_sdk_ui::timeline::TimelineItemContent>) 
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeMap, HashMap, HashSet};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use tokio::sync::{mpsc, oneshot};
 
     use crate::event::{TimelineItem, TimelineItemId, TimelineMessageActions};
 
     use super::{
-        OperationFailureKind, ThreadRootProjectionActivity, ThreadRootProjectionDecision,
-        ThreadRootProjectionService,
+        ActiveSubscription, OperationFailureKind, SubscriptionTasks, ThreadRootProjectionActivity,
+        ThreadRootProjectionDecision, ThreadRootProjectionService,
     };
+
+    fn pending_task(settled: oneshot::Sender<()>) -> crate::executor::JoinHandle<()> {
+        crate::executor::spawn(async move {
+            let _settled = settled;
+            std::future::pending::<()>().await;
+        })
+    }
+
+    fn pending_subscription() -> (ActiveSubscription, [oneshot::Receiver<()>; 3]) {
+        let (item_settled_tx, item_settled_rx) = oneshot::channel::<()>();
+        let (pagination_settled_tx, pagination_settled_rx) = oneshot::channel::<()>();
+        let (update_settled_tx, update_settled_rx) = oneshot::channel::<()>();
+        let (pagination_request_tx, _pagination_request_rx) = mpsc::channel(1);
+        let (pagination_failure_tx, _pagination_failure_rx) = mpsc::channel(1);
+        (
+            ActiveSubscription {
+                services: BTreeMap::new(),
+                pagination_request_tx,
+                pagination_failure_tx,
+                tasks: SubscriptionTasks::new(vec![
+                    pending_task(item_settled_tx),
+                    pending_task(pagination_settled_tx),
+                    pending_task(update_settled_tx),
+                ]),
+            },
+            [item_settled_rx, pagination_settled_rx, update_settled_rx],
+        )
+    }
+
+    async fn assert_tasks_settled(tasks: [oneshot::Receiver<()>; 3]) {
+        for settled in tasks {
+            crate::executor::timeout(Duration::from_millis(100), settled)
+                .await
+                .expect("every owned subscription task must settle");
+        }
+    }
+
+    #[tokio::test]
+    async fn active_subscription_shutdown_settles_every_owned_task() {
+        let (active, tasks) = pending_subscription();
+        active.shutdown().await;
+        assert_tasks_settled(tasks).await;
+    }
+
+    #[tokio::test]
+    async fn active_subscription_drop_aborts_every_owned_task() {
+        let (active, tasks) = pending_subscription();
+        drop(active);
+        assert_tasks_settled(tasks).await;
+    }
 
     fn test_timeline_item(event_id: &str) -> TimelineItem {
         TimelineItem {

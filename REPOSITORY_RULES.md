@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-08-16.
+Last amended: 2026-08-18.
 
 ## Read Order And Authority
 
@@ -149,6 +149,15 @@ conflict is being resolved.
   state affects a Matrix command shape, selected target, pending operation,
   cleanup, retry, or success/failure interpretation, model it first as
   serializable Rust `AppState` / `CoreEvent` data and prove it headlessly.
+- Product and asynchronous lifecycle state that can outlive one mounted DOM
+  owner belongs to Rust. Core actors retain every SDK subscription and spawned
+  task handle they create, cancel them at replacement/account/app teardown, and
+  await settlement before acknowledging shutdown; dropping a raw Tokio
+  `JoinHandle` is detachment, not cleanup. React may own a browser listener,
+  observer, animation frame, or timer only when it serves presentation/DOM
+  lifetime exclusively and the same effect or controller cancels it on logical
+  key change and unmount. Product retries, backoff, operation correlation, and
+  session-scoped cleanup must not be implemented by browser timers or refs.
 - `apps/desktop/src-tauri` is a transport adapter. It holds `CoreRuntime`,
   sends commands, forwards events/snapshots, and does not call Matrix SDK
   wrapper APIs directly.

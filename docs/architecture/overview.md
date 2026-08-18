@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-08-15.
+Last amended: 2026-08-18.
 
 ## Product Scope
 
@@ -168,7 +168,10 @@ Crate responsibilities:
   patch proves that broader scope.
 - `koushi-core` — actor lifecycle, command routing, event emission,
   SDK session handles, background tasks, AppState projection, headless QA
-  binaries. Production Matrix behavior lives here and nowhere else. Scheduled
+  binaries. It retains the task/subscription handles it creates and makes
+  replacement plus ordered shutdown a cancel-and-await barrier; a detached
+  task is never a lifecycle owner. Production Matrix behavior lives here and
+  nowhere else. Scheduled
   send uses this layer for MSC4140 capability detection and SDK/Ruma delayed
   event requests, and for the local fallback timer that routes due Local-handle
   items back through the normal outbound send queue; the GUI never owns
@@ -182,7 +185,10 @@ Crate responsibilities:
 - `apps/desktop/src-tauri` — transport adapter. Holds a `CoreRuntime`, sends
   commands, forwards events/snapshots. No direct SDK wrapper calls.
 - `apps/desktop` — view and interaction code only, including viewport state,
-  DOM measurement, and scroll anchoring.
+  DOM measurement, and scroll anchoring. It may own browser listeners,
+  observers, frames, and timers only for mounted presentation lifetime, with
+  cleanup in the same effect/controller; product retry and session lifecycle
+  remain Rust-owned.
 
 Upstream SDK deltas are consumed exclusively from the checked-out
 `vendor/matrix-rust-sdk` submodule. Root workspace Matrix SDK dependencies are
@@ -482,7 +488,10 @@ contracts and resource ownership.
 Supervision follows the same ownership tree:
 
 - `AppActor` owns account runtimes; each `AccountActor` owns its child task
-  handles and subscription handles.
+  handles and subscription handles. Every child actor in turn retains the
+  `JoinHandle`s and live subscription handles it creates. Replacement and
+  shutdown cancel and await those children before the owner reports completion;
+  `JoinHandle` drop is an unexpected-detach hazard, not an orderly teardown.
 - Expected SDK failures are reported through domain state (`SyncFailed`,
   pagination failure, search failure) and redacted `OperationFailed` events.
 - A child task panic or unexpected join error tears down only that child when

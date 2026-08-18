@@ -5179,6 +5179,79 @@ describe("TimelineView", () => {
     vi.useRealTimers();
   });
 
+  it("cancels superseded acknowledgement retry timers on unmount", async () => {
+    vi.useFakeTimers();
+    try {
+      let emit: (payload: CoreEventPayload) => void = () => undefined;
+      const acknowledgeRenderedBatch = vi.fn<() => Promise<void>>().mockRejectedValue(
+        new Error("queue timeout")
+      );
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+      const transport = baseTransport({
+        listenCoreEvents(nextListener) {
+          emit = nextListener;
+          return () => undefined;
+        },
+        acknowledgeRenderedBatch
+      });
+      const view = (minimumBatchId: number, batchesProcessed: number) => (
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={transport}
+          continuity={{
+            kind: "repairing",
+            generation: 11,
+            gap_count: 1,
+            batches_processed: batchesProcessed,
+            minimum_batch_id: minimumBatchId
+          }}
+          onReply={vi.fn()}
+        />
+      );
+      const { rerender, unmount } = render(view(5, 1));
+      act(() => {
+        emit({
+          kind: "Timeline",
+          event: {
+            InitialItems: {
+              request_id: null,
+              key: KEY,
+              actor_generation: 9,
+              generation: 3,
+              items: [message("$repair", "Repair")]
+            }
+          }
+        });
+      });
+      act(() => {
+        while (frames.length > 0) {
+          frames.shift()?.(0);
+        }
+      });
+      await act(async () => Promise.resolve());
+      expect(acknowledgeRenderedBatch).toHaveBeenCalledTimes(1);
+
+      act(() => rerender(view(6, 2)));
+      act(() => {
+        while (frames.length > 0) {
+          frames.shift()?.(0);
+        }
+      });
+      await act(async () => Promise.resolve());
+      expect(acknowledgeRenderedBatch).toHaveBeenCalledTimes(2);
+
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not backfill a 3,234-item virtual timeline from transient DOM underfill", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const paginateBackwards = vi.fn(async () => undefined);

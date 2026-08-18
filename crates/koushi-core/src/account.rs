@@ -4109,7 +4109,9 @@ impl AccountActor {
     /// Ordered shutdown of the ThreadsListActor. Dropping the handle cancels
     /// the actor and its SDK subscriptions.
     async fn stop_threads_list_actor(&mut self) {
-        let _ = self.threads_list_actor.take();
+        if let Some(handle) = self.threads_list_actor.take() {
+            let _ = handle.shutdown().await;
+        }
     }
 
     /// Ordered shutdown of the TimelineManagerActor (step 2 of the shutdown
