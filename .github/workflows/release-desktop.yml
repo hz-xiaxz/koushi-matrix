@@ -65,10 +65,6 @@ jobs:
             runner: macos-15
             target: aarch64-apple-darwin
             asset: Koushi-macos-arm64.dmg
-          - arch: x64
-            runner: macos-15-intel
-            target: x86_64-apple-darwin
-            asset: Koushi-macos-x64.dmg
     env:
       APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
@@ -263,7 +259,12 @@ jobs:
           $asset = "Koushi-windows-x64-unsigned.exe"
           Copy-Item $installers[0].FullName "release-assets/$asset"
           $hash = (Get-FileHash -Algorithm SHA256 -Path "release-assets/$asset").Hash.ToLower()
-          "$hash  $asset" | Set-Content -Path "release-assets/$asset.sha256" -Encoding ascii
+          $checksumPath = Join-Path "release-assets" "$asset.sha256"
+          [System.IO.File]::WriteAllText(
+            $checksumPath,
+            "$hash  $asset`n",
+            [System.Text.Encoding]::ASCII
+          )
 
       - name: Upload Windows release asset
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
