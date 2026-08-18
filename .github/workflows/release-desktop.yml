@@ -152,17 +152,36 @@ jobs:
           RELEASE_TARGET: ${{ matrix.target }}
         run: |
           bundle_root="target/$RELEASE_TARGET/release/bundle"
-          app_count="$(find "$bundle_root/macos" -maxdepth 1 -name '*.app' -print | wc -l | tr -d ' ')"
           dmg_count="$(find "$bundle_root/dmg" -maxdepth 1 -name '*.dmg' -print | wc -l | tr -d ' ')"
-          [[ "$app_count" == "1" && "$dmg_count" == "1" ]]
-          app="$(find "$bundle_root/macos" -maxdepth 1 -name '*.app' -print)"
+          [[ "$dmg_count" == "1" ]]
           dmg="$(find "$bundle_root/dmg" -maxdepth 1 -name '*.dmg' -print)"
+
+          xcrun notarytool submit "$dmg" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$dmg"
+
+          mount_point="$(mktemp -d "$RUNNER_TEMP/koushi-release-dmg.XXXXXX")"
+          cleanup_mount() {
+            hdiutil detach "$mount_point" >/dev/null 2>&1 || true
+            rmdir "$mount_point" >/dev/null 2>&1 || true
+          }
+          trap cleanup_mount EXIT
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_point"
+          app_count="$(find "$mount_point" -maxdepth 1 -name '*.app' -print | wc -l | tr -d ' ')"
+          [[ "$app_count" == "1" ]]
+          app="$(find "$mount_point" -maxdepth 1 -name '*.app' -print)"
+
           codesign --verify --deep --strict --verbose=2 "$app"
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=4 "$app"
           codesign --verify --verbose=2 "$dmg"
           xcrun stapler validate "$dmg"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+          cleanup_mount
+          trap - EXIT
           mkdir -p release-assets
           cp "$dmg" "release-assets/$RELEASE_ASSET"
           (cd release-assets && shasum -a 256 "$RELEASE_ASSET" > "$RELEASE_ASSET.sha256")
