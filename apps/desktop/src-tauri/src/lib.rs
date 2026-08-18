@@ -1594,7 +1594,8 @@ mod tests {
             koushi_core::renderable_thumbnail::RenderableThumbnailKind::Avatar,
             "mxc://example.test/avatar",
             b"protocol-bytes".to_vec(),
-        );
+        )
+        .expect("protocol fixture is within the thumbnail cache bound");
         let source_url = match ready {
             koushi_state::AvatarThumbnailState::Ready { source_url, .. } => source_url,
             other => panic!("unexpected thumbnail state: {other:?}"),

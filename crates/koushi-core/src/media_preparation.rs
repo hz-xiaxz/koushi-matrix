@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, fmt};
 
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_media::{
     ImageOutputFormat, ImageOutputRequest, ImagePreparationPolicy, ImageResizeScale,
     PreparedImageFormat, PreparedImageVariant, heif_mime_type, prepare_image_output,
@@ -32,6 +33,10 @@ impl MediaPreparationService {
 
     pub async fn reconcile_snapshot(&self, snapshot: &koushi_state::AppState) {
         self.registry.lock().await.reconcile_snapshot(snapshot);
+    }
+
+    pub async fn stats(&self) -> MediaPreparationStats {
+        self.registry.lock().await.stats()
     }
 }
 
@@ -110,6 +115,10 @@ impl MediaPreparationTransition<'_> {
     pub fn clear_target(&mut self, target: &ComposerTarget) {
         self.registry.clear_target(target);
     }
+
+    pub fn stats(&self) -> MediaPreparationStats {
+        self.registry.stats()
+    }
 }
 
 #[derive(Clone)]
@@ -137,7 +146,89 @@ impl fmt::Debug for StageUploadBytesInput {
 #[derive(Clone)]
 struct CachedVariant {
     descriptor: PreparedUploadVariant,
-    bytes: Vec<u8>,
+    storage: CachedVariantStorage,
+}
+
+#[derive(Clone)]
+enum CachedVariantStorage {
+    Owned(Vec<u8>),
+    Source,
+}
+
+impl CachedVariantStorage {
+    fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Owned(bytes) => bytes.len(),
+            Self::Source => 0,
+        }
+    }
+
+    fn is_source_backed(&self) -> bool {
+        matches!(self, Self::Source)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MediaPreparationStats {
+    pub source_count: usize,
+    pub source_bytes: usize,
+    pub variant_count: usize,
+    pub source_backed_variant_count: usize,
+    pub variant_bytes: usize,
+    pub selected_count: usize,
+    pub high_water_source_count: usize,
+    pub high_water_source_bytes: usize,
+    pub high_water_variant_count: usize,
+    pub high_water_variant_bytes: usize,
+}
+
+pub fn media_preparation_summary_event(stats: MediaPreparationStats) -> DiagnosticEvent {
+    DiagnosticEvent::new(DiagnosticLevel::Info, "core.media_preparation", "summary")
+        .field(DiagnosticField::token("retention", "source_backed"))
+        .field(DiagnosticField::count(
+            "source_count",
+            stats.source_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "source_bytes",
+            stats.source_bytes as u64,
+        ))
+        .field(DiagnosticField::count(
+            "variant_count",
+            stats.variant_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "source_backed_variant_count",
+            stats.source_backed_variant_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "variant_bytes",
+            stats.variant_bytes as u64,
+        ))
+        .field(DiagnosticField::count(
+            "selected_count",
+            stats.selected_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "high_water_source_count",
+            stats.high_water_source_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "high_water_source_bytes",
+            stats.high_water_source_bytes as u64,
+        ))
+        .field(DiagnosticField::count(
+            "high_water_variant_count",
+            stats.high_water_variant_count as u64,
+        ))
+        .field(DiagnosticField::count(
+            "high_water_variant_bytes",
+            stats.high_water_variant_bytes as u64,
+        ))
+}
+
+pub fn record_media_preparation_summary(stats: MediaPreparationStats) {
+    record(media_preparation_summary_event(stats));
 }
 
 #[derive(Clone)]
@@ -162,9 +253,102 @@ pub struct MediaPreparationRegistry {
     selected: BTreeMap<(ComposerTarget, String), String>,
     sources: BTreeMap<(ComposerTarget, String), StageUploadBytesInput>,
     account_user_id: Option<String>,
+    high_water_source_count: usize,
+    high_water_source_bytes: usize,
+    high_water_variant_count: usize,
+    high_water_variant_bytes: usize,
 }
 
 impl MediaPreparationRegistry {
+    pub fn stats(&self) -> MediaPreparationStats {
+        let source_bytes = self.sources.values().fold(0usize, |total, input| {
+            total.saturating_add(input.bytes.len())
+        });
+        let variant_bytes = self.variants.values().fold(0usize, |total, variant| {
+            total.saturating_add(variant.storage.retained_bytes())
+        });
+        MediaPreparationStats {
+            source_count: self.sources.len(),
+            source_bytes,
+            variant_count: self.variants.len(),
+            source_backed_variant_count: self
+                .variants
+                .values()
+                .filter(|variant| variant.storage.is_source_backed())
+                .count(),
+            variant_bytes,
+            selected_count: self.selected.len(),
+            high_water_source_count: self.high_water_source_count,
+            high_water_source_bytes: self.high_water_source_bytes,
+            high_water_variant_count: self.high_water_variant_count,
+            high_water_variant_bytes: self.high_water_variant_bytes,
+        }
+    }
+
+    fn refresh_high_water(&mut self) {
+        let stats = self.stats();
+        self.high_water_source_count = self.high_water_source_count.max(stats.source_count);
+        self.high_water_source_bytes = self.high_water_source_bytes.max(stats.source_bytes);
+        self.high_water_variant_count = self.high_water_variant_count.max(stats.variant_count);
+        self.high_water_variant_bytes = self.high_water_variant_bytes.max(stats.variant_bytes);
+    }
+
+    fn record_cleanup_diagnostic(
+        &self,
+        reason: &'static str,
+        before: MediaPreparationStats,
+        force: bool,
+    ) {
+        let after = self.stats();
+        if !force && before == after {
+            return;
+        }
+        record(
+            DiagnosticEvent::new(DiagnosticLevel::Debug, "core.media_preparation", "cleanup")
+                .field(DiagnosticField::token("reason", reason))
+                .field(DiagnosticField::count(
+                    "source_count",
+                    after.source_count as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "source_bytes",
+                    after.source_bytes as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "variant_count",
+                    after.variant_count as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "source_backed_variant_count",
+                    after.source_backed_variant_count as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "variant_bytes",
+                    after.variant_bytes as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "selected_count",
+                    after.selected_count as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "high_water_source_count",
+                    after.high_water_source_count as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "high_water_source_bytes",
+                    after.high_water_source_bytes as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "high_water_variant_count",
+                    after.high_water_variant_count as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "high_water_variant_bytes",
+                    after.high_water_variant_bytes as u64,
+                )),
+        );
+    }
+
     pub fn prepare_target(
         &mut self,
         target: &ComposerTarget,
@@ -232,12 +416,27 @@ impl MediaPreparationRegistry {
         bytes: Vec<u8>,
     ) {
         let variant_id = descriptor.variant_id.clone();
+        let source_backed = descriptor.resize == StagedUploadResizeChoice::Original
+            && descriptor.format_choice == StagedUploadFormatChoice::Keep
+            && self
+                .sources
+                .get(&(target.clone(), staged_id.to_owned()))
+                .is_some_and(|source| source.bytes == bytes);
+        let storage = if source_backed {
+            CachedVariantStorage::Source
+        } else {
+            CachedVariantStorage::Owned(bytes)
+        };
         self.variants.insert(
             (target.clone(), staged_id.to_owned(), variant_id.clone()),
-            CachedVariant { descriptor, bytes },
+            CachedVariant {
+                descriptor,
+                storage,
+            },
         );
         self.selected
             .insert((target.clone(), staged_id.to_owned()), variant_id);
+        self.refresh_high_water();
     }
 
     pub fn select_variant(
@@ -268,7 +467,7 @@ impl MediaPreparationRegistry {
                 .get(&(target.clone(), staged_id.to_owned(), selected.clone()))?;
         Some(PreparedMediaUpload {
             descriptor: cached.descriptor.clone(),
-            bytes: cached.bytes.clone(),
+            bytes: self.cached_variant_bytes(target, staged_id, cached)?,
         })
     }
 
@@ -278,39 +477,75 @@ impl MediaPreparationRegistry {
         staged_id: &str,
         variant_id: &str,
     ) -> Option<Vec<u8>> {
-        self.variants
-            .get(&(target.clone(), staged_id.to_owned(), variant_id.to_owned()))
-            .map(|cached| cached.bytes.clone())
+        let cached =
+            self.variants
+                .get(&(target.clone(), staged_id.to_owned(), variant_id.to_owned()))?;
+        self.cached_variant_bytes(target, staged_id, cached)
+    }
+
+    fn cached_variant_bytes(
+        &self,
+        target: &ComposerTarget,
+        staged_id: &str,
+        cached: &CachedVariant,
+    ) -> Option<Vec<u8>> {
+        match &cached.storage {
+            CachedVariantStorage::Owned(bytes) => Some(bytes.clone()),
+            CachedVariantStorage::Source => self
+                .sources
+                .get(&(target.clone(), staged_id.to_owned()))
+                .map(|source| source.bytes.clone()),
+        }
     }
 
     pub fn remove_item(&mut self, target: &ComposerTarget, staged_id: &str) {
+        let before = self.stats();
         self.variants
             .retain(|(item_target, item_id, _), _| item_target != target || item_id != staged_id);
         self.selected
             .remove(&(target.clone(), staged_id.to_owned()));
         self.sources.remove(&(target.clone(), staged_id.to_owned()));
+        self.record_cleanup_diagnostic("remove_item", before, false);
     }
 
     pub fn clear_target(&mut self, target: &ComposerTarget) {
+        let before = self.stats();
         self.variants
             .retain(|(item_target, _, _), _| item_target != target);
         self.selected
             .retain(|(item_target, _), _| item_target != target);
         self.sources
             .retain(|(item_target, _), _| item_target != target);
+        self.record_cleanup_diagnostic("clear_target", before, false);
     }
 
     pub fn clear(&mut self) {
+        let before = self.stats();
+        let had_account = self.account_user_id.is_some();
         self.variants.clear();
         self.selected.clear();
         self.sources.clear();
         self.account_user_id = None;
+        self.record_cleanup_diagnostic("clear", before, had_account);
     }
 
     pub fn merge_prepared(&mut self, prepared: Self) {
+        self.high_water_source_count = self
+            .high_water_source_count
+            .max(prepared.high_water_source_count);
+        self.high_water_source_bytes = self
+            .high_water_source_bytes
+            .max(prepared.high_water_source_bytes);
+        self.high_water_variant_count = self
+            .high_water_variant_count
+            .max(prepared.high_water_variant_count);
+        self.high_water_variant_bytes = self
+            .high_water_variant_bytes
+            .max(prepared.high_water_variant_bytes);
         self.variants.extend(prepared.variants);
         self.selected.extend(prepared.selected);
         self.sources.extend(prepared.sources);
+        self.refresh_high_water();
     }
 
     pub fn source_input(
@@ -324,20 +559,25 @@ impl MediaPreparationRegistry {
     }
 
     pub fn clear_thread_targets(&mut self) {
+        let before = self.stats();
         self.variants
             .retain(|(target, _, _), _| !matches!(target, ComposerTarget::Thread { .. }));
         self.selected
             .retain(|(target, _), _| !matches!(target, ComposerTarget::Thread { .. }));
         self.sources
             .retain(|(target, _), _| !matches!(target, ComposerTarget::Thread { .. }));
+        self.record_cleanup_diagnostic("clear_thread_targets", before, false);
     }
 
     fn reconcile_snapshot(&mut self, snapshot: &koushi_state::AppState) {
+        let before = self.stats();
+        let mut account_changed = false;
         if let SessionAccountObservation::Stable(account_user_id) =
             session_account_observation(&snapshot.session)
         {
             let account_user_id = account_user_id.map(str::to_owned);
             if account_user_id != self.account_user_id {
+                account_changed = true;
                 self.variants.clear();
                 self.selected.clear();
                 self.sources.clear();
@@ -362,6 +602,15 @@ impl MediaPreparationRegistry {
                 .items
                 .contains_key(&(target.clone(), staged_id.clone()))
         });
+        self.record_cleanup_diagnostic(
+            if account_changed {
+                "account_change"
+            } else {
+                "reconcile_snapshot"
+            },
+            before,
+            account_changed,
+        );
     }
 
     pub fn retry_item(
@@ -415,6 +664,7 @@ impl MediaPreparationRegistry {
         }
         self.sources
             .insert((target.clone(), input.staged_id.clone()), input.clone());
+        self.refresh_high_water();
         let byte_count = u64::try_from(input.bytes.len()).unwrap_or(u64::MAX);
         if let Some(mime_type) = detected_heif {
             return self.prepare_heif_one(target, input, policy, mime_type);
@@ -467,13 +717,14 @@ impl MediaPreparationRegistry {
             ),
             CachedVariant {
                 descriptor: descriptor.clone(),
-                bytes: variant.bytes,
+                storage: CachedVariantStorage::Source,
             },
         );
         self.selected.insert(
             (target.clone(), input.staged_id.clone()),
             descriptor.variant_id.clone(),
         );
+        self.refresh_high_water();
         StagedUploadItem {
             staged_id: input.staged_id,
             room_id: target.room_id().to_owned(),
@@ -526,13 +777,14 @@ impl MediaPreparationRegistry {
             ),
             CachedVariant {
                 descriptor: descriptor.clone(),
-                bytes: input.bytes,
+                storage: CachedVariantStorage::Source,
             },
         );
         self.selected.insert(
             (target.clone(), input.staged_id.clone()),
             descriptor.variant_id.clone(),
         );
+        self.refresh_high_water();
         StagedUploadItem {
             staged_id: input.staged_id,
             room_id: target.room_id().to_owned(),
@@ -611,7 +863,7 @@ impl MediaPreparationRegistry {
             ),
             CachedVariant {
                 descriptor: original.clone(),
-                bytes: input.bytes,
+                storage: CachedVariantStorage::Source,
             },
         );
         self.variants.insert(
@@ -622,13 +874,14 @@ impl MediaPreparationRegistry {
             ),
             CachedVariant {
                 descriptor: converted_descriptor.clone(),
-                bytes: converted.bytes,
+                storage: CachedVariantStorage::Owned(converted.bytes),
             },
         );
         self.selected.insert(
             (target.clone(), input.staged_id.clone()),
             converted_descriptor.variant_id.clone(),
         );
+        self.refresh_high_water();
         StagedUploadItem {
             staged_id: input.staged_id,
             room_id: target.room_id().to_owned(),
@@ -682,10 +935,22 @@ fn session_account_observation(
 
 impl fmt::Debug for MediaPreparationRegistry {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let stats = self.stats();
         formatter
             .debug_struct("MediaPreparationRegistry")
-            .field("variant_count", &self.variants.len())
-            .field("selected_count", &self.selected.len())
+            .field("source_count", &stats.source_count)
+            .field("source_bytes", &stats.source_bytes)
+            .field("variant_count", &stats.variant_count)
+            .field(
+                "source_backed_variant_count",
+                &stats.source_backed_variant_count,
+            )
+            .field("variant_bytes", &stats.variant_bytes)
+            .field("selected_count", &stats.selected_count)
+            .field("high_water_source_count", &stats.high_water_source_count)
+            .field("high_water_source_bytes", &stats.high_water_source_bytes)
+            .field("high_water_variant_count", &stats.high_water_variant_count)
+            .field("high_water_variant_bytes", &stats.high_water_variant_bytes)
             .finish()
     }
 }
@@ -1058,6 +1323,13 @@ mod tests {
         registry.prepare_target(&main, vec![file("shared", b"main")], policy);
         registry.prepare_target(&thread, vec![file("shared", b"thread")], policy);
 
+        let retained = registry.stats();
+        assert_eq!(retained.source_count, 2);
+        assert_eq!(retained.source_bytes, b"main".len() + b"thread".len());
+        assert_eq!(retained.variant_count, 2);
+        assert_eq!(retained.source_backed_variant_count, 2);
+        assert_eq!(retained.variant_bytes, 0);
+
         assert_eq!(
             registry.selected_upload(&main, "shared").unwrap().bytes,
             b"main"
@@ -1066,11 +1338,87 @@ mod tests {
             registry.selected_upload(&thread, "shared").unwrap().bytes,
             b"thread"
         );
+        assert_eq!(
+            registry.variant_bytes(&main, "shared", "original").unwrap(),
+            b"main"
+        );
         registry.clear_target(&thread);
         assert!(registry.selected_upload(&thread, "shared").is_none());
         assert_eq!(
             registry.selected_upload(&main, "shared").unwrap().bytes,
             b"main"
+        );
+        let after_thread_clear = registry.stats();
+        assert_eq!(after_thread_clear.source_count, 1);
+        assert_eq!(after_thread_clear.variant_count, 1);
+        registry.remove_item(&main, "shared");
+        let after_remove = registry.stats();
+        assert_eq!(after_remove.source_count, 0);
+        assert_eq!(after_remove.source_bytes, 0);
+        assert_eq!(after_remove.variant_count, 0);
+        assert_eq!(after_remove.variant_bytes, 0);
+        assert_eq!(after_remove.high_water_source_count, 2);
+        assert_eq!(after_remove.high_water_variant_count, 2);
+    }
+
+    #[test]
+    fn clear_releases_retained_media_and_keeps_private_free_high_water_stats() {
+        let mut registry = MediaPreparationRegistry::default();
+        let target = target(None);
+        registry.prepare_target(
+            &target,
+            vec![file("private-stage", b"private bytes")],
+            ImageUploadCompressionPolicy::default(),
+        );
+
+        registry.clear();
+
+        let stats = registry.stats();
+        assert_eq!(stats.source_count, 0);
+        assert_eq!(stats.source_bytes, 0);
+        assert_eq!(stats.variant_count, 0);
+        assert_eq!(stats.variant_bytes, 0);
+        assert!(stats.high_water_source_bytes >= b"private bytes".len());
+        assert_eq!(stats.high_water_variant_bytes, 0);
+        let debug = format!("{registry:?}");
+        assert!(!debug.contains("private-stage"));
+        assert!(!debug.contains("private bytes"));
+    }
+
+    #[test]
+    fn original_image_and_heif_variants_reuse_retained_source_bytes() {
+        let target = target(None);
+        let mut registry = MediaPreparationRegistry::default();
+        let png = png_input("png-source", 8, 4);
+        let png_bytes = png.bytes.clone();
+        let heif = heif_input("heif-source");
+        let heif_bytes = heif.bytes.clone();
+
+        registry.prepare_items(
+            &target,
+            vec![png, heif],
+            ImageUploadCompressionPolicy::default(),
+        );
+
+        let heif_converted_bytes = registry
+            .selected_upload(&target, "heif-source")
+            .expect("HEIF JPEG conversion")
+            .bytes
+            .len();
+        let stats = registry.stats();
+        assert_eq!(stats.source_backed_variant_count, 2);
+        assert_eq!(stats.variant_bytes, heif_converted_bytes);
+        assert_eq!(
+            registry
+                .variant_bytes(&target, "png-source", "original-keep")
+                .expect("PNG original bytes"),
+            png_bytes
+        );
+        assert_eq!(
+            registry
+                .variant_bytes(&target, "heif-source", "original-keep")
+                .expect("HEIF original bytes"),
+            heif_bytes
         );
     }
 
@@ -1155,6 +1503,9 @@ mod tests {
         registry.clear_thread_targets();
         assert!(registry.selected_upload(&thread, "thread").is_none());
         assert!(registry.selected_upload(&main, "main").is_some());
+        let stats = registry.stats();
+        assert_eq!(stats.source_count, 1);
+        assert_eq!(stats.variant_count, 1);
     }
 
     #[test]
@@ -1201,6 +1552,9 @@ mod tests {
         registry.reconcile_snapshot(&snapshot);
 
         assert!(registry.selected_upload(&target, "private").is_none());
+        let stats = registry.stats();
+        assert_eq!(stats.source_count, 0);
+        assert_eq!(stats.variant_count, 0);
     }
 
     #[test]

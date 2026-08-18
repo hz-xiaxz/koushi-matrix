@@ -92,7 +92,8 @@ impl ImageResizeScale {
     }
 }
 
-/// Requested output encoding. `Keep` re-encodes in the source format.
+/// Requested output encoding. `Keep` preserves the source encoding, including
+/// the original bytes for an unscaled, non-HEIF image.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ImageOutputFormat {
     Keep,
@@ -159,6 +160,35 @@ pub fn prepare_image_output(
     if !decodable {
         return Err(ImagePreparationError::Decode);
     }
+
+    // An unscaled Keep output does not need a pixel buffer. Probe dimensions
+    // under the same limits as the decoder and retain the exact source bytes;
+    // this avoids allocating a full RGBA image merely to upload it unchanged.
+    // HEIF intentionally stays on its existing decode path because it is
+    // decode-only in this crate.
+    if request.resize == ImageResizeScale::Original
+        && request.format == ImageOutputFormat::Keep
+        && matches!(
+            source_format,
+            PreparedImageFormat::Png | PreparedImageFormat::Jpeg | PreparedImageFormat::WebP
+        )
+    {
+        let dimensions =
+            read_dimensions_with_limits(source, guessed.expect("recognized non-HEIF image format"))
+                .map_err(|_| ImagePreparationError::Decode)?;
+        return Ok(PreparedImageVariant {
+            id: request.identity(),
+            filename: normalized_filename(filename, extension(source_format, None)),
+            mime_type: actual_mime(source_format).to_owned(),
+            format: source_format,
+            bytes: source.to_vec(),
+            dimensions,
+            metadata_stripped: false,
+            thumbnail_refreshed: false,
+            recommended: false,
+        });
+    }
+
     let decoded = match source_format {
         PreparedImageFormat::Heif => decode_heif(source, heif.expect("recognized HEIF"))?,
         _ => decode_with_limits(source, guessed.expect("recognized image format"))
@@ -471,6 +501,38 @@ fn decode_with_limits(
     limits.max_alloc = Some(MAX_DECODED_ALLOCATION);
     reader.limits(limits);
     reader.decode()
+}
+
+fn read_dimensions_with_limits(
+    source: &[u8],
+    format: ImageFormat,
+) -> Result<(u32, u32), image::ImageError> {
+    let mut reader = ImageReader::with_format(Cursor::new(source), format);
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_DECODED_DIMENSION);
+    limits.max_image_height = Some(MAX_DECODED_DIMENSION);
+    limits.max_alloc = Some(MAX_DECODED_ALLOCATION);
+    reader.limits(limits);
+    let dimensions = reader.into_dimensions()?;
+    validate_decoded_dimensions(dimensions)
+}
+
+fn validate_decoded_dimensions(dimensions: (u32, u32)) -> Result<(u32, u32), image::ImageError> {
+    let (width, height) = dimensions;
+    let decoded_bytes = u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| {
+            image::ImageError::Limits(image::error::LimitError::from_kind(
+                image::error::LimitErrorKind::InsufficientMemory,
+            ))
+        })?;
+    if decoded_bytes > MAX_DECODED_ALLOCATION {
+        return Err(image::ImageError::Limits(
+            image::error::LimitError::from_kind(image::error::LimitErrorKind::InsufficientMemory),
+        ));
+    }
+    Ok(dimensions)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

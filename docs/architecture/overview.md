@@ -417,9 +417,20 @@ also the configuration used by the SDK `SqliteMediaStore`; supplying a separate
 `cache_path` does not remove or replace its `MatrixClientStoreKey`. Automatic
 avatar persistence therefore uses the SDK media store and its retention policy,
 not a Koushi-owned disk cache. Koushi may materialize decrypted bytes into a
-session-scoped in-memory `koushi-thumbnail://` cache for rendering, but it must
-never persist automatic avatar/link-preview plaintext or return `file://` URLs
-for them. Legacy plaintext thumbnail directories remain cleanup-only.
+session-scoped in-memory `koushi-thumbnail://` cache for rendering. That cache
+is an entry-and-byte-bounded LRU: access refreshes recency, eviction or session
+clear releases the owned bytes, and an item larger than the byte bound fails
+before a Ready URL is published. It must never persist automatic
+avatar/link-preview plaintext or return `file://` URLs for them. Legacy
+plaintext thumbnail directories remain cleanup-only.
+
+**Prepared-upload retention invariant.** `MediaPreparationService` owns staged
+upload source bytes for the lifetime of the corresponding composer item.
+Untouched originals are source-backed cached variants rather than duplicate
+byte vectors; only transformed outputs own additional bytes. Item removal,
+target/thread clear, snapshot reconciliation, account change, and full clear
+must release both sources and dependent variants. Exported retention summaries
+contain counts, byte totals, high-water marks, and fixed tokens only.
 
 **Verified-session admission invariant.** Password/OIDC authentication and
 credential restore first install an AccountActor-owned provisional SDK session;

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StagedUploadItem } from "../domain/types";
@@ -8,7 +8,10 @@ import { t } from "../i18n/messages";
 import { CreateEntityDialog, InviteTargetsDialog, UploadStagingDialog } from "./dialogs";
 import type { InviteWorkflowState } from "../domain/types";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 function stagedImage(
   caption: string,
@@ -346,6 +349,84 @@ describe("UploadStagingDialog resize and format controls", () => {
     const viewport = document.querySelector(".upload-preview-viewport");
     expect(viewport).not.toBeNull();
     expect(viewport?.getAttribute("data-recompressing")).toBe("true");
+  });
+});
+
+describe("UploadStagingDialog preview URL lifecycle", () => {
+  it("keeps the active preview URL across caption-only rerenders", async () => {
+    const preparation: StagedUploadItem["preparation"] = {
+      kind: "ready",
+      variants: [preparedVariant("original", "keep")],
+      selected: { resize: "original", format: "keep" },
+      pending: null,
+      generation: 0
+    };
+    const loadPreview = vi.fn(async () => [1, 2, 3]);
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:stable-upload-preview");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const props = {
+      onClear: vi.fn(),
+      onUpdateCaption: vi.fn(),
+      onSelectOutput: vi.fn(),
+      onRetryPreparation: vi.fn(),
+      onUseOriginal: vi.fn(),
+      onSendAttachments: vi.fn(),
+      loadPreview
+    };
+
+    const { rerender, unmount } = render(
+      <UploadStagingDialog items={[stagedImage("before", preparation)]} {...props} />
+    );
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+
+    rerender(<UploadStagingDialog items={[stagedImage("after", preparation)]} {...props} />);
+
+    expect(loadPreview).toHaveBeenCalledTimes(1);
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    unmount();
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:stable-upload-preview");
+  });
+
+  it("revokes the active preview URL when the dialog unmounts", async () => {
+    const loadPreview = vi.fn(async () => [1, 2, 3]);
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:upload-preview");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    const { unmount } = render(
+      <UploadStagingDialog
+        items={[
+          stagedImage("", {
+            kind: "ready",
+            variants: [preparedVariant("original", "keep")],
+            selected: { resize: "original", format: "keep" },
+            pending: null,
+            generation: 0
+          })
+        ]}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        onSendAttachments={vi.fn()}
+        loadPreview={loadPreview}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole("img", { name: "Prepared attachment preview" })).toBeTruthy());
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+
+    unmount();
+
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:upload-preview");
   });
 });
 

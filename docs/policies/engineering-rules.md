@@ -305,6 +305,12 @@ Rules:
    effects or platform ports. Media captions belong to the Rust-owned media
    upload request and incoming timeline projection; GUI code must not implement
    caption semantics by sending a separate `m.text` event after media upload.
+   Staged upload source bytes are owned by `MediaPreparationService` and must be
+   released on item removal, target/thread clear, snapshot reconciliation,
+   account change, and full clear. Untouched original variants must reference
+   the retained source instead of owning duplicate bytes; transformed variants
+   may own their encoded output. Retention diagnostics expose counts, byte
+   totals, high-water marks, and fixed tokens only.
 14. Profile/avatar diagnostics are metadata-minimized. Display names and avatar
    bytes may cross only the typed command or snapshot boundaries needed for the
    UI; normal `Debug`, QA logs, errors, window-title tokens, and issue evidence
@@ -319,7 +325,9 @@ Rules:
    SDK SQLite media store. A separated SDK `cache_path` must retain the same
    required `MatrixClientStoreKey`, and SDK media retention is the sole
    persistent retention policy. Koushi may keep decrypted renderable bytes only
-   in the account/session-scoped in-memory `koushi-thumbnail://` cache. A
+   in the account/session-scoped in-memory `koushi-thumbnail://` cache. That
+   cache must be bounded by both entry count and owned bytes, refresh recency on
+   access, and reject an over-bound single item before returning a Ready URL. A
    separate plaintext avatar/link-preview cache and automatic `file://` URLs are
    prohibited; legacy plaintext directories are cleanup-only.
    Personal local user aliases are private account-data-backed profile state:
