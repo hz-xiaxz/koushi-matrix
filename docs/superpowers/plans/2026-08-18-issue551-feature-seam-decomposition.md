@@ -87,7 +87,7 @@ The pilot uses an already named component boundary with existing unit and browse
   - Baseline/post: `npm --prefix apps/desktop test -- --run src/components/UserSettingsPanel.test.tsx`
   - Browser: `(cd apps/desktop && npx playwright test e2e/search-crawler-settings.spec.ts --workers=1)`
   - Layer: typecheck, lint, frontend Vitest, build.
-- [ ] **User Settings shared UIA prerequisite** — move the existing `AccountManagementUiaForm` used by both Sessions and Account Management to one private module before either section; this avoids assigning the shared secret-handling boundary to the wrong feature.
+- [x] **User Settings shared UIA prerequisite** — move the existing `AccountManagementUiaForm` used by both Sessions and Account Management to one private module before either section; this avoids assigning the shared secret-handling boundary to the wrong feature.
 - [ ] **User Settings sessions** — after the shared UIA prerequisite, move `SessionsSection` and `SessionRow` together.
 - [ ] **User Settings account management** — after the shared UIA prerequisite, move `AccountManagementSection` and its local forms together.
 - [ ] **User Settings security and room-key management** — move `SecuritySection` and its private dialog/status helpers; secret-bearing values remain callback-local and never enter observable state.
@@ -275,5 +275,6 @@ Before closing Issue #551:
 - Shared UIA prerequisite formal full-diff review: `reviewer-flash` reviewed `/tmp/issue551-shared-uia.diff` (`sha256:0c9bf9d3cb791149acdb9765aab010e85359b9b4264f3346412a8ffc6909bde7`) and returned `Correct-to-merge` with no findings.
 - Shared UIA prerequisite formal design review: `reviewer-flash` returned `Correct-to-merge`; its only new Minors (collapse the post-removal double blank and leave the similar Trust form untouched) were incorporated before implementation.
 - Shared UIA prerequisite pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused device-session-manager Playwright 1/1 passed; frontend typecheck and lint passed.
+- Shared UIA delivery PR: #561; focused and complete local gates passed after one unrelated runtime deadline retry, the first Rust CI attempt hit an unrelated existing diagnostic-counter timing failure, and the failed job rerun passed. Final required checks were 7/7 green before ledger update.
 - Pilot delivery PR: #560; focused and complete local gates passed, formal design/diff verdicts are `Correct-to-merge`, and the implementation CI run passed all seven required checks before final ledger update.
 - Merged PRs: #560 is the first delivery PR.
