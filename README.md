@@ -15,6 +15,20 @@ light running through the grid. Do not rebrand back to "Kagome", "Ruri", or
 "Matrix Desktop" — the name is intentional. The repository is now
 `shinaoka/koushi-matrix`.
 
+## Downloads
+
+Every synchronized desktop version bump on `main` publishes a GitHub Release
+after all platform builds succeed:
+
+- [macOS Apple Silicon DMG](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-macos-arm64.dmg)
+- [macOS Intel DMG](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-macos-x64.dmg)
+- [Windows x64 trial installer](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-windows-x64-unsigned.exe) — currently unsigned; Windows SmartScreen may warn
+- [Latest release and checksums](https://github.com/shinaoka/koushi-matrix/releases/latest)
+
+The macOS artifacts are Developer ID signed, notarized, stapled, and checked by
+Gatekeeper before publication. Verify the adjacent `.sha256` file when testing
+any downloaded installer.
+
 Current status: pre-login desktop shell. The repository has pure Rust state/search/key crates, a no-network fake backend, a Tauri v2 + React app shell, and a static Slack-like reference shell.
 
 ## License

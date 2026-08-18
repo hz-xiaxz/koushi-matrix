@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -150,10 +150,19 @@ if (macosSigning) {
     "env.APPLE_SIGNING_IDENTITY",
     "required for signed macOS distribution"
   );
+  const apiKeyNotarization = Boolean(
+    process.env.APPLE_API_ISSUER &&
+      process.env.APPLE_API_KEY &&
+      process.env.APPLE_API_KEY_PATH &&
+      existsSync(process.env.APPLE_API_KEY_PATH)
+  );
+  const appleIdNotarization = Boolean(
+    process.env.APPLE_ID && process.env.APPLE_PASSWORD && process.env.APPLE_TEAM_ID
+  );
   requireCheck(
-    Boolean(process.env.APPLE_ID && process.env.APPLE_PASSWORD && process.env.APPLE_TEAM_ID),
+    apiKeyNotarization || appleIdNotarization,
     "env.appleNotarization",
-    "APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID required for notarization"
+    "complete App Store Connect API key or Apple ID credential set required for notarization"
   );
 }
 if (strictSigning) {

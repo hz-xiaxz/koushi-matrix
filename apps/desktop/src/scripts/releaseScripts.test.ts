@@ -1,6 +1,15 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { relative, sep } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, sep } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const repoRoot = new URL("../../../../", import.meta.url).pathname;
@@ -2747,6 +2756,139 @@ fn test_only() {
     expect(configured.stdout).toContain("ok env.APPLE_SIGNING_IDENTITY");
     expect(configured.stdout).toContain("ok env.appleNotarization");
     expect(configured.stderr).not.toContain("env.windowsSigning");
+  });
+
+  test("macOS signing preflight accepts an App Store Connect API key file", () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), "koushi-notary-preflight-"));
+    const apiKeyPath = join(temporaryDirectory, "AuthKey_SYNTHETIC.p8");
+    writeFileSync(apiKeyPath, "synthetic-not-a-real-private-key", { mode: 0o600 });
+    try {
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/desktop-release-preflight.mjs", "--macos-signing"],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            APPLE_SIGNING_IDENTITY: "Developer ID Application: Synthetic",
+            APPLE_API_ISSUER: "synthetic-issuer",
+            APPLE_API_KEY: "SYNTHETIC",
+            APPLE_API_KEY_PATH: apiKeyPath,
+          },
+        }
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("ok env.appleNotarization");
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test("release version validator requires one changed SemVer across every manifest", () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), "koushi-release-version-"));
+    const desktopDirectory = join(temporaryDirectory, "apps", "desktop");
+    const tauriDirectory = join(desktopDirectory, "src-tauri");
+    mkdirSync(tauriDirectory, { recursive: true });
+    const writeVersions = (packageVersion: string, tauriVersion: string, cargoVersion: string) => {
+      writeFileSync(
+        join(desktopDirectory, "package.json"),
+        JSON.stringify({ version: packageVersion })
+      );
+      writeFileSync(
+        join(tauriDirectory, "tauri.conf.json"),
+        JSON.stringify({ version: tauriVersion })
+      );
+      writeFileSync(
+        join(tauriDirectory, "Cargo.toml"),
+        `[package]\nname = "fixture"\nversion = "${cargoVersion}"\n`
+      );
+    };
+    writeVersions("1.2.2", "1.2.2", "1.2.2");
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: temporaryDirectory });
+      execFileSync("git", ["config", "user.email", "release-test@example.invalid"], {
+        cwd: temporaryDirectory
+      });
+      execFileSync("git", ["config", "user.name", "Koushi release test"], {
+        cwd: temporaryDirectory
+      });
+      execFileSync("git", ["add", "."], { cwd: temporaryDirectory });
+      execFileSync("git", ["commit", "-qm", "fixture release"], { cwd: temporaryDirectory });
+      const previousSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: temporaryDirectory,
+        encoding: "utf8"
+      }).trim();
+
+      const unchanged = spawnSync(
+        process.execPath,
+        [
+          "scripts/desktop-release-version.mjs",
+          "--root",
+          temporaryDirectory,
+          "--before",
+          previousSha
+        ],
+        { cwd: repoRoot, encoding: "utf8" }
+      );
+      expect(unchanged.status).toBe(1);
+      expect(unchanged.stderr).toContain("release version must increase: 1.2.2 -> 1.2.2");
+
+      writeVersions("1.2.3", "1.2.3", "1.2.4");
+      const mismatch = spawnSync(
+        process.execPath,
+        ["scripts/desktop-release-version.mjs", "--root", temporaryDirectory],
+        { cwd: repoRoot, encoding: "utf8" }
+      );
+      expect(mismatch.status).toBe(1);
+      expect(mismatch.stderr).toContain("release versions do not match");
+
+      writeVersions("1.2.3", "1.2.3", "1.2.3");
+      const consistent = spawnSync(
+        process.execPath,
+        [
+          "scripts/desktop-release-version.mjs",
+          "--root",
+          temporaryDirectory,
+          "--before",
+          previousSha
+        ],
+        { cwd: repoRoot, encoding: "utf8" }
+      );
+      expect(consistent.status).toBe(0);
+      expect(consistent.stdout).toContain("version=1.2.3");
+      expect(consistent.stdout).toContain("tag=v1.2.3");
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test("desktop release workflow publishes fixed-name assets only after both platforms pass", () => {
+    const workflow = readFileSync(
+      new URL("../../../../.github/workflows/release-desktop.yml", import.meta.url),
+      "utf8"
+    );
+
+    for (const token of [
+      "paths:",
+      "scripts/desktop-release-version.mjs",
+      "environment: release-macos",
+      "APPLE_API_PRIVATE_KEY",
+      "npm --prefix apps/desktop audit --package-lock-only --audit-level=high",
+      "codesign --verify --deep --strict",
+      "xcrun stapler validate",
+      "spctl --assess",
+      "Koushi-macos-arm64.dmg",
+      "Koushi-macos-x64.dmg",
+      "Koushi-windows-x64-unsigned.exe",
+      "gh release create",
+      "--draft",
+      "gh release edit",
+      "--draft=false",
+    ]) {
+      expect(workflow).toContain(token);
+    }
+    expect(workflow).toMatch(/publish-release:[\s\S]*needs:\s*\[prepare, build-macos, build-windows\]/);
   });
 
   test("manual QA script lists every Milestone 9 flow", () => {
