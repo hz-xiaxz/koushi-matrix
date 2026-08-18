@@ -341,6 +341,12 @@ fn keep_preserves_the_source_encoding_while_format_overrides_it() {
     .expect("keep must succeed");
     assert_eq!(kept.format, PreparedImageFormat::Png);
     assert!(kept.filename.ends_with(".png"));
+    assert_eq!(
+        kept.bytes, png,
+        "Original/Keep must reuse the encoded source instead of allocating a full decoded RGBA buffer"
+    );
+    assert!(!kept.metadata_stripped);
+    assert!(!kept.thumbnail_refreshed);
 
     for (format, expected, extension) in [
         (ImageOutputFormat::Jpeg, PreparedImageFormat::Jpeg, ".jpg"),

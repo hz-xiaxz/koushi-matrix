@@ -11824,11 +11824,8 @@ async fn download_avatar_thumbnail(
         .await
         .map_err(|_| AvatarThumbnailFailureKind::Network)?;
 
-    Ok(store_renderable_thumbnail(
-        RenderableThumbnailKind::Avatar,
-        mxc_uri,
-        bytes,
-    ))
+    store_renderable_thumbnail(RenderableThumbnailKind::Avatar, mxc_uri, bytes)
+        .map_err(|_| AvatarThumbnailFailureKind::Unsupported)
 }
 
 fn classify_profile_error(error: &koushi_sdk::MatrixProfileError) -> ProfileFailureKind {
