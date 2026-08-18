@@ -2863,7 +2863,7 @@ fn test_only() {
     }
   });
 
-  test("desktop release workflow publishes fixed-name assets only after both platforms pass", () => {
+  test("desktop release workflow publishes fixed-name assets only after supported platforms pass", () => {
     const workflow = readFileSync(
       new URL("../../../../.github/workflows/release-desktop.yml", import.meta.url),
       "utf8"
@@ -2882,8 +2882,8 @@ fn test_only() {
       "hdiutil attach",
       "spctl --assess",
       "Koushi-macos-arm64.dmg",
-      "Koushi-macos-x64.dmg",
       "Koushi-windows-x64-unsigned.exe",
+      "[System.IO.File]::WriteAllText",
       "gh release create",
       "--draft",
       "gh release edit",
@@ -2891,6 +2891,14 @@ fn test_only() {
     ]) {
       expect(workflow).toContain(token);
     }
+    for (const retiredIntelToken of [
+      "macos-15-intel",
+      "x86_64-apple-darwin",
+      "Koushi-macos-x64.dmg",
+    ]) {
+      expect(workflow).not.toContain(retiredIntelToken);
+    }
+    expect(workflow).not.toContain('Set-Content -Path "release-assets/$asset.sha256"');
     expect(workflow).toMatch(/publish-release:[\s\S]*needs:\s*\[prepare, build-macos, build-windows\]/);
   });
 

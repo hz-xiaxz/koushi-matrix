@@ -30,8 +30,9 @@ Claude Code and OpenCode have equivalent discovery entry points under
   - `apps/desktop/src-tauri/Cargo.toml`
 - Do not create `v<version>` manually. The publish job creates the tag only
   after every required artifact passes its gates.
-- macOS arm64 and Intel artifacts must be Developer ID signed, notarized,
-  stapled, and accepted by Gatekeeper.
+- The macOS arm64 artifact must be Developer ID signed, notarized, stapled,
+  and accepted by Gatekeeper. Koushi v0.1.0 was the final release to include
+  an Intel Mac artifact.
 - The Windows x64 NSIS installer remains explicitly unsigned until a Windows
   certificate and signing gate are approved.
 - High or critical npm vulnerabilities stop the release.
@@ -74,8 +75,7 @@ The workflow:
    `main` commit;
 2. rejects an already-used release tag;
 3. runs the lockfile, full, and runtime-only npm vulnerability gates;
-4. builds macOS arm64 and Intel DMGs using the protected `release-macos`
-   Environment;
+4. builds the macOS arm64 DMG using the protected `release-macos` Environment;
 5. verifies signatures, notarization tickets, stapling, and Gatekeeper trust;
 6. builds the unsigned Windows x64 NSIS trial installer;
 7. creates SHA-256 files for every installer;
@@ -101,17 +101,15 @@ gh release view "v<version>" \
   --json url,isDraft,isPrerelease,tagName,targetCommitish,assets
 ```
 
-Confirm that the release contains all three installers and their `.sha256`
+Confirm that the release contains both installers and their `.sha256`
 files:
 
 - `Koushi-macos-arm64.dmg`
-- `Koushi-macos-x64.dmg`
 - `Koushi-windows-x64-unsigned.exe`
 
 Stable download links:
 
 - <https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-macos-arm64.dmg>
-- <https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-macos-x64.dmg>
 - <https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-windows-x64-unsigned.exe>
 
 GitHub's `releases/latest` links select the latest full release, not a
