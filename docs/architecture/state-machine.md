@@ -3329,12 +3329,18 @@ stateDiagram-v2
   branch on macOS/Linux/Windows notification semantics locally.
 - Windows taskbar overlay icon routing is represented by the
   `overlay_icon` capability, separate from generic badge count capability.
-- The Phase A core projection is `native_attention_state_from_rooms`. It
-  aggregates unread/highlight counts from eligible rooms, excludes low-priority
-  and muted rooms, prefers `mention` over `dm` over `message` candidates,
+- The Phase A core projection is `native_attention_state_from_rooms`. Its
+  persistent Dock badge sums raw unread messages once per unique non-muted room;
+  a manual marked-unread flag without raw unread does not fabricate a native
+  count. Low-priority rooms and ignored-user DMs remain in that persistent raw
+  account count, matching Home, but are excluded from transient candidates and
+  notification/highlight attention totals. Muted rooms are excluded from both
+  persistent and transient native attention. Mention-only rooms retain their raw
+  Dock contribution while candidate eligibility still requires a highlight.
+  The projection prefers `mention` over `dm` over `message` candidates,
   suppresses initial sync/backfill/self/focused-room observations, suppresses
-  duplicate candidates, and clears badge/candidate state when unread attention
-  reaches zero.
+  duplicate candidates, and clears badge/candidate state when eligible unread
+  attention reaches zero.
 - Candidates carry only private-data-minimized fields allowed by the security
   rules: safe room display label, attention kind (`mention`, `dm`, `message`),
   aggregate unread/highlight counts, and coarse capability tokens. They must not

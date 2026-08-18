@@ -1,8 +1,8 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, ConversationActivity, ConversationActivitySource,
-    NotificationSettings, OperationFailureKind, RoomNotificationMode,
-    RoomNotificationModeOperation, RoomPreference, RoomPreferencesState, RoomSummary, SessionInfo,
-    SessionState, SettingsPatch, SettingsValues, UiEvent, reduce,
+    NativeAttentionObservationKind, NotificationSettings, OperationFailureKind,
+    RoomNotificationMode, RoomNotificationModeOperation, RoomPreference, RoomPreferencesState,
+    RoomSummary, SessionInfo, SessionState, SettingsPatch, SettingsValues, UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -77,6 +77,47 @@ fn set_room_notification_mode_updates_known_room_and_sets_pending() {
             .iter()
             .any(|effect| matches!(effect, AppEffect::PersistRoomPreferences { .. }))
     );
+}
+
+#[test]
+fn room_notification_mode_changes_recompute_native_attention_badge() {
+    let mut state = ready_state();
+    state.rooms[0].unread_count = 3;
+    state.rooms[0].notification_count = 3;
+    state.native_attention.summary.unread_count = 3;
+    state.native_attention.summary.badge_count = 3;
+
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomNotificationModeSet {
+            request_id: 1,
+            room_id: "!known:example.invalid".to_owned(),
+            mode: RoomNotificationMode::Mute,
+        },
+    );
+
+    assert_eq!(state.native_attention.summary.badge_count, 0);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged)
+    )));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::RecordNativeAttentionRecomputed {
+            observation: NativeAttentionObservationKind::Live,
+            ..
+        }
+    )));
+
+    reduce(
+        &mut state,
+        AppAction::RoomNotificationModeSet {
+            request_id: 2,
+            room_id: "!known:example.invalid".to_owned(),
+            mode: RoomNotificationMode::All,
+        },
+    );
+    assert_eq!(state.native_attention.summary.badge_count, 3);
 }
 
 #[test]

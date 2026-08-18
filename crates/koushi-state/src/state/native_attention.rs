@@ -147,29 +147,29 @@ pub fn native_attention_projection_from_rooms(
             badge_excluded_room_count += 1;
             continue;
         }
+        let mode = input
+            .room_notification_modes
+            .get(&room.room_id)
+            .copied()
+            .unwrap_or_default();
+        let explicitly_muted = input
+            .muted_room_ids
+            .iter()
+            .any(|room_id| room_id == &room.room_id);
+        if explicitly_muted || mode == RoomNotificationMode::Mute {
+            badge_excluded_room_count += 1;
+            continue;
+        }
         badge_room_count += 1;
         badge_count += room.unread_count;
 
         let excluded_from_attention = room.tags.low_priority.is_some()
-            || input
-                .muted_room_ids
-                .iter()
-                .any(|room_id| room_id == &room.room_id)
             || (room.is_dm
                 && room
                     .dm_user_ids
                     .iter()
                     .any(|user_id| input.ignored_user_ids.contains(user_id)));
         if excluded_from_attention {
-            continue;
-        }
-
-        let mode = input
-            .room_notification_modes
-            .get(&room.room_id)
-            .copied()
-            .unwrap_or_default();
-        if mode == RoomNotificationMode::Mute {
             continue;
         }
 
@@ -504,5 +504,37 @@ mod tests {
         assert!(live.state.summary.candidate.is_some());
         assert_eq!(live.state.dispatch, NativeAttentionDispatchState::Idle);
         assert!(!live.active_room_match);
+    }
+
+    #[test]
+    fn native_badge_diagnostics_count_only_unique_non_muted_rooms() {
+        let included = unread_room();
+        let mut duplicate = included.clone();
+        duplicate.unread_count = 9;
+        let mut explicit_mute = unread_room();
+        explicit_mute.room_id = "!explicit:example.invalid".to_owned();
+        let mut mode_mute = unread_room();
+        mode_mute.room_id = "!mode:example.invalid".to_owned();
+        let rooms = [included, duplicate, explicit_mute, mode_mute];
+        let modes = HashMap::from([(
+            "!mode:example.invalid".to_owned(),
+            RoomNotificationMode::Mute,
+        )]);
+
+        let projection = native_attention_projection_from_rooms(NativeAttentionProjectionInput {
+            rooms: &rooms,
+            active_room_id: None,
+            muted_room_ids: &["!explicit:example.invalid".to_owned()],
+            room_notification_modes: &modes,
+            ignored_user_ids: &BTreeSet::new(),
+            window_focused: false,
+            observation: NativeAttentionObservationKind::Live,
+            previous_candidate: None,
+            capabilities: NativeAttentionCapabilities::default(),
+        });
+
+        assert_eq!(projection.state.summary.badge_count, 2);
+        assert_eq!(projection.badge_room_count, 1);
+        assert_eq!(projection.badge_excluded_room_count, 3);
     }
 }
