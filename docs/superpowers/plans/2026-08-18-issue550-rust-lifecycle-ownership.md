@@ -64,7 +64,8 @@ Local green gates:
 - Desktop Vitest: 1,361 passed; browser-headless Playwright: 248 passed.
 - Tauri lib: 149 passed, 1 ignored; SDK lib: 143 passed; state lib: 38 passed.
 - Desktop typecheck, lint, build, secret scan, adapter/domain boundary checks,
-  wasm check, agents-doc check, SDK-submodule check, rustfmt, and diff check pass.
+  wasm check, agents-doc check, SDK-submodule check, `cargo deny check`, rustfmt,
+  and diff check pass.
 
 The workspace gate exposed two pre-existing `origin/main` fixture-backend
 breakages: newly added production-only `AppEffect` variants were absent from the
@@ -72,6 +73,10 @@ historical fake executor, and one room-order expectation predated the canonical
 label fallback. The branch explicitly ignores those effects only in
 `koushi-backend` and aligns that synthetic expectation; production paths are
 unchanged.
+
+The first PR run also picked up newly published `RUSTSEC-2026-0258`: `h2 0.4.15`
+can retain unbounded empty DATA frames. `Cargo.lock` now pins patched `h2 0.4.16`;
+workspace tests and `cargo deny check` pass with that exact lockfile.
 
 Preflight traced the production ownership paths, found no command/event/DTO or
 state-machine change, and confirmed that unexpected drops abort children while
