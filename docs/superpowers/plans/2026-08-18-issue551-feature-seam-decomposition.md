@@ -87,8 +87,9 @@ The pilot uses an already named component boundary with existing unit and browse
   - Baseline/post: `npm --prefix apps/desktop test -- --run src/components/UserSettingsPanel.test.tsx`
   - Browser: `(cd apps/desktop && npx playwright test e2e/search-crawler-settings.spec.ts --workers=1)`
   - Layer: typecheck, lint, frontend Vitest, build.
-- [ ] **User Settings sessions** — move `SessionsSection`, `SessionRow`, and session-local forms together.
-- [ ] **User Settings account management** — move `AccountManagementSection` and its UIA form together.
+- [x] **User Settings shared UIA prerequisite** — move the existing `AccountManagementUiaForm` used by both Sessions and Account Management to one private module before either section; this avoids assigning the shared secret-handling boundary to the wrong feature.
+- [ ] **User Settings sessions** — after the shared UIA prerequisite, move `SessionsSection` and `SessionRow` together.
+- [ ] **User Settings account management** — after the shared UIA prerequisite, move `AccountManagementSection` and its local forms together.
 - [ ] **User Settings security and room-key management** — move `SecuritySection` and its private dialog/status helpers; secret-bearing values remain callback-local and never enter observable state.
 - [ ] **User Settings trust** — move `TrustSection`, verification/reset controls, trust rows, and trust-only label/tone helpers.
 - [ ] **User Settings appearance controls** — move theme/density/font/emoji buttons together; leave the top-level panel composition and section navigation in `UserSettingsPanel.tsx`.
@@ -107,6 +108,19 @@ Focused tests for every User Settings PR are the panel unit test plus the matchi
 - **Expected visibility delta:** one direct module export required by `UserSettingsPanel.tsx`, with no package/barrel/public API export.
 - **Expected source effect:** roughly 425 lines leave `UserSettingsPanel.tsx`; forwarding boilerplate is one import and the existing JSX call, with no duplicate implementation retained.
 - **Allowed implementation files:** `UserSettingsPanel.tsx` and the new `user-settings/SearchHistorySection.tsx` only. Plan/completion records may be updated by the parent after verification.
+
+#### Shared UIA prerequisite design slice
+
+- **Reason for ordering:** `SessionsSection` and `AccountManagementSection` both call `AccountManagementUiaForm`. Moving it with Sessions would make Account Management depend on a Sessions-owned secret form; moving it with Account Management first would create the reverse feature dependency. Extract the already shared form once before either section.
+- **Move exactly:** current `UserSettingsPanel.tsx:1536-1575`, containing only `AccountManagementUiaForm` and its unchanged DOM-ref password lifecycle. After removal, collapse the two adjacent blank separators between `SessionRow` and `KeyManagementStatus` to one; do not move either neighboring symbol.
+- **Create:** `apps/desktop/src/components/user-settings/AccountManagementUiaForm.tsx`. Export only `AccountManagementUiaForm`; no index/barrel. Import only React `FormEvent`/`useRef`/`useState`, `Check`, `t`, `ImeSafeForm`, and `SecureImeTextField` through their existing paths.
+- **Modify:** `UserSettingsPanel.tsx` only to add the direct import and remove the moved block. No existing parent import becomes unused because all moved dependencies remain used by other sections/rows.
+- **Do not modify:** call sites, props, tests, CSS, i18n, domain types, account/session state, callback names, form classes, autocomplete, disabled logic, or clearing order. The similar identity-reset password form inside `TrustSection` is deliberately outside this seam and remains untouched for the later Trust PR.
+- **Secret invariant:** the password remains only in the secure DOM ref, is passed directly to the typed callback, is cleared immediately after submission, and never enters React state, logs, diagnostics, or observable product state. `passwordFilled` remains boolean-only presentation state.
+- **Expected visibility delta:** one direct module export required by two parent call sites, with no package/barrel/public API export.
+- **Expected source effect:** 40 lines leave `UserSettingsPanel.tsx`; forwarding boilerplate is one import, with no duplicate implementation retained.
+- **Allowed implementation files:** `UserSettingsPanel.tsx` and the new `user-settings/AccountManagementUiaForm.tsx` only. Plan/completion records may be updated by the parent after verification.
+- **Baseline/post:** `npm --prefix apps/desktop test -- --run src/components/UserSettingsPanel.test.tsx`; `(cd apps/desktop && npx playwright test e2e/basic-operations.spec.ts -g "device session manager renames" --workers=1)`; typecheck and lint.
 
 ### Wave 1B — Focused test suites
 
@@ -257,5 +271,10 @@ Before closing Issue #551:
 - Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
 - Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
+- Shared UIA prerequisite implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the exact form and preserved its secret lifecycle.
+- Shared UIA prerequisite formal full-diff review: `reviewer-flash` reviewed `/tmp/issue551-shared-uia.diff` (`sha256:0c9bf9d3cb791149acdb9765aab010e85359b9b4264f3346412a8ffc6909bde7`) and returned `Correct-to-merge` with no findings.
+- Shared UIA prerequisite formal design review: `reviewer-flash` returned `Correct-to-merge`; its only new Minors (collapse the post-removal double blank and leave the similar Trust form untouched) were incorporated before implementation.
+- Shared UIA prerequisite pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused device-session-manager Playwright 1/1 passed; frontend typecheck and lint passed.
+- Shared UIA delivery PR: #561; focused and complete local gates passed after one unrelated runtime deadline retry, the first Rust CI attempt hit an unrelated existing diagnostic-counter timing failure, and the failed job rerun passed. Final required checks were 7/7 green before ledger update.
 - Pilot delivery PR: #560; focused and complete local gates passed, formal design/diff verdicts are `Correct-to-merge`, and the implementation CI run passed all seven required checks before final ledger update.
 - Merged PRs: #560 is the first delivery PR.
