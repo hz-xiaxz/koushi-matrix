@@ -288,23 +288,8 @@ unset APPLE_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD
 
 ## Automated desktop releases
 
-`.github/workflows/release-desktop.yml` runs when any desktop version manifest
-changes on `main`, and can be retried manually from `main`. The prepare job
-requires one increasing SemVer value in all three manifests:
-
-- `apps/desktop/package.json`
-- `apps/desktop/src-tauri/tauri.conf.json`
-- `apps/desktop/src-tauri/Cargo.toml`
-
-It then builds signed/notarized arm64 and Intel DMGs plus the explicitly
-unsigned Windows x64 trial installer. Each platform runs all three npm audit
-gates before packaging. Publication waits for every build, verifies downloaded
-SHA-256 manifests, creates a hidden draft Release with all assets, and only then
-publishes it. A failed build or upload therefore cannot expose a partial public
-release.
-
-Release assets use fixed names so the README's
-`releases/latest/download/<asset>` links remain stable. The release workflow
-creates `v<version>` only after successful builds; do not create that tag by
-hand first. Windows remains an unsigned trial until a separate certificate and
-signing gate are approved.
+The canonical preparation, monitoring, publication, and failure-recovery
+procedure is [`docs/releases/desktop-release.md`](../releases/desktop-release.md).
+Use the repository's `koushi-release` skill to execute that runbook. This file
+owns only the signing-environment setup above; do not duplicate the release
+procedure here.

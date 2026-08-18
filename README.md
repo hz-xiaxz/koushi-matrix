@@ -24,6 +24,7 @@ after all platform builds succeed:
 - [macOS Intel DMG](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-macos-x64.dmg)
 - [Windows x64 trial installer](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-windows-x64-unsigned.exe) — currently unsigned; Windows SmartScreen may warn
 - [Latest release and checksums](https://github.com/shinaoka/koushi-matrix/releases/latest)
+- [Maintainer release runbook](docs/releases/desktop-release.md)
 
 The macOS artifacts are Developer ID signed, notarized, stapled, and checked by
 Gatekeeper before publication. Verify the adjacent `.sha256` file when testing

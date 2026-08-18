@@ -2891,6 +2891,43 @@ fn test_only() {
     expect(workflow).toMatch(/publish-release:[\s\S]*needs:\s*\[prepare, build-macos, build-windows\]/);
   });
 
+  test("desktop release skill is shared by Codex, Claude Code, OpenCode, and Pi", () => {
+    const sharedSkill = readFileSync(
+      new URL("../../../../.agents/skills/koushi-release/SKILL.md", import.meta.url),
+      "utf8"
+    );
+    const claudeSkill = readFileSync(
+      new URL("../../../../.claude/skills/koushi-release/SKILL.md", import.meta.url),
+      "utf8"
+    );
+    const openCodeSkill = readFileSync(
+      new URL("../../../../.opencode/skills/koushi-release/SKILL.md", import.meta.url),
+      "utf8"
+    );
+    const runbook = readFileSync(
+      new URL("../../../../docs/releases/desktop-release.md", import.meta.url),
+      "utf8"
+    );
+
+    expect(claudeSkill).toBe(sharedSkill);
+    expect(openCodeSkill).toBe(sharedSkill);
+    expect(sharedSkill).toContain("../../../docs/releases/desktop-release.md");
+    for (const invocation of [
+      "$koushi-release",
+      "/koushi-release",
+      "/skill:koushi-release"
+    ]) {
+      expect(runbook).toContain(invocation);
+    }
+    for (const manifest of [
+      "apps/desktop/package.json",
+      "apps/desktop/src-tauri/tauri.conf.json",
+      "apps/desktop/src-tauri/Cargo.toml"
+    ]) {
+      expect(runbook).toContain(manifest);
+    }
+  });
+
   test("manual QA script lists every Milestone 9 flow", () => {
     const output = runScript("scripts/desktop-manual-qa.mjs", ["--list"]);
 

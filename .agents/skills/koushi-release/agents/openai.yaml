@@ -1,0 +1,4 @@
+interface:
+  display_name: "Koushi Release"
+  short_description: "Prepare and verify Koushi desktop releases"
+  default_prompt: "Use $koushi-release to prepare, monitor, verify, or troubleshoot a Koushi desktop release."
