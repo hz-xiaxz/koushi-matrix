@@ -38,6 +38,7 @@ import {
   DetailRow,
   TrustActionButton,
   TrustStatusRow,
+  failureKindLabel,
   type TrustTone
 } from "./user-settings/SettingsStatusPrimitives";
 import { TrustHelpButton } from "./TrustHelp";
@@ -72,7 +73,6 @@ import type {
   SecureBackupSetupState,
   ThemePreference,
   TimelineSettings,
-  TrustOperationFailureKind,
   VerificationFlowState
 } from "../domain/types";
 
@@ -1746,25 +1746,6 @@ function deviceTrustIcon(level: DeviceTrustLevel): ReactNode {
       return <ShieldQuestion size={15} />;
     case "unverified":
       return <ShieldAlert size={15} />;
-  }
-}
-
-function failureKindLabel(kind: TrustOperationFailureKind): string {
-  switch (kind) {
-    case "cancelled":
-      return t("trust.failureCancelled");
-    case "mismatch":
-      return t("trust.failureMismatch");
-    case "invalidPassphrase":
-      return t("trust.failureInvalidPassphrase");
-    case "network":
-      return t("trust.failureNetwork");
-    case "forbidden":
-      return t("trust.failureForbidden");
-    case "timeout":
-      return t("trust.failureTimeout");
-    case "sdk":
-      return t("trust.failureSdk");
   }
 }
 
