@@ -34,6 +34,12 @@ import { KeyboardSettingsContent } from "./KeyboardSettingsPanel";
 import { SearchHistorySection } from "./user-settings/SearchHistorySection";
 import { AccountManagementSection } from "./user-settings/AccountManagementSection";
 import { SessionsSection } from "./user-settings/SessionsSection";
+import {
+  DetailRow,
+  TrustActionButton,
+  TrustStatusRow,
+  type TrustTone
+} from "./user-settings/SettingsStatusPrimitives";
 import { TrustHelpButton } from "./TrustHelp";
 import type { DisplayDensity } from "../app/localPresentation";
 import type { ShortcutLabelProfile } from "../domain/shortcuts";
@@ -1460,59 +1466,6 @@ function recoveryKeyDeliveryLabel(delivery: RecoveryKeyDeliveryState): string {
   }
 }
 
-function TrustStatusRow({
-  icon,
-  label,
-  value,
-  tone,
-  action
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  tone: TrustTone;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="trust-status-row">
-      <span className={`trust-status-icon ${tone}`} aria-hidden="true">
-        {icon}
-      </span>
-      <span className="trust-status-copy">
-        <span>{label}</span>
-        <small>{value}</small>
-      </span>
-      {action ? <span className="trust-status-action">{action}</span> : null}
-    </div>
-  );
-}
-
-function TrustActionButton({
-  icon,
-  label,
-  disabled = false,
-  variant = "primary",
-  onClick
-}: {
-  icon: ReactNode;
-  label: string;
-  disabled?: boolean;
-  variant?: "primary" | "secondary";
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={`trust-action-button ${variant}`}
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
-  );
-}
-
 function IdentityResetAuthControls({
   state,
   onCancelIdentityReset,
@@ -1644,8 +1597,6 @@ function DeviceTrustList({ devices }: { devices: E2eeTrustState["devices"] }) {
     </section>
   );
 }
-
-type TrustTone = "good" | "warning" | "danger" | "neutral" | "progress";
 
 function trustOverallStatus(trust: E2eeTrustState): { label: string; tone: TrustTone } {
   if (
@@ -2163,15 +2114,6 @@ function DisplayToggle({
         <span className="settings-switch-thumb" />
       </span>
     </button>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="settings-detail-row">
-      <span>{label}</span>
-      <small>{value}</small>
-    </div>
   );
 }
 
