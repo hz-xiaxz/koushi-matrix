@@ -4808,7 +4808,7 @@ fn test_only() {
     expect(source).not.toContain('keystroke "q" using command down');
   });
 
-  test("GUI smoke FIFO writers use node:fs/promises open and never spawn tee", () => {
+  test("GUI smoke FIFO writers share the direct node writer and never spawn tee", () => {
     const linuxSource = readFileSync(
       new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
       "utf8"
@@ -4817,19 +4817,22 @@ fn test_only() {
       new URL("../../../../scripts/desktop-mac-gui-smoke.mjs", import.meta.url),
       "utf8"
     );
+    const fifoSource = readFileSync(
+      new URL("../../../../scripts/lib/sensitive-fifo.mjs", import.meta.url),
+      "utf8"
+    );
 
     for (const source of [linuxSource, macSource]) {
-      // The sensitive-payload writer must use a direct node:fs/promises FIFO
-      // write so no child process inherits the parent environment.
-      expect(source).toContain('import { open } from "node:fs/promises";');
       expect(source).toContain(
-        "async function writeSensitivePayloadToPath(path, payload, timeout)"
+        'import { writeSensitivePayloadToPath } from "./lib/sensitive-fifo.mjs";'
       );
-      expect(source).toContain("await open(path, ");
       // No `tee` helper process anywhere (it would inherit the parent env).
       expect(source).not.toContain('spawn("tee"');
       expect(source).not.toContain('"tee"');
     }
+    expect(fifoSource).toContain('from "node:fs/promises"');
+    expect(fifoSource).toContain("await open(path, ");
+    expect(fifoSource).not.toContain('spawn("tee"');
   });
 
   test("app icon family is consistent and the SVG avoids an unintended white rounded frame", () => {

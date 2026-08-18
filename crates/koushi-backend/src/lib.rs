@@ -428,7 +428,15 @@ impl FakeDesktopBackend {
                 }
                 SyncMode::Deferred => Vec::new(),
             },
-            AppEffect::PersistSession(_)
+            // Sliding Sync capability admission and secure-backup inspection
+            // are production Core actor effects. This historical fixture backend
+            // has neither owner and must not simulate their semantics.
+            AppEffect::ContinueSlidingSyncAdmission { .. }
+            | AppEffect::RetrySlidingSyncCapabilityDiscovery { .. }
+            | AppEffect::ScheduleSlidingSyncCapabilityRevalidation { .. }
+            | AppEffect::SettleSlidingSyncCapabilityRevalidation { .. }
+            | AppEffect::InspectSecureBackup
+            | AppEffect::PersistSession(_)
             | AppEffect::PersistSettings { .. }
             | AppEffect::PersistRoomPreferences { .. }
             | AppEffect::StopSync

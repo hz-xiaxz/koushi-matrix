@@ -5154,6 +5154,9 @@ export const TimelineView = memo(function TimelineView({
             retry.attempts =
               retry.signature === projectionSignature ? Math.min(6, retry.attempts + 1) : 1;
             retry.signature = projectionSignature;
+            if (retry.timer !== null) {
+              window.clearTimeout(retry.timer);
+            }
             retry.timer = window.setTimeout(() => {
               retry.timer = null;
               setProjectionSettlementRevision((current) => current + 1);
@@ -5195,6 +5198,9 @@ export const TimelineView = memo(function TimelineView({
             retry.attempts =
               retry.signature === repairSignature ? Math.min(6, retry.attempts + 1) : 1;
             retry.signature = repairSignature;
+            if (retry.timer !== null) {
+              window.clearTimeout(retry.timer);
+            }
             retry.timer = window.setTimeout(() => {
               retry.timer = null;
               setProjectionSettlementRevision((current) => current + 1);

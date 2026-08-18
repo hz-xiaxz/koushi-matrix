@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, statSync } from "node:fs";
-import { open } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertSdkSubmoduleSynced } from "./lib/sdk-submodule-status.mjs";
+import { writeSensitivePayloadToPath } from "./lib/sensitive-fifo.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopDir = join(repoRoot, "apps", "desktop");
@@ -542,29 +542,6 @@ async function requestQaLogout(path) {
   // control command. The logout command carries no secret values.
   const payload = JSON.stringify({ command: "logout" }) + "\n";
   await writeSensitivePayloadToPath(path, payload, 10000);
-}
-
-// Write a sensitive payload directly to the FIFO via node:fs/promises. No
-// helper child process is spawned, so no parent environment is inherited by a
-// `tee`-style writer (security: credential payloads must not leak the parent
-// env to a child). `open(path, "w")` blocks until the reader opens the pipe,
-// so the write is bounded by `timeout`.
-async function writeSensitivePayloadToPath(path, payload, timeout) {
-  let handle;
-  const write = async () => {
-    handle = await open(path, "w");
-    await handle.writeFile(payload, "utf8");
-  };
-  try {
-    await Promise.race([
-      write(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("real login FIFO write timed out")), timeout)
-      )
-    ]);
-  } finally {
-    await handle?.close();
-  }
 }
 
 async function waitForQaTitle(timeout, requireRecovered, allowEmptyTimeline, diagnostics = null) {

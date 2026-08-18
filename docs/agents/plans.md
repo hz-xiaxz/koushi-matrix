@@ -39,6 +39,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | --- | --- | --- |
 | Media / file timeline | [2026-06-15-media-phase-a.md](../superpowers/plans/2026-06-15-media-phase-a.md) | — |
 | Media preparation/cache retention (#547) | [2026-08-18-issue547-memory-bounds.md](../superpowers/plans/2026-08-18-issue547-memory-bounds.md) | [2026-08-18-issue547-memory-bounds.md](../superpowers/plans/2026-08-18-issue547-memory-bounds.md) |
+| Rust lifecycle ownership / leak cleanup (#550) | [2026-08-18-issue550-rust-lifecycle-ownership.md](../superpowers/plans/2026-08-18-issue550-rust-lifecycle-ownership.md) | [2026-08-18-issue550-rust-lifecycle-ownership.md](../superpowers/plans/2026-08-18-issue550-rust-lifecycle-ownership.md) |
 | Live signals (receipts, markers, typing, presence) | [2026-06-15-live-signals-phase-a.md](../superpowers/plans/2026-06-15-live-signals-phase-a.md) | [2026-06-15-live-signals-phase-b-gui.md](../superpowers/plans/2026-06-15-live-signals-phase-b-gui.md) |
 | E2EE trust state machine | [2026-06-14-e2ee-trust-phase-a.md](../superpowers/plans/2026-06-14-e2ee-trust-phase-a.md) | — |
 | Rust-owned settings | [2026-06-14-rust-owned-settings-phase-a.md](../superpowers/plans/2026-06-14-rust-owned-settings-phase-a.md) | — |
