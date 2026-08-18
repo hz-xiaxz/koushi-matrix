@@ -97,12 +97,13 @@ Focused tests for every User Settings PR are the panel unit test plus the matchi
 
 #### Pilot design slice: Search History
 
-- **Move exactly:** the contiguous Search History block currently headed `#77 Search History Crawler section`: `SearchHistorySection`, `CrawlerSpeedButton`, `CrawlerToggle`, `CrawlerRoomRow`, `CrawlerRoomEntry`, `CrawlerLastActiveEntry`, `crawlerRoomEntries`, `crawlerRoomRank`, `summarizeCrawlerRooms`, `crawlerLastActiveEntry`, `crawlerActivityAgeLabel`, `crawlerSpeedLabel`, `crawlerRoomStatusLabel`, and `crawlerFailureKindLabel`.
+- **Move exactly:** the contiguous 425-line Search History block currently at `UserSettingsPanel.tsx:1792-2216`, including the `#77 Search History Crawler section` header/separator and these symbols: `SearchHistorySection`, `CrawlerSpeedButton`, `CrawlerToggle`, `CrawlerRoomRow`, `CrawlerRoomEntry`, `CrawlerLastActiveEntry`, `crawlerRoomEntries`, `crawlerRoomRank`, `summarizeCrawlerRooms`, `crawlerLastActiveEntry`, `crawlerActivityAgeLabel`, `crawlerSpeedLabel`, `crawlerRoomStatusLabel`, and `crawlerFailureKindLabel`. Move the header/separator with the block; leave no dangling or duplicate separator.
 - **Create:** `apps/desktop/src/components/user-settings/SearchHistorySection.tsx`. It may import only `t` and the existing `RoomSummary`, `SearchCrawlerFailureKind`, `SearchCrawlerRoomState`, `SearchCrawlerSettings`, `SearchCrawlerSpeed`, `SearchCrawlerState`, and `SettingsPatch` types. Export only `SearchHistorySection` for the direct parent import; do not re-export it from an index.
-- **Modify:** `UserSettingsPanel.tsx` only to add that direct import, remove the moved block, and remove imports made unused by the move. The existing JSX call and props remain byte-for-byte equivalent apart from formatting/import order.
+- **Modify:** `UserSettingsPanel.tsx` only to add that direct import, remove the moved block, and remove exactly the now-unused `SearchCrawlerFailureKind`, `SearchCrawlerRoomState`, `SearchCrawlerSettings`, and `SearchCrawlerSpeed` imports. Keep `SearchCrawlerState`, `RoomSummary`, and `SettingsPatch`, which remain parent props/types. The existing JSX call and props remain byte-for-byte equivalent apart from formatting/import order.
 - **Do not modify:** tests, CSS, i18n messages, domain types, callbacks, settings patches, room sorting/ranking, status text, accessibility attributes, confirmation behavior, or Rust state.
 - **Ownership invariant:** this remains a pure presentation component. `onUpdateSettings`, rebuild, start, and stop intents continue to cross the existing typed callback boundary; no local product state is added.
-- **Privacy invariant:** `CrawlerRoomRow` continues to render only Rust-projected `display_label` or the neutral localized placeholder, never raw `roomId`.
+- **Privacy invariant:** `CrawlerRoomRow` continues to render only Rust-projected `display_label` or the neutral localized placeholder, never raw `roomId`. Internal `roomId` fields remain allowed for React keys and typed start/stop command callbacks; do not remove or render them during this move.
+- **Text invariant:** the existing coarse failure-kind tokens (`roomNotFound`, `sdk`, `decryption`, `indexUnavailable`) intentionally remain unchanged and are covered by tests; do not opportunistically localize or rename them in this move.
 - **Expected visibility delta:** one direct module export required by `UserSettingsPanel.tsx`, with no package/barrel/public API export.
 - **Expected source effect:** roughly 425 lines leave `UserSettingsPanel.tsx`; forwarding boilerplate is one import and the existing JSX call, with no duplicate implementation retained.
 - **Allowed implementation files:** `UserSettingsPanel.tsx` and the new `user-settings/SearchHistorySection.tsx` only. Plan/completion records may be updated by the parent after verification.
@@ -251,5 +252,6 @@ Before closing Issue #551:
 - Plan status: draft, awaiting independent design review.
 - Implementer selection: Luna low, selected by the user.
 - Reviewer selection: pending user choice.
-- Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
+- Non-gating advisory pre-audit: `reviewer-flash` found no Critical/Important issues and five documentation Minors; all five were incorporated. This does not satisfy the mandatory user-selected design-review gate.
+- Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
 - Merged PRs: none.
