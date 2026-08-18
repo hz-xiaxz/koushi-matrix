@@ -2,10 +2,10 @@ use koushi_state::{
     AppAction, AppState, DisplayPlatform, NativeAttentionCandidate, NativeAttentionCapabilities,
     NativeAttentionCapability, NativeAttentionDispatchId, NativeAttentionDispatchState,
     NativeAttentionObservationKind, NativeAttentionProjectionInput, NativeAttentionSoundOutcome,
-    NativeAttentionSuppressionReason, NotificationSettings, RoomAttentionKind, RoomSummary,
-    RoomTagInfo, RoomTags, SessionInfo, SessionState, SettingsPatch,
-    native_attention_capabilities_for_platform, native_attention_state_from_rooms, reduce,
-    room_attention_summary,
+    NativeAttentionSuppressionReason, NotificationSettings, RoomAttentionKind,
+    RoomNotificationMode, RoomSummary, RoomTagInfo, RoomTags, SessionInfo, SessionState,
+    SettingsPatch, native_attention_capabilities_for_platform, native_attention_state_from_rooms,
+    reduce, room_attention_summary,
 };
 use serde_json::json;
 
@@ -366,7 +366,7 @@ fn native_attention_suppresses_initial_backfill_self_and_focused_room() {
 }
 
 #[test]
-fn native_attention_excludes_low_priority_and_muted_rooms_from_alerts_but_keeps_badge() {
+fn native_attention_projection_excludes_explicit_muting_but_keeps_low_priority_badge() {
     let mut low_priority = room("!low:example.invalid", "Low", false, 5, 5, 1);
     low_priority.tags.low_priority = Some(RoomTagInfo {
         order: Some("0.9".to_owned()),
@@ -387,9 +387,79 @@ fn native_attention_excludes_low_priority_and_muted_rooms_from_alerts_but_keeps_
 
     assert_eq!(state.summary.unread_count, 0);
     assert_eq!(state.summary.highlight_count, 0);
-    assert_eq!(state.summary.badge_count, 9);
+    assert_eq!(state.summary.badge_count, 5);
     assert_eq!(state.summary.candidate, None);
     assert_eq!(state.dispatch, NativeAttentionDispatchState::Idle);
+}
+
+#[test]
+fn native_attention_projection_excludes_effectively_muted_rooms_from_badge() {
+    let muted = room("!muted:example.invalid", "Muted", false, 4, 4, 0);
+    let state = native_attention_state_from_rooms(NativeAttentionProjectionInput {
+        rooms: &[muted],
+        active_room_id: None,
+        muted_room_ids: &[],
+        room_notification_modes: &std::collections::HashMap::from([(
+            "!muted:example.invalid".to_owned(),
+            koushi_state::RoomNotificationMode::Mute,
+        )]),
+        ignored_user_ids: &std::collections::BTreeSet::new(),
+        window_focused: false,
+        observation: NativeAttentionObservationKind::Live,
+        previous_candidate: None,
+        capabilities: available_capabilities(),
+    });
+
+    assert_eq!(state.summary.badge_count, 0);
+}
+
+#[test]
+fn native_attention_badge_policy_preserves_non_muted_raw_unread() {
+    let mut ignored_dm = room("!ignored:example.invalid", "Ignored", true, 4, 4, 0);
+    ignored_dm.dm_user_ids = vec!["@ignored:example.invalid".to_owned()];
+    let mut marked = room("!marked:example.invalid", "Marked", false, 0, 0, 0);
+    marked.marked_unread = true;
+    let cases = vec![
+        (
+            room("!normal:example.invalid", "Normal", false, 3, 3, 0),
+            None,
+            false,
+            3,
+        ),
+        (
+            room("!mentions:example.invalid", "Mentions", false, 2, 2, 0),
+            Some(RoomNotificationMode::Mentions),
+            true,
+            2,
+        ),
+        (ignored_dm, None, true, 4),
+        (marked, None, false, 0),
+    ];
+
+    for (room, mode, candidate_suppressed, expected_badge) in cases {
+        let room_notification_modes = mode
+            .map(|mode| std::collections::HashMap::from([(room.room_id.clone(), mode)]))
+            .unwrap_or_default();
+        let ignored_user_ids = if candidate_suppressed {
+            std::collections::BTreeSet::from(["@ignored:example.invalid".to_owned()])
+        } else {
+            std::collections::BTreeSet::new()
+        };
+        let state = native_attention_state_from_rooms(NativeAttentionProjectionInput {
+            rooms: &[room],
+            active_room_id: None,
+            muted_room_ids: &[],
+            room_notification_modes: &room_notification_modes,
+            ignored_user_ids: &ignored_user_ids,
+            window_focused: false,
+            observation: NativeAttentionObservationKind::Live,
+            previous_candidate: None,
+            capabilities: available_capabilities(),
+        });
+
+        assert_eq!(state.summary.badge_count, expected_badge);
+        assert_eq!(state.summary.candidate.is_none(), candidate_suppressed);
+    }
 }
 
 #[test]

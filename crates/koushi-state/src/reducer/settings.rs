@@ -1,9 +1,9 @@
 use crate::{
     effect::{AppEffect, UiEvent},
     state::{
-        AppError, AppState, RoomNotificationMode, RoomNotificationModeOperation,
-        RoomNotificationSettings, RoomPreference, RoomPreferencesState, RoomUrlPreviews,
-        SettingsPersistenceState, sort_threads_list_items,
+        AppError, AppState, NativeAttentionObservationKind, RoomNotificationMode,
+        RoomNotificationModeOperation, RoomNotificationSettings, RoomPreference,
+        RoomPreferencesState, RoomUrlPreviews, SettingsPersistenceState, sort_threads_list_items,
     },
 };
 
@@ -239,6 +239,14 @@ pub(crate) fn handle_room_preferences_loaded(
         ));
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));
     }
+    let (changed, diagnostic) = super::native_attention::recompute_native_attention_from_rooms(
+        state,
+        NativeAttentionObservationKind::Live,
+    );
+    effects.push(diagnostic);
+    if changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged));
+    }
     effects
 }
 
@@ -262,10 +270,19 @@ pub(crate) fn handle_room_notification_mode_set(
         entry.operation = RoomNotificationModeOperation::Pending { request_id };
     }
     recompute_room_list_projection(state);
-    vec![
+    let (changed, diagnostic) = super::native_attention::recompute_native_attention_from_rooms(
+        state,
+        NativeAttentionObservationKind::Live,
+    );
+    let mut effects = vec![
         AppEffect::EmitUiEvent(UiEvent::RoomNotificationSettingsChanged),
         AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
-    ]
+        diagnostic,
+    ];
+    if changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged));
+    }
+    effects
 }
 
 fn update_room_notification_preference(
