@@ -14,8 +14,13 @@ commands. React must not mutate product state, synthesize Matrix semantics,
 repair command results locally, or infer success from a click. Visible change
 happens only after a Rust-shaped snapshot or event says so.
 
-React may own exactly three things: transient DOM input drafts, popup/dialog
-visibility, and refs that suppress duplicate command dispatches.
+React may own transient DOM input drafts, popup/dialog visibility, refs that
+suppress duplicate command dispatches, and browser resource handles tied
+strictly to one mounted presentation owner. Listeners, observers, animation
+frames, and timers must be cancelled by the same effect/controller on logical
+key change and unmount. Pending operations, retries/backoff, correlation,
+session cleanup, SDK subscriptions, and background task ownership remain Rust
+actor state.
 
 ## Snapshot and wire-contract mirrors
 

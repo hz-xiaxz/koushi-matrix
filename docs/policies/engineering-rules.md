@@ -7,7 +7,7 @@ build gates. AGENTS.md remains the operational how-to (permissions, install
 caveats, recovery steps); durable rules discovered there are promoted to
 REPOSITORY_RULES.md or this document.
 
-Last amended: 2026-08-15.
+Last amended: 2026-08-18.
 
 ## Design Simplicity
 
@@ -425,12 +425,20 @@ Rules:
 2. Store-backed Matrix SDK clients must be dropped while a Tokio runtime
    context is entered; otherwise `deadpool-runtime` panics with
    "there is no reactor running".
-3. Every spawned background task and live stream/subscription handle has an
-   owner responsible for cancelling it (unsubscribe, account shutdown, app
-   shutdown). No unbounded maps of owned tasks or live handles. The uncapped
-   account-session room-ID intent set is bounded by rooms observed in that
-   session and owns no per-room task/stream; it is allowed to preserve Sliding
-   Sync subscription residency until explicit leave or session teardown.
+3. Every spawned background task and live stream/subscription handle has one
+   retained owner responsible for cancelling it (replacement, unsubscribe,
+   account shutdown, app shutdown) and awaiting settlement. Tokio
+   `JoinHandle::drop` detaches the task and is never an orderly teardown;
+   actor handles retain their task, explicit shutdown is a cancel-and-await
+   barrier, and unexpected owner drop aborts as a fail-safe. Partial-start and
+   replacement error paths settle every child already created. No unbounded maps
+   of owned tasks or live handles. The uncapped account-session room-ID intent
+   set is bounded by rooms observed in that session and owns no per-room
+   task/stream; it is allowed to preserve Sliding Sync subscription residency
+   until explicit leave or session teardown. Browser listeners, observers,
+   frames, and timers are permitted only for mounted presentation lifetime and
+   are cancelled by the same React effect/controller on key change and unmount;
+   product retries, backoff, correlation, and session cleanup remain Rust-owned.
 4. Timeline scrollback is a split contract: core emits diffs and pagination
    state; React owns DOM anchoring. Product code must not issue automatic
    pagination loops before the previous diff has rendered and anchor

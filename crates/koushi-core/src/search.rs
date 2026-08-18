@@ -46,7 +46,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixClientSession;
@@ -73,6 +73,8 @@ use crate::search_crawler::{HistoryCrawlCheckpoint, HistoryCrawlPageResult};
 const SEARCH_CANDIDATE_LIMIT: usize = 50;
 /// Search index mutation queue capacity (canon, overview.md: 512).
 pub const SEARCH_INDEX_MUTATION_QUEUE: usize = 512;
+const SEARCH_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
+const SEARCH_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Automatic history crawling is held off for this long after the crawler first
 /// has work, so it does not contend with user-visible pagination during the
@@ -402,6 +404,7 @@ pub struct SearchActorHandle {
     /// Channel for forwarding timeline mutations (SearchIndexMessage).
     /// Cloned and handed to TimelineManagerActor on creation.
     index_tx: mpsc::Sender<SearchIndexMessage>,
+    task: Option<executor::JoinHandle<()>>,
 }
 
 impl SearchActorHandle {
@@ -450,8 +453,32 @@ impl SearchActorHandle {
         self.tx.send(msg).await.is_ok()
     }
 
-    pub async fn shutdown(&self) {
-        let _ = self.tx.send(SearchActorMessage::Shutdown).await;
+    pub async fn shutdown(self) -> bool {
+        self.shutdown_with_timeouts(
+            SEARCH_ACTOR_SHUTDOWN_SEND_TIMEOUT,
+            SEARCH_ACTOR_SHUTDOWN_JOIN_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn shutdown_with_timeouts(
+        mut self,
+        send_timeout: Duration,
+        join_timeout: Duration,
+    ) -> bool {
+        let sent = matches!(
+            executor::timeout(send_timeout, self.tx.send(SearchActorMessage::Shutdown)).await,
+            Ok(Ok(()))
+        );
+        let Some(mut task) = self.task.take() else {
+            return sent;
+        };
+        if sent && executor::timeout(join_timeout, &mut task).await.is_ok() {
+            return true;
+        }
+        task.abort();
+        let _ = task.await;
+        false
     }
 
     /// Try to notify the actor that the set of joined rooms has changed.
@@ -504,6 +531,14 @@ impl SearchActorHandle {
     /// The `TimelineManagerActor` holds this sender and forwards diffs here.
     pub fn index_sender(&self) -> mpsc::Sender<SearchIndexMessage> {
         self.index_tx.clone()
+    }
+}
+
+impl Drop for SearchActorHandle {
+    fn drop(&mut self) {
+        if let Some(task) = &self.task {
+            task.abort();
+        }
     }
 }
 
@@ -595,9 +630,13 @@ impl SearchActor {
         };
 
         // Spawn the actor task.
-        executor::spawn(actor.run(index_rx));
+        let task = executor::spawn(actor.run(index_rx));
 
-        SearchActorHandle { tx, index_tx }
+        SearchActorHandle {
+            tx,
+            index_tx,
+            task: Some(task),
+        }
     }
 
     async fn run(mut self, mut index_rx: mpsc::Receiver<SearchIndexMessage>) {
@@ -657,7 +696,7 @@ impl SearchActor {
         match msg {
             SearchActorMessage::Shutdown => {
                 if let Some(task) = self.active_sdk_search.take() {
-                    task.abort();
+                    abort_and_await_task(task).await;
                 }
                 self.stop_all_history_crawls().await;
                 false
@@ -773,7 +812,7 @@ impl SearchActor {
         self.active_query_generation = self.active_query_generation.wrapping_add(1);
         let generation = self.active_query_generation;
         if let Some(task) = self.active_sdk_search.take() {
-            task.abort();
+            abort_and_await_task(task).await;
             record_stale_sdk_drop(
                 request_id,
                 generation.saturating_sub(1),
@@ -1048,7 +1087,7 @@ impl SearchActor {
         room_id: String,
         settings: SearchCrawlerSettings,
     ) {
-        self.remove_history_crawl_room(&room_id);
+        self.remove_history_crawl_room(&room_id).await;
         self.completed_rooms.remove(&room_id);
         if settings.speed == SearchCrawlerSpeed::Paused {
             self.emit_history_crawl_stopped(room_id).await;
@@ -1070,7 +1109,7 @@ impl SearchActor {
     }
 
     async fn handle_stop_history_crawl(&mut self, _request_id: RequestId, room_id: String) {
-        self.remove_history_crawl_room(&room_id);
+        self.remove_history_crawl_room(&room_id).await;
         self.emit_history_crawl_stopped(room_id).await;
     }
 
@@ -1093,7 +1132,7 @@ impl SearchActor {
         }
 
         let mut stopped_room_ids = self.retain_history_crawl_rooms();
-        if let Some(room_id) = self.abort_active_history_crawl_if_retired() {
+        if let Some(room_id) = self.abort_active_history_crawl_if_retired().await {
             stopped_room_ids.push(room_id);
         }
         for room_id in stopped_room_ids {
@@ -1297,7 +1336,7 @@ impl SearchActor {
         stopped_room_ids.into_iter().collect()
     }
 
-    fn abort_active_history_crawl_if_retired(&mut self) -> Option<String> {
+    async fn abort_active_history_crawl_if_retired(&mut self) -> Option<String> {
         let retired_room_id = self
             .active_crawl_checkpoint
             .as_ref()
@@ -1307,14 +1346,14 @@ impl SearchActor {
             .map(|checkpoint| checkpoint.room_id.clone());
         if retired_room_id.is_some() {
             if let Some(handle) = self.active_crawl_page.take() {
-                handle.abort();
+                abort_and_await_task(handle).await;
             }
             self.active_crawl_checkpoint = None;
         }
         retired_room_id
     }
 
-    fn remove_history_crawl_room(&mut self, room_id: &str) {
+    async fn remove_history_crawl_room(&mut self, room_id: &str) {
         self.crawl_queue
             .retain(|checkpoint| checkpoint.room_id != room_id);
         self.queued_crawl_rooms.remove(room_id);
@@ -1325,7 +1364,7 @@ impl SearchActor {
             .is_some_and(|checkpoint| checkpoint.room_id == room_id);
         if active_matches {
             if let Some(handle) = self.active_crawl_page.take() {
-                handle.abort();
+                abort_and_await_task(handle).await;
             }
             self.active_crawl_checkpoint = None;
         }
@@ -1340,11 +1379,11 @@ impl SearchActor {
         self.crawl_queue.clear();
         self.queued_crawl_rooms.clear();
         if let Some(handle) = self.active_crawl_page.take() {
-            handle.abort();
+            abort_and_await_task(handle).await;
         }
         self.active_crawl_checkpoint = None;
         if let Some(timer) = self.crawl_delay_timer.take() {
-            timer.abort();
+            abort_and_await_task(timer).await;
         }
         for room_id in stopped_room_ids {
             self.emit_history_crawl_stopped(room_id).await;
@@ -1366,6 +1405,25 @@ impl SearchActor {
     fn emit(&self, event: CoreEvent) {
         let _ = self.event_tx.send(event);
     }
+}
+
+impl Drop for SearchActor {
+    fn drop(&mut self) {
+        if let Some(task) = &self.active_sdk_search {
+            task.abort();
+        }
+        if let Some(task) = &self.active_crawl_page {
+            task.abort();
+        }
+        if let Some(task) = &self.crawl_delay_timer {
+            task.abort();
+        }
+    }
+}
+
+async fn abort_and_await_task<T>(task: executor::JoinHandle<T>) {
+    task.abort();
+    let _ = task.await;
 }
 
 fn compact_search_results(results: &[koushi_state::SearchResult]) -> Vec<SearchResultItem> {
@@ -1574,12 +1632,39 @@ fn classify_matrix_search_error(error: &koushi_sdk::MatrixSearchError) -> Search
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::command::SearchScope;
     use crate::ids::{RequestId, RuntimeConnectionId};
     use koushi_search::{
         SearchCandidate, SearchDocumentStore, SearchEdit, SearchableEvent, SensitiveString,
     };
+
+    #[tokio::test]
+    async fn search_actor_shutdown_waits_for_actor_task_settlement() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let (index_tx, _index_rx) = mpsc::channel(1);
+        let (settled_tx, settled_rx) = tokio::sync::oneshot::channel::<()>();
+        let task = executor::spawn(async move {
+            let _settled = settled_tx;
+            let _ = rx.recv().await;
+            std::future::pending::<()>().await;
+        });
+        let handle = SearchActorHandle {
+            tx,
+            index_tx,
+            task: Some(task),
+        };
+
+        handle
+            .shutdown_with_timeouts(Duration::from_millis(100), Duration::from_millis(10))
+            .await;
+
+        executor::timeout(Duration::from_millis(100), settled_rx)
+            .await
+            .expect("shutdown must await actor task settlement");
+    }
 
     #[test]
     fn search_producer_records_typed_start_fields_without_environment_switch() {
@@ -2019,7 +2104,7 @@ mod tests {
             .next()
             .expect("SDK result handler should follow query handler");
         assert!(query_handler.contains("self.active_sdk_search.take()"));
-        assert!(query_handler.contains("task.abort()"));
+        assert!(query_handler.contains("abort_and_await_task(task).await"));
         assert!(query_handler.contains("record_stale_sdk_drop"));
 
         let sdk_result_handler = source
