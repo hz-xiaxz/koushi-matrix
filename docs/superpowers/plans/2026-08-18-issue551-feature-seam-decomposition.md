@@ -254,5 +254,7 @@ Before closing Issue #551:
 - Reviewer selection: `reviewer-flash` (DeepSeek V4 Flash, read-only); the recommended default was adopted when the user instructed continued autonomous progress after the eligible options were presented.
 - Non-gating advisory pre-audit: `reviewer-flash` found no Critical/Important issues and five documentation Minors; all five were incorporated.
 - Formal Pilot design review: `reviewer-flash` returned `Correct-to-merge`. Its only new Minor identified the opening separator at line 1791 outside the stated range; the range was corrected to the complete 426-line block before implementation.
+- Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
+- Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
 - Merged PRs: none.
