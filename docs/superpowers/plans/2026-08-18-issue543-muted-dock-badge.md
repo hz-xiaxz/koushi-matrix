@@ -101,4 +101,4 @@ git diff --check
 - Verify-first evidence: the muted badge and notification-mode recomputation tests failed before production edits, then passed with the fix.
 - Local focused verification: private projection unit test 1 passed; `attention_surface` 20 passed; `notification_settings_state` 16 passed; `navigation_state` 55 passed; rustfmt and diff checks passed.
 - Full local verification: workspace, QA-bin, Tauri, cargo-deny, frontend typecheck/Vitest/lint/build, browser-headless (76 Vitest + 248 Playwright), SDK-submodule, agents-doc, rustfmt, and diff gates pass. Playwright required `CHOKIDAR_USEPOLLING=true` because unrelated CodeGraph processes had exhausted the host inotify watch quota; no product test failed.
-- CI verification: pending.
+- CI verification: all seven required checks passed after rebasing onto the current `origin/main`.
