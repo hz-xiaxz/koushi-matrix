@@ -83,7 +83,7 @@ Each checkbox below is one PR unless the pre-implementation design proves it is 
 
 The pilot uses an already named component boundary with existing unit and browser coverage. It validates the move-only protocol without touching state ownership.
 
-- [ ] **Pilot: User Settings search history** — move `SearchHistorySection` and its crawler-only rows/labels/helpers from `UserSettingsPanel.tsx` to private `components/user-settings/SearchHistorySection.tsx`. Keep all settings patches and callbacks unchanged; do not create an index/barrel.
+- [x] **Pilot: User Settings search history** — move `SearchHistorySection` and its crawler-only rows/labels/helpers from `UserSettingsPanel.tsx` to private `components/user-settings/SearchHistorySection.tsx`. Keep all settings patches and callbacks unchanged; do not create an index/barrel.
   - Baseline/post: `npm --prefix apps/desktop test -- --run src/components/UserSettingsPanel.test.tsx`
   - Browser: `(cd apps/desktop && npx playwright test e2e/search-crawler-settings.spec.ts --workers=1)`
   - Layer: typecheck, lint, frontend Vitest, build.
@@ -257,4 +257,5 @@ Before closing Issue #551:
 - Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
 - Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
-- Merged PRs: none.
+- Pilot delivery PR: #560; focused and complete local gates passed, formal design/diff verdicts are `Correct-to-merge`, and the implementation CI run passed all seven required checks before final ledger update.
+- Merged PRs: #560 is the first delivery PR.
