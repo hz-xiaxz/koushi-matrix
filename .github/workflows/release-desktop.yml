@@ -1,0 +1,296 @@
+name: Release desktop installers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/desktop/package.json
+      - apps/desktop/src-tauri/Cargo.toml
+      - apps/desktop/src-tauri/tauri.conf.json
+  workflow_dispatch:
+
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Validate release version
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate synchronized SemVer bump
+        id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          args=(--github-output)
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            args+=(--before "$BEFORE_SHA")
+          fi
+          node scripts/desktop-release-version.mjs "${args[@]}"
+
+      - name: Require a new release tag
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse --quiet --verify "refs/tags/$RELEASE_TAG" >/dev/null; then
+            echo "Release tag already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+  build-macos:
+    name: macOS ${{ matrix.arch }} signed and notarized DMG
+    needs: prepare
+    environment: release-macos
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            asset: Koushi-macos-arm64.dmg
+          - arch: x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            asset: Koushi-macos-x64.dmg
+    env:
+      APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain (1.96.0)
+        uses: dtolnay/rust-toolchain@01ba1edad32c6f80dbcce879d3e0fa5a00b2a84e # 1.96.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: .
+          shared-key: koushi-release-macos-${{ matrix.arch }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: npm audit (lockfile, before install)
+        run: npm --prefix apps/desktop audit --package-lock-only --audit-level=high
+      - name: npm ci
+        run: npm --prefix apps/desktop ci
+      - name: npm audit (full)
+        run: npm --prefix apps/desktop audit --audit-level=high
+      - name: npm audit (runtime deps only)
+        run: npm --prefix apps/desktop audit --omit=dev --audit-level=high
+
+      - name: Submodule sync guard
+        run: node scripts/check-sdk-submodule.mjs
+
+      - name: Import Developer ID certificate and notarization key
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          certificate_path="$RUNNER_TEMP/koushi-developer-id.p12"
+          keychain_path="$RUNNER_TEMP/koushi-signing.keychain-db"
+          api_key_path="$RUNNER_TEMP/koushi-notarization-key.p8"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          chmod 600 "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 7200 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$keychain_path" >/dev/null
+          security list-keychains -d user -s "$keychain_path"
+          security default-keychain -d user -s "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path" \
+            | grep -Fq "\"$APPLE_SIGNING_IDENTITY\""
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$api_key_path"
+          chmod 600 "$api_key_path"
+          echo "KOUSHI_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_PATH=$api_key_path" >> "$GITHUB_ENV"
+
+      - name: Build signed and notarized DMG
+        run: >-
+          npm --prefix apps/desktop run build:dmg:signed --
+          --target=${{ matrix.target }}
+
+      - name: Verify Apple signatures, notarization tickets, and Gatekeeper trust
+        env:
+          RELEASE_ASSET: ${{ matrix.asset }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          bundle_root="target/$RELEASE_TARGET/release/bundle"
+          app_count="$(find "$bundle_root/macos" -maxdepth 1 -name '*.app' -print | wc -l | tr -d ' ')"
+          dmg_count="$(find "$bundle_root/dmg" -maxdepth 1 -name '*.dmg' -print | wc -l | tr -d ' ')"
+          [[ "$app_count" == "1" && "$dmg_count" == "1" ]]
+          app="$(find "$bundle_root/macos" -maxdepth 1 -name '*.app' -print)"
+          dmg="$(find "$bundle_root/dmg" -maxdepth 1 -name '*.dmg' -print)"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+          codesign --verify --verbose=2 "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+          mkdir -p release-assets
+          cp "$dmg" "release-assets/$RELEASE_ASSET"
+          (cd release-assets && shasum -a 256 "$RELEASE_ASSET" > "$RELEASE_ASSET.sha256")
+
+      - name: Upload verified macOS release asset
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          if [[ -n "${KOUSHI_RELEASE_KEYCHAIN:-}" && -e "$KOUSHI_RELEASE_KEYCHAIN" ]]; then
+            security delete-keychain "$KOUSHI_RELEASE_KEYCHAIN" || true
+          fi
+          rm -f \
+            "$RUNNER_TEMP/koushi-developer-id.p12" \
+            "$RUNNER_TEMP/koushi-notarization-key.p8"
+
+  build-windows:
+    name: Windows x64 unsigned NSIS installer
+    needs: prepare
+    runs-on: windows-2025
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain (1.96.0 + MSVC x64)
+        uses: dtolnay/rust-toolchain@01ba1edad32c6f80dbcce879d3e0fa5a00b2a84e # 1.96.0
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: .
+          shared-key: koushi-release-windows-x64
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: npm audit (lockfile, before install)
+        run: npm --prefix apps/desktop audit --package-lock-only --audit-level=high
+      - name: npm ci
+        run: npm --prefix apps/desktop ci
+      - name: npm audit (full)
+        run: npm --prefix apps/desktop audit --audit-level=high
+      - name: npm audit (runtime deps only)
+        run: npm --prefix apps/desktop audit --omit=dev --audit-level=high
+
+      - name: Submodule sync guard
+        run: node scripts/check-sdk-submodule.mjs
+
+      - name: Build unsigned Windows installer
+        run: npm --prefix apps/desktop run build:windows
+
+      - name: Stage unsigned installer and checksum
+        run: |
+          $installers = @(Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis" -Filter *.exe)
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer" }
+          New-Item -ItemType Directory -Force "release-assets" | Out-Null
+          $asset = "Koushi-windows-x64-unsigned.exe"
+          Copy-Item $installers[0].FullName "release-assets/$asset"
+          $hash = (Get-FileHash -Algorithm SHA256 -Path "release-assets/$asset").Hash.ToLower()
+          "$hash  $asset" | Set-Content -Path "release-assets/$asset.sha256" -Encoding ascii
+
+      - name: Upload Windows release asset
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-windows-x64-unsigned
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [prepare, build-macos, build-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      RELEASE_TARGET: ${{ github.sha }}
+    steps:
+      - name: Download verified installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify downloaded checksums
+        run: |
+          cd release-assets
+          sha256sum --check ./*.sha256
+
+      - name: Create hidden draft with all assets
+        run: |
+          prerelease_args=()
+          if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_TARGET" \
+            --title "Koushi $RELEASE_VERSION" \
+            --draft \
+            --generate-notes \
+            --notes $'### Windows trial notice\n\nThe Windows installer is currently unsigned. Windows SmartScreen may display a warning; verify the accompanying SHA-256 file before testing.\n' \
+            "${prerelease_args[@]}" \
+            release-assets/*
+
+      - name: Publish completed release
+        run: >-
+          gh release edit "$RELEASE_TAG"
+          --repo "$GITHUB_REPOSITORY"
+          --draft=false

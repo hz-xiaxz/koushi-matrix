@@ -206,15 +206,25 @@ init .` before broad code investigation.
 
 ## Signed macOS DMG
 
-Build signed, notarized macOS artifacts only in an attended `zsh` session on a
-Mac that has the project's Developer ID Application certificate and private key
-installed. Never commit, paste into logs, or store in a repository file any of
-the four values entered below. `APPLE_PASSWORD` is an Apple app-specific
-password, not the normal Apple Account password.
+Signed, notarized macOS artifacts have two supported paths: the protected
+`release-macos` GitHub Environment used by `.github/workflows/release-desktop.yml`,
+and an attended local `zsh` session on a Mac with the project's Developer ID
+Application certificate and private key installed. Never commit, paste into
+logs, or store in a repository file any certificate, private key, export
+password, Apple credential, or notarization token.
 
-From the repository root, list the available signing identities, then enter the
-matching identity and notarization credentials into session-only environment
-variables:
+The CI Environment holds `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+`KEYCHAIN_PASSWORD`, `APPLE_API_ISSUER`, `APPLE_API_KEY`, and
+`APPLE_API_PRIVATE_KEY`; `APPLE_SIGNING_IDENTITY` is an Environment variable.
+Only the macOS jobs receive that Environment. They create an ephemeral keychain
+and API-key file, run Tauri signing/notarization, require `codesign`, `stapler`,
+and Gatekeeper verification, and delete temporary key material in an `always()`
+step. The Environment deployment policy permits `main` only.
+
+For a local build, list the available signing identities, then enter the
+matching identity and Apple-ID notarization credentials into session-only
+environment variables. `APPLE_PASSWORD` is an app-specific password, not the
+normal Apple Account password:
 
 ```zsh
 security find-identity -v -p codesigning
@@ -245,7 +255,7 @@ every failed command returns before `open`:
 build_and_verify_signed_dmg() {
   local bundle_root app dmg
   local -a apps dmgs
-  bundle_root="apps/desktop/src-tauri/target/release/bundle"
+  bundle_root="target/release/bundle"
 
   rm -rf -- "$bundle_root/macos" "$bundle_root/dmg" || return
   npm --prefix apps/desktop run build:dmg:signed || return
@@ -275,3 +285,11 @@ After verification, remove the credentials from the current shell:
 ```zsh
 unset APPLE_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD
 ```
+
+## Automated desktop releases
+
+The canonical preparation, monitoring, publication, and failure-recovery
+procedure is [`docs/releases/desktop-release.md`](../releases/desktop-release.md).
+Use the repository's `koushi-release` skill to execute that runbook. This file
+owns only the signing-environment setup above; do not duplicate the release
+procedure here.

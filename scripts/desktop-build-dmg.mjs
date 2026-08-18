@@ -6,8 +6,15 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopDir = join(repoRoot, "apps", "desktop");
-const dmgDir = join(repoRoot, "target", "release", "bundle", "dmg");
 const args = new Set(process.argv.slice(2));
+const target = optionValue("--target");
+if (target && !["aarch64-apple-darwin", "x86_64-apple-darwin"].includes(target)) {
+  console.error(`desktop-build-dmg: unsupported macOS target: ${target}`);
+  process.exit(1);
+}
+const dmgDir = target
+  ? join(repoRoot, "target", target, "release", "bundle", "dmg")
+  : join(repoRoot, "target", "release", "bundle", "dmg");
 
 if (args.has("--help")) {
   printUsage();
@@ -33,6 +40,9 @@ const buildCommand = [
   "--config",
   JSON.stringify({ bundle: { macOS: { bundleVersion } } })
 ];
+if (target) {
+  buildCommand.push("--target", target);
+}
 if (args.has("--print-command")) {
   console.log(`desktop-build-dmg: npm ${buildCommand.join(" ")}`);
   process.exit(0);
@@ -157,6 +167,20 @@ function macOSBundleVersion() {
   return `${commitCount.stdout.trim()}.${dirty.stdout.trim() ? "1" : "0"}`;
 }
 
+function optionValue(name) {
+  const argumentsList = process.argv.slice(2);
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const argument = argumentsList[index];
+    if (argument === name) {
+      return argumentsList[index + 1] ?? null;
+    }
+    if (argument.startsWith(`${name}=`)) {
+      return argument.slice(name.length + 1);
+    }
+  }
+  return null;
+}
+
 function printStorageNotice() {
   console.log("desktop-build-dmg: local installed-app storage");
   console.log("  data: ~/Library/Application Support/koushi-desktop");
@@ -165,7 +189,9 @@ function printStorageNotice() {
 }
 
 function printUsage() {
-  console.log("Usage: npm --prefix apps/desktop run build:dmg [-- --signed|--skip-preflight]");
+  console.log(
+    "Usage: npm --prefix apps/desktop run build:dmg [-- --signed|--skip-preflight] [--target TARGET]"
+  );
   console.log("Builds the local macOS DMG via Tauri: tauri build --bundles dmg");
   printStorageNotice();
 }
