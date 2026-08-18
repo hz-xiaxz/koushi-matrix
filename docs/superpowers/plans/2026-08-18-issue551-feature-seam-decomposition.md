@@ -88,7 +88,7 @@ The pilot uses an already named component boundary with existing unit and browse
   - Browser: `(cd apps/desktop && npx playwright test e2e/search-crawler-settings.spec.ts --workers=1)`
   - Layer: typecheck, lint, frontend Vitest, build.
 - [x] **User Settings shared UIA prerequisite** — move the existing `AccountManagementUiaForm` used by both Sessions and Account Management to one private module before either section; this avoids assigning the shared secret-handling boundary to the wrong feature.
-- [ ] **User Settings sessions** — after the shared UIA prerequisite, move `SessionsSection` and `SessionRow` together.
+- [x] **User Settings sessions** — after the shared UIA prerequisite, move `SessionsSection` and `SessionRow` together.
 - [ ] **User Settings account management** — after the shared UIA prerequisite, move `AccountManagementSection` and its local forms together.
 - [ ] **User Settings security and room-key management** — move `SecuritySection` and its private dialog/status helpers; secret-bearing values remain callback-local and never enter observable state.
 - [ ] **User Settings trust** — move `TrustSection`, verification/reset controls, trust rows, and trust-only label/tone helpers.
@@ -121,6 +121,20 @@ Focused tests for every User Settings PR are the panel unit test plus the matchi
 - **Expected source effect:** 40 lines leave `UserSettingsPanel.tsx`; forwarding boilerplate is one import, with no duplicate implementation retained.
 - **Allowed implementation files:** `UserSettingsPanel.tsx` and the new `user-settings/AccountManagementUiaForm.tsx` only. Plan/completion records may be updated by the parent after verification.
 - **Baseline/post:** `npm --prefix apps/desktop test -- --run src/components/UserSettingsPanel.test.tsx`; `(cd apps/desktop && npx playwright test e2e/basic-operations.spec.ts -g "device session manager renames" --workers=1)`; typecheck and lint.
+
+#### Sessions design slice
+
+- **Move exactly:** the complete `SessionsSection` block at current `origin/main` `UserSettingsPanel.tsx:1105-1214` and the complete `SessionRow` block at `:1455-1535` (191 source lines total). Preserve their internal order in the destination as `SessionsSection` followed by private `SessionRow`; do not move the intervening `AccountManagementSection` or neighboring `RoomKeyPassphraseRequest`/`KeyManagementStatus` declarations.
+- **Create:** `apps/desktop/src/components/user-settings/SessionsSection.tsx`. Export only `SessionsSection` for one direct parent import; keep `SessionRow` private and add no index/barrel. Import only React `FormEvent`/`useState`, the existing `Check`/`Edit3`/`RefreshCcw`/`X` icons, `t`, `ImeSafeForm`, `ImeTextField`, `AccountManagementUiaForm`, and the existing `AccountManagementState`, `DeviceSessionListState`, and `DeviceSessionSummary` types through their direct paths.
+- **Modify:** `UserSettingsPanel.tsx` only to add the direct `SessionsSection` import, remove the two moved blocks, remove the now-unused `DeviceSessionSummary` type import, and collapse the two blank separators left around the removed `SessionRow` to one. Keep `AccountManagementUiaForm` in the parent because `AccountManagementSection` remains there. Keep the existing `SessionsSection` JSX call and every prop unchanged.
+- **Do not modify:** tests, CSS, i18n, domain/Rust types, callbacks, account-management state, UIA operation filters, loading/failure presentation, device ordering, current/other partition, ordinal collection, rename trimming/fallback, IME `syncKey`, badges, button labels/classes, disabled behavior, or accessibility attributes.
+- **Ownership invariant:** Rust remains owner of the device-session list and account-management/UIA product state. The extracted React component owns only the currently-renamed ordinal and one row's text draft. It dispatches the same typed query/rename/delete/UIA intents and does not repair or synthesize command results.
+- **Lifecycle invariant:** preserve existing React-key and local-draft behavior exactly. Do not add effects, retries, timers, subscriptions, draft synchronization, or teardown machinery during this move.
+- **Privacy invariant:** render only the existing Rust-projected device display name, verification/inactivity booleans, and localized neutral placeholder. Device ordinals remain internal React keys and typed callback arguments; do not render identifiers or add logging/diagnostics.
+- **Expected visibility delta:** one direct module export and one parent import, with `SessionRow` private and no package/barrel/public API growth.
+- **Expected source effect:** 191 source lines leave `UserSettingsPanel.tsx`; forwarding boilerplate is one import and the existing JSX call, with no duplicate implementation retained.
+- **Allowed implementation files:** `UserSettingsPanel.tsx` and the new `user-settings/SessionsSection.tsx` only. Plan/completion records may be updated by the parent after verification.
+- **Baseline/post:** `UserSettingsPanel.test.tsx` 25/25; focused `basic-operations.spec.ts` device-session-manager test 1/1 using `CHOKIDAR_USEPOLLING=true`; frontend typecheck; frontend lint. All four pre-edit baseline checks passed on merge base `db234d4c`.
 
 ### Wave 1B — Focused test suites
 
@@ -271,10 +285,16 @@ Before closing Issue #551:
 - Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
 - Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
+- Sessions delivery PR: #562; focused and complete local gates passed, formal design/diff verdicts are `Correct-to-merge`, and the first implementation CI run passed all seven required checks before final ledger update.
+- Sessions implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved only the two approved blocks into one private direct module. Parent verification proved the 4,197-byte `SessionsSection` and 2,637-byte `SessionRow` bodies exact after accounting only for the required `export` keyword and inter-symbol separator.
+- Sessions formal full-diff review: `reviewer-flash` reviewed `/tmp/issue551-sessions.diff` (`sha256:c170d2e5a508c83eddbdfc0a196cbb38d624b82cf0755adb91ad7c7c309e2d48`) and returned `Correct-to-merge` with no code findings.
+- Sessions complete local gates: focused unit 25/25 and Playwright 1/1; frontend 1,366 Vitest and browser-headless 76 + 248; Rust workspace 2,393 passed / 13 ignored; QA binary 129; Tauri 154 passed / 1 ignored; npm audit/typecheck/lint/build, SDK, agents-doc, rustfmt, diff, and cargo-deny passed.
+- Sessions formal design review: `reviewer-flash` verified both exact ranges, all imports/call sites, the two-file allowlist, coverage, and behavior/privacy/lifecycle/Rust-state ownership, then returned `Correct-to-merge`. Its only new Minor (collapse the blank separators left by the non-contiguous `SessionRow` removal) was incorporated before implementation.
+- Sessions pre-edit baseline on merge base `db234d4c`: `UserSettingsPanel.test.tsx` 25/25, focused device-session-manager Playwright 1/1, frontend typecheck, and frontend lint all passed.
 - Shared UIA prerequisite implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the exact form and preserved its secret lifecycle.
 - Shared UIA prerequisite formal full-diff review: `reviewer-flash` reviewed `/tmp/issue551-shared-uia.diff` (`sha256:0c9bf9d3cb791149acdb9765aab010e85359b9b4264f3346412a8ffc6909bde7`) and returned `Correct-to-merge` with no findings.
 - Shared UIA prerequisite formal design review: `reviewer-flash` returned `Correct-to-merge`; its only new Minors (collapse the post-removal double blank and leave the similar Trust form untouched) were incorporated before implementation.
 - Shared UIA prerequisite pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused device-session-manager Playwright 1/1 passed; frontend typecheck and lint passed.
 - Shared UIA delivery PR: #561; focused and complete local gates passed after one unrelated runtime deadline retry, the first Rust CI attempt hit an unrelated existing diagnostic-counter timing failure, and the failed job rerun passed. Final required checks were 7/7 green before ledger update.
 - Pilot delivery PR: #560; focused and complete local gates passed, formal design/diff verdicts are `Correct-to-merge`, and the implementation CI run passed all seven required checks before final ledger update.
-- Merged PRs: #560 is the first delivery PR.
+- Merged PRs: #560 (Search History pilot) and #561 (shared UIA prerequisite).
