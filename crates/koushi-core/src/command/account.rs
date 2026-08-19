@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Clone, Eq, PartialEq)]
 pub struct RoomKeyExportRequest {
     pub destination_path: PathBuf,
     pub passphrase: koushi_state::AuthSecret,

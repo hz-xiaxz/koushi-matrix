@@ -397,6 +397,7 @@ mod account;
 mod app;
 mod room;
 mod search;
+#[cfg(test)]
 mod test_support;
 mod timeline;
 
