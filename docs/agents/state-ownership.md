@@ -187,7 +187,7 @@ carry tokens and counts only. The full prohibited list is in
   `data-item-id="txn:<transaction_id>"`. Headless media-progress specs should
   target that canonical id instead of the raw transaction id.
 - Phase B send-queue GUI tests should seed Rust-shaped CoreEvent timeline items
-  in `appHarnessMain.tsx` / `basic-operations.spec.ts`, click the visible
+  in `appHarnessMain.tsx` / `composer-send-queue-upload.spec.ts`, click the visible
   controls, and then push a CoreEvent diff to prove the UI reflects Rust-owned
   state changes. Do not update React state directly after `retry_send` or
   `cancel_send`.
@@ -509,7 +509,7 @@ carry tokens and counts only. The full prohibited list is in
   WebDriver could only tell them apart by tag name. Inputs take their field
   label, buttons take their visible text.
 - Playwright specs that reach Explore or Invites must select Home first — the app
-  harness boots with a space selected. `basic-operations.spec.ts` has a
+  harness boots with a space selected. `room-space-invites.spec.ts` has a
   `selectAccountHome` helper for this.
 
 ## Message interactions
@@ -781,7 +781,7 @@ carry tokens and counts only. The full prohibited list is in
   control and scheduled-message list, records typed `schedule_send`,
   `reschedule_scheduled_send`, and `cancel_scheduled_send` IPC calls, and verifies
   rows stay visible until a later Rust-shaped snapshot changes `scheduled_sends`:
-  `cd apps/desktop && npx playwright test e2e/basic-operations.spec.ts -g "scheduled send UI"`.
+  `cd apps/desktop && npx playwright test e2e/composer-send-queue-upload.spec.ts -g "scheduled send UI"`.
 
 ## E2EE trust
 
@@ -960,7 +960,8 @@ cargo test -p koushi-core reset_local_data_clears_current_account_persistence_an
   spacing, and width-aware ellipsis/wrapping as appropriate.
 - Search/review paths for this area are: `apps/desktop/src/i18n/messages.ts`,
   `apps/desktop/src/i18n/messages.test.ts`, `apps/desktop/src/styles.css`,
-  `apps/desktop/e2e/basic-operations.spec.ts`,
+  `apps/desktop/e2e/profile-settings-session.spec.ts`,
+  `apps/desktop/e2e/composer-send-queue-upload.spec.ts`,
   `crates/koushi-state/src/locale_profile.rs`,
   `crates/koushi-state/tests/locale_display_profile.rs`,
   `crates/koushi-search/src/document.rs`, `crates/koushi-search/src/verify.rs`,
@@ -970,7 +971,7 @@ cargo test -p koushi-core reset_local_data_clears_current_account_persistence_an
 
 ```bash
 npm --prefix apps/desktop run test -- --run src/i18n/messages.test.ts
-npm --prefix apps/desktop exec -- playwright test e2e/basic-operations.spec.ts -g "Japanese locale renders shell labels and CJK text without clipping|thread and edit composers composing Enter" --workers=1
+cd apps/desktop && npx playwright test e2e/profile-settings-session.spec.ts e2e/composer-send-queue-upload.spec.ts -g "Japanese locale renders shell labels and CJK text without clipping|thread and edit composers composing Enter" --workers=1
 cargo test -p koushi-search --test search_adapter
 cargo test -p koushi-state --test locale_display_profile
 ```

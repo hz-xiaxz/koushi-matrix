@@ -195,7 +195,7 @@ stage must not print Matrix room IDs, event IDs, SDK transaction IDs, message
 bodies, raw SDK errors, or proxy connection details.
 
 The Phase B browser-headless proof lives in
-`apps/desktop/e2e/basic-operations.spec.ts`. It seeds Rust-shaped
+`apps/desktop/e2e/composer-send-queue-upload.spec.ts`. It seeds Rust-shaped
 `TimelineItem.send_state` values through the app harness CoreEvent stream,
 clicks the inline resend/delete/cancel controls and room-level resend bar, and
 asserts only typed IPC dispatch plus later CoreEvent-driven DOM changes. React
@@ -437,13 +437,13 @@ npm --prefix apps/desktop run test:ui-headless
 Focused E2EE trust GUI proof:
 
 ```bash
-cd apps/desktop && npx playwright test e2e/basic-operations.spec.ts -g "E2EE trust controls"
+cd apps/desktop && npx playwright test e2e/security-e2ee.spec.ts -g "E2EE trust controls"
 ```
 
 Focused E2EE key-management GUI proof:
 
 ```bash
-npm --prefix apps/desktop run test:ui-headless -- e2e/basic-operations.spec.ts --grep "security settings drive Rust-owned room-key transfer"
+cd apps/desktop && npx playwright test e2e/security-e2ee.spec.ts -g "security settings drive Rust-owned room-key transfer"
 ```
 
 This browser-headless proof drives the real User settings key-management forms
@@ -457,7 +457,7 @@ state, or display recovery-key material.
 Focused scheduled-send GUI proof:
 
 ```bash
-cd apps/desktop && npx playwright test e2e/basic-operations.spec.ts -g "scheduled send UI"
+cd apps/desktop && npx playwright test e2e/composer-send-queue-upload.spec.ts -g "scheduled send UI"
 ```
 
 This browser-headless proof drives the real Composer `Send later` control and
@@ -471,7 +471,7 @@ remove scheduled rows locally after a cancel/reschedule click.
 Focused media/file GUI proof:
 
 ```bash
-npm --prefix apps/desktop run test:ui-headless -- e2e/basic-operations.spec.ts --grep "attach control"
+cd apps/desktop && npx playwright test e2e/composer-send-queue-upload.spec.ts -g "attach control"
 ```
 
 This lane mounts the full React app over mocked Tauri IPC. For E2EE trust Phase
