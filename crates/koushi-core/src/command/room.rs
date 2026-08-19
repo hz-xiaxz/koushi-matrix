@@ -590,12 +590,6 @@ impl fmt::Debug for RoomCommand {
 mod tests {
     use super::super::test_support::fake_rid;
     use super::*;
-    use koushi_state::{
-        ImageUploadCompressionMode, MentionIntent, MentionTarget, NativeAttentionCandidate,
-        NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,
-        NativeAttentionState, NativeAttentionSummary, NativeAttentionSuppressionReason,
-        RoomAttentionKind, ThreadOpenIntent,
-    };
 
     #[test]
     fn pin_event_debug_redacts_room_and_event_ids() {

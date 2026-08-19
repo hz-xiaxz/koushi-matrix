@@ -719,12 +719,7 @@ impl fmt::Debug for TimelineCommand {
 mod tests {
     use super::super::test_support::fake_rid;
     use super::*;
-    use koushi_state::{
-        ImageUploadCompressionMode, MentionIntent, MentionTarget, NativeAttentionCandidate,
-        NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,
-        NativeAttentionState, NativeAttentionSummary, NativeAttentionSuppressionReason,
-        RoomAttentionKind, ThreadOpenIntent,
-    };
+    use koushi_state::{ImageUploadCompressionMode, MentionIntent, MentionTarget};
 
     fn test_session_key() -> koushi_key::SessionKeyId {
         koushi_key::SessionKeyId {

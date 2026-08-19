@@ -697,7 +697,7 @@ mod tests {
     use super::super::test_support::fake_rid;
     use super::*;
     use koushi_state::{
-        ImageUploadCompressionMode, MentionIntent, MentionTarget, NativeAttentionCandidate,
+        ImageUploadCompressionMode, MentionIntent, NativeAttentionCandidate,
         NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,
         NativeAttentionState, NativeAttentionSummary, NativeAttentionSuppressionReason,
         RoomAttentionKind, ThreadOpenIntent,

@@ -768,12 +768,6 @@ impl fmt::Debug for AccountCommand {
 mod tests {
     use super::super::test_support::fake_rid;
     use super::*;
-    use koushi_state::{
-        ImageUploadCompressionMode, MentionIntent, MentionTarget, NativeAttentionCandidate,
-        NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,
-        NativeAttentionState, NativeAttentionSummary, NativeAttentionSuppressionReason,
-        RoomAttentionKind, ThreadOpenIntent,
-    };
 
     #[test]
     fn soft_logout_reauth_is_allowed_past_ready_session_gate() {
