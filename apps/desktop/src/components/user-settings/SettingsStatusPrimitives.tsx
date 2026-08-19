@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
 
+import { t } from "../../i18n/messages";
+import type { TrustOperationFailureKind } from "../../domain/types";
+
 export function TrustStatusRow({
   icon,
   label,
@@ -62,4 +65,23 @@ export function DetailRow({ label, value }: { label: string; value: string }) {
       <small>{value}</small>
     </div>
   );
+}
+
+export function failureKindLabel(kind: TrustOperationFailureKind): string {
+  switch (kind) {
+    case "cancelled":
+      return t("trust.failureCancelled");
+    case "mismatch":
+      return t("trust.failureMismatch");
+    case "invalidPassphrase":
+      return t("trust.failureInvalidPassphrase");
+    case "network":
+      return t("trust.failureNetwork");
+    case "forbidden":
+      return t("trust.failureForbidden");
+    case "timeout":
+      return t("trust.failureTimeout");
+    case "sdk":
+      return t("trust.failureSdk");
+  }
 }
