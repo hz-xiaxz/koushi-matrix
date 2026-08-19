@@ -221,7 +221,7 @@ Focused tests for every User Settings PR are the panel unit test plus the matchi
 - [x] Create one private `TimelineView` test-support module containing only shared fixtures, DOM geometry mocks, and transport builders currently duplicated across feature groups.
 - [x] Move `TimelineView` viewport/anchoring tests to a feature test file.
 - [x] Move scrollback/virtualization tests to a feature test file.
-- [ ] Move rendering/message-state tests to a feature test file.
+- [x] Move rendering/message-state tests to a feature test file.
 - [ ] Move interactions/composer tests to a feature test file.
 - [ ] Move media tests to a feature test file.
 - [ ] Move threads/focused-context tests to a feature test file.
@@ -422,6 +422,9 @@ Before closing Issue #551:
 - Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
 - Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
+- TimelineView rendering/message-state implementation: Luna low performed the approved immutable-base move. The independently generated expected parent matched exactly (`sha256:c253b81b3742b1744e5672cfb367c134d9263f832ba148762eec956ae410b2e7`), and all 15 test bodies plus `latestEventSummary` matched base bytes and source order.
+- TimelineView rendering/message-state formal full-diff review: `reviewer-flash` reviewed `/tmp/issue551-timeline-rendering.diff` (`sha256:7d819449a8b7580da1938baa1d5d7b2e5055c0471d4d47e567128b7fa42a033b`), verified bodies/imports/store/provider/locale/cleanup, rendering ownership, retained neighbor groups, 19/101/173 counts, and two-file/no-production boundary, and returned `Correct-to-merge` with no findings.
+- TimelineView rendering/message-state complete gates: all four 173/173, rendering 19/19, parent 101/101, parent + rendering 120/120, parent + viewport + scrollback 154/154; frontend 1,366 Vitest and browser-headless 76 + 248; Rust workspace 2,393 passed / 13 ignored; QA binary 129; Tauri 154 passed / 1 ignored; npm audit/typecheck/lint/build, SDK, agents-doc, IME, rustfmt, diff, and cargo-deny passed.
 - TimelineView rendering/message-state formal design review: `reviewer-flash` verified all 15 ranges, helper/byte arithmetic, 19/101/173 counts, formatted-reply and hover-layout ownership decisions, destination imports, parent retentions, six-statement cleanup, exclusions, separators, and two-file/no-production boundary, found no findings, and returned `Correct-to-merge`.
 - TimelineView rendering/message-state pre-edit baseline on merge base `e2f1f28e`: parent + viewport + scrollback 173/173, frontend typecheck, and frontend lint passed.
 - TimelineView scrollback/virtualization delivery PR: #573 merged as `e2f1f28e72fdeae568e6cbf9f1a9b2606393b25a`; required CI passed 7/7 on the first run.
