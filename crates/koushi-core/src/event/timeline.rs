@@ -1,0 +1,2374 @@
+use super::*;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CjkTextPolicyEvent {
+    JapaneseCatalogProfileChanged { profile: JapaneseCatalogProfile },
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ThreadsListEvent {
+    Opened {
+        request_id: RequestId,
+        room_id: String,
+        items: Vec<ThreadsListItem>,
+        end_reached: bool,
+    },
+    Updated {
+        request_id: RequestId,
+        room_id: String,
+        items: Vec<ThreadsListItem>,
+        is_paginating: bool,
+        end_reached: bool,
+    },
+    PaginationCompleted {
+        request_id: RequestId,
+        room_id: String,
+        items: Vec<ThreadsListItem>,
+        end_reached: bool,
+    },
+    Failed {
+        request_id: RequestId,
+        room_id: String,
+        failure_kind: OperationFailureKind,
+    },
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TimelineEvent {
+    InitialItems {
+        /// Stable projection identity retained until the WebView acknowledges
+        /// this actor generation's initial projection.
+        request_id: Option<RequestId>,
+        /// Exact command that caused this delivery. Recovery projections have
+        /// no command cause and therefore use `None`.
+        cause_request_id: Option<RequestId>,
+        key: TimelineKey,
+        /// Monotonic owner generation for actor replacement fencing.
+        actor_generation: u64,
+        generation: TimelineGeneration,
+        items: Vec<TimelineItem>,
+    },
+    ItemsUpdated {
+        key: TimelineKey,
+        generation: TimelineGeneration,
+        batch_id: TimelineBatchId,
+        /// All numeric `TimelineDiff` indices are relative to the desktop
+        /// display sequence immediately before that operation, never to
+        /// Core's full navigation sequence.
+        diffs: Vec<TimelineDiff>,
+    },
+    PaginationStateChanged {
+        request_id: Option<RequestId>,
+        key: TimelineKey,
+        direction: PaginationDirection,
+        state: PaginationState,
+        /// Whether an accepted backward page changed the observable oldest edge.
+        /// `None` is used for admission rejection, start, cancellation, and failure.
+        prepend_expected: Option<bool>,
+    },
+    AnchorRestoreFinished {
+        request_id: RequestId,
+        key: TimelineKey,
+        status: TimelineAnchorRestoreStatus,
+    },
+    NavigationUpdated {
+        key: TimelineKey,
+        snapshot: TimelineNavigationSnapshot,
+    },
+    GapPositionsUpdated {
+        key: TimelineKey,
+        /// Monotonic owner generation for actor replacement fencing.
+        actor_generation: u64,
+        generation: u64,
+        positions: Vec<TimelineGapPosition>,
+    },
+    /// Gap work reached an idle scheduler after terminal processing. A UI
+    /// pagination request rejected while repair was active may retry now.
+    GapRepairReleased {
+        key: TimelineKey,
+        /// Monotonic owner generation for actor replacement fencing.
+        actor_generation: u64,
+        generation: u64,
+    },
+    SendCompleted {
+        request_id: RequestId,
+        key: TimelineKey,
+        transaction_id: String,
+        event_id: String,
+    },
+    MediaSendQueued {
+        request_id: RequestId,
+        key: TimelineKey,
+        transaction_id: String,
+    },
+    SubmissionAccepted {
+        request_id: RequestId,
+        key: TimelineKey,
+        submission_id: SubmissionId,
+        transaction_id: String,
+    },
+    SubmissionRejected {
+        request_id: RequestId,
+        key: TimelineKey,
+        submission_id: SubmissionId,
+        kind: TimelineFailureKind,
+    },
+    MessageForwarded {
+        request_id: RequestId,
+        key: TimelineKey,
+        destination_room_id: String,
+        transaction_id: String,
+        event_id: String,
+    },
+    MessageSourceLoaded {
+        request_id: RequestId,
+        key: TimelineKey,
+        source: TimelineMessageSource,
+    },
+    MediaUploadProgress {
+        request_id: Option<RequestId>,
+        key: TimelineKey,
+        transaction_id: String,
+        index: u64,
+        progress: MediaTransferProgress,
+        source: Option<TimelineMediaSource>,
+    },
+    MediaDownloadProgress {
+        request_id: RequestId,
+        key: TimelineKey,
+        event_id: String,
+        progress: MediaTransferProgress,
+    },
+    MediaDownloadCompleted {
+        request_id: RequestId,
+        key: TimelineKey,
+        event_id: String,
+        source_url: String,
+        byte_count: u64,
+        mimetype: Option<String>,
+        width: Option<u64>,
+        height: Option<u64>,
+    },
+    MediaDownloadFailed {
+        request_id: RequestId,
+        key: TimelineKey,
+        event_id: String,
+        kind: TimelineFailureKind,
+    },
+    /// A bounded, out-of-band root snapshot for latest-reply Room
+    /// presentation. This never changes the canonical VectorDiff item list.
+    ThreadRootProjection {
+        key: TimelineKey,
+        projection: ThreadRootProjectionDto,
+    },
+    ResyncRequired {
+        key: TimelineKey,
+        reason: TimelineResyncReason,
+    },
+    DisplayPolicyUpdated {
+        hide_redacted: bool,
+    },
+    DisplayLabelsUpdated {
+        labels: Vec<TimelineDisplayLabelUpdate>,
+    },
+}
+impl fmt::Debug for TimelineEvent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InitialItems {
+                request_id,
+                cause_request_id,
+                generation,
+                items,
+                ..
+            } => formatter
+                .debug_struct("InitialItems")
+                .field("request_id", request_id)
+                .field("cause_request_id", cause_request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("generation", generation)
+                .field("items", items)
+                .finish(),
+            Self::ItemsUpdated {
+                generation,
+                batch_id,
+                diffs,
+                ..
+            } => formatter
+                .debug_struct("ItemsUpdated")
+                .field("key", &"TimelineKey(..)")
+                .field("generation", generation)
+                .field("batch_id", batch_id)
+                .field("diffs", diffs)
+                .finish(),
+            Self::PaginationStateChanged {
+                request_id,
+                direction,
+                state,
+                ..
+            } => formatter
+                .debug_struct("PaginationStateChanged")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("direction", direction)
+                .field("state", state)
+                .finish(),
+            Self::AnchorRestoreFinished {
+                request_id, status, ..
+            } => formatter
+                .debug_struct("AnchorRestoreFinished")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("status", status)
+                .finish(),
+            Self::NavigationUpdated { snapshot, .. } => formatter
+                .debug_struct("NavigationUpdated")
+                .field("key", &"TimelineKey(..)")
+                .field("snapshot", snapshot)
+                .finish(),
+            Self::GapPositionsUpdated {
+                actor_generation,
+                generation,
+                positions,
+                ..
+            } => formatter
+                .debug_struct("GapPositionsUpdated")
+                .field("key", &"TimelineKey(..)")
+                .field("actor_generation", actor_generation)
+                .field("generation", generation)
+                .field("gap_count", &positions.len())
+                .finish(),
+            Self::GapRepairReleased {
+                actor_generation,
+                generation,
+                ..
+            } => formatter
+                .debug_struct("GapRepairReleased")
+                .field("key", &"TimelineKey(..)")
+                .field("actor_generation", actor_generation)
+                .field("generation", generation)
+                .finish(),
+            Self::SendCompleted {
+                request_id,
+                transaction_id,
+                ..
+            } => formatter
+                .debug_struct("SendCompleted")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("transaction_id", transaction_id)
+                .field("event_id", &"EventId(..)")
+                .finish(),
+            Self::MediaSendQueued { request_id, .. } => formatter
+                .debug_struct("MediaSendQueued")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("transaction_id", &"TransactionId(..)")
+                .finish(),
+            Self::SubmissionAccepted {
+                request_id,
+                submission_id,
+                transaction_id,
+                ..
+            } => formatter
+                .debug_struct("SubmissionAccepted")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("submission_id", submission_id)
+                .field("transaction_id", transaction_id)
+                .finish(),
+            Self::SubmissionRejected {
+                request_id,
+                submission_id,
+                kind,
+                ..
+            } => formatter
+                .debug_struct("SubmissionRejected")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("submission_id", submission_id)
+                .field("kind", kind)
+                .finish(),
+            Self::MessageForwarded { request_id, .. } => formatter
+                .debug_struct("MessageForwarded")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("destination_room_id", &"RoomId(..)")
+                .field("transaction_id", &"TransactionId(..)")
+                .field("event_id", &"EventId(..)")
+                .finish(),
+            Self::MessageSourceLoaded { request_id, .. } => formatter
+                .debug_struct("MessageSourceLoaded")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("source", &"TimelineMessageSource(..)")
+                .finish(),
+            Self::MediaUploadProgress {
+                request_id,
+                transaction_id,
+                index,
+                progress,
+                source,
+                ..
+            } => formatter
+                .debug_struct("MediaUploadProgress")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("transaction_id", transaction_id)
+                .field("index", index)
+                .field("progress", progress)
+                .field("source", source)
+                .finish(),
+            Self::MediaDownloadProgress {
+                request_id,
+                progress,
+                ..
+            } => formatter
+                .debug_struct("MediaDownloadProgress")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("event_id", &"EventId(..)")
+                .field("progress", progress)
+                .finish(),
+            Self::MediaDownloadCompleted {
+                request_id,
+                byte_count,
+                mimetype,
+                width,
+                height,
+                ..
+            } => formatter
+                .debug_struct("MediaDownloadCompleted")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("event_id", &"EventId(..)")
+                .field("source_url", &"SourceUrl(..)")
+                .field("byte_count", byte_count)
+                .field("mimetype", mimetype)
+                .field("width", width)
+                .field("height", height)
+                .finish(),
+            Self::MediaDownloadFailed {
+                request_id, kind, ..
+            } => formatter
+                .debug_struct("MediaDownloadFailed")
+                .field("request_id", request_id)
+                .field("key", &"TimelineKey(..)")
+                .field("event_id", &"EventId(..)")
+                .field("kind", kind)
+                .finish(),
+            Self::ThreadRootProjection { projection, .. } => formatter
+                .debug_struct("ThreadRootProjection")
+                .field("key", &"TimelineKey(..)")
+                .field("projection", projection)
+                .finish(),
+            Self::ResyncRequired { reason, .. } => formatter
+                .debug_struct("ResyncRequired")
+                .field("key", &"TimelineKey(..)")
+                .field("reason", reason)
+                .finish(),
+            Self::DisplayPolicyUpdated { hide_redacted } => formatter
+                .debug_struct("DisplayPolicyUpdated")
+                .field("hide_redacted", hide_redacted)
+                .finish(),
+            Self::DisplayLabelsUpdated { labels } => formatter
+                .debug_struct("DisplayLabelsUpdated")
+                .field("label_count", &labels.len())
+                .finish(),
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TimelineAnchorRestoreStatus {
+    Found,
+    EndReached,
+    BudgetExhausted,
+    Superseded,
+    Failed { kind: TimelineFailureKind },
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineDisplayLabelUpdate {
+    pub user_id: String,
+    pub display_label: String,
+}
+impl fmt::Debug for TimelineDisplayLabelUpdate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineDisplayLabelUpdate")
+            .field("user_id", &"UserId(..)")
+            .field("display_label", &"DisplayLabel(..)")
+            .finish()
+    }
+}
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineViewportObservation {
+    pub first_visible_event_id: Option<String>,
+    pub last_visible_event_id: Option<String>,
+    #[serde(default)]
+    pub visible_gap_ids: Vec<TimelineGapId>,
+    pub at_bottom: bool,
+}
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct TimelineGapId {
+    #[serde(with = "u64_decimal_string")]
+    pub topology_revision: u64,
+    pub ordinal: u32,
+}
+mod u64_decimal_string {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
+
+    pub(super) fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        let parsed = encoded
+            .parse::<u64>()
+            .map_err(|_| D::Error::custom("expected a canonical unsigned decimal string"))?;
+        if parsed.to_string() != encoded {
+            return Err(D::Error::custom(
+                "expected a canonical unsigned decimal string",
+            ));
+        }
+        Ok(parsed)
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineGapPosition {
+    pub id: TimelineGapId,
+    pub before_item_index: usize,
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineNavigationSnapshot {
+    pub read_marker_event_id: Option<String>,
+    pub read_marker_display_event_id: Option<String>,
+    pub first_unread_event_id: Option<String>,
+    pub unread_event_count: u64,
+    pub unread_position: TimelineUnreadPosition,
+    pub newer_event_count: u64,
+    pub can_jump_to_bottom: bool,
+}
+impl fmt::Debug for TimelineNavigationSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineNavigationSnapshot")
+            .field(
+                "read_marker_event_id",
+                &self.read_marker_event_id.as_ref().map(|_| "EventId(..)"),
+            )
+            .field(
+                "read_marker_display_event_id",
+                &self
+                    .read_marker_display_event_id
+                    .as_ref()
+                    .map(|_| "EventId(..)"),
+            )
+            .field(
+                "first_unread_event_id",
+                &self.first_unread_event_id.as_ref().map(|_| "EventId(..)"),
+            )
+            .field("unread_event_count", &self.unread_event_count)
+            .field("unread_position", &self.unread_position)
+            .field("newer_event_count", &self.newer_event_count)
+            .field("can_jump_to_bottom", &self.can_jump_to_bottom)
+            .finish()
+    }
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineUnreadPosition {
+    #[default]
+    None,
+    AboveViewport,
+    InsideViewport,
+    BelowViewport,
+    Unknown,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PaginationDirection {
+    Backward,
+    Forward,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PaginationState {
+    Idle,
+    Paginating,
+    EndReached,
+    Failed { kind: TimelineFailureKind },
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TimelineResyncReason {
+    QueueOverflow,
+    SubscriptionRestarted,
+    GapSettlementTimeout,
+}
+/// Stable identity for every renderable item (Viewport/Scrollback contract):
+/// remote event id when known, transaction id for local echo, synthetic ids
+/// for separators/virtual items.
+#[derive(Clone, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum TimelineItemId {
+    Event { event_id: String },
+    Transaction { transaction_id: String },
+    Synthetic { synthetic_id: String },
+}
+impl fmt::Debug for TimelineItemId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Event { .. } => formatter
+                .debug_struct("Event")
+                .field("event_id", &"EventId(..)")
+                .finish(),
+            Self::Transaction { .. } => formatter
+                .debug_struct("Transaction")
+                .field("transaction_id", &"TransactionId(..)")
+                .finish(),
+            Self::Synthetic { .. } => formatter
+                .debug_struct("Synthetic")
+                .field("synthetic_id", &"SyntheticId(..)")
+                .finish(),
+        }
+    }
+}
+/// Rust-owned outbound send state for timeline local echoes.
+///
+/// This is a coarse public DTO: raw SDK errors stay in Rust logs/failures and
+/// never cross the webview boundary.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TimelineSendState {
+    Sending,
+    NotSent { reason: TimelineSendFailureReason },
+    Cancelled,
+    Sent,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineSendFailureReason {
+    Recoverable,
+    Unrecoverable,
+}
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineMessageActions {
+    pub can_copy: bool,
+    pub can_forward: bool,
+    #[serde(default)]
+    pub can_reply: bool,
+    pub can_permalink: bool,
+    pub can_view_source: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permalink: Option<String>,
+    /// Identity-bearing document for the shared inline edit surface. Plain-only
+    /// legacy events remain text-only rather than guessing mention positions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editable_document: Option<ComposerDocument>,
+}
+impl fmt::Debug for TimelineMessageActions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineMessageActions")
+            .field("can_copy", &self.can_copy)
+            .field("can_forward", &self.can_forward)
+            .field("can_reply", &self.can_reply)
+            .field("can_permalink", &self.can_permalink)
+            .field("can_view_source", &self.can_view_source)
+            .field(
+                "permalink",
+                &self.permalink.as_ref().map(|_| "Permalink(..)"),
+            )
+            .field(
+                "editable_document",
+                &self
+                    .editable_document
+                    .as_ref()
+                    .map(|document| document.mention_intent().targets.len()),
+            )
+            .finish()
+    }
+}
+pub fn message_actions_for_timeline_item(
+    room_id: &str,
+    item_id: &TimelineItemId,
+    body: Option<&str>,
+    has_media: bool,
+    is_redacted: bool,
+) -> TimelineMessageActions {
+    let TimelineItemId::Event { event_id } = item_id else {
+        return TimelineMessageActions::default();
+    };
+
+    let has_body = body.map(|body| !body.is_empty()).unwrap_or(false);
+    let permalink = matrix_to_event_permalink(room_id, event_id);
+
+    TimelineMessageActions {
+        can_copy: has_body && !is_redacted,
+        can_forward: has_body && !is_redacted,
+        can_reply: !is_redacted && !event_id.trim().is_empty() && (body.is_some() || has_media),
+        can_permalink: permalink.is_some(),
+        can_view_source: !event_id.trim().is_empty(),
+        permalink,
+        editable_document: None,
+    }
+}
+pub fn matrix_to_event_permalink(room_id: &str, event_id: &str) -> Option<String> {
+    if room_id.trim().is_empty() || event_id.trim().is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "https://matrix.to/#/{}/{}",
+        percent_encode_matrix_to_component(room_id),
+        percent_encode_matrix_to_component(event_id)
+    ))
+}
+fn percent_encode_matrix_to_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'!') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push(hex_digit(byte >> 4));
+            encoded.push(hex_digit(byte & 0x0f));
+        }
+    }
+    encoded
+}
+fn hex_digit(value: u8) -> char {
+    match value {
+        0..=9 => (b'0' + value) as char,
+        10..=15 => (b'A' + (value - 10)) as char,
+        _ => unreachable!("hex digit nibble"),
+    }
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineMessageSource {
+    pub event_id: String,
+    pub sender: Option<String>,
+    pub timestamp_ms: Option<u64>,
+    pub body: Option<String>,
+    pub in_reply_to_event_id: Option<String>,
+    pub thread_root: Option<String>,
+    pub is_redacted: bool,
+    pub is_edited: bool,
+    pub has_media: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub megolm_session_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_json: Option<JsonValue>,
+}
+impl fmt::Debug for TimelineMessageSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineMessageSource")
+            .field("event_id", &"EventId(..)")
+            .field("sender", &self.sender.as_ref().map(|_| "UserId(..)"))
+            .field("timestamp_ms", &self.timestamp_ms)
+            .field("body", &self.body.as_ref().map(|_| "MessageBody(..)"))
+            .field(
+                "in_reply_to_event_id",
+                &self.in_reply_to_event_id.as_ref().map(|_| "EventId(..)"),
+            )
+            .field(
+                "thread_root",
+                &self.thread_root.as_ref().map(|_| "EventId(..)"),
+            )
+            .field("is_redacted", &self.is_redacted)
+            .field("is_edited", &self.is_edited)
+            .field("has_media", &self.has_media)
+            .field(
+                "megolm_session_fingerprint",
+                &self
+                    .megolm_session_fingerprint
+                    .as_ref()
+                    .map(|_| "MegolmSessionFingerprint(..)"),
+            )
+            .field(
+                "original_json",
+                &self.original_json.as_ref().map(|_| "OriginalEventJson(..)"),
+            )
+            .finish()
+    }
+}
+pub fn message_source_for_timeline_item(item: &TimelineItem) -> Option<TimelineMessageSource> {
+    let TimelineItemId::Event { event_id } = &item.id else {
+        return None;
+    };
+
+    Some(TimelineMessageSource {
+        event_id: event_id.clone(),
+        sender: item.sender.clone(),
+        timestamp_ms: item.timestamp_ms,
+        body: item.body.clone(),
+        in_reply_to_event_id: item.in_reply_to_event_id.clone(),
+        thread_root: item.thread_root.clone(),
+        is_redacted: item.is_redacted,
+        is_edited: item.is_edited,
+        has_media: item.media.is_some(),
+        megolm_session_fingerprint: None,
+        original_json: None,
+    })
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineCodeBlock {
+    pub language: Option<String>,
+    pub body: String,
+}
+impl fmt::Debug for TimelineCodeBlock {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineCodeBlock")
+            .field(
+                "language",
+                &self.language.as_ref().map(|_| "CodeBlockLanguage(..)"),
+            )
+            .field("body", &"CodeBlockBody(..)")
+            .finish()
+    }
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineFormattedBody {
+    pub html: String,
+    pub plain_text: String,
+    pub code_blocks: Vec<TimelineCodeBlock>,
+}
+impl fmt::Debug for TimelineFormattedBody {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineFormattedBody")
+            .field("html", &"FormattedHtml(..)")
+            .field("plain_text", &"FormattedPlainText(..)")
+            .field("code_blocks", &self.code_blocks.len())
+            .finish()
+    }
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineMessageKind {
+    #[default]
+    Text,
+    Emote,
+    Notice,
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineSpoilerSpan {
+    /// Start offset in JavaScript string units for the rendered text source.
+    pub start_utf16: usize,
+    /// End offset in JavaScript string units for the rendered text source.
+    pub end_utf16: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+impl fmt::Debug for TimelineSpoilerSpan {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineSpoilerSpan")
+            .field("start_utf16", &self.start_utf16)
+            .field("end_utf16", &self.end_utf16)
+            .field("reason", &self.reason.as_ref().map(|_| "SpoilerReason(..)"))
+            .finish()
+    }
+}
+/// Rust-owned plain-text link range. The URL itself is the authoritative,
+/// Unicode-aware extraction from the message body; React renders anchors at
+/// these UTF-16 offsets without re-parsing the text.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineLinkRange {
+    pub url: String,
+    /// Start offset in JavaScript string units for the rendered body text.
+    pub start_utf16: usize,
+    /// End offset in JavaScript string units for the rendered body text.
+    pub end_utf16: usize,
+}
+impl fmt::Debug for TimelineLinkRange {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineLinkRange")
+            .field("url", &"Url(..)")
+            .field("start_utf16", &self.start_utf16)
+            .field("end_utf16", &self.end_utf16)
+            .finish()
+    }
+}
+/// Timeline item DTO. Phase 5 concretizes content kinds from the SDK
+/// projection; the identity contract is stable from Phase 1.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TimelineNoticeI18nKey {
+    #[serde(rename = "timeline.notice.roomCreate")]
+    RoomCreate,
+    #[serde(rename = "timeline.notice.roomPowerLevels")]
+    RoomPowerLevels,
+    #[serde(rename = "timeline.notice.roomGuestAccess")]
+    RoomGuestAccess,
+    #[serde(rename = "timeline.notice.roomEncryption")]
+    RoomEncryption,
+    #[serde(rename = "timeline.notice.spaceParent")]
+    SpaceParent,
+    #[serde(rename = "timeline.notice.roomJoinRules")]
+    RoomJoinRules,
+    #[serde(rename = "timeline.notice.roomHistoryVisibility")]
+    RoomHistoryVisibility,
+    #[serde(rename = "timeline.notice.roomPinnedEvents")]
+    RoomPinnedEvents,
+    #[serde(rename = "timeline.notice.roomNameSet")]
+    RoomNameSet,
+    #[serde(rename = "timeline.notice.roomNameChanged")]
+    RoomNameChanged,
+    #[serde(rename = "timeline.notice.roomNameRemoved")]
+    RoomNameRemoved,
+    #[serde(rename = "timeline.notice.roomNameChangedGeneric")]
+    RoomNameChangedGeneric,
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineNoticeI18n {
+    pub key: TimelineNoticeI18nKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_name: Option<String>,
+}
+impl fmt::Debug for TimelineNoticeI18n {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineNoticeI18n")
+            .field("key", &self.key)
+            .field("has_old_name", &self.old_name.is_some())
+            .field("has_new_name", &self.new_name.is_some())
+            .finish()
+    }
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineItem {
+    pub id: TimelineItemId,
+    pub sender: Option<String>,
+    #[serde(default)]
+    pub sender_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_avatar: Option<AvatarImage>,
+    pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice_i18n: Option<TimelineNoticeI18n>,
+    #[serde(default)]
+    pub message_kind: TimelineMessageKind,
+    #[serde(default)]
+    pub spoiler_spans: Vec<TimelineSpoilerSpan>,
+    pub timestamp_ms: Option<u64>,
+    pub in_reply_to_event_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formatted: Option<TimelineFormattedBody>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_quote: Option<ReplyQuote>,
+    #[serde(default)]
+    pub thread_root: Option<String>,
+    #[serde(default)]
+    pub thread_summary: Option<ThreadSummaryDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<TimelineMedia>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_previews: Option<Vec<LinkPreview>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link_ranges: Vec<TimelineLinkRange>,
+    #[serde(default)]
+    pub reactions: Vec<ReactionGroup>,
+    #[serde(default)]
+    pub can_react: bool,
+    #[serde(default)]
+    pub is_redacted: bool,
+    #[serde(default)]
+    pub is_hidden: bool,
+    #[serde(default)]
+    pub can_redact: bool,
+    #[serde(default)]
+    pub is_edited: bool,
+    #[serde(default)]
+    pub can_edit: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unable_to_decrypt: Option<TimelineUnableToDecrypt>,
+    /// Room-key request presentation state (issue #460): closed stage + code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_state: Option<RoomKeyRequestStateDto>,
+    #[serde(default)]
+    pub actions: TimelineMessageActions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_state: Option<TimelineSendState>,
+}
+/// Rust-owned room-key request presentation state for a timeline item
+/// (issue #460). Only closed tokens cross the wire.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoomKeyRequestStage {
+    Sent,
+    Automatic,
+    StillWaiting,
+    Withheld,
+    DecryptionRecovered,
+    SendFailed,
+}
+/// Closed `m.room_key.withheld` codes correlatable from the SDK store
+/// (issue #460). The SDK retains exactly these four codes; everything else
+/// renders the generic refusal copy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoomKeyRequestWithheldCode {
+    Blacklisted,
+    Unverified,
+    Unauthorised,
+    Unavailable,
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomKeyRequestStateDto {
+    pub stage: RoomKeyRequestStage,
+    pub withheld_code: Option<RoomKeyRequestWithheldCode>,
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineUnableToDecrypt {
+    pub session_id: Option<String>,
+    pub reason: TimelineUnableToDecryptReason,
+    pub can_request_keys: bool,
+    /// Closed recovery-stage token (issue #478), present while a standard-only
+    /// recovery operation is running or settled for this session.
+    pub recovery_stage: Option<String>,
+    /// Closed terminal-guidance token (issue #478), present when automatic
+    /// recovery is exhausted or impossible.
+    pub recovery_guidance: Option<String>,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineUnableToDecryptReason {
+    MissingRoomKey,
+    Withheld,
+    Malformed,
+    Unknown,
+}
+impl fmt::Debug for TimelineItem {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineItem")
+            .field("id", &self.id)
+            .field("sender", &self.sender.as_ref().map(|_| "UserId(..)"))
+            .field(
+                "sender_label",
+                &self.sender_label.as_ref().map(|_| "SenderLabel(..)"),
+            )
+            .field(
+                "sender_avatar",
+                &self.sender_avatar.as_ref().map(|_| "AvatarImage(..)"),
+            )
+            .field("body", &self.body.as_ref().map(|_| "MessageBody(..)"))
+            .field(
+                "notice_i18n",
+                &self.notice_i18n.as_ref().map(|notice| notice.key),
+            )
+            .field("message_kind", &self.message_kind)
+            .field("spoiler_spans", &self.spoiler_spans.len())
+            .field("timestamp_ms", &self.timestamp_ms)
+            .field(
+                "in_reply_to_event_id",
+                &self.in_reply_to_event_id.as_ref().map(|_| "EventId(..)"),
+            )
+            .field(
+                "formatted",
+                &self.formatted.as_ref().map(|_| "TimelineFormattedBody(..)"),
+            )
+            .field(
+                "reply_quote",
+                &self.reply_quote.as_ref().map(|quote| quote.state.as_str()),
+            )
+            .field("thread_root", &self.thread_root)
+            .field(
+                "thread_summary",
+                &self.thread_summary.as_ref().map(|_| "ThreadSummary(..)"),
+            )
+            .field("media", &self.media)
+            .field(
+                "link_previews",
+                &self
+                    .link_previews
+                    .as_ref()
+                    .map(|previews| format!("{} preview(s)", previews.len())),
+            )
+            .field("link_ranges", &self.link_ranges.len())
+            .field("reactions", &self.reactions)
+            .field("can_react", &self.can_react)
+            .field("is_redacted", &self.is_redacted)
+            .field("is_hidden", &self.is_hidden)
+            .field("can_redact", &self.can_redact)
+            .field("is_edited", &self.is_edited)
+            .field("can_edit", &self.can_edit)
+            .field("unable_to_decrypt", &self.unable_to_decrypt)
+            .field("actions", &self.actions)
+            .field("send_state", &self.send_state)
+            .finish()
+    }
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineMedia {
+    pub kind: TimelineMediaKind,
+    pub filename: String,
+    pub source: TimelineMediaSource,
+    pub mimetype: Option<String>,
+    pub size: Option<u64>,
+    pub width: Option<u64>,
+    pub height: Option<u64>,
+    pub thumbnail: Option<TimelineMediaThumbnail>,
+}
+impl fmt::Debug for TimelineMedia {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineMedia")
+            .field("kind", &self.kind)
+            .field("filename", &"MediaFilename(..)")
+            .field("source", &self.source)
+            .field("mimetype", &self.mimetype)
+            .field("size", &self.size)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("thumbnail", &self.thumbnail)
+            .finish()
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TimelineMediaKind {
+    Image,
+    File,
+    Audio,
+    Video,
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineMediaSource {
+    pub mxc_uri: String,
+    pub encrypted: bool,
+    pub encryption_version: Option<String>,
+}
+impl fmt::Debug for TimelineMediaSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TimelineMediaSource")
+            .field("mxc_uri", &"MxcUri(..)")
+            .field("encrypted", &self.encrypted)
+            .field("encryption_version", &self.encryption_version)
+            .finish()
+    }
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TimelineMediaThumbnail {
+    pub source: TimelineMediaSource,
+    pub mimetype: Option<String>,
+    pub size: Option<u64>,
+    pub width: Option<u64>,
+    pub height: Option<u64>,
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LinkPreviewState {
+    #[default]
+    Pending,
+    Loading,
+    Ready,
+    Failed,
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LinkPreviewImage {
+    pub source: TimelineMediaSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u64>,
+    #[serde(default)]
+    pub thumbnail: AvatarThumbnailState,
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LinkPreview {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<LinkPreviewImage>,
+    #[serde(default)]
+    pub state: LinkPreviewState,
+}
+impl fmt::Debug for LinkPreview {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LinkPreview")
+            .field("state", &self.state)
+            .field("has_image", &self.image.is_some())
+            .finish()
+    }
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ThreadSummaryDto {
+    pub reply_count: u32,
+    pub latest_event_id: Option<String>,
+    pub latest_sender: Option<String>,
+    #[serde(default)]
+    pub latest_sender_label: Option<String>,
+    pub latest_body_preview: Option<String>,
+    pub latest_timestamp_ms: Option<u64>,
+}
+/// Root hydration payload keyed by the Room and `root_event_id` carried in
+/// the surrounding `TimelineEvent`. The activity identity is intentionally
+/// distinct from the root/content identity: it places the root block while
+/// actions continue targeting `root_event_id`.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ThreadRootProjectionSourceDto {
+    /// A bounded load-or-fetch projection whose lifetime follows a canonical
+    /// reply row in the Room window.
+    #[default]
+    Hydration,
+    /// A Ready snapshot copied from an already-known root during bounded
+    /// replay. Its epoch scopes later Clear events to this exact ownership.
+    ReplayKnown { epoch: u64 },
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ThreadRootProjectionDto {
+    pub root_event_id: String,
+    pub activity_event_id: String,
+    pub activity_timestamp_ms: Option<u64>,
+    /// A replay already had this complete root in the actor cache but omitted
+    /// it from the bounded display window. The frontend may retain this ready
+    /// snapshot without a canonical reply row until the Room projection is
+    /// explicitly cleared or replaced.
+    #[serde(default)]
+    pub retain_without_reply: bool,
+    /// The owner of this snapshot. Clears are source-scoped so a stale replay
+    /// clear cannot delete a newer ordinary hydration for the same root.
+    #[serde(default)]
+    pub source: ThreadRootProjectionSourceDto,
+    pub state: ThreadRootProjectionStateDto,
+}
+impl fmt::Debug for ThreadRootProjectionDto {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ThreadRootProjectionDto")
+            .field("root_event_id", &"EventId(..)")
+            .field("activity_event_id", &"EventId(..)")
+            .field("activity_timestamp_ms", &self.activity_timestamp_ms)
+            .field("retain_without_reply", &self.retain_without_reply)
+            .field("source", &self.source)
+            .field("state", &self.state)
+            .finish()
+    }
+}
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ThreadRootProjectionStateDto {
+    Pending,
+    Ready {
+        item: TimelineItem,
+    },
+    Failed {
+        failure_kind: OperationFailureKind,
+    },
+    /// Explicit owner-lifecycle cleanup. The projection is not renderable and
+    /// frontend stores must delete the keyed snapshot immediately.
+    Cleared,
+}
+impl fmt::Debug for ThreadRootProjectionStateDto {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pending => formatter.write_str("Pending"),
+            Self::Ready { item } => formatter.debug_struct("Ready").field("item", item).finish(),
+            Self::Failed { failure_kind } => formatter
+                .debug_struct("Failed")
+                .field("failure_kind", failure_kind)
+                .finish(),
+            Self::Cleared => formatter.write_str("Cleared"),
+        }
+    }
+}
+pub fn project_timeline_event_display_labels(event: &mut TimelineEvent, state: &AppState) {
+    match event {
+        TimelineEvent::InitialItems { items, .. } => {
+            for item in items {
+                project_timeline_item_display_labels(item, state);
+            }
+        }
+        TimelineEvent::ItemsUpdated { diffs, .. } => {
+            for diff in diffs {
+                project_timeline_diff_display_labels(diff, state);
+            }
+        }
+        TimelineEvent::ThreadRootProjection { projection, .. } => {
+            if let ThreadRootProjectionStateDto::Ready { item } = &mut projection.state {
+                project_timeline_item_display_labels(item, state);
+            }
+        }
+        TimelineEvent::PaginationStateChanged { .. }
+        | TimelineEvent::AnchorRestoreFinished { .. }
+        | TimelineEvent::SendCompleted { .. }
+        | TimelineEvent::MediaSendQueued { .. }
+        | TimelineEvent::SubmissionAccepted { .. }
+        | TimelineEvent::SubmissionRejected { .. }
+        | TimelineEvent::MessageSourceLoaded { .. }
+        | TimelineEvent::MessageForwarded { .. }
+        | TimelineEvent::MediaUploadProgress { .. }
+        | TimelineEvent::MediaDownloadProgress { .. }
+        | TimelineEvent::MediaDownloadCompleted { .. }
+        | TimelineEvent::MediaDownloadFailed { .. }
+        | TimelineEvent::ResyncRequired { .. }
+        | TimelineEvent::NavigationUpdated { .. }
+        | TimelineEvent::GapPositionsUpdated { .. }
+        | TimelineEvent::GapRepairReleased { .. }
+        | TimelineEvent::DisplayPolicyUpdated { .. }
+        | TimelineEvent::DisplayLabelsUpdated { .. } => {}
+    }
+}
+pub fn project_timeline_item_display_labels(item: &mut TimelineItem, state: &AppState) {
+    item.sender_label =
+        timeline_sender_label(item.sender.as_deref(), item.sender_label.as_deref(), state);
+    item.is_hidden = (state.settings.values.display.hide_redacted && item.is_redacted)
+        || koushi_state::is_ignored_user(&state.profile, item.sender.as_deref());
+    if let Some(reply_quote) = item.reply_quote.as_mut() {
+        reply_quote.sender_label = timeline_sender_label(
+            reply_quote.sender.as_deref(),
+            reply_quote.sender_label.as_deref(),
+            state,
+        );
+    }
+    if let Some(thread_summary) = item.thread_summary.as_mut() {
+        thread_summary.latest_sender_label = timeline_sender_label(
+            thread_summary.latest_sender.as_deref(),
+            thread_summary.latest_sender_label.as_deref(),
+            state,
+        );
+    }
+    for reaction in &mut item.reactions {
+        for sender in &mut reaction.sender_preview {
+            sender.display_label = timeline_sender_label(
+                Some(sender.user_id.as_str()),
+                sender.display_label.as_deref(),
+                state,
+            );
+        }
+    }
+}
+fn project_timeline_diff_display_labels(diff: &mut TimelineDiff, state: &AppState) {
+    match diff {
+        TimelineDiff::PushFront { item }
+        | TimelineDiff::PushBack { item }
+        | TimelineDiff::Insert { item, .. }
+        | TimelineDiff::Set { item, .. } => project_timeline_item_display_labels(item, state),
+        TimelineDiff::Reset { items } => {
+            for item in items {
+                project_timeline_item_display_labels(item, state);
+            }
+        }
+        TimelineDiff::Remove { .. } | TimelineDiff::Truncate { .. } | TimelineDiff::Clear => {}
+    }
+}
+fn timeline_sender_label(
+    sender: Option<&str>,
+    upstream_display_label: Option<&str>,
+    state: &AppState,
+) -> Option<String> {
+    let sender = sender?;
+    resolve_optional_user_display_name(
+        &state.profile,
+        sender,
+        upstream_display_label,
+        timeline_projection_own_user_id(state),
+    )
+}
+pub fn timeline_projection_own_user_id(state: &AppState) -> Option<&str> {
+    match &state.session {
+        SessionState::Ready(info) => Some(info.user_id.as_str()),
+        SessionState::SignedOut
+        | SessionState::Restoring
+        | SessionState::Authenticating { .. }
+        | SessionState::Provisional { .. }
+        | SessionState::AwaitingVerification { .. }
+        | SessionState::Verifying { .. }
+        | SessionState::AwaitingBootstrapConfirmation { .. }
+        | SessionState::Rejecting { .. }
+        | SessionState::LoggingOut
+        | SessionState::Locked(_)
+        | SessionState::CapabilityBlocked { .. }
+        | SessionState::SwitchingAccount { .. } => None,
+    }
+}
+pub fn derive_display_label_updates(
+    profile: &ProfileState,
+    own_user_id: Option<&str>,
+) -> Vec<TimelineDisplayLabelUpdate> {
+    derive_display_label_updates_for_user_ids(profile, own_user_id, std::iter::empty::<&str>())
+}
+pub fn derive_display_label_updates_for_user_ids<'a>(
+    profile: &ProfileState,
+    own_user_id: Option<&str>,
+    additional_user_ids: impl IntoIterator<Item = &'a str>,
+) -> Vec<TimelineDisplayLabelUpdate> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut updates = Vec::new();
+
+    let mut push = |user_id: &str| {
+        if !seen.insert(user_id.to_owned()) {
+            return;
+        }
+        let label = resolve_user_display_name(profile, user_id, None, own_user_id);
+        updates.push(TimelineDisplayLabelUpdate {
+            user_id: user_id.to_owned(),
+            display_label: label,
+        });
+    };
+
+    for uid in profile.local_aliases.keys() {
+        push(uid);
+    }
+    for uid in profile.users.keys() {
+        push(uid);
+    }
+    if let Some(uid) = own_user_id {
+        push(uid);
+    }
+    for uid in additional_user_ids {
+        push(uid);
+    }
+
+    updates
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReactionGroup {
+    pub key: String,
+    pub count: u32,
+    pub reacted_by_me: bool,
+    pub my_reaction_event_id: Option<String>,
+    pub sender_preview: Vec<ReactionSender>,
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReactionSender {
+    pub user_id: String,
+    pub display_label: Option<String>,
+}
+/// `VectorDiff`-shaped update preserving positional operations so the UI can
+/// distinguish prepend pagination from live append/update/remove.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TimelineDiff {
+    PushFront { item: TimelineItem },
+    PushBack { item: TimelineItem },
+    Insert { index: usize, item: TimelineItem },
+    Set { index: usize, item: TimelineItem },
+    Remove { index: usize },
+    Truncate { length: usize },
+    Clear,
+    Reset { items: Vec<TimelineItem> },
+}
+
+#[cfg(test)]
+use super::*;
+
+#[cfg(test)]
+mod tests {
+    const FULL_RANGE_TOPOLOGY_REVISION: u64 = 14_695_981_039_346_656_037;
+    use super::super::test_support::fake_rid;
+    use super::*;
+    use serde_json::json;
+    fn timeline_item_fixture(event_id: &str, is_redacted: bool) -> TimelineItem {
+        TimelineItem {
+            request_state: None,
+            id: TimelineItemId::Event {
+                event_id: event_id.to_owned(),
+            },
+            sender: Some("@alice:example.invalid".to_owned()),
+            sender_label: None,
+            sender_avatar: None,
+            body: if is_redacted {
+                None
+            } else {
+                Some("visible body".to_owned())
+            },
+            notice_i18n: None,
+            message_kind: Default::default(),
+            spoiler_spans: Vec::new(),
+            timestamp_ms: Some(1),
+            in_reply_to_event_id: None,
+            formatted: None,
+            reply_quote: None,
+            thread_root: None,
+            thread_summary: None,
+            media: None,
+            link_previews: None,
+            link_ranges: Vec::new(),
+            reactions: Vec::new(),
+            can_react: !is_redacted,
+            is_redacted,
+            is_hidden: false,
+            can_redact: !is_redacted,
+            is_edited: false,
+            can_edit: false,
+            actions: TimelineMessageActions::default(),
+            send_state: None,
+            unable_to_decrypt: None,
+        }
+    }
+
+    #[test]
+    fn timeline_gap_id_wire_serializes_and_deserializes_full_range_revision() {
+        let gap_id = TimelineGapId {
+            topology_revision: FULL_RANGE_TOPOLOGY_REVISION,
+            ordinal: 0,
+        };
+
+        let encoded = serde_json::to_value(gap_id).expect("timeline gap id serializes");
+        assert_eq!(
+            encoded,
+            json!({
+                "topology_revision": "14695981039346656037",
+                "ordinal": 0,
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<TimelineGapId>(encoded)
+                .expect("canonical decimal-string topology revision deserializes"),
+            gap_id
+        );
+    }
+    #[test]
+    fn timeline_gap_id_wire_rejects_noncanonical_revision_encodings() {
+        for encoded in [
+            r#"{"topology_revision":14695981039346656037,"ordinal":0}"#,
+            r#"{"topology_revision":"+14695981039346656037","ordinal":0}"#,
+            r#"{"topology_revision":" 14695981039346656037","ordinal":0}"#,
+            r#"{"topology_revision":"014695981039346656037","ordinal":0}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<TimelineGapId>(encoded).is_err(),
+                "noncanonical topology revision must be rejected: {encoded}"
+            );
+        }
+    }
+    #[test]
+    fn timeline_item_serializes_thread_fields_reactions_and_redaction_affordances() {
+        let item = TimelineItem {
+            request_state: None,
+            id: TimelineItemId::Event {
+                event_id: "$event:test".to_owned(),
+            },
+            sender: Some("@alice:example.invalid".to_owned()),
+            sender_label: None,
+            sender_avatar: None,
+            body: Some("hello".to_owned()),
+            notice_i18n: None,
+            message_kind: Default::default(),
+            spoiler_spans: Vec::new(),
+            timestamp_ms: Some(1_234),
+            in_reply_to_event_id: None,
+            formatted: None,
+            reply_quote: None,
+            thread_root: Some("$root:test".to_owned()),
+            thread_summary: Some(ThreadSummaryDto {
+                reply_count: 2,
+                latest_event_id: Some("$latest-reply:test".to_owned()),
+                latest_sender: Some("@bob:example.invalid".to_owned()),
+                latest_sender_label: None,
+                latest_body_preview: Some("latest reply".to_owned()),
+                latest_timestamp_ms: Some(1_456),
+            }),
+            media: None,
+            link_previews: None,
+            link_ranges: Vec::new(),
+            reactions: vec![ReactionGroup {
+                key: "👍".to_owned(),
+                count: 2,
+                reacted_by_me: true,
+                my_reaction_event_id: Some("$reaction:test".to_owned()),
+                sender_preview: vec![ReactionSender {
+                    user_id: "@alice:example.invalid".to_owned(),
+                    display_label: Some("Alice".to_owned()),
+                }],
+            }],
+            can_react: true,
+            is_redacted: false,
+            is_hidden: false,
+            can_redact: true,
+            is_edited: true,
+            can_edit: true,
+            actions: TimelineMessageActions::default(),
+            send_state: None,
+            unable_to_decrypt: None,
+        };
+
+        let value = serde_json::to_value(&item).expect("timeline item serializes");
+
+        assert_eq!(
+            value["reactions"],
+            json!([
+                {
+                    "key": "👍",
+                    "count": 2,
+                    "reacted_by_me": true,
+                    "my_reaction_event_id": "$reaction:test",
+                    "sender_preview": [
+                        {
+                            "user_id": "@alice:example.invalid",
+                            "display_label": "Alice"
+                        }
+                    ]
+                }
+            ])
+        );
+        assert_eq!(value["can_react"], json!(true));
+        assert_eq!(value["is_redacted"], json!(false));
+        assert_eq!(value["can_redact"], json!(true));
+        assert_eq!(value["is_edited"], json!(true));
+        assert_eq!(value["can_edit"], json!(true));
+        assert_eq!(value["thread_root"], json!("$root:test"));
+        assert_eq!(
+            value["thread_summary"],
+            json!({
+                "reply_count": 2,
+                "latest_event_id": "$latest-reply:test",
+                "latest_sender": "@bob:example.invalid",
+                "latest_sender_label": null,
+                "latest_body_preview": "latest reply",
+                "latest_timestamp_ms": 1456
+            })
+        );
+    }
+    #[test]
+    fn timeline_item_serializes_reply_quote_without_debugging_body() {
+        let item = TimelineItem {
+            request_state: None,
+            id: TimelineItemId::Event {
+                event_id: "$reply:test".to_owned(),
+            },
+            sender: Some("@alice:example.invalid".to_owned()),
+            sender_label: None,
+            sender_avatar: None,
+            body: Some("reply body".to_owned()),
+            notice_i18n: None,
+            message_kind: Default::default(),
+            spoiler_spans: Vec::new(),
+            timestamp_ms: Some(1_234),
+            in_reply_to_event_id: Some("$root:test".to_owned()),
+            formatted: None,
+            reply_quote: Some(koushi_state::ReplyQuote {
+                event_id: "$root:test".to_owned(),
+                sender: Some("@bob:example.invalid".to_owned()),
+                sender_label: None,
+                body_preview: Some("quoted body".to_owned()),
+                formatted: Some(koushi_state::ReplyQuoteFormattedBody {
+                    html: "<p>quoted <strong>body</strong></p>".to_owned(),
+                    plain_text: "quoted body".to_owned(),
+                    code_blocks: Vec::new(),
+                }),
+                state: koushi_state::ReplyQuoteState::Ready,
+            }),
+            thread_root: None,
+            thread_summary: None,
+            media: None,
+            link_previews: None,
+            link_ranges: Vec::new(),
+            reactions: Vec::new(),
+            can_react: true,
+            is_redacted: false,
+            is_hidden: false,
+            can_redact: true,
+            is_edited: false,
+            can_edit: false,
+            actions: TimelineMessageActions::default(),
+            send_state: None,
+            unable_to_decrypt: None,
+        };
+
+        let value = serde_json::to_value(&item).expect("timeline item serializes");
+
+        assert_eq!(
+            value["reply_quote"],
+            json!({
+                "event_id": "$root:test",
+                "sender": "@bob:example.invalid",
+                "sender_label": null,
+                "body_preview": "quoted body",
+                "formatted": {
+                    "html": "<p>quoted <strong>body</strong></p>",
+                    "plain_text": "quoted body",
+                    "code_blocks": []
+                },
+                "state": "ready"
+            })
+        );
+        let debug = format!("{item:?}");
+        assert!(debug.contains("reply_quote"));
+        assert!(!debug.contains("quoted body"), "{debug}");
+        assert!(!debug.contains("$root:test"), "{debug}");
+    }
+    #[test]
+    fn timeline_item_serializes_formatted_body_without_debugging_content() {
+        let item = TimelineItem {
+                request_state: None,
+                id: TimelineItemId::Event {
+                    event_id: "$formatted:test".to_owned(),
+                },
+                sender: Some("@alice:example.invalid".to_owned()),
+                sender_label: None,
+                sender_avatar: None,
+                body: Some("plain fallback".to_owned()),
+                notice_i18n: None,
+                message_kind: TimelineMessageKind::Emote,
+                spoiler_spans: vec![TimelineSpoilerSpan {
+                    start_utf16: 0,
+                    end_utf16: 13,
+                    reason: Some("reason".to_owned()),
+                }],
+                timestamp_ms: Some(1_234),
+                in_reply_to_event_id: None,
+                formatted: Some(TimelineFormattedBody {
+                    html: "<strong>private html</strong><pre><code class=\"language-rust\">private_code()</code></pre>"
+                        .to_owned(),
+                    plain_text: "private htmlprivate_code()".to_owned(),
+                    code_blocks: vec![TimelineCodeBlock {
+                        language: Some("rust".to_owned()),
+                        body: "private_code()".to_owned(),
+                    }],
+                }),
+                reply_quote: None,
+                thread_root: None,
+                thread_summary: None,
+                media: None,
+                link_previews: None,
+                link_ranges: Vec::new(),
+                reactions: Vec::new(),
+                can_react: true,
+                is_redacted: false,
+                is_hidden: false,
+                can_redact: true,
+                is_edited: false,
+                can_edit: true,
+                actions: TimelineMessageActions::default(),
+                send_state: None,
+                unable_to_decrypt: None,
+            };
+
+        let value = serde_json::to_value(&item).expect("timeline item serializes");
+
+        assert_eq!(
+            value["formatted"],
+            json!({
+                "html": "<strong>private html</strong><pre><code class=\"language-rust\">private_code()</code></pre>",
+                "plain_text": "private htmlprivate_code()",
+                "code_blocks": [
+                    {
+                        "language": "rust",
+                        "body": "private_code()"
+                    }
+                ]
+            })
+        );
+        assert_eq!(value["message_kind"], json!("emote"));
+        assert_eq!(
+            value["spoiler_spans"],
+            json!([
+                {
+                    "start_utf16": 0,
+                    "end_utf16": 13,
+                    "reason": "reason"
+                }
+            ])
+        );
+        let debug = format!("{item:?}");
+        assert!(debug.contains("TimelineFormattedBody"));
+        assert!(!debug.contains("private html"), "{debug}");
+        assert!(!debug.contains("private_code"), "{debug}");
+        assert!(!debug.contains("language-rust"), "{debug}");
+        assert!(!debug.contains("reason"), "{debug}");
+        assert!(!debug.contains("$formatted:test"), "{debug}");
+    }
+    #[test]
+    fn timeline_item_serializes_rust_owned_message_actions() {
+        let item = TimelineItem {
+            request_state: None,
+            id: TimelineItemId::Event {
+                event_id: "$event:test".to_owned(),
+            },
+            sender: Some("@alice:example.invalid".to_owned()),
+            sender_label: None,
+            sender_avatar: None,
+            body: Some("copyable body".to_owned()),
+            notice_i18n: None,
+            message_kind: Default::default(),
+            spoiler_spans: Vec::new(),
+            timestamp_ms: Some(1_234),
+            in_reply_to_event_id: None,
+            formatted: None,
+            reply_quote: None,
+            thread_root: None,
+            thread_summary: None,
+            media: None,
+            link_previews: None,
+            link_ranges: Vec::new(),
+            reactions: Vec::new(),
+            can_react: true,
+            is_redacted: false,
+            is_hidden: false,
+            can_redact: true,
+            is_edited: false,
+            can_edit: true,
+            actions: message_actions_for_timeline_item(
+                "!room:test",
+                &TimelineItemId::Event {
+                    event_id: "$event:test".to_owned(),
+                },
+                Some("copyable body"),
+                false,
+                false,
+            ),
+            send_state: None,
+            unable_to_decrypt: None,
+        };
+
+        let value = serde_json::to_value(&item).expect("timeline item serializes");
+
+        assert_eq!(
+            value["actions"],
+            json!({
+                "can_copy": true,
+                "can_forward": true,
+                "can_reply": true,
+                "can_permalink": true,
+                "can_view_source": true,
+                "permalink": "https://matrix.to/#/!room%3Atest/%24event%3Atest"
+            })
+        );
+        let debug = format!("{item:?}");
+        assert!(debug.contains("actions"), "{debug}");
+        assert!(!debug.contains("https://matrix.to"), "{debug}");
+        assert!(!debug.contains("$event:test"), "{debug}");
+        assert!(!debug.contains("!room:test"), "{debug}");
+
+        let redacted = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$redacted:test".to_owned(),
+            },
+            Some("redacted body"),
+            true,
+            true,
+        );
+        assert!(!redacted.can_copy);
+        assert!(!redacted.can_forward);
+        assert!(redacted.can_permalink);
+        assert!(redacted.can_view_source);
+
+        let media_without_body = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$media:test".to_owned(),
+            },
+            None,
+            true,
+            false,
+        );
+        assert!(!media_without_body.can_copy);
+        assert!(!media_without_body.can_forward);
+        assert!(media_without_body.can_permalink);
+        assert!(media_without_body.can_view_source);
+
+        let local_echo = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Transaction {
+                transaction_id: "txn:test".to_owned(),
+            },
+            Some("local echo"),
+            false,
+            false,
+        );
+        assert_eq!(local_echo, TimelineMessageActions::default());
+    }
+    #[test]
+    fn message_actions_allow_reply_for_captionless_stable_events() {
+        for media_kind in ["file", "image", "audio", "video"] {
+            let actions = message_actions_for_timeline_item(
+                "!room:test",
+                &TimelineItemId::Event {
+                    event_id: format!("${media_kind}:test"),
+                },
+                None,
+                true,
+                false,
+            );
+
+            assert!(actions.can_reply, "{media_kind} event should be replyable");
+        }
+
+        let redacted = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$redacted:test".to_owned(),
+            },
+            None,
+            true,
+            true,
+        );
+        assert!(!redacted.can_reply);
+
+        let local_echo = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Transaction {
+                transaction_id: "txn:test".to_owned(),
+            },
+            None,
+            true,
+            false,
+        );
+        assert!(!local_echo.can_reply);
+    }
+    #[test]
+    fn message_actions_reject_stable_non_message_events() {
+        let actions = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$state-event:test".to_owned(),
+            },
+            None,
+            false,
+            false,
+        );
+
+        assert!(!actions.can_reply);
+    }
+    #[test]
+    fn message_actions_allow_reply_for_empty_text_body() {
+        let actions = message_actions_for_timeline_item(
+            "!room:test",
+            &TimelineItemId::Event {
+                event_id: "$empty-text:test".to_owned(),
+            },
+            Some(""),
+            false,
+            false,
+        );
+
+        assert!(actions.can_reply);
+    }
+    #[test]
+    fn message_source_and_forward_events_are_typed_and_redacted_in_debug() {
+        let key = TimelineKey::room(AccountKey("@alice:test".to_owned()), "!room:test");
+        let source = TimelineMessageSource {
+            event_id: "$event:test".to_owned(),
+            sender: Some("@alice:test".to_owned()),
+            timestamp_ms: Some(1234),
+            body: Some("private source body".to_owned()),
+            in_reply_to_event_id: Some("$root:test".to_owned()),
+            thread_root: Some("$thread:test".to_owned()),
+            is_redacted: false,
+            is_edited: true,
+            has_media: false,
+            megolm_session_fingerprint: Some("AbCdEfGhIjKl".to_owned()),
+            original_json: Some(json!({
+                "event_id": "$event:test",
+                "sender": "@alice:test",
+                "type": "m.room.message",
+                "content": {
+                    "body": "private source body",
+                    "msgtype": "m.text"
+                },
+                "origin_server_ts": 1234
+            })),
+        };
+        let loaded = TimelineEvent::MessageSourceLoaded {
+            request_id: fake_rid(30),
+            key: key.clone(),
+            source: source.clone(),
+        };
+        let forwarded = TimelineEvent::MessageForwarded {
+            request_id: fake_rid(31),
+            key,
+            destination_room_id: "!destination:test".to_owned(),
+            transaction_id: "txn-forward-private".to_owned(),
+            event_id: "$forwarded:test".to_owned(),
+        };
+
+        let value = serde_json::to_value(&loaded).expect("source event serializes");
+        assert_eq!(
+            value,
+            json!({
+                "MessageSourceLoaded": {
+                    "request_id": { "connection_id": 7, "sequence": 30 },
+                    "key": {
+                        "account_key": "@alice:test",
+                        "kind": { "Room": { "room_id": "!room:test" } }
+                    },
+                    "source": {
+                        "event_id": "$event:test",
+                        "sender": "@alice:test",
+                        "timestamp_ms": 1234,
+                        "body": "private source body",
+                        "in_reply_to_event_id": "$root:test",
+                        "thread_root": "$thread:test",
+                        "is_redacted": false,
+                        "is_edited": true,
+                        "has_media": false,
+                        "megolm_session_fingerprint": "AbCdEfGhIjKl",
+                        "original_json": {
+                            "content": {
+                                "body": "private source body",
+                                "msgtype": "m.text"
+                            },
+                            "event_id": "$event:test",
+                            "origin_server_ts": 1234,
+                            "sender": "@alice:test",
+                            "type": "m.room.message"
+                        }
+                    }
+                }
+            })
+        );
+
+        for debug in [
+            format!("{source:?}"),
+            format!("{loaded:?}"),
+            format!("{forwarded:?}"),
+        ] {
+            assert!(!debug.contains("private source body"), "{debug}");
+            assert!(!debug.contains("$event:test"), "{debug}");
+            assert!(!debug.contains("$root:test"), "{debug}");
+            assert!(!debug.contains("$thread:test"), "{debug}");
+            assert!(!debug.contains("$forwarded:test"), "{debug}");
+            assert!(!debug.contains("!destination:test"), "{debug}");
+            assert!(!debug.contains("txn-forward-private"), "{debug}");
+            assert!(!debug.contains("AbCdEfGhIjKl"), "{debug}");
+        }
+    }
+    #[test]
+    fn timeline_item_serializes_outbound_send_state_without_raw_error() {
+        let item = TimelineItem {
+            request_state: None,
+            id: TimelineItemId::Transaction {
+                transaction_id: "txn-send-state".to_owned(),
+            },
+            sender: Some("@alice:example.invalid".to_owned()),
+            sender_label: None,
+            sender_avatar: None,
+            body: Some("hello".to_owned()),
+            notice_i18n: None,
+            message_kind: Default::default(),
+            spoiler_spans: Vec::new(),
+            timestamp_ms: Some(1_234),
+            in_reply_to_event_id: None,
+            formatted: None,
+            reply_quote: None,
+            thread_root: None,
+            thread_summary: None,
+            media: None,
+            link_previews: None,
+            link_ranges: Vec::new(),
+            reactions: Vec::new(),
+            can_react: false,
+            is_redacted: false,
+            is_hidden: false,
+            can_redact: false,
+            is_edited: false,
+            can_edit: false,
+            actions: TimelineMessageActions::default(),
+            send_state: Some(TimelineSendState::NotSent {
+                reason: TimelineSendFailureReason::Recoverable,
+            }),
+            unable_to_decrypt: None,
+        };
+
+        let value = serde_json::to_value(&item).expect("timeline item serializes");
+
+        assert_eq!(
+            value["send_state"],
+            json!({
+                "kind": "notSent",
+                "reason": "recoverable"
+            })
+        );
+        let debug = format!("{item:?}");
+        assert!(debug.contains("NotSent"), "{debug}");
+        assert!(!debug.contains("hello"), "{debug}");
+    }
+    #[test]
+    fn timeline_item_serializes_media_metadata_without_encryption_secrets() {
+        let item = TimelineItem {
+            request_state: None,
+            id: TimelineItemId::Event {
+                event_id: "$media:test".to_owned(),
+            },
+            sender: Some("@alice:example.invalid".to_owned()),
+            sender_label: None,
+            sender_avatar: None,
+            body: Some("synthetic caption".to_owned()),
+            notice_i18n: None,
+            message_kind: Default::default(),
+            spoiler_spans: Vec::new(),
+            timestamp_ms: Some(1_234),
+            in_reply_to_event_id: None,
+            formatted: None,
+            reply_quote: None,
+            thread_root: None,
+            thread_summary: None,
+            media: Some(TimelineMedia {
+                kind: TimelineMediaKind::Image,
+                filename: "synthetic-image.png".to_owned(),
+                source: TimelineMediaSource {
+                    mxc_uri: "mxc://example.invalid/media".to_owned(),
+                    encrypted: true,
+                    encryption_version: Some("v2".to_owned()),
+                },
+                mimetype: Some("image/png".to_owned()),
+                size: Some(68),
+                width: Some(2),
+                height: Some(2),
+                thumbnail: Some(TimelineMediaThumbnail {
+                    source: TimelineMediaSource {
+                        mxc_uri: "mxc://example.invalid/thumb".to_owned(),
+                        encrypted: true,
+                        encryption_version: Some("v2".to_owned()),
+                    },
+                    mimetype: Some("image/png".to_owned()),
+                    size: Some(32),
+                    width: Some(1),
+                    height: Some(1),
+                }),
+            }),
+            link_previews: None,
+            link_ranges: Vec::new(),
+            reactions: Vec::new(),
+            can_react: true,
+            is_redacted: false,
+            is_hidden: false,
+            can_redact: true,
+            is_edited: false,
+            can_edit: false,
+            actions: TimelineMessageActions::default(),
+            send_state: None,
+            unable_to_decrypt: None,
+        };
+
+        let value = serde_json::to_value(&item).expect("timeline item serializes");
+
+        assert_eq!(
+            value["media"],
+            json!({
+                "kind": "Image",
+                "filename": "synthetic-image.png",
+                "source": {
+                    "mxc_uri": "mxc://example.invalid/media",
+                    "encrypted": true,
+                    "encryption_version": "v2"
+                },
+                "mimetype": "image/png",
+                "size": 68,
+                "width": 2,
+                "height": 2,
+                "thumbnail": {
+                    "source": {
+                        "mxc_uri": "mxc://example.invalid/thumb",
+                        "encrypted": true,
+                        "encryption_version": "v2"
+                    },
+                    "mimetype": "image/png",
+                    "size": 32,
+                    "width": 1,
+                    "height": 1
+                }
+            })
+        );
+        let serialized = serde_json::to_string(&item).expect("timeline item json");
+        assert!(!serialized.contains("key"));
+        assert!(!serialized.contains("hashes"));
+
+        let debug = format!("{item:?}");
+        assert!(!debug.contains("synthetic caption"), "{debug}");
+        assert!(!debug.contains("synthetic-image.png"), "{debug}");
+        assert!(!debug.contains("mxc://example.invalid"), "{debug}");
+        assert!(!debug.contains("$media:test"), "{debug}");
+    }
+    #[test]
+    fn media_timeline_event_debug_redacts_routing_and_media_identifiers() {
+        let key = TimelineKey::room(
+            AccountKey("@alice:example.invalid".to_owned()),
+            "!room:example.invalid",
+        );
+        let event = TimelineEvent::MediaUploadProgress {
+            request_id: Some(RequestId {
+                connection_id: crate::ids::RuntimeConnectionId(1),
+                sequence: 7,
+            }),
+            key,
+            transaction_id: "txn-media".to_owned(),
+            index: 0,
+            progress: MediaTransferProgress {
+                current: 4,
+                total: 8,
+            },
+            source: Some(TimelineMediaSource {
+                mxc_uri: "mxc://example.invalid/media".to_owned(),
+                encrypted: true,
+                encryption_version: Some("v2".to_owned()),
+            }),
+        };
+
+        let debug = format!("{event:?}");
+        assert!(debug.contains("MediaUploadProgress"), "{debug}");
+        assert!(debug.contains("txn-media"), "{debug}");
+        assert!(!debug.contains("!room:example.invalid"), "{debug}");
+        assert!(!debug.contains("@alice:example.invalid"), "{debug}");
+        assert!(!debug.contains("mxc://example.invalid"), "{debug}");
+    }
+    #[test]
+    fn display_labels_updated_event_serializes_and_redacts_debug() {
+        let labels = vec![
+            TimelineDisplayLabelUpdate {
+                user_id: "@alice:example.invalid".to_owned(),
+                display_label: "Alice Alias".to_owned(),
+            },
+            TimelineDisplayLabelUpdate {
+                user_id: "@bob:example.invalid".to_owned(),
+                display_label: "Bobby".to_owned(),
+            },
+        ];
+        let event = TimelineEvent::DisplayLabelsUpdated { labels };
+
+        let value = serde_json::to_value(&event).expect("DisplayLabelsUpdated serializes");
+        assert_eq!(
+            value,
+            json!({
+                "DisplayLabelsUpdated": {
+                    "labels": [
+                        { "user_id": "@alice:example.invalid", "display_label": "Alice Alias" },
+                        { "user_id": "@bob:example.invalid", "display_label": "Bobby" }
+                    ]
+                }
+            })
+        );
+
+        let debug = format!("{event:?}");
+        assert!(debug.contains("DisplayLabelsUpdated"), "{debug}");
+        assert!(!debug.contains("@alice:example.invalid"), "{debug}");
+        assert!(!debug.contains("@bob:example.invalid"), "{debug}");
+        assert!(!debug.contains("Alice Alias"), "{debug}");
+        assert!(!debug.contains("Bobby"), "{debug}");
+    }
+    #[test]
+    fn timeline_items_project_redacted_visibility_from_settings() {
+        let mut state = AppState::default();
+        state.settings.values.display.hide_redacted = true;
+        let key = TimelineKey::room(
+            AccountKey("@me:example.invalid".to_owned()),
+            "!room:example.invalid",
+        );
+        let mut event = TimelineEvent::InitialItems {
+            request_id: None,
+            cause_request_id: None,
+            key,
+            actor_generation: 0,
+            generation: TimelineGeneration(0),
+            items: vec![
+                timeline_item_fixture("$redacted:example.invalid", true),
+                timeline_item_fixture("$visible:example.invalid", false),
+            ],
+        };
+
+        project_timeline_event_display_labels(&mut event, &state);
+
+        let TimelineEvent::InitialItems { items, .. } = event else {
+            panic!("expected InitialItems");
+        };
+        assert!(items[0].is_redacted);
+        assert!(items[0].is_hidden);
+        assert!(!items[1].is_redacted);
+        assert!(!items[1].is_hidden);
+    }
+    #[test]
+    fn timeline_display_policy_update_serializes_and_redacts_debug() {
+        let event = TimelineEvent::DisplayPolicyUpdated {
+            hide_redacted: true,
+        };
+
+        let value = serde_json::to_value(&event).expect("DisplayPolicyUpdated serializes");
+        assert_eq!(
+            value,
+            json!({
+                "DisplayPolicyUpdated": {
+                    "hide_redacted": true
+                }
+            })
+        );
+
+        let debug = format!("{event:?}");
+        assert!(debug.contains("DisplayPolicyUpdated"), "{debug}");
+        assert!(debug.contains("hide_redacted"), "{debug}");
+    }
+    #[test]
+    fn derive_display_label_updates_resolves_from_profile_state() {
+        let mut state = AppState::default();
+        state.profile.own.display_name = Some("My Name".to_owned());
+        state.profile.local_aliases.insert(
+            "@alice:example.invalid".to_owned(),
+            "Alice Alias".to_owned(),
+        );
+        state.profile.local_aliases.insert(
+            "@bob:example.invalid".to_owned(),
+            "".to_owned(), // empty alias = cleared, falls through
+        );
+        state.profile.users.insert(
+            "@carol:example.invalid".to_owned(),
+            koushi_state::UserProfile {
+                user_id: "@carol:example.invalid".to_owned(),
+                display_name: Some("Carol Upstream".to_owned()),
+                display_label: String::new(),
+                original_display_label: String::new(),
+                mention_search_terms: Vec::new(),
+                avatar: None,
+            },
+        );
+        // own user id for resolve_user_display_name own-user fallback
+        let own_user_id = Some("@me:example.invalid");
+
+        let updates = derive_display_label_updates(&state.profile, own_user_id);
+
+        // Alice: alias present -> label = alias
+        let alice = updates
+            .iter()
+            .find(|u| u.user_id == "@alice:example.invalid")
+            .expect("alice in updates");
+        assert_eq!(alice.display_label, "Alice Alias");
+
+        // Bob: alias is empty -> falls through to MXID since no upstream
+        let bob = updates
+            .iter()
+            .find(|u| u.user_id == "@bob:example.invalid")
+            .expect("bob in updates");
+        assert_eq!(bob.display_label, "@bob:example.invalid");
+
+        // Carol: upstream display_name in users, no alias -> label = upstream
+        let carol = updates
+            .iter()
+            .find(|u| u.user_id == "@carol:example.invalid")
+            .expect("carol in updates");
+        assert_eq!(carol.display_label, "Carol Upstream");
+
+        // Own user is included when own display_name is set
+        let me = updates
+            .iter()
+            .find(|u| u.user_id == "@me:example.invalid")
+            .expect("own user in updates");
+        assert_eq!(me.display_label, "My Name");
+
+        let updates = derive_display_label_updates_for_user_ids(
+            &state.profile,
+            own_user_id,
+            ["@unknown:example.invalid"].into_iter(),
+        );
+        let unknown = updates
+            .iter()
+            .find(|u| u.user_id == "@unknown:example.invalid")
+            .expect("additional user id in updates");
+        assert_eq!(unknown.display_label, "@unknown:example.invalid");
+    }
+    #[test]
+    fn media_download_events_redact_routing_and_source_url_in_debug() {
+        let key = TimelineKey::room(
+            AccountKey("@alice:example.invalid".to_owned()),
+            "!room:example.invalid",
+        );
+        let completed = TimelineEvent::MediaDownloadCompleted {
+            request_id: RequestId {
+                connection_id: crate::ids::RuntimeConnectionId(1),
+                sequence: 7,
+            },
+            key: key.clone(),
+            event_id: "$event:example.invalid".to_owned(),
+            source_url: "/data/secret.png".to_owned(),
+            byte_count: 1234,
+            mimetype: Some("image/png".to_owned()),
+            width: Some(640),
+            height: Some(480),
+        };
+
+        let debug = format!("{completed:?}");
+        assert!(debug.contains("MediaDownloadCompleted"), "{debug}");
+        assert!(debug.contains("byte_count"), "{debug}");
+        assert!(!debug.contains("!room:example.invalid"), "{debug}");
+        assert!(!debug.contains("@alice:example.invalid"), "{debug}");
+        assert!(!debug.contains("$event:example.invalid"), "{debug}");
+        assert!(!debug.contains("/data/secret.png"), "{debug}");
+
+        let failed = TimelineEvent::MediaDownloadFailed {
+            request_id: RequestId {
+                connection_id: crate::ids::RuntimeConnectionId(1),
+                sequence: 8,
+            },
+            key,
+            event_id: "$event:example.invalid".to_owned(),
+            kind: crate::failure::TimelineFailureKind::Network,
+        };
+        let debug = format!("{failed:?}");
+        assert!(debug.contains("MediaDownloadFailed"), "{debug}");
+        assert!(!debug.contains("$event:example.invalid"), "{debug}");
+    }
+    #[test]
+    fn media_download_event_serializes_with_camel_case_fields() {
+        let key = TimelineKey::room(
+            AccountKey("@alice:example.invalid".to_owned()),
+            "!room:example.invalid",
+        );
+        let event = TimelineEvent::MediaDownloadCompleted {
+            request_id: RequestId {
+                connection_id: crate::ids::RuntimeConnectionId(1),
+                sequence: 7,
+            },
+            key,
+            event_id: "$event:example.invalid".to_owned(),
+            source_url: "/data/image.png".to_owned(),
+            byte_count: 1234,
+            mimetype: Some("image/png".to_owned()),
+            width: Some(640),
+            height: Some(480),
+        };
+
+        let value = serde_json::to_value(&event).expect("MediaDownloadCompleted serializes");
+        let completed = value.get("MediaDownloadCompleted").expect("tagged variant");
+        assert_eq!(
+            completed.get("source_url").and_then(|v| v.as_str()),
+            Some("/data/image.png")
+        );
+        assert_eq!(
+            completed.get("byte_count").and_then(|v| v.as_u64()),
+            Some(1234)
+        );
+        assert_eq!(
+            completed.get("mimetype").and_then(|v| v.as_str()),
+            Some("image/png")
+        );
+        assert_eq!(completed.get("width").and_then(|v| v.as_u64()), Some(640));
+        assert_eq!(completed.get("height").and_then(|v| v.as_u64()), Some(480));
+    }
+    #[test]
+    fn avatar_metadata_events_redact_private_mxc_values() {
+        let mut item = timeline_item_fixture("$event:test", false);
+        item.sender_avatar = Some(koushi_state::AvatarImage {
+            mxc_uri: "mxc://example.invalid/private-avatar".to_owned(),
+            thumbnail: koushi_state::AvatarThumbnailState::Ready {
+                source_url: "koushi-thumbnail://localhost/private.bin".to_owned(),
+                width: Some(64),
+                height: Some(64),
+                mime_type: Some("image/png".to_owned()),
+            },
+        });
+        let debug = format!("{:?}", item);
+        assert!(
+            !debug.contains("mxc://example.invalid/private-avatar"),
+            "{debug}"
+        );
+        assert!(
+            !debug.contains("koushi-thumbnail://localhost/private.bin"),
+            "{debug}"
+        );
+        assert!(debug.contains("AvatarImage"), "{debug}");
+    }
+}
