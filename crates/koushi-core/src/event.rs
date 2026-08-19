@@ -53,7 +53,6 @@ pub use timeline::{
     derive_display_label_updates, derive_display_label_updates_for_user_ids,
     matrix_to_event_permalink, message_actions_for_timeline_item, message_source_for_timeline_item,
     project_timeline_event_display_labels, project_timeline_item_display_labels,
-    timeline_projection_own_user_id,
 };
 
 /// Serializable UI snapshot. The full timeline item lists never live here
@@ -153,6 +152,23 @@ pub enum SyncEvent {
     Reconnecting,
     Failed,
     Stopped { request_id: Option<RequestId> },
+}
+pub fn timeline_projection_own_user_id(state: &AppState) -> Option<&str> {
+    match &state.session {
+        SessionState::Ready(info) => Some(info.user_id.as_str()),
+        SessionState::SignedOut
+        | SessionState::Restoring
+        | SessionState::Authenticating { .. }
+        | SessionState::Provisional { .. }
+        | SessionState::AwaitingVerification { .. }
+        | SessionState::Verifying { .. }
+        | SessionState::AwaitingBootstrapConfirmation { .. }
+        | SessionState::Rejecting { .. }
+        | SessionState::LoggingOut
+        | SessionState::Locked(_)
+        | SessionState::CapabilityBlocked { .. }
+        | SessionState::SwitchingAccount { .. } => None,
+    }
 }
 
 #[cfg(test)]

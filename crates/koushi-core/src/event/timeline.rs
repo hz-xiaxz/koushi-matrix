@@ -1277,25 +1277,8 @@ fn timeline_sender_label(
         &state.profile,
         sender,
         upstream_display_label,
-        timeline_projection_own_user_id(state),
+        super::timeline_projection_own_user_id(state),
     )
-}
-pub fn timeline_projection_own_user_id(state: &AppState) -> Option<&str> {
-    match &state.session {
-        SessionState::Ready(info) => Some(info.user_id.as_str()),
-        SessionState::SignedOut
-        | SessionState::Restoring
-        | SessionState::Authenticating { .. }
-        | SessionState::Provisional { .. }
-        | SessionState::AwaitingVerification { .. }
-        | SessionState::Verifying { .. }
-        | SessionState::AwaitingBootstrapConfirmation { .. }
-        | SessionState::Rejecting { .. }
-        | SessionState::LoggingOut
-        | SessionState::Locked(_)
-        | SessionState::CapabilityBlocked { .. }
-        | SessionState::SwitchingAccount { .. } => None,
-    }
 }
 pub fn derive_display_label_updates(
     profile: &ProfileState,
