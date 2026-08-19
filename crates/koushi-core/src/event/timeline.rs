@@ -1586,49 +1586,49 @@ mod tests {
     #[test]
     fn timeline_item_serializes_formatted_body_without_debugging_content() {
         let item = TimelineItem {
-                request_state: None,
-                id: TimelineItemId::Event {
-                    event_id: "$formatted:test".to_owned(),
-                },
-                sender: Some("@alice:example.invalid".to_owned()),
-                sender_label: None,
-                sender_avatar: None,
-                body: Some("plain fallback".to_owned()),
-                notice_i18n: None,
-                message_kind: TimelineMessageKind::Emote,
-                spoiler_spans: vec![TimelineSpoilerSpan {
-                    start_utf16: 0,
-                    end_utf16: 13,
-                    reason: Some("reason".to_owned()),
+            request_state: None,
+            id: TimelineItemId::Event {
+                event_id: "$formatted:test".to_owned(),
+            },
+            sender: Some("@alice:example.invalid".to_owned()),
+            sender_label: None,
+            sender_avatar: None,
+            body: Some("plain fallback".to_owned()),
+            notice_i18n: None,
+            message_kind: TimelineMessageKind::Emote,
+            spoiler_spans: vec![TimelineSpoilerSpan {
+                start_utf16: 0,
+                end_utf16: 13,
+                reason: Some("reason".to_owned()),
+            }],
+            timestamp_ms: Some(1_234),
+            in_reply_to_event_id: None,
+            formatted: Some(TimelineFormattedBody {
+                html: "<strong>private html</strong><pre><code class=\"language-rust\">private_code()</code></pre>"
+                    .to_owned(),
+                plain_text: "private htmlprivate_code()".to_owned(),
+                code_blocks: vec![TimelineCodeBlock {
+                    language: Some("rust".to_owned()),
+                    body: "private_code()".to_owned(),
                 }],
-                timestamp_ms: Some(1_234),
-                in_reply_to_event_id: None,
-                formatted: Some(TimelineFormattedBody {
-                    html: "<strong>private html</strong><pre><code class=\"language-rust\">private_code()</code></pre>"
-                        .to_owned(),
-                    plain_text: "private htmlprivate_code()".to_owned(),
-                    code_blocks: vec![TimelineCodeBlock {
-                        language: Some("rust".to_owned()),
-                        body: "private_code()".to_owned(),
-                    }],
-                }),
-                reply_quote: None,
-                thread_root: None,
-                thread_summary: None,
-                media: None,
-                link_previews: None,
-                link_ranges: Vec::new(),
-                reactions: Vec::new(),
-                can_react: true,
-                is_redacted: false,
-                is_hidden: false,
-                can_redact: true,
-                is_edited: false,
-                can_edit: true,
-                actions: TimelineMessageActions::default(),
-                send_state: None,
-                unable_to_decrypt: None,
-            };
+            }),
+            reply_quote: None,
+            thread_root: None,
+            thread_summary: None,
+            media: None,
+            link_previews: None,
+            link_ranges: Vec::new(),
+            reactions: Vec::new(),
+            can_react: true,
+            is_redacted: false,
+            is_hidden: false,
+            can_redact: true,
+            is_edited: false,
+            can_edit: true,
+            actions: TimelineMessageActions::default(),
+            send_state: None,
+            unable_to_decrypt: None,
+        };
 
         let value = serde_json::to_value(&item).expect("timeline item serializes");
 
