@@ -20,6 +20,7 @@ afterEach(() => {
 });
 
 describe("TimelineView", () => {
+
   it("marks the latest visible room event as read even when bottom pixels are not exact", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const sendReadReceipt = vi.fn().mockResolvedValue(undefined);
@@ -107,6 +108,7 @@ describe("TimelineView", () => {
     }
   });
 
+
   it("marks the latest visible thread event with a threaded read receipt", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const threadKey = threadTimelineKey(
@@ -190,6 +192,7 @@ describe("TimelineView", () => {
     }
   });
 
+
   it("renders read receipts as a compact avatar stack without an inline text label", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
@@ -264,6 +267,7 @@ describe("TimelineView", () => {
       expect(receipts?.getAttribute("title")).toBe("Ken Inayoshi\nSatoshi Terasaki");
     });
   });
+
 
   it("opens the reader popup in the floating layer so a clipped pane cannot cut it", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
@@ -359,6 +363,7 @@ describe("TimelineView", () => {
     pane.remove();
   });
 
+
   it("places reactions and read receipts in one status row", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
@@ -445,6 +450,7 @@ describe("TimelineView", () => {
     });
   });
 
+
   it("jumps to an unread event outside the mounted virtual window", async () => {
     const originalScrollIntoView = Element.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
@@ -525,6 +531,7 @@ describe("TimelineView", () => {
     }
   });
 
+
   it("lets users request missing room keys from undecryptable events", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const requestRoomKey = vi.fn(async () => undefined);
@@ -577,6 +584,7 @@ describe("TimelineView", () => {
       KEY
     );
   });
+
 
   it("renders Rust-owned automatic request state without dispatching automatic commands", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
@@ -635,6 +643,7 @@ describe("TimelineView", () => {
     });
     expect(screen.queryByText("Waiting for the decryption key…")).toBeTruthy();
   });
+
 
   it("does not classify room-key request failures in React", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
@@ -711,6 +720,7 @@ describe("TimelineView", () => {
     }
   });
 
+
   it("renders the read marker after the Rust-derived display anchor for own messages after the marker", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
@@ -771,6 +781,7 @@ describe("TimelineView", () => {
     );
   });
 
+
   it("renders the read marker after the current user's latest own message when the marker starts on an own message", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
@@ -830,6 +841,7 @@ describe("TimelineView", () => {
     );
   });
 
+
   it("renders the unread marker before the first unread event", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
@@ -885,6 +897,7 @@ describe("TimelineView", () => {
       "$unread:example.invalid"
     );
   });
+
 
   it("keeps reactions and read receipts in one footer status row", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
@@ -966,6 +979,7 @@ describe("TimelineView", () => {
     expect(statusRow.querySelector(".message-receipts")).toBeTruthy();
   });
 
+
   it("renders typing indicators with room display labels when available", async () => {
     const transport = baseTransport({});
     const liveSignals: LiveSignalsState = {
@@ -1009,6 +1023,7 @@ describe("TimelineView", () => {
     expect(screen.queryByText("@hironeishida:matrix.org is typing")).toBeNull();
   });
 
+
   it("uses a friendly fallback for typing indicators without a projected label", async () => {
     const transport = baseTransport({});
     const liveSignals: LiveSignalsState = {
@@ -1044,7 +1059,6 @@ describe("TimelineView", () => {
 
 });
 
-describe("room key request feedback (#460)", () => {
 describe("room key request feedback (#460)", () => {
   function utdItem(eventId: string, requestState: RoomKeyRequestStateDto | null) {
     return {
@@ -1420,5 +1434,4 @@ describe("room key request feedback (#460)", () => {
       expect(screen.queryByText(/Waiting for the decryption key/)).toBeNull();
     });
   });
-});
 });

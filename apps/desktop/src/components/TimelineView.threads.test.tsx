@@ -102,7 +102,7 @@ function mockPresentationOrderRects(
 }
 
 
-  describe("TimelineView", () => {
+describe("TimelineView", () => {
 
   it("omits reply in thread from focused presentation while preserving ordinary reply", () => {
     const key = focusedTimelineKey(
@@ -137,6 +137,8 @@ function mockPresentationOrderRects(
     expect(within(row!).getByRole("button", { name: "Reply to message" })).not.toBeNull();
     expect(within(row!).queryByRole("button", { name: "Reply in thread" })).toBeNull();
   });
+
+
   it("omits every reply-composition affordance from thread presentation", () => {
     const key = threadTimelineKey(
       "@alice:example.invalid",
@@ -194,6 +196,8 @@ function mockPresentationOrderRects(
     // The menu still has to be useful for the remaining thread-event actions.
     expect(menuItems.length).toBeGreaterThan(0);
   });
+
+
   it("renders an incoming rich reply quote inside thread presentation", () => {
     const key = threadTimelineKey(
       "@alice:example.invalid",
@@ -242,6 +246,8 @@ function mockPresentationOrderRects(
     expect(quote?.textContent).toContain("Bob");
     expect(quote?.textContent).toContain("Earlier thread event");
   });
+
+
   it("preserves gap identity when the same thread root crosses it in latestReply mode", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const observeViewport = vi.fn().mockResolvedValue(undefined);
@@ -400,6 +406,8 @@ function mockPresentationOrderRects(
       rectSpy.mockRestore();
     }
   });
+
+
   it("covers selected-room persisted gap recovery through live history and room switch", async () => {
     let releaseRepairAcknowledgement: () => void = () => undefined;
     const pendingRepairAcknowledgement = new Promise<void>((resolve) => {
@@ -661,6 +669,8 @@ function mockPresentationOrderRects(
       rectSpy.mockRestore();
     }
   });
+
+
   it("emits safe timestamped timeline event diagnostics for thread timelines", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onDiagnosticLogEntry = vi.fn();
@@ -727,6 +737,8 @@ function mockPresentationOrderRects(
       "$root"
     );
   });
+
+
   it("emits privacy-safe focused store lookup and event-key mismatch diagnostics", async () => {
     resetTimelineTransportStats();
     let emit: (payload: CoreEventPayload) => void = () => undefined;
@@ -803,6 +815,8 @@ function mockPresentationOrderRects(
     expect(diagnostics).not.toContain("$target:example.invalid");
     expect(diagnostics).not.toContain("$other:example.invalid");
   });
+
+
   it("centers the focused target instead of restoring the focused window to live edge", async () => {
     const originalScrollIntoView = Element.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
@@ -882,6 +896,8 @@ function mockPresentationOrderRects(
       Element.prototype.scrollIntoView = originalScrollIntoView;
     }
   });
+
+
   it("records a deduplicated committed thread projection", async () => {
     const onDiagnosticLogEntry = vi.fn();
     const threadKey = threadTimelineKey(
@@ -936,6 +952,8 @@ function mockPresentationOrderRects(
       )
     ).toHaveLength(1);
   });
+
+
   it("backfills an empty thread timeline even when the first Core generation is zero", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const threadKey = threadTimelineKey(
@@ -990,6 +1008,8 @@ function mockPresentationOrderRects(
     });
     expect(paginateBackwards).toHaveBeenCalledTimes(1);
   });
+
+
   it("keeps a new-thread draft out of backfill and hides stale pagination state", async () => {
     const threadKey = threadTimelineKey(
       "@alice:example.invalid",
@@ -1081,6 +1101,8 @@ function mockPresentationOrderRects(
     expect(paginateBackwards).not.toHaveBeenCalled();
     expect(screen.queryByTestId("timeline-spinner")).toBeNull();
   });
+
+
   it("keeps an old-root placeholder at latest activity and replaces it without canonical pagination", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
@@ -1179,6 +1201,8 @@ function mockPresentationOrderRects(
       "$old-root-latest:example.invalid"
     );
   });
+
+
   it("keeps a terminal old-root failure visible without restoring a reply row", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
@@ -1234,6 +1258,8 @@ function mockPresentationOrderRects(
     );
     expect(screen.queryByText("reply must remain suppressed")).toBeNull();
   });
+
+
   it("keeps a Room root summary at its origin and suppresses canonical replies by default", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const paginateBackwards = vi.fn(async () => undefined);
@@ -1304,6 +1330,8 @@ function mockPresentationOrderRects(
     ).toEqual(["$default-thread-root:example.invalid", "$default-between:example.invalid"]);
     expect(paginateBackwards).not.toHaveBeenCalled();
   });
+
+
   it("keeps the root but hides conversation-start chrome and its summary in thread presentation", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const threadKey = threadTimelineKey(
@@ -1362,6 +1390,8 @@ function mockPresentationOrderRects(
     expect(screen.queryByText("Start of conversation")).toBeNull();
     expect(screen.queryByRole("button", { name: /2 replies/i })).toBeNull();
   });
+
+
   it("moves one Room thread root and its summary to its latest reply while keeping root actions and timestamps", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onOpenThread = vi.fn();
@@ -1503,6 +1533,8 @@ function mockPresentationOrderRects(
     });
     rectMock.mockRestore();
   });
+
+
   it("keeps a replay-summary root out of the free-scroll anchor while using its activity identity", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onScrollDiagnosticsChange = vi.fn();
@@ -1695,6 +1727,8 @@ function mockPresentationOrderRects(
     expect(rootRow?.getAttribute("data-activity-event-id")).toBe(laterActivityEventId);
     rectMock.mockRestore();
   });
+
+
   it("uses a non-moving row, never the moved root, when latest-reply placement toggles in free scroll", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onScrollDiagnosticsChange = vi.fn();
@@ -1791,6 +1825,8 @@ function mockPresentationOrderRects(
     expect(screen.getByText("Between").closest("article")?.getBoundingClientRect().top).toBe(10);
     rectMock.mockRestore();
   });
+
+
   it("keeps a committed projection compensation when StrictMode abandons a later render", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     let controls: {
@@ -1941,6 +1977,8 @@ function mockPresentationOrderRects(
     expect(timeline.scrollTop).toBe(90);
     rectMock.mockRestore();
   });
+
+
   it("does not overwrite a user scroll that happens after projection compensation is queued", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onScrollDiagnosticsChange = vi.fn();
@@ -2052,6 +2090,8 @@ function mockPresentationOrderRects(
     ).toBe(false);
     rectMock.mockRestore();
   });
+
+
   it("does not apply queued projection compensation after a jump takes viewport ownership", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     let jumpToLatest: (() => void) | null = null;
@@ -2167,6 +2207,8 @@ function mockPresentationOrderRects(
     ).toBe(false);
     rectMock.mockRestore();
   });
+
+
   it("renders an unread latest-reply marker before the root block that represents it", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const root = {
@@ -2236,6 +2278,8 @@ function mockPresentationOrderRects(
       "$latest-thread-reply:example.invalid"
     );
   });
+
+
   it("jumps to a moved root by its latest activity identity", async () => {
     const originalScrollIntoView = Element.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
@@ -2312,6 +2356,8 @@ function mockPresentationOrderRects(
       Element.prototype.scrollIntoView = originalScrollIntoView;
     }
   });
+
+
   it("keeps live edge pinned when a summary Set relocates its root block", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const oldRoot = {
@@ -2414,6 +2460,8 @@ function mockPresentationOrderRects(
       expect(timeline.scrollTop).toBe(1_000);
     });
   });
+
+
   it("falls back to the virtual height model when a projection anchor unmounts", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onScrollDiagnosticsChange = vi.fn();
@@ -2619,6 +2667,8 @@ function mockPresentationOrderRects(
     });
     rectMock.mockRestore();
   });
+
+
   it("does not reorder Thread timeline rows when latest placement is enabled", async () => {
     const threadKey = threadTimelineKey(
       "@alice:example.invalid",
@@ -2679,6 +2729,8 @@ function mockPresentationOrderRects(
       )
     ).toEqual(["$thread-root:example.invalid", "$latest-thread-reply:example.invalid"]);
   });
+
+
   it("shows new thread replies on the matching root row without moving timeline rows", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onOpenThread = vi.fn();
