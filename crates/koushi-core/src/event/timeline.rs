@@ -1277,7 +1277,7 @@ fn timeline_sender_label(
         &state.profile,
         sender,
         upstream_display_label,
-        super::timeline_projection_own_user_id(state),
+        timeline_projection_own_user_id(state),
     )
 }
 pub fn derive_display_label_updates(

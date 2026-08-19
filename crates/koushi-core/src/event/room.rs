@@ -1,5 +1,4 @@
 use super::*;
-pub use koushi_state::EncryptionDebugOperationOutcome;
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RoomEvent {
@@ -182,6 +181,13 @@ pub enum RoomKeyReshareOutcome {
     NoRecipients,
     StaleSession,
 }
+
+/// Closed outcome of a manual encryption-debug operation (issue #538).
+/// Re-exported from koushi-state; tokens mirror the diagnostic allowlist and
+/// the aggregate detail (own/peer buckets, claim outcome, elapsed) is
+/// carried by the diagnostics only.
+pub use koushi_state::EncryptionDebugOperationOutcome;
+
 impl fmt::Debug for RoomEvent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
