@@ -218,7 +218,7 @@ Focused tests for every User Settings PR are the panel unit test plus the matchi
 
 ### Wave 1B — Focused test suites
 
-- [ ] Create one private `TimelineView` test-support module containing only shared fixtures, DOM geometry mocks, and transport builders currently duplicated across feature groups.
+- [x] Create one private `TimelineView` test-support module containing only shared fixtures, DOM geometry mocks, and transport builders currently duplicated across feature groups.
 - [ ] Move `TimelineView` viewport/anchoring tests to a feature test file.
 - [ ] Move scrollback/virtualization tests to a feature test file.
 - [ ] Move rendering/message-state tests to a feature test file.
@@ -378,6 +378,9 @@ Before closing Issue #551:
 - Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
 - Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
+- TimelineView test-support implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved only the four approved ranges into one private test leaf. Parent normalized hashes proved all 1/80, 25/590, 39/882, and 87/2,763 line/byte ranges exact after removing only required `export` keywords.
+- TimelineView test-support formal full-diff review: `reviewer-flash` reviewed `/tmp/issue551-timeline-test-support.diff` (`sha256:7224c2b7484635a4a45396d375b608ba2f0c84f845f22036be8c5289d201dc6b`) and returned `Correct-to-merge` with no blocking findings.
+- TimelineView test-support complete local gates: original target 173/173; frontend 1,366 Vitest and browser-headless 76 + 248; Rust workspace 2,393 passed / 13 ignored; QA binary 129; Tauri 154 passed / 1 ignored; npm audit/typecheck/lint/build, SDK, agents-doc, rustfmt, diff, and cargo-deny passed.
 - TimelineView test-support formal design review: `reviewer-flash` verified the four exact ranges, seven-symbol dependency/export/import boundary, call-site spread across planned feature groups, feature-local retained helpers, sole parent type removal, comments/separators, two-file allowlist, and absence of tests/hooks/product lifecycle changes, then returned `Correct-to-merge`. Its separator Minor was incorporated before implementation; parent-measured byte counts remain subject to the already-required normalized post-move hash proof.
 - TimelineView test-support pre-edit baseline on merge base `8ca09f94`: complete original `TimelineView.test.tsx` 173/173, frontend typecheck, and frontend lint all passed.
 - Appearance delivery PR: #568; focused and complete local gates passed, formal design/diff verdicts are `Correct-to-merge`, and the first implementation CI run passed all seven required checks before final ledger update.
