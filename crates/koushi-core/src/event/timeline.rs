@@ -1365,9 +1365,6 @@ pub enum TimelineDiff {
 }
 
 #[cfg(test)]
-use super::*;
-
-#[cfg(test)]
 mod tests {
     const FULL_RANGE_TOPOLOGY_REVISION: u64 = 14_695_981_039_346_656_037;
     use super::super::test_support::fake_rid;

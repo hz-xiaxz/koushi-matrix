@@ -111,13 +111,9 @@ impl fmt::Debug for NativeAttentionEvent {
 }
 
 #[cfg(test)]
-use super::*;
-
-#[cfg(test)]
 mod tests {
     use super::super::test_support::fake_rid;
     use super::*;
-    use serde_json::json;
     fn activity_row(room_id: &str, event_id: &str, timestamp_ms: u64) -> koushi_state::ActivityRow {
         koushi_state::ActivityRow::event(
             room_id.to_owned(),

@@ -108,13 +108,3 @@ impl fmt::Debug for SearchResultItem {
             .finish()
     }
 }
-
-#[cfg(test)]
-use super::*;
-
-#[cfg(test)]
-mod tests {
-    use super::super::test_support::fake_rid;
-    use super::*;
-    use serde_json::json;
-}
