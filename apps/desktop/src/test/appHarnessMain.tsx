@@ -1,7 +1,7 @@
 /**
  * Playwright harness entry: mounts the FULL <App /> over a recording mock
  * Tauri IPC transport, so the headless-Chromium spec
- * (e2e/basic-operations.spec.ts) can prove that the Task 5 UI drives the
+ * (the e2e feature specs) can prove that the Task 5 UI drives the
  * right Tauri COMMAND NAMES (create_room, create_space,
  * accept_invite, invite_user, start_direct_message,
  * set_composer_reply_target, send_reply, edit_message).
