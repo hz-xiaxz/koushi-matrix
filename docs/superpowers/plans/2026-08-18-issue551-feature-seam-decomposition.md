@@ -226,13 +226,13 @@ Focused tests for every User Settings PR are the panel unit test plus the matchi
 - [x] Move media tests to a feature test file.
 - [x] Move threads/focused-context tests to a feature test file.
 - [x] Move live-signals/read-state/room-key tests to feature test files; delete the emptied original monolith or retain only genuinely cross-feature tests with evidence.
-- [ ] Extract only genuinely shared `basic-operations.spec.ts` fixtures into `e2e/support/`; keep feature assertions out of support.
-- [ ] Move room/space and invite/directory scenarios from `basic-operations.spec.ts` to feature specs.
-- [ ] Move activity/files/threads/navigation scenarios to feature specs.
-- [ ] Move composer/send-queue/upload scenarios to feature specs.
-- [ ] Move message actions/media/live-signals scenarios to feature specs.
-- [ ] Move profile/settings/session scenarios to feature specs.
-- [ ] Move security/E2EE scenarios to feature specs; delete the emptied monolith or retain only evidenced cross-feature smoke scenarios.
+- [x] Extract only genuinely shared `basic-operations.spec.ts` fixtures into `e2e/support/`; keep feature assertions out of support.
+- [x] Move room/space and invite/directory scenarios from `basic-operations.spec.ts` to feature specs.
+- [x] Move activity/files/threads/navigation scenarios to feature specs.
+- [x] Move composer/send-queue/upload scenarios to feature specs.
+- [x] Move message actions/media/live-signals scenarios to feature specs.
+- [x] Move profile/settings/session scenarios to feature specs.
+- [x] Move security/E2EE scenarios to feature specs; delete the emptied monolith or retain only evidenced cross-feature smoke scenarios.
 - [ ] Split `session_state.rs` into authentication, verification gate, secure backup, device cleanup, and lifecycle child modules under one integration-test root and one minimal shared fixture module.
 - [ ] Split `navigation_state.rs` into room list, selection, sidebar/sorting, and anchors child modules under one integration-test root and one minimal shared fixture module.
 
@@ -468,6 +468,9 @@ Before closing Issue #551:
 - Pilot implementation: `luna-implementer` (GPT-5.6 Luna, low, write-capable) moved the approved seam. One bounded follow-up truncated the untracked destination file; the same implementer deterministically restored it from the reviewed `HEAD` range, and the parent proved the normalized 13,874-byte block byte-identical before review.
 - Formal Pilot full-diff review: `reviewer-flash` reviewed `/tmp/issue551-pilot.diff` (`sha256:cdb9dae149c06ea16b973bd51893166f1d48000fdf490f679fc4bfa7d70cd737`) and returned `Correct-to-merge` with no Critical, Important, or new findings.
 - Pilot pre-edit baseline: `UserSettingsPanel.test.tsx` 25/25 passed; focused `search-crawler-settings.spec.ts` 15/15 passed; frontend typecheck and lint passed. The browser run used `CHOKIDAR_USEPOLLING=true` because unrelated processes consume the host inotify quota.
+- `basic-operations.spec.ts` six-owner parallel implementation: Luna/low support prerequisite `8316b3ad`; isolated destination commits integrated as room `f4903023`, activity/threads `00c0ad6f`, composer `535452f9`, message/media/live `5a621494`, profile/settings/session `dce99411`, and security `2f5cb96b`; integration owner deleted the parent and migrated live references in `d7f05cb1`, followed by one EOF normalization `d3a6726`. No concurrent worker wrote the same file/worktree.
+- `basic-operations.spec.ts` six-owner formal full-diff review: `reviewer-flash` reviewed `/tmp/issue551-basic-operations-final.diff` (`sha256:4c58fb09d3c720a49f300ac79845d1c2097ca96c0fe5c728017272ca6c9c5671`), verified all 102 declarations/104 runtime scenarios, exact bodies/loops/helpers/support, imports, parent deletion, no duplicate discovery, secret/IME/polling behavior, live-reference migration, QA token-table identity, and 12-path/test-only scope, then returned `Correct-to-merge` with no blocking findings.
+- `basic-operations.spec.ts` six-owner complete gates: list 104 and destination browser 104/104; complete browser-headless 76 + 248; frontend 1,366 Vitest; Rust workspace 2,393 passed / 13 ignored; QA binary 129; Tauri 154 passed / 1 ignored; npm audit/typecheck/lint/build, SDK, agents-doc, IME, rustfmt, diff, and cargo-deny passed; parent absent and no stale live command remains. All six destination bodies/private helpers and seven shared support declarations matched immutable base bytes/source order. Final file SHA-256: room `db1252aaba44ca72ec9ec16ed644affc9f84c367fa58603585ffd99c6633b416`; activity `da41b5e2c83f97d7de7c20d31f5b74db0966ae43ea958a0e91b1f387b8d12eb9`; composer `78f55ed9e806db1afc79c56782849056091657c71e04a95b2201d56f4e938b8f`; message `59b97698d72f53ab147eff9135fead16eee4a552f9875407dcf5a4ded1eea8ea`; profile `1b52926a8af2c51d96572fe84f7f269068ecebb5cc898ff7527fde8a82e68246`; security `cb159be2c661d2e6eedf8972f1b18f6fa56e479f2c9909b53cb39e75fd0277b4`; support `674ba4fb6845cd879fd5363ceeafe83861a0244ea24cfae4f4fe95dac80971d3`.
 - `basic-operations.spec.ts` six-owner formal design review round 2: after all import/documentation fixes, the same `reviewer-flash` re-derived the 102 declarations/104 runtime cases, disjoint ranges, helper uses, import completeness, parent deletion, live-reference scope, and worktree protocol, found no new findings, and returned `Correct-to-merge`.
 - `basic-operations.spec.ts` six-owner formal design review round 1: `reviewer-flash` verified ranges/counts/support/helper ownership/deletion/reference scope but returned `Not correct-to-merge` because composer and profile import contracts omitted `roomTimelineKey`. Implementation did not begin. Both Important findings and all five documentation Minors were corrected for round 2.
 - `basic-operations.spec.ts` six-owner pre-edit baseline on merge base `1ef38262`: cwd-fixed list 104, focused parent 104/104, frontend typecheck, and lint passed.
