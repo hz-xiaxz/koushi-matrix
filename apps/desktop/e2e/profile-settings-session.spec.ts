@@ -1328,4 +1328,3 @@ test("a future snapshot schema_version is also rejected to the recovery screen",
   await expect(page.getByRole("alert")).toContainText(t("app.versionMismatch.title"));
   await expect(page.getByRole("main", { name: "Conversation timeline" })).toBeHidden();
 });
-
