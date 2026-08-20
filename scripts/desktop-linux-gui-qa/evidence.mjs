@@ -30,8 +30,13 @@ export function qaStatusHasAttentionBaseline(status) {
 }
 
 
+export function normalizePath(path) {
+  return path.replace(/\\/g, "/");
+}
+
+
 export function qaWindowStatePathHasContract(path) {
-  return path.replace(/\\/g, "/").endsWith("/app-shell/window-state.json");
+  return normalizePath(path).endsWith("/app-shell/window-state.json");
 }
 
 

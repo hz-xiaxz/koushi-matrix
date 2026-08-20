@@ -250,11 +250,6 @@ export function connectOnce(hostname, port, timeout) {
 }
 
 
-export function normalizePath(path) {
-  return path.replace(/\\/g, "/");
-}
-
-
 export function startDbusMonitor(logPath, env) {
   const busAddress = env.DBUS_SESSION_BUS_ADDRESS;
   if (!busAddress) {

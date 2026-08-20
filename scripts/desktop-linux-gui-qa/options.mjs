@@ -9,14 +9,14 @@ const args = new Set(process.argv.slice(2));
 
 function optionValue(name) {
   const prefix = `${name}=`;
-  const inline = process.argv.find((argument) => argument.startsWith(prefix));
-  if (inline) return inline.slice(prefix.length);
-  const index = process.argv.indexOf(name);
-  return index >= 0 ? process.argv[index + 1] : undefined;
+  const value = process.argv.find((argument) => argument.startsWith(prefix));
+  return value?.slice(prefix.length);
 }
 
 function resolveArtifactRoot(artifactDirOption) {
-  if (!artifactDirOption) return join(repoRoot, "artifacts", "linux-gui-qa");
+  if (!artifactDirOption) {
+    return join(repoRoot, "artifacts", "linux-gui-qa");
+  }
   return isAbsolute(artifactDirOption) ? artifactDirOption : resolve(repoRoot, artifactDirOption);
 }
 
