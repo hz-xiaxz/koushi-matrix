@@ -1,5 +1,28 @@
 use super::*;
 
+pub(crate) fn build_set_typing_command(
+    request_id: koushi_core::RequestId,
+    account_key: AccountKey,
+    room_id: String,
+    is_typing: bool,
+) -> CoreCommand {
+    CoreCommand::Timeline(TimelineCommand::SetTyping {
+        request_id,
+        key: build_timeline_key(account_key, room_id),
+        is_typing,
+    })
+}
+
+pub(crate) fn build_set_presence_command(
+    request_id: koushi_core::RequestId,
+    presence: PresenceKind,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::SetPresence {
+        request_id,
+        presence,
+    })
+}
+
 #[tauri::command]
 pub async fn send_read_receipt(
     room_id: String,
