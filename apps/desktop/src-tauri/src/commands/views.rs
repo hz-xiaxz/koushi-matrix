@@ -107,3 +107,53 @@ pub async fn close_thread(
     update_qa_window_title_from_state(&app, state.inner()).await;
     current_snapshot(state.inner()).await
 }
+
+pub(super) fn build_open_files_view_command(
+    request_id: koushi_core::RequestId,
+    scope: FilesViewScope,
+    filter: AttachmentFilter,
+    sort: AttachmentSort,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::OpenFilesView {
+        request_id,
+        scope,
+        filter,
+        sort,
+    })
+}
+
+pub(super) fn build_close_files_view_command(request_id: koushi_core::RequestId) -> CoreCommand {
+    CoreCommand::App(AppCommand::CloseFilesView { request_id })
+}
+
+pub(super) fn build_open_thread_command(
+    request_id: koushi_core::RequestId,
+    room_id: String,
+    root_event_id: String,
+    intent: ThreadOpenIntent,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::OpenThread {
+        request_id,
+        room_id,
+        root_event_id,
+        intent,
+    })
+}
+
+pub(super) fn build_open_threads_list_command(
+    request_id: koushi_core::RequestId,
+    scope: ThreadsListScope,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::OpenThreadsList { request_id, scope })
+}
+
+pub(super) fn build_close_threads_list_command(request_id: koushi_core::RequestId) -> CoreCommand {
+    CoreCommand::App(AppCommand::CloseThreadsList { request_id })
+}
+
+pub(super) fn build_paginate_threads_list_command(
+    request_id: koushi_core::RequestId,
+    scope: ThreadsListScope,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::PaginateThreadsList { request_id, scope })
+}

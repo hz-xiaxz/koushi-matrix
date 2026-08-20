@@ -1,4 +1,31 @@
+use super::timeline::{
+    build_send_read_receipt_command, build_set_fully_read_command, build_timeline_key,
+    trace_tauri_timeline_command, trace_tauri_timeline_command_elapsed,
+};
 use super::*;
+
+pub(super) fn build_set_typing_command(
+    request_id: koushi_core::RequestId,
+    account_key: AccountKey,
+    room_id: String,
+    is_typing: bool,
+) -> CoreCommand {
+    CoreCommand::Timeline(TimelineCommand::SetTyping {
+        request_id,
+        key: build_timeline_key(account_key, room_id),
+        is_typing,
+    })
+}
+
+pub(super) fn build_set_presence_command(
+    request_id: koushi_core::RequestId,
+    presence: PresenceKind,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::SetPresence {
+        request_id,
+        presence,
+    })
+}
 
 #[tauri::command]
 pub async fn send_read_receipt(

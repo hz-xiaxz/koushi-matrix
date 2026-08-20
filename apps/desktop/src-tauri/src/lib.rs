@@ -1019,7 +1019,7 @@ fn submit_oidc_callback_url(app: tauri::AppHandle, callback_url: String) {
         let event_conn = core_state.runtime.attach();
         let request_id = event_conn.next_request_id();
         let _ = event_conn
-            .command(commands::build_complete_oidc_login_command(
+            .command(commands::session::build_complete_oidc_login_command(
                 request_id,
                 callback_url,
                 dto::frontend_display_platform(),
@@ -1207,12 +1207,15 @@ pub fn run() {
 
             #[cfg(any(debug_assertions, test))]
             if let Some(pipe_path) = qa_login_pipe_path_from_env() {
-                commands::spawn_qa_login_pipe_reader(app.handle().clone(), pipe_path);
+                commands::diagnostics::spawn_qa_login_pipe_reader(app.handle().clone(), pipe_path);
             }
 
             #[cfg(any(debug_assertions, test))]
             if let Some(pipe_path) = qa_control_pipe_path_from_env() {
-                commands::spawn_qa_control_pipe_reader(app.handle().clone(), pipe_path);
+                commands::diagnostics::spawn_qa_control_pipe_reader(
+                    app.handle().clone(),
+                    pipe_path,
+                );
             }
 
             if restore_session {
@@ -1523,7 +1526,7 @@ mod tests {
         restored_window_geometry, saved_sessions_disabled_from_env_value,
         window_event_should_persist, window_event_should_stop_background_tasks, window_state_path,
     };
-    use crate::commands::parse_qa_login_pipe_payload;
+    use crate::commands::diagnostics::parse_qa_login_pipe_payload;
 
     #[test]
     fn main_window_overlay_permission_contract() {
