@@ -353,11 +353,11 @@ mod tests {
         std::fs::write(
             &legacy_path,
             r#"{
-                    "active_space_id":"!space:test.example.com",
-                    "active_room_id":"!room:test.example.com",
-                    "space_order":["!space:test.example.com"],
-                    "last_room_by_space_id":{"!space:test.example.com":"!room:test.example.com"}
-                }"#,
+                "active_space_id":"!space:test.example.com",
+                "active_room_id":"!room:test.example.com",
+                "space_order":["!space:test.example.com"],
+                "last_room_by_space_id":{"!space:test.example.com":"!room:test.example.com"}
+            }"#,
         )
         .expect("write legacy navigation");
 

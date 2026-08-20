@@ -1167,9 +1167,9 @@ mod store_tests {
     #[test]
     fn legacy_composer_draft_payload_defaults_causal_revisions() {
         let legacy = r#"{
-                "rooms":{"!room:test.example.com":"legacy room draft"},
-                "threads":{"!room:test.example.com":{"$root:test.example.com":"legacy thread draft"}}
-            }"#;
+            "rooms":{"!room:test.example.com":"legacy room draft"},
+            "threads":{"!room:test.example.com":{"$root:test.example.com":"legacy thread draft"}}
+        }"#;
 
         let loaded: ComposerDraftStore =
             serde_json::from_str(legacy).expect("deserialize legacy draft payload");
