@@ -54,12 +54,12 @@ Each test remains one function with every assertion intact. `item_body` changes 
 | `sas_handle_adoption_is_classified_before_any_active_flow_side_effect` | verification | `verification.rs` |
 | `incoming_actor_admission_checks_own_user_before_replacing_runtime` | verification | `verification.rs` |
 | `logout_teardown_preserves_persistence_and_only_forgets_startup_pointer` | session_lifecycle | `session_lifecycle.rs` |
-| `search_crawler_room_notifications_are_latest_wins_and_nonblocking` | routing | `routing.rs` |
+| `search_crawler_room_notifications_are_latest_wins_and_nonblocking` | routing | `actor.rs` (mailbox latest-wins arm) |
 | `restore_into_store_emits_event_cache_status_without_failing_restore` | session_lifecycle | `session_lifecycle.rs`, `actor.rs` (`emit_event_cache_status`) |
 | `changing_homeserver_does_not_logout_pending_login_on_the_old_server` | session_lifecycle | `session_lifecycle.rs` |
-| `authentication_completion_installs_quarantine_before_ready_side_effects` | session_lifecycle | `session_lifecycle.rs` |
+| `authentication_completion_installs_quarantine_before_ready_side_effects` | session_lifecycle | `session_lifecycle.rs`, `sliding_sync.rs` |
 | `restore_trace_covers_startup_restore_boundaries_without_private_ids` | session_lifecycle | `session_lifecycle.rs`, `sliding_sync.rs`, `actor.rs`; the unchanged global `DiagnosticField::request_id` assertion scans `actor.rs`, which owns `trace_restore`/`trace_account_request` |
-| `verification_restore_diagnostics_separate_trust_timing_from_persistence` | session_lifecycle | `session_lifecycle.rs`, `recovery_backup.rs` |
+| `verification_restore_diagnostics_separate_trust_timing_from_persistence` | session_lifecycle | `session_lifecycle.rs`, `recovery_backup.rs`, `trust_gate.rs` |
 | `login_success_is_not_blocked_by_optional_account_hydration` | profile | `session_lifecycle.rs`, `trust_gate.rs` |
 | `password_login_prefers_saved_device_without_making_login_fail_closed` | session_lifecycle | `session_lifecycle.rs` |
 | `async_account_hydration_is_generation_gated` | profile | `actor.rs` (`AccountMessage`), `profile.rs` |
@@ -74,7 +74,7 @@ Each test remains one function with every assertion intact. `item_body` changes 
 | `soft_logout_reauth_keeps_locked_session_until_password_login_succeeds` | session_lifecycle | `session_lifecycle.rs` |
 | `e2ee_key_management_failures_use_typed_classification` | recovery_backup | `recovery_backup.rs` |
 | `local_user_alias_failure_reconciles_authoritative_aliases` | profile | `profile.rs` |
-| `device_list_failures_are_not_reported_as_store_unavailable` | account_management | `account_management.rs`, `recovery_backup.rs` (classifier owner) |
+| `device_list_failures_are_not_reported_as_store_unavailable` | account_management | `account_management.rs`; the sibling classifier owner is compile-checked by the production import rather than duplicated as a source assertion |
 | `identity_reset_auth_wait_has_cancel_and_timeout_exits` | verification | `actor.rs` (field/command arm), `verification.rs`, `recovery_backup.rs` |
 | `account_actor_credential_store_hot_paths_use_blocking_port` | session_lifecycle | `session_lifecycle.rs`, `local_data_cleanup.rs`; every section uses brace-aware `item_body`, including `handle_query_saved_sessions`, replacing the old weak substring terminator without changing an assertion |
 | `submit_recovery_hydrates_joined_room_keys_after_secret_recovery` | recovery_backup | `recovery_backup.rs` |

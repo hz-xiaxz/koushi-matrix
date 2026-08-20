@@ -696,7 +696,7 @@ mod tests {
         )
         .arg("--exact")
         .arg(concat!(
-            "account::tests::",
+            "account::routing::tests::",
             "event_cache_repair_diagnostic_records_without_trace_environment"
         ))
         .arg("--ignored")
