@@ -2,7 +2,7 @@
 
 ## Status
 
-Design only. Implementation must not begin until the selected read-only cross-model reviewer records `Correct-to-implement` or every finding is fixed and re-reviewed.
+Design only. `reviewer-flash` (read-only, cross-model) recorded `Correct-to-implement` with four naming/visibility clarifications; they are incorporated below and await the bounded amendment verdict. Implementation must not begin before that verdict.
 
 ## Objective
 
@@ -98,6 +98,7 @@ Owns the single live `RoomListService` observation and reconciliation subsystem:
 - dynamic entries, committed-response reconciliation, auxiliary direct/account-data wake;
 - authority checks by distinct identity, range completeness, generation/source fencing;
 - reliable visible-room and membership forwarding;
+- test-only `LiveObserverTestEvent`, `LiveDirectEventTestSource`, and `emit_live_observer_test_event`, colocated with their only producer and harness;
 - initial/direct-source diagnostics and observer exit diagnostics;
 - refresh/current-room refresh/start/stop observer methods.
 
@@ -122,7 +123,7 @@ Owns ordinary room mutations and their reliable settlement:
 - create room/space, parent-child linking, invite, invite accept/decline;
 - DM start, direct join, leave, forget;
 - tags, mark read/unread, notification mode, content/room report;
-- residency admission/permit handling and membership success acknowledgements;
+- residency admission/permit handling and membership success acknowledgements, including the single `AdmittedRoomOperation` owner; its struct/methods are `pub(super)` only for directory join's proven sibling use;
 - known-room guards, space-child repair dedupe, coarse failure classification and operation diagnostics;
 - `RoomOperationKind`, `RoomOperationTestControl`, and `classify_room_error`.
 
@@ -162,6 +163,8 @@ Owns manual room-key reshare and dangerous encryption-debug operations:
 - cancel/join/settle/reset ordering on session clear and actor shutdown;
 - `EncryptionDebugTestControl`.
 
+The completion receiver and fence map remain owned here but are `pub(super)` because `actor.rs::run` directly selects the lossless completion ingress and enumerates fences during shutdown/session clear. Do not replace those direct accesses with a polling or forwarding method.
+
 Normal shutdown must still cancel and join every in-flight operation without abort before it stops observation or acknowledges session clear. The outer 30-second actor emergency timeout remains unchanged.
 
 ## Visibility
@@ -175,7 +178,7 @@ Normal shutdown must still cancel and join every in-flight operation without abo
 
 ## Test redistribution
 
-Move all 85 unit tests exactly once beside their owner:
+Move all 85 unit tests exactly once beside their owner. The baseline `pub mod tests` is cfg(test)-only and has no consumer; it is dissolved into private owner-local test modules and is not part of the retained production façade:
 
 - actor/lifecycle and cross-feature routing contracts → `actor.rs`;
 - observer/reconciliation tests → `list_observer.rs`;
@@ -188,7 +191,7 @@ Move all 85 unit tests exactly once beside their owner:
 - pin tests → `pins.rs`;
 - encryption-debug lifecycle tests → `encryption_debug.rs`.
 
-Cross-feature source-order contracts remain under the actor composition owner; they may inspect explicitly named owner files but must not concatenate files into a false global order.
+Cross-feature source-order contracts remain under the actor composition owner; they may inspect explicitly named owner files but must not concatenate files into a false global order. The shared test helper `make_request_id` is defined exactly once in `actor.rs` test support and exposed only as `pub(super)` under `cfg(test)` to sibling owner tests; it must not be copied.
 
 ### Source-characterization migration
 
