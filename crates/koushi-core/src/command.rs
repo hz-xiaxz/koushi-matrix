@@ -1,25 +1,8 @@
 //! Public command boundary. Every command carries a runtime-scoped
 //! `RequestId`. Secret-bearing payloads redact `Debug`.
 
-use std::{fmt, path::PathBuf};
-
-use koushi_state::{
-    ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentScope, AttachmentSort,
-    ComposerDocument, ComposerDraftRevision, DirectoryQuery, DisplayPlatform, FilesViewScope,
-    FormattedMessageDraft, IdentityResetAuthRequest, ImageUploadCompressionMode,
-    InviteScopeSelection, JapaneseCatalogProfile, LocalEncryptionHealth, LoginRequest,
-    NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState, PresenceKind,
-    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomSettingChange, RoomTagKind,
-    SearchRoomFilter, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, SubmissionId,
-    TimelineScrollAnchor, VerificationCancelReason, VerificationTarget,
-};
-use serde::{Deserialize, Serialize};
-
 use crate::composer_draft_lifecycle::ComposerDraftScope;
-use crate::event::TimelineViewportObservation;
-use crate::ids::{
-    AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey,
-};
+use crate::ids::{RequestId, RuntimeConnectionId};
 
 #[derive(Debug)]
 pub enum CoreCommand {
