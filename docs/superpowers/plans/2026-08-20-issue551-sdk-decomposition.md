@@ -14,7 +14,7 @@ This is a source-ownership change only. It does not redesign Matrix semantics, s
 
 - Commit: `19fa81a2ccc656996d6d3440d3a205730ddacae3`
 - Source: `crates/koushi-sdk/src/lib.rs`
-- Lines: 16,198
+- `wc -l`: 16,198 newline-terminated lines; 16,199 content lines including the final non-newline line
 - Bytes: 591,305
 - SHA-256: `01918c451f766f960d77cc0d4ff870b6873a90e85d55a753b720ebd6f5aaef49`
 - Default lib baseline: 143 passed
@@ -54,17 +54,21 @@ crates/koushi-sdk/src/
 ├── room_operations.rs
 ├── room_projection.rs
 ├── e2ee.rs
-└── qa_reports.rs
+├── qa_reports.rs
+└── test_source.rs              # cfg(test), source-contract helper only
 ```
+
+External source-contract tests share `crates/koushi-sdk/tests/support/mod.rs`; because it is nested below `tests/`, it is support code rather than a standalone integration-test target.
 
 `lib.rs` retains only:
 
 - private `mod` declarations;
 - the existing `sliding_sync_discovery` module;
 - explicit, exhaustive `pub use module::{...};` declarations preserving every baseline flat public path;
-- the existing `pub use koushi_state::E2eeRecoveryState`.
+- the existing `pub use koushi_state::E2eeRecoveryState`;
+- one `#[cfg(test)] mod test_source;` declaration for brace-aware source-contract support.
 
-No production function, type implementation, test, lifecycle owner, diagnostic registry, or behavioral constant remains in the root.
+No production function, type implementation, test body, lifecycle owner, diagnostic registry, or behavioral constant remains in the root.
 
 ## Ownership map
 
@@ -74,7 +78,7 @@ Line references are baseline guides; item boundaries, attached attributes/docs, 
 
 Owns client/store construction, `MatrixClientSession`, persistable session data, event-cache enablement, restore, logout, and store-close barriers.
 
-Baseline clusters: 4056–4151, 4215–4220, session impl portions 4776–4794 and 4921–4944, 5631–5827, 7123–7133, 8247–8352, 8708–8723, 11227–11236, and their focused tests.
+Baseline clusters: 4056–4151, 4215–4220, session impl portions 4776–4794 and 4921–4944, `impl fmt::Debug for MatrixClientSession` at 5268–5278, 5631–5827, 7123–7133, 8247–8352, 8708–8723, 11227–11236, and their focused tests.
 
 ### `auth.rs`
 
@@ -98,7 +102,7 @@ Baseline clusters: 4221–4227, 6868–6873, 6897–6985, 7061–7069, 11215–1
 
 Owns timeline continuity/gap/checkpoint/live-tail types, timeline subscription and pagination handles, item/diff projection, send/edit/redact entry points, cancellation, and tests. No speculative media module is introduced because the baseline has no independent media implementation seam.
 
-Baseline clusters: 4228–4775, session impl portions 4795–4920, 6769–6867, 7081–7109, 8910–8951, 10751–10791, 11138–11214, 12229–12294, 13217–13226, and focused tests.
+Baseline clusters: 4228–4775, session impl portions 4795–4920, 6769–6867, 7081–7109, 8911–8951, 10751–10791, 11138–11214, 12229–12294, 13217–13226, and focused tests. Line 8910 belongs to the preceding profile item; attached item boundaries, not the numeric guide, decide the move.
 
 ### `search.rs`
 
@@ -110,19 +114,19 @@ Baseline clusters: 4152–4214, 6027–6050, 7110–7122, 10792–10887, and foc
 
 Owns room-list/space/activity/invite/member projection DTOs, room-list snapshots/diffs, normalization, direct-account-data mapping, attention projection, SDK-to-adapter mapping, and tests.
 
-Baseline clusters: 6051–6058, 6127–6321, 6435–6613, 10888–11036, 11050–11070, 11307–12173, 12295–13216, and focused tests.
+Baseline clusters: 6051–6058, 6127–6321, 6435–6613, `room_list_snapshot_blocking` at 7070–7080, 10888–11036, 11050–11070, 11307–12173, 12295–13053 excluding profile helpers 13054–13174, `matrix_parent_space_ids` and `matrix_space_child_room_ids` at 13175–13216, and focused tests.
 
 ### `room_operations.rs`
 
 Owns room/space/directory creation and management, invite/DM/join/leave/forget, tags, pins, read state, notification/settings/moderation operations and their errors/tests.
 
-Baseline clusters: 5955–6026, 6364–6434, 6614–6672, 8936–8959, 9463–10750 excluding separately owned search/timeline items, and focused tests.
+Baseline clusters: 5955–6026, 6364–6434, 6614–6672, 8936–8959, 9463–10750 excluding separately owned search/timeline items, the public tail item `room_is_joined` at 16192–16199, and focused tests.
 
 ### `e2ee.rs`
 
 Owns trust, verification observers, secure backup, key import/export, device cleanup, encryption diagnostics, recovery, outbound-key controls, room-key diagnostic registry, and all related tests.
 
-Baseline clusters: 14–673, 839–4055 excluding specifically reassigned client/sync tests, session impl portions 4945–5268, 5279–5630, 7134–7145, 7334–8246, 8353–8707, 8960–9462, and E2EE tests in 13367–16191.
+Baseline clusters: 14–673, 839–4055 excluding specifically reassigned client/sync tests, session impl portions 4945–5267, 5279–5630, 7134–7145, 7334–8246, 8353–8707, 8960–9462, `map_sdk_recovery_state` at 13232–13237, and E2EE tests in 13367–16191. The file-tail `room_is_joined` is explicitly excluded and owned by room operations.
 
 The diagnostic reset/dispatch registry remains cohesive and centralized in this module.
 
@@ -166,18 +170,35 @@ One integration owner alone edits `lib.rs`, resolves imports/visibility, and qua
 
 - Existing public items remain `pub` and are explicitly re-exported at the root.
 - Existing flat paths remain byte-for-byte name compatible.
-- Private sibling needs use `pub(super)` by default. `pub(crate)` requires a proven non-sibling crate-internal caller.
+- At crate-root child depth, `pub(super)` and `pub(crate)` are both crate-wide. Prefer `pub(super)` as the intent marker for sibling-only use; use `pub(crate)` only when matching an existing declaration or a documented crate-root use makes that spelling clearer.
 - Do not add public API for tests or extraction convenience.
 - Public signatures, derives, serde/error strings, cfg gates, target gates, and docs remain unchanged.
 - `sliding_sync_discovery` re-exports remain explicit and compatible.
 
 ## Test redistribution
 
-Move each inline test beside its feature owner. The large mixed `#[cfg(test)] mod tests` disappears only after every test exists exactly once.
+Move each inline test beside its feature owner. The large mixed `#[cfg(test)] mod tests` disappears only after every test exists exactly once. Raw numeric test ranges must never be swept wholesale: before parent deletion, every worker records the exact moved test-name list and body hash for its destination; the integration owner compares the union to the 143-test baseline and rejects omissions or duplicates.
 
-Source-characterization tests that read `lib.rs` must read the actual owner file or a deterministic ordered concatenation. Only path/window changes are allowed; assertions and semantic expectations remain unchanged.
+### Source-characterization migration
 
-No new public test hooks or integration-test target is introduced.
+Twenty in-lib tests read `include_str!("lib.rs")`. They are assigned as follows:
+
+- client session: `matrix_client_store_config_uses_the_required_key_for_sqlite_builder`, `desktop_client_builder_defaults_enable_thread_subscriptions_and_share_history`, `client_builder_defaults_download_backup_keys_after_decryption_failures`;
+- sync: `sliding_sync_invite_probe_contract_is_typed_bounded_and_discards_cursor`;
+- E2EE: `recovery_key_path_uses_sdk_signature_publication_only`;
+- room projection: `joined_room_list_prefers_async_direct_dm_detection`, `joined_room_list_snapshot_avoids_full_member_scans`, `joined_room_list_dm_resolution_uses_account_data_cached_and_heroes_candidates`, `space_member_ids_are_no_sync_and_space_only`, `joined_only_helpers_do_not_use_active_membership`, `space_lookup_failures_are_not_coerced_to_empty_observations`, `failed_space_member_counts_are_reported_as_unavailable`, `matrix_room_member_summaries_still_scans_full_members`, `live_direct_account_data_loader_is_local_only`, `direct_account_data_dm_detection_fetches_server_when_store_misses`;
+- room operations: `mark_room_as_read_sends_read_marker_with_private_receipt`, `cancel_space_invite_validates_invite_membership_before_kicking`, `room_tag_operations_use_sdk_tag_methods`, `pin_operations_use_sdk_pinned_event_methods`, `room_management_wrappers_use_settings_privacy_and_moderation_apis`.
+
+Each reads its single owning file. Tests that previously used the next unrelated top-level item as a textual end marker use `test_source::item_body`, a test-only brace-aware helper that extracts one uniquely named item from the owner source. Assertions and searched production text stay unchanged; only source path and boundary selection change. The two vendor-source `include_str!` calls in `recovery_sdk_records_standard_signature_round_trip_diagnostics` remain unchanged.
+
+Two external whole-crate tests remain whole-crate:
+
+- `tests/send_backup_policy.rs::all_session_constructors_leave_the_per_send_backup_fence_disabled` sums matches over every production source returned by `tests/support/mod.rs` and still requires exactly four false/zero true occurrences.
+- `tests/timeline_gap_adapter.rs::committed_room_checkpoint_has_no_legacy_or_room_absent_api` checks every production source for every forbidden token.
+
+`tests/support/mod.rs` contains an explicit, fixed list of `include_str!` inputs for `lib.rs`, existing `sliding_sync_discovery.rs`, and every new production module. It returns a slice; it does not concatenate or impose a false cross-module order. A source-contract test asserts that this manifest names every production `.rs` file exactly once. The integration owner is explicitly authorized to create this helper and to change only the source-window plumbing in those two external tests.
+
+No new public test hook or standalone integration-test target is introduced.
 
 ## Exactness evidence
 
@@ -187,11 +208,12 @@ A temporary non-repository verifier compares the pinned baseline to the integrat
 2. Every test name exists exactly once; test-body hashes match except explicit source-path allowlist changes.
 3. Every baseline public item appears in exactly one explicit root re-export or is the retained `E2eeRecoveryState` re-export.
 4. Attached cfg/doc/derive/serde/target attributes match.
-5. Function/method/test bodies, enum variants, struct fields, strings, diagnostic arrays, and match-arm order hash identically after normalization limited to required module qualification and visibility.
-6. No duplicate helper, glob, wrapper, compatibility alias, TODO, dead code, or hidden behavioral branch is introduced.
-7. Root contains no production declaration/impl/test/behavioral constant.
+5. Function/method/test bodies, enum variants, struct fields, strings, diagnostic arrays, and match-arm order hash identically after normalization limited to required module qualification, visibility, and the enumerated source-characterization plumbing.
+6. The 20 in-lib source tests remain owner-scoped, while the two external aggregate/negative tests scan the exhaustive production-source manifest; no assertion is narrowed or removed.
+7. No duplicate production helper, glob, wrapper, compatibility alias, TODO, dead code, or hidden behavioral branch is introduced.
+8. Root contains no production declaration/impl/test body/behavioral constant; its cfg(test) support module declaration is allowlisted.
 
-`cargo-public-api` is not installed in this environment, so API evidence uses the explicit source API manifest plus compiler checks across default, `test-hooks`, `smoke`, and all-feature configurations. If the tool becomes available, add it; do not make it a blocker absent from the baseline environment.
+`cargo-public-api` is not installed in this environment, so API evidence uses the explicit source API manifest plus compiler checks across default, `test-hooks`, `smoke`, and all-feature configurations. The recorded baseline commands were executed at the pinned commit: default lib 143/143, `test-hooks` lib 143/143, and all-target/all-feature check green; these results and the source hash are retained in this document and the PR evidence. If the tool becomes available, add it; do not make it a blocker absent from the baseline environment.
 
 ## Lifecycle and security invariants
 
