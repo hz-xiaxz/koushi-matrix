@@ -527,19 +527,19 @@ impl OsCredentialStore {
     }
 }
 
-pub(super) fn missing_credential_error() -> koushi_key::LocalSecretError {
+fn missing_credential_error() -> koushi_key::LocalSecretError {
     koushi_key::LocalSecretError::CredentialBackend(
         koushi_key::CredentialBackendErrorKind::MissingCredential,
     )
 }
 
-pub(super) fn unavailable_credential_error() -> koushi_key::LocalSecretError {
+fn unavailable_credential_error() -> koushi_key::LocalSecretError {
     koushi_key::LocalSecretError::CredentialBackend(
         koushi_key::CredentialBackendErrorKind::Unavailable,
     )
 }
 
-pub(super) fn vault_error_to_local_secret_error(
+fn vault_error_to_local_secret_error(
     error: crate::credential_vault::CredentialVaultError,
 ) -> koushi_key::LocalSecretError {
     let kind = match error {
@@ -694,7 +694,7 @@ impl FileCredentialStore {
 
 /// Make a name filesystem-safe by replacing all non-alphanumeric chars with `_`.
 #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
-pub(super) fn safe_filename(name: String) -> String {
+fn safe_filename(name: String) -> String {
     name.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' {
@@ -710,7 +710,7 @@ pub(super) fn safe_filename(name: String) -> String {
 /// builds along with its only call site (the file credential store branch in
 /// `CredentialStoreBackend::resolve`).
 #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
-pub(super) fn record_file_credential_store_active() {
+fn record_file_credential_store_active() {
     record(
         DiagnosticEvent::new(DiagnosticLevel::Debug, "core.store", "credential_store")
             .field(DiagnosticField::token("outcome", "file_backend_active")),
@@ -728,7 +728,7 @@ pub(super) fn record_local_unlock_secret(purpose: Option<&'static str>, outcome:
     );
 }
 
-pub(super) fn record_credential_vault_access(outcome: &'static str) {
+fn record_credential_vault_access(outcome: &'static str) {
     record(
         DiagnosticEvent::new(
             DiagnosticLevel::Debug,
@@ -739,9 +739,7 @@ pub(super) fn record_credential_vault_access(outcome: &'static str) {
     );
 }
 
-pub(super) fn credential_vault_failure_outcome(
-    error: &koushi_key::LocalSecretError,
-) -> &'static str {
+fn credential_vault_failure_outcome(error: &koushi_key::LocalSecretError) -> &'static str {
     match error {
         koushi_key::LocalSecretError::CredentialBackend(
             koushi_key::CredentialBackendErrorKind::LockedOrInaccessible,

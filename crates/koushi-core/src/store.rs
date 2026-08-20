@@ -50,8 +50,19 @@ const CREDENTIAL_STORE_SERVICE_NAME: &str = "koushi-desktop";
 const COMPOSER_DRAFTS_FILE_MAGIC: &[u8] = b"KOUSHI-DRAFTS-V1\0";
 const COMPOSER_DRAFTS_NONCE_LEN: usize = 12;
 
+/// Derive a filesystem-safe directory name from a `SessionKeyId`.
+/// Uses the same base64url encoding the key crate uses for credential store
+/// account names, so both namespaces are consistent.
 fn account_dir_name(key_id: &SessionKeyId) -> String {
-    key_id.account_name()
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    // Build a deterministic slug: encode homeserver + user_id + device_id
+    // separated by underscores so the path stays readable in debug tooling.
+    format!(
+        "{}_{}_{}",
+        URL_SAFE_NO_PAD.encode(key_id.homeserver.as_bytes()),
+        URL_SAFE_NO_PAD.encode(key_id.user_id.as_bytes()),
+        URL_SAFE_NO_PAD.encode(key_id.device_id.as_bytes()),
+    )
 }
 
 /// Resolved store configuration for one account.
@@ -348,8 +359,8 @@ fn atomic_replace_file(
 }
 
 /// Derive a filesystem-safe directory name from a `SessionKeyId`.
-/// Uses the same base64url encoding the key crate uses for credential store
-/// account names, so both namespaces are consistent.
+/// Convert a `SessionInfo` (from koushi-state) into a `SessionKeyId`
+/// (from koushi-key). This is the canonical mapping used everywhere
 /// in the codebase.
 pub fn session_key_id_from_info(info: &koushi_state::SessionInfo) -> SessionKeyId {
     SessionKeyId {
