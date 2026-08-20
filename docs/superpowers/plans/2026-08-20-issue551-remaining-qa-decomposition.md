@@ -38,11 +38,11 @@ This is a move-only decomposition. If extraction reveals a behavior defect, stop
 
 Create `scripts/desktop-linux-gui-qa/`:
 
-- `main.mjs`: the existing top-level argument/probe/run composition. It executes on import; wrapping it in a new function is unnecessary.
+- `main.mjs`: the existing top-level argument/probe/run composition. It executes on import; wrapping it in a new function is unnecessary. It imports registry dispatch plus the lower-level probe functions it already calls: child-environment projection from `redaction`, WebDriver capabilities from `webdriver`, QA-title/artifact projections from `evidence`, and tool checks from `runtime`. `assertSdkSubmoduleSynced` remains imported from the existing `../lib/sdk-submodule-status.mjs` here.
 - `registry.mjs`: the one exhaustive scenario/checklist registry and dispatch owner.
 - `runtime.mjs`: tool/build/Xvfb/DBus/app/WebDriver process startup and generic final process settlement.
 - `webdriver.mjs`: WebDriver loading/capabilities/session deletion and generic DOM action/wait primitives.
-- `local-session.mjs`: disposable homeserver/users/rooms, sensitive FIFO transport, local session object, and the one ordered local-session teardown.
+- `local-session.mjs`: disposable homeserver/users/rooms, local session object, FIFO path creation/writes, and the one ordered local-session teardown. It imports `writeSensitivePayloadToPath` from the existing shared `../lib/sensitive-fifo.mjs`; it must not copy or wrap that writer. Existing local-homeserver helpers remain direct imports from `../lib/local-homeserver-qa.mjs`.
 - `evidence.mjs`: screenshots, QA-title/window/DBus parsing, artifact paths, and private-data-free evidence projection.
 - `redaction.mjs`: child environment filtering and captured-output sanitization.
 - `scenarios/auth.mjs`, `rooms.mjs`, `timeline.mjs`, `media.mjs`, `settings-security.mjs`: feature-specific scenario bodies and feature-only helpers.
@@ -59,11 +59,15 @@ redaction, webdriver
   -> registry
   -> main
   -> root entrypoint
+
+main -> redaction, webdriver, evidence, runtime  # probe-only direct imports
 ```
 
-`runtime` and `local-session` may share low-level modules but never import scenarios. Scenario modules never import siblings, registry, main, or root. `registry` imports each scenario owner directly and remains the exhaustive dispatch point.
+`runtime` and `local-session` may share low-level modules but never import scenarios. Scenario modules never import siblings, registry, main, or root. `registry` imports each scenario owner directly and remains the exhaustive dispatch point. “Reverse import” means a lower ownership layer importing a higher layer; `main` directly importing lower-layer probe functions is intentional and not a reverse edge.
 
-Source-characterization consumers in `releaseScripts` and `build-structure-contract.test.mjs` must read the owning module or a deterministic list of all production modules. Public CLI probes remain byte-for-byte equivalent.
+Source-characterization consumers in `releaseScripts` and `scripts/build-structure-contract.test.mjs` must read the owning module or a deterministic list of all production modules. The real-homeserver negative whole-source privacy assertions likewise read its deterministic production-module concatenation rather than only the root. Public CLI probes remain byte-for-byte equivalent.
+
+Mechanical exactness explicitly permits only these source-contract edits: (1) retarget a source read to its owning module or deterministic production-module list, (2) adjust a relative import literal for the new module depth (for example `./lib/sensitive-fifo.mjs` to `../lib/sensitive-fifo.mjs`), and (3) apply a negative whole-source assertion to deterministic module concatenation. These are reviewed source-guard corrections, not product/test behavior changes; all other test bodies remain exact.
 
 ## Release contract ownership
 
@@ -128,11 +132,16 @@ Before integration, each worker proves body hashes/names, symbol counts, duplica
 Focused gates:
 
 ```bash
+find scripts/desktop-linux-gui-qa -name '*.mjs' -print0 | xargs -0 -n1 node --check
 node --check scripts/desktop-linux-gui-qa.mjs
 node scripts/desktop-linux-gui-qa.mjs --list
+node scripts/desktop-linux-gui-qa.mjs --check-tools
+node scripts/desktop-linux-gui-qa.mjs --child-env
 node scripts/desktop-linux-gui-qa.mjs --child-env-keys
 node scripts/desktop-linux-gui-qa.mjs --print-artifact-root
+node scripts/desktop-linux-gui-qa.mjs --print-real-login-transport
 node scripts/desktop-linux-gui-qa.mjs --print-webdriver-capabilities --app-binary=/tmp/koushi
+# releaseScripts concern tests also invoke every --qa-title-* and window-state probe
 node --test scripts/build-structure-contract.test.mjs
 npm --prefix apps/desktop test -- --run src/scripts/diagnosticSourceScanner.test.ts src/scripts/releaseConfiguration.test.ts src/scripts/headlessAndRealQa.test.ts src/scripts/linuxGuiQa.test.ts src/scripts/macGuiQa.test.ts src/scripts/qaTitleAndAppWiring.test.ts
 cargo test -p koushi-core --bin real-homeserver-qa --features qa-bin,test-hooks
