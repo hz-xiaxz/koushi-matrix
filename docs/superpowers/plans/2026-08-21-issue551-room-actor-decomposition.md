@@ -2,7 +2,7 @@
 
 ## Status
 
-Design only. `reviewer-flash` (read-only, cross-model) recorded `Correct-to-implement` with four naming/visibility clarifications; they are incorporated below and await the bounded amendment verdict. Implementation must not begin before that verdict.
+Design approved. `reviewer-flash` (read-only, cross-model) recorded `Correct-to-implement`; the four naming/visibility clarifications were incorporated in `c7d65f3` and the bounded amendment review again recorded `Correct-to-implement` with no findings.
 
 ## Objective
 
