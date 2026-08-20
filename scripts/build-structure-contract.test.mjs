@@ -137,7 +137,11 @@ test("submodule guard is wired into commit and QA entrypoints", () => {
   const preCommit = readRepoFile(".githooks/pre-commit");
   const headless = readRepoFile("scripts/desktop-headless-local-qa.mjs");
   const real = readRepoFile("scripts/desktop-real-homeserver-qa.mjs");
-  const linux = readRepoFile("scripts/desktop-linux-gui-qa.mjs");
+  const linux = [
+    "scripts/desktop-linux-gui-qa.mjs",
+    "scripts/desktop-linux-gui-qa/main.mjs",
+    "scripts/desktop-linux-gui-qa/registry.mjs"
+  ].map(readRepoFile).join("\n");
   const mac = readRepoFile("scripts/desktop-mac-gui-smoke.mjs");
   const releaseGate = readRepoFile("scripts/desktop-release-gate-check.mjs");
 
