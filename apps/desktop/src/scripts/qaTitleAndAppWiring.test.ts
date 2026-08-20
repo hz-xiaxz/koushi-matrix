@@ -1,8 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative, sep } from "node:path";
-import { describe, expect, test } from "vitest";
+import { existsSync,readFileSync } from "node:fs";
+import { describe,expect,test } from "vitest";
 
 import { readLinuxProductionSource } from "./releaseTestSupport";
 

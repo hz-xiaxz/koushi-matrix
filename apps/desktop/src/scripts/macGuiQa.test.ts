@@ -1,10 +1,8 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative, sep } from "node:path";
-import { describe, expect, test } from "vitest";
+import { execFileSync,spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { describe,expect,test } from "vitest";
 
-import { repoRoot, runScript } from "./releaseTestSupport";
+import { repoRoot,runScript } from "./releaseTestSupport";
 
 describe("desktop release scripts", () => {
   test("headless local QA failure messages do not replay raw child output or paths", () => {

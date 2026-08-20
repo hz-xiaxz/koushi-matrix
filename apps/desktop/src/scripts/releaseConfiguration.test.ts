@@ -1,10 +1,10 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync,spawnSync } from "node:child_process";
+import { mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, sep } from "node:path";
-import { describe, expect, test } from "vitest";
+import { join } from "node:path";
+import { describe,expect,test } from "vitest";
 
-import { repoRoot, runScript, gitTrackedFiles } from "./releaseTestSupport";
+import { gitTrackedFiles,repoRoot,runScript } from "./releaseTestSupport";
 
 describe("desktop release scripts", () => {
   test("tracked text artifacts contain no previous branding residue", () => {

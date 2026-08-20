@@ -1,10 +1,8 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative, sep } from "node:path";
-import { describe, expect, test } from "vitest";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { describe,expect,test } from "vitest";
 
-import { readLinuxProductionSource, readRealHomeserverProductionSource, repoRoot, runScript } from "./releaseTestSupport";
+import { readLinuxProductionSource,repoRoot,runScript } from "./releaseTestSupport";
 
 describe("desktop release scripts", () => {
   test("linux GUI smoke resolves relative artifact dirs from the repo root", () => {

@@ -1,7 +1,10 @@
-import { describe, expect, test } from "vitest";
-import { gitTrackedFiles, repoRoot, runScript } from "./releaseTestSupport";
+import { describe,expect,test } from "vitest";
 import {
-  DiagnosticSource, DiagnosticGateFinding, SourceScope, DIAGNOSTIC_ENV_PATTERN, TEST_ATTRIBUTE_PATTERN, SYNTHETIC_TRACE_ENV, SYNTHETIC_TRACE_DECLARATION, GATED_DIAGNOSTIC_REASON, REMOVED_DIAGNOSTIC_ENV_LITERALS, runtimeRustSources, productionRustLines, isTestOnlyAttribute, isTestOnlyCfgExpression, splitCfgArguments, testOnlyItemEnd, RustLexicalView, lexicalRustView, structuralRustLine, braceDelta, braceDepths, previousStatementRange, matchingBlockStart, blockEnd, balancedBlockEndsLine, sourceScopes, DiagnosticSourceAnalysis, HelperResolution, envConstants, directDiagnosticEnvCheck, moduleQualifiers, escapeRegExp, normalizedHelperCode, normalizedHelperName, callArguments, hasNamedCall, hasHelperCall, resolveHelpers, scopeReturnsBool, visibleHelpers, statementEnd, bindingInitializer, localEnvironmentAliases, diagnosticGateLine, gateHeaderEnd, hasStructuredCollection, barrierControlAllowsMirror, NormalizedCondition, gateConditionImpliesCollector, normalizedCondition, splitTopLevelBooleanExpression, stripBalancedOuterParentheses, loopIteratorExpressions, iteratorAliases, resolvedIteratorAlias, normalizedIteratorExpression, iteratorDataRoots, equivalentIteratorDataFlow, isAssociationBarrier, isBindingBarrier, recordArguments, hasStructuredRecord, producerTokens, expandInlineLoopBindings, semanticTokens, addAll, expandSemanticTokensThroughBindings, diagnosticSideEffectTokens, hasSemanticAssociation, hasStructuredProducer, hasDiagnosticSideEffect, scanDiagnosticSources, runtimeDiagnosticStderrFindings, removedDiagnosticEnvironmentLiteralInSyntax, lineIndexAtOffset
+GATED_DIAGNOSTIC_REASON,
+SYNTHETIC_TRACE_DECLARATION,
+runtimeDiagnosticStderrFindings,
+runtimeRustSources,
+scanDiagnosticSources
 } from "./diagnosticSourceScanner";
 
 describe("diagnostic source scanner", () => {

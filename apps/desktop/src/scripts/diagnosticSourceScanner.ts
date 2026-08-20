@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { relative, sep } from "node:path";
+import { readdirSync,readFileSync } from "node:fs";
+import { relative,sep } from "node:path";
 import { repoRoot } from "./releaseTestSupport";
 
 export type DiagnosticSource = {

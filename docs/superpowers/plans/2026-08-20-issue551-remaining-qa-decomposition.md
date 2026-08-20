@@ -136,8 +136,9 @@ Focused gates:
 
 ```bash
 find scripts/desktop-linux-gui-qa -name '*.mjs' -print0 | xargs -0 -n1 node --check
-# checkJs integration catches missing/incorrect exports and free identifiers
-apps/desktop/node_modules/.bin/tsc --allowJs --checkJs --noEmit --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck scripts/desktop-linux-gui-qa.mjs scripts/desktop-linux-gui-qa/*.mjs scripts/desktop-linux-gui-qa/scenarios/*.mjs
+# checkJs integration must report no missing/free/incorrect-export diagnostics;
+# implicit-any diagnostics in this pre-existing plain-JS runner are outside this move-only gate
+! apps/desktop/node_modules/.bin/tsc --allowJs --checkJs --noEmit --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck scripts/desktop-linux-gui-qa.mjs scripts/desktop-linux-gui-qa/*.mjs scripts/desktop-linux-gui-qa/scenarios/*.mjs 2>&1 | grep -E 'TS(2304|2305|2459|2724)'
 node --check scripts/desktop-linux-gui-qa.mjs
 node scripts/desktop-linux-gui-qa.mjs --list
 node scripts/desktop-linux-gui-qa.mjs --check-tools
