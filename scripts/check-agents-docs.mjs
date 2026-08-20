@@ -61,7 +61,11 @@ function guiScenarios() {
 
 function coreScenarios() {
   const names = new Set();
-  for (const bin of ["headless_core_qa/registry.rs", "real-homeserver-qa.rs"]) {
+  for (const bin of [
+    "headless_core_qa/registry.rs",
+    "real-homeserver-qa.rs",
+    "real_homeserver_qa/config.rs"
+  ]) {
     const source = readFileSync(
       join(repoRoot, "crates/koushi-core/src/bin", bin),
       "utf8"
