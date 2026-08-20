@@ -4,7 +4,8 @@
 
 - Design: `reviewer-flash` (read-only, cross-model) recorded `Correct-to-implement`; the four naming/visibility clarifications were incorporated in `c7d65f3` and the bounded amendment review again recorded `Correct-to-implement` with no findings.
 - Implementation: integrated from the immutable baseline after worker ambiguity was rejected; bidirectional AST/token exactness and all focused gates are green.
-- Delivery: awaiting formal full-diff review and final repository gates.
+- Full-diff review: `reviewer-flash` (read-only, cross-model) reviewed `70e1ecb5..071550f` and recorded `Correct-to-merge`; no blocking findings.
+- Delivery: all required local repository gates are green; PR CI and merge remain pending.
 
 ## Objective
 
@@ -198,7 +199,7 @@ Cross-feature source-order contracts remain under the actor composition owner; t
 
 ### Source-characterization migration
 
-Seventeen tests currently read `include_str!("room.rs")`. Preserve every assertion and searched production token while changing only the source file and brace-aware item boundary:
+Seventeen tests originally read `include_str!("room.rs")`. They remain seventeen source-contract tests; the integrated tree has eighteen `include_str!` sites because the actor-owned missing-space-child contract now reads both `operations.rs` and `list_observer.rs` explicitly instead of relying on one monolithic source blob. Preserve every assertion and searched production token while changing only the source file and brace-aware item boundary:
 
 - actor: command loop, one-live-service routing, lifecycle/repair ownership ordering;
 - list observer: direct subscription ordering, missing-link relay, known-book-before-delivery;
@@ -296,6 +297,16 @@ git diff --check
 ```
 
 Run wire/generated checks despite the prohibition on contract changes. A local homeserver/GUI lane is required only if compilation, tests, exactness, or review identifies runtime-path ambiguity; no behavior change may be waived into this decomposition.
+
+### Final local evidence
+
+- Bidirectional AST/token inventory: 227/227 production keys with matching multiplicity, 10/10 public/crate declarations and exact root exports, 85/85 unit-test names; the 17 reviewed source-test functions are the only body allowlist.
+- Focused: Core lib default and `test-hooks` each 1,014 passed/8 ignored; DM-space 1, residency 25, room-list 6, preferences 2, selection-scale 4; all-target/all-feature check green.
+- Rust workspace final rerun: 2,394 passed, 13 ignored, 0 failed across 97 suites; desktop lib 149 passed/1 ignored; Headless Core QA 129 passed.
+- The first workspace run hit the existing eight-second `runtime_room_list_sync` event deadline at 8.12 seconds under concurrent suite load. The exact failed test passed focused in 7.21 seconds, and the complete workspace rerun was green; no expectation was changed or waived.
+- Frontend: typecheck/lint green; Vitest 1,367 passed; UI-headless timeline store 76 passed and Playwright 248 passed with `CHOKIDAR_USEPOLLING=true`; production build green.
+- Boundary/policy: Tauri adapter, domain dependencies, secret scan, release gates, SDK submodule, agents docs, IPC generated-wire contract, `cargo deny`, rustfmt, and diff checks green.
+- Compilation, tests, exactness, and formal review found no runtime-path ambiguity, so the design's conditional local homeserver/GUI lane was not triggered.
 
 ## Stop conditions
 
