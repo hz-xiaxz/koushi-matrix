@@ -1,3 +1,11 @@
+use super::{SecondarySasObservation, after_receiver_device_known, observe_secondary_sas};
+use crate::registry::{QaScenario, should_run_normal_secondary_participant};
+use crate::scenario_identity::requested_verification_flow_id;
+use crate::{
+    Arc, AtomicUsize, Ordering, SessionInfo, SessionState, VerificationFlowState,
+    VerificationTarget,
+};
+
 #[test]
 fn stale_gate_failure_is_not_attributed_to_a_fresh_sas_flow() {
     let session = SessionState::AwaitingVerification {
@@ -82,7 +90,7 @@ fn normal_secondary_participant_policy_covers_only_shared_b_stages() {
     }
 }
 
-#[test]
+#[tokio::test]
 async fn receiver_device_checkpoint_holds_start_once_until_ack_and_skips_it_on_failure() {
     let starts = Arc::new(AtomicUsize::new(0));
     let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();

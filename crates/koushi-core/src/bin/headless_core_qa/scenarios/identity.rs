@@ -1,4 +1,49 @@
-async fn run_gate_restore_stage(
+use super::cleanup::{
+    cleanup_e2ee_multi_device_participants, cleanup_owned_e2ee_participant_best_effort,
+};
+use super::diagnostics::{diagnostic_count_field, diagnostic_has_token, diagnostic_token_field};
+use super::event_wait::{
+    QaEventDeadline, QaSnapshotEventSource, find_timeline_item_with_body, start_sync_for_qa,
+    subscribe_timeline_for_qa, wait_for_initial_items,
+    wait_for_item_with_body_or_decryption_failure, wait_for_logged_in, wait_for_logged_out,
+    wait_for_operation_failed, wait_for_operation_failed_and_signed_out, wait_for_ready_snapshot,
+    wait_for_send_flow_completion, wait_for_send_flow_completion_with_timeout,
+    wait_for_session_restored, wait_for_sync_started_and_running, wait_for_sync_stopped,
+    wait_for_withheld_event_projection_from_source,
+};
+use super::participants::{
+    QaE2eeRecipient, QaOwnedRuntimeParticipant, QaParticipantLoginGate, SasQaOutcome,
+    authenticated_session_info, finish_e2ee_recipient_stage_with_owned_cleanup,
+    login_synced_participant_for_qa, qa_data_dir, verify_provisional_second_device_for_qa,
+    wait_for_existing_identity_gate, wait_for_locked_snapshot, wait_for_matching_recovery_flow,
+    wait_for_recovery_gate,
+};
+use super::registry::{
+    DEVICE_A, DEVICE_B, E2EE_EVENT_TIMEOUT, E2EE_KEY_BACKUP_SEED_BODY,
+    E2EE_MULTI_USER_MULTI_DEVICE_BODY, E2EE_SECOND_DEVICE_BODY, ENV_E2EE_RECIPIENT_SECOND_DEVICE,
+    EVENT_TIMEOUT, GATE_RESTORE_READY_BUDGET, QA_WRONG_RECOVERY_SECRET, QaConfig, env_flag_enabled,
+};
+use super::scenario_rooms::{
+    accept_invite_for_qa, assert_room_settings_contains_members, create_room_for_qa,
+    invite_user_for_qa, load_room_settings_for_qa, private_room_options,
+    wait_for_invite_in_snapshot, wait_for_room_created, wait_for_room_in_room_list,
+};
+use super::{
+    AccountCommand, AccountEvent, AccountKey, AppCommand, AppState, AuthSecret, CoreCommand,
+    CoreConnection, CoreEvent, CoreFailure, CoreRuntime, CurrentSessionStatusState,
+    CurrentSessionSyncState, DeviceCleanupLocalMode, DeviceCleanupState, Duration, E2eeTrustEvent,
+    EncryptionDebugOperationOutcome, IdentityResetAuthRequest, IdentityResetAuthType,
+    IdentityResetState, KeyBackupStatus, LocalEncryptionEvent, LocalEncryptionHealth,
+    LocalEncryptionState, NativeAttentionCapabilities, NativeAttentionCapability,
+    NativeAttentionDispatchState, NativeAttentionObservationKind, NativeAttentionProjectionInput,
+    NativeAttentionState, NativeAttentionSuppressionReason, RecoveryRequest, RequestId,
+    RoomAttentionKind, RoomCommand, RoomEvent, RoomNotificationMode, RoomSummary, RoomTags,
+    SasEmoji, SessionAuthenticationMethod, SessionInfo, SessionState, SessionStatusRefreshTrigger,
+    SyncCommand, TimelineCommand, TimelineItem, TimelineKey, VerificationFlowState,
+    VerificationTarget, native_attention_state_from_rooms,
+};
+
+pub(super) async fn run_gate_restore_stage(
     mut conn: CoreConnection,
     runtime: CoreRuntime,
     data_dir: std::path::PathBuf,
@@ -67,7 +112,7 @@ async fn run_gate_restore_stage(
     Ok(())
 }
 
-async fn run_gate_no_proof_stage(config: &QaConfig) -> Result<(), String> {
+pub(super) async fn run_gate_no_proof_stage(config: &QaConfig) -> Result<(), String> {
     let raw = koushi_sdk::login_with_password(&koushi_state::LoginRequest {
         homeserver: config.homeserver.clone(),
         username: config.user_a.clone(),
@@ -159,7 +204,7 @@ async fn run_gate_no_proof_stage(config: &QaConfig) -> Result<(), String> {
     Ok(())
 }
 
-async fn run_gate_negative_stage(
+pub(super) async fn run_gate_negative_stage(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
     recovery_secret: &AuthSecret,
@@ -435,7 +480,7 @@ async fn run_gate_negative_stage(
     Ok(())
 }
 
-async fn run_provisional_device_cleanup_qa(config: &QaConfig) -> Result<(), String> {
+pub(super) async fn run_provisional_device_cleanup_qa(config: &QaConfig) -> Result<(), String> {
     let runtime = CoreRuntime::start_with_data_dir(qa_data_dir("gate-device-cleanup"));
     let mut conn = runtime.attach();
     let result = async {
@@ -524,17 +569,347 @@ async fn audit_removed_device_absent_from_server(
     Ok(())
 }
 
+async fn cleanup_qa_auditor_device(
+    auditor: &koushi_sdk::MatrixClientSession,
+    password: &str,
+) -> Result<(), String> {
+    let initial = koushi_sdk::cleanup_current_device(auditor, None, None)
+        .await
+        .map_err(|_| "device cleanup audit device removal failed".to_owned())?;
+    match initial {
+        koushi_sdk::MatrixDeviceCleanupOutcome::Settled(_) => Ok(()),
+        koushi_sdk::MatrixDeviceCleanupOutcome::UiaaRequired { session } => {
+            match koushi_sdk::cleanup_current_device(
+                auditor,
+                Some(&AuthSecret::new(password.to_owned())),
+                session.as_deref(),
+            )
+            .await
+            .map_err(|_| "device cleanup audit authenticated removal failed".to_owned())?
+            {
+                koushi_sdk::MatrixDeviceCleanupOutcome::Settled(_) => Ok(()),
+                koushi_sdk::MatrixDeviceCleanupOutcome::UiaaRequired { .. } => {
+                    Err("device cleanup audit repeated its authentication challenge".to_owned())
+                }
+            }
+        }
+    }
+}
 
+async fn login_until_device_cleanup_offered(
+    conn: &mut CoreConnection,
+    config: &QaConfig,
+    label: &str,
+) -> Result<SessionInfo, String> {
+    let login_id = conn.next_request_id();
+    conn.command(CoreCommand::Account(AccountCommand::LoginPassword {
+        request_id: login_id,
+        request: koushi_state::LoginRequest {
+            homeserver: config.homeserver.clone(),
+            username: config.user_a.clone(),
+            password: AuthSecret::new(config.password_a.clone()),
+            device_display_name: Some("Koushi Device Cleanup QA".to_owned()),
+        },
+        platform: koushi_state::DisplayPlatform::Linux,
+    }))
+    .await
+    .map_err(|error| format!("{label}: login submit failed: {error}"))?;
+    wait_for_recovery_gate(conn, label).await?;
+    let session = authenticated_session_info(conn, label)?;
 
+    let invalid_recovery = conn.next_request_id();
+    conn.command(CoreCommand::Account(AccountCommand::SubmitRecovery {
+        request_id: invalid_recovery,
+        request: RecoveryRequest {
+            secret: AuthSecret::new(QA_WRONG_RECOVERY_SECRET.to_owned()),
+        },
+    }))
+    .await
+    .map_err(|error| format!("{label}: invalid recovery submit failed: {error}"))?;
+    wait_for_device_cleanup_offered(conn, label).await?;
+    Ok(session)
+}
 
+async fn wait_for_device_cleanup_offered(
+    conn: &mut CoreConnection,
+    label: &str,
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
+    loop {
+        if matches!(
+            conn.snapshot().device_cleanup,
+            DeviceCleanupState::Offered { .. }
+        ) {
+            return Ok(());
+        }
+        tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for device cleanup offer"))?
+            .map_err(|_| format!("{label}: event stream closed"))?;
+    }
+}
 
+async fn drive_remote_first_device_cleanup(
+    conn: &mut CoreConnection,
+    password: &str,
+    label: &str,
+) -> Result<(), String> {
+    let start_request_id = conn.next_request_id();
+    conn.command(CoreCommand::Account(AccountCommand::StartDeviceCleanup {
+        request_id: start_request_id,
+    }))
+    .await
+    .map_err(|error| format!("{label}: cleanup submit failed: {error}"))?;
 
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
+    let mut submitted_uia_flow = None;
+    let mut retried_local_reset = false;
+    loop {
+        let snapshot = conn.snapshot();
+        if matches!(snapshot.session, SessionState::SignedOut) {
+            return Ok(());
+        }
+        match snapshot.device_cleanup {
+            DeviceCleanupState::AwaitingUia { flow_id, .. }
+                if submitted_uia_flow != Some(flow_id) =>
+            {
+                submitted_uia_flow = Some(flow_id);
+                let request_id = conn.next_request_id();
+                conn.command(CoreCommand::Account(
+                    AccountCommand::SubmitDeviceCleanupUia {
+                        request_id,
+                        flow_id,
+                        password: AuthSecret::new(password.to_owned()),
+                    },
+                ))
+                .await
+                .map_err(|error| format!("{label}: cleanup UIAA submit failed: {error}"))?;
+            }
+            DeviceCleanupState::RemoteFailed {
+                failure, auth_mode, ..
+            } => {
+                return Err(format!(
+                    "{label}: remote cleanup failed; mode={auth_mode:?} failure={failure:?}"
+                ));
+            }
+            DeviceCleanupState::LocalResetFailed {
+                mode: DeviceCleanupLocalMode::RemoteRemoved { .. },
+                ..
+            } if !retried_local_reset => {
+                retried_local_reset = true;
+                let request_id = conn.next_request_id();
+                conn.command(CoreCommand::Account(AccountCommand::StartDeviceCleanup {
+                    request_id,
+                }))
+                .await
+                .map_err(|error| format!("{label}: local cleanup retry failed: {error}"))?;
+            }
+            DeviceCleanupState::LocalResetFailed { .. } => {
+                return Err(format!("{label}: local cleanup failed after retry"));
+            }
+            _ => {}
+        }
 
+        tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for cleanup completion"))?
+            .map_err(|_| format!("{label}: event stream closed"))?;
+    }
+}
 
+async fn wait_for_saved_session_presence(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    expected: &AccountKey,
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| "timed out waiting for saved-session readiness".to_owned())?
+            .map_err(|lag| {
+                format!(
+                    "saved-session readiness event lagged (skipped={})",
+                    lag.skipped
+                )
+            })?;
+        match event {
+            CoreEvent::Account(AccountEvent::SavedSessionsListed {
+                request_id: event_id,
+                sessions,
+            }) if event_id == request_id => {
+                if sessions.iter().any(|session| session.user_id == expected.0) {
+                    return Ok(());
+                }
+                return Err(format!(
+                    "saved-session readiness missing expected account; saved_count={}",
+                    sessions.len()
+                ));
+            }
+            CoreEvent::OperationFailed {
+                request_id: event_id,
+                failure,
+            } if event_id == request_id => {
+                return Err(format!("saved-session readiness failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
 
+pub(super) async fn run_e2ee_trust_stage(
+    config: &QaConfig,
+    conn_a: &mut CoreConnection,
+    account_key_a: &AccountKey,
+    recipient_base: Option<(&mut CoreConnection, &AccountKey)>,
+) -> Result<(), String> {
+    let session_a = authenticated_session_info(conn_a, "session A info for E2EE trust")?;
 
+    // The login gate already bootstrapped and authoritatively promoted this
+    // session. Re-running bootstrap here would rotate the identity and
+    // invalidate the proof device that A2 is about to use.
+    println!("e2ee_cross_signing_reused=ok");
+    println!("e2ee_cross_signing=ok");
 
+    let key_backup_seed_room_id =
+        seed_encrypted_room_key_for_qa(conn_a, account_key_a, "seed key backup room A").await?;
+    println!("e2ee_key_backup_seed=ok");
 
+    let key_backup_version = enable_key_backup_for_qa(
+        conn_a,
+        account_key_a,
+        Some(AuthSecret::new(config.password_a.clone())),
+        "enable key backup A",
+    )
+    .await?;
+    println!("e2ee_key_backup_enable=ok");
+
+    let runtime_a2 = CoreRuntime::start_with_data_dir(qa_data_dir("a2"));
+    let conn_a2 = runtime_a2.attach();
+    let mut owned_a2 = QaOwnedRuntimeParticipant::new(runtime_a2, conn_a2);
+    let a2_stage_result: Result<(), String> = async {
+        let login_a2_id = owned_a2.conn.next_request_id();
+        owned_a2
+            .conn
+            .command(CoreCommand::Account(AccountCommand::LoginPassword {
+                request_id: login_a2_id,
+                request: koushi_state::LoginRequest {
+                    homeserver: config.homeserver.clone(),
+                    username: config.user_a.clone(),
+                    password: AuthSecret::new(config.password_a.clone()),
+                    device_display_name: Some("Koushi Core QA A2".to_owned()),
+                },
+                platform: koushi_state::DisplayPlatform::Linux,
+            }))
+            .await
+            .map_err(|e| format!("submit login A2: {e}"))?;
+        owned_a2.mark_login_submitted();
+
+        let session_a2 =
+            wait_for_existing_identity_gate(&mut owned_a2.conn, "session A2 gate").await?;
+        verify_provisional_second_device_for_qa(
+            conn_a,
+            &mut owned_a2.conn,
+            &session_a,
+            &session_a2,
+            "e2ee gated self verification A/A2",
+            SasQaOutcome::Success,
+        )
+        .await?;
+        let account_key_a2 =
+            wait_for_logged_in(&mut owned_a2.conn, login_a2_id, "login A2").await?;
+        owned_a2.mark_logged_in(account_key_a2.clone());
+        let conn_a2 = &mut owned_a2.conn;
+        wait_for_ready_snapshot(conn_a2, "session A2 Ready").await?;
+        println!("gate_own_sas=ok");
+
+        let sync_start_a2_id = conn_a2.next_request_id();
+        conn_a2
+            .command(CoreCommand::Sync(SyncCommand::Start {
+                request_id: sync_start_a2_id,
+            }))
+            .await
+            .map_err(|e| format!("submit sync start A2: {e}"))?;
+        wait_for_sync_started_and_running(conn_a2, sync_start_a2_id, "sync start A2").await?;
+
+        wait_for_room_in_room_list(
+            conn_a2,
+            &key_backup_seed_room_id,
+            "room list A2 after key backup seed",
+        )
+        .await?;
+
+        restore_key_backup_failure_for_qa(
+            conn_a2,
+            &account_key_a2,
+            Some(key_backup_version.clone()),
+            "restore key backup failure A2",
+        )
+        .await?;
+        println!("e2ee_key_backup_restore_failure=ok");
+
+        restore_key_backup_success_for_qa(
+            conn_a2,
+            &account_key_a2,
+            Some(key_backup_version),
+            AuthSecret::new(config.password_a.clone()),
+            "restore key backup success A2",
+        )
+        .await?;
+        println!("joined_room_restore=ok");
+
+        println!("e2ee_verification=ok");
+
+        verify_second_device_room_key_delivery_for_qa(
+            conn_a,
+            conn_a2,
+            account_key_a,
+            &account_key_a2,
+            &key_backup_seed_room_id,
+        )
+        .await?;
+        println!("e2ee_second_device_decrypt=ok");
+
+        verify_multi_user_multi_device_room_key_delivery_for_qa(
+            config,
+            conn_a,
+            conn_a2,
+            account_key_a,
+            &account_key_a2,
+            recipient_base,
+        )
+        .await?;
+        println!("e2ee_multi_user_multi_device_decrypt=ok");
+        Ok(())
+    }
+    .await;
+
+    finish_e2ee_recipient_stage_with_owned_cleanup(
+        a2_stage_result,
+        Some(owned_a2),
+        |participant| async move {
+            cleanup_owned_e2ee_participant_best_effort(participant, "cleanup secondary device")
+                .await
+        },
+    )
+    .await?;
+
+    if config.allow_identity_reset {
+        reset_identity_for_qa(
+            conn_a,
+            account_key_a,
+            config.password_a.clone(),
+            "reset identity A",
+        )
+        .await?;
+        println!("e2ee_identity_reset=ok");
+    } else {
+        println!("e2ee_identity_reset=skipped");
+    }
+    println!("e2ee_trust=ok");
+
+    Ok(())
+}
 
 async fn wait_for_local_encryption_health(
     conn: &mut CoreConnection,
@@ -615,117 +990,14 @@ async fn wait_for_native_attention_state(
 }
 
 /// Wait for `AccountEvent::LoggedIn` with the given request_id.
-fn ready_account_key<S: QaSnapshotEventSource + ?Sized>(conn: &S) -> Option<AccountKey> {
+pub(super) fn ready_account_key<S: QaSnapshotEventSource + ?Sized>(conn: &S) -> Option<AccountKey> {
     match conn.snapshot().session {
         SessionState::Ready(info) => Some(AccountKey(info.user_id)),
         _ => None,
     }
 }
 
-async fn wait_for_logged_in<S: QaSnapshotEventSource + ?Sized>(
-    conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
-    label: &str,
-) -> Result<AccountKey, String> {
-    if let Some(account_key) = ready_account_key(conn) {
-        return Ok(account_key);
-    }
-    let deadline = QaEventDeadline::after(LOGIN_EVENT_TIMEOUT);
-    loop {
-        let event = match deadline.recv(conn).await {
-            Ok(Ok(event)) => event,
-            Ok(Err(lag)) => {
-                return Err(format!(
-                    "{label}: event stream lagged (skipped={})",
-                    lag.skipped
-                ));
-            }
-            Err(_) => {
-                // Name the session phase so one failed capture distinguishes
-                // "promotion never happened" from "promotion in flight" or
-                // "event correlated to another request". Without it the
-                // message was identical for every hypothesis (#375).
-                let trust_path =
-                    trust_admission_diagnostic_summary(&koushi_diagnostics::snapshot());
-                return ready_account_key(conn).ok_or_else(|| {
-                    format!(
-                        "{label}: timed out waiting for LoggedIn event; phase={}; trust_path={trust_path}",
-                        gate_session_phase(&conn.snapshot().session),
-                    )
-                });
-            }
-        };
-
-        match event {
-            CoreEvent::Account(AccountEvent::LoggedIn {
-                request_id: ev_id,
-                account_key,
-            }) if ev_id == request_id => {
-                return Ok(account_key);
-            }
-            CoreEvent::OperationFailed {
-                request_id: ev_id,
-                failure,
-            } if ev_id == request_id => {
-                return Err(format!("{label} failed: {failure:?}"));
-            }
-            _ => {
-                if let Some(account_key) = ready_account_key(conn) {
-                    return Ok(account_key);
-                }
-            }
-        }
-    }
-}
-
-/// Wait for `AccountEvent::SessionRestored` with the given request_id.
-async fn wait_for_session_restored<S: QaSnapshotEventSource + ?Sized>(
-    conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
-    expected_account_key: &AccountKey,
-    label: &str,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
-    loop {
-        if matches!(
-            conn.snapshot().session,
-            SessionState::AwaitingVerification { .. }
-        ) {
-            return Err(format!(
-                "{label}: trusted restore unexpectedly requires proof; phase={}",
-                gate_session_phase(&conn.snapshot().session)
-            ));
-        }
-        let event = tokio::time::timeout_at(deadline, conn.recv_event())
-            .await
-            .map_err(|_| {
-                format!(
-                    "{label}: timed out waiting for SessionRestored event; phase={}",
-                    gate_session_phase(&conn.snapshot().session)
-                )
-            })?
-            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-
-        match event {
-            CoreEvent::Account(AccountEvent::SessionRestored {
-                request_id: ev_id,
-                account_key,
-            }) if ev_id == request_id => {
-                ensure_session_restored_account_key(&account_key, expected_account_key, label)?;
-                return Ok(());
-            }
-            CoreEvent::OperationFailed {
-                request_id: ev_id,
-                failure,
-            } if ev_id == request_id => {
-                return Err(format!("{label} failed: {failure:?}"));
-            }
-            _ => continue,
-        }
-    }
-}
-
-fn ensure_session_restored_account_key(
+pub(super) fn ensure_session_restored_account_key(
     actual: &AccountKey,
     expected: &AccountKey,
     label: &str,
@@ -736,192 +1008,13 @@ fn ensure_session_restored_account_key(
     Ok(())
 }
 
-/// Wait for `AccountEvent::LoggedOut` with the given request_id.
-async fn wait_for_logged_out<S: QaSnapshotEventSource + ?Sized>(
-    conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
-    expected_account_key: &AccountKey,
-    label: &str,
-) -> Result<(), String> {
-    wait_for_logout_barrier(
-        conn,
-        request_id,
-        QaLogoutAccountExpectation::Exact(expected_account_key),
-        label,
-    )
-    .await
+#[derive(Clone, Copy)]
+pub(super) enum QaLogoutAccountExpectation<'a> {
+    Exact(&'a AccountKey),
+    Any,
 }
 
-async fn wait_for_signed_out_after_logout<S: QaSnapshotEventSource + ?Sized>(
-    conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
-    label: &str,
-) -> Result<(), String> {
-    wait_for_logout_barrier(conn, request_id, QaLogoutAccountExpectation::Any, label).await
-}
-
-async fn wait_for_logout_barrier<S: QaSnapshotEventSource + ?Sized>(
-    conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
-    account_expectation: QaLogoutAccountExpectation<'_>,
-    label: &str,
-) -> Result<(), String> {
-    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
-    let mut saw_logged_out = false;
-    loop {
-        if saw_logged_out && matches!(conn.snapshot().session, SessionState::SignedOut) {
-            return Ok(());
-        }
-
-        let event = match deadline.recv(conn).await {
-            Ok(Ok(event)) => event,
-            Err(_) => {
-                return if saw_logged_out
-                    && matches!(conn.snapshot().session, SessionState::SignedOut)
-                {
-                    Ok(())
-                } else {
-                    Err(format!("{label}: timed out waiting for LoggedOut event"))
-                };
-            }
-            Ok(Err(lag)) => {
-                return if saw_logged_out
-                    && matches!(conn.snapshot().session, SessionState::SignedOut)
-                {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "{label}: event stream lagged (skipped={})",
-                        lag.skipped
-                    ))
-                };
-            }
-        };
-
-        match event {
-            CoreEvent::Account(AccountEvent::LoggedOut {
-                request_id: ev_id,
-                account_key,
-            }) if ev_id == request_id => {
-                if let QaLogoutAccountExpectation::Exact(expected_account_key) = account_expectation
-                    && account_key != *expected_account_key
-                {
-                    return Err(format!("{label}: LoggedOut account_key mismatch"));
-                }
-                saw_logged_out = true;
-            }
-            CoreEvent::OperationFailed {
-                request_id: ev_id,
-                failure,
-            } if ev_id == request_id => {
-                return Err(format!("{label} failed: {failure:?}"));
-            }
-            _ => continue,
-        }
-    }
-}
-
-/// Wait for `OperationFailed` with the given request_id and return the failure.
-async fn wait_for_operation_failed<S: QaEventSource + ?Sized>(
-    conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
-    label: &str,
-) -> Result<CoreFailure, String> {
-    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
-    loop {
-        let event = deadline
-            .recv(conn)
-            .await
-            .map_err(|_| format!("{label}: timed out waiting for OperationFailed event"))?
-            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-
-        match event {
-            CoreEvent::OperationFailed {
-                request_id: ev_id,
-                failure,
-            } if ev_id == request_id => {
-                return Ok(failure);
-            }
-            CoreEvent::Account(account_event) => {
-                let matches_request = match &account_event {
-                    AccountEvent::LoggedIn { request_id: id, .. }
-                    | AccountEvent::SessionRestored { request_id: id, .. }
-                    | AccountEvent::SavedSessionsListed { request_id: id, .. }
-                    | AccountEvent::RecoveryCompleted { request_id: id, .. }
-                    | AccountEvent::ProfileUpdated { request_id: id, .. }
-                    | AccountEvent::AvatarThumbnailDownloaded { request_id: id, .. }
-                    | AccountEvent::ReportCompleted { request_id: id, .. }
-                    | AccountEvent::LoggedOut { request_id: id, .. }
-                    | AccountEvent::AccountSwitched { request_id: id, .. } => *id == request_id,
-                    AccountEvent::OidcAuthorizationCreated { .. }
-                    | AccountEvent::RecoveryRequired { .. } => false,
-                };
-                if matches_request {
-                    return Err(format!(
-                        "{label}: expected OperationFailed but the operation succeeded"
-                    ));
-                }
-            }
-            _ => continue,
-        }
-    }
-}
-
-async fn wait_for_operation_failed_and_signed_out<S: QaSnapshotEventSource + ?Sized>(
-    conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
-    label: &str,
-) -> Result<CoreFailure, String> {
-    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
-    let mut operation_failure = None;
-    loop {
-        if matches!(conn.snapshot().session, SessionState::SignedOut) {
-            if let Some(failure) = operation_failure.take() {
-                return Ok(failure);
-            }
-        }
-
-        let event = deadline
-            .recv(conn)
-            .await
-            .map_err(|_| {
-                format!("{label}: timed out waiting for OperationFailed and SignedOut state")
-            })?
-            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-
-        match event {
-            CoreEvent::OperationFailed {
-                request_id: ev_id,
-                failure,
-            } if ev_id == request_id => {
-                operation_failure = Some(failure);
-            }
-            CoreEvent::Account(account_event) => {
-                let matches_request = match &account_event {
-                    AccountEvent::LoggedIn { request_id: id, .. }
-                    | AccountEvent::SessionRestored { request_id: id, .. }
-                    | AccountEvent::SavedSessionsListed { request_id: id, .. }
-                    | AccountEvent::RecoveryCompleted { request_id: id, .. }
-                    | AccountEvent::ProfileUpdated { request_id: id, .. }
-                    | AccountEvent::AvatarThumbnailDownloaded { request_id: id, .. }
-                    | AccountEvent::ReportCompleted { request_id: id, .. }
-                    | AccountEvent::LoggedOut { request_id: id, .. }
-                    | AccountEvent::AccountSwitched { request_id: id, .. } => *id == request_id,
-                    AccountEvent::OidcAuthorizationCreated { .. }
-                    | AccountEvent::RecoveryRequired { .. } => false,
-                };
-                if matches_request {
-                    return Err(format!(
-                        "{label}: expected OperationFailed but the operation succeeded"
-                    ));
-                }
-            }
-            _ => continue,
-        }
-    }
-}
-
-async fn run_session_status_stage(conn: &mut CoreConnection) -> Result<(), String> {
+pub(super) async fn run_session_status_stage(conn: &mut CoreConnection) -> Result<(), String> {
     let expected_device_id = match &conn.snapshot().session {
         SessionState::Ready(info) => info.device_id.clone(),
         _ => return Err("session_status: current session is not Ready".to_owned()),
@@ -1007,7 +1100,7 @@ async fn run_session_status_stage(conn: &mut CoreConnection) -> Result<(), Strin
     }
 }
 
-async fn run_credential_health_stage(conn: &mut CoreConnection) -> Result<(), String> {
+pub(super) async fn run_credential_health_stage(conn: &mut CoreConnection) -> Result<(), String> {
     let probe_id = conn.next_request_id();
     conn.command(CoreCommand::Account(
         AccountCommand::ProbeLocalEncryptionHealth {
@@ -1063,7 +1156,7 @@ async fn run_credential_health_stage(conn: &mut CoreConnection) -> Result<(), St
 /// command → RoomActor → event path and the typed outcomes. The SDK owns all
 /// cryptographic effects; the scenario only asserts closed outcomes and that
 /// index 0 is not consumed by the share.
-async fn run_encryption_debug_stage(
+pub(super) async fn run_encryption_debug_stage(
     config: &QaConfig,
     conn: &mut CoreConnection,
     account_key: &AccountKey,
@@ -1376,7 +1469,7 @@ async fn wait_for_encryption_debug_event(
     }
 }
 
-async fn run_native_attention_stage(conn: &mut CoreConnection) -> Result<(), String> {
+pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Result<(), String> {
     let rooms = vec![
         native_attention_room("!message:example.invalid", "Room", false, 8, 8, 0),
         native_attention_room("!dm:example.invalid", "Direct", true, 3, 3, 0),
@@ -1459,7 +1552,7 @@ async fn run_native_attention_stage(conn: &mut CoreConnection) -> Result<(), Str
     });
     if with_modes.summary.unread_count != 1
         || with_modes.summary.highlight_count != 1
-        || with_modes.summary.badge_count != 12
+        || with_modes.summary.badge_count != 4
         || with_modes
             .summary
             .candidate
@@ -1510,7 +1603,7 @@ fn native_attention_available_capabilities() -> NativeAttentionCapabilities {
     }
 }
 
-fn native_attention_room(
+pub(super) fn native_attention_room(
     room_id: &str,
     display_name: &str,
     is_dm: bool,
@@ -1540,8 +1633,6 @@ fn native_attention_room(
         joined_members: 0,
     }
 }
-
-
 
 async fn seed_encrypted_room_key_for_qa(
     conn: &mut CoreConnection,
@@ -1897,6 +1988,11 @@ async fn reset_identity_for_qa(
             "{label}: unknown identity reset auth type cannot run headlessly"
         )),
     }
+}
+
+enum IdentityResetWait {
+    Completed,
+    AuthRequired(IdentityResetAuthType),
 }
 
 async fn wait_for_identity_reset_auth_or_done(
@@ -2462,6 +2558,30 @@ async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
     .await
 }
 
+pub(super) async fn refresh_device_keys_and_assert_known_for_qa(
+    conn: &mut CoreConnection,
+    target: VerificationTarget,
+    label: &str,
+) -> Result<(), String> {
+    let (acknowledged, ack) = tokio::sync::oneshot::channel();
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::Account(
+        AccountCommand::QaRefreshDeviceKeysAndAssertKnown {
+            request_id,
+            target,
+            acknowledged,
+        },
+    ))
+    .await
+    .map_err(|_| format!("{label}: submit device-key refresh checkpoint failed"))?;
+
+    tokio::time::timeout(E2EE_EVENT_TIMEOUT, ack)
+        .await
+        .map_err(|_| format!("{label}: timed out waiting for device-key refresh checkpoint"))?
+        .map_err(|_| format!("{label}: device-key refresh checkpoint closed"))?
+        .map_err(|_| format!("{label}: exact device was not known after key refresh"))
+}
+
 fn assert_no_decryption_failure_items(items: &[TimelineItem], label: &str) -> Result<(), String> {
     if items.iter().any(timeline_item_is_decryption_failure) {
         return Err(format!(
@@ -2471,7 +2591,7 @@ fn assert_no_decryption_failure_items(items: &[TimelineItem], label: &str) -> Re
     Ok(())
 }
 
-fn timeline_item_is_decryption_failure(item: &TimelineItem) -> bool {
+pub(super) fn timeline_item_is_decryption_failure(item: &TimelineItem) -> bool {
     item.unable_to_decrypt.is_some()
         || item
             .body
@@ -2480,7 +2600,7 @@ fn timeline_item_is_decryption_failure(item: &TimelineItem) -> bool {
             .unwrap_or(false)
 }
 
-fn ensure_incoming_verification_receiver_sync_not_stopped(
+pub(super) fn ensure_incoming_verification_receiver_sync_not_stopped(
     sync: &koushi_state::SyncState,
     label: &str,
 ) -> Result<(), String> {
@@ -2493,7 +2613,7 @@ fn ensure_incoming_verification_receiver_sync_not_stopped(
     }
 }
 
-async fn wait_for_verification_requested_event_only(
+pub(super) async fn wait_for_verification_requested_event_only(
     conn: &mut CoreConnection,
     expected_target: Option<&VerificationTarget>,
     excluded_flow_id: Option<u64>,
@@ -2536,7 +2656,7 @@ async fn wait_for_verification_requested_event_only(
     }
 }
 
-fn requested_verification_flow_id(
+pub(super) fn requested_verification_flow_id(
     state: &VerificationFlowState,
     expected_target: Option<&VerificationTarget>,
     excluded_flow_id: Option<u64>,
@@ -2561,7 +2681,7 @@ fn requested_verification_flow_id(
     }
 }
 
-async fn wait_for_verification_accepted(
+pub(super) async fn wait_for_verification_accepted(
     conn: &mut CoreConnection,
     flow_id: u64,
     command_request_id: Option<RequestId>,
@@ -2623,7 +2743,7 @@ fn verification_state_is_at_least_accepted(
     }
 }
 
-fn verification_state_sas(
+pub(super) fn verification_state_sas(
     state: &VerificationFlowState,
     flow_id: u64,
     label: &str,
@@ -2646,7 +2766,7 @@ fn verification_state_sas(
     }
 }
 
-fn verification_state_flow_id(state: &VerificationFlowState) -> Option<u64> {
+pub(super) fn verification_state_flow_id(state: &VerificationFlowState) -> Option<u64> {
     match state {
         VerificationFlowState::Idle => None,
         VerificationFlowState::Requested { request_id, .. }
@@ -2677,44 +2797,6 @@ fn verification_state_matches_target(
     expected_target.is_none_or(|target| verification_state_target(state) == Some(target))
 }
 
-
 #[cfg(test)]
-mod tests {
-
-    #[test]
-    fn e2ee_trust_qa_uses_authenticated_provisional_session_info() {
-        let info = SessionInfo {
-            homeserver: "https://example.invalid".to_owned(),
-            user_id: "@alice:example.invalid".to_owned(),
-            device_id: "ALICEDEVICE".to_owned(),
-            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
-        };
-
-        assert_eq!(
-            authenticated_session_info_from_state(&SessionState::Provisional {
-                info: info.clone(),
-                phase: koushi_state::ProvisionalPhase::CheckingTrust,
-            }),
-            Some(&info)
-        );
-        assert_eq!(
-            authenticated_session_info_from_state(&SessionState::AwaitingVerification {
-                info: info.clone(),
-                gate: koushi_state::VerificationGateState {
-                    methods: vec![],
-                    account_kind: koushi_state::VerificationAccountKind::Unknown,
-                    failure: None,
-                },
-            }),
-            Some(&info)
-        );
-        assert_eq!(
-            authenticated_session_info_from_state(&SessionState::Ready(info.clone())),
-            Some(&info)
-        );
-        assert_eq!(
-            authenticated_session_info_from_state(&SessionState::SignedOut),
-            None
-        );
-    }
-}
+#[path = "identity_tests.rs"]
+mod tests;

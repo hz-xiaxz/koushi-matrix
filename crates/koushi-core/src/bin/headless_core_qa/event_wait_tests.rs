@@ -1,3 +1,25 @@
+use super::{
+    BodyWaitObserver, InitialItemsWaitMatch, PairedEventWaitError, SendFlowWaiter,
+    find_timeline_item_with_body, match_initial_items_wait_event, visit_timeline_diff_items,
+    wait_for_initial_items_from_source, wait_for_logged_in, wait_for_logged_out,
+    wait_for_operation_failed, wait_for_paired_event_until, wait_for_session_restored,
+    wait_for_withheld_event_projection_from_source,
+};
+use crate::contracts::{
+    IntervalQaEventSource, IntervalQaSnapshotEventSource, ScriptedQaEventSource,
+    ScriptedQaSnapshotEventSource, SharedSnapshotPendingEventSource, qa_logged_out_event,
+    qa_state_with_session, synthetic_timeline_item, withheld_projection_items_updated,
+    withheld_projection_test_item,
+};
+use crate::registry::{EVENT_TIMEOUT, LOGIN_EVENT_TIMEOUT};
+use crate::scenario_search::projection_timeline_item;
+use crate::scenario_timeline::WithheldEventProjectionOrigin;
+use crate::{
+    AccountEvent, AccountKey, Arc, CoreEvent, CoreFailure, Duration, Mutex, RequestId, SessionInfo,
+    SessionState, SyncEvent, TimelineDiff, TimelineEvent, TimelineKey, TimelineMessageActions,
+    TimelineSendState,
+};
+
 #[test]
 fn diff_item_visitor_scans_set_and_reset_items() {
     let set_item = synthetic_timeline_item("$root:test", Some("root"), None, None, None);
@@ -430,7 +452,7 @@ fn initial_items_wait_requires_exact_subscribe_cause_even_for_same_key_replays()
     ));
 }
 
-#[test]
+#[tokio::test]
 async fn withheld_projection_wait_accepts_decryption_failure_from_late_items_updated() {
     let key = TimelineKey::room(AccountKey("@qa:example.invalid".to_owned()), "!room:test");
     let target_event_id = "$withheld:test";
@@ -460,7 +482,7 @@ async fn withheld_projection_wait_accepts_decryption_failure_from_late_items_upd
     assert_eq!(origin, WithheldEventProjectionOrigin::ItemsUpdated);
 }
 
-#[test]
+#[tokio::test(start_paused = true)]
 async fn withheld_projection_wait_reports_private_safe_missing_category_at_deadline() {
     let key = TimelineKey::room(AccountKey("@qa:example.invalid".to_owned()), "!room:test");
     let target_event_id = "$withheld:test";
@@ -486,7 +508,7 @@ async fn withheld_projection_wait_reports_private_safe_missing_category_at_deadl
     assert!(!error.contains("!room:"));
 }
 
-#[test]
+#[tokio::test]
 async fn withheld_projection_wait_rejects_plaintext_without_exposing_it() {
     let key = TimelineKey::room(AccountKey("@qa:example.invalid".to_owned()), "!room:test");
     let target_event_id = "$withheld:test";
@@ -514,7 +536,7 @@ async fn withheld_projection_wait_rejects_plaintext_without_exposing_it() {
     assert!(!error.contains(private_body));
 }
 
-#[test]
+#[tokio::test]
 async fn paired_verification_wait_wakes_from_either_event_source() {
     let mut primary = ScriptedQaEventSource {
         events: Default::default(),
@@ -534,7 +556,7 @@ async fn paired_verification_wait_wakes_from_either_event_source() {
     );
 }
 
-#[test]
+#[tokio::test(start_paused = true)]
 async fn paired_verification_wait_uses_one_absolute_deadline() {
     let mut primary = ScriptedQaEventSource {
         events: Default::default(),
@@ -555,7 +577,7 @@ async fn paired_verification_wait_uses_one_absolute_deadline() {
     );
 }
 
-#[test]
+#[tokio::test(start_paused = true)]
 async fn login_wait_observes_ready_snapshot_once_at_deadline_without_a_broadcast() {
     let shared = Arc::new(Mutex::new(qa_state_with_session(SessionState::SignedOut)));
     let mut source = SharedSnapshotPendingEventSource {
@@ -594,7 +616,7 @@ async fn login_wait_observes_ready_snapshot_once_at_deadline_without_a_broadcast
     );
 }
 
-#[test]
+#[tokio::test(start_paused = true)]
 async fn login_wait_without_event_or_ready_snapshot_still_times_out() {
     let shared = Arc::new(Mutex::new(qa_state_with_session(SessionState::SignedOut)));
     let mut source = SharedSnapshotPendingEventSource { snapshot: shared };
@@ -614,18 +636,18 @@ async fn login_wait_without_event_or_ready_snapshot_still_times_out() {
     // The phase token is part of the contract now (#375): it is what makes
     // one failed CI capture diagnosable.
     assert!(
-            error.starts_with(
-                "login remains pending: timed out waiting for LoggedIn event; phase=signed_out; trust_path="
-            ),
-            "unexpected timeout diagnostic: {error}"
-        );
+        error.starts_with(
+            "login remains pending: timed out waiting for LoggedIn event; phase=signed_out; trust_path="
+        ),
+        "unexpected timeout diagnostic: {error}"
+    );
     assert_eq!(
         tokio::time::Instant::now().duration_since(started_at),
         LOGIN_EVENT_TIMEOUT
     );
 }
 
-#[test]
+#[tokio::test]
 async fn session_restored_account_mismatch_is_private_safe() {
     let request_id = RequestId {
         connection_id: koushi_core::ids::RuntimeConnectionId(1),
@@ -653,7 +675,7 @@ async fn session_restored_account_mismatch_is_private_safe() {
     assert_eq!(source.received, 1);
 }
 
-#[test]
+#[tokio::test(start_paused = true)]
 async fn logout_and_operation_failed_deadlines_survive_unrelated_event_starvation() {
     let request_id = RequestId {
         connection_id: koushi_core::ids::RuntimeConnectionId(1),
@@ -692,7 +714,7 @@ async fn logout_and_operation_failed_deadlines_survive_unrelated_event_starvatio
     );
 }
 
-#[test]
+#[tokio::test(start_paused = true)]
 async fn initial_items_wait_deadline_is_not_extended_by_continuous_unrelated_events() {
     let request_id = RequestId {
         connection_id: koushi_core::ids::RuntimeConnectionId(1),
@@ -729,7 +751,7 @@ async fn initial_items_wait_deadline_is_not_extended_by_continuous_unrelated_eve
     );
 }
 
-#[test]
+#[tokio::test]
 async fn initial_items_wait_skips_fresh_wrong_cause_then_accepts_exact_replay_cause() {
     let old_projection_request_id = RequestId {
         connection_id: koushi_core::ids::RuntimeConnectionId(1),
@@ -774,7 +796,7 @@ async fn initial_items_wait_skips_fresh_wrong_cause_then_accepts_exact_replay_ca
     assert_eq!(items.len(), 1, "the wrong-cause fresh event was ignored");
 }
 
-#[test]
+#[tokio::test(start_paused = true)]
 async fn initial_items_timeout_reports_only_private_safe_causal_category_counts() {
     let old_request_id = RequestId {
         connection_id: koushi_core::ids::RuntimeConnectionId(1),

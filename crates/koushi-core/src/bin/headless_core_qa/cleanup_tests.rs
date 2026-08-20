@@ -1,4 +1,26 @@
-#[test]
+use super::{
+    QaE2eeLogoutBarrier, cleanup_all_owned_e2ee_participants,
+    cleanup_owned_e2ee_lifecycle_best_effort,
+};
+use crate::contracts::{
+    FirstEventSharedSnapshotPendingSource, FirstEventThenTerminalLagSource,
+    IntervalQaSnapshotEventSource, RecordedOwnedE2eeCleanupOperation,
+    ScriptedQaSnapshotEventSource, qa_logged_out_event, qa_operation_failed_event,
+    qa_state_with_session, recording_owned_e2ee_cleanup_operations,
+};
+use crate::event_wait::{
+    wait_for_logged_out, wait_for_operation_failed_and_signed_out, wait_for_signed_out_after_logout,
+};
+use crate::participants::{
+    QaOwnedRuntimePhase, finish_e2ee_recipient_stage_with_owned_cleanup,
+    retain_or_cleanup_e2ee_callers_after_stage,
+};
+use crate::registry::EVENT_TIMEOUT;
+use crate::{
+    AccountEvent, AccountKey, Arc, CoreEvent, CoreFailure, Duration, Mutex, RequestId, SessionState,
+};
+
+#[tokio::test]
 async fn owned_e2ee_recipient_cleanup_runs_after_post_login_stage_failure() {
     let cleanup_attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed_attempts = cleanup_attempts.clone();
@@ -24,7 +46,7 @@ async fn owned_e2ee_recipient_cleanup_runs_after_post_login_stage_failure() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn borrowed_e2ee_stage_failure_runs_outer_caller_cleanup_path() {
     let cleanup_attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed_attempts = cleanup_attempts.clone();
@@ -50,7 +72,7 @@ async fn borrowed_e2ee_stage_failure_runs_outer_caller_cleanup_path() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn owned_e2ee_cleanup_orders_each_ownership_phase() {
     let account_key = AccountKey("@owned:example.invalid".to_owned());
     let cases = [
@@ -111,7 +133,7 @@ async fn owned_e2ee_cleanup_orders_each_ownership_phase() {
     }
 }
 
-#[test]
+#[tokio::test]
 async fn borrowed_e2ee_recipient_is_not_cleaned_by_the_inner_stage() {
     let cleanup_attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed_attempts = cleanup_attempts.clone();
@@ -136,7 +158,7 @@ async fn borrowed_e2ee_recipient_is_not_cleaned_by_the_inner_stage() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn e2ee_multi_device_cleanup_attempts_every_owned_participant_after_one_failure() {
     let operations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed = operations.clone();
@@ -188,7 +210,7 @@ async fn e2ee_multi_device_cleanup_attempts_every_owned_participant_after_one_fa
     }
 }
 
-#[test]
+#[tokio::test]
 async fn logged_out_waiter_requires_event_and_signed_out_snapshot_in_either_order() {
     let request_id = RequestId {
         connection_id: koushi_core::ids::RuntimeConnectionId(1),
@@ -235,7 +257,7 @@ async fn logged_out_waiter_requires_event_and_signed_out_snapshot_in_either_orde
     }
 }
 
-#[test]
+#[tokio::test(start_paused = true)]
 async fn logout_waiters_observe_final_signed_out_snapshot_without_another_broadcast() {
     for keyed in [true, false] {
         let request_id = RequestId {
@@ -283,7 +305,7 @@ async fn logout_waiters_observe_final_signed_out_snapshot_without_another_broadc
     }
 }
 
-#[test]
+#[tokio::test]
 async fn logout_waiters_observe_final_signed_out_snapshot_after_lag_or_close() {
     for (keyed, skipped) in [(true, 0), (false, 4)] {
         let request_id = RequestId {
@@ -317,7 +339,7 @@ async fn logout_waiters_observe_final_signed_out_snapshot_after_lag_or_close() {
     }
 }
 
-#[test]
+#[tokio::test]
 async fn logged_out_waiter_keeps_wrong_account_and_failure_terminal_and_private_safe() {
     let request_id = RequestId {
         connection_id: koushi_core::ids::RuntimeConnectionId(1),
@@ -367,7 +389,7 @@ async fn logged_out_waiter_keeps_wrong_account_and_failure_terminal_and_private_
     assert_eq!(failed.received, 1);
 }
 
-#[test]
+#[tokio::test]
 async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_order() {
     let request_id = RequestId {
         connection_id: koushi_core::ids::RuntimeConnectionId(1),
@@ -441,7 +463,7 @@ async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_orde
     assert_eq!(succeeded.received, 1);
 }
 
-#[test]
+#[tokio::test(start_paused = true)]
 async fn operation_failed_signed_out_deadline_survives_unrelated_event_starvation() {
     let request_id = RequestId {
         connection_id: koushi_core::ids::RuntimeConnectionId(1),

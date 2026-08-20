@@ -1585,12 +1585,12 @@ fn fast_send_queue_lane_hard_bounds_generic_lifecycle_phases() {
 
 #[test]
 fn send_queue_stage_uses_exact_causal_waiter_for_both_subscriptions() {
-    let source = include_str!("../src/bin/headless-core-qa.rs");
+    let source = include_str!("../src/bin/headless_core_qa/scenarios/timeline.rs");
     let send_queue_stage = source
-        .split("\nasync fn run_send_queue_stage(")
+        .split("\npub(super) async fn run_send_queue_stage(")
         .nth(1)
         .expect("run_send_queue_stage body")
-        .split("\nasync fn unsubscribe_timeline_for_qa(")
+        .split("\npub(super) async fn unsubscribe_timeline_for_qa(")
         .next()
         .expect("run_send_queue_stage body end");
 
@@ -1603,7 +1603,7 @@ fn send_queue_stage_uses_exact_causal_waiter_for_both_subscriptions() {
 
 #[test]
 fn headless_send_queue_diagnostic_contract_counts_forwarded_and_completed_room_sends() {
-    let source = include_str!("../src/bin/headless-core-qa.rs");
+    let source = include_str!("../src/bin/headless_core_qa/diagnostics.rs");
     let classifier = source
         .split("\nfn qa_proxy_request_kind(")
         .nth(1)
@@ -1658,12 +1658,12 @@ fn headless_send_queue_diagnostic_contract_counts_forwarded_and_completed_room_s
 
 #[test]
 fn headless_send_queue_diagnostic_contract_wraps_fifo_failure_with_proxy_deltas() {
-    let source = include_str!("../src/bin/headless-core-qa.rs");
+    let source = include_str!("../src/bin/headless_core_qa/scenarios/timeline.rs");
     let send_queue_stage = source
-        .split("\nasync fn run_send_queue_stage(")
+        .split("\npub(super) async fn run_send_queue_stage(")
         .nth(1)
         .expect("run_send_queue_stage body")
-        .split("\nasync fn unsubscribe_timeline_for_qa(")
+        .split("\npub(super) async fn unsubscribe_timeline_for_qa(")
         .next()
         .expect("run_send_queue_stage body end");
     let retry_stage = send_queue_stage
@@ -1697,12 +1697,12 @@ fn headless_send_queue_diagnostic_contract_wraps_fifo_failure_with_proxy_deltas(
 
 #[test]
 fn headless_send_queue_diagnostic_contract_arms_before_private_safe_not_sent_failure() {
-    let source = include_str!("../src/bin/headless-core-qa.rs");
+    let source = include_str!("../src/bin/headless_core_qa/scenarios/timeline.rs");
     let observer = source
         .split("\nfn observe_send_queue_retry_item_state(")
         .nth(1)
         .expect("causally fenced private-safe SendQueue state observer")
-        .split("\nasync fn wait_for_send_completions_in_order(")
+        .split("\npub(super) async fn wait_for_send_completions_in_order(")
         .next()
         .expect("causally fenced private-safe SendQueue state observer end");
     assert!(observer.contains("first_left_not_sent_after_retry: &mut bool"));
@@ -1715,10 +1715,10 @@ fn headless_send_queue_diagnostic_contract_arms_before_private_safe_not_sent_fai
     assert!(!observer.contains("format!("));
 
     let waiter = source
-        .split("\nasync fn wait_for_send_completions_in_order(")
+        .split("\npub(super) async fn wait_for_send_completions_in_order(")
         .nth(1)
         .expect("ordered SendQueue completion waiter")
-        .split("\nasync fn wait_for_cancelled_or_removed_send(")
+        .split("\npub(super) async fn wait_for_cancelled_or_removed_send(")
         .next()
         .expect("ordered SendQueue completion waiter end");
     assert!(waiter.contains("TimelineEvent::InitialItems"));

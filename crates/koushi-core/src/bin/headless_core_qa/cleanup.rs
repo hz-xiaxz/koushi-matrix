@@ -1,4 +1,16 @@
-async fn cleanup_after_login_sync(
+use super::event_wait::{
+    wait_for_logged_out, wait_for_operation_failed_and_signed_out, wait_for_ready_snapshot,
+    wait_for_session_restored, wait_for_signed_out_after_logout, wait_for_sync_stopped,
+};
+use super::participants::{
+    QaOwnedRuntimeParticipant, QaOwnedRuntimePhase, QaParticipantLoginOutcome,
+};
+use super::{
+    AccountCommand, AccountKey, CoreCommand, CoreConnection, CoreFailure, CoreRuntime, Future,
+    SyncCommand,
+};
+
+pub(super) async fn cleanup_after_login_sync(
     mut conn_a: CoreConnection,
     runtime_a: CoreRuntime,
     data_dir_a: std::path::PathBuf,
@@ -81,7 +93,7 @@ async fn cleanup_after_login_sync(
     Ok("restore_cleanup=ok".to_owned())
 }
 
-async fn cleanup_logged_in_runtime(
+pub(super) async fn cleanup_logged_in_runtime(
     mut conn: CoreConnection,
     runtime: CoreRuntime,
     account_key: AccountKey,
@@ -108,7 +120,8 @@ async fn cleanup_logged_in_runtime(
     Ok(())
 }
 
-enum QaE2eeLogoutBarrier {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum QaE2eeLogoutBarrier {
     AnyAccount,
     Exact(AccountKey),
 }
@@ -126,7 +139,7 @@ fn e2ee_cleanup_logout_barrier(phase: &QaOwnedRuntimePhase) -> Option<QaE2eeLogo
     }
 }
 
-trait QaOwnedE2eeCleanupOperations {
+pub(super) trait QaOwnedE2eeCleanupOperations {
     async fn stop_sync(&mut self, label: &str) -> Result<(), String>;
     async fn submit_logout(
         &mut self,
@@ -146,6 +159,84 @@ struct QaCoreOwnedE2eeCleanupOperations {
     runtime: Option<CoreRuntime>,
     conn: Option<CoreConnection>,
     logout_request_id: Option<koushi_core::ids::RequestId>,
+}
+
+impl QaCoreOwnedE2eeCleanupOperations {
+    fn new(runtime: CoreRuntime, conn: CoreConnection) -> Self {
+        Self {
+            runtime: Some(runtime),
+            conn: Some(conn),
+            logout_request_id: None,
+        }
+    }
+
+    fn connection(&mut self) -> &mut CoreConnection {
+        self.conn
+            .as_mut()
+            .expect("owned E2EE cleanup connection is available before its drop barrier")
+    }
+}
+
+impl QaOwnedE2eeCleanupOperations for QaCoreOwnedE2eeCleanupOperations {
+    async fn stop_sync(&mut self, label: &str) -> Result<(), String> {
+        let conn = self.connection();
+        let sync_stop_id = conn.next_request_id();
+        match conn
+            .command(CoreCommand::Sync(SyncCommand::Stop {
+                request_id: sync_stop_id,
+            }))
+            .await
+        {
+            Ok(()) => wait_for_sync_stopped(conn, sync_stop_id, label).await,
+            Err(_) => Err(format!("{label}: submit sync stop failed")),
+        }
+    }
+
+    async fn submit_logout(
+        &mut self,
+        _barrier: &QaE2eeLogoutBarrier,
+        label: &str,
+    ) -> Result<(), String> {
+        let conn = self.connection();
+        let logout_request_id = conn.next_request_id();
+        conn.command(CoreCommand::Account(AccountCommand::Logout {
+            request_id: logout_request_id,
+        }))
+        .await
+        .map_err(|_| format!("{label}: submit logout failed"))?;
+        self.logout_request_id = Some(logout_request_id);
+        Ok(())
+    }
+
+    async fn wait_for_authoritative_logout(
+        &mut self,
+        barrier: &QaE2eeLogoutBarrier,
+        label: &str,
+    ) -> Result<(), String> {
+        let logout_request_id = self
+            .logout_request_id
+            .take()
+            .expect("logout submission precedes its authoritative cleanup barrier");
+        let conn = self.connection();
+        match barrier {
+            QaE2eeLogoutBarrier::AnyAccount => {
+                wait_for_signed_out_after_logout(conn, logout_request_id, label).await
+            }
+            QaE2eeLogoutBarrier::Exact(account_key) => {
+                wait_for_logged_out(conn, logout_request_id, account_key, label).await
+            }
+        }
+    }
+
+    fn drop_connection(&mut self) {
+        drop(self.conn.take());
+    }
+
+    async fn shutdown_runtime(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown().await;
+        }
+    }
 }
 
 async fn cleanup_owned_e2ee_lifecycle_best_effort<Operations>(
@@ -188,7 +279,7 @@ where
     }
 }
 
-async fn cleanup_owned_e2ee_participant_best_effort(
+pub(super) async fn cleanup_owned_e2ee_participant_best_effort(
     participant: QaOwnedRuntimeParticipant,
     label: &str,
 ) -> Result<(), String> {
@@ -201,7 +292,7 @@ async fn cleanup_owned_e2ee_participant_best_effort(
     cleanup_owned_e2ee_lifecycle_best_effort(&phase, &mut operations, label).await
 }
 
-async fn cleanup_e2ee_callers_after_stage_failure(
+pub(super) async fn cleanup_e2ee_callers_after_stage_failure(
     callers: (QaOwnedRuntimeParticipant, QaOwnedRuntimeParticipant),
 ) -> Result<(), String> {
     let (caller_a, caller_b) = callers;
@@ -220,7 +311,7 @@ async fn cleanup_e2ee_callers_after_stage_failure(
     }
 }
 
-async fn cleanup_e2ee_multi_device_participants(
+pub(super) async fn cleanup_e2ee_multi_device_participants(
     participants: (
         Option<QaOwnedRuntimeParticipant>,
         Option<QaOwnedRuntimeParticipant>,
@@ -265,7 +356,7 @@ where
     }
 }
 
-async fn cleanup_normal_secondary_participant_for_qa(
+pub(super) async fn cleanup_normal_secondary_participant_for_qa(
     normal_secondary: &mut Option<QaParticipantLoginOutcome>,
     label: &str,
 ) -> Result<(), String> {
@@ -281,7 +372,7 @@ async fn cleanup_normal_secondary_participant_for_qa(
     .await
 }
 
-async fn cleanup_after_full_flow(
+pub(super) async fn cleanup_after_full_flow(
     mut conn_a: CoreConnection,
     mut conn_b: CoreConnection,
     runtime_a: CoreRuntime,
@@ -396,3 +487,7 @@ async fn cleanup_after_full_flow(
     println!("restore_cleanup=ok");
     Ok("restore_cleanup=ok".to_owned())
 }
+
+#[cfg(test)]
+#[path = "cleanup_tests.rs"]
+mod tests;

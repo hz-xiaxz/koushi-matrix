@@ -1,4 +1,24 @@
-async fn run_invites_dm_stage(
+use super::diagnostics::{
+    invite_observer_diagnostic_summary, runtime_sync_diagnostic_summary,
+    session_state_diagnostic_label, sync_diagnostic_summary, sync_event_diagnostic_label,
+    sync_state_diagnostic_label,
+};
+use super::event_wait::{
+    QaEventDeadline, wait_for_initial_items, wait_for_item_with_body, wait_for_send_flow_completion,
+};
+use super::registry::{EVENT_TIMEOUT, QaConfig, ROOM_LIST_EVENT_TIMEOUT};
+use super::{
+    AccountCommand, AccountEvent, AccountKey, AppCommand, AppState, BTreeSet, CoreCommand,
+    CoreConnection, CoreEvent, CoreFailure, CreateRoomOptions, CreateRoomVisibility,
+    DirectoryQuery, DirectoryRoomSummary, Duration, MentionCandidatesCompleteness,
+    MentionCandidatesTarget, MentionSurface, MentionTarget, OperationFailureKind, RequestId,
+    RoomCommand, RoomEvent, RoomFailureKind, RoomListFilter, RoomManagementOperationKind,
+    RoomManagementOperationState, RoomMentionPermission, RoomModerationAction, RoomSettingChange,
+    RoomSettingsSnapshot, TimelineCommand, TimelineEvent, TimelineItemId, TimelineKey,
+    compose_sidebar,
+};
+
+pub(super) async fn run_invites_dm_stage(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
@@ -161,7 +181,7 @@ async fn run_invites_dm_stage(
     Ok(())
 }
 
-async fn run_directory_stage(
+pub(super) async fn run_directory_stage(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
@@ -228,7 +248,7 @@ async fn join_directory_room_for_qa(
     wait_for_room_joined(conn_b, join_id, public_room_id, label).await
 }
 
-async fn run_room_people_projection_stage(
+pub(super) async fn run_room_people_projection_stage(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
@@ -764,7 +784,129 @@ async fn wait_for_structured_mention_source(
     }
 }
 
-async fn create_room_for_qa(
+pub(super) async fn run_room_management_stage(
+    config: &QaConfig,
+    conn_a: &mut CoreConnection,
+    conn_b: &mut CoreConnection,
+    account_key_a: &AccountKey,
+    account_key_b: &AccountKey,
+) -> Result<(), String> {
+    let room_id = create_room_for_qa(
+        conn_a,
+        "QA Room Management",
+        false,
+        "room_management create room",
+    )
+    .await?;
+    wait_for_room_in_room_list(conn_a, &room_id, "room_management A room list").await?;
+
+    let user_b_full_id = format!("@{}:{}", config.user_b, config.server_name);
+    invite_user_for_qa(
+        conn_a,
+        &room_id,
+        &user_b_full_id,
+        "room_management invite B",
+    )
+    .await?;
+    wait_for_invite_in_snapshot(
+        conn_b,
+        &room_id,
+        Some(false),
+        "room_management wait for B invite",
+    )
+    .await?;
+
+    let join_b_id = conn_b.next_request_id();
+    conn_b
+        .command(CoreCommand::Room(RoomCommand::JoinRoom {
+            request_id: join_b_id,
+            room_id: room_id.clone(),
+        }))
+        .await
+        .map_err(|e| format!("room_management: submit B join failed: {e}"))?;
+    wait_for_room_joined(conn_b, join_b_id, &room_id, "room_management B joins").await?;
+    let settings_a =
+        load_room_settings_for_qa(conn_a, &room_id, "room_management load settings A").await?;
+    assert_room_settings_contains_members(
+        &settings_a,
+        &[account_key_a.0.as_str(), account_key_b.0.as_str()],
+        "room_management A observes joined members",
+    )?;
+    if !settings_a.permissions.can_edit_settings || !settings_a.permissions.can_kick {
+        return Err("room_management: creator permissions were not projected".to_owned());
+    }
+
+    let update_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Room(RoomCommand::UpdateRoomSetting {
+            request_id: update_id,
+            room_id: room_id.clone(),
+            change: RoomSettingChange::Topic(Some("QA room management topic".to_owned())),
+        }))
+        .await
+        .map_err(|e| format!("room_management: submit topic update failed: {e}"))?;
+    let updated =
+        wait_for_room_setting_updated(conn_a, update_id, "room_management topic update").await?;
+    if updated.topic.as_deref() != Some("QA room management topic") {
+        return Err("room_management: updated settings snapshot did not carry topic".to_owned());
+    }
+    println!("room_settings=ok");
+
+    let settings_b =
+        load_room_settings_for_qa(conn_b, &room_id, "room_management load settings B").await?;
+    assert_room_settings_contains_members(
+        &settings_b,
+        &[account_key_a.0.as_str(), account_key_b.0.as_str()],
+        "room_management B observes joined members",
+    )?;
+    if settings_b.permissions.can_kick {
+        return Err("room_management: normal member unexpectedly has kick permission".to_owned());
+    }
+
+    let guard_id = conn_b.next_request_id();
+    conn_b
+        .command(CoreCommand::Room(RoomCommand::ModerateRoomMember {
+            request_id: guard_id,
+            room_id: room_id.clone(),
+            target_user_id: account_key_a.0.clone(),
+            action: RoomModerationAction::Kick,
+            reason: None,
+        }))
+        .await
+        .map_err(|e| format!("room_management: submit forbidden moderation failed: {e}"))?;
+    wait_for_room_management_forbidden(conn_b, guard_id, "room_management permission guard")
+        .await?;
+    println!("permission_guard=ok");
+
+    let kick_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Room(RoomCommand::ModerateRoomMember {
+            request_id: kick_id,
+            room_id,
+            target_user_id: account_key_b.0.clone(),
+            action: RoomModerationAction::Kick,
+            reason: Some("QA moderation".to_owned()),
+        }))
+        .await
+        .map_err(|e| format!("room_management: submit kick failed: {e}"))?;
+    wait_for_room_member_moderated(conn_a, kick_id, "room_management member kick").await?;
+    println!("moderation=ok");
+
+    Ok(())
+}
+
+pub(super) fn private_room_options(name: impl Into<String>, encrypted: bool) -> CreateRoomOptions {
+    CreateRoomOptions {
+        name: name.into(),
+        topic: None,
+        alias_localpart: None,
+        encrypted,
+        visibility: CreateRoomVisibility::Private,
+        parent_space: None,
+    }
+}
+
+pub(super) async fn create_room_for_qa(
     conn: &mut CoreConnection,
     name: &str,
     encrypted: bool,
@@ -797,7 +939,7 @@ async fn create_public_directory_room_for_qa(
     wait_for_room_created(conn, request_id, label).await
 }
 
-async fn create_space_for_qa(
+pub(super) async fn create_space_for_qa(
     conn: &mut CoreConnection,
     name: &str,
     label: &str,
@@ -812,7 +954,7 @@ async fn create_space_for_qa(
     wait_for_space_created(conn, request_id, label).await
 }
 
-async fn invite_user_for_qa(
+pub(super) async fn invite_user_for_qa(
     conn: &mut CoreConnection,
     room_id: &str,
     user_id: &str,
@@ -829,7 +971,7 @@ async fn invite_user_for_qa(
     wait_for_user_invited_ack(conn, request_id, label).await
 }
 
-async fn load_room_settings_for_qa(
+pub(super) async fn load_room_settings_for_qa(
     conn: &mut CoreConnection,
     room_id: &str,
     label: &str,
@@ -844,7 +986,7 @@ async fn load_room_settings_for_qa(
     wait_for_room_settings_loaded(conn, request_id, label).await
 }
 
-fn assert_room_settings_contains_members(
+pub(super) fn assert_room_settings_contains_members(
     settings: &RoomSettingsSnapshot,
     expected_user_ids: &[&str],
     label: &str,
@@ -869,7 +1011,7 @@ fn assert_room_settings_contains_members(
     Ok(())
 }
 
-async fn accept_invite_for_qa(
+pub(super) async fn accept_invite_for_qa(
     conn: &mut CoreConnection,
     room_id: &str,
     label: &str,
@@ -899,7 +1041,7 @@ async fn decline_invite_for_qa(
     wait_for_invite_declined(conn, request_id, room_id, label).await
 }
 
-async fn start_direct_message_for_qa(
+pub(super) async fn start_direct_message_for_qa(
     conn: &mut CoreConnection,
     user_id: &str,
     label: &str,
@@ -914,7 +1056,7 @@ async fn start_direct_message_for_qa(
     wait_for_direct_message_started(conn, request_id, label).await
 }
 
-async fn set_space_child_for_qa(
+pub(super) async fn set_space_child_for_qa(
     conn: &mut CoreConnection,
     space_id: &str,
     child_room_id: &str,
@@ -934,7 +1076,7 @@ async fn set_space_child_for_qa(
 }
 
 /// Wait for `RoomEvent::RoomCreated` with the given request_id. Returns room_id.
-async fn wait_for_room_created(
+pub(super) async fn wait_for_room_created(
     conn: &mut CoreConnection,
     request_id: koushi_core::ids::RequestId,
     label: &str,
@@ -1216,7 +1358,7 @@ fn room_management_forbidden_recorded(snapshot: &AppState, request_id: RequestId
 }
 
 /// Wait for `RoomEvent::SpaceCreated` with the given request_id. Returns space_id.
-async fn wait_for_space_created(
+pub(super) async fn wait_for_space_created(
     conn: &mut CoreConnection,
     request_id: koushi_core::ids::RequestId,
     label: &str,
@@ -1272,7 +1414,7 @@ async fn wait_for_space_created(
 }
 
 /// Wait for `RoomEvent::SpaceChildSet` with the given request_id.
-async fn wait_for_space_child_set(
+pub(super) async fn wait_for_space_child_set(
     conn: &mut CoreConnection,
     request_id: koushi_core::ids::RequestId,
     space_id: &str,
@@ -1310,7 +1452,7 @@ async fn wait_for_space_child_set(
 }
 
 /// Wait for `RoomEvent::UserInvited` with the given request_id.
-async fn wait_for_user_invited(
+pub(super) async fn wait_for_user_invited(
     conn: &mut CoreConnection,
     request_id: koushi_core::ids::RequestId,
     room_id: &str,
@@ -1475,7 +1617,7 @@ async fn wait_for_direct_message_started(
 }
 
 /// Wait for `RoomEvent::RoomJoined` with the given request_id.
-async fn wait_for_room_joined(
+pub(super) async fn wait_for_room_joined(
     conn: &mut CoreConnection,
     request_id: koushi_core::ids::RequestId,
     room_id: &str,
@@ -1510,7 +1652,7 @@ async fn wait_for_room_joined(
     }
 }
 
-async fn wait_for_pin_event_completed(
+pub(super) async fn wait_for_pin_event_completed(
     conn: &mut CoreConnection,
     request_id: koushi_core::ids::RequestId,
     label: &str,
@@ -1536,7 +1678,7 @@ async fn wait_for_pin_event_completed(
     }
 }
 
-async fn wait_for_unpin_event_completed(
+pub(super) async fn wait_for_unpin_event_completed(
     conn: &mut CoreConnection,
     request_id: koushi_core::ids::RequestId,
     label: &str,
@@ -1562,7 +1704,7 @@ async fn wait_for_unpin_event_completed(
     }
 }
 
-async fn wait_for_pinned_state(
+pub(super) async fn wait_for_pinned_state(
     conn: &mut CoreConnection,
     room_id: &str,
     event_id: &str,
@@ -1618,7 +1760,7 @@ fn snapshot_has_pinned_event(snapshot: &AppState, room_id: &str, event_id: &str)
 /// snapshot. Waiting for "any non-empty list" is not enough: spaces only
 /// classify as spaces after the create reaches the client via sync, so the
 /// list can be momentarily rooms-only.
-async fn wait_for_room_list_containing(
+pub(super) async fn wait_for_room_list_containing(
     conn: &mut CoreConnection,
     expected_room_id: &str,
     expected_space_id: &str,
@@ -1674,7 +1816,7 @@ async fn wait_for_room_list_containing(
     }
 }
 
-async fn wait_for_room_in_room_list(
+pub(super) async fn wait_for_room_in_room_list(
     conn: &mut CoreConnection,
     expected_room_id: &str,
     label: &str,
@@ -1718,7 +1860,7 @@ async fn wait_for_room_in_room_list(
     }
 }
 
-async fn wait_for_encrypted_room_projection_for_qa(
+pub(super) async fn wait_for_encrypted_room_projection_for_qa(
     conn: &mut CoreConnection,
     expected_room_id: &str,
     label: &str,
@@ -1769,7 +1911,7 @@ async fn wait_for_encrypted_room_projection_for_qa(
     }
 }
 
-async fn wait_for_space_in_space_list(
+pub(super) async fn wait_for_space_in_space_list(
     conn: &mut CoreConnection,
     expected_space_id: &str,
     label: &str,
@@ -1820,7 +1962,7 @@ async fn wait_for_space_in_space_list(
     }
 }
 
-async fn wait_for_space_child_projection(
+pub(super) async fn wait_for_space_child_projection(
     conn: &mut CoreConnection,
     space_id: &str,
     expected_child_room_ids: &[String],
@@ -1874,7 +2016,7 @@ async fn wait_for_space_child_projection(
     }
 }
 
-async fn select_space_and_wait_for_room_scope(
+pub(super) async fn select_space_and_wait_for_room_scope(
     conn: &mut CoreConnection,
     space_id: &str,
     expected_room_ids: &[String],
@@ -2021,7 +2163,7 @@ fn room_list_matches_selected_space(
     projected == expected
 }
 
-async fn wait_for_dm_room_in_room_list(
+pub(super) async fn wait_for_dm_room_in_room_list(
     conn: &mut CoreConnection,
     expected_room_id: &str,
     label: &str,
@@ -2143,58 +2285,190 @@ async fn select_space_scope_for_qa(
     }
 }
 
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn room_management_scenario_runs_after_room_space_and_reports_private_tokens() {
-        assert!(QaScenario::RoomManagement.should_run_stage(QaStage::Safety));
-        assert!(QaScenario::RoomManagement.should_run_stage(QaStage::LoginSync));
-        assert!(QaScenario::RoomManagement.should_run_stage(QaStage::RoomSpace));
-        assert!(QaScenario::RoomManagement.should_run_stage(QaStage::RoomManagement));
-        assert!(!QaScenario::RoomManagement.should_run_stage(QaStage::Timeline));
-        assert!(QaScenario::RoomManagement.suppress_matrix_identifiers());
-
-        assert_eq!(
-            final_tokens_for_scenario(QaScenario::RoomManagement),
-            [
-                "safety=ok",
-                "login_sync=ok",
-                "room_space=ok",
-                "room_settings=ok",
-                "moderation=ok",
-                "permission_guard=ok",
-                "restore_cleanup=ok",
-            ]
-        );
+async fn wait_for_sidebar_dm_room_ids(
+    conn: &mut CoreConnection,
+    expected_room_ids: &[&str],
+    label: &str,
+) -> Result<(), String> {
+    let expected = expected_room_ids
+        .iter()
+        .map(|room_id| (*room_id).to_owned())
+        .collect::<BTreeSet<_>>();
+    let matches_expected = |snapshot: &AppState| sidebar_dm_room_ids(snapshot) == expected;
+    if matches_expected(&conn.snapshot()) {
+        return Ok(());
     }
 
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            let snapshot = conn.snapshot();
+            return Err(format!(
+                "{label}: DM section scope mismatch \
+                 (expected_count={}, observed_count={}, active_space={})",
+                expected.len(),
+                sidebar_dm_room_ids(&snapshot).len(),
+                snapshot.navigation.active_space_id.is_some()
+            ));
+        }
 
-    #[test]
-    fn room_management_forbidden_predicate_requires_matching_failed_moderation_state() {
-        let request_id = RequestId {
-            connection_id: koushi_core::ids::RuntimeConnectionId(1),
-            sequence: 42,
-        };
-        let mut state = AppState::default();
+        let event = tokio::time::timeout(remaining, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                format!(
+                    "{label}: DM section scope mismatch \
+                     (expected_count={}, observed_count={}, active_space={})",
+                    expected.len(),
+                    sidebar_dm_room_ids(&snapshot).len(),
+                    snapshot.navigation.active_space_id.is_some()
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
-        assert!(!room_management_forbidden_recorded(&state, request_id));
-
-        state.room_management.operation = RoomManagementOperationState::Failed {
-            request_id: 41,
-            room_id: "!redacted:example.invalid".to_owned(),
-            operation: RoomManagementOperationKind::Moderation,
-            kind: OperationFailureKind::Forbidden,
-        };
-        assert!(!room_management_forbidden_recorded(&state, request_id));
-
-        state.room_management.operation = RoomManagementOperationState::Failed {
-            request_id: 42,
-            room_id: "!redacted:example.invalid".to_owned(),
-            operation: RoomManagementOperationKind::Moderation,
-            kind: OperationFailureKind::Forbidden,
-        };
-        assert!(room_management_forbidden_recorded(&state, request_id));
+        match event {
+            CoreEvent::StateChanged(snapshot) if matches_expected(&snapshot) => return Ok(()),
+            CoreEvent::Room(RoomEvent::RoomListUpdated) if matches_expected(&conn.snapshot()) => {
+                return Ok(());
+            }
+            _ if matches_expected(&conn.snapshot()) => return Ok(()),
+            _ => {}
+        }
     }
 }
+
+fn sidebar_dm_room_ids(snapshot: &AppState) -> BTreeSet<String> {
+    compose_sidebar(
+        snapshot.navigation.active_space_id.as_deref(),
+        &snapshot.spaces,
+        &snapshot.rooms,
+    )
+    .global_dms
+    .into_iter()
+    .map(|room| room.room_id)
+    .collect()
+}
+
+pub(super) async fn wait_for_invite_in_snapshot(
+    conn: &mut CoreConnection,
+    expected_room_id: &str,
+    expected_is_dm: Option<bool>,
+    label: &str,
+) -> Result<AppState, String> {
+    let contains_expected = |snapshot: &AppState| {
+        snapshot.invites.iter().any(|invite| {
+            invite.room_id == expected_room_id
+                && expected_is_dm.is_none_or(|expected| invite.is_dm == expected)
+        })
+    };
+
+    let snapshot = conn.snapshot();
+    if contains_expected(&snapshot) {
+        return Ok(snapshot);
+    }
+
+    let mut last_sync_event = "none";
+    let mut last_snapshot_sync = sync_state_diagnostic_label(&snapshot.sync);
+    let mut last_snapshot_session = session_state_diagnostic_label(&snapshot.session);
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                let observer_diagnostics =
+                    invite_observer_diagnostic_summary(&koushi_diagnostics::snapshot());
+                let diagnostics = koushi_diagnostics::snapshot();
+                let sync_diagnostics = sync_diagnostic_summary(&diagnostics);
+                let runtime_diagnostics = runtime_sync_diagnostic_summary(&diagnostics);
+                let sync_state = sync_state_diagnostic_label(&snapshot.sync);
+                let session_state = session_state_diagnostic_label(&snapshot.session);
+                format!(
+                    "{label}: timed out waiting for invite snapshot \
+                     (have {} invites; snapshot_sync={sync_state} snapshot_session={session_state} \
+                     last_sync_event={last_sync_event} last_snapshot_sync={last_snapshot_sync} \
+                     last_snapshot_session={last_snapshot_session} snapshot_rooms={} \
+                     snapshot_spaces={} snapshot_invites={}; {observer_diagnostics}; \
+                     {sync_diagnostics}; {runtime_diagnostics})",
+                    snapshot.invites.len(),
+                    snapshot.rooms.len(),
+                    snapshot.spaces.len(),
+                    snapshot.invites.len(),
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Sync(sync_event) => {
+                last_sync_event = sync_event_diagnostic_label(&sync_event);
+            }
+            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+                let snapshot = conn.snapshot();
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            CoreEvent::StateChanged(snapshot) => {
+                last_snapshot_sync = sync_state_diagnostic_label(&snapshot.sync);
+                last_snapshot_session = session_state_diagnostic_label(&snapshot.session);
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            _ => continue,
+        }
+    }
+}
+
+async fn wait_for_invite_absent(
+    conn: &mut CoreConnection,
+    expected_room_id: &str,
+    label: &str,
+) -> Result<AppState, String> {
+    let is_absent = |snapshot: &AppState| {
+        !snapshot
+            .invites
+            .iter()
+            .any(|invite| invite.room_id == expected_room_id)
+    };
+
+    let snapshot = conn.snapshot();
+    if is_absent(&snapshot) {
+        return Ok(snapshot);
+    }
+
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                format!(
+                    "{label}: timed out waiting for invite removal \
+                     (have {} invites)",
+                    snapshot.invites.len()
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+                let snapshot = conn.snapshot();
+                if is_absent(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            CoreEvent::StateChanged(snapshot) => {
+                if is_absent(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            _ => continue,
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "rooms_tests.rs"]
+mod tests;

@@ -1,7 +1,62 @@
-// Mechanical Wave 2A staging; integrated by the parent composition root.
+use super::cleanup::cleanup_logged_in_runtime;
+use super::diagnostics::{QaCannedTimelineEvent, QaTcpProxy};
+use super::event_wait::{
+    QaEventDeadline, SendQueueLocalEcho, cancel_send_queue_item, find_timeline_item_with_body,
+    retry_send_queue_item, send_text_expect_local_echo, start_sync_for_qa, stop_sync_for_qa,
+    subscribe_timeline_for_qa, timeline_item_body_matches, timeline_item_transaction_id,
+    visit_timeline_diff_items, wait_for_event_item_with_body,
+    wait_for_event_item_with_body_or_retry_not_sent, wait_for_initial_items,
+    wait_for_item_with_body, wait_for_item_with_body_or_decryption_failure,
+    wait_for_link_preview_item_projection, wait_for_logged_in, wait_for_logged_out,
+    wait_for_media_download_completed, wait_for_media_item, wait_for_media_send_flow_completion,
+    wait_for_ready_snapshot, wait_for_send_completed, wait_for_send_flow_completion,
+    wait_for_session_restored, wait_for_sync_reconnecting, wait_for_sync_running_after_reconnect,
+    wait_for_sync_started, wait_for_sync_started_and_running, wait_for_sync_stopped,
+    wait_for_timeline_send_state,
+};
+use super::participants::{
+    QaParticipantLoginGate, QaParticipantLoginOutcome, authenticated_session_info,
+    complete_new_identity_gate_for_qa, login_synced_participant_for_qa, qa_data_dir,
+};
+use super::registry::{
+    CACHE_RESTORE_MAX_CYCLES, CACHE_RESTORE_PAGINATE_BATCH, CACHE_RESTORE_PROD_EVENT_COUNT,
+    CACHE_RESTORE_PROD_MAX_BATCHES, CACHE_RESTORE_SHALLOW_DEPTH, DEFAULT_CACHE_RESTORE_DEPTH,
+    DEFAULT_CACHE_RESTORE_ROOMS, ENV_CACHE_RESTORE_DEPTH, ENV_CACHE_RESTORE_ROOMS, EVENT_TIMEOUT,
+    QaConfig, ROOM_LIST_EVENT_TIMEOUT, SEND_QUEUE_EVENT_TIMEOUT, TIMELINE_INITIAL_EVENT_TIMEOUT,
+    TIMELINE_RECONNECT_EXPECTED_BODY_COUNT, TIMELINE_RECONNECT_MIN_INITIAL_BODIES,
+    TIMELINE_RECONNECT_PAGINATE_EVENT_COUNT, TIMELINE_UNSUBSCRIBE_SETTLE_TIMEOUT,
+    TimelineStressConfig,
+};
+use super::scenario_identity::{native_attention_room, timeline_item_is_decryption_failure};
+use super::scenario_rooms::{
+    accept_invite_for_qa, create_room_for_qa, create_space_for_qa, invite_user_for_qa,
+    select_space_and_wait_for_room_scope, set_space_child_for_qa, start_direct_message_for_qa,
+    wait_for_dm_room_in_room_list, wait_for_encrypted_room_projection_for_qa,
+    wait_for_invite_in_snapshot, wait_for_room_in_room_list, wait_for_space_child_projection,
+    wait_for_space_in_space_list,
+};
+use super::scenario_search::wait_for_settings_persisted;
+use super::{
+    AccountCommand, AccountKey, ActivityEvent, ActivityMarkReadTarget, ActivityRowKind,
+    ActivityState, AppAction, AppCommand, AppState, AuthSecret, BTreeSet, ComposerDocument,
+    ComposerDraftScope, ComposerKey, ComposerKeyEvent, ComposerKeyModifiers,
+    ComposerResolvedAction, ComposerResolverContext, ComposerSelection, ComposerSendShortcut,
+    ComposerSurface, ComposerTarget, CoreCommand, CoreConnection, CoreEvent, CoreRuntime,
+    DisplaySettings, Duration, ImageUploadCompressionMode, ImageUploadCompressionPolicy,
+    ImageUploadCompressionState, ImageUploadDimensions, ImageUploadVariantInfo,
+    ImageUploadVariantKind, LinkPreviewState, LiveSignalsEvent, MediaDownloadSelection,
+    MentionIntent, MentionTarget, PaginationDirection, PaginationState, PresenceKind, RequestId,
+    RoomCommand, RoomEvent, ScheduledSendCapability, SessionInfo, SessionState, SettingsPatch,
+    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, SyncCommand, SystemTime,
+    TimelineAnchorRestoreStatus, TimelineCommand, TimelineDiff, TimelineEvent, TimelineGapId,
+    TimelineGapPosition, TimelineItem, TimelineItemId, TimelineKey, TimelineKind,
+    TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
+    TimelineMediaKind, TimelineSendState, TimelineUnreadPosition, TimelineViewportObservation,
+    UNIX_EPOCH, UploadMediaKind, UploadMediaRequest, UploadMediaThumbnail,
+    build_formatted_message_draft, reduce, resolve_composer_key_action,
+};
 
-
-async fn run_timeline_stress_stage(
+pub(super) async fn run_timeline_stress_stage(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
@@ -174,9 +229,7 @@ async fn run_timeline_stress_stage(
     Ok(())
 }
 
-
-
-async fn run_timeline_stress_replay_stage(
+pub(super) async fn run_timeline_stress_replay_stage(
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
     account_key_a: &AccountKey,
@@ -241,8 +294,6 @@ async fn run_timeline_stress_replay_stage(
     Ok(())
 }
 
-
-
 async fn wait_for_existing_stress_fixture_room_list(
     conn: &mut CoreConnection,
     label: &str,
@@ -286,8 +337,6 @@ async fn wait_for_existing_stress_fixture_room_list(
     }
 }
 
-
-
 async fn verify_existing_stress_space_scopes(
     conn: &mut CoreConnection,
     snapshot: &AppState,
@@ -307,8 +356,6 @@ async fn verify_existing_stress_space_scopes(
     }
     Ok(())
 }
-
-
 
 fn stress_replay_room_ids(snapshot: &AppState) -> Vec<String> {
     let joined_room_ids = snapshot
@@ -332,15 +379,11 @@ fn stress_replay_room_ids(snapshot: &AppState) -> Vec<String> {
     room_ids.into_iter().collect()
 }
 
-
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct StressReplayScan {
     rooms: usize,
     message_rows: usize,
 }
-
-
 
 async fn scan_existing_stress_rooms(
     conn: &mut CoreConnection,
@@ -357,8 +400,6 @@ async fn scan_existing_stress_rooms(
         message_rows,
     })
 }
-
-
 
 async fn scan_existing_stress_timeline(
     conn: &mut CoreConnection,
@@ -397,15 +438,11 @@ async fn scan_existing_stress_timeline(
     Ok(message_rows)
 }
 
-
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct StressReplayPageResult {
     message_rows: usize,
     end_reached: bool,
 }
-
-
 
 async fn wait_for_stress_replay_paginate(
     conn: &mut CoreConnection,
@@ -478,8 +515,6 @@ async fn wait_for_stress_replay_paginate(
     }
 }
 
-
-
 fn count_visible_payload_event_rows(items: &[TimelineItem]) -> usize {
     items
         .iter()
@@ -488,8 +523,6 @@ fn count_visible_payload_event_rows(items: &[TimelineItem]) -> usize {
         })
         .count()
 }
-
-
 
 fn count_visible_payload_event_rows_in_diffs(diffs: &[TimelineDiff]) -> usize {
     let mut count = 0usize;
@@ -502,8 +535,6 @@ fn count_visible_payload_event_rows_in_diffs(diffs: &[TimelineDiff]) -> usize {
     count
 }
 
-
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct StressRoomCoordinates {
     sender_prefix: &'static str,
@@ -511,15 +542,11 @@ struct StressRoomCoordinates {
     room_index: usize,
 }
 
-
-
 impl StressRoomCoordinates {
     fn should_send_empty_formatted_probe(self) -> bool {
         self.space_index == 0 && self.room_index == 0
     }
 }
-
-
 
 async fn run_timeline_stress_room_messages(
     config: &QaConfig,
@@ -643,8 +670,6 @@ async fn run_timeline_stress_room_messages(
     Ok(expected_bodies.len())
 }
 
-
-
 async fn send_timeline_stress_empty_formatted_probe(
     config: &QaConfig,
     room_id: &str,
@@ -695,9 +720,7 @@ async fn send_timeline_stress_empty_formatted_probe(
     Ok(body)
 }
 
-
-
-async fn run_scheduled_send_stage(
+pub(super) async fn run_scheduled_send_stage(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     room_id: &str,
@@ -838,8 +861,6 @@ async fn run_scheduled_send_stage(
     Ok(())
 }
 
-
-
 fn scheduled_qa_epoch_ms(offset: Duration) -> u64 {
     SystemTime::now()
         .checked_add(offset)
@@ -848,8 +869,6 @@ fn scheduled_qa_epoch_ms(offset: Duration) -> u64 {
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
 }
-
-
 
 async fn wait_for_selected_room(
     conn: &mut CoreConnection,
@@ -877,8 +896,6 @@ async fn wait_for_selected_room(
         }
     }
 }
-
-
 
 async fn wait_for_scheduled_send_count(
     conn: &mut CoreConnection,
@@ -910,8 +927,6 @@ async fn wait_for_scheduled_send_count(
     }
 }
 
-
-
 async fn wait_for_scheduled_send_due(
     conn: &mut CoreConnection,
     scheduled_id: &str,
@@ -941,8 +956,6 @@ async fn wait_for_scheduled_send_due(
         }
     }
 }
-
-
 
 async fn wait_for_scheduled_send_fired(
     conn: &mut CoreConnection,
@@ -993,8 +1006,6 @@ async fn wait_for_scheduled_send_fired(
     }
 }
 
-
-
 fn scheduled_item_absent(snapshot: &AppState, scheduled_id: &str) -> bool {
     snapshot
         .timeline
@@ -1002,8 +1013,6 @@ fn scheduled_item_absent(snapshot: &AppState, scheduled_id: &str) -> bool {
         .iter()
         .all(|item| item.scheduled_id != scheduled_id)
 }
-
-
 
 /// Reads KOUSHI_QA_CACHE_RESTORE_ROOMS / _DEPTH, clamps at defaults.
 fn cache_restore_params() -> (usize, usize) {
@@ -1019,8 +1028,6 @@ fn cache_restore_params() -> (usize, usize) {
         .max(10);
     (rooms, depth)
 }
-
-
 
 /// Apply a single `TimelineDiff` in-place to a `Vec<TimelineItem>`.
 fn apply_timeline_diff(items: &mut Vec<TimelineItem>, diff: &TimelineDiff) {
@@ -1047,9 +1054,7 @@ fn apply_timeline_diff(items: &mut Vec<TimelineItem>, diff: &TimelineDiff) {
     }
 }
 
-
-
-async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), String> {
+pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), String> {
     let (num_rooms, depth) = cache_restore_params();
     let proxy = QaTcpProxy::start(&config.homeserver)?;
     let data_dir = qa_data_dir("cache_restore");
@@ -1703,9 +1708,7 @@ async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), String> {
     Ok(())
 }
 
-
-
-async fn run_focused_send_queue_scenario(config: &QaConfig) -> Result<(), String> {
+pub(super) async fn run_focused_send_queue_scenario(config: &QaConfig) -> Result<(), String> {
     let QaParticipantLoginOutcome {
         runtime,
         mut conn,
@@ -1756,9 +1759,7 @@ async fn run_focused_send_queue_scenario(config: &QaConfig) -> Result<(), String
     run_send_queue_stage(config, &recovery_secret).await
 }
 
-
-
-async fn run_send_queue_stage(
+pub(super) async fn run_send_queue_stage(
     config: &QaConfig,
     recovery_secret: &AuthSecret,
 ) -> Result<(), String> {
@@ -1987,9 +1988,7 @@ async fn run_send_queue_stage(
     cleanup_logged_in_runtime(conn, runtime, account_key, "send_queue cleanup").await
 }
 
-
-
-fn assert_zero_display_projection_reset_fallback_delta(
+pub(super) fn assert_zero_display_projection_reset_fallback_delta(
     baseline: u64,
     current: u64,
 ) -> Result<(), String> {
@@ -1999,8 +1998,6 @@ fn assert_zero_display_projection_reset_fallback_delta(
         Err("send_queue: display projection reset fallback counter changed".to_owned())
     }
 }
-
-
 
 async fn unsubscribe_timeline_for_qa(
     conn: &mut CoreConnection,
@@ -2018,13 +2015,9 @@ async fn unsubscribe_timeline_for_qa(
     Ok(())
 }
 
-
-
-async fn run_timeline_reconnect_scenario(config: &QaConfig) -> Result<(), String> {
+pub(super) async fn run_timeline_reconnect_scenario(config: &QaConfig) -> Result<(), String> {
     run_timeline_reconnect_scenario_impl(config).await
 }
-
-
 
 async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), String> {
     // The public scenario selector exercises the single live reconnect path.
@@ -2730,8 +2723,6 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
     Ok(())
 }
 
-
-
 fn timeline_gap_count_for_qa(conn: &CoreConnection) -> u32 {
     match conn.snapshot().timeline.continuity {
         koushi_state::TimelineContinuityState::Inspecting {
@@ -2744,8 +2735,6 @@ fn timeline_gap_count_for_qa(conn: &CoreConnection) -> u32 {
         | koushi_state::TimelineContinuityState::Healthy { .. } => 0,
     }
 }
-
-
 
 fn live_tail_snapshot_completion_count_for_qa() -> usize {
     koushi_diagnostics::snapshot()
@@ -2771,8 +2760,6 @@ fn live_tail_snapshot_completion_count_for_qa() -> usize {
         })
         .count()
 }
-
-
 
 async fn wait_for_live_tail_snapshot_gap_count_for_qa(
     conn: &CoreConnection,
@@ -2813,8 +2800,6 @@ async fn wait_for_live_tail_snapshot_gap_count_for_qa(
         )
     })
 }
-
-
 
 async fn wait_for_projected_gap_and_item_for_qa(
     conn: &mut CoreConnection,
@@ -2877,8 +2862,6 @@ async fn wait_for_projected_gap_and_item_for_qa(
     }
 }
 
-
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct QaVisibleGapSelection {
     id: TimelineGapId,
@@ -2886,15 +2869,11 @@ struct QaVisibleGapSelection {
     last_visible_event_id: Option<String>,
 }
 
-
-
 #[derive(Default)]
 struct QaVisibleGapCapture {
     exact_body_present: bool,
     projected_gap: Option<(QaVisibleGapSelection, (u64, u64))>,
 }
-
-
 
 impl QaVisibleGapCapture {
     fn observe_items(
@@ -2951,8 +2930,6 @@ impl QaVisibleGapCapture {
         self.projected_gap.as_ref()
     }
 }
-
-
 
 fn select_visible_gap_for_qa(
     items: &[TimelineItem],
@@ -3030,8 +3007,6 @@ fn select_visible_gap_for_qa(
     ))
 }
 
-
-
 fn settled_nonzero_timeline_gap_count_for_qa(
     conn: &CoreConnection,
     projection_generation: u64,
@@ -3063,8 +3038,6 @@ fn settled_nonzero_timeline_gap_count_for_qa(
     (gap_count > 0).then_some(gap_count)
 }
 
-
-
 async fn wait_for_timeline_gap_count_for_qa(
     conn: &CoreConnection,
     expected_gap_count: u32,
@@ -3090,9 +3063,159 @@ async fn wait_for_timeline_gap_count_for_qa(
     }
 }
 
+fn qa_detached_live_tail_events(sender: &str) -> Vec<QaCannedTimelineEvent> {
+    (0..128)
+        .rev()
+        .map(|index| QaCannedTimelineEvent {
+            event_id: format!("$qa-live-tail-detached-{index:03}:example.invalid"),
+            sender: sender.to_owned(),
+            body: format!("QA timeline detached live tail {index:03}"),
+            origin_server_ts: 1_900_000_100_000 + index as u64,
+        })
+        .collect()
+}
 
+fn qa_detached_historical_continuation_events(sender: &str) -> Vec<QaCannedTimelineEvent> {
+    vec![QaCannedTimelineEvent {
+        event_id: "$qa-live-tail-detached-historical:example.invalid".to_owned(),
+        sender: sender.to_owned(),
+        body: "QA timeline detached historical continuation".to_owned(),
+        origin_server_ts: 1_900_000_099_999,
+    }]
+}
 
-async fn run_activity_stage(
+async fn wait_for_room_unread_count(
+    conn: &mut CoreConnection,
+    room_id: &str,
+    label: &str,
+) -> Result<(), String> {
+    let started_at = std::time::Instant::now();
+    loop {
+        if conn
+            .snapshot()
+            .rooms
+            .iter()
+            .any(|room| room.room_id == room_id && room.unread_count > 0)
+        {
+            return Ok(());
+        }
+        if started_at.elapsed() > EVENT_TIMEOUT {
+            return Err(format!(
+                "{label}: timed out waiting for unread room summary"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_for_activity_snapshot(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    label: &str,
+) -> Result<(Vec<String>, Vec<String>, Vec<String>), String> {
+    loop {
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for Activity SnapshotLoaded"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Activity(ActivityEvent::SnapshotLoaded {
+                request_id: ev_id,
+                recent,
+                unread,
+                ..
+            }) if ev_id == request_id => {
+                let mut unread_room_ids = Vec::new();
+                let mut unread_event_ids = Vec::new();
+                for row in unread.rows {
+                    match row.kind {
+                        ActivityRowKind::Event => {
+                            let event_id = row.event_id.ok_or_else(|| {
+                                format!("{label}: Activity event row lacked an event id")
+                            })?;
+                            unread_event_ids.push(event_id);
+                        }
+                        ActivityRowKind::RoomUnread => {
+                            if row.event_id.is_some() {
+                                return Err(format!(
+                                    "{label}: Activity placeholder contained an event id"
+                                ));
+                            }
+                        }
+                    }
+                    unread_room_ids.push(row.room_id);
+                }
+
+                return Ok((
+                    recent
+                        .rows
+                        .into_iter()
+                        .filter_map(|row| row.event_id)
+                        .collect(),
+                    unread_event_ids,
+                    unread_room_ids,
+                ));
+            }
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == request_id => {
+                return Err(format!("{label}: Activity open failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn wait_for_activity_marked_read(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    label: &str,
+) -> Result<(), String> {
+    loop {
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for Activity MarkedRead"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Activity(ActivityEvent::MarkedRead {
+                request_id: ev_id, ..
+            }) if ev_id == request_id => return Ok(()),
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == request_id => {
+                return Err(format!("{label}: Activity mark-read failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn wait_for_activity_unread_empty(
+    conn: &mut CoreConnection,
+    label: &str,
+) -> Result<(), String> {
+    let started_at = std::time::Instant::now();
+    loop {
+        if matches!(
+            &conn.snapshot().activity,
+            ActivityState::Open { unread, .. } if unread.rows.is_empty()
+        ) {
+            return Ok(());
+        }
+        if started_at.elapsed() > EVENT_TIMEOUT {
+            return Err(format!(
+                "{label}: timed out waiting for empty unread stream"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+pub(super) async fn run_activity_stage(
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
     key_a: &TimelineKey,
@@ -3179,25 +3302,6 @@ async fn run_activity_stage(
     Ok(())
 }
 
-
-
-async fn subscribe_timeline_for_qa(
-    conn: &mut CoreConnection,
-    key: &TimelineKey,
-    label: &str,
-) -> Result<Vec<TimelineItem>, String> {
-    let request_id = conn.next_request_id();
-    conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
-        request_id,
-        key: key.clone(),
-    }))
-    .await
-    .map_err(|e| format!("{label}: submit timeline subscribe failed: {e}"))?;
-    wait_for_initial_items(conn, key, request_id, label).await
-}
-
-
-
 async fn subscribe_and_ack_active_timeline_projection_for_qa(
     conn: &mut CoreConnection,
     key: &TimelineKey,
@@ -3252,7 +3356,16 @@ async fn subscribe_and_ack_active_timeline_projection_for_qa(
     }
 }
 
+pub(super) fn thread_initial_items_need_paginate_backfill(
+    initial_items: &[koushi_core::event::TimelineItem],
+    expected_body: &str,
+) -> bool {
+    find_timeline_item_with_body(initial_items, expected_body).is_none()
+}
 
+fn thread_reply_should_repaginate_on_idle(pagination_ended: bool) -> bool {
+    !pagination_ended
+}
 
 fn observe_send_queue_retry_item_state(
     item: &TimelineItem,
@@ -3278,8 +3391,6 @@ fn observe_send_queue_retry_item_state(
         }
     }
 }
-
-
 
 async fn wait_for_send_completions_in_order(
     conn: &mut CoreConnection,
@@ -3378,8 +3489,6 @@ async fn wait_for_send_completions_in_order(
     }
 }
 
-
-
 async fn wait_for_cancelled_or_removed_send(
     conn: &mut CoreConnection,
     key: &TimelineKey,
@@ -3440,9 +3549,7 @@ async fn wait_for_cancelled_or_removed_send(
     }
 }
 
-
-
-async fn run_live_signals_stage(
+pub(super) async fn run_live_signals_stage(
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
     key_a: &TimelineKey,
@@ -3558,8 +3665,6 @@ async fn run_live_signals_stage(
     Ok(())
 }
 
-
-
 fn read_receipt_projection_status(
     snapshot: &AppState,
     room_id: &str,
@@ -3593,8 +3698,6 @@ fn read_receipt_projection_status(
         "label_missing"
     }
 }
-
-
 
 async fn wait_for_read_receipt_projection(
     conn: &mut CoreConnection,
@@ -3634,9 +3737,7 @@ async fn wait_for_read_receipt_projection(
     }
 }
 
-
-
-async fn run_composer_stage(
+pub(super) async fn run_composer_stage(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     mentioned_user_id: &str,
@@ -3742,8 +3843,6 @@ async fn run_composer_stage(
     Ok(())
 }
 
-
-
 fn timeline_key_room_id(key: &TimelineKey) -> Option<&str> {
     match &key.kind {
         TimelineKind::Room { room_id }
@@ -3751,8 +3850,6 @@ fn timeline_key_room_id(key: &TimelineKey) -> Option<&str> {
         | TimelineKind::Focused { room_id, .. } => Some(room_id.as_str()),
     }
 }
-
-
 
 async fn wait_for_live_signal_event(
     conn: &mut CoreConnection,
@@ -3779,8 +3876,6 @@ async fn wait_for_live_signal_event(
     }
 }
 
-
-
 async fn wait_for_live_signal_snapshot(
     conn: &mut CoreConnection,
     label: &str,
@@ -3805,9 +3900,7 @@ async fn wait_for_live_signal_snapshot(
     }
 }
 
-
-
-async fn run_media_stage(
+pub(super) async fn run_media_stage(
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
     key_a: &TimelineKey,
@@ -3933,8 +4026,6 @@ async fn run_media_stage(
     Ok(())
 }
 
-
-
 /// Wait for the `Set` diff that applies a media caption edit and require the
 /// attachment projection to survive it (issue #328). Only presence of the media
 /// projection is checked; no MXC URI, filename, or caption text is printed.
@@ -3990,9 +4081,7 @@ async fn wait_for_media_caption_edit(
     }
 }
 
-
-
-async fn run_link_preview_stage(
+pub(super) async fn run_link_preview_stage(
     conn_a: &mut CoreConnection,
     conn_b: &mut CoreConnection,
     key_a: &TimelineKey,
@@ -4268,8 +4357,6 @@ async fn run_link_preview_stage(
     Ok(())
 }
 
-
-
 fn assert_image_upload_compression_contract() -> Result<(), String> {
     let policy = ImageUploadCompressionPolicy::default();
     let original_dimensions = ImageUploadDimensions {
@@ -4350,8 +4437,6 @@ fn assert_image_upload_compression_contract() -> Result<(), String> {
     }
     Ok(())
 }
-
-
 
 fn assert_upload_ux_state_contract(room_id: &str) -> Result<(), String> {
     let mut state = AppState {
@@ -4483,8 +4568,6 @@ fn assert_upload_ux_state_contract(room_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-
-
 fn media_gallery_contract_item(
     event_id: &str,
     room_id: &str,
@@ -4513,14 +4596,10 @@ fn media_gallery_contract_item(
     }
 }
 
-
-
 struct ReconnectProjection {
     items: Vec<TimelineItem>,
     expected_bodies: Vec<String>,
 }
-
-
 
 impl ReconnectProjection {
     fn from_initial(
@@ -4631,8 +4710,6 @@ impl ReconnectProjection {
     }
 }
 
-
-
 fn observe_reconnect_pagination_state(
     request_id: Option<RequestId>,
     expected_request_id: RequestId,
@@ -4660,8 +4737,6 @@ fn observe_reconnect_pagination_state(
     }
     Ok(())
 }
-
-
 
 async fn wait_for_reconnect_projection(
     conn: &mut CoreConnection,
@@ -4732,8 +4807,6 @@ async fn wait_for_reconnect_projection(
         }
     }
 }
-
-
 
 async fn wait_for_exact_items_and_gap_release(
     conn: &mut CoreConnection,
@@ -4902,18 +4975,14 @@ async fn wait_for_exact_items_and_gap_release(
     }
 }
 
-
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WithheldEventProjectionOrigin {
+pub(super) enum WithheldEventProjectionOrigin {
     InitialItems,
     ItemsUpdated,
 }
 
-
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WithheldEventTargetOutcome {
+pub(super) enum WithheldEventTargetOutcome {
     Missing,
     DecryptionFailure,
     NonFailure {
@@ -4923,9 +4992,7 @@ enum WithheldEventTargetOutcome {
     },
 }
 
-
-
-fn withheld_event_target_outcome(
+pub(super) fn withheld_event_target_outcome(
     items: &[TimelineItem],
     target_event_id: &str,
     expected_body: &str,
@@ -4947,9 +5014,7 @@ fn withheld_event_target_outcome(
     }
 }
 
-
-
-fn withheld_event_target_outcome_in_diffs(
+pub(super) fn withheld_event_target_outcome_in_diffs(
     diffs: &[TimelineDiff],
     target_event_id: &str,
     expected_body: &str,
@@ -4972,8 +5037,6 @@ fn withheld_event_target_outcome_in_diffs(
     Ok(outcome)
 }
 
-
-
 fn timeline_item_has_visible_payload(item: &TimelineItem) -> bool {
     item.body
         .as_ref()
@@ -4988,8 +5051,6 @@ fn timeline_item_has_visible_payload(item: &TimelineItem) -> bool {
         })
 }
 
-
-
 fn timeline_item_is_visible_event_row(item: &TimelineItem) -> bool {
     matches!(item.id, TimelineItemId::Event { .. })
         && !item.is_hidden
@@ -4997,8 +5058,6 @@ fn timeline_item_is_visible_event_row(item: &TimelineItem) -> bool {
         && item.sender.is_some()
         && item.timestamp_ms.is_some()
 }
-
-
 
 fn assert_no_blank_visible_event_rows(items: &[TimelineItem], label: &str) -> Result<(), String> {
     let blank_count = items
@@ -5015,8 +5074,6 @@ fn assert_no_blank_visible_event_rows(items: &[TimelineItem], label: &str) -> Re
     ))
 }
 
-
-
 fn retain_unseen_expected_bodies(items: &[TimelineItem], remaining: &mut Vec<String>) {
     for item in items {
         if let Some(body) = item.body.as_ref() {
@@ -5025,7 +5082,259 @@ fn retain_unseen_expected_bodies(items: &[TimelineItem], remaining: &mut Vec<Str
     }
 }
 
+async fn wait_for_stress_bodies_and_no_blank_rows(
+    conn: &mut CoreConnection,
+    key: &TimelineKey,
+    initial_items: &[TimelineItem],
+    expected_bodies: &[String],
+    page_size: u16,
+    label: &str,
+) -> Result<(), String> {
+    assert_no_blank_visible_event_rows(initial_items, label)?;
+    let mut remaining_bodies = expected_bodies.to_vec();
+    retain_unseen_expected_bodies(initial_items, &mut remaining_bodies);
+    if remaining_bodies.is_empty() {
+        return Ok(());
+    }
 
+    let mut pagination_ended = false;
+    let mut current_paginate_request_id =
+        submit_stress_backfill_paginate(conn, key, page_size, label).await?;
+
+    loop {
+        if remaining_bodies.is_empty() {
+            return Ok(());
+        }
+
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| {
+                format!(
+                    "{label}: timed out; remaining_body_count={} pagination_ended={}",
+                    remaining_bodies.len(),
+                    pagination_ended
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match &event {
+            CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
+                key: ev_key, diffs, ..
+            }) if ev_key == key => {
+                visit_timeline_diff_items(diffs, |item| {
+                    if timeline_item_is_visible_event_row(item)
+                        && !timeline_item_has_visible_payload(item)
+                    {
+                        return Err(format!(
+                            "{label}: visible event row had no renderable payload"
+                        ));
+                    }
+                    if let Some(body) = item.body.as_ref() {
+                        remaining_bodies.retain(|expected| !body.contains(expected));
+                    }
+                    Ok(())
+                })?;
+            }
+            CoreEvent::Timeline(TimelineEvent::InitialItems {
+                key: ev_key, items, ..
+            }) if ev_key == key => {
+                assert_no_blank_visible_event_rows(items, label)?;
+                retain_unseen_expected_bodies(items, &mut remaining_bodies);
+            }
+            CoreEvent::Timeline(TimelineEvent::PaginationStateChanged {
+                key: ev_key,
+                request_id: ev_id,
+                state,
+                ..
+            }) if ev_key == key && ev_id == &Some(current_paginate_request_id) => match state {
+                PaginationState::Idle => {
+                    if !remaining_bodies.is_empty() && !pagination_ended {
+                        current_paginate_request_id =
+                            submit_stress_backfill_paginate(conn, key, page_size, label).await?;
+                    }
+                }
+                PaginationState::EndReached => {
+                    pagination_ended = true;
+                }
+                PaginationState::Failed { kind } => {
+                    return Err(format!("{label}: pagination failed: {kind:?}"));
+                }
+                PaginationState::Paginating => {}
+            },
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == &current_paginate_request_id => {
+                return Err(format!("{label}: paginate operation failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn submit_stress_backfill_paginate(
+    conn: &mut CoreConnection,
+    key: &TimelineKey,
+    page_size: u16,
+    label: &str,
+) -> Result<RequestId, String> {
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::Timeline(TimelineCommand::Paginate {
+        request_id,
+        key: key.clone(),
+        direction: PaginationDirection::Backward,
+        event_count: page_size,
+    }))
+    .await
+    .map_err(|e| format!("{label}: submit receiver paginate failed: {e}"))?;
+    Ok(request_id)
+}
+
+pub(super) async fn wait_for_timeline_navigation(
+    conn: &mut CoreConnection,
+    key: &TimelineKey,
+    expected_position: TimelineUnreadPosition,
+    minimum_unread_count: u64,
+    minimum_newer_count: u64,
+    label: &str,
+) -> Result<(), String> {
+    loop {
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for NavigationUpdated"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Timeline(TimelineEvent::NavigationUpdated {
+                key: ref ev_key,
+                snapshot,
+            }) if ev_key == key
+                && snapshot.unread_position == expected_position
+                && snapshot.unread_event_count >= minimum_unread_count
+                && snapshot.newer_event_count >= minimum_newer_count =>
+            {
+                return Ok(());
+            }
+            CoreEvent::OperationFailed { failure, .. } => {
+                return Err(format!("{label}: navigation command failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Wait for the thread reply item by scanning `initial_items` and subsequent
+/// `InitialItems`, `ItemsUpdated`, and `PaginationStateChanged` events for the
+/// reply body. If the reply is not yet visible, this helper drives additional
+/// backward pagination until the reply arrives or pagination ends/fails.
+#[allow(dead_code)]
+pub(super) async fn wait_for_thread_reply_item(
+    conn: &mut CoreConnection,
+    key: &TimelineKey,
+    initial_items: &[koushi_core::event::TimelineItem],
+    expected_body: &str,
+    label: &str,
+) -> Result<koushi_core::event::TimelineItem, String> {
+    if let Some(item) = find_timeline_item_with_body(initial_items, expected_body) {
+        return Ok(item);
+    }
+
+    let mut current_paginate_request_id = conn.next_request_id();
+    let mut pagination_ended = false;
+    conn.command(CoreCommand::Timeline(TimelineCommand::Paginate {
+        request_id: current_paginate_request_id,
+        key: key.clone(),
+        direction: PaginationDirection::Backward,
+        event_count: 20,
+    }))
+    .await
+    .map_err(|e| format!("{label}: submit thread paginate failed: {e}"))?;
+
+    loop {
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| {
+                format!("{label}: timed out waiting for thread reply body {expected_body:?}")
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Timeline(TimelineEvent::InitialItems {
+                key: ref ev_key,
+                items,
+                ..
+            }) if ev_key == key => {
+                if let Some(item) = find_timeline_item_with_body(&items, expected_body) {
+                    return Ok(item);
+                }
+            }
+            CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
+                key: ref ev_key,
+                diffs,
+                ..
+            }) if ev_key == key => {
+                for diff in diffs {
+                    let item = match diff {
+                        koushi_core::event::TimelineDiff::PushBack { item }
+                        | koushi_core::event::TimelineDiff::PushFront { item }
+                        | koushi_core::event::TimelineDiff::Insert { item, .. }
+                        | koushi_core::event::TimelineDiff::Set { item, .. } => item,
+                        koushi_core::event::TimelineDiff::Reset { items } => {
+                            if let Some(item) = find_timeline_item_with_body(&items, expected_body)
+                            {
+                                return Ok(item);
+                            }
+                            continue;
+                        }
+                        _ => continue,
+                    };
+                    if item
+                        .body
+                        .as_ref()
+                        .map(|body| body.contains(expected_body))
+                        .unwrap_or(false)
+                    {
+                        return Ok(item.clone());
+                    }
+                }
+            }
+            CoreEvent::Timeline(TimelineEvent::PaginationStateChanged {
+                key: ref ev_key,
+                direction,
+                state,
+                ..
+            }) if ev_key == key && direction == PaginationDirection::Backward => match state {
+                PaginationState::Idle => {
+                    if thread_reply_should_repaginate_on_idle(pagination_ended) {
+                        current_paginate_request_id = conn.next_request_id();
+                        conn.command(CoreCommand::Timeline(TimelineCommand::Paginate {
+                            request_id: current_paginate_request_id,
+                            key: key.clone(),
+                            direction: PaginationDirection::Backward,
+                            event_count: 20,
+                        }))
+                        .await
+                        .map_err(|e| format!("{label}: re-paginate thread failed: {e}"))?;
+                    }
+                }
+                PaginationState::EndReached => {
+                    pagination_ended = true;
+                }
+                PaginationState::Failed { kind } => {
+                    return Err(format!("{label}: thread pagination failed: {kind:?}"));
+                }
+                PaginationState::Paginating => {}
+            },
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == current_paginate_request_id => {
+                return Err(format!("{label}: thread paginate failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
 
 fn timeline_item_body_contains(item: &TimelineItem, expected_body: &str) -> bool {
     item.body
@@ -5034,16 +5343,12 @@ fn timeline_item_body_contains(item: &TimelineItem, expected_body: &str) -> bool
         .unwrap_or(false)
 }
 
-
-
 fn timeline_item_event_id(item: &TimelineItem) -> Option<&str> {
     match &item.id {
         TimelineItemId::Event { event_id } => Some(event_id),
         TimelineItemId::Transaction { .. } | TimelineItemId::Synthetic { .. } => None,
     }
 }
-
-
 
 fn timeline_item_has_thread_summary_reply(item: &TimelineItem, root_event_id: &str) -> bool {
     timeline_item_event_id(item) == Some(root_event_id)
@@ -5054,16 +5359,12 @@ fn timeline_item_has_thread_summary_reply(item: &TimelineItem, root_event_id: &s
             .unwrap_or(false)
 }
 
-
-
 struct RoomThreadSummaryObserver<'a> {
     expected_thread_body: &'a str,
     root_event_id: &'a str,
     saw_canonical_reply: bool,
     saw_summary: bool,
 }
-
-
 
 impl<'a> RoomThreadSummaryObserver<'a> {
     fn new(expected_thread_body: &'a str, root_event_id: &'a str) -> Self {
@@ -5103,9 +5404,7 @@ impl<'a> RoomThreadSummaryObserver<'a> {
     }
 }
 
-
-
-async fn wait_for_room_timeline_thread_summary(
+pub(super) async fn wait_for_room_timeline_thread_summary(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     initial_items: &[TimelineItem],
@@ -5159,8 +5458,6 @@ async fn wait_for_room_timeline_thread_summary(
     }
 }
 
-
-
 #[allow(dead_code)]
 fn assert_room_timeline_exposes_canonical_reply_and_summarizes_root(
     items: &[TimelineItem],
@@ -5177,9 +5474,10 @@ fn assert_room_timeline_exposes_canonical_reply_and_summarizes_root(
     Ok(())
 }
 
-
-
-fn assert_thread_reply_relation(item: &TimelineItem, root_event_id: &str) -> Result<(), String> {
+pub(super) fn assert_thread_reply_relation(
+    item: &TimelineItem,
+    root_event_id: &str,
+) -> Result<(), String> {
     if item
         .in_reply_to_event_id
         .as_deref()
@@ -5193,15 +5491,13 @@ fn assert_thread_reply_relation(item: &TimelineItem, root_event_id: &str) -> Res
     Ok(())
 }
 
-
-
 /// Wait for an `ItemsUpdated` Set diff for the event identified by `event_id`
 /// OR a Set diff that has the given body substring (whichever arrives first).
 /// This asserts that an edit was reflected in the timeline. A failed edit
 /// operation (`OperationFailed` with the edit's request_id) is surfaced as an
 /// explicit error instead of a silent timeout.
 /// Timeout is extended to 60s because edit confirmation requires a sync round-trip.
-async fn wait_for_edit_diff(
+pub(super) async fn wait_for_edit_diff(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     request_id: koushi_core::ids::RequestId,
@@ -5251,13 +5547,11 @@ async fn wait_for_edit_diff(
     }
 }
 
-
-
 /// Wait for an `ItemsUpdated` diff that signals a redaction: either a Remove
 /// or a Set where the body is None or empty (redacted message placeholder).
 /// A failed redact operation is surfaced as an explicit error.
 /// Timeout is extended to 60s because redaction requires a sync round-trip.
-async fn wait_for_redact_diff(
+pub(super) async fn wait_for_redact_diff(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     request_id: koushi_core::ids::RequestId,
@@ -5301,957 +5595,6 @@ async fn wait_for_redact_diff(
     }
 }
 
-
-
-    #[test]
-    fn reconnect_initial_projection_rejects_missing_newest_body() {
-        let bodies = reconnect_test_bodies();
-        let error = ReconnectProjection::from_initial(
-            &reconnect_test_items(0..20),
-            &bodies,
-            "reconnect test",
-        )
-        .err()
-        .expect("an initial projection missing newest body 20 must be rejected");
-
-        assert!(error.contains("newest_window_count=false"));
-        assert!(!error.contains("synthetic body"));
-    }
-
-
-
-    #[test]
-    fn reconnect_initial_projection_rejects_oldest_present_before_page() {
-        let bodies = reconnect_test_bodies();
-        let error = ReconnectProjection::from_initial(
-            &reconnect_test_items(0..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
-            &bodies,
-            "reconnect test",
-        )
-        .err()
-        .expect("an initial projection containing oldest body 0 must be rejected");
-
-        assert!(error.contains("oldest_count=1"));
-        assert!(!error.contains("synthetic body"));
-    }
-
-
-
-    #[test]
-    fn reconnect_initial_projection_requires_mandatory_pagination() {
-        let error = ReconnectProjection::from_initial(
-            &reconnect_test_items(0..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
-            &reconnect_test_bodies(),
-            "reconnect test",
-        )
-        .err()
-        .expect("the all-21 shortcut fixture must be removed");
-
-        assert!(error.contains("initial projection"));
-        assert!(!error.contains("needs no pagination"));
-    }
-
-
-
-    #[test]
-    fn reconnect_pagination_requires_paginating_before_terminal() {
-        let request_id = reconnect_test_request(1);
-        let mut saw_paginating = false;
-        let mut terminal = false;
-
-        observe_reconnect_pagination_state(
-            Some(request_id),
-            request_id,
-            &PaginationState::Paginating,
-            &mut saw_paginating,
-            &mut terminal,
-            "reconnect test",
-        )
-        .expect("Paginating should be accepted");
-        assert!(saw_paginating);
-        assert!(!terminal);
-
-        observe_reconnect_pagination_state(
-            Some(request_id),
-            request_id,
-            &PaginationState::Idle,
-            &mut saw_paginating,
-            &mut terminal,
-            "reconnect test",
-        )
-        .expect("Idle after Paginating should be accepted");
-        assert!(terminal);
-    }
-
-
-
-    #[test]
-    fn reconnect_projection_applies_destructive_diffs_exactly_and_rejects_duplicates() {
-        let bodies = reconnect_test_bodies();
-        let mut projection = ReconnectProjection::from_initial(
-            &reconnect_test_items(1..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
-            &bodies,
-            "reconnect test",
-        )
-        .expect("newest-window initial projection should be valid");
-        projection
-            .apply_batch(&[TimelineDiff::Remove { index: 0 }], "reconnect test")
-            .expect("remove should be applied");
-        assert_eq!(projection.missing_indices(), vec![0, 1]);
-
-        let newest_window_first = reconnect_test_items([1]).remove(0);
-        projection
-            .apply_batch(
-                &[TimelineDiff::PushFront {
-                    item: newest_window_first,
-                }],
-                "reconnect test",
-            )
-            .expect("push front should restore the exact newest-window body");
-        let first = reconnect_test_items([0]).remove(0);
-        projection
-            .apply_batch(&[TimelineDiff::PushFront { item: first }], "reconnect test")
-            .expect("push front should recover the oldest body");
-        assert!(projection.is_complete());
-
-        let duplicate = reconnect_test_items([0]).remove(0);
-        let error = projection
-            .apply_batch(
-                &[TimelineDiff::Set {
-                    index: 1,
-                    item: duplicate,
-                }],
-                "reconnect test",
-            )
-            .expect_err("a destructive/set diff creating a duplicate must fail");
-        assert!(error.contains("duplicate_indices=[0]"));
-
-        projection
-            .apply_batch(
-                &[
-                    TimelineDiff::Clear,
-                    TimelineDiff::Reset {
-                        items: reconnect_test_items(0..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
-                    },
-                ],
-                "reconnect test",
-            )
-            .expect("clear/reset should rebuild the exact projection");
-        assert!(projection.is_complete());
-    }
-
-
-
-    #[test]
-    fn reconnect_terminal_before_paginating_is_rejected() {
-        let request_id = reconnect_test_request(2);
-        let mut saw_paginating = false;
-        let mut terminal = false;
-        let error = observe_reconnect_pagination_state(
-            Some(request_id),
-            request_id,
-            &PaginationState::EndReached,
-            &mut saw_paginating,
-            &mut terminal,
-            "reconnect test",
-        )
-        .expect_err("terminal before Paginating must fail");
-
-        assert!(error.contains("before Paginating"));
-        assert!(!terminal);
-    }
-
-
-
-    #[test]
-    fn reconnect_terminal_can_precede_the_final_diff() {
-        let bodies = reconnect_test_bodies();
-        let mut projection = ReconnectProjection::from_initial(
-            &reconnect_test_items(1..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT),
-            &bodies,
-            "reconnect test",
-        )
-        .expect("20-body newest-window initial projection should be valid");
-        let request_id = reconnect_test_request(3);
-        let mut saw_paginating = false;
-        let mut terminal = false;
-        observe_reconnect_pagination_state(
-            Some(request_id),
-            request_id,
-            &PaginationState::Paginating,
-            &mut saw_paginating,
-            &mut terminal,
-            "reconnect test",
-        )
-        .unwrap();
-        observe_reconnect_pagination_state(
-            Some(request_id),
-            request_id,
-            &PaginationState::EndReached,
-            &mut saw_paginating,
-            &mut terminal,
-            "reconnect test",
-        )
-        .unwrap();
-        assert!(terminal);
-        projection
-            .apply_batch(
-                &[TimelineDiff::PushBack {
-                    item: reconnect_test_items([0]).remove(0),
-                }],
-                "reconnect test",
-            )
-            .unwrap();
-        assert!(projection.is_complete());
-    }
-
-
-
-    #[test]
-    fn reconnect_projection_rejects_undecipherable_items() {
-        let bodies = reconnect_test_bodies();
-        let mut items = reconnect_test_items(1..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT);
-        items[0].body = Some("Unable to decrypt message".to_owned());
-        let error = ReconnectProjection::from_initial(&items, &bodies, "reconnect test")
-            .err()
-            .expect("UTD must fail closed");
-
-        assert!(error.contains("contains UTD"));
-        assert!(!error.contains("synthetic body"));
-    }
-
-
-
-    #[test]
-    fn visible_gap_selector_prefers_internal_gap_and_returns_nearest_event_bounds() {
-        let mut synthetic = projection_timeline_item("$synthetic-placeholder:test", false);
-        synthetic.id = TimelineItemId::Synthetic {
-            synthetic_id: "placeholder".to_owned(),
-        };
-        let items = vec![
-            projection_timeline_item("$far-left:test", false),
-            projection_timeline_item("$near-left:test", false),
-            synthetic,
-            projection_timeline_item("$near-right:test", false),
-            projection_timeline_item("$far-right:test", false),
-        ];
-        let top_row_id = TimelineGapId {
-            topology_revision: 10,
-            ordinal: 0,
-        };
-        let bracketed_id = TimelineGapId {
-            topology_revision: 10,
-            ordinal: 1,
-        };
-
-        let selected = select_visible_gap_for_qa(
-            &items,
-            &[
-                TimelineGapPosition {
-                    id: top_row_id,
-                    before_item_index: 0,
-                },
-                TimelineGapPosition {
-                    id: bracketed_id,
-                    before_item_index: 3,
-                },
-            ],
-        )
-        .expect("an internally bracketed gap should be visible");
-
-        assert_eq!(selected.id, bracketed_id);
-        assert_eq!(
-            selected.first_visible_event_id.as_deref(),
-            Some("$near-left:test")
-        );
-        assert_eq!(
-            selected.last_visible_event_id.as_deref(),
-            Some("$near-right:test")
-        );
-    }
-
-
-
-    #[test]
-    fn visible_gap_selector_chooses_newest_internal_gap_from_reversed_positions() {
-        let items = vec![
-            projection_timeline_item("$event-0:test", false),
-            projection_timeline_item("$event-1:test", false),
-            projection_timeline_item("$event-2:test", false),
-            projection_timeline_item("$event-3:test", false),
-            projection_timeline_item("$event-4:test", false),
-        ];
-        let older_gap_id = TimelineGapId {
-            topology_revision: 20,
-            ordinal: 0,
-        };
-        let newest_gap_id = TimelineGapId {
-            topology_revision: 21,
-            ordinal: 1,
-        };
-
-        let selected = select_visible_gap_for_qa(
-            &items,
-            &[
-                TimelineGapPosition {
-                    id: newest_gap_id,
-                    before_item_index: 4,
-                },
-                TimelineGapPosition {
-                    id: older_gap_id,
-                    before_item_index: 2,
-                },
-            ],
-        )
-        .expect("the newest internally bracketed gap should be visible");
-
-        assert_eq!(selected.id, newest_gap_id);
-        assert_eq!(
-            selected.first_visible_event_id.as_deref(),
-            Some("$event-3:test")
-        );
-        assert_eq!(
-            selected.last_visible_event_id.as_deref(),
-            Some("$event-4:test")
-        );
-    }
-
-
-
-    #[test]
-    fn visible_gap_selector_chooses_newest_top_row_gap_without_event_bounds() {
-        let older_gap_id = TimelineGapId {
-            topology_revision: 11,
-            ordinal: 0,
-        };
-        let newest_gap_id = TimelineGapId {
-            topology_revision: 12,
-            ordinal: 1,
-        };
-        let selected = select_visible_gap_for_qa(
-            &[projection_timeline_item("$first:test", false)],
-            &[
-                TimelineGapPosition {
-                    id: newest_gap_id,
-                    before_item_index: 0,
-                },
-                TimelineGapPosition {
-                    id: older_gap_id,
-                    before_item_index: 0,
-                },
-            ],
-        )
-        .expect("a top-row gap should support a gap-only viewport");
-
-        assert_eq!(selected.id, newest_gap_id);
-        assert_eq!(selected.first_visible_event_id, None);
-        assert_eq!(selected.last_visible_event_id, None);
-    }
-
-
-
-    #[test]
-    fn visible_gap_selector_rejects_unbracketed_non_top_gaps_privately() {
-        let mut synthetic = projection_timeline_item("$synthetic-placeholder:test", false);
-        synthetic.id = TimelineItemId::Synthetic {
-            synthetic_id: "placeholder".to_owned(),
-        };
-        let error = select_visible_gap_for_qa(
-            &[projection_timeline_item("$left:test", false), synthetic],
-            &[
-                TimelineGapPosition {
-                    id: TimelineGapId {
-                        topology_revision: 12,
-                        ordinal: 0,
-                    },
-                    before_item_index: 1,
-                },
-                TimelineGapPosition {
-                    id: TimelineGapId {
-                        topology_revision: 12,
-                        ordinal: 1,
-                    },
-                    before_item_index: 3,
-                },
-            ],
-        )
-        .expect_err("offscreen non-top gaps should not be reported as visible");
-
-        assert!(error.contains("item_count=2"));
-        assert!(error.contains("position_count=2"));
-        assert!(error.contains("min_before_item_index=1"));
-        assert!(error.contains("max_before_item_index=3"));
-        assert!(!error.contains("$left:test"));
-    }
-
-
-
-    #[test]
-    fn visible_gap_capture_requires_a_post_body_projection() {
-        let expected_body = "detached live-tail body";
-        let pre_body_items = vec![
-            projection_timeline_item("$old-left:test", false),
-            projection_timeline_item("$old-right:test", false),
-        ];
-        let old_gap_id = TimelineGapId {
-            topology_revision: 30,
-            ordinal: 0,
-        };
-        let new_gap_id = TimelineGapId {
-            topology_revision: 31,
-            ordinal: 0,
-        };
-        let mut capture = QaVisibleGapCapture::default();
-
-        capture
-            .observe_items(&pre_body_items, expected_body, "ordering test")
-            .unwrap();
-        capture
-            .observe_gap_positions(
-                &pre_body_items,
-                7,
-                40,
-                &[TimelineGapPosition {
-                    id: old_gap_id,
-                    before_item_index: 1,
-                }],
-                "ordering test",
-            )
-            .unwrap();
-        assert!(capture.projected_gap().is_none());
-
-        let mut body_item = projection_timeline_item("$new-right:test", false);
-        body_item.body = Some(expected_body.to_owned());
-        let post_body_items = vec![projection_timeline_item("$new-left:test", false), body_item];
-        capture
-            .observe_items(&post_body_items, expected_body, "ordering test")
-            .unwrap();
-        assert!(capture.projected_gap().is_none());
-
-        capture
-            .observe_gap_positions(
-                &post_body_items,
-                7,
-                41,
-                &[TimelineGapPosition {
-                    id: new_gap_id,
-                    before_item_index: 1,
-                }],
-                "ordering test",
-            )
-            .unwrap();
-        let (selected, (actor_generation, projection_generation)) = capture
-            .projected_gap()
-            .expect("the post-body projection should be captured");
-        assert_eq!(selected.id, new_gap_id);
-        assert_eq!(*actor_generation, 7);
-        assert_eq!(*projection_generation, 41);
-    }
-
-
-
-    #[test]
-    fn finds_timeline_item_in_initial_items_by_body_substring() {
-        let items = vec![
-            koushi_core::event::TimelineItem {
-                request_state: None,
-                id: koushi_core::event::TimelineItemId::Synthetic {
-                    synthetic_id: "skip".to_owned(),
-                },
-                sender: None,
-                sender_label: None,
-                sender_avatar: None,
-                body: Some("first item".to_owned()),
-                notice_i18n: None,
-                message_kind: Default::default(),
-                spoiler_spans: Vec::new(),
-                timestamp_ms: None,
-                in_reply_to_event_id: None,
-                formatted: None,
-                reply_quote: None,
-                thread_root: None,
-                thread_summary: None,
-                media: None,
-                link_previews: None,
-                link_ranges: Vec::new(),
-                reactions: Vec::new(),
-                can_react: false,
-                is_redacted: false,
-                is_hidden: false,
-                can_redact: false,
-                is_edited: false,
-                can_edit: false,
-                actions: TimelineMessageActions::default(),
-                send_state: None,
-                unable_to_decrypt: None,
-            },
-            koushi_core::event::TimelineItem {
-                request_state: None,
-                id: koushi_core::event::TimelineItemId::Event {
-                    event_id: "$thread:test".to_owned(),
-                },
-                sender: Some("@b:test".to_owned()),
-                sender_label: None,
-                sender_avatar: None,
-                body: Some("Phase 5 QA thread reply from B".to_owned()),
-                notice_i18n: None,
-                message_kind: Default::default(),
-                spoiler_spans: Vec::new(),
-                timestamp_ms: None,
-                in_reply_to_event_id: Some("$root:test".to_owned()),
-                formatted: None,
-                reply_quote: None,
-                thread_root: None,
-                thread_summary: None,
-                media: None,
-                link_previews: None,
-                link_ranges: Vec::new(),
-                reactions: Vec::new(),
-                can_react: true,
-                is_redacted: false,
-                is_hidden: false,
-                can_redact: false,
-                is_edited: false,
-                can_edit: true,
-                actions: TimelineMessageActions::default(),
-                send_state: None,
-                unable_to_decrypt: None,
-            },
-        ];
-
-        let item = find_timeline_item_with_body(&items, "thread reply from B")
-            .expect("expected to find thread reply in initial items");
-
-        assert_eq!(item.in_reply_to_event_id, Some("$root:test".to_owned()));
-        assert_eq!(item.body.as_deref(), Some("Phase 5 QA thread reply from B"));
-    }
-
-
-
-    #[test]
-    fn thread_reply_missing_from_initial_items_requires_paginate_backfill() {
-        let initial_items = vec![koushi_core::event::TimelineItem {
-            request_state: None,
-            id: koushi_core::event::TimelineItemId::Synthetic {
-                synthetic_id: "placeholder".to_owned(),
-            },
-            sender: None,
-            sender_label: None,
-            sender_avatar: None,
-            body: Some("Phase 5 QA message 1".to_owned()),
-            notice_i18n: None,
-            message_kind: Default::default(),
-            spoiler_spans: Vec::new(),
-            timestamp_ms: None,
-            in_reply_to_event_id: None,
-            formatted: None,
-            reply_quote: None,
-            thread_root: None,
-            thread_summary: None,
-            media: None,
-            link_previews: None,
-            link_ranges: Vec::new(),
-            reactions: Vec::new(),
-            can_react: false,
-            is_redacted: false,
-            is_hidden: false,
-            can_redact: false,
-            is_edited: false,
-            can_edit: false,
-            actions: TimelineMessageActions::default(),
-            send_state: None,
-            unable_to_decrypt: None,
-        }];
-
-        assert!(thread_initial_items_need_paginate_backfill(
-            &initial_items,
-            "Phase 5 QA thread reply from B"
-        ));
-    }
-
-
-
-    #[test]
-    fn thread_reply_present_in_initial_items_does_not_require_backfill() {
-        let initial_items = vec![koushi_core::event::TimelineItem {
-            request_state: None,
-            id: koushi_core::event::TimelineItemId::Synthetic {
-                synthetic_id: "thread-reply".to_owned(),
-            },
-            sender: Some("@b:test".to_owned()),
-            sender_label: None,
-            sender_avatar: None,
-            body: Some("Phase 5 QA thread reply from B".to_owned()),
-            notice_i18n: None,
-            message_kind: Default::default(),
-            spoiler_spans: Vec::new(),
-            timestamp_ms: None,
-            in_reply_to_event_id: Some("$root:test".to_owned()),
-            formatted: None,
-            reply_quote: None,
-            thread_root: None,
-            thread_summary: None,
-            media: None,
-            link_previews: None,
-            link_ranges: Vec::new(),
-            reactions: Vec::new(),
-            can_react: false,
-            is_redacted: false,
-            is_hidden: false,
-            can_redact: false,
-            is_edited: false,
-            can_edit: false,
-            actions: TimelineMessageActions::default(),
-            send_state: None,
-            unable_to_decrypt: None,
-        }];
-
-        assert!(!thread_initial_items_need_paginate_backfill(
-            &initial_items,
-            "Phase 5 QA thread reply from B"
-        ));
-    }
-
-
-
-    #[test]
-    fn thread_reply_stops_repagination_after_end_reached() {
-        assert!(thread_reply_should_repaginate_on_idle(false));
-        assert!(!thread_reply_should_repaginate_on_idle(true));
-    }
-
-
-
-    #[test]
-    fn thread_summary_helper_requires_root_item_with_reply_count() {
-        let summary = ThreadSummaryDto {
-            reply_count: 1,
-            latest_event_id: None,
-            latest_sender: None,
-            latest_sender_label: None,
-            latest_body_preview: None,
-            latest_timestamp_ms: None,
-        };
-        let root = synthetic_timeline_item("$root:test", None, None, None, Some(summary.clone()));
-        let no_replies = synthetic_timeline_item(
-            "$root:test",
-            None,
-            None,
-            None,
-            Some(ThreadSummaryDto {
-                reply_count: 0,
-                ..summary.clone()
-            }),
-        );
-        let other_root =
-            synthetic_timeline_item("$other:test", None, None, None, Some(summary.clone()));
-
-        assert!(timeline_item_has_thread_summary_reply(&root, "$root:test"));
-        assert!(!timeline_item_has_thread_summary_reply(
-            &no_replies,
-            "$root:test"
-        ));
-        assert!(!timeline_item_has_thread_summary_reply(
-            &other_root,
-            "$root:test"
-        ));
-    }
-
-
-
-    #[test]
-    fn room_thread_assertion_requires_canonical_reply_and_root_summary() {
-        let root = synthetic_timeline_item(
-            "$root:test",
-            Some("root message"),
-            None,
-            None,
-            Some(ThreadSummaryDto {
-                reply_count: 1,
-                latest_event_id: None,
-                latest_sender: None,
-                latest_sender_label: None,
-                latest_body_preview: None,
-                latest_timestamp_ms: None,
-            }),
-        );
-        let unrelated = synthetic_timeline_item("$other:test", Some("other"), None, None, None);
-
-        assert!(
-            assert_room_timeline_exposes_canonical_reply_and_summarizes_root(
-                &[root.clone(), unrelated],
-                "Phase 11 QA thread reply from B",
-                "$root:test",
-            )
-            .is_err(),
-            "a Room canonical stream must include the thread reply as the projection anchor"
-        );
-
-        let canonical_reply = synthetic_timeline_item(
-            "$reply:test",
-            Some("Phase 11 QA thread reply from B"),
-            Some("$root:test"),
-            Some("$root:test"),
-            None,
-        );
-        assert!(
-            assert_room_timeline_exposes_canonical_reply_and_summarizes_root(
-                &[root.clone(), canonical_reply],
-                "Phase 11 QA thread reply from B",
-                "$root:test",
-            )
-            .is_ok()
-        );
-
-        assert!(
-            assert_room_timeline_exposes_canonical_reply_and_summarizes_root(
-                &[synthetic_timeline_item(
-                    "$root:test",
-                    Some("root message"),
-                    None,
-                    None,
-                    None,
-                )],
-                "Phase 11 QA thread reply from B",
-                "$root:test",
-            )
-            .is_err()
-        );
-    }
-
-
-
-    #[test]
-    fn room_thread_summary_observer_waits_for_late_summary_diff() {
-        let mut observer =
-            RoomThreadSummaryObserver::new("Phase 11 QA thread reply from B", "$root:test");
-        let root_without_summary =
-            synthetic_timeline_item("$root:test", Some("root message"), None, None, None);
-
-        assert!(!observer.observe_items(&[root_without_summary]).unwrap());
-
-        let root_with_summary = synthetic_timeline_item(
-            "$root:test",
-            Some("root message"),
-            None,
-            None,
-            Some(ThreadSummaryDto {
-                reply_count: 1,
-                latest_event_id: None,
-                latest_sender: None,
-                latest_sender_label: None,
-                latest_body_preview: None,
-                latest_timestamp_ms: None,
-            }),
-        );
-
-        assert!(
-            observer
-                .observe_diffs(&[TimelineDiff::Set {
-                    index: 0,
-                    item: root_with_summary,
-                }])
-                .unwrap()
-                == false,
-            "the root summary alone is insufficient; canonical reply observation is the anchor contract"
-        );
-    }
-
-
-
-    #[test]
-    fn room_thread_summary_observer_accepts_canonical_thread_reply() {
-        let mut observer =
-            RoomThreadSummaryObserver::new("Phase 11 QA thread reply from B", "$root:test");
-        let canonical_reply = synthetic_timeline_item(
-            "$reply:test",
-            Some("Phase 11 QA thread reply from B"),
-            Some("$root:test"),
-            Some("$root:test"),
-            None,
-        );
-
-        assert!(!observer.observe_items(&[canonical_reply]).unwrap());
-    }
-
-
-
-    #[test]
-    fn thread_qa_reports_canonical_reply_contract() {
-        assert!(
-            final_tokens_for_scenario(QaScenario::Thread).contains(&"thread_canonical=ok"),
-            "the public QA summary must describe the canonical Room stream contract"
-        );
-    }
-
-
-
-    #[test]
-    fn thread_relation_helper_requires_thread_root_and_validates_optional_reply_metadata() {
-        let valid = synthetic_timeline_item(
-            "$reply:test",
-            Some("Phase 11 QA thread reply from B"),
-            Some("$root:test"),
-            Some("$root:test"),
-            None,
-        );
-        let valid_thread_only = synthetic_timeline_item(
-            "$reply:test",
-            Some("Phase 11 QA thread reply from B"),
-            None,
-            Some("$root:test"),
-            None,
-        );
-        let mismatched_reply = synthetic_timeline_item(
-            "$reply:test",
-            Some("Phase 11 QA thread reply from B"),
-            Some("$other:test"),
-            Some("$root:test"),
-            None,
-        );
-        let missing_thread_root = synthetic_timeline_item(
-            "$reply:test",
-            Some("Phase 11 QA thread reply from B"),
-            Some("$root:test"),
-            None,
-            None,
-        );
-
-        assert_thread_reply_relation(&valid, "$root:test").unwrap();
-        assert_thread_reply_relation(&valid_thread_only, "$root:test").unwrap();
-        assert!(assert_thread_reply_relation(&mismatched_reply, "$root:test").is_err());
-        assert!(assert_thread_reply_relation(&missing_thread_root, "$root:test").is_err());
-    }
-
-
-
-    #[test]
-    fn send_queue_scenario_skips_generic_fixture_stages_and_reports_private_tokens() {
-        assert!(QaScenario::SendQueue.should_run_stage(QaStage::Safety));
-        assert!(QaScenario::SendQueue.should_run_stage(QaStage::LoginSync));
-        assert!(!QaScenario::SendQueue.should_run_stage(QaStage::RoomSpace));
-        assert!(!QaScenario::SendQueue.should_run_stage(QaStage::Timeline));
-        assert!(QaScenario::SendQueue.should_run_stage(QaStage::SendQueue));
-        assert!(!QaScenario::SendQueue.should_run_stage(QaStage::Reply));
-        assert!(!QaScenario::SendQueue.should_run_stage(QaStage::EditRedactSearch));
-        assert_eq!(
-            stages_for_scenario(QaScenario::SendQueue),
-            [QaStage::Safety, QaStage::LoginSync, QaStage::SendQueue]
-        );
-
-        assert_eq!(
-            final_tokens_for_scenario(QaScenario::SendQueue),
-            [
-                "safety=ok",
-                "login_sync=ok",
-                "send_fail=ok",
-                "resend=ok",
-                "cancel_send=ok",
-                "fifo=ok",
-                "unsent_restart=ok",
-                "display_projection_reset_fallbacks=0",
-                "restore_cleanup=ok",
-            ]
-        );
-    }
-
-
-
-    #[test]
-    fn canned_live_tail_messages_page_reproduces_a_gap_before_the_known_latest_event() {
-        let body = QaCannedMessagesPage::anchored_silent_gap(
-            "$latest:example.invalid".to_owned(),
-            "known latest".to_owned(),
-            "$missing:example.invalid".to_owned(),
-            "missing before latest".to_owned(),
-            "$older:example.invalid".to_owned(),
-            "@sender:example.invalid".to_owned(),
-            "known older anchor".to_owned(),
-        )
-        .response_body()
-        .expect("canned /messages response should serialize");
-        let response: serde_json::Value =
-            serde_json::from_slice(&body).expect("canned /messages response should be JSON");
-
-        assert_eq!(
-            response.get("start").and_then(serde_json::Value::as_str),
-            Some("qa-live-tail-start")
-        );
-        assert!(response.get("end").is_none());
-        let ids = response["chunk"]
-            .as_array()
-            .expect("canned chunk")
-            .iter()
-            .map(|event| event["event_id"].as_str().expect("event id"))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            ids,
-            [
-                "$latest:example.invalid",
-                "$missing:example.invalid",
-                "$older:example.invalid",
-            ]
-        );
-    }
-
-
-
-    #[test]
-    fn timeline_stress_blank_row_detection_rejects_empty_formatted_body() {
-        let mut item = synthetic_timeline_item(
-            "$formatted-blank:test",
-            Some("plain fallback"),
-            None,
-            None,
-            None,
-        );
-        item.formatted = Some(koushi_core::event::TimelineFormattedBody {
-            html: "<p><br /></p>".to_owned(),
-            plain_text: String::new(),
-            code_blocks: Vec::new(),
-        });
-        item.body = None;
-
-        assert!(
-            !timeline_item_has_visible_payload(&item),
-            "blank formatted HTML must not satisfy stress_no_blank"
-        );
-    }
-
-
-
-    #[test]
-    fn scheduled_send_scenario_runs_after_timeline_and_reports_private_tokens() {
-        assert_eq!(
-            QaScenario::from_env_value("scheduled_send").unwrap(),
-            QaScenario::ScheduledSend
-        );
-        assert!(QaScenario::ScheduledSend.should_run_stage(QaStage::Safety));
-        assert!(QaScenario::ScheduledSend.should_run_stage(QaStage::LoginSync));
-        assert!(QaScenario::ScheduledSend.should_run_stage(QaStage::RoomSpace));
-        assert!(QaScenario::ScheduledSend.should_run_stage(QaStage::Timeline));
-        assert!(QaScenario::ScheduledSend.should_run_stage(QaStage::ScheduledSend));
-        assert!(QaScenario::ScheduledSend.suppress_matrix_identifiers());
-        assert!(!QaScenario::ScheduledSend.should_run_stage(QaStage::Reply));
-        assert!(!QaScenario::ScheduledSend.should_run_stage(QaStage::EditRedactSearch));
-
-        assert_eq!(
-            final_tokens_for_scenario(QaScenario::ScheduledSend),
-            [
-                "safety=ok",
-                "login_sync=ok",
-                "room_space=ok",
-                "timeline=ok",
-                "timeline_nav=ok",
-                "hide_redacted=ok",
-                "scheduled_capability=local_fallback",
-                "scheduled_create=ok",
-                "scheduled_reschedule=ok",
-                "scheduled_cancel=ok",
-                "scheduled_fire=ok",
-                "restore_cleanup=ok",
-            ]
-        );
-    }
-
-
+#[cfg(test)]
+#[path = "timeline_tests.rs"]
+mod tests;

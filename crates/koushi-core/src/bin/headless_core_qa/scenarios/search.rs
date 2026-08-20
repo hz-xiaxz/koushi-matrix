@@ -1,5 +1,10 @@
-// Mechanical Wave 2A staging; integrated by the parent composition root.
-
+use super::{
+    AccountKey, AppCommand, AppState, CoreCommand, CoreConnection, CoreEvent, DisplaySettings,
+    Duration, PaginationDirection, PaginationState, RequestId, SearchCommand,
+    SearchCrawlerFailureKind, SearchCrawlerRoomState, SearchCrawlerSettings, SearchCrawlerSpeed,
+    SearchEvent, SearchScope, SettingsPatch, SettingsPersistenceState, TimelineCommand,
+    TimelineEvent, TimelineItem, TimelineItemId, TimelineKey, TimelineMessageActions,
+};
 
 /// Prove the search-history crawler contract through token-only stdout.
 ///
@@ -18,7 +23,7 @@
 ///
 /// Output is TOKEN-ONLY and private-data-free; no room IDs, event IDs,
 /// user IDs, message bodies, or raw SDK errors are printed.
-async fn run_search_crawler_stage(
+pub(super) async fn run_search_crawler_stage(
     conn: &mut CoreConnection,
     _account_key: &AccountKey,
     room_id: &str,
@@ -159,9 +164,7 @@ async fn run_search_crawler_stage(
     Ok(())
 }
 
-
-
-async fn run_hide_redacted_stage(
+pub(super) async fn run_hide_redacted_stage(
     conn: &mut CoreConnection,
     key: &TimelineKey,
 ) -> Result<(), String> {
@@ -186,8 +189,6 @@ async fn run_hide_redacted_stage(
     println!("hide_redacted=ok");
     Ok(())
 }
-
-
 
 async fn wait_for_display_policy_update(
     conn: &mut CoreConnection,
@@ -221,14 +222,12 @@ async fn wait_for_display_policy_update(
     }
 }
 
-
-
 /// Wait for a settings update to finish persisting.
 ///
 /// The runtime may complete the fast local settings write before publishing a
 /// snapshot, so this waits for the final `Idle` state with the expected display
 /// policy instead of requiring an intermediate `Saving` snapshot.
-async fn wait_for_settings_persisted(
+pub(super) async fn wait_for_settings_persisted(
     conn: &mut CoreConnection,
     request_id: RequestId,
     label: &str,
@@ -270,8 +269,6 @@ async fn wait_for_settings_persisted(
     }
 }
 
-
-
 fn settings_snapshot_matches_link_preview_policy(
     snapshot: &AppState,
     expected_url_previews_enabled: bool,
@@ -279,8 +276,6 @@ fn settings_snapshot_matches_link_preview_policy(
     snapshot.settings.persistence == SettingsPersistenceState::Idle
         && snapshot.settings.values.display.url_previews_enabled == expected_url_previews_enabled
 }
-
-
 
 fn assert_hide_redacted_projection() -> Result<(), String> {
     let mut state = AppState::default();
@@ -320,9 +315,7 @@ fn assert_hide_redacted_projection() -> Result<(), String> {
     Ok(())
 }
 
-
-
-fn projection_timeline_item(event_id: &str, is_redacted: bool) -> TimelineItem {
+pub(super) fn projection_timeline_item(event_id: &str, is_redacted: bool) -> TimelineItem {
     TimelineItem {
         request_state: None,
         id: TimelineItemId::Event {
@@ -361,15 +354,13 @@ fn projection_timeline_item(event_id: &str, is_redacted: bool) -> TimelineItem {
     }
 }
 
-
-
 /// Paginate backward in a loop until `EndReached`, asserting the state
 /// sequence. Returns `"end_reached"` on success.
 ///
 /// The spec requires: emit Paginating, then (Idle | EndReached | Failed).
 /// We drive the loop ourselves: on Idle we re-submit Paginate; on EndReached
 /// we return; on Failed we return an error.
-async fn wait_for_paginate_end_reached(
+pub(super) async fn wait_for_paginate_end_reached(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     first_request_id: koushi_core::ids::RequestId,
@@ -442,12 +433,10 @@ async fn wait_for_paginate_end_reached(
     }
 }
 
-
-
 /// Poll `SearchCommand::Query` every 500ms until the Results event contains
 /// `expected_event_id` in the given room, or timeout (60s). Fails on any
 /// search failure response.
-async fn poll_search_until_found(
+pub(super) async fn poll_search_until_found(
     conn: &mut CoreConnection,
     _account_key: &AccountKey,
     query: &str,
@@ -485,8 +474,6 @@ async fn poll_search_until_found(
     }
 }
 
-
-
 /// Poll `SearchCommand::Query` every 500ms until the Results event does NOT
 /// contain `excluded_event_id`, or timeout (30s). If the event is still present
 /// after the timeout, returns Ok (the old ngram token may still generate a
@@ -496,7 +483,7 @@ async fn poll_search_until_found(
 /// For the "old text absent" assertion after an edit: the ngram index may still
 /// have the old token, but `SearchDocumentStore::verify_candidate` must reject
 /// it. We poll until the event is absent from the verified result set.
-async fn poll_search_until_absent(
+pub(super) async fn poll_search_until_absent(
     conn: &mut CoreConnection,
     _account_key: &AccountKey,
     query: &str,
@@ -535,8 +522,6 @@ async fn poll_search_until_absent(
     }
 }
 
-
-
 /// Submit one search query and wait for `SearchEvent::Results` with matching
 /// `request_id`. Returns `true` if `expected_event_id` appears in results,
 /// `false` if the Results arrived but the event is absent.
@@ -571,5 +556,3 @@ async fn wait_for_search_result(
         }
     }
 }
-
-

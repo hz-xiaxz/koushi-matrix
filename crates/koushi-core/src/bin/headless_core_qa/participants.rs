@@ -1,4 +1,24 @@
-async fn complete_new_identity_gate_for_qa(
+use super::cleanup::cleanup_owned_e2ee_participant_best_effort;
+use super::diagnostics::{
+    gate_session_phase, session_gate_closed_summary, verification_closed_summary,
+    verification_event_stream_error,
+};
+use super::event_wait::{
+    PairedEventWaitError, QaEventDeadline, start_sync_for_qa, wait_for_logged_in,
+    wait_for_paired_event_until, wait_for_ready_snapshot,
+};
+use super::registry::{E2EE_EVENT_TIMEOUT, EVENT_TIMEOUT};
+use super::scenario_identity::{
+    refresh_device_keys_and_assert_known_for_qa, verification_state_flow_id,
+    verification_state_sas, wait_for_verification_accepted,
+    wait_for_verification_requested_event_only,
+};
+use super::{
+    AccountCommand, AccountKey, AuthSecret, CoreCommand, CoreConnection, CoreEvent, CoreRuntime,
+    Duration, Future, RecoveryRequest, SessionInfo, SessionState, VerificationTarget,
+};
+
+pub(super) async fn complete_new_identity_gate_for_qa(
     conn: &mut CoreConnection,
     password: &str,
     destination_suffix: &str,
@@ -132,7 +152,7 @@ async fn complete_new_identity_gate_for_qa(
     Ok(Some(recovery_secret))
 }
 
-async fn wait_for_existing_identity_gate(
+pub(super) async fn wait_for_existing_identity_gate(
     conn: &mut CoreConnection,
     label: &str,
 ) -> Result<SessionInfo, String> {
@@ -164,7 +184,10 @@ async fn wait_for_existing_identity_gate(
     }
 }
 
-async fn wait_for_recovery_gate(conn: &mut CoreConnection, label: &str) -> Result<(), String> {
+pub(super) async fn wait_for_recovery_gate(
+    conn: &mut CoreConnection,
+    label: &str,
+) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
     loop {
         if let SessionState::AwaitingVerification { gate, .. } = &conn.snapshot().session
@@ -191,7 +214,7 @@ async fn wait_for_recovery_gate(conn: &mut CoreConnection, label: &str) -> Resul
     }
 }
 
-async fn wait_for_matching_recovery_flow(
+pub(super) async fn wait_for_matching_recovery_flow(
     conn: &mut CoreConnection,
     flow_id: u64,
     label: &str,
@@ -216,7 +239,10 @@ async fn wait_for_matching_recovery_flow(
     }
 }
 
-async fn wait_for_locked_snapshot(conn: &mut CoreConnection, label: &str) -> Result<(), String> {
+pub(super) async fn wait_for_locked_snapshot(
+    conn: &mut CoreConnection,
+    label: &str,
+) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
     loop {
         if matches!(conn.snapshot().session, SessionState::Locked(_)) {
@@ -234,7 +260,44 @@ async fn wait_for_locked_snapshot(conn: &mut CoreConnection, label: &str) -> Res
     }
 }
 
-async fn verify_provisional_second_device_for_qa(
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum SasQaOutcome {
+    Success,
+    Mismatch,
+    UserCancel,
+    Timeout,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum SecondarySasObservation {
+    Pending,
+    Presented(Vec<koushi_state::SasEmoji>),
+    Failed,
+}
+
+fn observe_secondary_sas(
+    session: &SessionState,
+    expected_flow_id: u64,
+    matching_flow_observed: bool,
+) -> SecondarySasObservation {
+    match session {
+        SessionState::Verifying {
+            flow_id,
+            sas_emojis,
+            ..
+        } if *flow_id == expected_flow_id && sas_emojis.len() == 7 => {
+            SecondarySasObservation::Presented(sas_emojis.clone())
+        }
+        SessionState::AwaitingVerification { gate, .. }
+            if matching_flow_observed && gate.failure.is_some() =>
+        {
+            SecondarySasObservation::Failed
+        }
+        _ => SecondarySasObservation::Pending,
+    }
+}
+
+pub(super) async fn verify_provisional_second_device_for_qa(
     conn_a: &mut CoreConnection,
     conn_a2: &mut CoreConnection,
     session_a: &SessionInfo,
@@ -441,7 +504,7 @@ where
     start_once().await
 }
 
-fn authenticated_session_info(
+pub(super) fn authenticated_session_info(
     conn: &mut CoreConnection,
     label: &str,
 ) -> Result<SessionInfo, String> {
@@ -450,7 +513,9 @@ fn authenticated_session_info(
         .ok_or_else(|| format!("{label}: session is not authenticated"))
 }
 
-fn authenticated_session_info_from_state(session: &SessionState) -> Option<&SessionInfo> {
+pub(super) fn authenticated_session_info_from_state(
+    session: &SessionState,
+) -> Option<&SessionInfo> {
     match session {
         SessionState::Provisional { info, .. }
         | SessionState::AwaitingVerification { info, .. }
@@ -468,37 +533,100 @@ fn authenticated_session_info_from_state(session: &SessionState) -> Option<&Sess
     }
 }
 
-enum QaParticipantLoginGate<'a> {
+pub(super) enum QaParticipantLoginGate<'a> {
     BootstrapNewIdentity,
     RecoverExistingIdentity(&'a AuthSecret),
 }
 
-struct QaParticipantLoginOutcome {
-    runtime: CoreRuntime,
-    conn: CoreConnection,
-    account_key: AccountKey,
-    bootstrap_recovery_secret: Option<AuthSecret>,
+pub(super) struct QaParticipantLoginOutcome {
+    pub(super) runtime: CoreRuntime,
+    pub(super) conn: CoreConnection,
+    pub(super) account_key: AccountKey,
+    pub(super) bootstrap_recovery_secret: Option<AuthSecret>,
 }
 
-struct QaOwnedLoggedInRuntime {
-    runtime: CoreRuntime,
-    conn: CoreConnection,
-    account_key: AccountKey,
+pub(super) struct QaOwnedLoggedInRuntime {
+    pub(super) runtime: CoreRuntime,
+    pub(super) conn: CoreConnection,
+    pub(super) account_key: AccountKey,
 }
 
-enum QaOwnedRuntimePhase {
+impl From<QaParticipantLoginOutcome> for QaOwnedLoggedInRuntime {
+    fn from(participant: QaParticipantLoginOutcome) -> Self {
+        Self {
+            runtime: participant.runtime,
+            conn: participant.conn,
+            account_key: participant.account_key,
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(super) enum QaOwnedRuntimePhase {
     LoginNotSubmitted,
     LoginSubmitted,
     LoggedIn(AccountKey),
 }
 
-struct QaOwnedRuntimeParticipant {
-    runtime: CoreRuntime,
-    conn: CoreConnection,
-    phase: QaOwnedRuntimePhase,
+pub(super) struct QaOwnedRuntimeParticipant {
+    pub(super) runtime: CoreRuntime,
+    pub(super) conn: CoreConnection,
+    pub(super) phase: QaOwnedRuntimePhase,
 }
 
-enum QaE2eeRecipient<'a> {
+impl QaOwnedRuntimeParticipant {
+    pub(super) fn new(runtime: CoreRuntime, conn: CoreConnection) -> Self {
+        Self {
+            runtime,
+            conn,
+            phase: QaOwnedRuntimePhase::LoginNotSubmitted,
+        }
+    }
+
+    pub(super) fn from_logged_in(participant: QaOwnedLoggedInRuntime) -> Self {
+        Self {
+            runtime: participant.runtime,
+            conn: participant.conn,
+            phase: QaOwnedRuntimePhase::LoggedIn(participant.account_key),
+        }
+    }
+
+    pub(super) fn mark_login_submitted(&mut self) {
+        self.phase = QaOwnedRuntimePhase::LoginSubmitted;
+    }
+
+    pub(super) fn mark_logged_in(&mut self, account_key: AccountKey) {
+        self.phase = QaOwnedRuntimePhase::LoggedIn(account_key);
+    }
+
+    fn logged_in_connection_and_account_key(
+        &mut self,
+    ) -> Option<(&mut CoreConnection, &AccountKey)> {
+        let QaOwnedRuntimePhase::LoggedIn(account_key) = &self.phase else {
+            return None;
+        };
+        Some((&mut self.conn, account_key))
+    }
+
+    pub(super) fn into_logged_in_runtime(self) -> QaOwnedLoggedInRuntime {
+        let QaOwnedRuntimePhase::LoggedIn(account_key) = self.phase else {
+            panic!("caller ownership returns only after a completed login");
+        };
+        QaOwnedLoggedInRuntime {
+            runtime: self.runtime,
+            conn: self.conn,
+            account_key,
+        }
+    }
+}
+
+impl From<QaParticipantLoginOutcome> for QaOwnedRuntimeParticipant {
+    fn from(participant: QaParticipantLoginOutcome) -> Self {
+        Self::from_logged_in(QaOwnedLoggedInRuntime::from(participant))
+    }
+}
+
+pub(super) enum QaE2eeRecipient<'a> {
     Borrowed {
         conn: &'a mut CoreConnection,
         account_key: &'a AccountKey,
@@ -506,7 +634,30 @@ enum QaE2eeRecipient<'a> {
     Owned(QaOwnedRuntimeParticipant),
 }
 
-async fn finish_e2ee_recipient_stage_with_owned_cleanup<T, Participant, Cleanup, CleanupFuture>(
+impl QaE2eeRecipient<'_> {
+    pub(super) fn connection_and_account_key(&mut self) -> (&mut CoreConnection, &AccountKey) {
+        match self {
+            Self::Borrowed { conn, account_key } => (conn, account_key),
+            Self::Owned(participant) => participant
+                .logged_in_connection_and_account_key()
+                .expect("owned E2EE recipient login completed before the post-login stage"),
+        }
+    }
+
+    pub(super) fn into_owned(self) -> Option<QaOwnedRuntimeParticipant> {
+        match self {
+            Self::Borrowed { .. } => None,
+            Self::Owned(participant) => Some(participant),
+        }
+    }
+}
+
+pub(super) async fn finish_e2ee_recipient_stage_with_owned_cleanup<
+    T,
+    Participant,
+    Cleanup,
+    CleanupFuture,
+>(
     stage_result: Result<T, String>,
     owned_participant: Option<Participant>,
     cleanup: Cleanup,
@@ -530,7 +681,7 @@ where
     }
 }
 
-async fn retain_or_cleanup_e2ee_callers_after_stage<Callers, Cleanup, CleanupFuture>(
+pub(super) async fn retain_or_cleanup_e2ee_callers_after_stage<Callers, Cleanup, CleanupFuture>(
     stage_result: Result<(), String>,
     callers: Callers,
     cleanup: Cleanup,
@@ -568,7 +719,7 @@ where
     }
 }
 
-async fn login_synced_participant_for_qa(
+pub(super) async fn login_synced_participant_for_qa(
     homeserver: &str,
     data_dir: std::path::PathBuf,
     username: &str,
@@ -649,7 +800,8 @@ async fn login_synced_participant_for_qa(
     })
 }
 
-fn qa_data_dir(suffix: &str) -> std::path::PathBuf {
+/// Data directory for QA runs.
+pub(super) fn qa_data_dir(suffix: &str) -> std::path::PathBuf {
     if let Ok(dir) = std::env::var("KOUSHI_QA_DATA_DIR") {
         return std::path::PathBuf::from(dir).join(suffix);
     }
@@ -657,3 +809,7 @@ fn qa_data_dir(suffix: &str) -> std::path::PathBuf {
         .join("koushi-core-qa")
         .join(format!("{}_{}", std::process::id(), suffix))
 }
+
+#[cfg(test)]
+#[path = "participants_tests.rs"]
+mod tests;
