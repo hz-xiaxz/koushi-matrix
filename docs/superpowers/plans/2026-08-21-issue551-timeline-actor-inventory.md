@@ -1,0 +1,1621 @@
+# Issue #551 Timeline ownership exact inventory
+
+This normative appendix belongs to
+[2026-08-21-issue551-timeline-actor-decomposition.md](2026-08-21-issue551-timeline-actor-decomposition.md).
+It is derived from immutable baseline `d7b3e268c7564fe691db49e42fe80cd2f67e06a1` with `syn`; implementation stops if that parse differs.
+
+## Count derivation
+
+The production/cfg-test inventory outside inline test modules is exactly **1,050 keys**: 594 named top-level declarations (27 constants, 4 statics, 113 structs, 47 enums, 7 type aliases and 396 free functions), 455 type-qualified associated items, and one explicitly keyed empty impl container (`impl Eq for ReadRetryToken {}`). The source contains 72 impl containers total. The two principal impls contain 84 `TimelineManagerActor` methods and 112 `TimelineActor` methods. Associated keys are `(self type/trait impl, item kind, name)`; empty impls use `(impl-container, trait, self type)`. The verifier also compares all 72 impl identities, attrs and associated-item memberships, including non-empty containers already represented by their associated keys.
+
+The test inventory is exactly **410 unique test functions**: 71 in `timeline_gap_repair_tracker_tests` and 339 in the main `tests` module. Exactly 55 tests contain one `include_str!("timeline.rs")` source-characterization site. Counts below sum to 1,050 and 410 respectively.
+
+Line spans used by the generating inventory classify only complete immutable AST items. They are not extraction ranges. Extraction and verification use the full parsed item span and qualified key; any item crossing or missing a classification boundary is an error. Within each destination, top-level items, associated methods and tests retain immutable-baseline relative source order; no worker may alphabetize or regroup bodies.
+
+## Production ownership (1,050/1,050)
+
+## actor (42)
+
+- `const::TIMELINE_ACTOR_CONTROL_QUEUE_CAPACITY`
+- `enum::TimelineActorMessage`
+- `enum::TimelineActorControl`
+- `struct::TimelineActorCleanupState`
+- `struct::TimelineActorCleanupIngress`
+- `method::impl TimelineActorCleanupIngress::channel`
+- `method::impl TimelineActorCleanupIngress::end_gap_repair_demand`
+- `method::impl TimelineActorCleanupIngress::cancel_live_tail_network`
+- `method::impl TimelineActorCleanupIngress::cancel_pagination`
+- `method::impl TimelineActorCleanupIngress::cancel_link_previews`
+- `method::impl From < TimelineActorControl > for TimelineActorMessage::from`
+- `fn::emit_app_action_reliable`
+- `struct::TimelineActorHandle`
+- `struct::TimelinePositionIndex`
+- `method::impl TimelinePositionIndex::from_items`
+- `method::impl TimelinePositionIndex::evidence`
+- `method::impl TimelinePositionIndex::actor_generation`
+- `method::impl TimelineActorHandle::send`
+- `method::impl TimelineActorHandle::send_control`
+- `method::impl TimelineActorHandle::try_send_control`
+- `method::impl TimelineActorHandle::end_gap_repair_demand`
+- `method::impl TimelineActorHandle::cancel_live_tail_network`
+- `method::impl TimelineActorHandle::cancel_pagination_after_commit`
+- `method::impl TimelineActorHandle::cancel_link_previews_after_commit`
+- `method::impl TimelineActorHandle::cleanup_ingress`
+- `method::impl TimelineActorHandle::read_position`
+- `method::impl TimelineActorHandle::read_position_index`
+- `method::impl TimelineActorHandle::stop`
+- `method::impl Drop for TimelineActorHandle::drop`
+- `struct::TimelineActor`
+- `method::impl Drop for TimelineActor::drop`
+- `method::impl TimelineActor::spawn`
+- `method::impl TimelineActor::run`
+- `method::impl TimelineActor::finish_ready_causal_projection_handoffs`
+- `method::impl TimelineActor::handle_cleanup`
+- `method::impl TimelineActor::handle_msg`
+- `method::impl TimelineActor::emit`
+- `method::impl TimelineActor::emit_action_reliable`
+- `method::impl TimelineActor::emit_search_messages_reliable`
+- `method::impl TimelineActor::emit_failure`
+- `method::impl TimelineActor::emit_timeline_failure`
+- `method::impl TimelineActor::emit_typing_users_action`
+## composer (10)
+
+- `fn::validate_composer_body_for_timeline_send`
+- `fn::build_room_message_content_from_composer_document`
+- `fn::build_room_message_content_from_composer_document_with_options`
+- `fn::build_room_message_content_without_relation_from_composer_document_with_options`
+- `fn::build_room_message_content_from_composer_body`
+- `fn::build_room_message_content_from_composer_body_with_options`
+- `fn::build_room_message_content_without_relation_from_composer_body_with_options`
+- `fn::without_relation_content_from_formatted_draft`
+- `fn::media_caption_content_from_draft`
+- `fn::ruma_mentions_from_intent`
+## diagnostics (82)
+
+- `fn::read_state_kind_token`
+- `fn::record_read_admission`
+- `fn::decrypt_retry_elapsed_bucket`
+- `fn::decrypt_retry_event`
+- `fn::record_room_key_requester_stage`
+- `fn::record_decrypt_retry_request`
+- `fn::record_decrypt_retry_backup_lookup`
+- `fn::record_decrypt_retry_device_request`
+- `fn::record_decrypt_retry_settled`
+- `fn::decrypt_retry_backup_result_for_error`
+- `fn::decrypt_retry_failure_for_room_operation`
+- `fn::record_room_key_reshare`
+- `enum::OutboundSessionLookupDiagnostic`
+- `method::impl OutboundSessionLookupDiagnostic::token`
+- `fn::record_post_send_encryption_snapshot`
+- `fn::record_send_diagnostic_snapshot_skipped`
+- `fn::room_key_reshare_target_token`
+- `fn::record_read_completion`
+- `fn::record_read_retry`
+- `fn::record_read_state_diagnostic`
+- `fn::read_state_key_for_command`
+- `fn::read_state_room_id`
+- `fn::timeline_key_matches_read_state_key`
+- `fn::timeline_subscription_failed_action`
+- `fn::timeline_key_trace_kind`
+- `fn::timeline_stage_token`
+- `fn::timeline_operation_token`
+- `fn::timeline_outcome_token`
+- `fn::timeline_diff_token`
+- `fn::record_timeline_event`
+- `fn::record_subscribe_stage`
+- `fn::record_subscription_room_coverage`
+- `fn::subscription_count_bucket`
+- `fn::record_residency_intent`
+- `fn::record_subscription_reconcile`
+- `fn::record_thread_projection`
+- `fn::record_timeline_gap_repair`
+- `fn::live_tail_refresh_outcome_token`
+- `fn::live_tail_freshness_token`
+- `fn::record_live_tail_state`
+- `fn::record_live_tail_queue`
+- `fn::record_live_tail_cancellation`
+- `fn::record_live_tail_refresh`
+- `fn::record_live_tail_reconciliation`
+- `fn::record_live_tail_commit`
+- `fn::record_live_catchup_gate`
+- `fn::record_timeline_gap_repair_evaluation`
+- `fn::record_timeline_gap_projection`
+- `fn::record_timeline_gap_projection_boundary`
+- `fn::record_timeline_gap_demand`
+- `struct::TimelineGapSelectionDiagnostic`
+- `fn::record_timeline_gap_selection`
+- `fn::trace_timeline_actor_operation`
+- `fn::trace_timeline_actor_scan`
+- `fn::timeline_item_id_for_trace`
+- `fn::timeline_item_diagnostic_event`
+- `fn::record_timeline_item`
+- `fn::trace_timeline_items`
+- `fn::trace_timeline_diffs`
+- `fn::timeline_diff_batch_diagnostic_event`
+- `struct::EventCacheRelationTrace`
+- `fn::event_cache_relation_trace`
+- `fn::relation_type_trace_token`
+- `struct::FullyReadReceiptContext`
+- `struct::RoomLatestReceiptContext`
+- `fn::private_read_receipt_event_id_for_fully_read`
+- `fn::private_read_receipt_event_id_from_room_for_fully_read`
+- `fn::room_latest_receipt_context`
+- `fn::timeline_event_relation_type`
+- `fn::event_cache_item_diagnostic_event`
+- `fn::record_event_cache_item`
+- `fn::trace_event_cache_items`
+- `fn::event_cache_diff_without_item_diagnostic_event`
+- `fn::record_event_cache_diff_without_item`
+- `fn::trace_event_cache_diff_without_item`
+- `fn::event_cache_origin_trace_token`
+- `fn::trace_event_cache_diffs`
+- `fn::event_cache_diff_batch_diagnostic_event`
+- `fn::pagination_direction_trace_token`
+- `fn::trace_timeline_route`
+- `fn::trace_timeline_paginate`
+- `fn::trace_timeline_link_preview`
+## display_projection (60)
+
+- `struct::DisplayProjectionSlot`
+- `struct::DisplayProjectionState`
+- `method::impl DisplayProjectionState::from_canonical_window`
+- `method::impl DisplayProjectionState::display_items`
+- `method::impl DisplayProjectionState::refresh_display_items`
+- `fn::flush_pending_canonical_push_fronts`
+- `enum::DisplayMembershipCell`
+- `method::impl DisplayMembershipCell::canonical_len`
+- `method::impl DisplayMembershipCell::visible_len`
+- `type::DisplayMembershipLink`
+- `struct::DisplayMembershipNode`
+- `struct::PendingDisplayMembershipNode`
+- `method::impl DisplayMembershipNode::new`
+- `method::impl DisplayMembershipNode::refresh`
+- `fn::display_membership_canonical_len`
+- `fn::display_membership_visible_len`
+- `struct::DisplayMembershipRope`
+- `method::impl DisplayMembershipRope::empty`
+- `method::impl DisplayMembershipRope::record_structural_node_visit`
+- `method::impl DisplayMembershipRope::merge`
+- `method::impl DisplayMembershipRope::from_projection_state`
+- `method::impl DisplayMembershipRope::from_canonical_window`
+- `method::impl DisplayMembershipRope::canonical_len`
+- `method::impl DisplayMembershipRope::visible_len`
+- `method::impl DisplayMembershipRope::next_priority`
+- `method::impl DisplayMembershipRope::node`
+- `method::impl DisplayMembershipRope::from_cells`
+- `method::impl DisplayMembershipRope::split`
+- `method::impl DisplayMembershipRope::split_root`
+- `method::impl DisplayMembershipRope::edge_is_visible`
+- `method::impl DisplayMembershipRope::insert`
+- `method::impl DisplayMembershipRope::split_one`
+- `method::impl DisplayMembershipRope::set`
+- `method::impl DisplayMembershipRope::remove`
+- `method::impl DisplayMembershipRope::truncate`
+- `method::impl DisplayMembershipRope::clear`
+- `method::impl DisplayMembershipRope::hide_first_visible`
+- `method::impl DisplayMembershipRope::trim_to_live_edge`
+- `method::impl DisplayMembershipRope::materialize`
+- `struct::DisplayProjectionContext`
+- `method::impl DisplayProjectionContext::for_timeline`
+- `method::impl DisplayProjectionContext::bounded_live_edge`
+- `struct::DisplayProjectionBatch`
+- `fn::commit_sdk_batch_for_generation`
+- `fn::project_sdk_batch`
+- `fn::normalize_display_projection_slots`
+- `struct::BuiltDisplayProjectionDiffs`
+- `fn::finalize_display_projection_diffs`
+- `fn::build_display_projection_diffs`
+- `fn::validate_display_projection_diffs`
+- `fn::rebuild_display_projection_index`
+- `fn::record_display_projection_reset_fallback`
+- `fn::apply_timeline_diffs_to_items`
+- `fn::apply_timeline_diffs_to_display_items`
+- `fn::apply_non_sdk_item_set_diffs_to_display_items`
+- `fn::insert_display_timeline_item`
+- `fn::set_display_timeline_item`
+- `fn::normalize_display_timeline_items`
+- `fn::timeline_item_render_id`
+- `fn::timeline_diffs_include_prepend`
+## gap_repair (139)
+
+- `const::LIVE_TAIL_CANCELLATION_DEADLINE`
+- `method::impl TimelineManagerActor::invalidate_live_tail_epoch_for_existing_rooms`
+- `method::impl TimelineManagerActor::handle_room_subscription_checkpoint`
+- `method::impl TimelineManagerActor::handle_all_rooms_response_committed`
+- `method::impl TimelineManagerActor::apply_live_tail_scheduler_actions`
+- `method::impl TimelineManagerActor::handle_live_tail_refresh_completed`
+- `method::impl TimelineManagerActor::replay_retained_room_subscription_checkpoint`
+- `fn::is_global_commit_inspection_target`
+- `struct::TestGapRepairCompletionPause`
+- `const::MAX_TIMELINE_GAP_REPAIR_BATCHES`
+- `const::MAX_LIVE_EDGE_GAP_REPAIR_BATCHES`
+- `const::TIMELINE_GAP_OBSERVABLE_SETTLEMENT_TIMEOUT`
+- `const::TIMELINE_GAP_RELAY_SETTLEMENT_TIMEOUT`
+- `const::TIMELINE_GAP_RENDER_SETTLEMENT_TIMEOUT`
+- `fn::historical_causal_projection_operation`
+- `fn::live_tail_causal_projection_operation`
+- `method::impl CausalProjectionId::decode_transport`
+- `method::impl CausalProjectionId::encode_transport`
+- `enum::TimelineGapObservableSettlement`
+- `fn::wait_for_gap_repair_projection_with_timeout`
+- `enum::TimelineGapRepairTrigger`
+- `struct::TimelineGapRenderFence`
+- `enum::TimelineGapProjectionCompletion`
+- `struct::TimelineGapProjectionCorrelation`
+- `method::impl TimelineGapProjectionCorrelation::begin`
+- `method::impl TimelineGapProjectionCorrelation::complete`
+- `method::impl TimelineGapProjectionCorrelation::observe`
+- `method::impl TimelineGapProjectionCorrelation::clear`
+- `method::impl TimelineGapProjectionCorrelation::is_pending`
+- `method::impl TimelineGapProjectionCorrelation::accepts`
+- `struct::CausalProjectionObservation`
+- `fn::observe_causal_projection`
+- `struct::RestoreCausalProjectionBuffer`
+- `method::impl RestoreCausalProjectionBuffer::buffer_batch`
+- `method::impl RestoreCausalProjectionBuffer::observe_after_publication`
+- `struct::PendingTimelineGapProjection`
+- `struct::PendingLiveTailRefreshCompletion`
+- `fn::recover_obsolete_gap_settlement`
+- `fn::timeline_gap_repair_budget`
+- `fn::timeline_gap_repair_trigger_token`
+- `fn::post_diff_gap_inspection_trigger`
+- `fn::live_tail_completion_requires_snapshot`
+- `fn::timeline_gap_repair_made_progress`
+- `struct::TimelineGapRepairResultDiagnostic`
+- `fn::timeline_gap_repair_result_diagnostic`
+- `fn::record_timeline_gap_repair_attempt`
+- `fn::admit_and_record_timeline_gap_repair_attempt`
+- `fn::record_timeline_gap_repair_budget`
+- `fn::record_timeline_gap_repair_result`
+- `fn::checkpoint_is_strictly_newer`
+- `struct::GlobalResponseCommit`
+- `method::impl GlobalResponseCommit::new`
+- `enum::GlobalCommitDecision`
+- `struct::GlobalCommitFence`
+- `method::impl GlobalCommitFence::note_room_checkpoint_advanced`
+- `method::impl GlobalCommitFence::observe`
+- `method::impl GlobalCommitFence::take_pending_inspection`
+- `method::impl GlobalCommitFence::has_pending_inspection`
+- `method::impl GlobalCommitFence::restore_pending_inspection`
+- `fn::retain_room_subscription_checkpoint`
+- `fn::room_checkpoint_advances_global_fence`
+- `fn::global_commit_gap_selection`
+- `enum::MissingCommittedGapDecision`
+- `fn::missing_committed_gap_decision`
+- `fn::consume_room_subscription_checkpoint`
+- `fn::gap_repair_continuation_trigger`
+- `fn::projected_gap_insertion_index`
+- `struct::GapBoundaryPresenceCounts`
+- `fn::summarize_gap_boundary_presence`
+- `fn::projected_gap_id`
+- `struct::ProjectedGapCandidate`
+- `enum::ProjectedGapRelation`
+- `enum::GapRepairViewportWakeDecision`
+- `struct::GapRepairEvaluationDiagnosticSignature`
+- `fn::projected_gaps_contain_id`
+- `fn::should_record_gap_repair_evaluation`
+- `fn::gap_repair_batch_events`
+- `fn::gap_repair_work_kind`
+- `fn::select_projected_gap_candidate`
+- `fn::evaluate_gap_repair_viewport_wake`
+- `fn::select_projected_gap_id`
+- `fn::projected_gap_identity_matches_descriptor`
+- `enum::GapRepairSelection`
+- `enum::UnprojectedGapReason`
+- `fn::gap_selection_diagnostic_decision`
+- `enum::UnlocatedGapAction`
+- `fn::unlocated_gap_action`
+- `fn::select_gap_repair_candidate`
+- `struct::LiveEdgeGapSelection`
+- `enum::LiveEdgeSelectionDecision`
+- `fn::rendered_live_edge_target`
+- `enum::TimelineGapAttemptResetReason`
+- `method::impl TimelineGapAttemptResetReason::as_str`
+- `struct::TimelineGapAttemptAdmission`
+- `struct::TimelineGapRepairTracker`
+- `method::impl TimelineGapRepairTracker::begin_inspection`
+- `method::impl TimelineGapRepairTracker::begin_repair`
+- `method::impl TimelineGapRepairTracker::queue_inspection`
+- `method::impl TimelineGapRepairTracker::replace_projected_gaps`
+- `method::impl TimelineGapRepairTracker::clear_projected_gaps`
+- `method::impl TimelineGapRepairTracker::observe_live_edge_target`
+- `method::impl TimelineGapRepairTracker::has_live_edge_target`
+- `method::impl TimelineGapRepairTracker::evaluate_live_edge_selection`
+- `method::impl TimelineGapRepairTracker::evaluate_viewport_wake`
+- `method::impl TimelineGapRepairTracker::begin_explicit_demand`
+- `method::impl TimelineGapRepairTracker::advance_demand_revision`
+- `method::impl TimelineGapRepairTracker::begin_pending_inspection`
+- `method::impl TimelineGapRepairTracker::has_pending_inspection`
+- `method::impl TimelineGapRepairTracker::await_projection`
+- `method::impl TimelineGapRepairTracker::acknowledge_projection`
+- `method::impl TimelineGapRepairTracker::recover_projection_timeout`
+- `method::impl TimelineGapRepairTracker::begin_work`
+- `method::impl TimelineGapRepairTracker::finish_work`
+- `method::impl TimelineGapRepairTracker::admit_gap_attempt`
+- `method::impl TimelineGapRepairTracker::record_batch`
+- `method::impl TimelineGapRepairTracker::record_batch_error`
+- `method::impl TimelineGapRepairTracker::record_batch_outcome`
+- `method::impl TimelineGapRepairTracker::can_start_batch`
+- `method::impl TimelineActor::start_live_tail_refresh`
+- `method::impl TimelineActor::handle_live_tail_refresh_finished`
+- `method::impl TimelineActor::finish_pending_live_tail_projection`
+- `method::impl TimelineActor::publish_live_tail_refresh_completion`
+- `method::impl TimelineActor::viewport_item_range`
+- `method::impl TimelineActor::gap_repair_scheduler_phase`
+- `method::impl TimelineActor::record_gap_selection_diagnostic`
+- `method::impl TimelineActor::request_timeline_gap_inspection`
+- `method::impl TimelineActor::start_pending_timeline_gap_inspection`
+- `method::impl TimelineActor::live_catchup_gate`
+- `method::impl TimelineActor::handle_timeline_gap_inspection_finished`
+- `method::impl TimelineActor::emit_gap_positions`
+- `method::impl TimelineActor::timeline_event_position`
+- `method::impl TimelineActor::start_timeline_gap_repair`
+- `method::impl TimelineActor::handle_timeline_gap_repair_finished`
+- `method::impl TimelineActor::schedule_gap_relay_settlement`
+- `method::impl TimelineActor::release_gap_relay_settlement`
+- `method::impl TimelineActor::recover_gap_render_settlement`
+- `method::impl TimelineActor::emit_gap_repair_failure_and_resume`
+- `method::impl TimelineActor::emit_gap_repair_released_if_idle`
+- `method::impl TimelineActor::finish_pending_gap_projection`
+## item_projection (146)
+
+- `const::REPLY_QUOTE_PREVIEW_MAX_CHARS`
+- `method::impl TimelineManagerActor::handle_ignored_users_updated`
+- `fn::spawn_link_preview_fetch`
+- `fn::spawn_reply_detail_fetch`
+- `struct::ReactionTargetState`
+- `method::impl TimelineActor::handle_load_message_source`
+- `method::impl TimelineActor::handle_edit_text`
+- `method::impl TimelineActor::handle_redact`
+- `method::impl TimelineActor::handle_toggle_reaction`
+- `method::impl TimelineActor::handle_send_reaction`
+- `method::impl TimelineActor::handle_redact_reaction`
+- `method::impl TimelineActor::handle_ignored_users_updated`
+- `method::impl TimelineActor::emit_timeline_item_set`
+- `method::impl TimelineActor::handle_load_link_previews`
+- `method::impl TimelineActor::handle_link_previews_fetched`
+- `method::impl TimelineActor::handle_cancel_link_previews`
+- `method::impl TimelineActor::handle_hide_link_preview`
+- `method::impl TimelineActor::handle_link_preview_policy_changed`
+- `method::impl TimelineActor::maybe_fetch_visible_reply_details`
+- `method::impl TimelineActor::forward_diff_to_search`
+- `method::impl TimelineActor::search_index_messages_for_diff`
+- `method::impl TimelineActor::search_index_messages_for_item`
+- `method::impl TimelineActor::forward_initial_items_to_search`
+- `method::impl TimelineActor::attachment_document_from_timeline_media`
+- `method::impl TimelineActor::attachment_document_from_sticker`
+- `method::impl TimelineActor::item_ids_for_event`
+- `method::impl TimelineActor::timeline_contains_event_id`
+- `method::impl TimelineActor::project_message_source_for_event`
+- `method::impl TimelineActor::reaction_target_state`
+- `fn::timeline_room_id`
+- `fn::apply_ignored_sender_suppression`
+- `fn::apply_ignored_sender_suppression_to_diff`
+- `fn::apply_link_previews_to_item`
+- `fn::reset_loading_link_previews_to_pending`
+- `fn::is_unread_navigation_item`
+- `fn::has_user_visible_content`
+- `fn::timeline_content_is_renderable`
+- `fn::timeline_formatted_body_is_renderable`
+- `fn::timeline_sender_label_from_profile`
+- `fn::timeline_sender_avatar_from_profile`
+- `fn::original_json_for_event_item`
+- `fn::megolm_session_fingerprint`
+- `fn::effective_message_content`
+- `fn::mention_intent_from_event_json`
+- `fn::composer_document_from_event_json`
+- `fn::collect_composer_inlines_from_nodes`
+- `fn::matrix_to_mention_target`
+- `fn::allowed_editable_mention_target`
+- `fn::percent_decode_matrix_identifier`
+- `fn::hex_value`
+- `fn::timeline_item_should_be_hidden`
+- `fn::timeline_item_should_be_hidden_for_key`
+- `fn::reply_enforce_thread_for_key`
+- `fn::attachment_reply_for_key`
+- `fn::thread_root_from_original_json`
+- `fn::item_index_for_event_id`
+- `fn::visible_missing_reply_detail_event_ids`
+- `fn::timeline_item_event_id`
+- `fn::live_event_receipts_from_sdk_items`
+- `enum::ReceiptObservationTarget`
+- `fn::build_receipt_observation_actions`
+- `fn::build_live_receipt_observation_actions`
+- `fn::live_receipt_observation_actions_from_sdk_receipts`
+- `fn::receipt_observation_actions_from_sdk_receipts`
+- `fn::emit_receipt_observation_actions`
+- `fn::emit_live_receipt_observation_actions`
+- `fn::record_live_receipt_profile_lookup`
+- `fn::collect_live_event_receipts_from_diff`
+- `fn::live_event_receipts_from_sdk_item`
+- `fn::sdk_item_to_timeline_item`
+- `fn::request_state_for_item`
+- `fn::key_request_stage_token`
+- `fn::key_request_withheld_code_token`
+- `fn::sdk_item_to_timeline_item_with_send_states`
+- `fn::thread_auto_requestable_event_id`
+- `fn::withheld_update_should_publish`
+- `fn::unable_to_decrypt_from_content`
+- `fn::decrypt_retry_reason_from_content`
+- `fn::thread_summary_from_sdk`
+- `struct::MessageProjection`
+- `fn::link_ranges_for_message_projection`
+- `fn::reply_quote_from_details`
+- `fn::reply_quote_from_embedded_event`
+- `fn::reply_quote_from_message_projection`
+- `fn::reply_quote_formatted_body_from_timeline`
+- `fn::reply_quote_preview_from_message_projection`
+- `fn::message_projection_from_timeline_content`
+- `fn::sticker_projection_from_body`
+- `fn::state_event_notice_projection`
+- `fn::state_event_notice_body`
+- `fn::state_event_notice_i18n`
+- `fn::room_name_notice_projection`
+- `fn::membership_change_projection`
+- `fn::profile_change_projection`
+- `fn::non_user_content_projection`
+- `fn::collapsed_preview`
+- `fn::message_projection_from_msgtype`
+- `fn::message_projection_from_body_and_formatted`
+- `struct::PlainBodyProjection`
+- `fn::project_plain_body_with_spoilers`
+- `struct::FormattedBodyProjection`
+- `fn::project_formatted_body`
+- `fn::plain_text_from_html`
+- `fn::collect_plain_text_from_nodes`
+- `fn::spoiler_spans_from_html`
+- `fn::collect_spoiler_spans_from_nodes`
+- `fn::code_blocks_from_html`
+- `fn::collect_code_blocks_from_nodes`
+- `fn::timeline_media_from_audio`
+- `fn::timeline_media_from_image`
+- `fn::timeline_media_from_file`
+- `fn::timeline_media_from_video`
+- `fn::timeline_media_source_from_sdk`
+- `fn::timeline_media_thumbnail_from_sdk`
+- `fn::timeline_send_state_from_sdk`
+- `fn::send_failure_reason`
+- `fn::remember_local_echo`
+- `fn::private_media_entry_from_msgtype`
+- `fn::cache_sdk_item_media_source`
+- `fn::attachment_info_for_upload`
+- `fn::thumbnail_for_upload`
+- `fn::media_request_for_download`
+- `fn::sanitize_matrix_id_for_path`
+- `fn::uint_to_u64`
+- `fn::uint_from_u64`
+- `fn::timeline_item_can_react`
+- `fn::validate_send_reaction`
+- `fn::validate_redact_reaction`
+- `fn::timeline_item_can_redact`
+- `fn::timeline_item_can_edit`
+- `struct::MediaMessageShape`
+- `fn::msgtype_media_shape`
+- `fn::msgtype_carries_editable_caption`
+- `fn::edit_target_msgtype`
+- `fn::edited_document_content_for_edit_target`
+- `fn::edited_content_for_edit_target`
+- `fn::message_edit_target_token`
+- `fn::trace_message_edit_target`
+- `fn::mention_summary_for_message_type`
+- `fn::mention_counts_for_edit`
+- `fn::trace_message_edit_lifecycle`
+- `fn::validate_retry_send`
+- `fn::validate_cancel_send`
+- `fn::reaction_groups_from_sdk`
+- `fn::sdk_vector_diffs_to_timeline_diffs`
+- `fn::classify_reaction_error`
+## manager (33)
+
+- `const::TIMELINE_DIFF_QUEUE_CAPACITY`
+- `enum::TimelineMessage`
+- `struct::TimelineManagerHandle`
+- `enum::TimelineManagerControl`
+- `method::impl TimelineManagerHandle::send`
+- `method::impl TimelineManagerHandle::sender`
+- `method::impl TimelineManagerHandle::residency_handle`
+- `method::impl TimelineManagerHandle::close_membership_operations`
+- `method::impl TimelineManagerHandle::residency_snapshot_for_testing`
+- `method::impl TimelineManagerHandle::residency_gate_snapshot_for_testing`
+- `method::impl TimelineManagerHandle::shutdown`
+- `method::impl TimelineManagerHandle::terminal_sender`
+- `struct::TimelineManagerActor`
+- `method::impl Drop for TimelineManagerActor::drop`
+- `method::impl TimelineManagerActor::spawn`
+- `method::impl TimelineManagerActor::spawn_with_session`
+- `method::impl TimelineManagerActor::run`
+- `method::impl TimelineManagerActor::handle_command`
+- `method::impl TimelineManagerActor::handle_command_with_formatting_options`
+- `method::impl TimelineManagerActor::handle_command_with_formatting_context`
+- `method::impl TimelineManagerActor::handle_command_with_permit`
+- `method::impl TimelineManagerActor::handle_replay_subscribed`
+- `method::impl TimelineManagerActor::acknowledge_projection`
+- `method::impl TimelineManagerActor::acknowledge_batch_rendered`
+- `method::impl TimelineManagerActor::handle_subscribe`
+- `method::impl TimelineManagerActor::build_timeline_actor_handle`
+- `method::impl TimelineManagerActor::route_to_actor_or_fail`
+- `method::impl TimelineManagerActor::emit`
+- `method::impl TimelineManagerActor::emit_failure`
+- `method::impl TimelineManagerActor::emit_subscription_failure`
+- `method::impl TimelineManagerActor::emit_timeline_subscribed_action`
+- `method::impl TimelineManagerActor::emit_action_reliable`
+- `fn::internal_timeline_request_id`
+## media (30)
+
+- `const::MEDIA_DOWNLOAD_TIMEOUT`
+- `struct::PrivateMediaEntry`
+- `struct::MediaDownloadReady`
+- `enum::MediaDownloadOutcome`
+- `fn::media_download_selection_token`
+- `fn::media_download_failure_token`
+- `fn::media_source_token`
+- `fn::media_format_token`
+- `fn::sdk_media_error_token`
+- `fn::trace_media_download_request`
+- `fn::trace_media_download_worker`
+- `fn::trace_media_download_file_write_failed`
+- `fn::io_error_kind_token`
+- `method::impl TimelineActor::sdk_room_for_key`
+- `method::impl TimelineActor::handle_download_media`
+- `method::impl TimelineActor::download_media_for`
+- `method::impl TimelineActor::handle_media_download_finished`
+- `method::impl TimelineActor::emit_media_download_current_state`
+- `method::impl TimelineActor::emit_download_failed`
+- `method::impl TimelineActor::emit_media_gallery_if_changed`
+- `method::impl TimelineActor::apply_sdk_media_cache_diff`
+- `fn::media_gallery_updated_action`
+- `struct::AuthoritativeMediaGalleryReplacement`
+- `fn::authoritative_media_gallery_replacement`
+- `fn::media_gallery_items_from_timeline_items`
+- `fn::media_gallery_item_from_timeline_item`
+- `fn::media_gallery_kind_from_timeline_kind`
+- `fn::media_gallery_source_from_timeline_source`
+- `fn::media_gallery_thumbnail`
+- `fn::classify_media_download_error`
+## navigation (104)
+
+- `const::INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT`
+- `const::ROOM_REPLAY_INITIAL_ITEMS_MAX`
+- `const::RESTORE_ANCHOR_RELAY_WAIT_TICKS`
+- `const::RESTORE_ANCHOR_RELAY_WAIT_TICK_MS`
+- `struct::TimelineProjectionAcknowledgement`
+- `struct::NavigationProjectionIntent`
+- `struct::NavigationProjectionCleanup`
+- `struct::NavigationProjectionIngress`
+- `method::impl NavigationProjectionIngress::channel`
+- `method::impl NavigationProjectionIngress::subscribe`
+- `method::impl NavigationProjectionIngress::admit`
+- `struct::TimelineActorGenerationGateState`
+- `static::NEXT_TIMELINE_ACTOR_GENERATION`
+- `static::DISPLAY_PROJECTION_RESET_FALLBACKS`
+- `fn::display_projection_reset_fallback_count`
+- `struct::TimelineActorGenerationGateEntry`
+- `struct::TimelineActorGenerationGate`
+- `struct::TimelineActorGenerationActivation`
+- `struct::TimelineActorGenerationLease`
+- `method::impl Default for TimelineActorGenerationGate::default`
+- `method::impl TimelineActorGenerationGate::activate_after_quiescence`
+- `method::impl TimelineActorGenerationGate::restore_failed_activation`
+- `method::impl TimelineActorGenerationGate::invalidate_and_quiesce`
+- `method::impl TimelineActorGenerationGate::try_acquire`
+- `method::impl TimelineActorGenerationGate::current_generation`
+- `method::impl Drop for TimelineActorGenerationLease::drop`
+- `fn::next_timeline_actor_generation`
+- `fn::accept_projection_ack_for_active_actor`
+- `fn::projection_acknowledgement_for_current_items`
+- `fn::replay_projection_request_id`
+- `struct::InitialItemsRequestIdentity`
+- `method::impl InitialItemsRequestIdentity::fresh`
+- `method::impl InitialItemsRequestIdentity::replay`
+- `method::impl InitialItemsRequestIdentity::recovery`
+- `fn::emit_timeline_events_for_generation`
+- `fn::acquire_pagination_permit_and_emit_paginating`
+- `fn::emit_timeline_events_with_lease`
+- `fn::emit_items_updated_and_reconcile_replay_known_for_generation`
+- `fn::emit_non_sdk_item_sets_and_reconcile_replay_known_for_generation`
+- `fn::emit_items_updated_and_reconcile_replay_known_with_lease`
+- `struct::RestoreSettlement`
+- `fn::publish_restore_settlement_for_generation`
+- `fn::publish_restore_settlement_with_lease`
+- `fn::emit_initial_items_and_reconcile_replay_known_for_generation`
+- `fn::emit_initial_items_and_reconcile_replay_known_for_generation_after_initial`
+- `fn::emit_initial_items_and_reconcile_replay_known_with_lease_after_initial`
+- `struct::PreparedInitialWindow`
+- `fn::commit_prepared_initial_window_for_generation`
+- `fn::commit_prepared_initial_window_with_lease`
+- `fn::emit_initial_items_and_reconcile_replay_known_for_generation_with_test_hook`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::replace`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::replace_with_emit_unchanged`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::clear`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::reconcile_navigation`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::owns_root`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::mark_hydration_terminal_suppressed`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::take_suppressed_hydration_terminal`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::mark_hydration_terminal_emitted`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::take_emitted_hydration_terminal`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::allocate_safe_epoch`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::is_empty`
+- `method::impl ReplayKnownThreadRootProjectionRegistry::get`
+- `fn::receive_navigation_projection`
+- `method::impl TimelineManagerActor::handle_navigation_projection`
+- `method::impl TimelineManagerActor::handle_committed_room_selection`
+- `method::impl TimelineManagerActor::restore_foreground_gap_demand`
+- `fn::send_generation_fenced`
+- `struct::ActivePaginationTask`
+- `struct::PaginationCompletion`
+- `method::impl PaginationCompletion::into_result`
+- `struct::RestoreTimelineAnchorState`
+- `fn::backward_pagination_changed_oldest_edge`
+- `fn::oldest_observable_event_id`
+- `method::impl TimelineActor::handle_paginate`
+- `method::impl TimelineActor::paginate_once`
+- `method::impl TimelineActor::paginate_once_for`
+- `method::impl TimelineActor::emit_pagination_completion`
+- `method::impl TimelineActor::handle_cancel_pagination`
+- `method::impl TimelineActor::handle_restore_timeline_anchor`
+- `method::impl TimelineActor::handle_restore_timeline_anchor_continue`
+- `method::impl TimelineActor::maybe_continue_restore_anchor_after_diff`
+- `method::impl TimelineActor::schedule_restore_anchor_continue`
+- `method::impl TimelineActor::handle_replay_initial_items`
+- `method::impl TimelineActor::acknowledge_projection`
+- `method::impl TimelineActor::emit_navigation_if_changed`
+- `method::impl TimelineActor::emit_anchor_restore_finished`
+- `method::impl TimelineActor::publish_restore_settlement`
+- `method::impl TimelineActor::emit_items_updated_and_reconcile_replay_known`
+- `method::impl TimelineActor::emit_non_sdk_item_sets_and_reconcile_replay_known`
+- `method::impl TimelineActor::finish_anchor_restore`
+- `fn::replay_initial_items_window`
+- `fn::replay_initial_items_window_range`
+- `fn::should_hydrate_empty_initial_room_timeline`
+- `fn::activity_rows_from_timeline_items`
+- `fn::activity_rows_from_timeline_diffs`
+- `fn::activity_row_from_timeline_item`
+- `fn::derive_timeline_navigation_snapshot`
+- `fn::timeline_unread_position_token`
+- `fn::timeline_unread_consistency_diagnostic_event`
+- `fn::record_timeline_unread_consistency`
+- `fn::is_own_visible_event`
+- `fn::newer_unread_event_count`
+- `fn::unread_position_for_index`
+- `fn::classify_pagination_error`
+## outbound_send (134)
+
+- `const::SEND_ENQUEUE_WORKER_SHUTDOWN_DEADLINE`
+- `struct::TimelineSendCompletionDelivery`
+- `struct::TimelineSendFailureDelivery`
+- `struct::TimelineSendTerminalHandoff`
+- `struct::TimelineSendTerminalIngress`
+- `enum::TimelineSendTerminalAdmission`
+- `method::impl TimelineSendTerminalIngress::channel`
+- `method::impl TimelineSendTerminalIngress::admit`
+- `method::impl TimelineSendTerminalIngress::close_for_shutdown`
+- `method::impl TimelineSendTerminalIngress::stop_accepting`
+- `struct::MatrixTimelineSendEnqueueContext`
+- `enum::TimelineSendEnqueueContext`
+- `method::impl TimelineSendEnqueueContext::set_diagnostic_trace`
+- `enum::RoomEncryptionDiagnosticState`
+- `method::impl RoomEncryptionDiagnosticState::token`
+- `enum::OwnUserTrackingDiagnosticState`
+- `method::impl OwnUserTrackingDiagnosticState::token`
+- `struct::EncryptedSendDiagnosticSnapshot`
+- `fn::encrypted_send_diagnostic_snapshot`
+- `enum::TimelineSendEnqueuePayload`
+- `struct::SyntheticSendEnqueueRequest`
+- `struct::MediaSendQueuedDelivery`
+- `struct::SendEnqueueSuccess`
+- `method::impl SendEnqueueSuccess::terminal_only`
+- `struct::SendEnqueueWorkerCompletion`
+- `type::SendEnqueueWorkerFuture`
+- `type::SendDiagnosticFuture`
+- `type::GlobalSendCompletionObserverFuture`
+- `const::MAX_CONCURRENT_SEND_DIAGNOSTICS`
+- `fn::poll_global_send_completion_observer`
+- `fn::poll_global_send_completion_observer_once`
+- `struct::SendEnqueueWorkerSupervisor`
+- `method::impl SendEnqueueWorkerSupervisor::new`
+- `method::impl SendEnqueueWorkerSupervisor::cancel_all`
+- `method::impl SendEnqueueWorkerSupervisor::cancel_diagnostics`
+- `method::impl SendEnqueueWorkerSupervisor::spawn_diagnostic`
+- `method::impl Drop for SendEnqueueWorkerSupervisor::drop`
+- `fn::run_send_enqueue_future`
+- `fn::enqueue_document_send`
+- `fn::enqueue_document_reply_send`
+- `fn::enqueue_media_send`
+- `fn::enqueue_timeline_send`
+- `const::MAX_SUBMISSION_TOMBSTONES`
+- `struct::SubmissionAdmissionLedger`
+- `method::impl SubmissionAdmissionLedger::get`
+- `method::impl SubmissionAdmissionLedger::accept`
+- `method::impl SubmissionAdmissionLedger::rejected`
+- `method::impl SubmissionAdmissionLedger::reject`
+- `method::impl SubmissionAdmissionLedger::terminal`
+- `method::impl TimelineManagerActor::spawn_send_enqueue_future`
+- `method::impl TimelineManagerActor::spawn_send_enqueue`
+- `method::impl TimelineManagerActor::handle_send_enqueue_worker_completion`
+- `method::impl TimelineManagerActor::drive_send_enqueue_until_preflight_started`
+- `method::impl TimelineManagerActor::drain_send_enqueue_workers_until`
+- `method::impl TimelineManagerActor::join_send_enqueue_workers`
+- `method::impl TimelineManagerActor::join_send_enqueue_workers_with_grace_period`
+- `method::impl TimelineManagerActor::handle_send_terminal_handoff`
+- `method::impl TimelineManagerActor::spawn_post_send_encryption_diagnostics`
+- `method::impl TimelineManagerActor::route_send_to_worker_or_fail`
+- `method::impl TimelineManagerActor::route_media_send_to_worker_or_fail`
+- `method::impl TimelineManagerActor::route_submission_to_worker`
+- `enum::SendComposerProjection`
+- `method::impl SendComposerProjection::for_send_text`
+- `method::impl SendComposerProjection::for_send_reply`
+- `fn::send_submitted_action`
+- `fn::send_finished_action`
+- `fn::submission_target`
+- `fn::send_failed_action`
+- `fn::thread_attention_action`
+- `fn::matching_remote_thread_reply_event_id`
+- `fn::matching_thread_reply_event_id`
+- `fn::thread_activity_observed_action`
+- `fn::thread_activity_observed_action_for_batch`
+- `fn::newest_provable_receipt_event_id`
+- `fn::await_submission_admission`
+- `fn::deliver_submission_terminal_action`
+- `method::impl TimelineActor::handle_retry_send`
+- `method::impl TimelineActor::handle_cancel_send`
+- `method::impl TimelineActor::handle_send_queue_update`
+- `method::impl TimelineActor::handle_send_queue_lagged`
+- `method::impl TimelineActor::resync_send_queue_statuses`
+- `fn::run_global_send_completion_observer`
+- `fn::run_send_queue_monitor`
+- `fn::classify_timeline_send_error`
+- `fn::classify_send_queue_error`
+- `struct::SendCorrelationKey`
+- `type::SharedSendCompletionCoordinator`
+- `struct::SendCompletionCoordinator`
+- `static::NEXT_SEND_DIAGNOSTIC_CORRELATION`
+- `struct::SendLifecycleTrace`
+- `method::impl SendLifecycleTrace::new`
+- `method::impl SendLifecycleTrace::correlation`
+- `method::impl SendLifecycleTrace::stage`
+- `method::impl SendLifecycleTrace::stage_once`
+- `method::impl SendLifecycleTrace::stage_with_outcome`
+- `method::impl SendLifecycleTrace::stage_with_outcome_once`
+- `method::impl SendLifecycleTrace::stage_with_failure`
+- `method::impl SendLifecycleTrace::record_encryption_local_store_snapshot`
+- `method::impl SendLifecycleTrace::stage_internal`
+- `struct::SendLifecycleTraceState`
+- `struct::CoordinatedPendingSend`
+- `enum::SendCompletionObservation`
+- `enum::ObservedSendTerminal`
+- `struct::SendCompletionRegistration`
+- `method::impl SendCompletionRegistration::begin`
+- `method::impl SendCompletionRegistration::activate`
+- `method::impl SendCompletionRegistration::registration_id`
+- `method::impl SendCompletionRegistration::hold_interactive_guard`
+- `method::impl SendCompletionRegistration::bind`
+- `method::impl SendCompletionRegistration::fail_known`
+- `method::impl Drop for SendCompletionRegistration::drop`
+- `method::impl SendCompletionCoordinator::pending_send`
+- `method::impl SendCompletionCoordinator::stage_pending_send`
+- `method::impl SendCompletionCoordinator::activate_registration`
+- `method::impl SendCompletionCoordinator::cancel_registration`
+- `method::impl SendCompletionCoordinator::fail_registration`
+- `method::impl SendCompletionCoordinator::abandon_registration`
+- `method::impl SendCompletionCoordinator::room_has_active_registration`
+- `method::impl SendCompletionCoordinator::room_unbound_capacity`
+- `method::impl SendCompletionCoordinator::purge_unmatched_for_inactive_room`
+- `method::impl SendCompletionCoordinator::remember_settled`
+- `method::impl SendCompletionCoordinator::bind_registration`
+- `method::impl SendCompletionCoordinator::observe`
+- `method::impl SendCompletionCoordinator::observation_lost`
+- `method::impl SendCompletionCoordinator::apply_terminal`
+- `fn::media_upload_progress_identity`
+- `fn::apply_send_completion_observation_and_handoff`
+- `fn::apply_send_completion_observation_loss_and_handoff`
+- `const::MAX_SETTLED_SEND_TOMBSTONES`
+- `enum::SendCompletionTerminal`
+- `fn::send_terminal_action`
+- `fn::timeline_send_terminal_handoff`
+- `fn::timeline_send_observation_loss_handoff`
+- `fn::timeline_send_failure_handoff`
+## read_state (67)
+
+- `impl-container::Eq::ReadRetryToken`
+
+- `const::READ_NETWORK_TIMEOUT`
+- `const::READ_RETRY_BASE_DELAY`
+- `const::READ_RETRY_MAX_DELAY`
+- `struct::ReadPersistenceIngress`
+- `struct::ReadPersistenceRequest`
+- `method::impl ReadPersistenceRequest::new`
+- `method::impl ReadPersistenceRequest::session_generation`
+- `method::impl ReadPersistenceRequest::save_generation`
+- `method::impl ReadPersistenceRequest::snapshot`
+- `method::impl std :: fmt :: Debug for ReadPersistenceRequest::fmt`
+- `method::impl ReadPersistenceIngress::channel`
+- `method::impl ReadPersistenceIngress::publish`
+- `enum::ReadNetworkContext`
+- `struct::SyntheticReadNetworkRequest`
+- `enum::ReadCommandKind`
+- `enum::ReadRetrySource`
+- `method::impl ReadRetrySource::token`
+- `struct::ReadCommandWaiter`
+- `enum::ReadActorApplyKind`
+- `struct::ReadRetryToken`
+- `method::impl PartialEq for ReadRetryToken::eq`
+- `enum::ReadWorkerCompletion`
+- `method::impl ReadWorkerCompletion::fence`
+- `type::ReadWorkerFuture`
+- `struct::ReadWorkerSupervisor`
+- `method::impl ReadWorkerSupervisor::new`
+- `method::impl ReadWorkerSupervisor::unavailable`
+- `method::impl ReadWorkerSupervisor::matrix`
+- `method::impl ReadWorkerSupervisor::synthetic`
+- `method::impl ReadWorkerSupervisor::synthetic_with_retry`
+- `method::impl ReadWorkerSupervisor::synthetic_restored`
+- `method::impl ReadWorkerSupervisor::allocate_waiter`
+- `method::impl ReadWorkerSupervisor::spawn_network`
+- `method::impl ReadWorkerSupervisor::spawn_actor_apply`
+- `method::impl ReadWorkerSupervisor::cancel`
+- `method::impl ReadWorkerSupervisor::finish`
+- `method::impl ReadWorkerSupervisor::schedule_retry`
+- `method::impl ReadWorkerSupervisor::accept_retry_wake`
+- `method::impl ReadWorkerSupervisor::invalidate_retry`
+- `method::impl ReadWorkerSupervisor::reset_retry`
+- `method::impl ReadWorkerSupervisor::desired_keys`
+- `method::impl ReadWorkerSupervisor::reconciliation_pending`
+- `method::impl ReadWorkerSupervisor::finish_reconciliation`
+- `method::impl ReadWorkerSupervisor::publish_persistence`
+- `method::impl ReadWorkerSupervisor::cancel_all`
+- `method::impl ReadWorkerSupervisor::retry_bookkeeping_key_count`
+- `fn::read_retry_delay_for_attempt`
+- `method::impl Drop for ReadWorkerSupervisor::drop`
+- `fn::perform_read_network_operation`
+- `method::impl TimelineManagerActor::route_read_command`
+- `method::impl TimelineManagerActor::wake_read_operation`
+- `method::impl TimelineManagerActor::wake_all_desired_reads`
+- `method::impl TimelineManagerActor::wake_desired_reads_for_room`
+- `method::impl TimelineManagerActor::handle_authoritative_read_state_observed`
+- `method::impl TimelineManagerActor::handle_read_worker_completion`
+- `method::impl TimelineManagerActor::spawn_read_actor_apply`
+- `method::impl TimelineManagerActor::read_timeline_key_for_operation`
+- `method::impl TimelineManagerActor::settle_read_operation`
+- `method::impl TimelineManagerActor::settle_read_waiters`
+- `method::impl TimelineActor::handle_read_success`
+- `method::impl TimelineActor::handle_own_read_receipt_changed`
+- `method::impl TimelineActor::publish_authoritative_read_state`
+- `method::impl TimelineActor::publish_authoritative_read_observation`
+- `method::impl TimelineActor::handle_set_typing`
+- `method::impl TimelineActor::live_receipts_action_from_sdk_diffs`
+- `fn::run_typing_notifications`
+## residency (51)
+
+- `enum::RoomRemovalCause`
+- `method::impl RoomRemovalCause::token`
+- `enum::RoomMembershipTransitionKind`
+- `struct::RoomMembershipTransition`
+- `struct::VisibleRoomObservation`
+- `struct::MembershipOperationGateState`
+- `struct::MembershipOperationGate`
+- `struct::TimelineSubscriptionResidencyPermit`
+- `method::impl MembershipOperationGate::new`
+- `method::impl MembershipOperationGate::begin_operation`
+- `method::impl MembershipOperationGate::close_and_drain`
+- `method::impl MembershipOperationGate::snapshot`
+- `method::impl Drop for TimelineSubscriptionResidencyPermit::drop`
+- `struct::TimelineSubscriptionResidencyHandle`
+- `method::impl TimelineSubscriptionResidencyHandle::begin_operation`
+- `method::impl TimelineSubscriptionResidencyHandle::close_and_drain`
+- `method::impl TimelineSubscriptionResidencyHandle::gate_snapshot`
+- `method::impl TimelineSubscriptionResidencyHandle::gate_probe_for_testing`
+- `method::impl TimelineSubscriptionResidencyHandle::visible_rooms_observed`
+- `method::impl TimelineSubscriptionResidencyHandle::membership_observed`
+- `method::impl TimelineSubscriptionResidencyHandle::room_left`
+- `method::impl TimelineSubscriptionResidencyHandle::room_rejoined`
+- `enum::RoomLeaveState`
+- `enum::SubscriptionReconcileTrigger`
+- `method::impl SubscriptionReconcileTrigger::token`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_actor_handle`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_manager`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_handle`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_gate_probe`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_admit_key`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_admit_build_failure`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_unsubscribe`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_snapshot`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_seed_sdk_subscriptions`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_expire_sdk_subscriptions`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_pump_next_ingress`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_sync_started`
+- `method::impl TimelineManagerActor::room_subscription_residency_test_offer_restore`
+- `method::impl TimelineManagerActor::handle_sync_started`
+- `method::impl TimelineManagerActor::handle_visible_rooms_observed`
+- `method::impl TimelineManagerActor::handle_room_membership_observed`
+- `method::impl TimelineManagerActor::handle_room_left`
+- `method::impl TimelineManagerActor::handle_room_rejoined`
+- `method::impl TimelineManagerActor::room_ordinal_for`
+- `method::impl TimelineManagerActor::lease_room`
+- `method::impl TimelineManagerActor::release_room_lease`
+- `method::impl TimelineManagerActor::room_is_leased`
+- `method::impl TimelineManagerActor::reconcile_subscriptions`
+- `method::impl TimelineManagerActor::subscribe_existing_timeline_rooms`
+- `method::impl TimelineManagerActor::rebuild_existing_room_timelines_after_sync_started`
+- `method::impl TimelineManagerActor::replace_existing_room_timeline_after_sync_started`
+## room_key_recovery (58)
+
+- `const::DECRYPT_RETRY_TIMEOUT`
+- `struct::RoomKeyReshareAttempt`
+- `const::ROOM_KEY_RESHARE_ATTEMPTS`
+- `fn::spawn_delayed_timeline_message`
+- `enum::RoomKeyReshareCompletion`
+- `struct::RoomKeyReshareTaskSlot`
+- `method::impl RoomKeyReshareTaskSlot::abort`
+- `struct::RoomKeyReshareSchedule`
+- `method::impl Drop for RoomKeyReshareSchedule::drop`
+- `type::RoomKeyReshareOperation`
+- `struct::RoomKeyReshareTestSignals`
+- `fn::map_room_key_reshare_completion`
+- `fn::spawn_room_key_reshare_task_with_operation`
+- `fn::spawn_room_key_reshare_task`
+- `method::impl TimelineManagerActor::schedule_room_key_reshares`
+- `method::impl TimelineManagerActor::room_key_reshare_is_current`
+- `method::impl TimelineManagerActor::handle_room_key_reshare`
+- `method::impl TimelineManagerActor::take_room_key_reshare_worker`
+- `method::impl TimelineManagerActor::handle_room_key_reshare_completed`
+- `enum::DecryptRetryReason`
+- `method::impl DecryptRetryReason::token`
+- `enum::DecryptRetryBackupState`
+- `method::impl DecryptRetryBackupState::token`
+- `fn::decrypt_retry_backup_state_for`
+- `enum::DecryptRetryBackupResult`
+- `method::impl DecryptRetryBackupResult::token`
+- `enum::DecryptRetryDeviceResult`
+- `method::impl DecryptRetryDeviceResult::token`
+- `enum::DecryptRetryFailure`
+- `method::impl DecryptRetryFailure::token`
+- `enum::DecryptRetrySettledResult`
+- `method::impl DecryptRetrySettledResult::token`
+- `fn::decrypt_retry_diff_settlement`
+- `static::NEXT_DECRYPT_RETRY_OPERATION`
+- `fn::next_decrypt_retry_operation`
+- `struct::KeyRequestUiState`
+- `struct::PendingDecryptRetry`
+- `struct::DecryptRetrySettlement`
+- `struct::DecryptRetryController`
+- `method::impl DecryptRetryController::admit`
+- `method::impl DecryptRetryController::is_current`
+- `method::impl DecryptRetryController::settle_if_current`
+- `method::impl DecryptRetryController::settle_timeout_if_current`
+- `fn::decrypt_retry_settlement_operation`
+- `method::impl TimelineActor::begin_decrypt_retry`
+- `method::impl TimelineActor::schedule_decrypt_retry_timeout`
+- `method::impl TimelineActor::settle_decrypt_retry`
+- `method::impl TimelineActor::publish_key_request_state`
+- `method::impl TimelineActor::dispatch_auto_key_requests`
+- `method::impl TimelineActor::handle_request_room_key`
+- `method::impl TimelineActor::handle_request_late_decryption`
+- `method::impl TimelineActor::ensure_room_key_recovery`
+- `method::impl TimelineActor::recovery_resume_path`
+- `method::impl TimelineActor::persist_recovery_state`
+- `method::impl TimelineActor::load_recovery_resume`
+- `method::impl TimelineActor::schedule_recovery_tick`
+- `method::impl TimelineActor::handle_room_key_recovery_tick`
+- `method::impl TimelineActor::handle_forward_message`
+## relay (32)
+
+- `enum::TimelineRelayControl`
+- `const::RELAY_RESTART_BASE_DELAY`
+- `const::RELAY_RESTART_MAX_DELAY`
+- `struct::RelayRestartSchedule`
+- `struct::RelayRestartBackoff`
+- `method::impl RelayRestartBackoff::new`
+- `method::impl RelayRestartBackoff::schedule`
+- `method::impl RelayRestartBackoff::accept_due`
+- `method::impl RelayRestartBackoff::reset_after_live_batch`
+- `fn::spawn_relay_restart_timer`
+- `struct::TimelineRelayBatch`
+- `method::impl TimelineRelayBatch::retain_gap_repair_projections_for_actor`
+- `method::impl TimelineActor::handle_relay_control`
+- `method::impl TimelineActor::schedule_relay_restart`
+- `method::impl TimelineActor::handle_diff_batch`
+- `method::impl TimelineActor::prepare_authoritative_snapshot_reconciliation`
+- `method::impl TimelineActor::handle_relay_overflow`
+- `fn::koushi_timeline_builder`
+- `struct::PreparedRelayRecovery`
+- `struct::AuthoritativeWindowReconciliation`
+- `struct::ReceiptObservationRequest`
+- `struct::PreparedAuthoritativeSnapshotReconciliation`
+- `fn::authoritative_window_reconciliation`
+- `fn::authoritative_search_removals`
+- `fn::authoritative_receipts_action`
+- `fn::replace_authoritative_cache`
+- `fn::prepare_relay_recovery`
+- `fn::accept_relay_generation`
+- `fn::accepted_relay_batch`
+- `fn::commit_authoritative_recovery_window`
+- `fn::sdk_timeline_item_event_id`
+- `fn::run_diff_relay`
+## thread_projection (62)
+
+- `const::ROOM_REPLAY_KNOWN_THREAD_ROOT_PROJECTIONS_MAX`
+- `const::JAVASCRIPT_SAFE_INTEGER_MAX`
+- `struct::ThreadRootProjectionFetchRegistry`
+- `method::impl ThreadRootProjectionFetchRegistry::contains`
+- `method::impl ThreadRootProjectionFetchRegistry::insert`
+- `method::impl ThreadRootProjectionFetchRegistry::take_completion`
+- `method::impl ThreadRootProjectionFetchRegistry::abort_room`
+- `method::impl ThreadRootProjectionFetchRegistry::abort_all`
+- `struct::ReplayKnownThreadRootProjection`
+- `struct::ReplayKnownThreadRootProjectionRegistry`
+- `struct::ReplayKnownThreadRootProjectionUpdate`
+- `method::impl TimelineManagerActor::handle_thread_root_projection_fetch_start`
+- `method::impl TimelineManagerActor::handle_thread_root_projection_fetch_finished`
+- `method::impl TimelineManagerActor::clear_thread_root_projections_for_room`
+- `fn::spawn_thread_root_projection_fetch`
+- `fn::thread_root_projection_dto_from_record`
+- `fn::thread_root_projection_pending_dto`
+- `fn::hydration_projection_event`
+- `struct::PreparedThreadRootHydration`
+- `fn::commit_prepared_thread_root_hydration_for_generation`
+- `fn::thread_root_projection_action_from_record`
+- `fn::thread_root_item_with_latest_activity_summary`
+- `fn::load_thread_root_projection_item`
+- `fn::thread_root_projection_activity_from_item`
+- `struct::ReplayKnownDisplayContext`
+- `method::impl ReplayKnownDisplayContext::from_display_items`
+- `fn::known_thread_root_projections_for_replay`
+- `fn::known_thread_root_projections_for_display_context`
+- `fn::replay_activity_timestamp_range`
+- `fn::replay_known_candidates_for_display_items`
+- `fn::refresh_replay_known_root_projections`
+- `fn::refresh_replay_known_root_projections_with_display_context`
+- `fn::reconcile_replay_known_root_projections_after_navigation_update`
+- `fn::replay_known_clear_projection`
+- `fn::emit_replay_known_root_projection_update`
+- `fn::replay_known_timeline_events`
+- `fn::replay_known_timeline_events_with_hydration_handoffs`
+- `fn::emit_hydration_terminal_unless_replay_owned`
+- `fn::thread_root_activity_preview`
+- `fn::message_projection_from_loaded_root_raw`
+- `fn::reaction_groups_from_cached_relation_events`
+- `struct::ThreadRootProjectionRenderContext`
+- `fn::thread_root_projection_item_from_raw`
+- `fn::thread_root_projection_item_from_raw_with_context`
+- `fn::thread_summary_from_loaded_root_raw`
+- `struct::ThreadAttentionCounters`
+- `enum::ThreadAttentionObservation`
+- `struct::ThreadAttentionBatchProvenance`
+- `fn::gap_repair_projections_from_sdk_diffs`
+- `fn::thread_attention_observation_from_event_origin`
+- `method::impl ThreadAttentionBatchProvenance::from_sdk_diffs`
+- `method::impl ThreadAttentionBatchProvenance::from_timeline_items`
+- `method::impl ThreadAttentionBatchProvenance::observe_sdk_item`
+- `method::impl ThreadAttentionBatchProvenance::observation_for`
+- `struct::ThreadAttentionTracker`
+- `method::impl ThreadAttentionTracker::hydrate`
+- `method::impl ThreadAttentionTracker::reconcile`
+- `method::impl ThreadAttentionTracker::reconcile_batch`
+- `method::impl ThreadAttentionTracker::acknowledge`
+- `method::impl ThreadAttentionTracker::observe_without_increment`
+- `method::impl ThreadAttentionTracker::refresh_counts`
+- `method::impl TimelineActor::maybe_hydrate_missing_thread_roots`
+
+
+## Test ownership (410/410)
+
+Tests retain their attrs and bodies. The source-guard list at the end records the post-move test owner; each guard is retargeted to the explicit production owner file(s) containing the declaration(s) it already inspects. Cross-owner source is read separately and never concatenated.
+
+## actor (3)
+
+- `timeline_actor_handle_drop_aborts_actor_and_auxiliary_tasks`
+- `timeline_actor_control_lane_bypasses_full_ordinary_mailbox`
+- `room_unsubscribe_clears_projection_service_before_dropping_the_actor`
+## composer (12)
+
+- `composer_terminals_survive_replacement_during_reducer_capacity_wait`
+- `composer_document_builds_body_html_and_mentions_from_one_source`
+- `composer_core_builds_markdown_send_content_with_mentions`
+- `composer_core_builds_me_slash_command_as_emote_content`
+- `composer_core_builds_spoiler_markdown_as_formatted_body`
+- `composer_core_builds_math_markdown_as_matrix_math_html`
+- `composer_core_respects_math_mode_off_for_sent_content`
+- `sender_profile_projects_display_name_and_avatar_mxc`
+- `composer_core_sends_unknown_slash_text_literally`
+- `composer_core_rejects_recognized_unavailable_commands_locally`
+- `thread_composer_sends_regular_thread_messages_for_element_compatibility`
+- `thread_media_uses_the_same_regular_thread_relation`
+## diagnostics (13)
+
+- `event_cache_structured_fields_include_relation_presence_without_ids`
+- `timeline_diagnostic_helpers_collect_typed_records_without_trace_env`
+- `timeline_diff_batch_emits_one_count_only_summary`
+- `event_cache_diff_batch_emits_one_count_only_summary`
+- `timeline_items_record_batch_only_by_default`
+- `thread_projection_diagnostic_records_only_thread_batches`
+- `subscribe_replay_path_records_subscribed_done_stage`
+- `diagnostics_producer_paths_run_in_env_unset_child_process`
+- `diagnostics_producer_paths_run_without_trace_environment`
+- `reaction_and_read_signal_collector_fields_are_typed_and_private`
+- `timeline_subscribe_and_paginate_emit_startup_trace`
+- `timeline_route_and_paginate_emit_ordered_trace_tokens`
+- `manager_coordinator_fails_new_registration_on_exact_correlation_collision`
+## display_projection (17)
+
+- `sdk_canonical_indices_project_to_bounded_display_and_converge_local_echo`
+- `display_projection_retains_duplicate_identity_until_its_last_owner_is_removed`
+- `display_projection_media_duplicate_keeps_indexed_confirmation_in_display_space`
+- `display_projection_ignores_out_of_window_index_mutations`
+- `display_projection_includes_boundary_adjacent_insert`
+- `display_projection_live_edge_push_back_stays_bounded`
+- `display_projection_payload_work_does_not_rescan_window_per_prepend`
+- `display_projection_payload_work_does_not_rescan_window_per_indexed_diff`
+- `uncapped_restore_structural_visits_stay_inside_expected_log_envelope`
+- `sparse_indexed_structural_envelope_is_independent_of_canonical_history_length`
+- `display_projection_backward_push_front_prepends_historical_page`
+- `display_projection_clear_and_reset_replace_authoritative_display`
+- `display_projection_invalid_translation_uses_validated_reset_fallback`
+- `restore_terminal_flush_publishes_two_projected_batches_once_then_rebounds_live_edge`
+- `sdk_batch_generation_fence_rejects_activity_and_state_together`
+- `replay_known_display_mirror_matches_webview_identity_normalization`
+- `projection_ack_requires_exact_identity_and_current_actor_generation`
+## gap_repair (70)
+
+- `global_commit_fence_admits_one_omitted_room_inspection_per_new_commit`
+- `room_checkpoint_covers_only_its_exact_global_response`
+- `global_commit_selects_only_the_newest_gap_for_bounded_live_edge_repair`
+- `global_commit_messages_preserve_engine_neutral_identity`
+- `global_commit_inspection_targets_only_active_room_timelines`
+- `missing_committed_gap_is_reinspected_once_then_closed`
+- `lagged_observable_projection_wait_is_bounded`
+- `unlocated_gap_has_no_projection_position`
+- `projected_gap_identity_is_stable_only_within_the_same_topology_revision`
+- `timeline_gap_id_wire_preserves_full_range_projected_identity`
+- `projected_gap_identity_validates_revision_and_ordinal_before_descriptor_lookup`
+- `gap_projection_counts_unlocated_sdk_descriptors`
+- `foreground_unlocated_selection_is_distinguished_from_blocked_selection`
+- `foreground_unlocated_gap_has_one_action_policy`
+- `projected_selection_diagnostic_preserves_candidate_relation`
+- `unlocated_gap_diagnostics_are_private_safe`
+- `gap_projection_boundary_diagnostics_correlate_without_private_identifiers`
+- `automatic_repair_prefers_a_gap_intersecting_the_viewport`
+- `visible_gap_demand_is_preferred_over_inferred_event_bounds`
+- `visible_gap_without_event_bounds_wakes_foreground_repair`
+- `stale_visible_gap_is_ignored_and_requests_fresh_inspection`
+- `stale_visible_gap_does_not_suppress_independent_live_edge_fallback`
+- `viewport_wake_requests_inspection_when_projected_candidate_changes`
+- `viewport_wake_ignores_repeated_observation_for_same_candidate`
+- `viewport_wake_requests_again_when_viewport_selects_another_gap`
+- `viewport_wake_preserves_pending_trigger_while_render_ack_is_outstanding`
+- `observe_viewport_wakes_only_after_projected_candidate_changes`
+- `viewport_wake_evaluation_diagnostics_are_private_safe`
+- `gap_repair_wake_is_retained_across_ack_and_inspection_order`
+- `terminal_gap_repair_failures_resume_queued_candidate_inspection`
+- `terminal_gap_inspection_paths_resume_queued_work_before_release_wake`
+- `candidate_wake_queued_during_repair_is_available_after_terminal_release`
+- `repeated_gap_repair_evaluation_signature_is_deduplicated`
+- `automatic_and_manual_repair_use_separate_cache_budgets`
+- `gap_repair_takes_a_scheduler_permit_around_one_bounded_batch`
+- `gap_repair_work_kind_follows_reported_visibility`
+- `trigger_priority_keeps_live_edge_between_viewport_and_manual`
+- `live_tail_snapshot_observes_projected_gaps_without_repairing_them`
+- `final_live_tail_projection_batch_queues_one_snapshot_instead_of_live_edge`
+- `live_edge_fallback_selects_only_the_newest_unprojected_gap`
+- `live_edge_target_change_rearms_a_bounded_attempt`
+- `unchanged_live_edge_topology_after_a_batch_is_no_progress`
+- `live_edge_zero_progress_outcomes_terminate`
+- `gap_repair_result_diagnostics_preserve_sdk_outcome_and_progress_counts`
+- `repaired_live_edge_does_not_continue_into_an_unrelated_historical_gap`
+- `actor_fixture_recovers_relation_bounded_live_edge_after_exact_render_ack`
+- `live_edge_diagnostic_trigger_is_private_safe`
+- `subscription_inspection_waits_for_initial_projection_ack`
+- `repair_continuation_requires_the_matching_render_fence`
+- `render_ack_timeout_clears_fence_and_requeues_live_edge`
+- `relay_overflow_clears_obsolete_gap_correlation_and_requeues_live_edge`
+- `stale_prior_actor_gap_projection_is_removed_from_every_relay_batch`
+- `timeline_gap_repair_tracker_coalesces_and_rejects_stale_completions`
+- `historical_projection_serial_exhaustion_never_reuses_one`
+- `gap_repair_progress_budget_allows_cache_reveal_beyond_total_batch_count`
+- `gap_repair_attempt_diagnostics_classify_attempt_resets`
+- `gap_repair_attempt_diagnostics_emit_once_per_changed_admission`
+- `gap_repair_attempt_diagnostics_emit_one_budget_update_per_sdk_result`
+- `gap_repair_progress_budget_rejects_thirty_third_consecutive_noop`
+- `gap_repair_sdk_error_budget_rejects_thirty_third_consecutive_error`
+- `gap_repair_budget_is_scoped_without_resetting_repeated_demand`
+- `gap_repair_budget_is_scoped_to_topology_revision`
+- `gap_repair_budget_is_scoped_to_gap_ordinal`
+- `gap_repair_budget_is_scoped_to_explicit_demand_revision`
+- `gap_repair_budget_is_scoped_to_room_reselection_demand`
+- `gap_repair_budget_is_scoped_to_newly_visible_demand`
+- `repair_projection_waits_for_the_exact_tagged_batch`
+- `repair_projection_uses_the_last_sdk_projection_batch`
+- `gap_only_cache_reveal_requires_no_render_fence`
+- `gap_repair_room_switch_cancels_completion`
+## item_projection (51)
+
+- `visible_missing_reply_detail_event_ids_only_returns_visible_unrequested_missing_replies`
+- `editable_document_uses_formatted_links_for_duplicate_mention_identity`
+- `editable_document_keeps_room_link_identity_without_user_mentions_metadata`
+- `editable_document_rejects_unsafe_links_even_when_labels_match`
+- `message_projection_carries_msgtype_and_plain_spoiler_spans`
+- `membership_change_projection_is_a_supported_notice`
+- `profile_change_projection_does_not_emit_user_id_body`
+- `pinned_events_projection_is_a_supported_notice`
+- `supported_state_event_notices_carry_i18n_keys`
+- `room_name_notice_projects_initial_name_as_structured_set_notice`
+- `room_name_notice_projects_old_and_new_names_for_change`
+- `room_name_notice_projects_empty_name_as_removal`
+- `room_name_notice_uses_set_wording_for_identical_names`
+- `room_name_notice_projects_redacted_content_as_safe_generic_notice`
+- `message_projection_extracts_formatted_spoiler_spans_with_reason`
+- `message_projection_sanitizes_formatted_html_and_extracts_code_blocks`
+- `formatted_message_link_ranges_use_formatted_plain_text_basis`
+- `message_projection_keeps_allowed_formatted_blocks_and_spoilers`
+- `reply_quote_projection_retains_sanitized_formatted_body`
+- `captionless_media_projections_can_reply_and_keep_filename_reply_quotes`
+- `message_projection_falls_back_to_plain_body_when_formatted_body_is_empty`
+- `message_projection_falls_back_to_plain_body_when_formatted_body_has_only_markup`
+- `user_visible_content_includes_formatted_body`
+- `bodyless_event_backed_items_are_hidden_unless_redacted`
+- `timeline_item_structured_fields_match_private_legacy_semantics`
+- `timeline_search_index_mutations_use_reliable_delivery`
+- `media_gallery_and_thread_attention_projections_use_reliable_delivery`
+- `send_operation_guards_allow_retry_and_cancel_only_from_outbound_states`
+- `retry_send_reenables_sdk_room_queue_before_unwedge`
+- `cancel_send_reenables_sdk_room_queue_after_abort`
+- `reaction_groups_project_my_sender_and_remote_event_id`
+- `reaction_groups_count_unique_senders_after_sdk_deduplication`
+- `reaction_groups_follow_sdk_redaction_removal`
+- `timeline_item_can_react_requires_event_backed_renderable_content`
+- `send_reaction_guard_requires_reactable_target_without_existing_own_reaction`
+- `redact_reaction_guard_requires_matching_own_reaction_event`
+- `reaction_and_read_signal_handlers_emit_private_latency_traces`
+- `timeline_item_can_redact_requires_own_renderable_event_content`
+- `timeline_item_can_edit_requires_own_editable_body`
+- `edit_replacement_preserves_media_attachment_as_caption`
+- `edit_replacement_preserves_non_media_message_kind`
+- `edit_replacement_stays_plain_text_for_unresolved_target`
+- `structured_edit_preserves_final_mentions_and_formats_text_and_media_captions`
+- `edit_replacement_carries_final_mentions_and_sdk_filters_revision_mentions`
+- `edit_replacement_caption_support_matches_media_projection`
+- `timeline_send_command_bodies_are_not_visible_in_debug`
+- `timeline_link_preview_load_emits_private_data_free_trace_tokens`
+- `timeline_link_preview_fetches_do_not_block_actor_command_queue`
+- `timeline_link_preview_fetches_are_abortable_without_dropping_the_actor`
+- `cancelled_link_preview_loads_return_loading_previews_to_pending`
+- `initial_timeline_items_are_forwarded_to_search_index`
+## manager (7)
+
+- `room_subscribe_success_reduces_timeline_subscribed_action`
+- `timeline_subscribe_settles_use_reliable_reducer_actions`
+- `thread_timeline_focus_uses_sdk_thread_pagination`
+- `timeline_subscribe_is_idempotent_for_existing_key`
+- `sync_started_subscribes_existing_timeline_rooms_with_live_room_list_service`
+- `timeline_ensure_subscribed_can_skip_existing_actor_replay`
+- `replay_subscribed_recovery_replays_initial_items_causeless_for_all_timelines`
+## media (6)
+
+- `media_gallery_projection_keeps_event_media_newest_first`
+- `media_gallery_projection_recomputes_after_timeline_diffs`
+- `relay_overflow_authoritative_snapshot_replaces_media_gallery_and_emits_action`
+- `attachment_info_for_image_upload_uses_selected_variant_metadata`
+- `media_downloads_spawn_bounded_tasks_and_report_all_exits`
+- `media_downloads_diagnose_stage_and_failure_boundaries`
+## navigation (46)
+
+- `backward_pagination_detects_only_a_changed_oldest_edge_as_prepend`
+- `pagination_waits_for_permit_before_publishing_paginating`
+- `projection_ack_evidence_is_recomputed_from_current_actor_items`
+- `resubscribe_replay_keeps_scrolled_room_context_complete`
+- `resubscribe_replay_keeps_focused_timeline_context_complete`
+- `empty_room_initial_snapshot_needs_initial_backfill`
+- `non_room_empty_initial_snapshots_do_not_use_room_live_backfill`
+- `idempotent_subscribe_replay_carries_exact_command_cause`
+- `cached_room_replay_uses_control_lane_when_ordinary_mailbox_is_full`
+- `ordinary_completion_burst_does_not_run_before_committed_room_selection`
+- `manager_shutdown_control_quiesces_before_retained_navigation`
+- `navigation_projection_retains_latest_value_across_manager_replacement`
+- `coalesced_navigation_projection_cleans_the_actual_manager_foreground`
+- `live_tail_preemption_cancels_network_before_new_active_room_starts`
+- `post_commit_cleanup_never_waits_for_a_missing_cancel_ack`
+- `committed_navigation_projection_failure_does_not_emit_a_second_terminal`
+- `foreground_gap_demand_moves_to_the_newly_selected_room`
+- `sync_replacement_restores_foreground_gap_demand_to_the_new_actor`
+- `live_tail_epoch_replacement_folds_stale_pending_starts_before_dispatch`
+- `causal_projection_domains_route_equal_raw_serial_without_collision`
+- `live_tail_restore_actor_flush_hands_completion_to_manager_once`
+- `timeline_actor_spawn_returns_before_authoritative_publish_waits_for_manager_capacity`
+- `live_tail_replacement_ignores_old_epoch_actor_and_projection_completion`
+- `activity_row_from_timeline_item_preserves_thread_root_event_id`
+- `timeline_navigation_marks_first_unread_inside_viewport`
+- `timeline_navigation_reports_unread_below_viewport_and_newer_count`
+- `timeline_navigation_does_not_count_read_history_below_viewport_as_newer`
+- `timeline_navigation_does_not_count_newer_events_without_read_marker`
+- `timeline_navigation_ignores_own_local_and_synthetic_items_for_unread_counts`
+- `unread_consistency_diagnostic_correlates_thread_receipt_with_latest_reply_projection`
+- `forward_pagination_on_room_key_fails_invalid_direction`
+- `timeline_pagination_uses_the_account_work_scheduler`
+- `timeline_pagination_is_abortable_without_dropping_the_actor`
+- `pagination_terminal_is_emitted_after_active_task_release`
+- `restore_anchor_handler_is_room_only_and_bounded`
+- `forward_pagination_on_thread_key_not_subscribed`
+- `focused_allows_forward_direction_in_paginate_logic`
+- `backward_direction_never_invalid_for_any_kind`
+- `paginate_on_unsubscribed_key_returns_not_subscribed`
+- `restore_anchor_budget_respects_frontend_hint`
+- `restore_walk_coalesces_items_updated_to_single_flush`
+- `restore_terminal_is_anchor_present_not_timing_dependent`
+- `sdk_vector_diff_batch_preserves_prefix_for_append_and_pop_variants`
+- `navigation_display_anchor_advances_past_own_messages_after_marker`
+- `navigation_display_anchor_stays_at_marker_when_no_own_messages_after`
+- `navigation_display_anchor_advances_from_own_marker_to_later_own_message`
+## outbound_send (48)
+
+- `send_enqueue_takes_the_interactive_guard_before_the_sdk_enqueue`
+- `send_completion_keeps_the_interactive_guard_until_terminal`
+- `generation_fenced_send_discards_a_continuation_replaced_during_capacity_await`
+- `send_terminal_handoff_survives_origin_abort_and_delivers_exactly_once`
+- `media_enqueue_publishes_queued_before_a_prebind_terminal`
+- `send_terminal_required_action_failure_suppresses_completion_and_shutdowns`
+- `observation_loss_failure_survives_required_action_channel_shutdown`
+- `duplicate_submission_routes_one_manager_enqueue_worker`
+- `drive_send_enqueue_until_preflight_started_returns_when_sender_closes`
+- `submission_admission_permit_blocks_until_reducer_acceptance_and_aborts_on_drop`
+- `shutdown_acknowledges_after_timeline_children_are_dropped`
+- `shutdown_deadline_aborts_stalled_enqueue_worker_before_stopping_terminal_observer`
+- `shutdown_grace_polls_exact_terminal_observer_before_worker_quiescence`
+- `shutdown_cleans_captured_room_keys_before_acknowledging`
+- `manager_enqueue_worker_waits_for_reducer_acceptance_delivery`
+- `submission_admission_tombstones_are_bounded_and_active_is_retained`
+- `send_submission_is_not_reduced_before_manager_worker_route_exists`
+- `thread_reply_submission_is_not_reduced_before_manager_worker_route_exists`
+- `thread_timeline_keys_project_send_reply_to_thread_composer_actions`
+- `outbound_send_state_uses_sdk_truth_and_reliable_settles`
+- `outbound_sdk_enqueues_are_session_manager_owned_and_supervised`
+- `send_without_authoritative_account_session_fails_closed`
+- `send_completion_trace_orders_terminal_before_and_after_binding`
+- `send_failure_trace_records_only_closed_failure_fields`
+- `encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe`
+- `post_send_encryption_diagnostics_keep_unknown_state_and_session_evidence_separate`
+- `send_diagnostic_tasks_are_capacity_bounded_and_cancellable`
+- `manager_coordinator_survives_unsubscribe_until_sdk_terminal`
+- `manager_owned_prebind_enqueue_survives_room_and_thread_unsubscribe`
+- `manager_drop_aborts_owned_observer_and_send_enqueue_workers`
+- `panicked_enqueue_future_is_fail_closed_without_stopping_manager_workers`
+- `manager_coordinator_keeps_same_room_room_and_thread_keys_collision_safe`
+- `unmatched_terminal_cohort_overflow_fails_safe_once_without_unbounded_growth`
+- `known_enqueue_failure_and_active_registration_abort_have_distinct_terminals`
+- `global_send_observer_lag_fails_bound_and_unbound_in_registration_order`
+- `shutdown_joins_observer_then_actor_and_drains_registration_failure_before_ack`
+- `coordinator_maps_sdk_transaction_to_client_request_and_completion`
+- `send_completion_race_delivers_completion_when_sent_event_arrives_first`
+- `replacement_owner_preserves_pending_send_completion_correlation`
+- `duplicate_sent_event_after_completion_is_idempotent`
+- `sent_event_before_pending_race_remains_idempotent_after_settlement`
+- `cancelled_completion_is_tombstoned_against_late_sent_event`
+- `unmatched_early_send_completions_survive_beyond_tombstone_history_bound`
+- `settled_send_tombstones_are_bounded`
+- `send_completion_coordinator_preserves_submission_id_for_terminal_paths`
+- `media_pending_send_does_not_settle_text_composer`
+- `timeline_send_error_classifies_not_joined_as_forbidden`
+- `same_room_thread_media_progress_does_not_borrow_room_request_correlation`
+## read_state (34)
+
+- `set_fully_read_success_uses_private_read_receipt_before_clearing_room_unread_summary`
+- `private_read_receipt_target_advances_to_hidden_edit_notification`
+- `private_read_receipt_target_advances_to_hidden_thread_notification`
+- `send_read_receipt_uses_threaded_receipt_for_thread_timelines`
+- `restored_read_waits_for_authoritative_reconciliation_before_retrying`
+- `reconnect_preserves_a_bounded_reconciliation_wake_for_new_read_waiters`
+- `invalidating_retry_actively_finishes_the_long_lived_sleeper`
+- `retry_serial_exhaustion_never_reuses_a_live_stale_token`
+- `completed_retry_keys_do_not_accumulate_generation_bookkeeping`
+- `authoritative_server_ahead_clears_restored_read_without_network_retry`
+- `authoritative_reconciliation_keeps_unordered_remaining_candidate_pending`
+- `stalled_read_receipt_worker_does_not_block_cached_subscription_replay`
+- `newer_positioned_read_target_cancels_stale_worker_and_settles_both_waiters_once`
+- `coalesced_read_timeout_fails_each_waiter_once_without_retry_storm`
+- `fully_read_success_waits_for_actor_control_ack_before_terminal_event`
+- `fully_read_success_after_actor_removal_fails_without_success_terminal`
+- `read_admission_rejects_missing_session_actor_and_invalid_ids_immediately`
+- `failed_read_network_settles_waiter_once_then_retries_after_capped_backoff`
+- `read_retry_delay_is_exponential_and_capped`
+- `sync_restart_wakes_failed_read_immediately_and_invalidates_backoff`
+- `room_subscription_checkpoint_wakes_failed_read_immediately`
+- `manager_read_completion_lane_precedes_ordinary_mailbox`
+- `replaying_thread_initial_items_preserves_semantic_attention_tracker`
+- `timeline_builder_does_not_track_state_event_read_receipts`
+- `koushi_timeline_builder_projects_sdk_read_receipts`
+- `live_receipt_observation_action_builder_is_pure_and_orders_profiles_first`
+- `local_receipt_observation_helper_builds_profile_then_receipt_actions`
+- `production_receipt_diff_delivery_refreshes_unknown_with_room_profile`
+- `production_receipt_diff_delivery_uses_global_cache_when_local_lookup_misses`
+- `production_receipt_diff_delivery_sends_receipts_when_local_lookup_fails`
+- `stale_production_receipt_diff_result_is_discarded_after_generation_replacement`
+- `production_receipt_diff_path_uses_fenced_ordered_observation_delivery`
+- `initial_receipts_use_the_ordered_local_profile_observation_batch`
+- `authoritative_recovery_receipts_use_the_same_ordered_observation_batch`
+## residency (6)
+
+- `begin_operation_rejects_when_message_receiver_is_closed`
+- `lease_and_release_room_leases_refcount_by_room`
+- `reconcile_subscriptions_uses_session_residency_not_leases`
+- `unsubscribe_releases_the_room_lease_only_at_zero`
+- `retained_room_actor_receives_generation_update_on_set_change`
+- `sync_started_reconciles_the_full_session_residency_set_once`
+## room_key_recovery (18)
+
+- `room_key_reshare_wakes_only_at_the_three_bounded_delays`
+- `delayed_room_key_reshare_wake_is_cancellable`
+- `room_key_reshare_waiter_does_not_block_manager_terminal_progress`
+- `room_key_reshare_completion_is_exactly_once_and_stale_inputs_are_inert`
+- `room_key_reshare_replacement_unsubscribe_and_shutdown_abort_owned_work`
+- `room_key_reshare_handler_does_not_hold_the_manager_on_sdk_work`
+- `decrypt_retry_diagnostics_are_fixed_token_and_private_data_free`
+- `decrypt_retry_controller_fences_deadline_settlement_and_replacement`
+- `room_key_request_state_tokens_are_closed_and_serde_stable`
+- `withheld_update_guard_allows_typed_code_and_never_regresses_terminal_stages`
+- `room_key_request_state_changed_debug_redacts_identifiers`
+- `decrypt_retry_diff_settlement_requires_current_generation_and_matching_event`
+- `decrypt_retry_timeout_message_settles_current_operation_once`
+- `decrypt_retry_backup_state_only_reports_available_for_ready_local_recovery`
+- `decrypt_retry_operation_sequence_is_process_wide_and_monotonic`
+- `decrypt_retry_backup_failures_keep_typed_private_kinds`
+- `decrypt_retry_diagnostics_use_only_the_planned_outcome_tokens`
+- `room_key_reshare_diagnostics_include_attempt_target_and_result`
+## relay (14)
+
+- `batch_id_monotonically_increases_per_generation`
+- `relay_overflow_control_is_delivered_when_data_inbox_is_full`
+- `relay_stream_end_emits_one_recovery_control_without_consuming_commands`
+- `relay_restart_backoff_grows_caps_resets_and_rejects_stale_due_tokens`
+- `relay_restart_timer_does_not_block_commands_and_emits_one_due_after_delay`
+- `relay_overflow_recovery_subscribes_once_emits_snapshot_then_next_live_update`
+- `relay_overflow_stale_generation_is_rejected_without_state_or_event_change`
+- `relay_overflow_authoritative_window_plan_scopes_receipts_and_search_removals`
+- `relay_overflow_authoritative_cache_rebuild_removes_old_and_installs_new_entries`
+- `authoritative_resync_projects_event_only_and_emits_ordered_recovery_events`
+- `stale_generation_recovery_does_not_commit_candidate_or_publish`
+- `stale_generation_prepared_initial_window_does_not_commit_or_publish`
+- `relay_overflow_signal_triggers_generation_bump`
+- `timeline_subscribe_spawns_always_on_origin_observer`
+## thread_projection (65)
+
+- `thread_activity_promotion_requires_a_matching_event_backed_reply`
+- `resubscribe_replay_caps_room_timeline_to_live_window`
+- `replay_display_window_emits_a_known_ready_root_without_a_reply_or_fetch`
+- `replay_known_roots_stay_inside_the_display_activity_range_inclusively`
+- `replay_known_roots_are_capped_deterministically`
+- `replay_known_root_is_not_suppressed_by_an_older_canonical_reply`
+- `replay_known_registry_reconciles_diff_removals_and_all_initial_refreshes`
+- `replay_known_navigation_summary_change_replaces_the_ready_snapshot`
+- `replay_known_same_activity_reemits_a_renderable_root_revision_without_a_clear`
+- `non_sdk_ignored_root_set_revises_replay_ready_without_corrupting_bounded_display`
+- `non_sdk_link_preview_set_reemits_same_epoch_replay_ready_revision`
+- `non_sdk_set_updates_an_ordinary_bounded_display_item_by_canonical_owner`
+- `stale_non_sdk_set_cannot_mutate_display_mirror_registry_or_emit_events`
+- `non_sdk_item_sets_update_the_exact_canonical_duplicate_owner`
+- `non_sdk_item_sets_ignore_exact_owners_outside_the_display_window`
+- `stale_actor_generation_cannot_clear_new_replay_known_registry_state`
+- `replay_known_reconciliation_uses_the_bounded_display_context_not_cache_replies`
+- `hydration_preparation_replaced_during_capacity_wait_publishes_nothing`
+- `hydration_does_not_hold_action_capacity_while_waiting_for_manager_capacity`
+- `actor_owner_generation_remains_monotonic_across_manager_gate_recreation`
+- `lost_projection_delivery_replays_same_identity_until_actor_accepts_ack`
+- `initial_items_keep_projection_ack_identity_separate_from_subscribe_cause`
+- `lost_delivery_reprojection_emits_same_core_event_under_active_actor_lease`
+- `stale_actor_generation_cannot_emit_any_timeline_event_after_replacement`
+- `timeline_event_group_uses_one_generation_lease_and_finishes_before_replacement`
+- `fenced_diff_group_emits_neither_replay_transition_nor_items_update`
+- `hydration_completion_does_not_overwrite_a_current_replay_known_owner`
+- `manager_rejects_stale_generation_hydration_start_and_completion`
+- `initial_items_replay_owner_group_suppresses_a_terminal_and_handoffs_exactly_once`
+- `replay_clear_hands_back_a_hydration_terminal_that_was_emitted_before_replay_ownership`
+- `initial_items_forces_ready_and_failed_completion_attempts_to_wait_for_replay_ownership`
+- `hydration_terminal_cannot_overtake_a_replay_known_ready_in_the_event_stream`
+- `replay_owner_clear_handoffs_the_retained_hydration_terminal_to_the_exact_reply_slot`
+- `replay_owner_removal_handoffs_an_existing_terminal_reemit_once`
+- `replay_owner_clear_does_not_reemit_an_unsuppressed_hydration_terminal`
+- `replay_owner_clear_handoffs_the_retained_hydration_failure_without_refetching`
+- `replay_known_epoch_never_exceeds_the_javascript_safe_integer_or_reuses_an_owner_epoch`
+- `replay_known_registry_lifecycle_helpers_cover_actor_refresh_paths`
+- `room_unsubscribe_emits_core_clear_for_replay_known_roots_before_a_revisit`
+- `room_live_timeline_focus_includes_threaded_events`
+- `old_root_reply_reaches_bounded_room_projection_hydration_without_pagination`
+- `root_projection_actions_wait_for_reducer_capacity_instead_of_dropping`
+- `root_projection_fetch_registry_aborts_room_workers_and_rejects_late_completion`
+- `loaded_old_root_raw_event_projects_renderable_snapshot_with_latest_activity_identity`
+- `loaded_old_root_reuses_message_projection_for_formatted_spoiler_and_media_content`
+- `loaded_old_root_reuses_message_projection_for_file_audio_and_sticker_content`
+- `cached_root_relations_project_reactions_without_network_or_unrelated_targets`
+- `sdk_projection_reads_thread_contract_accessors`
+- `thread_summary_projection_preserves_ready_latest_event_id`
+- `encrypted_thread_reply_relation_is_recovered_from_original_json`
+- `megolm_session_fingerprint_is_stable_compact_and_distinguishes_rotation`
+- `room_timeline_keeps_renderable_thread_messages_visible`
+- `thread_attention_does_not_count_root_or_hydrated_history_pushed_back`
+- `thread_attention_hydration_uses_visible_authoritative_receipt_baseline`
+- `thread_attention_counts_one_live_remote_reply_and_deduplicates_replay`
+- `live_encrypted_reply_counts_when_a_later_set_becomes_renderable`
+- `thread_attention_backfill_reset_and_other_roots_do_not_increment`
+- `delayed_pagination_batch_does_not_become_live_after_task_completion`
+- `sdk_event_origin_is_the_relay_batch_attention_provenance`
+- `thread_attention_trackers_do_not_contaminate_different_threads`
+- `thread_attention_acknowledgement_clears_without_changing_total_reply_count`
+- `visible_receipt_prunes_attention_preserved_while_it_was_outside_the_window`
+- `recovery_counts_first_seen_unread_reply_after_visible_receipt`
+- `recovery_and_manager_owned_receipt_success_preserve_attention_ordering`
+- `successful_receipt_uses_newest_provable_canonical_boundary`
+
+## source guards (55)
+
+- `terminal_gap_repair_failures_resume_queued_candidate_inspection` — `gap_repair`
+- `terminal_gap_inspection_paths_resume_queued_work_before_release_wake` — `gap_repair`
+- `send_enqueue_takes_the_interactive_guard_before_the_sdk_enqueue` — `outbound_send`
+- `send_completion_keeps_the_interactive_guard_until_terminal` — `outbound_send`
+- `gap_repair_takes_a_scheduler_permit_around_one_bounded_batch` — `gap_repair`
+- `replay_display_window_emits_a_known_ready_root_without_a_reply_or_fetch` — `thread_projection`
+- `replay_known_registry_lifecycle_helpers_cover_actor_refresh_paths` — `thread_projection`
+- `set_fully_read_success_uses_private_read_receipt_before_clearing_room_unread_summary` — `read_state`
+- `send_read_receipt_uses_threaded_receipt_for_thread_timelines` — `read_state`
+- `manager_read_completion_lane_precedes_ordinary_mailbox` — `read_state`
+- `profile_change_projection_does_not_emit_user_id_body` — `item_projection`
+- `room_subscribe_success_reduces_timeline_subscribed_action` — `manager`
+- `timeline_subscribe_settles_use_reliable_reducer_actions` — `manager`
+- `timeline_search_index_mutations_use_reliable_delivery` — `item_projection`
+- `media_gallery_and_thread_attention_projections_use_reliable_delivery` — `item_projection`
+- `replaying_thread_initial_items_preserves_semantic_attention_tracker` — `read_state`
+- `timeline_builder_does_not_track_state_event_read_receipts` — `read_state`
+- `production_receipt_diff_path_uses_fenced_ordered_observation_delivery` — `read_state`
+- `initial_receipts_use_the_ordered_local_profile_observation_batch` — `read_state`
+- `authoritative_recovery_receipts_use_the_same_ordered_observation_batch` — `read_state`
+- `room_live_timeline_focus_includes_threaded_events` — `thread_projection`
+- `old_root_reply_reaches_bounded_room_projection_hydration_without_pagination` — `thread_projection`
+- `room_unsubscribe_clears_projection_service_before_dropping_the_actor` — `actor`
+- `thread_timeline_focus_uses_sdk_thread_pagination` — `manager`
+- `timeline_subscribe_is_idempotent_for_existing_key` — `manager`
+- `sync_started_subscribes_existing_timeline_rooms_with_live_room_list_service` — `manager`
+- `timeline_ensure_subscribed_can_skip_existing_actor_replay` — `manager`
+- `replay_subscribed_recovery_replays_initial_items_causeless_for_all_timelines` — `manager`
+- `timeline_pagination_uses_the_account_work_scheduler` — `navigation`
+- `timeline_pagination_is_abortable_without_dropping_the_actor` — `navigation`
+- `pagination_terminal_is_emitted_after_active_task_release` — `navigation`
+- `sdk_projection_reads_thread_contract_accessors` — `thread_projection`
+- `recovery_and_manager_owned_receipt_success_preserve_attention_ordering` — `thread_projection`
+- `send_submission_is_not_reduced_before_manager_worker_route_exists` — `outbound_send`
+- `thread_reply_submission_is_not_reduced_before_manager_worker_route_exists` — `outbound_send`
+- `thread_timeline_keys_project_send_reply_to_thread_composer_actions` — `outbound_send`
+- `outbound_send_state_uses_sdk_truth_and_reliable_settles` — `outbound_send`
+- `room_key_reshare_handler_does_not_hold_the_manager_on_sdk_work` — `room_key_recovery`
+- `outbound_sdk_enqueues_are_session_manager_owned_and_supervised` — `outbound_send`
+- `media_downloads_spawn_bounded_tasks_and_report_all_exits` — `media`
+- `media_downloads_diagnose_stage_and_failure_boundaries` — `media`
+- `restore_anchor_handler_is_room_only_and_bounded` — `navigation`
+- `retry_send_reenables_sdk_room_queue_before_unwedge` — `item_projection`
+- `cancel_send_reenables_sdk_room_queue_after_abort` — `item_projection`
+- `reaction_and_read_signal_handlers_emit_private_latency_traces` — `item_projection`
+- `timeline_subscribe_and_paginate_emit_startup_trace` — `diagnostics`
+- `timeline_route_and_paginate_emit_ordered_trace_tokens` — `diagnostics`
+- `timeline_link_preview_load_emits_private_data_free_trace_tokens` — `item_projection`
+- `timeline_link_preview_fetches_do_not_block_actor_command_queue` — `item_projection`
+- `timeline_link_preview_fetches_are_abortable_without_dropping_the_actor` — `item_projection`
+- `timeline_subscribe_spawns_always_on_origin_observer` — `relay`
+- `restore_anchor_budget_respects_frontend_hint` — `navigation`
+- `initial_timeline_items_are_forwarded_to_search_index` — `item_projection`
+- `restore_walk_coalesces_items_updated_to_single_flush` — `navigation`
+- `restore_terminal_is_anchor_present_not_timing_dependent` — `navigation`
+
+
+## Flat façade (30/30)
+
+- `manager`: `TIMELINE_DIFF_QUEUE_CAPACITY`, `TimelineMessage`, `TimelineManagerHandle`, `TimelineManagerActor`.
+- `residency`: `RoomRemovalCause`, `RoomMembershipTransitionKind`, `RoomMembershipTransition`, `VisibleRoomObservation`, `TimelineSubscriptionResidencyPermit`, `TimelineSubscriptionResidencyHandle`.
+- `navigation`: `TimelineProjectionAcknowledgement`, `NavigationProjectionIntent`, `NavigationProjectionCleanup`, `NavigationProjectionIngress`, `display_projection_reset_fallback_count`.
+- `read_state`: `ReadPersistenceIngress`, `ReadPersistenceRequest`.
+- `composer`: `validate_composer_body_for_timeline_send`, cfg-test `build_room_message_content_from_composer_document`, `build_room_message_content_from_composer_body`, `build_room_message_content_from_composer_body_with_options`.
+- `item_projection`: `sdk_item_to_timeline_item`, `timeline_item_can_react`, `validate_send_reaction`, `validate_redact_reaction`, `timeline_item_can_redact`, `timeline_item_can_edit`, `validate_retry_send`, `validate_cancel_send`, `reaction_groups_from_sdk`.
+
+No child module is public. Existing visibility and cfg are retained by explicit re-export; no glob is permitted.
+
+## Shared test support boundary
+
+Only these existing helpers have direct consumers in more than one planned owner and may live in cfg-test-only `test_support.rs`: `fake_rid`, `room_key`, `replacement_generation_fixture`, `replay_projection_services`, `timeline_item`, `test_timeline_actor_handle`, `gap_demand_test_actor_handle`, `live_tail_test_manager`, `timeline_media_item`, `focused_key`, and `thread_key`. Their required existing fixture structs/impls may follow them. Every other helper is owner-local. Imports are explicit and helper bodies are unchanged apart from minimum `pub(super)` scope.
+
+## Visibility protocol
+
+The immutable call graph is generated again after modules exist. Existing public/crate names retain their scope. A private field, type, helper or associated method becomes `pub(super)` only when at least one concrete sibling caller/type-use exists. The report must be bidirectional: every promoted symbol has an edge and every cross-owner edge names one promoted symbol. Any unlisted edge discovered during implementation amends this appendix and receives a new design verdict before code proceeds.
