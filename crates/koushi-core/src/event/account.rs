@@ -1,4 +1,13 @@
-use super::*;
+use std::fmt;
+
+use koushi_state::{
+    AvatarThumbnailState, CrossSigningStatus, IdentityResetState, KeyBackupStatus,
+    LocalEncryptionHealth, VerificationFlowState,
+};
+use serde::{Deserialize, Serialize};
+
+use super::ReportKind;
+use crate::ids::{AccountKey, RequestId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]

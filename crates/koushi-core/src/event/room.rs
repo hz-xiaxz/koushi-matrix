@@ -1,4 +1,13 @@
-use super::*;
+use std::fmt;
+
+use super::timeline::{RoomKeyRequestStage, RoomKeyRequestWithheldCode};
+use super::{ReportKind, timeline_projection_own_user_id};
+use crate::ids::{RequestId, TimelineKey};
+use koushi_state::{
+    AppState, DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary, InviteDestinationResult,
+    PinnedEvent, RoomModerationAction, RoomSettingsSnapshot, RoomTagKind, SpaceMemberInviteOutcome,
+};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RoomEvent {
@@ -495,6 +504,7 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
 mod tests {
     use super::super::test_support::fake_rid;
     use super::*;
+    use koushi_state::SessionState;
     #[test]
     fn room_member_role_event_debug_redacts_room_and_user_ids() {
         let event = RoomEvent::RoomMemberRoleUpdated {

@@ -1,23 +1,11 @@
 //! Public event boundary. Events carry the originating `RequestId` when one
 //! exists; identifiers and visible bodies are allowed, secrets never.
 
-use std::fmt;
-
-use koushi_state::{
-    ActivityStream, ActivityTab, AppState, AttachmentResult, AvatarImage, AvatarThumbnailState,
-    ComposerDocument, CrossSigningStatus, DirectoryQuery, DirectoryRoomPreview,
-    DirectoryRoomSummary, IdentityResetState, InviteDestinationResult, JapaneseCatalogProfile,
-    KeyBackupStatus, LocalEncryptionHealth, MediaTransferProgress, NativeAttentionDispatchId,
-    NativeAttentionSummary, OperationFailureKind, PinnedEvent, PresenceKind, ProfileState,
-    ReplyQuote, RoomModerationAction, RoomSettingsSnapshot, RoomTagKind, SessionState,
-    SpaceMemberInviteOutcome, SubmissionId, ThreadsListItem, VerificationFlowState,
-    resolve_optional_user_display_name, resolve_user_display_name,
-};
+use koushi_state::{AppState, SessionState};
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 
-use crate::failure::{CoreFailure, TimelineFailureKind};
-use crate::ids::{AccountKey, RequestId, TimelineBatchId, TimelineGeneration, TimelineKey};
+use crate::failure::CoreFailure;
+use crate::ids::RequestId;
 use crate::state_delta::StateDelta;
 
 mod account;

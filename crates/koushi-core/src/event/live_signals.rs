@@ -1,4 +1,9 @@
-use super::*;
+use std::fmt;
+
+use koushi_state::PresenceKind;
+use serde::{Deserialize, Serialize};
+
+use crate::ids::{RequestId, TimelineKey};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]

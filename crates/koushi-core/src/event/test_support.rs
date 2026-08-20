@@ -1,4 +1,4 @@
-use super::*;
+use crate::ids::RequestId;
 
 pub(super) fn fake_rid(sequence: u64) -> RequestId {
     RequestId {

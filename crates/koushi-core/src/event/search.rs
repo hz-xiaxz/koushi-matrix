@@ -1,4 +1,9 @@
-use super::*;
+use std::fmt;
+
+use koushi_state::AttachmentResult;
+use serde::{Deserialize, Serialize};
+
+use crate::ids::RequestId;
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SearchEvent {

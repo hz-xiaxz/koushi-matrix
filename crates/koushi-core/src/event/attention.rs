@@ -1,4 +1,12 @@
-use super::*;
+use std::fmt;
+
+use koushi_state::{
+    ActivityStream, ActivityTab, NativeAttentionDispatchId, NativeAttentionSummary,
+};
+
+use serde::{Deserialize, Serialize};
+
+use crate::ids::RequestId;
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ActivityEvent {
