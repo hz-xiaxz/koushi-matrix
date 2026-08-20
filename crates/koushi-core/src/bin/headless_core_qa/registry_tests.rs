@@ -1,0 +1,823 @@
+use super::{
+    DEVICE_A, QaScenario, QaStage, final_tokens_for_scenario, implemented_final_tokens,
+    parse_env_flag, scenario_preflight_error, scenario_report, stages_for_scenario,
+};
+
+#[test]
+fn parses_all_scenarios_from_env_value_including_directory() {
+    assert_eq!(QaScenario::from_env_value("all").unwrap(), QaScenario::All);
+    assert_eq!(
+        QaScenario::from_env_value("safety").unwrap(),
+        QaScenario::Safety
+    );
+    assert_eq!(
+        QaScenario::from_env_value("login_sync").unwrap(),
+        QaScenario::LoginSync
+    );
+    assert_eq!(
+        QaScenario::from_env_value("session_status").unwrap(),
+        QaScenario::SessionStatus
+    );
+    assert_eq!(
+        QaScenario::from_env_value("room_space").unwrap(),
+        QaScenario::RoomSpace
+    );
+    assert_eq!(
+        QaScenario::from_env_value("directory").unwrap(),
+        QaScenario::Directory
+    );
+    assert_eq!(
+        QaScenario::from_env_value("room_management").unwrap(),
+        QaScenario::RoomManagement
+    );
+    assert_eq!(
+        QaScenario::from_env_value("invites_dm").unwrap(),
+        QaScenario::InvitesDm
+    );
+    assert_eq!(
+        QaScenario::from_env_value("timeline").unwrap(),
+        QaScenario::Timeline
+    );
+    assert_eq!(
+        QaScenario::from_env_value("timeline_reconnect").unwrap(),
+        QaScenario::TimelineReconnect
+    );
+    assert_eq!(
+        QaScenario::from_env_value("activity").unwrap(),
+        QaScenario::Activity
+    );
+    assert_eq!(
+        QaScenario::from_env_value("credential_health").unwrap(),
+        QaScenario::CredentialHealth
+    );
+    assert_eq!(
+        QaScenario::from_env_value("native_attention").unwrap(),
+        QaScenario::NativeAttention
+    );
+    assert_eq!(
+        QaScenario::from_env_value("reply").unwrap(),
+        QaScenario::Reply
+    );
+    assert_eq!(
+        QaScenario::from_env_value("composer").unwrap(),
+        QaScenario::Composer
+    );
+    assert_eq!(
+        QaScenario::from_env_value("media").unwrap(),
+        QaScenario::Media
+    );
+    assert_eq!(
+        QaScenario::from_env_value("live_signals").unwrap(),
+        QaScenario::LiveSignals
+    );
+    assert_eq!(
+        QaScenario::from_env_value("thread").unwrap(),
+        QaScenario::Thread
+    );
+    assert_eq!(
+        QaScenario::from_env_value("edit_redact_search").unwrap(),
+        QaScenario::EditRedactSearch
+    );
+    assert_eq!(
+        QaScenario::from_env_value("search_crawler").unwrap(),
+        QaScenario::SearchCrawler
+    );
+    assert_eq!(
+        QaScenario::from_env_value("scheduled_send").unwrap(),
+        QaScenario::ScheduledSend
+    );
+    assert_eq!(
+        QaScenario::from_env_value("restore_cleanup").unwrap(),
+        QaScenario::RestoreCleanup
+    );
+    assert_eq!(
+        QaScenario::from_env_value("send_queue").unwrap(),
+        QaScenario::SendQueue
+    );
+    assert_eq!(
+        QaScenario::from_env_value("e2ee_trust").unwrap(),
+        QaScenario::E2eeTrust
+    );
+    assert_eq!(
+        QaScenario::from_env_value("link_preview").unwrap(),
+        QaScenario::LinkPreview
+    );
+    assert_eq!(
+        QaScenario::from_env_value("timeline_stress").unwrap(),
+        QaScenario::TimelineStress
+    );
+}
+
+#[test]
+fn rejects_unknown_scenario_names() {
+    let error = QaScenario::from_env_value("unknown").unwrap_err();
+
+    assert!(error.contains("KOUSHI_QA_SCENARIO"));
+    assert!(error.contains("unknown"));
+}
+
+#[test]
+fn supported_scenarios_are_allowed_by_preflight() {
+    for scenario in [
+        QaScenario::Safety,
+        QaScenario::LoginSync,
+        QaScenario::SessionStatus,
+        QaScenario::CredentialHealth,
+        QaScenario::NativeAttention,
+        QaScenario::RoomSpace,
+        QaScenario::Directory,
+        QaScenario::RoomManagement,
+        QaScenario::InvitesDm,
+        QaScenario::Timeline,
+        QaScenario::TimelineReconnect,
+        QaScenario::TimelineStress,
+        QaScenario::Reply,
+        QaScenario::Composer,
+        QaScenario::Media,
+        QaScenario::LiveSignals,
+        QaScenario::Thread,
+        QaScenario::EditRedactSearch,
+        QaScenario::SearchCrawler,
+        QaScenario::ScheduledSend,
+        QaScenario::SendQueue,
+        QaScenario::RestoreCleanup,
+        QaScenario::E2eeTrust,
+        QaScenario::LinkPreview,
+    ] {
+        scenario_preflight_error(scenario).unwrap();
+    }
+}
+
+#[test]
+fn session_status_scenario_runs_after_login_and_reports_only_safe_tokens() {
+    assert_eq!(
+        stages_for_scenario(QaScenario::SessionStatus),
+        [QaStage::Safety, QaStage::LoginSync, QaStage::SessionStatus]
+    );
+    let report = scenario_report("local", QaScenario::SessionStatus);
+    assert!(report.contains("session_status_checking=ok"));
+    assert!(report.contains("session_status_ready=ok"));
+    assert!(report.contains("session_status_device=ok"));
+    assert!(report.contains("session_status=ok"));
+    assert!(!report.contains('@'));
+    assert!(!report.contains("http"));
+    assert!(!report.contains(DEVICE_A));
+}
+
+#[test]
+fn thread_is_allowed_by_preflight() {
+    scenario_preflight_error(QaScenario::Thread).unwrap();
+}
+
+#[test]
+fn all_core_qa_scenarios_suppress_matrix_identifiers() {
+    for scenario in [
+        QaScenario::All,
+        QaScenario::Safety,
+        QaScenario::LoginSync,
+        QaScenario::SessionStatus,
+        QaScenario::CredentialHealth,
+        QaScenario::NativeAttention,
+        QaScenario::E2eeTrust,
+        QaScenario::InvitesDm,
+        QaScenario::RoomSpace,
+        QaScenario::Directory,
+        QaScenario::RoomManagement,
+        QaScenario::Timeline,
+        QaScenario::TimelineReconnect,
+        QaScenario::TimelineStress,
+        QaScenario::Activity,
+        QaScenario::Composer,
+        QaScenario::Reply,
+        QaScenario::Media,
+        QaScenario::LiveSignals,
+        QaScenario::Thread,
+        QaScenario::EditRedactSearch,
+        QaScenario::SearchCrawler,
+        QaScenario::ScheduledSend,
+        QaScenario::SendQueue,
+        QaScenario::RestoreCleanup,
+        QaScenario::LinkPreview,
+    ] {
+        assert!(
+            scenario.suppress_matrix_identifiers(),
+            "{scenario:?} should keep core QA stdout private-data-free"
+        );
+    }
+}
+
+#[test]
+fn staged_scenarios_stop_after_their_requested_stage() {
+    assert!(QaScenario::Safety.should_run_stage(QaStage::Safety));
+    assert!(!QaScenario::Safety.should_run_stage(QaStage::LoginSync));
+
+    assert!(QaScenario::LoginSync.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::LoginSync.should_run_stage(QaStage::LoginSync));
+    assert!(!QaScenario::LoginSync.should_run_stage(QaStage::RoomSpace));
+    assert!(!QaScenario::LoginSync.should_run_stage(QaStage::InvitesDm));
+
+    assert!(QaScenario::InvitesDm.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::InvitesDm.should_run_stage(QaStage::InvitesDm));
+    assert!(!QaScenario::InvitesDm.should_run_stage(QaStage::RoomSpace));
+
+    assert!(QaScenario::RoomSpace.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::RoomSpace.should_run_stage(QaStage::RoomSpace));
+    assert!(!QaScenario::RoomSpace.should_run_stage(QaStage::InvitesDm));
+    assert!(!QaScenario::RoomSpace.should_run_stage(QaStage::E2eeTrust));
+    assert!(!QaScenario::RoomSpace.should_run_stage(QaStage::Timeline));
+
+    assert!(QaScenario::Timeline.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::Timeline.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::Timeline.should_run_stage(QaStage::Timeline));
+    assert!(!QaScenario::Timeline.should_run_stage(QaStage::E2eeTrust));
+    assert!(!QaScenario::Timeline.should_run_stage(QaStage::Activity));
+    assert!(!QaScenario::Timeline.should_run_stage(QaStage::Reply));
+    assert!(!QaScenario::Timeline.should_run_stage(QaStage::EditRedactSearch));
+
+    assert!(QaScenario::TimelineReconnect.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::TimelineReconnect.should_run_stage(QaStage::TimelineReconnect));
+    assert!(!QaScenario::TimelineReconnect.should_run_stage(QaStage::LoginSync));
+    assert!(!QaScenario::TimelineReconnect.should_run_stage(QaStage::Timeline));
+    assert!(!QaScenario::TimelineReconnect.should_run_stage(QaStage::SendQueue));
+
+    assert!(QaScenario::TimelineStress.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::TimelineStress.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::TimelineStress.should_run_stage(QaStage::Timeline));
+    assert!(QaScenario::TimelineStress.should_run_stage(QaStage::TimelineStress));
+    assert!(!QaScenario::TimelineStress.should_run_stage(QaStage::Activity));
+    assert!(!QaScenario::TimelineStress.should_run_stage(QaStage::EditRedactSearch));
+
+    assert!(QaScenario::Activity.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::Activity.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::Activity.should_run_stage(QaStage::Timeline));
+    assert!(QaScenario::Activity.should_run_stage(QaStage::Activity));
+    assert!(QaScenario::Activity.suppress_matrix_identifiers());
+    assert!(!QaScenario::Activity.should_run_stage(QaStage::Composer));
+    assert!(!QaScenario::Activity.should_run_stage(QaStage::Reply));
+
+    assert!(QaScenario::CredentialHealth.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::CredentialHealth.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::CredentialHealth.should_run_stage(QaStage::CredentialHealth));
+    assert!(!QaScenario::CredentialHealth.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::CredentialHealth.suppress_matrix_identifiers());
+
+    assert!(QaScenario::NativeAttention.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::NativeAttention.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::NativeAttention.should_run_stage(QaStage::NativeAttention));
+    assert!(!QaScenario::NativeAttention.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::NativeAttention.suppress_matrix_identifiers());
+
+    assert!(QaScenario::Reply.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::Reply.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::Reply.should_run_stage(QaStage::Timeline));
+    assert!(QaScenario::Reply.should_run_stage(QaStage::Reply));
+    assert!(!QaScenario::Reply.should_run_stage(QaStage::EditRedactSearch));
+
+    assert!(QaScenario::Media.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::Media.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::Media.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::Media.should_run_stage(QaStage::Timeline));
+    assert!(QaScenario::Media.should_run_stage(QaStage::Media));
+    assert!(!QaScenario::Media.should_run_stage(QaStage::LiveSignals));
+    assert!(!QaScenario::Media.should_run_stage(QaStage::Thread));
+    assert!(!QaScenario::Media.should_run_stage(QaStage::EditRedactSearch));
+
+    assert!(QaScenario::LiveSignals.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::LiveSignals.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::LiveSignals.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::LiveSignals.should_run_stage(QaStage::Timeline));
+    assert!(QaScenario::LiveSignals.should_run_stage(QaStage::LiveSignals));
+    assert!(!QaScenario::LiveSignals.should_run_stage(QaStage::Media));
+    assert!(!QaScenario::LiveSignals.should_run_stage(QaStage::Thread));
+    assert!(!QaScenario::LiveSignals.should_run_stage(QaStage::EditRedactSearch));
+
+    assert!(QaScenario::Thread.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::Thread.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::Thread.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::Thread.should_run_stage(QaStage::Timeline));
+    assert!(QaScenario::Thread.should_run_stage(QaStage::Reply));
+    assert!(QaScenario::Thread.should_run_stage(QaStage::Thread));
+    assert!(!QaScenario::Thread.should_run_stage(QaStage::Media));
+    assert!(!QaScenario::Thread.should_run_stage(QaStage::EditRedactSearch));
+
+    assert!(QaScenario::Directory.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::Directory.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::Directory.should_run_stage(QaStage::Directory));
+    assert!(!QaScenario::Directory.should_run_stage(QaStage::Timeline));
+    assert!(!QaScenario::Directory.should_run_stage(QaStage::Reply));
+
+    assert!(QaScenario::RoomManagement.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::RoomManagement.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::RoomManagement.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::RoomManagement.should_run_stage(QaStage::RoomManagement));
+    assert!(!QaScenario::RoomManagement.should_run_stage(QaStage::Timeline));
+    assert!(!QaScenario::RoomManagement.should_run_stage(QaStage::Reply));
+
+    assert!(QaScenario::LinkPreview.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::LinkPreview.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::LinkPreview.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::LinkPreview.should_run_stage(QaStage::Timeline));
+    assert!(QaScenario::LinkPreview.should_run_stage(QaStage::Composer));
+    assert!(QaScenario::LinkPreview.should_run_stage(QaStage::LinkPreview));
+    assert!(!QaScenario::LinkPreview.should_run_stage(QaStage::Reply));
+    assert!(QaScenario::LinkPreview.suppress_matrix_identifiers());
+
+    assert!(QaScenario::All.should_run_stage(QaStage::Safety));
+    assert!(QaScenario::All.should_run_stage(QaStage::LoginSync));
+    assert!(QaScenario::All.should_run_stage(QaStage::E2eeTrust));
+    assert!(QaScenario::All.should_run_stage(QaStage::InvitesDm));
+    assert!(QaScenario::All.should_run_stage(QaStage::RoomSpace));
+    assert!(QaScenario::All.should_run_stage(QaStage::Directory));
+    assert!(QaScenario::All.should_run_stage(QaStage::RoomManagement));
+    assert!(QaScenario::All.should_run_stage(QaStage::Timeline));
+    assert!(!QaScenario::All.should_run_stage(QaStage::TimelineReconnect));
+    assert!(!QaScenario::All.should_run_stage(QaStage::TimelineStress));
+    assert!(QaScenario::All.should_run_stage(QaStage::Activity));
+    assert!(QaScenario::All.should_run_stage(QaStage::CredentialHealth));
+    assert!(QaScenario::All.should_run_stage(QaStage::Reply));
+    assert!(QaScenario::All.should_run_stage(QaStage::Media));
+    assert!(QaScenario::All.should_run_stage(QaStage::LiveSignals));
+    assert!(QaScenario::All.should_run_stage(QaStage::Thread));
+    assert!(QaScenario::All.should_run_stage(QaStage::EditRedactSearch));
+    assert!(QaScenario::All.should_run_stage(QaStage::ScheduledSend));
+    assert!(QaScenario::All.should_run_stage(QaStage::SendQueue));
+    assert!(QaScenario::All.should_run_stage(QaStage::RestoreCleanup));
+    assert!(QaScenario::All.should_run_stage(QaStage::LinkPreview));
+}
+
+#[test]
+fn implemented_final_tokens_include_thread() {
+    assert_eq!(
+        &implemented_final_tokens()[..],
+        &[
+            "safety=ok",
+            "login_sync=ok",
+            "session_status_checking=ok",
+            "session_status_ready=ok",
+            "session_status_device=ok",
+            "session_status=ok",
+            "credential_health=ok",
+            "fail_closed=ok",
+            "notification_candidate=ok",
+            "badge_state=ok",
+            "suppress_focus=ok",
+            "clear_badge=ok",
+            "invite_recv=ok",
+            "invite_accept=ok",
+            "invite_decline=ok",
+            "member_list=ok",
+            "dm_start=ok",
+            "dm_space_scope=ok",
+            "room_space=ok",
+            "directory_query=ok",
+            "directory_join=ok",
+            "room_settings=ok",
+            "moderation=ok",
+            "permission_guard=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "activity_recent=ok",
+            "activity_unread=ok",
+            "activity_resolution=ok",
+            "activity_markread=ok",
+            "mention_send=ok",
+            "markdown_send=ok",
+            "slash_command=ok",
+            "ime_guard=ok",
+            "reply=ok",
+            "reply_quote=ok",
+            "pin_event=ok",
+            "pinned_state=ok",
+            "unpin_event=ok",
+            "thread_canonical=ok",
+            "thread_summary=ok",
+            "thread_recv=ok",
+            "thread_paginate=end_reached",
+            "send_media=ok",
+            "media_caption=ok",
+            "image_compress=ok",
+            "upload_staging=ok",
+            "media_gallery=ok",
+            "recv_media=ok",
+            "media_caption_edit=ok",
+            "read_receipt=ok",
+            "fully_read=ok",
+            "typing=ok",
+            "presence=ok",
+            "live_signals=ok",
+            "edit_redact_search=ok",
+            "crawl_backfill=ok",
+            "crawl_no_media_bytes=ok",
+            "crawl_throttle=ok",
+            "crawl_failure=ok",
+            "scheduled_capability=local_fallback",
+            "scheduled_create=ok",
+            "scheduled_reschedule=ok",
+            "scheduled_cancel=ok",
+            "scheduled_fire=ok",
+            "send_fail=ok",
+            "resend=ok",
+            "cancel_send=ok",
+            "fifo=ok",
+            "unsent_restart=ok",
+            "display_projection_reset_fallbacks=0",
+            "joined_room_restore=ok",
+            "e2ee_second_device_decrypt=ok",
+            "e2ee_multi_user_multi_device_decrypt=ok",
+            "e2ee_unverified_peer_send_nonblocking=ok",
+            "e2ee_blocked_device_withheld=ok",
+            "e2ee_trust=ok",
+            "restore_cleanup=ok",
+            "link_preview_global=ok",
+            "link_preview_room=ok",
+            "link_preview_e2ee_default=ok",
+            "link_preview_hide=ok",
+        ][..]
+    );
+}
+
+#[test]
+fn parse_env_flag_accepts_only_explicit_boolean_values() {
+    for (value, expected) in [
+        ("1", true),
+        ("true", true),
+        ("TRUE", true),
+        ("0", false),
+        ("false", false),
+        ("FALSE", false),
+        ("", false),
+    ] {
+        assert_eq!(parse_env_flag("QA_FLAG", value), Ok(expected));
+    }
+
+    assert!(parse_env_flag("QA_FLAG", "yes").is_err());
+}
+
+#[test]
+fn final_tokens_follow_the_requested_scenario_including_composer() {
+    assert_eq!(final_tokens_for_scenario(QaScenario::Safety), ["safety=ok"]);
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::LoginSync),
+        ["safety=ok", "login_sync=ok", "restore_cleanup=ok"]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::Composer),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "mention_send=ok",
+            "markdown_send=ok",
+            "slash_command=ok",
+            "ime_guard=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::RoomSpace),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "restore_cleanup=ok"
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::InvitesDm),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "invite_recv=ok",
+            "invite_accept=ok",
+            "invite_decline=ok",
+            "member_list=ok",
+            "dm_start=ok",
+            "dm_space_scope=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::Timeline),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::TimelineReconnect),
+        [
+            "safety=ok",
+            "timeline_reconnect_recv_after_reconnect=ok",
+            "live_catchup_checkpoint=ok",
+            "live_catchup_gap_repaired=ok",
+            "timeline_reconnect=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::TimelineStress),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "timeline_stress=ok",
+            "stress_no_blank=ok",
+            "stress_space_scope=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::Activity),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "activity_recent=ok",
+            "activity_unread=ok",
+            "activity_resolution=ok",
+            "activity_markread=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::CredentialHealth),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "credential_health=ok",
+            "fail_closed=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::NativeAttention),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "notification_candidate=ok",
+            "badge_state=ok",
+            "suppress_focus=ok",
+            "clear_badge=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::Directory),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "directory_query=ok",
+            "directory_join=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::Reply),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "mention_send=ok",
+            "markdown_send=ok",
+            "slash_command=ok",
+            "ime_guard=ok",
+            "reply=ok",
+            "reply_quote=ok",
+            "pin_event=ok",
+            "pinned_state=ok",
+            "unpin_event=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::Media),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "send_media=ok",
+            "media_caption=ok",
+            "image_compress=ok",
+            "upload_staging=ok",
+            "media_gallery=ok",
+            "recv_media=ok",
+            "media_caption_edit=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::LiveSignals),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "read_receipt=ok",
+            "fully_read=ok",
+            "typing=ok",
+            "presence=ok",
+            "live_signals=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::Thread),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "reply=ok",
+            "reply_quote=ok",
+            "pin_event=ok",
+            "pinned_state=ok",
+            "unpin_event=ok",
+            "thread_canonical=ok",
+            "thread_summary=ok",
+            "thread_recv=ok",
+            "thread_paginate=end_reached",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::EditRedactSearch),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "edit_redact_search=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::SearchCrawler),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "edit_redact_search=ok",
+            "crawl_backfill=ok",
+            "crawl_no_media_bytes=ok",
+            "crawl_throttle=ok",
+            "crawl_failure=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::ScheduledSend),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "room_space=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "scheduled_capability=local_fallback",
+            "scheduled_create=ok",
+            "scheduled_reschedule=ok",
+            "scheduled_cancel=ok",
+            "scheduled_fire=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::All),
+        implemented_final_tokens()
+    );
+    assert_eq!(
+        final_tokens_for_scenario(QaScenario::E2eeTrust),
+        [
+            "safety=ok",
+            "login_sync=ok",
+            "joined_room_restore=ok",
+            "e2ee_second_device_decrypt=ok",
+            "e2ee_multi_user_multi_device_decrypt=ok",
+            "e2ee_unverified_peer_send_nonblocking=ok",
+            "e2ee_blocked_device_withheld=ok",
+            "e2ee_trust=ok",
+            "restore_cleanup=ok",
+        ]
+    );
+}
+
+#[test]
+fn implemented_final_tokens_include_safety() {
+    assert_eq!(
+        &implemented_final_tokens()[..],
+        &[
+            "safety=ok",
+            "login_sync=ok",
+            "session_status_checking=ok",
+            "session_status_ready=ok",
+            "session_status_device=ok",
+            "session_status=ok",
+            "credential_health=ok",
+            "fail_closed=ok",
+            "notification_candidate=ok",
+            "badge_state=ok",
+            "suppress_focus=ok",
+            "clear_badge=ok",
+            "invite_recv=ok",
+            "invite_accept=ok",
+            "invite_decline=ok",
+            "member_list=ok",
+            "dm_start=ok",
+            "dm_space_scope=ok",
+            "room_space=ok",
+            "directory_query=ok",
+            "directory_join=ok",
+            "room_settings=ok",
+            "moderation=ok",
+            "permission_guard=ok",
+            "timeline=ok",
+            "timeline_nav=ok",
+            "hide_redacted=ok",
+            "activity_recent=ok",
+            "activity_unread=ok",
+            "activity_resolution=ok",
+            "activity_markread=ok",
+            "mention_send=ok",
+            "markdown_send=ok",
+            "slash_command=ok",
+            "ime_guard=ok",
+            "reply=ok",
+            "reply_quote=ok",
+            "pin_event=ok",
+            "pinned_state=ok",
+            "unpin_event=ok",
+            "thread_canonical=ok",
+            "thread_summary=ok",
+            "thread_recv=ok",
+            "thread_paginate=end_reached",
+            "send_media=ok",
+            "media_caption=ok",
+            "image_compress=ok",
+            "upload_staging=ok",
+            "media_gallery=ok",
+            "recv_media=ok",
+            "media_caption_edit=ok",
+            "read_receipt=ok",
+            "fully_read=ok",
+            "typing=ok",
+            "presence=ok",
+            "live_signals=ok",
+            "edit_redact_search=ok",
+            "crawl_backfill=ok",
+            "crawl_no_media_bytes=ok",
+            "crawl_throttle=ok",
+            "crawl_failure=ok",
+            "scheduled_capability=local_fallback",
+            "scheduled_create=ok",
+            "scheduled_reschedule=ok",
+            "scheduled_cancel=ok",
+            "scheduled_fire=ok",
+            "send_fail=ok",
+            "resend=ok",
+            "cancel_send=ok",
+            "fifo=ok",
+            "unsent_restart=ok",
+            "display_projection_reset_fallbacks=0",
+            "joined_room_restore=ok",
+            "e2ee_second_device_decrypt=ok",
+            "e2ee_multi_user_multi_device_decrypt=ok",
+            "e2ee_unverified_peer_send_nonblocking=ok",
+            "e2ee_blocked_device_withheld=ok",
+            "e2ee_trust=ok",
+            "restore_cleanup=ok",
+            "link_preview_global=ok",
+            "link_preview_room=ok",
+            "link_preview_e2ee_default=ok",
+            "link_preview_hide=ok",
+        ][..]
+    );
+}
