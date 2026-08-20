@@ -1,7 +1,4 @@
-use super::{
-    QaE2eeLogoutBarrier, cleanup_all_owned_e2ee_participants,
-    cleanup_owned_e2ee_lifecycle_best_effort,
-};
+use super::cleanup_all_owned_e2ee_participants;
 use crate::contracts::{
     FirstEventSharedSnapshotPendingSource, FirstEventThenTerminalLagSource,
     IntervalQaSnapshotEventSource, RecordedOwnedE2eeCleanupOperation,
@@ -12,8 +9,8 @@ use crate::event_wait::{
     wait_for_logged_out, wait_for_operation_failed_and_signed_out, wait_for_signed_out_after_logout,
 };
 use crate::participants::{
-    QaOwnedRuntimePhase, finish_e2ee_recipient_stage_with_owned_cleanup,
-    retain_or_cleanup_e2ee_callers_after_stage,
+    QaE2eeLogoutBarrier, QaOwnedRuntimePhase, cleanup_owned_e2ee_lifecycle_best_effort,
+    finish_e2ee_recipient_stage_with_owned_cleanup, retain_or_cleanup_e2ee_callers_after_stage,
 };
 use crate::registry::EVENT_TIMEOUT;
 use crate::{

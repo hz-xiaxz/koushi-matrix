@@ -6,10 +6,12 @@ use super::diagnostics::room_list_summary;
 use super::event_wait::{
     find_timeline_item_with_body, wait_for_bodies_and_pagination_settle, wait_for_initial_items,
     wait_for_item_with_body, wait_for_logged_in, wait_for_logged_out,
-    wait_for_operation_failed_and_signed_out, wait_for_ready_snapshot, wait_for_send_completed,
-    wait_for_send_flow_completion, wait_for_session_restored, wait_for_sync_started_and_running,
-    wait_for_sync_stopped,
+    wait_for_operation_failed_and_signed_out, wait_for_ready_snapshot, wait_for_room_created,
+    wait_for_room_joined, wait_for_send_completed, wait_for_send_flow_completion,
+    wait_for_session_restored, wait_for_space_child_set, wait_for_space_created,
+    wait_for_sync_started_and_running, wait_for_sync_stopped, wait_for_user_invited,
 };
+use super::fixtures::private_room_options;
 use super::participants::{
     QaOwnedLoggedInRuntime, QaOwnedRuntimeParticipant, QaParticipantLoginGate,
     QaParticipantLoginOutcome, complete_new_identity_gate_for_qa, login_synced_participant_for_qa,
@@ -25,11 +27,9 @@ use super::scenario_identity::{
     run_native_attention_stage, run_provisional_device_cleanup_qa, run_session_status_stage,
 };
 use super::scenario_rooms::{
-    private_room_options, run_directory_stage, run_invites_dm_stage, run_room_management_stage,
+    run_directory_stage, run_invites_dm_stage, run_room_management_stage,
     run_room_people_projection_stage, wait_for_pin_event_completed, wait_for_pinned_state,
-    wait_for_room_created, wait_for_room_joined, wait_for_room_list_containing,
-    wait_for_space_child_set, wait_for_space_created, wait_for_unpin_event_completed,
-    wait_for_user_invited,
+    wait_for_room_list_containing, wait_for_unpin_event_completed,
 };
 use super::scenario_search::{
     poll_search_until_absent, poll_search_until_found, run_hide_redacted_stage,

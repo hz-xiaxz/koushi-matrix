@@ -1,8 +1,9 @@
 use super::{
     BodyWaitObserver, InitialItemsWaitMatch, PairedEventWaitError, SendFlowWaiter,
-    find_timeline_item_with_body, match_initial_items_wait_event, visit_timeline_diff_items,
-    wait_for_initial_items_from_source, wait_for_logged_in, wait_for_logged_out,
-    wait_for_operation_failed, wait_for_paired_event_until, wait_for_session_restored,
+    WithheldEventProjectionOrigin, find_timeline_item_with_body, match_initial_items_wait_event,
+    projection_timeline_item, visit_timeline_diff_items, wait_for_initial_items_from_source,
+    wait_for_logged_in, wait_for_logged_out, wait_for_operation_failed,
+    wait_for_paired_event_until, wait_for_session_restored,
     wait_for_withheld_event_projection_from_source,
 };
 use crate::contracts::{
@@ -12,8 +13,6 @@ use crate::contracts::{
     withheld_projection_test_item,
 };
 use crate::registry::{EVENT_TIMEOUT, LOGIN_EVENT_TIMEOUT};
-use crate::scenario_search::projection_timeline_item;
-use crate::scenario_timeline::WithheldEventProjectionOrigin;
 use crate::{
     AccountEvent, AccountKey, Arc, CoreEvent, CoreFailure, Duration, Mutex, RequestId, SessionInfo,
     SessionState, SyncEvent, TimelineDiff, TimelineEvent, TimelineKey, TimelineMessageActions,

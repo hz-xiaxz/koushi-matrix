@@ -1,4 +1,3 @@
-use super::scenario_identity::verification_state_flow_id;
 use super::{
     AppState, Arc, AtomicBool, AtomicUsize, Duration, EventStreamLag, JoinHandle, Mutex, Ordering,
     SessionState, Shutdown, SocketAddr, SyncEvent, TcpListener, TcpStream, VerificationFlowState,
@@ -490,6 +489,18 @@ pub(super) fn sync_event_diagnostic_label(event: &SyncEvent) -> &'static str {
         SyncEvent::Reconnecting => "reconnecting",
         SyncEvent::Failed => "failed",
         SyncEvent::Stopped { .. } => "stopped",
+    }
+}
+
+pub(super) fn verification_state_flow_id(state: &VerificationFlowState) -> Option<u64> {
+    match state {
+        VerificationFlowState::Idle => None,
+        VerificationFlowState::Requested { request_id, .. }
+        | VerificationFlowState::Accepted { request_id, .. }
+        | VerificationFlowState::SasPresented { request_id, .. }
+        | VerificationFlowState::Confirming { request_id, .. }
+        | VerificationFlowState::Done { request_id, .. }
+        | VerificationFlowState::Failed { request_id, .. } => Some(*request_id),
     }
 }
 

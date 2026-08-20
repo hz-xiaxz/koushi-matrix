@@ -1,11 +1,14 @@
-use super::cleanup::{QaE2eeLogoutBarrier, QaOwnedE2eeCleanupOperations};
-use super::event_wait::{QaEventFuture, QaEventSource, QaSnapshotEventSource};
+use super::event_wait::{
+    QaEventFuture, QaEventSource, QaSnapshotEventSource, projection_timeline_item,
+};
+use super::participants::{
+    QaE2eeLogoutBarrier, QaOwnedE2eeCleanupOperations,
+    ensure_incoming_verification_receiver_sync_not_stopped,
+};
 use super::registry::{
     QaScenario, QaStage, SEND_QUEUE_EVENT_TIMEOUT, TIMELINE_RECONNECT_EXPECTED_BODY_COUNT,
     should_run_focused_send_queue_route, tokens_for_stage,
 };
-use super::scenario_identity::ensure_incoming_verification_receiver_sync_not_stopped;
-use super::scenario_search::projection_timeline_item;
 use super::scenario_timeline::assert_zero_display_projection_reset_fallback_delta;
 use super::{
     AccountEvent, AccountKey, AppState, Arc, CoreEvent, CoreFailure, Duration, EventStreamLag,
@@ -29,6 +32,9 @@ pub(super) fn event_wait_source() -> &'static str {
 }
 pub(super) fn participants_source() -> &'static str {
     production_part(include_str!("participants.rs"))
+}
+pub(super) fn fixtures_source() -> &'static str {
+    production_part(include_str!("fixtures.rs"))
 }
 pub(super) fn cleanup_source() -> &'static str {
     production_part(include_str!("cleanup.rs"))
@@ -57,10 +63,11 @@ pub(super) fn production_source() -> &'static str {
         [
             root_source(),
             registry_source(),
+            diagnostics_source(),
             event_wait_source(),
             participants_source(),
+            fixtures_source(),
             cleanup_source(),
-            diagnostics_source(),
             orchestrator_source(),
             identity_source(),
             rooms_source(),
@@ -242,13 +249,13 @@ fn unverified_peer_refreshes_device_keys_before_behavioral_checkpoints() {
     assert!(!stage.contains("AccountCommand::RequestVerification"));
     assert!(!stage.contains("SyncCommand::SyncOnce"));
 
-    let helper = source
+    let helper = participants_source()
         .split("async fn refresh_device_keys_and_assert_known_for_qa")
         .nth(1)
         .expect("device-key refresh checkpoint helper should exist")
-        .split("async fn run_session_status_stage")
+        .split("pub(super) enum QaParticipantLoginGate")
         .next()
-        .expect("session-status stage should follow the checkpoint helper");
+        .expect("participant login gate should follow the checkpoint helper");
     assert!(helper.contains("AccountCommand::QaRefreshDeviceKeysAndAssertKnown"));
     assert!(helper.contains("tokio::time::timeout(E2EE_EVENT_TIMEOUT, ack)"));
     assert!(!helper.contains("AccountCommand::RequestVerification"));
@@ -1158,10 +1165,10 @@ pub(super) fn strict_e2ee_waiter_body(source: &str, waiter: &str, end_declaratio
 pub(super) fn strict_e2ee_waiter_source(waiter: &str) -> &'static str {
     match waiter {
         "wait_for_existing_identity_gate" => participants_source(),
-        "wait_for_room_in_room_list" => rooms_source(),
+        "wait_for_room_in_room_list" => event_wait_source(),
         "subscribe_and_ack_active_timeline_projection_for_qa" => timeline_source(),
         "wait_for_verification_requested_event_only" | "wait_for_verification_accepted" => {
-            identity_source()
+            participants_source()
         }
         _ => event_wait_source(),
     }

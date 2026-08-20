@@ -1,23 +1,18 @@
 use super::diagnostics::{
-    gate_session_phase, sync_diagnostic_summary, trust_admission_diagnostic_summary,
+    gate_session_phase, invite_observer_diagnostic_summary, runtime_sync_diagnostic_summary,
+    session_state_diagnostic_label, sync_diagnostic_summary, sync_event_diagnostic_label,
+    sync_state_diagnostic_label, trust_admission_diagnostic_summary,
 };
 use super::registry::{
     E2EE_EVENT_TIMEOUT, EVENT_TIMEOUT, LOGIN_EVENT_TIMEOUT, ROOM_LIST_EVENT_TIMEOUT,
     TIMELINE_INITIAL_EVENT_TIMEOUT,
 };
-use super::scenario_identity::{
-    QaLogoutAccountExpectation, ensure_session_restored_account_key, ready_account_key,
-    timeline_item_is_decryption_failure,
-};
-use super::scenario_timeline::{
-    WithheldEventProjectionOrigin, WithheldEventTargetOutcome, withheld_event_target_outcome,
-    withheld_event_target_outcome_in_diffs,
-};
 use super::{
-    AccountEvent, AccountKey, AppState, CoreCommand, CoreConnection, CoreEvent, CoreFailure,
-    Duration, EventStreamLag, Future, PaginationState, Pin, RequestId, SessionState, SyncCommand,
-    SyncEvent, TimelineCommand, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
-    TimelineKey, TimelineSendState,
+    AccountEvent, AccountKey, AppState, BTreeSet, CoreCommand, CoreConnection, CoreEvent,
+    CoreFailure, Duration, EventStreamLag, Future, PaginationState, Pin, RequestId, RoomEvent,
+    SessionState, SettingsPersistenceState, SyncCommand, SyncEvent, TimelineCommand, TimelineDiff,
+    TimelineEvent, TimelineItem, TimelineItemId, TimelineKey, TimelineMessageActions,
+    TimelineSendState,
 };
 
 pub(super) type QaEventFuture<'a> =
@@ -87,6 +82,594 @@ where
             .map(|_| ())
             .map_err(PairedEventWaitError::Secondary),
         _ = tokio::time::sleep_until(deadline) => Err(PairedEventWaitError::Deadline),
+    }
+}
+
+/// Wait for `RoomEvent::RoomCreated` with the given request_id. Returns room_id.
+pub(super) async fn wait_for_room_created(
+    conn: &mut CoreConnection,
+    request_id: koushi_core::ids::RequestId,
+    label: &str,
+) -> Result<String, String> {
+    let mut seen_total = 0usize;
+    let mut seen_state_changed = 0usize;
+    let mut seen_room_created_other = 0usize;
+    let mut seen_operation_failed_other = 0usize;
+    let mut last_event_kind = "none";
+    loop {
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| {
+                format!(
+                    "{label}: timed out waiting for RoomEvent::RoomCreated request_id={}/{} seen_total={seen_total} seen_state_changed={seen_state_changed} seen_room_created_other={seen_room_created_other} seen_operation_failed_other={seen_operation_failed_other} last_event={last_event_kind}",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+        seen_total += 1;
+        last_event_kind = core_event_kind(&event);
+
+        match event {
+            CoreEvent::Room(RoomEvent::RoomCreated {
+                request_id: ev_id,
+                room_id,
+            }) if ev_id == request_id => {
+                return Ok(room_id);
+            }
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == request_id => {
+                return Err(format!("{label} failed: {failure:?}"));
+            }
+            CoreEvent::Room(RoomEvent::RoomCreated { .. }) => {
+                seen_room_created_other += 1;
+            }
+            CoreEvent::OperationFailed { .. } => {
+                seen_operation_failed_other += 1;
+            }
+            CoreEvent::StateChanged(_) => {
+                seen_state_changed += 1;
+            }
+            _ => continue,
+        }
+    }
+}
+
+fn core_event_kind(event: &CoreEvent) -> &'static str {
+    match event {
+        CoreEvent::StateDelta(_) => "StateDelta",
+        CoreEvent::StateChanged(_) => "StateChanged",
+        CoreEvent::Account(_) => "Account",
+        CoreEvent::Sync(_) => "Sync",
+        CoreEvent::Room(room_event) => match room_event {
+            RoomEvent::RoomCreated { .. } => "RoomCreated",
+            RoomEvent::SpaceCreated { .. } => "SpaceCreated",
+            RoomEvent::SpaceChildSet { .. } => "SpaceChildSet",
+            RoomEvent::UserInvited { .. } => "UserInvited",
+            RoomEvent::InviteAccepted { .. } => "InviteAccepted",
+            RoomEvent::InviteDeclined { .. } => "InviteDeclined",
+            RoomEvent::RoomJoined { .. } => "RoomJoined",
+            RoomEvent::RoomListUpdated => "RoomListUpdated",
+            _ => "Room",
+        },
+        CoreEvent::Timeline(_) => "Timeline",
+        CoreEvent::LiveSignals(_) => "LiveSignals",
+        CoreEvent::Search(_) => "Search",
+        CoreEvent::E2eeTrust(_) => "E2eeTrust",
+        CoreEvent::Activity(_) => "Activity",
+        CoreEvent::LocalEncryption(_) => "LocalEncryption",
+        CoreEvent::NativeAttention(_) => "NativeAttention",
+        CoreEvent::CjkTextPolicy(_) => "CjkTextPolicy",
+        CoreEvent::ThreadsList(_) => "ThreadsList",
+        CoreEvent::IntentLifecycle { .. } => "IntentLifecycle",
+        CoreEvent::OperationFailed { .. } => "OperationFailed",
+    }
+}
+
+/// Wait for `RoomEvent::SpaceCreated` with the given request_id. Returns space_id.
+pub(super) async fn wait_for_space_created(
+    conn: &mut CoreConnection,
+    request_id: koushi_core::ids::RequestId,
+    label: &str,
+) -> Result<String, String> {
+    let mut seen_total = 0usize;
+    let mut seen_state_changed = 0usize;
+    let mut seen_space_created_other = 0usize;
+    let mut seen_room_created = 0usize;
+    let mut seen_operation_failed_other = 0usize;
+    let mut last_event_kind = "none";
+    loop {
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| {
+                format!(
+                    "{label}: timed out waiting for RoomEvent::SpaceCreated request_id={}/{} seen_total={seen_total} seen_state_changed={seen_state_changed} seen_space_created_other={seen_space_created_other} seen_room_created={seen_room_created} seen_operation_failed_other={seen_operation_failed_other} last_event={last_event_kind}",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+        seen_total += 1;
+        last_event_kind = core_event_kind(&event);
+
+        match event {
+            CoreEvent::Room(RoomEvent::SpaceCreated {
+                request_id: ev_id,
+                space_id,
+            }) if ev_id == request_id => {
+                return Ok(space_id);
+            }
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == request_id => {
+                return Err(format!("{label} failed: {failure:?}"));
+            }
+            CoreEvent::Room(RoomEvent::SpaceCreated { .. }) => {
+                seen_space_created_other += 1;
+            }
+            CoreEvent::Room(RoomEvent::RoomCreated { .. }) => {
+                seen_room_created += 1;
+            }
+            CoreEvent::OperationFailed { .. } => {
+                seen_operation_failed_other += 1;
+            }
+            CoreEvent::StateChanged(_) => {
+                seen_state_changed += 1;
+            }
+            _ => continue,
+        }
+    }
+}
+
+/// Wait for `RoomEvent::SpaceChildSet` with the given request_id.
+pub(super) async fn wait_for_space_child_set(
+    conn: &mut CoreConnection,
+    request_id: koushi_core::ids::RequestId,
+    space_id: &str,
+    child_room_id: &str,
+    label: &str,
+) -> Result<(), String> {
+    loop {
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for RoomEvent::SpaceChildSet"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::SpaceChildSet {
+                request_id: ev_id,
+                space_id: ev_space,
+                child_room_id: ev_child,
+            }) if ev_id == request_id => {
+                if ev_space != space_id || ev_child != child_room_id {
+                    return Err(format!(
+                        "{label}: SpaceChildSet IDs mismatch: space={ev_space} child={ev_child}"
+                    ));
+                }
+                return Ok(());
+            }
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == request_id => {
+                return Err(format!("{label} failed: {failure:?}"));
+            }
+            _ => continue,
+        }
+    }
+}
+
+/// Wait for `RoomEvent::UserInvited` with the given request_id.
+pub(super) async fn wait_for_user_invited(
+    conn: &mut CoreConnection,
+    request_id: koushi_core::ids::RequestId,
+    room_id: &str,
+    user_id: &str,
+    label: &str,
+) -> Result<(), String> {
+    loop {
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for RoomEvent::UserInvited"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::UserInvited {
+                request_id: ev_id,
+                room_id: ev_room,
+                user_id: ev_user,
+            }) if ev_id == request_id => {
+                if ev_room != room_id || ev_user != user_id {
+                    return Err(format!(
+                        "{label}: UserInvited IDs mismatch: room={ev_room} user={ev_user}"
+                    ));
+                }
+                return Ok(());
+            }
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == request_id => {
+                return Err(format!("{label} failed: {failure:?}"));
+            }
+            _ => continue,
+        }
+    }
+}
+
+/// Wait for `RoomEvent::RoomJoined` with the given request_id.
+pub(super) async fn wait_for_room_joined(
+    conn: &mut CoreConnection,
+    request_id: koushi_core::ids::RequestId,
+    room_id: &str,
+    label: &str,
+) -> Result<(), String> {
+    loop {
+        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for RoomEvent::RoomJoined"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::RoomJoined {
+                request_id: ev_id,
+                room_id: ev_room,
+            }) if ev_id == request_id => {
+                if ev_room != room_id {
+                    return Err(format!(
+                        "{label}: RoomJoined room_id mismatch: got {ev_room}, expected {room_id}"
+                    ));
+                }
+                return Ok(());
+            }
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == request_id => {
+                return Err(format!("{label} failed: {failure:?}"));
+            }
+            _ => continue,
+        }
+    }
+}
+
+pub(super) async fn wait_for_room_in_room_list(
+    conn: &mut CoreConnection,
+    expected_room_id: &str,
+    label: &str,
+) -> Result<AppState, String> {
+    let contains_expected =
+        |snapshot: &AppState| snapshot.rooms.iter().any(|r| r.room_id == expected_room_id);
+
+    let snapshot = conn.snapshot();
+    if contains_expected(&snapshot) {
+        return Ok(snapshot);
+    }
+
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                format!(
+                    "{label}: timed out waiting for room list to include the expected room \
+                     (have {} rooms)",
+                    snapshot.rooms.len()
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+                let snapshot = conn.snapshot();
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            CoreEvent::StateChanged(snapshot) => {
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            _ => continue,
+        }
+    }
+}
+
+pub(super) async fn wait_for_encrypted_room_projection_for_qa(
+    conn: &mut CoreConnection,
+    expected_room_id: &str,
+    label: &str,
+) -> Result<AppState, String> {
+    let contains_expected = |snapshot: &AppState| {
+        snapshot
+            .rooms
+            .iter()
+            .any(|room| room.room_id == expected_room_id && room.is_encrypted)
+    };
+
+    let snapshot = conn.snapshot();
+    if contains_expected(&snapshot) {
+        return Ok(snapshot);
+    }
+
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                let encrypted_rooms = snapshot
+                    .rooms
+                    .iter()
+                    .filter(|room| room.is_encrypted)
+                    .count();
+                format!(
+                    "{label}: timed out waiting for encrypted room projection \
+                     (rooms={}, encrypted_rooms={encrypted_rooms})",
+                    snapshot.rooms.len(),
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+                let snapshot = conn.snapshot();
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            CoreEvent::StateChanged(snapshot) if contains_expected(&snapshot) => {
+                return Ok(snapshot);
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(super) async fn wait_for_space_in_space_list(
+    conn: &mut CoreConnection,
+    expected_space_id: &str,
+    label: &str,
+) -> Result<AppState, String> {
+    let contains_expected = |snapshot: &AppState| {
+        snapshot
+            .spaces
+            .iter()
+            .any(|s| s.space_id == expected_space_id)
+    };
+
+    let snapshot = conn.snapshot();
+    if contains_expected(&snapshot) {
+        return Ok(snapshot);
+    }
+
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                let observer_diagnostics =
+                    invite_observer_diagnostic_summary(&koushi_diagnostics::snapshot());
+                let sync_diagnostics = sync_diagnostic_summary(&koushi_diagnostics::snapshot());
+                format!(
+                    "{label}: timed out waiting for space list to include the expected space \
+                     (have {} spaces; {observer_diagnostics}; {sync_diagnostics})",
+                    snapshot.spaces.len(),
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+                let snapshot = conn.snapshot();
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            CoreEvent::StateChanged(snapshot) => {
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            _ => continue,
+        }
+    }
+}
+
+pub(super) async fn wait_for_space_child_projection(
+    conn: &mut CoreConnection,
+    space_id: &str,
+    expected_child_room_ids: &[String],
+    label: &str,
+) -> Result<AppState, String> {
+    let contains_expected = |snapshot: &AppState| {
+        space_has_expected_children(snapshot, space_id, expected_child_room_ids)
+    };
+
+    let snapshot = conn.snapshot();
+    if contains_expected(&snapshot) {
+        return Ok(snapshot);
+    }
+
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                let observed_child_count = snapshot
+                    .spaces
+                    .iter()
+                    .find(|space| space.space_id == space_id)
+                    .map(|space| space.child_room_ids.len())
+                    .unwrap_or_default();
+                format!(
+                    "{label}: timed out waiting for space child projection \
+                     (expected_children={}, observed_children={}, spaces={})",
+                    expected_child_room_ids.len(),
+                    observed_child_count,
+                    snapshot.spaces.len()
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+                let snapshot = conn.snapshot();
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            CoreEvent::StateChanged(snapshot) => {
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            _ => continue,
+        }
+    }
+}
+
+pub(super) fn space_has_expected_children(
+    snapshot: &AppState,
+    space_id: &str,
+    expected_child_room_ids: &[String],
+) -> bool {
+    let Some(space) = snapshot
+        .spaces
+        .iter()
+        .find(|space| space.space_id == space_id)
+    else {
+        return false;
+    };
+    let child_room_ids = space.child_room_ids.iter().collect::<BTreeSet<_>>();
+    expected_child_room_ids
+        .iter()
+        .all(|room_id| child_room_ids.contains(room_id))
+}
+
+pub(super) async fn wait_for_dm_room_in_room_list(
+    conn: &mut CoreConnection,
+    expected_room_id: &str,
+    label: &str,
+) -> Result<AppState, String> {
+    let contains_expected = |snapshot: &AppState| {
+        snapshot
+            .rooms
+            .iter()
+            .any(|room| room.room_id == expected_room_id && room.is_dm)
+    };
+
+    let snapshot = conn.snapshot();
+    if contains_expected(&snapshot) {
+        return Ok(snapshot);
+    }
+
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                format!(
+                    "{label}: timed out waiting for DM room in room list \
+                     (have {} rooms)",
+                    snapshot.rooms.len()
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+                let snapshot = conn.snapshot();
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            CoreEvent::StateChanged(snapshot) => {
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            _ => continue,
+        }
+    }
+}
+
+pub(super) async fn wait_for_invite_in_snapshot(
+    conn: &mut CoreConnection,
+    expected_room_id: &str,
+    expected_is_dm: Option<bool>,
+    label: &str,
+) -> Result<AppState, String> {
+    let contains_expected = |snapshot: &AppState| {
+        snapshot.invites.iter().any(|invite| {
+            invite.room_id == expected_room_id
+                && expected_is_dm.is_none_or(|expected| invite.is_dm == expected)
+        })
+    };
+
+    let snapshot = conn.snapshot();
+    if contains_expected(&snapshot) {
+        return Ok(snapshot);
+    }
+
+    let mut last_sync_event = "none";
+    let mut last_snapshot_sync = sync_state_diagnostic_label(&snapshot.sync);
+    let mut last_snapshot_session = session_state_diagnostic_label(&snapshot.session);
+    let deadline = tokio::time::Instant::now() + ROOM_LIST_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| {
+                let snapshot = conn.snapshot();
+                let observer_diagnostics =
+                    invite_observer_diagnostic_summary(&koushi_diagnostics::snapshot());
+                let diagnostics = koushi_diagnostics::snapshot();
+                let sync_diagnostics = sync_diagnostic_summary(&diagnostics);
+                let runtime_diagnostics = runtime_sync_diagnostic_summary(&diagnostics);
+                let sync_state = sync_state_diagnostic_label(&snapshot.sync);
+                let session_state = session_state_diagnostic_label(&snapshot.session);
+                format!(
+                    "{label}: timed out waiting for invite snapshot \
+                     (have {} invites; snapshot_sync={sync_state} snapshot_session={session_state} \
+                     last_sync_event={last_sync_event} last_snapshot_sync={last_snapshot_sync} \
+                     last_snapshot_session={last_snapshot_session} snapshot_rooms={} \
+                     snapshot_spaces={} snapshot_invites={}; {observer_diagnostics}; \
+                     {sync_diagnostics}; {runtime_diagnostics})",
+                    snapshot.invites.len(),
+                    snapshot.rooms.len(),
+                    snapshot.spaces.len(),
+                    snapshot.invites.len(),
+                )
+            })?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::Sync(sync_event) => {
+                last_sync_event = sync_event_diagnostic_label(&sync_event);
+            }
+            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+                let snapshot = conn.snapshot();
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            CoreEvent::StateChanged(snapshot) => {
+                last_snapshot_sync = sync_state_diagnostic_label(&snapshot.sync);
+                last_snapshot_session = session_state_diagnostic_label(&snapshot.session);
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
+            }
+            _ => continue,
+        }
     }
 }
 
@@ -306,6 +889,14 @@ pub(super) async fn wait_for_ready_snapshot(
     }
 }
 
+/// Wait for `AccountEvent::LoggedIn` with the given request_id.
+pub(super) fn ready_account_key<S: QaSnapshotEventSource + ?Sized>(conn: &S) -> Option<AccountKey> {
+    match conn.snapshot().session {
+        SessionState::Ready(info) => Some(AccountKey(info.user_id)),
+        _ => None,
+    }
+}
+
 pub(super) async fn wait_for_logged_in<S: QaSnapshotEventSource + ?Sized>(
     conn: &mut S,
     request_id: koushi_core::ids::RequestId,
@@ -409,6 +1000,17 @@ pub(super) async fn wait_for_session_restored<S: QaSnapshotEventSource + ?Sized>
     }
 }
 
+fn ensure_session_restored_account_key(
+    actual: &AccountKey,
+    expected: &AccountKey,
+    label: &str,
+) -> Result<(), String> {
+    if actual != expected {
+        return Err(format!("{label}: SessionRestored account_key mismatch"));
+    }
+    Ok(())
+}
+
 /// Wait for `AccountEvent::LoggedOut` with the given request_id.
 pub(super) async fn wait_for_logged_out<S: QaSnapshotEventSource + ?Sized>(
     conn: &mut S,
@@ -431,6 +1033,12 @@ pub(super) async fn wait_for_signed_out_after_logout<S: QaSnapshotEventSource + 
     label: &str,
 ) -> Result<(), String> {
     wait_for_logout_barrier(conn, request_id, QaLogoutAccountExpectation::Any, label).await
+}
+
+#[derive(Clone, Copy)]
+enum QaLogoutAccountExpectation<'a> {
+    Exact(&'a AccountKey),
+    Any,
 }
 
 async fn wait_for_logout_barrier<S: QaSnapshotEventSource + ?Sized>(
@@ -609,6 +1217,15 @@ pub(super) async fn subscribe_timeline_for_qa(
     wait_for_initial_items(conn, key, request_id, label).await
 }
 
+pub(super) fn timeline_item_is_decryption_failure(item: &TimelineItem) -> bool {
+    item.unable_to_decrypt.is_some()
+        || item
+            .body
+            .as_ref()
+            .map(|body| body.contains("Unable to decrypt"))
+            .unwrap_or(false)
+}
+
 #[derive(Debug)]
 struct BodyWaitObserver<'a> {
     expected_body: &'a str,
@@ -674,7 +1291,7 @@ pub(super) async fn wait_for_initial_items(
         .await
 }
 
-async fn wait_for_initial_items_from_source<S: QaEventSource + ?Sized>(
+pub(super) async fn wait_for_initial_items_from_source<S: QaEventSource + ?Sized>(
     source: &mut S,
     key: &TimelineKey,
     request_id: koushi_core::ids::RequestId,
@@ -702,7 +1319,7 @@ async fn wait_for_initial_items_from_source<S: QaEventSource + ?Sized>(
 }
 
 #[derive(Default)]
-struct InitialItemsWaitDiagnostics {
+pub(super) struct InitialItemsWaitDiagnostics {
     same_key_exact_cause: u64,
     same_key_wrong_cause: u64,
     same_key_causeless: u64,
@@ -1712,6 +2329,68 @@ pub(super) async fn wait_for_item_with_body_or_decryption_failure(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum WithheldEventProjectionOrigin {
+    InitialItems,
+    ItemsUpdated,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WithheldEventTargetOutcome {
+    Missing,
+    DecryptionFailure,
+    NonFailure {
+        has_body: bool,
+        has_typed_decryption_failure: bool,
+        matches_expected_body: bool,
+    },
+}
+
+fn withheld_event_target_outcome(
+    items: &[TimelineItem],
+    target_event_id: &str,
+    expected_body: &str,
+) -> WithheldEventTargetOutcome {
+    let Some(item) = items
+        .iter()
+        .find(|item| timeline_item_event_id(item) == Some(target_event_id))
+    else {
+        return WithheldEventTargetOutcome::Missing;
+    };
+    if timeline_item_is_decryption_failure(item) {
+        WithheldEventTargetOutcome::DecryptionFailure
+    } else {
+        WithheldEventTargetOutcome::NonFailure {
+            has_body: item.body.is_some(),
+            has_typed_decryption_failure: item.unable_to_decrypt.is_some(),
+            matches_expected_body: timeline_item_body_matches(item, expected_body),
+        }
+    }
+}
+
+fn withheld_event_target_outcome_in_diffs(
+    diffs: &[TimelineDiff],
+    target_event_id: &str,
+    expected_body: &str,
+) -> Result<WithheldEventTargetOutcome, String> {
+    let mut outcome = WithheldEventTargetOutcome::Missing;
+    visit_timeline_diff_items(diffs, |item| {
+        if timeline_item_event_id(item) == Some(target_event_id) {
+            outcome = if timeline_item_is_decryption_failure(item) {
+                WithheldEventTargetOutcome::DecryptionFailure
+            } else {
+                WithheldEventTargetOutcome::NonFailure {
+                    has_body: item.body.is_some(),
+                    has_typed_decryption_failure: item.unable_to_decrypt.is_some(),
+                    matches_expected_body: timeline_item_body_matches(item, expected_body),
+                }
+            };
+        }
+        Ok(())
+    })?;
+    Ok(outcome)
+}
+
 pub(super) async fn wait_for_withheld_event_projection_from_source<S: QaEventSource + ?Sized>(
     source: &mut S,
     key: &TimelineKey,
@@ -1871,6 +2550,13 @@ pub(super) async fn wait_for_bodies_and_pagination_settle(
     }
 }
 
+pub(super) fn timeline_item_event_id(item: &TimelineItem) -> Option<&str> {
+    match &item.id {
+        TimelineItemId::Event { event_id } => Some(event_id),
+        TimelineItemId::Transaction { .. } | TimelineItemId::Synthetic { .. } => None,
+    }
+}
+
 #[allow(dead_code)]
 pub(super) fn visit_timeline_diff_items(
     diffs: &[TimelineDiff],
@@ -1891,6 +2577,100 @@ pub(super) fn visit_timeline_diff_items(
         }
     }
     Ok(())
+}
+
+/// Wait for a settings update to finish persisting.
+///
+/// The runtime may complete the fast local settings write before publishing a
+/// snapshot, so this waits for the final `Idle` state with the expected display
+/// policy instead of requiring an intermediate `Saving` snapshot.
+pub(super) async fn wait_for_settings_persisted(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    label: &str,
+    expected_url_previews_enabled: bool,
+) -> Result<(), String> {
+    let timeout = Duration::from_secs(10);
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    if settings_snapshot_matches_link_preview_policy(
+        &conn.snapshot(),
+        expected_url_previews_enabled,
+    ) {
+        return Ok(());
+    }
+
+    loop {
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for settings save"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::StateChanged(snapshot)
+                if settings_snapshot_matches_link_preview_policy(
+                    &snapshot,
+                    expected_url_previews_enabled,
+                ) =>
+            {
+                return Ok(());
+            }
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if ev_id == request_id => {
+                return Err(format!("{label}: settings update failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn settings_snapshot_matches_link_preview_policy(
+    snapshot: &AppState,
+    expected_url_previews_enabled: bool,
+) -> bool {
+    snapshot.settings.persistence == SettingsPersistenceState::Idle
+        && snapshot.settings.values.display.url_previews_enabled == expected_url_previews_enabled
+}
+
+pub(super) fn projection_timeline_item(event_id: &str, is_redacted: bool) -> TimelineItem {
+    TimelineItem {
+        request_state: None,
+        id: TimelineItemId::Event {
+            event_id: event_id.to_owned(),
+        },
+        sender: Some("@projection:example.invalid".to_owned()),
+        sender_label: None,
+        sender_avatar: None,
+        body: if is_redacted {
+            None
+        } else {
+            Some("projection body".to_owned())
+        },
+        notice_i18n: None,
+        message_kind: Default::default(),
+        spoiler_spans: Vec::new(),
+        timestamp_ms: None,
+        in_reply_to_event_id: None,
+        formatted: None,
+        reply_quote: None,
+        thread_root: None,
+        thread_summary: None,
+        media: None,
+        link_previews: None,
+        link_ranges: Vec::new(),
+        reactions: Vec::new(),
+        can_react: false,
+        is_redacted,
+        is_hidden: false,
+        can_redact: false,
+        is_edited: false,
+        can_edit: false,
+        actions: TimelineMessageActions::default(),
+        send_state: None,
+        unable_to_decrypt: None,
+    }
 }
 
 #[cfg(test)]

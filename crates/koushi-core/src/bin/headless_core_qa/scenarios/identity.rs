@@ -1,20 +1,24 @@
-use super::cleanup::{
-    cleanup_e2ee_multi_device_participants, cleanup_owned_e2ee_participant_best_effort,
-};
+use super::cleanup::cleanup_e2ee_multi_device_participants;
 use super::diagnostics::{diagnostic_count_field, diagnostic_has_token, diagnostic_token_field};
 use super::event_wait::{
-    QaEventDeadline, QaSnapshotEventSource, find_timeline_item_with_body, start_sync_for_qa,
-    subscribe_timeline_for_qa, wait_for_initial_items,
+    QaEventDeadline, find_timeline_item_with_body, start_sync_for_qa, subscribe_timeline_for_qa,
+    timeline_item_is_decryption_failure, wait_for_initial_items, wait_for_invite_in_snapshot,
     wait_for_item_with_body_or_decryption_failure, wait_for_logged_in, wait_for_logged_out,
     wait_for_operation_failed, wait_for_operation_failed_and_signed_out, wait_for_ready_snapshot,
-    wait_for_send_flow_completion, wait_for_send_flow_completion_with_timeout,
-    wait_for_session_restored, wait_for_sync_started_and_running, wait_for_sync_stopped,
+    wait_for_room_created, wait_for_room_in_room_list, wait_for_send_flow_completion,
+    wait_for_send_flow_completion_with_timeout, wait_for_session_restored,
+    wait_for_sync_started_and_running, wait_for_sync_stopped,
     wait_for_withheld_event_projection_from_source,
+};
+use super::fixtures::{
+    accept_invite_for_qa, assert_room_settings_contains_members, create_room_for_qa,
+    invite_user_for_qa, load_room_settings_for_qa, native_attention_room, private_room_options,
 };
 use super::participants::{
     QaE2eeRecipient, QaOwnedRuntimeParticipant, QaParticipantLoginGate, SasQaOutcome,
-    authenticated_session_info, finish_e2ee_recipient_stage_with_owned_cleanup,
-    login_synced_participant_for_qa, qa_data_dir, verify_provisional_second_device_for_qa,
+    authenticated_session_info, cleanup_owned_e2ee_participant_best_effort,
+    finish_e2ee_recipient_stage_with_owned_cleanup, login_synced_participant_for_qa, qa_data_dir,
+    refresh_device_keys_and_assert_known_for_qa, verify_provisional_second_device_for_qa,
     wait_for_existing_identity_gate, wait_for_locked_snapshot, wait_for_matching_recovery_flow,
     wait_for_recovery_gate,
 };
@@ -23,24 +27,18 @@ use super::registry::{
     E2EE_MULTI_USER_MULTI_DEVICE_BODY, E2EE_SECOND_DEVICE_BODY, ENV_E2EE_RECIPIENT_SECOND_DEVICE,
     EVENT_TIMEOUT, GATE_RESTORE_READY_BUDGET, QA_WRONG_RECOVERY_SECRET, QaConfig, env_flag_enabled,
 };
-use super::scenario_rooms::{
-    accept_invite_for_qa, assert_room_settings_contains_members, create_room_for_qa,
-    invite_user_for_qa, load_room_settings_for_qa, private_room_options,
-    wait_for_invite_in_snapshot, wait_for_room_created, wait_for_room_in_room_list,
-};
 use super::{
-    AccountCommand, AccountEvent, AccountKey, AppCommand, AppState, AuthSecret, CoreCommand,
-    CoreConnection, CoreEvent, CoreFailure, CoreRuntime, CurrentSessionStatusState,
-    CurrentSessionSyncState, DeviceCleanupLocalMode, DeviceCleanupState, Duration, E2eeTrustEvent,
+    AccountCommand, AccountEvent, AccountKey, AppCommand, AuthSecret, CoreCommand, CoreConnection,
+    CoreEvent, CoreFailure, CoreRuntime, CurrentSessionStatusState, CurrentSessionSyncState,
+    DeviceCleanupLocalMode, DeviceCleanupState, Duration, E2eeTrustEvent,
     EncryptionDebugOperationOutcome, IdentityResetAuthRequest, IdentityResetAuthType,
     IdentityResetState, KeyBackupStatus, LocalEncryptionEvent, LocalEncryptionHealth,
     LocalEncryptionState, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionDispatchState, NativeAttentionObservationKind, NativeAttentionProjectionInput,
     NativeAttentionState, NativeAttentionSuppressionReason, RecoveryRequest, RequestId,
-    RoomAttentionKind, RoomCommand, RoomEvent, RoomNotificationMode, RoomSummary, RoomTags,
-    SasEmoji, SessionAuthenticationMethod, SessionInfo, SessionState, SessionStatusRefreshTrigger,
-    SyncCommand, TimelineCommand, TimelineItem, TimelineKey, VerificationFlowState,
-    VerificationTarget, native_attention_state_from_rooms,
+    RoomAttentionKind, RoomCommand, RoomEvent, RoomNotificationMode, SessionAuthenticationMethod,
+    SessionInfo, SessionState, SessionStatusRefreshTrigger, SyncCommand, TimelineCommand,
+    TimelineItem, TimelineKey, VerificationTarget, native_attention_state_from_rooms,
 };
 
 pub(super) async fn run_gate_restore_stage(
@@ -526,7 +524,7 @@ pub(super) async fn run_provisional_device_cleanup_qa(config: &QaConfig) -> Resu
     result
 }
 
-async fn audit_removed_device_absent_from_server(
+pub(super) async fn audit_removed_device_absent_from_server(
     config: &QaConfig,
     removed_device_id: &str,
     replacement_device_id: &str,
@@ -596,7 +594,7 @@ async fn cleanup_qa_auditor_device(
     }
 }
 
-async fn login_until_device_cleanup_offered(
+pub(super) async fn login_until_device_cleanup_offered(
     conn: &mut CoreConnection,
     config: &QaConfig,
     label: &str,
@@ -987,31 +985,6 @@ async fn wait_for_native_attention_state(
             _ => {}
         }
     }
-}
-
-/// Wait for `AccountEvent::LoggedIn` with the given request_id.
-pub(super) fn ready_account_key<S: QaSnapshotEventSource + ?Sized>(conn: &S) -> Option<AccountKey> {
-    match conn.snapshot().session {
-        SessionState::Ready(info) => Some(AccountKey(info.user_id)),
-        _ => None,
-    }
-}
-
-pub(super) fn ensure_session_restored_account_key(
-    actual: &AccountKey,
-    expected: &AccountKey,
-    label: &str,
-) -> Result<(), String> {
-    if actual != expected {
-        return Err(format!("{label}: SessionRestored account_key mismatch"));
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum QaLogoutAccountExpectation<'a> {
-    Exact(&'a AccountKey),
-    Any,
 }
 
 pub(super) async fn run_session_status_stage(conn: &mut CoreConnection) -> Result<(), String> {
@@ -1603,38 +1576,7 @@ fn native_attention_available_capabilities() -> NativeAttentionCapabilities {
     }
 }
 
-pub(super) fn native_attention_room(
-    room_id: &str,
-    display_name: &str,
-    is_dm: bool,
-    unread_count: u64,
-    notification_count: u64,
-    highlight_count: u64,
-) -> RoomSummary {
-    RoomSummary {
-        room_id: room_id.to_owned(),
-        display_name: display_name.to_owned(),
-        display_label: display_name.to_owned(),
-        original_display_label: display_name.to_owned(),
-        avatar: None,
-        is_dm,
-        dm_user_ids: Vec::new(),
-        tags: RoomTags::default(),
-        unread_count,
-        notification_count,
-        highlight_count,
-        marked_unread: false,
-        recency_stamp: None,
-        conversation_activity: None,
-        latest_event: None,
-        parent_space_ids: Vec::new(),
-        dm_space_ids: Vec::new(),
-        is_encrypted: false,
-        joined_members: 0,
-    }
-}
-
-async fn seed_encrypted_room_key_for_qa(
+pub(super) async fn seed_encrypted_room_key_for_qa(
     conn: &mut CoreConnection,
     account_key: &AccountKey,
     label: &str,
@@ -1688,7 +1630,7 @@ async fn seed_encrypted_room_key_for_qa(
     Ok(room_id)
 }
 
-async fn enable_key_backup_for_qa(
+pub(super) async fn enable_key_backup_for_qa(
     conn: &mut CoreConnection,
     account_key: &AccountKey,
     passphrase: Option<AuthSecret>,
@@ -2142,7 +2084,7 @@ fn identity_reset_observation(
     }
 }
 
-async fn verify_second_device_room_key_delivery_for_qa(
+pub(super) async fn verify_second_device_room_key_delivery_for_qa(
     conn_a: &mut CoreConnection,
     conn_a2: &mut CoreConnection,
     account_key_a: &AccountKey,
@@ -2211,7 +2153,7 @@ async fn verify_second_device_room_key_delivery_for_qa(
     Ok(())
 }
 
-async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
+pub(super) async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
     conn_a2: &mut CoreConnection,
@@ -2558,30 +2500,6 @@ async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
     .await
 }
 
-pub(super) async fn refresh_device_keys_and_assert_known_for_qa(
-    conn: &mut CoreConnection,
-    target: VerificationTarget,
-    label: &str,
-) -> Result<(), String> {
-    let (acknowledged, ack) = tokio::sync::oneshot::channel();
-    let request_id = conn.next_request_id();
-    conn.command(CoreCommand::Account(
-        AccountCommand::QaRefreshDeviceKeysAndAssertKnown {
-            request_id,
-            target,
-            acknowledged,
-        },
-    ))
-    .await
-    .map_err(|_| format!("{label}: submit device-key refresh checkpoint failed"))?;
-
-    tokio::time::timeout(E2EE_EVENT_TIMEOUT, ack)
-        .await
-        .map_err(|_| format!("{label}: timed out waiting for device-key refresh checkpoint"))?
-        .map_err(|_| format!("{label}: device-key refresh checkpoint closed"))?
-        .map_err(|_| format!("{label}: exact device was not known after key refresh"))
-}
-
 fn assert_no_decryption_failure_items(items: &[TimelineItem], label: &str) -> Result<(), String> {
     if items.iter().any(timeline_item_is_decryption_failure) {
         return Err(format!(
@@ -2589,212 +2507,6 @@ fn assert_no_decryption_failure_items(items: &[TimelineItem], label: &str) -> Re
         ));
     }
     Ok(())
-}
-
-pub(super) fn timeline_item_is_decryption_failure(item: &TimelineItem) -> bool {
-    item.unable_to_decrypt.is_some()
-        || item
-            .body
-            .as_ref()
-            .map(|body| body.contains("Unable to decrypt"))
-            .unwrap_or(false)
-}
-
-pub(super) fn ensure_incoming_verification_receiver_sync_not_stopped(
-    sync: &koushi_state::SyncState,
-    label: &str,
-) -> Result<(), String> {
-    if matches!(sync, koushi_state::SyncState::Stopped) {
-        Err(format!(
-            "{label}: receiver sync is stopped; cannot await an incoming verification request"
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-pub(super) async fn wait_for_verification_requested_event_only(
-    conn: &mut CoreConnection,
-    expected_target: Option<&VerificationTarget>,
-    excluded_flow_id: Option<u64>,
-    label: &str,
-) -> Result<u64, String> {
-    ensure_incoming_verification_receiver_sync_not_stopped(&conn.snapshot().sync, label)?;
-    let deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
-
-    loop {
-        if let Some(flow_id) = requested_verification_flow_id(
-            &conn.snapshot().e2ee_trust.verification,
-            expected_target,
-            excluded_flow_id,
-        )? {
-            return Ok(flow_id);
-        }
-
-        let event = tokio::time::timeout_at(deadline, conn.recv_event())
-            .await
-            .map_err(|_| format!("{label}: timed out waiting for incoming verification request"))?
-            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-        match event {
-            CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. })
-            | CoreEvent::StateChanged(AppState {
-                e2ee_trust:
-                    koushi_state::E2eeTrustState {
-                        verification: state,
-                        ..
-                    },
-                ..
-            }) => {
-                if let Some(flow_id) =
-                    requested_verification_flow_id(&state, expected_target, excluded_flow_id)?
-                {
-                    return Ok(flow_id);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-pub(super) fn requested_verification_flow_id(
-    state: &VerificationFlowState,
-    expected_target: Option<&VerificationTarget>,
-    excluded_flow_id: Option<u64>,
-) -> Result<Option<u64>, String> {
-    if verification_state_flow_id(state).is_some_and(|flow_id| Some(flow_id) == excluded_flow_id) {
-        return Ok(None);
-    }
-    if !verification_state_matches_target(state, expected_target) {
-        return Ok(None);
-    }
-
-    match state {
-        VerificationFlowState::Requested { request_id, .. }
-        | VerificationFlowState::Accepted { request_id, .. }
-        | VerificationFlowState::SasPresented { request_id, .. }
-        | VerificationFlowState::Confirming { request_id, .. }
-        | VerificationFlowState::Done { request_id, .. } => Ok(Some(*request_id)),
-        VerificationFlowState::Failed { kind, .. } => Err(format!(
-            "verification request failed before acceptance: {kind:?}"
-        )),
-        VerificationFlowState::Idle => Ok(None),
-    }
-}
-
-pub(super) async fn wait_for_verification_accepted(
-    conn: &mut CoreConnection,
-    flow_id: u64,
-    command_request_id: Option<RequestId>,
-    label: &str,
-) -> Result<(), String> {
-    if verification_state_is_at_least_accepted(&conn.snapshot().e2ee_trust.verification, flow_id)? {
-        return Ok(());
-    }
-
-    let deadline = QaEventDeadline::after(E2EE_EVENT_TIMEOUT);
-    loop {
-        let event = deadline
-            .recv(conn)
-            .await
-            .map_err(|_| format!("{label}: timed out waiting for verification acceptance"))?
-            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-
-        match event {
-            CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. })
-            | CoreEvent::StateChanged(AppState {
-                e2ee_trust:
-                    koushi_state::E2eeTrustState {
-                        verification: state,
-                        ..
-                    },
-                ..
-            }) => {
-                if verification_state_is_at_least_accepted(&state, flow_id)? {
-                    return Ok(());
-                }
-            }
-            CoreEvent::OperationFailed {
-                request_id: ev_id,
-                failure,
-            } if command_request_id == Some(ev_id) => {
-                return Err(format!("{label} failed: {failure:?}"));
-            }
-            _ => {}
-        }
-    }
-}
-
-fn verification_state_is_at_least_accepted(
-    state: &VerificationFlowState,
-    flow_id: u64,
-) -> Result<bool, String> {
-    if verification_state_flow_id(state) != Some(flow_id) {
-        return Ok(false);
-    }
-    match state {
-        VerificationFlowState::Accepted { .. }
-        | VerificationFlowState::SasPresented { .. }
-        | VerificationFlowState::Confirming { .. }
-        | VerificationFlowState::Done { .. } => Ok(true),
-        VerificationFlowState::Failed { kind, .. } => {
-            Err(format!("verification failed before acceptance: {kind:?}"))
-        }
-        VerificationFlowState::Idle | VerificationFlowState::Requested { .. } => Ok(false),
-    }
-}
-
-pub(super) fn verification_state_sas(
-    state: &VerificationFlowState,
-    flow_id: u64,
-    label: &str,
-) -> Result<Option<Vec<SasEmoji>>, String> {
-    if verification_state_flow_id(state) != Some(flow_id) {
-        return Ok(None);
-    }
-    match state {
-        VerificationFlowState::SasPresented { emojis, .. }
-        | VerificationFlowState::Confirming { emojis, .. } => Ok(Some(emojis.clone())),
-        VerificationFlowState::Done { .. } => Err(format!(
-            "{label}: verification completed before SAS was observed"
-        )),
-        VerificationFlowState::Failed { kind, .. } => {
-            Err(format!("{label}: verification failed before SAS: {kind:?}"))
-        }
-        VerificationFlowState::Idle
-        | VerificationFlowState::Requested { .. }
-        | VerificationFlowState::Accepted { .. } => Ok(None),
-    }
-}
-
-pub(super) fn verification_state_flow_id(state: &VerificationFlowState) -> Option<u64> {
-    match state {
-        VerificationFlowState::Idle => None,
-        VerificationFlowState::Requested { request_id, .. }
-        | VerificationFlowState::Accepted { request_id, .. }
-        | VerificationFlowState::SasPresented { request_id, .. }
-        | VerificationFlowState::Confirming { request_id, .. }
-        | VerificationFlowState::Done { request_id, .. }
-        | VerificationFlowState::Failed { request_id, .. } => Some(*request_id),
-    }
-}
-
-fn verification_state_target(state: &VerificationFlowState) -> Option<&VerificationTarget> {
-    match state {
-        VerificationFlowState::Idle => None,
-        VerificationFlowState::Requested { target, .. }
-        | VerificationFlowState::Accepted { target, .. }
-        | VerificationFlowState::SasPresented { target, .. }
-        | VerificationFlowState::Confirming { target, .. }
-        | VerificationFlowState::Done { target, .. }
-        | VerificationFlowState::Failed { target, .. } => Some(target),
-    }
-}
-
-fn verification_state_matches_target(
-    state: &VerificationFlowState,
-    expected_target: Option<&VerificationTarget>,
-) -> bool {
-    expected_target.is_none_or(|target| verification_state_target(state) == Some(target))
 }
 
 #[cfg(test)]

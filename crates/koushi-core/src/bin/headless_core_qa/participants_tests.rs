@@ -1,6 +1,8 @@
-use super::{SecondarySasObservation, after_receiver_device_known, observe_secondary_sas};
+use super::{
+    SecondarySasObservation, after_receiver_device_known, observe_secondary_sas,
+    requested_verification_flow_id,
+};
 use crate::registry::{QaScenario, should_run_normal_secondary_participant};
-use crate::scenario_identity::requested_verification_flow_id;
 use crate::{
     Arc, AtomicUsize, Ordering, SessionInfo, SessionState, VerificationFlowState,
     VerificationTarget,

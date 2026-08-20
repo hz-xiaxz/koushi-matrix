@@ -4528,6 +4528,7 @@ fn test_only() {
       "crates/koushi-core/src/bin/headless_core_qa/registry.rs",
       "crates/koushi-core/src/bin/headless_core_qa/event_wait.rs",
       "crates/koushi-core/src/bin/headless_core_qa/participants.rs",
+      "crates/koushi-core/src/bin/headless_core_qa/fixtures.rs",
       "crates/koushi-core/src/bin/headless_core_qa/cleanup.rs",
       "crates/koushi-core/src/bin/headless_core_qa/diagnostics.rs",
       "crates/koushi-core/src/bin/headless_core_qa/orchestrator.rs",

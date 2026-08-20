@@ -92,6 +92,8 @@ mod cleanup;
 mod diagnostics;
 #[path = "headless_core_qa/event_wait.rs"]
 mod event_wait;
+#[path = "headless_core_qa/fixtures.rs"]
+mod fixtures;
 #[path = "headless_core_qa/orchestrator.rs"]
 mod orchestrator;
 #[path = "headless_core_qa/participants.rs"]

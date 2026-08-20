@@ -1,21 +1,17 @@
-use super::cleanup::cleanup_owned_e2ee_participant_best_effort;
 use super::diagnostics::{
     gate_session_phase, session_gate_closed_summary, verification_closed_summary,
-    verification_event_stream_error,
+    verification_event_stream_error, verification_state_flow_id,
 };
 use super::event_wait::{
     PairedEventWaitError, QaEventDeadline, start_sync_for_qa, wait_for_logged_in,
-    wait_for_paired_event_until, wait_for_ready_snapshot,
+    wait_for_logged_out, wait_for_paired_event_until, wait_for_ready_snapshot,
+    wait_for_signed_out_after_logout, wait_for_sync_stopped,
 };
 use super::registry::{E2EE_EVENT_TIMEOUT, EVENT_TIMEOUT};
-use super::scenario_identity::{
-    refresh_device_keys_and_assert_known_for_qa, verification_state_flow_id,
-    verification_state_sas, wait_for_verification_accepted,
-    wait_for_verification_requested_event_only,
-};
 use super::{
-    AccountCommand, AccountKey, AuthSecret, CoreCommand, CoreConnection, CoreEvent, CoreRuntime,
-    Duration, Future, RecoveryRequest, SessionInfo, SessionState, VerificationTarget,
+    AccountCommand, AccountKey, AppState, AuthSecret, CoreCommand, CoreConnection, CoreEvent,
+    CoreRuntime, Duration, E2eeTrustEvent, Future, RecoveryRequest, RequestId, SasEmoji,
+    SessionInfo, SessionState, SyncCommand, VerificationFlowState, VerificationTarget,
 };
 
 pub(super) async fn complete_new_identity_gate_for_qa(
@@ -533,6 +529,30 @@ pub(super) fn authenticated_session_info_from_state(
     }
 }
 
+pub(super) async fn refresh_device_keys_and_assert_known_for_qa(
+    conn: &mut CoreConnection,
+    target: VerificationTarget,
+    label: &str,
+) -> Result<(), String> {
+    let (acknowledged, ack) = tokio::sync::oneshot::channel();
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::Account(
+        AccountCommand::QaRefreshDeviceKeysAndAssertKnown {
+            request_id,
+            target,
+            acknowledged,
+        },
+    ))
+    .await
+    .map_err(|_| format!("{label}: submit device-key refresh checkpoint failed"))?;
+
+    tokio::time::timeout(E2EE_EVENT_TIMEOUT, ack)
+        .await
+        .map_err(|_| format!("{label}: timed out waiting for device-key refresh checkpoint"))?
+        .map_err(|_| format!("{label}: device-key refresh checkpoint closed"))?
+        .map_err(|_| format!("{label}: exact device was not known after key refresh"))
+}
+
 pub(super) enum QaParticipantLoginGate<'a> {
     BootstrapNewIdentity,
     RecoverExistingIdentity(&'a AuthSecret),
@@ -800,6 +820,179 @@ pub(super) async fn login_synced_participant_for_qa(
     })
 }
 
+pub(super) fn ensure_incoming_verification_receiver_sync_not_stopped(
+    sync: &koushi_state::SyncState,
+    label: &str,
+) -> Result<(), String> {
+    if matches!(sync, koushi_state::SyncState::Stopped) {
+        Err(format!(
+            "{label}: receiver sync is stopped; cannot await an incoming verification request"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+pub(super) async fn wait_for_verification_requested_event_only(
+    conn: &mut CoreConnection,
+    expected_target: Option<&VerificationTarget>,
+    excluded_flow_id: Option<u64>,
+    label: &str,
+) -> Result<u64, String> {
+    ensure_incoming_verification_receiver_sync_not_stopped(&conn.snapshot().sync, label)?;
+    let deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
+
+    loop {
+        if let Some(flow_id) = requested_verification_flow_id(
+            &conn.snapshot().e2ee_trust.verification,
+            expected_target,
+            excluded_flow_id,
+        )? {
+            return Ok(flow_id);
+        }
+
+        let event = tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for incoming verification request"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+        match event {
+            CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. })
+            | CoreEvent::StateChanged(AppState {
+                e2ee_trust:
+                    koushi_state::E2eeTrustState {
+                        verification: state,
+                        ..
+                    },
+                ..
+            }) => {
+                if let Some(flow_id) =
+                    requested_verification_flow_id(&state, expected_target, excluded_flow_id)?
+                {
+                    return Ok(flow_id);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(super) fn requested_verification_flow_id(
+    state: &VerificationFlowState,
+    expected_target: Option<&VerificationTarget>,
+    excluded_flow_id: Option<u64>,
+) -> Result<Option<u64>, String> {
+    if verification_state_flow_id(state).is_some_and(|flow_id| Some(flow_id) == excluded_flow_id) {
+        return Ok(None);
+    }
+    if !verification_state_matches_target(state, expected_target) {
+        return Ok(None);
+    }
+
+    match state {
+        VerificationFlowState::Requested { request_id, .. }
+        | VerificationFlowState::Accepted { request_id, .. }
+        | VerificationFlowState::SasPresented { request_id, .. }
+        | VerificationFlowState::Confirming { request_id, .. }
+        | VerificationFlowState::Done { request_id, .. } => Ok(Some(*request_id)),
+        VerificationFlowState::Failed { kind, .. } => Err(format!(
+            "verification request failed before acceptance: {kind:?}"
+        )),
+        VerificationFlowState::Idle => Ok(None),
+    }
+}
+
+pub(super) async fn wait_for_verification_accepted(
+    conn: &mut CoreConnection,
+    flow_id: u64,
+    command_request_id: Option<RequestId>,
+    label: &str,
+) -> Result<(), String> {
+    if verification_state_is_at_least_accepted(&conn.snapshot().e2ee_trust.verification, flow_id)? {
+        return Ok(());
+    }
+
+    let deadline = QaEventDeadline::after(E2EE_EVENT_TIMEOUT);
+    loop {
+        let event = deadline
+            .recv(conn)
+            .await
+            .map_err(|_| format!("{label}: timed out waiting for verification acceptance"))?
+            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
+
+        match event {
+            CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. })
+            | CoreEvent::StateChanged(AppState {
+                e2ee_trust:
+                    koushi_state::E2eeTrustState {
+                        verification: state,
+                        ..
+                    },
+                ..
+            }) => {
+                if verification_state_is_at_least_accepted(&state, flow_id)? {
+                    return Ok(());
+                }
+            }
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } if command_request_id == Some(ev_id) => {
+                return Err(format!("{label} failed: {failure:?}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(super) fn verification_state_is_at_least_accepted(
+    state: &VerificationFlowState,
+    flow_id: u64,
+) -> Result<bool, String> {
+    if verification_state_flow_id(state) != Some(flow_id) {
+        return Ok(false);
+    }
+    match state {
+        VerificationFlowState::Accepted { .. }
+        | VerificationFlowState::SasPresented { .. }
+        | VerificationFlowState::Confirming { .. }
+        | VerificationFlowState::Done { .. } => Ok(true),
+        VerificationFlowState::Failed { kind, .. } => {
+            Err(format!("verification failed before acceptance: {kind:?}"))
+        }
+        VerificationFlowState::Idle | VerificationFlowState::Requested { .. } => Ok(false),
+    }
+}
+
+fn verification_state_sas(
+    state: &VerificationFlowState,
+    flow_id: u64,
+    label: &str,
+) -> Result<Option<Vec<SasEmoji>>, String> {
+    if verification_state_flow_id(state) != Some(flow_id) {
+        return Ok(None);
+    }
+    match state {
+        VerificationFlowState::SasPresented { emojis, .. }
+        | VerificationFlowState::Confirming { emojis, .. } => Ok(Some(emojis.clone())),
+        VerificationFlowState::Done { .. } => Err(format!(
+            "{label}: verification completed before SAS was observed"
+        )),
+        VerificationFlowState::Failed { kind, .. } => {
+            Err(format!("{label}: verification failed before SAS: {kind:?}"))
+        }
+        VerificationFlowState::Idle
+        | VerificationFlowState::Requested { .. }
+        | VerificationFlowState::Accepted { .. } => Ok(None),
+    }
+}
+
+fn verification_state_matches_target(
+    state: &VerificationFlowState,
+    expected_target: Option<&VerificationTarget>,
+) -> bool {
+    expected_target.is_none_or(|target| verification_state_target(state) == Some(target))
+}
+
 /// Data directory for QA runs.
 pub(super) fn qa_data_dir(suffix: &str) -> std::path::PathBuf {
     if let Ok(dir) = std::env::var("KOUSHI_QA_DATA_DIR") {
@@ -813,3 +1006,187 @@ pub(super) fn qa_data_dir(suffix: &str) -> std::path::PathBuf {
 #[cfg(test)]
 #[path = "participants_tests.rs"]
 mod tests;
+
+fn verification_state_target(state: &VerificationFlowState) -> Option<&VerificationTarget> {
+    match state {
+        VerificationFlowState::Idle => None,
+        VerificationFlowState::Requested { target, .. }
+        | VerificationFlowState::Accepted { target, .. }
+        | VerificationFlowState::SasPresented { target, .. }
+        | VerificationFlowState::Confirming { target, .. }
+        | VerificationFlowState::Done { target, .. }
+        | VerificationFlowState::Failed { target, .. } => Some(target),
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum QaE2eeLogoutBarrier {
+    AnyAccount,
+    Exact(AccountKey),
+}
+
+fn e2ee_cleanup_logout_barrier(phase: &QaOwnedRuntimePhase) -> Option<QaE2eeLogoutBarrier> {
+    match phase {
+        QaOwnedRuntimePhase::LoginNotSubmitted => None,
+        // Login was submitted, but ownership has not advanced through the
+        // authoritative LoggedIn gate. Do not infer an exact account key from
+        // a provisional snapshot.
+        QaOwnedRuntimePhase::LoginSubmitted => Some(QaE2eeLogoutBarrier::AnyAccount),
+        QaOwnedRuntimePhase::LoggedIn(account_key) => {
+            Some(QaE2eeLogoutBarrier::Exact(account_key.clone()))
+        }
+    }
+}
+
+pub(super) trait QaOwnedE2eeCleanupOperations {
+    async fn stop_sync(&mut self, label: &str) -> Result<(), String>;
+    async fn submit_logout(
+        &mut self,
+        barrier: &QaE2eeLogoutBarrier,
+        label: &str,
+    ) -> Result<(), String>;
+    async fn wait_for_authoritative_logout(
+        &mut self,
+        barrier: &QaE2eeLogoutBarrier,
+        label: &str,
+    ) -> Result<(), String>;
+    fn drop_connection(&mut self);
+    async fn shutdown_runtime(&mut self);
+}
+
+struct QaCoreOwnedE2eeCleanupOperations {
+    runtime: Option<CoreRuntime>,
+    conn: Option<CoreConnection>,
+    logout_request_id: Option<koushi_core::ids::RequestId>,
+}
+
+impl QaCoreOwnedE2eeCleanupOperations {
+    fn new(runtime: CoreRuntime, conn: CoreConnection) -> Self {
+        Self {
+            runtime: Some(runtime),
+            conn: Some(conn),
+            logout_request_id: None,
+        }
+    }
+
+    fn connection(&mut self) -> &mut CoreConnection {
+        self.conn
+            .as_mut()
+            .expect("owned E2EE cleanup connection is available before its drop barrier")
+    }
+}
+
+impl QaOwnedE2eeCleanupOperations for QaCoreOwnedE2eeCleanupOperations {
+    async fn stop_sync(&mut self, label: &str) -> Result<(), String> {
+        let conn = self.connection();
+        let sync_stop_id = conn.next_request_id();
+        match conn
+            .command(CoreCommand::Sync(SyncCommand::Stop {
+                request_id: sync_stop_id,
+            }))
+            .await
+        {
+            Ok(()) => wait_for_sync_stopped(conn, sync_stop_id, label).await,
+            Err(_) => Err(format!("{label}: submit sync stop failed")),
+        }
+    }
+
+    async fn submit_logout(
+        &mut self,
+        _barrier: &QaE2eeLogoutBarrier,
+        label: &str,
+    ) -> Result<(), String> {
+        let conn = self.connection();
+        let logout_request_id = conn.next_request_id();
+        conn.command(CoreCommand::Account(AccountCommand::Logout {
+            request_id: logout_request_id,
+        }))
+        .await
+        .map_err(|_| format!("{label}: submit logout failed"))?;
+        self.logout_request_id = Some(logout_request_id);
+        Ok(())
+    }
+
+    async fn wait_for_authoritative_logout(
+        &mut self,
+        barrier: &QaE2eeLogoutBarrier,
+        label: &str,
+    ) -> Result<(), String> {
+        let logout_request_id = self
+            .logout_request_id
+            .take()
+            .expect("logout submission precedes its authoritative cleanup barrier");
+        let conn = self.connection();
+        match barrier {
+            QaE2eeLogoutBarrier::AnyAccount => {
+                wait_for_signed_out_after_logout(conn, logout_request_id, label).await
+            }
+            QaE2eeLogoutBarrier::Exact(account_key) => {
+                wait_for_logged_out(conn, logout_request_id, account_key, label).await
+            }
+        }
+    }
+
+    fn drop_connection(&mut self) {
+        drop(self.conn.take());
+    }
+
+    async fn shutdown_runtime(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown().await;
+        }
+    }
+}
+
+pub(super) async fn cleanup_owned_e2ee_lifecycle_best_effort<Operations>(
+    phase: &QaOwnedRuntimePhase,
+    operations: &mut Operations,
+    label: &str,
+) -> Result<(), String>
+where
+    Operations: QaOwnedE2eeCleanupOperations,
+{
+    let sync_stop_result = if matches!(phase, QaOwnedRuntimePhase::LoggedIn(_)) {
+        operations.stop_sync(label).await
+    } else {
+        Ok(())
+    };
+
+    // Logout is attempted even if stopping sync failed. Connection drop and
+    // ordered runtime shutdown remain the final barriers in every phase.
+    let logout_result = if let Some(barrier) = e2ee_cleanup_logout_barrier(phase) {
+        match operations.submit_logout(&barrier, label).await {
+            Ok(()) => {
+                operations
+                    .wait_for_authoritative_logout(&barrier, label)
+                    .await
+            }
+            Err(error) => Err(error),
+        }
+    } else {
+        Ok(())
+    };
+
+    operations.drop_connection();
+    operations.shutdown_runtime().await;
+
+    match (sync_stop_result, logout_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(_), Ok(())) => Err(format!("{label}: sync stop cleanup failed")),
+        (Ok(()), Err(_)) => Err(format!("{label}: logout cleanup failed")),
+        (Err(_), Err(_)) => Err(format!("{label}: sync stop and logout cleanup failed")),
+    }
+}
+
+pub(super) async fn cleanup_owned_e2ee_participant_best_effort(
+    participant: QaOwnedRuntimeParticipant,
+    label: &str,
+) -> Result<(), String> {
+    let QaOwnedRuntimeParticipant {
+        runtime,
+        conn,
+        phase,
+    } = participant;
+    let mut operations = QaCoreOwnedE2eeCleanupOperations::new(runtime, conn);
+    cleanup_owned_e2ee_lifecycle_best_effort(&phase, &mut operations, label).await
+}

@@ -3,16 +3,24 @@ use super::diagnostics::{QaCannedTimelineEvent, QaTcpProxy};
 use super::event_wait::{
     QaEventDeadline, SendQueueLocalEcho, cancel_send_queue_item, find_timeline_item_with_body,
     retry_send_queue_item, send_text_expect_local_echo, start_sync_for_qa, stop_sync_for_qa,
-    subscribe_timeline_for_qa, timeline_item_body_matches, timeline_item_transaction_id,
-    visit_timeline_diff_items, wait_for_event_item_with_body,
-    wait_for_event_item_with_body_or_retry_not_sent, wait_for_initial_items,
-    wait_for_item_with_body, wait_for_item_with_body_or_decryption_failure,
-    wait_for_link_preview_item_projection, wait_for_logged_in, wait_for_logged_out,
-    wait_for_media_download_completed, wait_for_media_item, wait_for_media_send_flow_completion,
-    wait_for_ready_snapshot, wait_for_send_completed, wait_for_send_flow_completion,
-    wait_for_session_restored, wait_for_sync_reconnecting, wait_for_sync_running_after_reconnect,
-    wait_for_sync_started, wait_for_sync_started_and_running, wait_for_sync_stopped,
-    wait_for_timeline_send_state,
+    subscribe_timeline_for_qa, timeline_item_body_matches, timeline_item_event_id,
+    timeline_item_is_decryption_failure, timeline_item_transaction_id, visit_timeline_diff_items,
+    wait_for_dm_room_in_room_list, wait_for_encrypted_room_projection_for_qa,
+    wait_for_event_item_with_body, wait_for_event_item_with_body_or_retry_not_sent,
+    wait_for_initial_items, wait_for_invite_in_snapshot, wait_for_item_with_body,
+    wait_for_item_with_body_or_decryption_failure, wait_for_link_preview_item_projection,
+    wait_for_logged_in, wait_for_logged_out, wait_for_media_download_completed,
+    wait_for_media_item, wait_for_media_send_flow_completion, wait_for_ready_snapshot,
+    wait_for_room_in_room_list, wait_for_send_completed, wait_for_send_flow_completion,
+    wait_for_session_restored, wait_for_settings_persisted, wait_for_space_child_projection,
+    wait_for_space_in_space_list, wait_for_sync_reconnecting,
+    wait_for_sync_running_after_reconnect, wait_for_sync_started,
+    wait_for_sync_started_and_running, wait_for_sync_stopped, wait_for_timeline_send_state,
+};
+use super::fixtures::{
+    accept_invite_for_qa, create_room_for_qa, create_space_for_qa, invite_user_for_qa,
+    native_attention_room, select_space_and_wait_for_room_scope, set_space_child_for_qa,
+    start_direct_message_for_qa,
 };
 use super::participants::{
     QaParticipantLoginGate, QaParticipantLoginOutcome, authenticated_session_info,
@@ -27,15 +35,6 @@ use super::registry::{
     TIMELINE_RECONNECT_PAGINATE_EVENT_COUNT, TIMELINE_UNSUBSCRIBE_SETTLE_TIMEOUT,
     TimelineStressConfig,
 };
-use super::scenario_identity::{native_attention_room, timeline_item_is_decryption_failure};
-use super::scenario_rooms::{
-    accept_invite_for_qa, create_room_for_qa, create_space_for_qa, invite_user_for_qa,
-    select_space_and_wait_for_room_scope, set_space_child_for_qa, start_direct_message_for_qa,
-    wait_for_dm_room_in_room_list, wait_for_encrypted_room_projection_for_qa,
-    wait_for_invite_in_snapshot, wait_for_room_in_room_list, wait_for_space_child_projection,
-    wait_for_space_in_space_list,
-};
-use super::scenario_search::wait_for_settings_persisted;
 use super::{
     AccountCommand, AccountKey, ActivityEvent, ActivityMarkReadTarget, ActivityRowKind,
     ActivityState, AppAction, AppCommand, AppState, AuthSecret, BTreeSet, ComposerDocument,
@@ -536,7 +535,7 @@ fn count_visible_payload_event_rows_in_diffs(diffs: &[TimelineDiff]) -> usize {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct StressRoomCoordinates {
+pub(super) struct StressRoomCoordinates {
     sender_prefix: &'static str,
     space_index: usize,
     room_index: usize,
@@ -548,7 +547,7 @@ impl StressRoomCoordinates {
     }
 }
 
-async fn run_timeline_stress_room_messages(
+pub(super) async fn run_timeline_stress_room_messages(
     config: &QaConfig,
     sender_conn: &mut CoreConnection,
     receiver_conn: &mut CoreConnection,
@@ -1999,7 +1998,7 @@ pub(super) fn assert_zero_display_projection_reset_fallback_delta(
     }
 }
 
-async fn unsubscribe_timeline_for_qa(
+pub(super) async fn unsubscribe_timeline_for_qa(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     label: &str,
@@ -2019,7 +2018,7 @@ pub(super) async fn run_timeline_reconnect_scenario(config: &QaConfig) -> Result
     run_timeline_reconnect_scenario_impl(config).await
 }
 
-async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), String> {
+pub(super) async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), String> {
     // The public scenario selector exercises the single live reconnect path.
     // The dormant persisted-gap fixture remains below for its separate
     // timeline continuity assertions.
@@ -2723,7 +2722,7 @@ async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> Result<(), S
     Ok(())
 }
 
-fn timeline_gap_count_for_qa(conn: &CoreConnection) -> u32 {
+pub(super) fn timeline_gap_count_for_qa(conn: &CoreConnection) -> u32 {
     match conn.snapshot().timeline.continuity {
         koushi_state::TimelineContinuityState::Inspecting {
             known_gap_count, ..
@@ -3302,7 +3301,7 @@ pub(super) async fn run_activity_stage(
     Ok(())
 }
 
-async fn subscribe_and_ack_active_timeline_projection_for_qa(
+pub(super) async fn subscribe_and_ack_active_timeline_projection_for_qa(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     label: &str,
@@ -3392,7 +3391,7 @@ fn observe_send_queue_retry_item_state(
     }
 }
 
-async fn wait_for_send_completions_in_order(
+pub(super) async fn wait_for_send_completions_in_order(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     retry_request_id: RequestId,
@@ -3489,7 +3488,7 @@ async fn wait_for_send_completions_in_order(
     }
 }
 
-async fn wait_for_cancelled_or_removed_send(
+pub(super) async fn wait_for_cancelled_or_removed_send(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     cancel_request_id: RequestId,
@@ -4975,68 +4974,6 @@ async fn wait_for_exact_items_and_gap_release(
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum WithheldEventProjectionOrigin {
-    InitialItems,
-    ItemsUpdated,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum WithheldEventTargetOutcome {
-    Missing,
-    DecryptionFailure,
-    NonFailure {
-        has_body: bool,
-        has_typed_decryption_failure: bool,
-        matches_expected_body: bool,
-    },
-}
-
-pub(super) fn withheld_event_target_outcome(
-    items: &[TimelineItem],
-    target_event_id: &str,
-    expected_body: &str,
-) -> WithheldEventTargetOutcome {
-    let Some(item) = items
-        .iter()
-        .find(|item| timeline_item_event_id(item) == Some(target_event_id))
-    else {
-        return WithheldEventTargetOutcome::Missing;
-    };
-    if timeline_item_is_decryption_failure(item) {
-        WithheldEventTargetOutcome::DecryptionFailure
-    } else {
-        WithheldEventTargetOutcome::NonFailure {
-            has_body: item.body.is_some(),
-            has_typed_decryption_failure: item.unable_to_decrypt.is_some(),
-            matches_expected_body: timeline_item_body_matches(item, expected_body),
-        }
-    }
-}
-
-pub(super) fn withheld_event_target_outcome_in_diffs(
-    diffs: &[TimelineDiff],
-    target_event_id: &str,
-    expected_body: &str,
-) -> Result<WithheldEventTargetOutcome, String> {
-    let mut outcome = WithheldEventTargetOutcome::Missing;
-    visit_timeline_diff_items(diffs, |item| {
-        if timeline_item_event_id(item) == Some(target_event_id) {
-            outcome = if timeline_item_is_decryption_failure(item) {
-                WithheldEventTargetOutcome::DecryptionFailure
-            } else {
-                WithheldEventTargetOutcome::NonFailure {
-                    has_body: item.body.is_some(),
-                    has_typed_decryption_failure: item.unable_to_decrypt.is_some(),
-                    matches_expected_body: timeline_item_body_matches(item, expected_body),
-                }
-            };
-        }
-        Ok(())
-    })?;
-    Ok(outcome)
-}
-
 fn timeline_item_has_visible_payload(item: &TimelineItem) -> bool {
     item.body
         .as_ref()
@@ -5082,7 +5019,7 @@ fn retain_unseen_expected_bodies(items: &[TimelineItem], remaining: &mut Vec<Str
     }
 }
 
-async fn wait_for_stress_bodies_and_no_blank_rows(
+pub(super) async fn wait_for_stress_bodies_and_no_blank_rows(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     initial_items: &[TimelineItem],
@@ -5172,7 +5109,7 @@ async fn wait_for_stress_bodies_and_no_blank_rows(
     }
 }
 
-async fn submit_stress_backfill_paginate(
+pub(super) async fn submit_stress_backfill_paginate(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     page_size: u16,
@@ -5341,13 +5278,6 @@ fn timeline_item_body_contains(item: &TimelineItem, expected_body: &str) -> bool
         .as_ref()
         .map(|body| body.contains(expected_body))
         .unwrap_or(false)
-}
-
-fn timeline_item_event_id(item: &TimelineItem) -> Option<&str> {
-    match &item.id {
-        TimelineItemId::Event { event_id } => Some(event_id),
-        TimelineItemId::Transaction { .. } | TimelineItemId::Synthetic { .. } => None,
-    }
 }
 
 fn timeline_item_has_thread_summary_reply(item: &TimelineItem, root_event_id: &str) -> bool {

@@ -9,12 +9,11 @@ use crate::contracts::{
     reconnect_test_bodies, reconnect_test_items, reconnect_test_request, synthetic_timeline_item,
 };
 use crate::diagnostics::QaCannedMessagesPage;
-use crate::event_wait::find_timeline_item_with_body;
+use crate::event_wait::{find_timeline_item_with_body, projection_timeline_item};
 use crate::registry::{
     QaScenario, QaStage, TIMELINE_RECONNECT_EXPECTED_BODY_COUNT, final_tokens_for_scenario,
     stages_for_scenario,
 };
-use crate::scenario_search::projection_timeline_item;
 use crate::{
     PaginationState, TimelineDiff, TimelineGapId, TimelineGapPosition, TimelineItemId,
     TimelineMessageActions,

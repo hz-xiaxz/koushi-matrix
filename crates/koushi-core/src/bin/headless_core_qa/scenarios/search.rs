@@ -1,9 +1,9 @@
+use super::event_wait::projection_timeline_item;
 use super::{
     AccountKey, AppCommand, AppState, CoreCommand, CoreConnection, CoreEvent, DisplaySettings,
     Duration, PaginationDirection, PaginationState, RequestId, SearchCommand,
     SearchCrawlerFailureKind, SearchCrawlerRoomState, SearchCrawlerSettings, SearchCrawlerSpeed,
-    SearchEvent, SearchScope, SettingsPatch, SettingsPersistenceState, TimelineCommand,
-    TimelineEvent, TimelineItem, TimelineItemId, TimelineKey, TimelineMessageActions,
+    SearchEvent, SearchScope, SettingsPatch, TimelineCommand, TimelineEvent, TimelineKey,
 };
 
 /// Prove the search-history crawler contract through token-only stdout.
@@ -222,61 +222,6 @@ async fn wait_for_display_policy_update(
     }
 }
 
-/// Wait for a settings update to finish persisting.
-///
-/// The runtime may complete the fast local settings write before publishing a
-/// snapshot, so this waits for the final `Idle` state with the expected display
-/// policy instead of requiring an intermediate `Saving` snapshot.
-pub(super) async fn wait_for_settings_persisted(
-    conn: &mut CoreConnection,
-    request_id: RequestId,
-    label: &str,
-    expected_url_previews_enabled: bool,
-) -> Result<(), String> {
-    let timeout = Duration::from_secs(10);
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    if settings_snapshot_matches_link_preview_policy(
-        &conn.snapshot(),
-        expected_url_previews_enabled,
-    ) {
-        return Ok(());
-    }
-
-    loop {
-        let event = tokio::time::timeout_at(deadline, conn.recv_event())
-            .await
-            .map_err(|_| format!("{label}: timed out waiting for settings save"))?
-            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-
-        match event {
-            CoreEvent::StateChanged(snapshot)
-                if settings_snapshot_matches_link_preview_policy(
-                    &snapshot,
-                    expected_url_previews_enabled,
-                ) =>
-            {
-                return Ok(());
-            }
-            CoreEvent::OperationFailed {
-                request_id: ev_id,
-                failure,
-            } if ev_id == request_id => {
-                return Err(format!("{label}: settings update failed: {failure:?}"));
-            }
-            _ => {}
-        }
-    }
-}
-
-fn settings_snapshot_matches_link_preview_policy(
-    snapshot: &AppState,
-    expected_url_previews_enabled: bool,
-) -> bool {
-    snapshot.settings.persistence == SettingsPersistenceState::Idle
-        && snapshot.settings.values.display.url_previews_enabled == expected_url_previews_enabled
-}
-
 fn assert_hide_redacted_projection() -> Result<(), String> {
     let mut state = AppState::default();
     state.settings.values.display = DisplaySettings {
@@ -313,45 +258,6 @@ fn assert_hide_redacted_projection() -> Result<(), String> {
         return Err("non-redacted item was hidden by Rust projection".to_owned());
     }
     Ok(())
-}
-
-pub(super) fn projection_timeline_item(event_id: &str, is_redacted: bool) -> TimelineItem {
-    TimelineItem {
-        request_state: None,
-        id: TimelineItemId::Event {
-            event_id: event_id.to_owned(),
-        },
-        sender: Some("@projection:example.invalid".to_owned()),
-        sender_label: None,
-        sender_avatar: None,
-        body: if is_redacted {
-            None
-        } else {
-            Some("projection body".to_owned())
-        },
-        notice_i18n: None,
-        message_kind: Default::default(),
-        spoiler_spans: Vec::new(),
-        timestamp_ms: None,
-        in_reply_to_event_id: None,
-        formatted: None,
-        reply_quote: None,
-        thread_root: None,
-        thread_summary: None,
-        media: None,
-        link_previews: None,
-        link_ranges: Vec::new(),
-        reactions: Vec::new(),
-        can_react: false,
-        is_redacted,
-        is_hidden: false,
-        can_redact: false,
-        is_edited: false,
-        can_edit: false,
-        actions: TimelineMessageActions::default(),
-        send_state: None,
-        unable_to_decrypt: None,
-    }
 }
 
 /// Paginate backward in a loop until `EndReached`, asserting the state
