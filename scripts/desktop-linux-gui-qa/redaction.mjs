@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { qaProfile, realLoginFromStdin } from "./options.mjs";
 
 export function childEnvironment(dataDir, qaLoginPipePath = null, qaControlPipePath = null) {
   const allowedKeys = [

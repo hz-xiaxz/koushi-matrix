@@ -1,9 +1,10 @@
-// Extracted verbatim from ../desktop-linux-gui-qa.mjs.
-import * as webdriver from "../webdriver.mjs";
-import * as localSession from "../local-session.mjs";
-import * as evidence from "../evidence.mjs";
-import * as redaction from "../redaction.mjs";
-import * as runtime from "../runtime.mjs";
+import { activeRoomDiagnostics, clickKeyManagementFormButton, clickLatestMessageRedactButtonByText, clickMenuItemByText, clickReadyComposerSendButton, clickRoomMemberAliasClear, clickVisibleButtonByAriaLabel, clickVisibleButtonByAriaLabelInElement, clickVisibleButtonByTextPrefix, clickVisibleMenuItemByText, clickWorkspaceButton, crc32, dispatchFileInputChange, documentContainsAll, driveTimelineToBottom, elementCount, ensureReadyImageMedia, ensureUserSettingsKeyManagementOpen, fileInputFileNames, getRoomEvent, importDesktopWebdriverio, keyManagementFormInputXpath, localDatetimeInputValue, makeFileInputInteractable, messageActionDiagnostics, openRoomContextMenu, pinnedRegionDiagnostics, pngChunk, readyImageMediaXpath, readyImageOpenButtonXpath, restoreFileInputPresentation, roomButtonXpath, roomExistsInSection, roomSectionSelector, safeDeleteSession, safeUserSettingsDiagnostics, scrollTimelineToBottom, scrollTimelineToTop, selectComposerText, selectRoomByName, setDatetimeLocalValue, setKeyManagementFormInput, setSyntheticFileInput, setSyntheticFileList, setTextInputValueByLabel, timelineDateJumpDiagnostics, timelineScrollMetrics, waitForActiveRoomName, waitForCjkVisualContract, waitForCompressedImageMedia, waitForDocumentText, waitForDocumentTheme, waitForElementAttribute, waitForElementCount, waitForElementCountGreaterThan, waitForFileExists, waitForInputValue, waitForKeyManagementStatus, waitForLatestEventMessageRow, waitForLatestEventMessageRowByText, waitForLatestMessageActionButton, waitForMessageSourceDialog, waitForPinnedRegionCleared, waitForPinnedRegionVisible, waitForQaTitle, waitForReadyImageHoverActions, waitForReadyImageMedia, waitForReplyLanded, waitForRichFormattedTimeline, waitForRoomInSection, waitForRoomManagementTopic, waitForRoomMemberAlias, waitForRoomMemberRole, waitForSecureBackupSetupEvidence, waitForStagedUpload, waitForStagedUploadsCleared, waitForTextareaValue, waitForTimelineAwayFromBottom, waitForTimelineFocusedContextReady, waitForTimelineScrollable, waitForTimelineScrolledToBottom, waitForTimelineSenderLabel, waitForTimelineViewMounted, waitForWorkspaceActive, waitForWorkspaceButton, webdriverCapabilities, workspaceButtonState, writePngFixture, xpathLiteral } from "../webdriver.mjs";
+import { TIMELINE_NAVIGATION_SEED_LINE_COUNT, TIMELINE_NAVIGATION_SEED_MESSAGE_COUNT, cleanupLocalGuiScenario, completeRealLoginInputWasReceived, createNamedPipe, exerciseRealRoomSelection, exerciseRealSpaceSelection, readRealLoginCredentials, realLoginCredentialsFromInput, realRoomSelectionDiagnostics, realSpaceSelectionDiagnostics, recordLocalGuiEvidence, requestQaLogout, selectFirstRoom, shouldSelectFirstRoom, startLocalGuiScenario, submitLoginForm, timelineNavigationSeedBody, waitForAuthScreen, waitForComposerSendSettled, waitForLocalLoginReady, waitForLocalSendSuccess, writeLocalLoginPipe, writeRealLoginPipe } from "../local-session.mjs";
+import { parseQaTitle, qaStatusHasAttentionBaseline, qaStatusHasRequiredPanel, qaStatusHasSendSuccess, qaStatusIsReady, qaWindowStatePathHasContract, requireNonEmptyFile, safeTimestamp, timestamp } from "../evidence.mjs";
+import { buildLdPreload, childEnvironment, nssWrapperEnvironment } from "../redaction.mjs";
+import { checkLinuxTools, connectOnce, ensureAppBinary, ensureDbusSession, findFreeDisplayNumber, guiScenarioServerKind, normalizePath, qaDataDirForRun, recordProcessOutput, resolveDebugAppBinary, runLoggedCommand, settleChild, sleep, spawnLogged, startDbusMonitor, startXvfb, terminateProcessGroup, triggerNotificationSmoke, validatedQaProfileName, waitForDbusMonitorReady, waitForDbusMonitorToken, waitForDisplaySocket, waitForPort, waitForSignedOutTitle } from "../runtime.mjs";
+import { timeoutMs } from "../options.mjs";
+import { sendRoomMessage } from "../../lib/local-homeserver-qa.mjs";
 
 export async function runLocalSendScenario() {
   const session = await startLocalGuiScenario();
@@ -1072,27 +1073,4 @@ export async function runLocalCjkScenario() {
   } finally {
     await cleanupLocalGuiScenario(session);
   }
-}
-
-function timelineNavigationSeedBody(index) {
-  return Array.from(
-    { length: TIMELINE_NAVIGATION_SEED_LINE_COUNT },
-    (_, lineIndex) =>
-      `QA timeline navigation seed ${index}.${lineIndex} scroll contract`
-  ).join("\n");
-}
-
-function roomSectionSelector(sectionId) {
-  switch (sectionId) {
-    case "favourites":
-      return 'section[data-room-section="favourites"]';
-    case "rooms":
-      return 'section[data-room-section="rooms"]';
-    default:
-      throw new Error(`unknown room section: ${sectionId}`);
-  }
-}
-
-function roomButtonXpath(sectionId, roomName) {
-  return `//section[@data-room-section=${xpathLiteral(sectionId)}]//button[@data-testid="room-item"][.//span[normalize-space()=${xpathLiteral(roomName)}]]`;
 }

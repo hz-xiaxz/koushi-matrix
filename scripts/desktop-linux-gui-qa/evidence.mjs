@@ -1,4 +1,6 @@
-import { join, resolve } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { repoRoot } from "./options.mjs";
 
 export function parseQaTitle(title) {
   const status = {};
@@ -29,7 +31,7 @@ export function qaStatusHasAttentionBaseline(status) {
 
 
 export function qaWindowStatePathHasContract(path) {
-  return normalizePath(path).endsWith("/app-shell/window-state.json");
+  return path.replace(/\\/g, "/").endsWith("/app-shell/window-state.json");
 }
 
 
@@ -72,13 +74,6 @@ export function qaStatusIsReady(status, requireRecovered, allowEmptyTimeline = f
   );
 }
 
-
-export function resolveArtifactRoot(artifactDirOption) {
-  if (!artifactDirOption) {
-    return join(repoRoot, "artifacts", "linux-gui-qa");
-  }
-  return isAbsolute(artifactDirOption) ? artifactDirOption : resolve(repoRoot, artifactDirOption);
-}
 
 
 export function requireNonEmptyFile(path, label) {

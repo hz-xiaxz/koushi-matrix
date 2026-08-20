@@ -1,9 +1,13 @@
-// Extracted verbatim from ../desktop-linux-gui-qa.mjs.
-import * as webdriver from "../webdriver.mjs";
-import * as localSession from "../local-session.mjs";
-import * as evidence from "../evidence.mjs";
-import * as redaction from "../redaction.mjs";
-import * as runtime from "../runtime.mjs";
+import { pngCrc32Table, activeRoomDiagnostics, clickKeyManagementFormButton, clickLatestMessageRedactButtonByText, clickMenuItemByText, clickReadyComposerSendButton, clickRoomMemberAliasClear, clickVisibleButtonByAriaLabel, clickVisibleButtonByAriaLabelInElement, clickVisibleButtonByTextPrefix, clickVisibleMenuItemByText, clickWorkspaceButton, crc32, dispatchFileInputChange, documentContainsAll, driveTimelineToBottom, elementCount, ensureReadyImageMedia, ensureUserSettingsKeyManagementOpen, fileInputFileNames, getRoomEvent, importDesktopWebdriverio, keyManagementFormInputXpath, localDatetimeInputValue, makeFileInputInteractable, messageActionDiagnostics, openRoomContextMenu, pinnedRegionDiagnostics, pngChunk, readyImageMediaXpath, readyImageOpenButtonXpath, restoreFileInputPresentation, roomButtonXpath, roomExistsInSection, roomSectionSelector, safeDeleteSession, safeUserSettingsDiagnostics, scrollTimelineToBottom, scrollTimelineToTop, selectComposerText, selectRoomByName, setDatetimeLocalValue, setKeyManagementFormInput, setSyntheticFileInput, setSyntheticFileList, setTextInputValueByLabel, timelineDateJumpDiagnostics, timelineScrollMetrics, waitForActiveRoomName, waitForCjkVisualContract, waitForCompressedImageMedia, waitForDocumentText, waitForDocumentTheme, waitForElementAttribute, waitForElementCount, waitForElementCountGreaterThan, waitForFileExists, waitForInputValue, waitForKeyManagementStatus, waitForLatestEventMessageRow, waitForLatestEventMessageRowByText, waitForLatestMessageActionButton, waitForMessageSourceDialog, waitForPinnedRegionCleared, waitForPinnedRegionVisible, waitForQaTitle, waitForReadyImageHoverActions, waitForReadyImageMedia, waitForReplyLanded, waitForRichFormattedTimeline, waitForRoomInSection, waitForRoomManagementTopic, waitForRoomMemberAlias, waitForRoomMemberRole, waitForSecureBackupSetupEvidence, waitForStagedUpload, waitForStagedUploadsCleared, waitForTextareaValue, waitForTimelineAwayFromBottom, waitForTimelineFocusedContextReady, waitForTimelineScrollable, waitForTimelineScrolledToBottom, waitForTimelineSenderLabel, waitForTimelineViewMounted, waitForWorkspaceActive, waitForWorkspaceButton, webdriverCapabilities, workspaceButtonState, writePngFixture, xpathLiteral } from "../webdriver.mjs";
+import { TIMELINE_NAVIGATION_SEED_LINE_COUNT, TIMELINE_NAVIGATION_SEED_MESSAGE_COUNT, cleanupLocalGuiScenario, completeRealLoginInputWasReceived, createNamedPipe, exerciseRealRoomSelection, exerciseRealSpaceSelection, readRealLoginCredentials, realLoginCredentialsFromInput, realRoomSelectionDiagnostics, realSpaceSelectionDiagnostics, recordLocalGuiEvidence, requestQaLogout, selectFirstRoom, shouldSelectFirstRoom, startLocalGuiScenario, submitLoginForm, timelineNavigationSeedBody, waitForAuthScreen, waitForLocalLoginReady, waitForLocalSendSuccess, writeLocalLoginPipe, writeRealLoginPipe } from "../local-session.mjs";
+import { parseQaTitle, qaStatusHasAttentionBaseline, qaStatusHasRequiredPanel, qaStatusHasSendSuccess, qaStatusIsReady, qaWindowStatePathHasContract, requireNonEmptyFile, safeTimestamp, timestamp } from "../evidence.mjs";
+import { buildLdPreload, childEnvironment, nssWrapperEnvironment } from "../redaction.mjs";
+import { checkLinuxTools, connectOnce, ensureAppBinary, ensureDbusSession, findFreeDisplayNumber, guiScenarioServerKind, normalizePath, qaDataDirForRun, recordProcessOutput, resolveDebugAppBinary, runLoggedCommand, settleChild, sleep, spawnLogged, startDbusMonitor, startXvfb, terminateProcessGroup, triggerNotificationSmoke, validatedQaProfileName, waitForDbusMonitorReady, waitForDbusMonitorToken, waitForDisplaySocket, waitForPort, waitForSignedOutTitle } from "../runtime.mjs";
+import { desktopDir, timeoutMs } from "../options.mjs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { deflateSync } from "node:zlib";
+import { sendRoomEmoteMessage, sendRoomFormattedMessage, sendRoomNoticeMessage } from "../../lib/local-homeserver-qa.mjs";
 
 export async function runLocalMediaScenario() {
   const session = await startLocalGuiScenario();
@@ -424,74 +428,4 @@ export async function runLocalMessageTypesScenario() {
   } finally {
     await cleanupLocalGuiScenario(session);
   }
-}
-
-function readyImageMediaXpath(filename) {
-  return `//img[contains(concat(" ", normalize-space(@class), " "), " message-media-image ") and @alt=${xpathLiteral(filename)}]`;
-}
-
-function readyImageOpenButtonXpath(filename) {
-  return `${readyImageMediaXpath(filename)}/ancestor::button[contains(concat(" ", normalize-space(@class), " "), " message-media-open ")][1]`;
-}
-
-function xpathLiteral(value) {
-  if (!value.includes("'")) {
-    return `'${value}'`;
-  }
-  if (!value.includes('"')) {
-    return `"${value}"`;
-  }
-  return `concat(${value
-    .split("'")
-    .map((part) => `'${part}'`)
-    .join(`, "\"'\"", `)})`;
-}
-
-function writePngFixture(path, width, height) {
-  const raw = Buffer.alloc((width * 4 + 1) * height);
-  for (let y = 0; y < height; y += 1) {
-    const rowOffset = y * (width * 4 + 1);
-    raw[rowOffset] = 0;
-    for (let x = 0; x < width; x += 1) {
-      const offset = rowOffset + 1 + x * 4;
-      raw[offset] = x % 2 === 0 ? 45 : 255;
-      raw[offset + 1] = y % 2 === 0 ? 111 : 255;
-      raw[offset + 2] = 239;
-      raw[offset + 3] = 255;
-    }
-  }
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 6;
-  ihdr[10] = 0;
-  ihdr[11] = 0;
-  ihdr[12] = 0;
-  writeFileSync(
-    path,
-    Buffer.concat([
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      pngChunk("IHDR", ihdr),
-      pngChunk("IDAT", deflateSync(raw)),
-      pngChunk("IEND", Buffer.alloc(0))
-    ])
-  );
-}
-
-function pngChunk(type, data) {
-  const typeBuffer = Buffer.from(type, "ascii");
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length, 0);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(Buffer.concat([typeBuffer, data])), 0);
-  return Buffer.concat([length, typeBuffer, data, crc]);
-}
-
-function crc32(buffer) {
-  let crc = 0xffffffff;
-  for (const byte of buffer) {
-    crc = pngCrc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
 }

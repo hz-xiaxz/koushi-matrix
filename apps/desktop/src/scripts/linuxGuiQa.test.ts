@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { describe, expect, test } from "vitest";
 
-import { repoRoot, runScript } from "./releaseTestSupport";
+import { readLinuxProductionSource, readRealHomeserverProductionSource, repoRoot, runScript } from "./releaseTestSupport";
 
 describe("desktop release scripts", () => {
   test("linux GUI smoke resolves relative artifact dirs from the repo root", () => {
@@ -27,10 +27,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI smoke source emits the local scenario success tokens", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("gui_local_login=ok");
     expect(source).toContain("gui_local_send=ok");
@@ -56,10 +53,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI local logout/relogin uses the gated QA control pipe", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("local-logout-relogin");
     expect(source).toContain("KOUSHI_QA_CONTROL_PIPE");
@@ -76,10 +70,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI local spaces navigation checks rail selection and space info", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("local-spaces-nav");
     expect(source).toContain("waitForWorkspaceActive");
@@ -90,10 +81,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI local scenarios also emit DBus and window-state evidence", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("recordLocalGuiEvidence");
     expect(source).toContain("notification_dbus=ok");
@@ -110,10 +98,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI local login selects the first room when timeline subscription is still missing", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("shouldSelectFirstRoom(status, selectedRoom)");
     expect(source).toMatch(
@@ -141,10 +126,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI smoke wires dbus notification evidence into the signed-out run path", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("dbus-daemon");
     expect(source).toContain("--session");
@@ -239,10 +221,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI smoke source wires the shared local homeserver helper module", () => {
-    const guiSource = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const guiSource = readLinuxProductionSource();
     const sharedSource = readFileSync(
       new URL("../../../../scripts/lib/local-homeserver-qa.mjs", import.meta.url),
       "utf8"
@@ -278,10 +257,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI local setup keeps homeserver data separate and cleanup covers setup failures", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("serverDataDir");
     expect(source).toContain("homeserver-data");
@@ -290,10 +266,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI local setup defines the safe timestamp helper it uses for synthetic users", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("const userSuffix = safeTimestamp();");
     expect(source).toContain("function safeTimestamp()");
@@ -304,10 +277,7 @@ describe("desktop release scripts", () => {
     const transport = runScript("scripts/desktop-linux-gui-qa.mjs", [
       "--print-real-login-transport"
     ]);
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(transport.trim()).toBe("fifo");
     expect(source).toContain("readRealLoginCredentials");
@@ -337,13 +307,10 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI smoke run path now wires WebdriverIO and the signed-out screenshot", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("webdriverio");
-    expect(source).toContain('createRequire(new URL("../apps/desktop/package.json"');
+    expect(source).toContain('createRequire(new URL("../../apps/desktop/package.json"');
     expect(source).toContain("importDesktopWebdriverio");
     expect(source).toContain("remote({");
     expect(source).toContain("screenshots/01-signed-out.png");
@@ -351,10 +318,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI smoke launches Xvfb with the sanitized child environment", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("const xvfb = await startXvfb(logPath, buildEnv);");
     expect(source).toContain("async function startXvfb(logPath, buildEnv)");
@@ -510,10 +474,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI local login retries room selection until a displayed row is clicked", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("selectedRoom = await selectFirstRoom(browser);");
     expect(source).toMatch(

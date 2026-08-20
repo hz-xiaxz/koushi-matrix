@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { describe, expect, test } from "vitest";
 
+import { readLinuxProductionSource } from "./releaseTestSupport";
+
 describe("desktop release scripts", () => {
   test("mac GUI smoke does not send Cmd+Q while cleaning up", () => {
     const source = readFileSync(
@@ -16,10 +18,7 @@ describe("desktop release scripts", () => {
   });
 
   test("GUI smoke FIFO writers share the direct node writer and never spawn tee", () => {
-    const linuxSource = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const linuxSource = readLinuxProductionSource();
     const macSource = readFileSync(
       new URL("../../../../scripts/desktop-mac-gui-smoke.mjs", import.meta.url),
       "utf8"
@@ -30,9 +29,8 @@ describe("desktop release scripts", () => {
     );
 
     for (const source of [linuxSource, macSource]) {
-      expect(source).toContain(
-        'import { writeSensitivePayloadToPath } from "./lib/sensitive-fifo.mjs";'
-      );
+      expect(source).toContain("writeSensitivePayloadToPath");
+      expect(source).toMatch(/from \"(?:\.\/|\.\.\/)?(?:scripts\/)?lib\/sensitive-fifo\.mjs\"/);
       // No `tee` helper process anywhere (it would inherit the parent env).
       expect(source).not.toContain('spawn("tee"');
       expect(source).not.toContain('"tee"');

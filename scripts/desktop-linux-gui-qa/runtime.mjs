@@ -5,6 +5,8 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { childEnvironment, nssWrapperEnvironment, buildLdPreload } from "./redaction.mjs";
+import { args, desktopDir, optionValue, qaProfile, repoRoot, serverOption, timeoutMs } from "./options.mjs";
+import { parseQaTitle, qaStatusHasAttentionBaseline } from "./evidence.mjs";
 
 export function guiScenarioServerKind() {
   if (serverOption === "tuwunel") {

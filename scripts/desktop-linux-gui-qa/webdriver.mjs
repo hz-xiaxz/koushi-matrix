@@ -2,6 +2,17 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFil
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { deflateSync } from "node:zlib";
+import { desktopPackageRequire, timeoutMs } from "./options.mjs";
+import { parseQaTitle } from "./evidence.mjs";
+import { sleep } from "./runtime.mjs";
+
+export const pngCrc32Table = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
 
 export async function waitForQaTitle(browser, predicate, timeout, description) {
   const startedAt = Date.now();
@@ -64,18 +75,6 @@ export async function waitForElementAttribute(browser, selector, attribute, expe
   throw new Error(
     `${description} did not reach ${attribute}=${expected}. Last value: ${lastValue}`
   );
-}
-
-
-export async function waitForComposerSendSettled(browser, timeout, description) {
-  await waitForTextareaValue(
-    browser,
-    'textarea[aria-label="Message composer"]',
-    "",
-    timeout,
-    `${description} clear`
-  );
-  await waitForLocalSendSuccess(browser, timeout);
 }
 
 
@@ -1189,15 +1188,6 @@ export async function timelineScrollMetrics(browser) {
       atBottom: bottomOffset <= 2
     };
   });
-}
-
-
-export function timelineNavigationSeedBody(index) {
-  return Array.from(
-    { length: TIMELINE_NAVIGATION_SEED_LINE_COUNT },
-    (_, lineIndex) =>
-      `QA timeline navigation seed ${index}.${lineIndex} scroll contract`
-  ).join("\n");
 }
 
 

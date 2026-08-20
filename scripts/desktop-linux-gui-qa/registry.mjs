@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { assertSdkSubmoduleSynced } from "../lib/sdk-submodule-status.mjs";
+import { repoRoot, guiScenario } from "./options.mjs";
 import { runSignedOutScenario, runLocalLoginScenario, runLocalLogoutReloginScenario } from "./scenarios/auth.mjs";
-import { runLocalSendScenario, runLocalCreateRoomScenario, runLocalCreateSpaceScenario, runLocalSpacesNavScenario, runLocalInvitesDmScenario, runLocalReplyScenario, runLocalRoomTagsScenario, runLocalRoomManagementScenario, runLocalActivityScenario, runLocalExploreScenario, runLocalMessageActionsScenario, runLocalPinsScenario, runLocalMessageTypesScenario, runLocalComposerScenario, runLocalScheduledSendScenario, runLocalTimelineNavigationScenario, runLocalAliasScenario, runLocalRichFormattingScenario, runLocalCjkScenario } from "./scenarios/rooms-timeline.mjs";
+import { runLocalSendScenario, runLocalCreateRoomScenario, runLocalCreateSpaceScenario, runLocalSpacesNavScenario, runLocalReplyScenario, runLocalRoomTagsScenario, runLocalRoomManagementScenario, runLocalActivityScenario, runLocalExploreScenario, runLocalMessageActionsScenario, runLocalPinsScenario, runLocalComposerScenario, runLocalScheduledSendScenario, runLocalTimelineNavigationScenario, runLocalAliasScenario, runLocalRichFormattingScenario, runLocalCjkScenario } from "./scenarios/rooms-timeline.mjs";
+import { runLocalInvitesDmScenario } from "./scenarios/auth.mjs";
+import { runLocalMessageTypesScenario } from "./scenarios/media.mjs";
 import { runLocalMediaScenario, runLocalImageCompressionScenario } from "./scenarios/media.mjs";
 import { runLocalSettingsScenario, runLocalE2eeKeyManagementScenario } from "./scenarios/settings-security.mjs";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const checks = [
+export const checks = [
   "scenario signed-out",
   "scenario local-login",
   "scenario local-send",
@@ -45,9 +45,8 @@ const checks = [
   "optional local homeserver login via FIFO",
   "clean process teardown"
 ];
-const guiScenario = process.argv.includes("--scenario") ? process.argv[process.argv.indexOf("--scenario") + 1] : "signed-out";
 
-async function run() {
+export async function run() {
   assertSdkSubmoduleSynced({ repoRoot });
 
   if (guiScenario === "signed-out") {

@@ -1,55 +1,10 @@
 #!/usr/bin/env node
-import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import * as net from "node:net";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { deflateSync } from "node:zlib";
-
-import {
-  checkInstalledHomeserver,
-  createRoom,
-  freePort,
-  inviteUser as inviteUserToRoom,
-  joinRoom,
-  registerUser,
-  sendRoomEmoteMessage,
-  sendRoomFormattedMessage,
-  sendRoomMessage,
-  sendRoomNoticeMessage,
-  setDisplayName,
-  startHomeserver,
-  stopProcess,
-  tuwunelConfig,
-  waitForHomeserver
-} from "../lib/local-homeserver-qa.mjs";
-
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const desktopDir = join(repoRoot, "apps", "desktop");
-const desktopPackageRequire = createRequire(new URL("../apps/desktop/package.json", import.meta.url));
-const pngCrc32Table = Array.from({ length: 256 }, (_, index) => {
-  let value = index;
-  for (let bit = 0; bit < 8; bit += 1) {
-    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-  }
-  return value >>> 0;
-});
 import { checks, run } from "./registry.mjs";
-import { childEnvironment, qaDataDirForRun } from "./redaction.mjs";
+import { childEnvironment } from "./redaction.mjs";
 import { webdriverCapabilities } from "./webdriver.mjs";
-import { parseQaTitle, qaStatusHasAttentionBaseline, qaStatusHasRequiredPanel, qaStatusHasSendSuccess, qaStatusIsReady, qaWindowStateIsReady } from "./evidence.mjs";
-import { checkLinuxTools, optionValue, resolveArtifactRoot, printUsage } from "./runtime.mjs";
-
-
-const args = new Set(process.argv.slice(2));
-const guiScenario = optionValue("--scenario") ?? "signed-out";
-const serverOption = optionValue("--server") ?? "tuwunel";
-const qaProfile = optionValue("--qa-profile");
-const realLoginFromStdin = args.has("--real-login-from-stdin");
-const allowEmptyTimeline = args.has("--allow-empty-timeline");
-const artifactRoot = resolveArtifactRoot(optionValue("--artifact-dir"));
-const timeoutMs = Number(optionValue("--timeout-ms") ?? "120000");
+import { parseQaTitle, qaStatusHasAttentionBaseline, qaStatusHasRequiredPanel, qaStatusHasSendSuccess, qaStatusIsReady, qaWindowStatePathHasContract } from "./evidence.mjs";
+import { checkLinuxTools, qaDataDirForRun } from "./runtime.mjs";
+import { allowEmptyTimeline, artifactRoot, args, optionValue, realLoginFromStdin, timeoutMs } from "./options.mjs";
 
 if (args.has("--print-artifact-root")) {
   console.log(artifactRoot);
@@ -154,20 +109,16 @@ if (qaRecoveredTitleReadySample !== undefined) {
   process.exit(0);
 }
 
-const TIMELINE_NAVIGATION_SEED_MESSAGE_COUNT = 24;
-const TIMELINE_NAVIGATION_SEED_LINE_COUNT = 12;
+if (args.has("--run")) {
+  await run();
+  process.exit(0);
+}
 
 if (args.has("--run")) {
   await run();
   process.exit(0);
 }
 
-printUsage();
-
-
-if (args.has("--run")) {
-  await run();
-  process.exit(0);
-}
-
-printUsage();
+console.log(
+  "Usage: node scripts/desktop-linux-gui-qa.mjs --list|--check-tools|--child-env|--child-env-keys|--print-artifact-root|--print-real-login-transport|--print-webdriver-capabilities --app-binary=PATH|--qa-title-panel=TITLE|--qa-title-panel-ready=TITLE [--required-panel=PANEL]|--qa-title-ready=TITLE|--qa-title-attention-ready=TITLE|--qa-window-state-ready=PATH|--qa-title-send-ready=TITLE|--qa-title-ready-require-recovered=TITLE|--run [--skip-build] [--real-login-from-stdin] [--qa-profile=NAME] [--allow-empty-timeline] [--artifact-dir=PATH] [--timeout-ms=MS]"
+);

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { describe, expect, test } from "vitest";
 
-import { runScript } from "./releaseTestSupport";
+import { readLinuxProductionSource, readRealHomeserverProductionSource, runScript } from "./releaseTestSupport";
 
 describe("desktop release scripts", () => {
   test("macOS Keychain Tier 2 workflow stays disabled while retaining the temporary-keychain recipe", () => {
@@ -63,10 +63,7 @@ describe("desktop release scripts", () => {
   });
 
   test("real homeserver QA binary names the staged real-server scenarios", () => {
-    const source = readFileSync(
-      new URL("../../../../crates/koushi-core/src/bin/real-homeserver-qa.rs", import.meta.url),
-      "utf8"
-    );
+    const source = readRealHomeserverProductionSource();
 
     expect(source).toContain("KOUSHI_REAL_QA_SCENARIO");
     expect(source).toContain("RealQaScenario");
@@ -75,10 +72,7 @@ describe("desktop release scripts", () => {
   });
 
   test("real homeserver QA treats space projection as an observation token", () => {
-    const source = readFileSync(
-      new URL("../../../../crates/koushi-core/src/bin/real-homeserver-qa.rs", import.meta.url),
-      "utf8"
-    );
+    const source = readRealHomeserverProductionSource();
 
     expect(source).toContain("real_space_projection=observed");
     expect(source).toContain("real_space_projection=not_observed");
@@ -131,10 +125,7 @@ describe("desktop release scripts", () => {
   });
 
   test("real homeserver QA binary emits private-data-free tokens (no Matrix ids)", () => {
-    const source = readFileSync(
-      new URL("../../../../crates/koushi-core/src/bin/real-homeserver-qa.rs", import.meta.url),
-      "utf8"
-    );
+    const source = readRealHomeserverProductionSource();
 
     // No token line or summary may interpolate a Matrix identifier.
     expect(source).not.toContain("event_id={");
@@ -313,10 +304,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI smoke supports the fast skip-build inner loop", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("--skip-build");
     expect(source).toContain("--app-binary");
@@ -324,10 +312,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI smoke source emits the basic-operation success tokens", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("gui_local_create_room=ok");
     expect(source).toContain("gui_local_create_space=ok");
@@ -353,12 +338,9 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI composer smoke drives real controls without IPC mocking", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
-    expect(source).toContain("async function runLocalComposerScenario()");
+    expect(source).toContain("export async function runLocalComposerScenario()");
     expect(source).toContain('textarea[aria-label="Message composer"]');
     expect(source).toContain('button[role="option"]');
     expect(source).toContain('button[aria-label="Bold"]');
@@ -368,12 +350,9 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI room-tag smoke drives context menu and Rust-owned section movement", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
-    expect(source).toContain("async function runLocalRoomTagsScenario()");
+    expect(source).toContain("export async function runLocalRoomTagsScenario()");
     expect(source).toContain('button[data-testid="room-item"]');
     expect(source).toContain('button[role="menuitem"]');
     expect(source).toContain("Add to Favourites");
@@ -385,12 +364,9 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI room-management smoke drives Rust-owned settings and member state", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
-    expect(source).toContain("async function runLocalRoomManagementScenario()");
+    expect(source).toContain("export async function runLocalRoomManagementScenario()");
     expect(source).toContain('textarea[aria-label="Room topic"]');
     expect(source).toContain("Save topic");
     expect(source).toContain(".settings-detail-row");
@@ -401,12 +377,9 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI message-action smoke drives real action menu controls", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
-    expect(source).toContain("async function runLocalMessageActionsScenario()");
+    expect(source).toContain("export async function runLocalMessageActionsScenario()");
     expect(source).toContain("waitForLatestMessageActionButton(");
     expect(source).toContain('button[aria-label="Message actions"]');
     expect(source).toContain("View source");
@@ -421,10 +394,7 @@ describe("desktop release scripts", () => {
   });
 
   test("linux GUI media smoke drives the hidden file input without a native dialog", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-linux-gui-qa.mjs", import.meta.url),
-      "utf8"
-    );
+    const source = readLinuxProductionSource();
 
     expect(source).toContain("setSyntheticFileInput(");
     expect(source).toContain("makeFileInputInteractable(");

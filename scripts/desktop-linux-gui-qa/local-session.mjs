@@ -3,12 +3,22 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkInstalledHomeserver, createRoom, freePort, inviteUser as inviteUserToRoom, joinRoom, registerUser, sendRoomFormattedMessage, sendRoomMessage, setDisplayName, startHomeserver, stopProcess, tuwunelConfig, waitForHomeserver } from "../lib/local-homeserver-qa.mjs";
 import { writeSensitivePayloadToPath } from "../lib/sensitive-fifo.mjs";
-import { settleChild, terminateProcessGroup } from "./runtime.mjs";
-import { safeDeleteSession, webdriverCapabilities, importDesktopWebdriver } from "./webdriver.mjs";
-import { timestamp } from "./evidence.mjs";
+import { artifactRoot, desktopDir, guiScenario, timeoutMs } from "./options.mjs";
+import { checkLinuxTools, ensureAppBinary, ensureDbusSession, guiScenarioServerKind, qaDataDirForRun, sleep, spawnLogged, startDbusMonitor, startXvfb, settleChild, terminateProcessGroup, triggerNotificationSmoke, waitForDbusMonitorReady, waitForDbusMonitorToken, waitForPort } from "./runtime.mjs";
+import { importDesktopWebdriverio, safeDeleteSession, webdriverCapabilities, waitForQaTitle, waitForTextareaValue } from "./webdriver.mjs";
+import { parseQaTitle, qaStatusHasSendSuccess, qaStatusIsReady, safeTimestamp, timestamp } from "./evidence.mjs";
+import { childEnvironment } from "./redaction.mjs";
 
 export const TIMELINE_NAVIGATION_SEED_MESSAGE_COUNT = 24;
 export const TIMELINE_NAVIGATION_SEED_LINE_COUNT = 12;
+
+export function timelineNavigationSeedBody(index) {
+  return Array.from(
+    { length: TIMELINE_NAVIGATION_SEED_LINE_COUNT },
+    (_, lineIndex) =>
+      `QA timeline navigation seed ${index}.${lineIndex} scroll contract`
+  ).join("\n");
+}
 
 export async function startLocalGuiScenario() {
   checkLinuxTools();
@@ -395,6 +405,17 @@ export async function waitForLocalLoginReady(browser, timeout) {
   throw new Error(`local GUI login did not reach a ready state. Last title: ${lastTitle}`);
 }
 
+
+export async function waitForComposerSendSettled(browser, timeout, description) {
+  await waitForTextareaValue(
+    browser,
+    'textarea[aria-label="Message composer"]',
+    "",
+    timeout,
+    `${description} clear`
+  );
+  await waitForLocalSendSuccess(browser, timeout);
+}
 
 export async function waitForLocalSendSuccess(browser, timeout) {
   const startedAt = Date.now();
