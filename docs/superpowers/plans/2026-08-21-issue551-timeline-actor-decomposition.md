@@ -238,6 +238,13 @@ Pre-existing warnings are baseline artifacts, not permission to add or suppress 
 - Focused integrations: runtime timeline 21, send queue 13, room-subscription residency 25, intent lifecycle 5, room-selection scale 4, activity 9, composer-draft lifecycle 7, scheduled send 12; all green.
 - `cargo check -p koushi-core --all-targets --all-features`, `cargo fmt --all -- --check`, and `git diff --check` are green.
 
+### Final local evidence
+
+- Rust workspace final rerun: 2,393 passed/13 ignored/0 failed across 97 suites; desktop lib 149 passed/1 ignored; Headless Core QA binary 129 passed.
+- The first workspace run hit the existing five-second room-list synchronization fence; the unchanged focused test passed, including its normal setup wall time beyond the internal fence. The next workspace run hit the pre-recorded Account action-ordering flake; the exact test passed 3/3 focused and the unchanged final workspace rerun passed. No timeout, expectation, source, or behavior was changed or waived.
+- Frontend: typecheck and lint green; Vitest 1,367 passed; UI-headless timeline store plus Playwright 248 passed with `CHOKIDAR_USEPOLLING=true`; production build green.
+- Boundary/policy: Tauri adapter, domain dependencies, tracked secret scan, release gates, IPC generated-wire contract, SDK submodule, agents docs, wasm domain check, `cargo deny`, `cargo machete`, rustfmt, exactness and diff checks green.
+
 ## Verification
 
 Baseline and identical post-move checks. Before each full Core lib run, the unrelated ordering-sensitive Account test is pinned with three focused passes; if the subsequent full run fails it, rerun the exact focused test three times and the unchanged full suite once, recording both outcomes rather than changing its expectation:
