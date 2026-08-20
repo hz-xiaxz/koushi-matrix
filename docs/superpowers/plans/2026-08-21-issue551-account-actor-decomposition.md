@@ -2,7 +2,7 @@
 
 ## Status
 
-- Design: `reviewer-flash` approved the base design and bounded visibility amendments as `Correct-to-implement`. Test-module compile found three test ownership corrections plus one shared diagnostic-token production edge; the 66-name/test-count appendix amendment is pending re-review before test integration resumes.
+- Design: `reviewer-flash` approved the base design, bounded visibility amendments, and final 66-name/test-ownership amendment as `Correct-to-implement`; test integration may resume.
 - Implementation: blocked until the design reviewer records `Correct-to-implement`.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 
