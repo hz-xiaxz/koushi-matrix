@@ -90,7 +90,7 @@ Baseline clusters: 723–838, 2360–2472, auth-owned declarations within 5828�
 
 Owns own-profile, aliases, ignore/unignore, profile/reporting operations, errors, mappings, and tests.
 
-Baseline clusters: 6322–6342 (`MatrixOwnProfile` and `MatrixLocalUserAliases`), 6673–6768, 8724–8910, 13054–13174, and corresponding tests in the mixed root test module. `MatrixUserProfile` is excluded because it is a room/member projection DTO.
+Baseline clusters: 6322–6342 (`MatrixOwnProfile` and `MatrixLocalUserAliases`), 6673–6768, 8724–8908, 13054–13174, and corresponding tests in the mixed root test module. `MatrixUserProfile` is excluded because it is a room/member projection DTO.
 
 ### `sync.rs`
 
@@ -102,7 +102,7 @@ Baseline clusters: 4221–4227, 6868–6873, 6897–6985, 7061–7069, 11215–1
 
 Owns timeline continuity/gap/checkpoint/live-tail types, timeline subscription and pagination handles, item/diff projection, send/edit/redact entry points, cancellation, and tests. No speculative media module is introduced because the baseline has no independent media implementation seam.
 
-Baseline clusters: 4228–4775, session impl portions 4795–4920, 6769–6867, 7081–7109, 8911–8951, 10751–10791, 11138–11214, 12229–12294, 13217–13226, and focused tests. Line 8910 belongs to the preceding profile item; attached item boundaries, not the numeric guide, decide the move.
+Baseline clusters: 4228–4775, session impl portions 4795–4920, 6769–6867, 7081–7109, `send_text_message`/`map_room_send_result` at 8910–8934, 10751–10791, 11138–11214, 12229–12294, 13217–13226, and focused tests. Room capability/settings functions beginning at 8936 belong to room operations; attached item boundaries, not numeric adjacency, decide the move.
 
 ### `search.rs`
 
