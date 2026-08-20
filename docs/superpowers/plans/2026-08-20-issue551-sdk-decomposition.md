@@ -207,7 +207,7 @@ A temporary non-repository verifier compares the pinned baseline to the integrat
 
 1. Every named top-level production item exists exactly once.
 2. Every test name exists exactly once; test-body hashes match except explicit source-path allowlist changes.
-3. Every baseline public item appears in exactly one explicit root re-export or is the retained `E2eeRecoveryState` re-export.
+3. The explicit root named-re-export set equals the baseline public-item set bidirectionally: every baseline public item appears exactly once, and no private/`pub(super)` item or extra public name appears; `E2eeRecoveryState` remains the retained direct re-export.
 4. Attached cfg/doc/derive/serde/target attributes match.
 5. Function/method/test bodies, enum variants, struct fields, strings, diagnostic arrays, and match-arm order hash identically after normalization limited to required module qualification, visibility, and the enumerated source-characterization plumbing.
 6. The 20 in-lib source tests remain owner-scoped, while the two external aggregate/negative tests scan the exhaustive production-source manifest; no assertion is narrowed or removed.
