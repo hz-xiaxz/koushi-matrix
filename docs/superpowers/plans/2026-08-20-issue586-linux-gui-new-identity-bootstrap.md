@@ -45,7 +45,7 @@ In `scripts/desktop-linux-gui-qa/local-session.mjs`:
 5. Fence before field fill/submit. If the product rejects bootstrap and returns to `awaitingVerification`, suppress any second attempt and let the existing readiness deadline produce the existing fail-closed timeout; do not replace it with a retry or a mid-flow secret-bearing error.
 6. Import existing generic DOM functions directly from `webdriver.mjs`; use WebDriver's native `browser.$$` with `xpathLiteral` for exact form detection (the existing `elementCount` helper is CSS-only), and existing field/click helpers for actions. Do not duplicate polling/input/click logic or introduce a new lifecycle owner.
 
-Update every stale Linux-runner `textarea[aria-label="Message composer"]` selector to the real contenteditable role selector in the same verify-first repair. Rename the private `waitForTextareaValue` helper to `waitForEditableValue` and read native input/textarea value or contenteditable text as appropriate. This is one DOM-contract correction; do not change product Rust/React/Tauri behavior, DTOs, commands, state, token registry, or scenario names.
+Update every stale Linux-runner `textarea[aria-label="Message composer"]` selector to the real contenteditable role selector in the same verify-first repair. Rename the private `waitForTextareaValue` helper to `waitForEditableValue`; read native input/textarea value or contenteditable `textContent` (not layout-dependent `innerText`) and compare exactly. Rewrite `selectComposerText` to focus the contenteditable and select its contents with `Range` plus `document.getSelection()` instead of textarea-only `setSelectionRange`. This is one DOM-contract correction; do not change product Rust/React/Tauri behavior, DTOs, commands, state, token registry, or scenario names.
 
 ## Verification
 
@@ -57,7 +57,8 @@ Update every stale Linux-runner `textarea[aria-label="Message composer"]` select
   - destination is a non-existing child of a unique `mkdtempSync` directory, with recursive forced removal in helper `finally` and session teardown;
   - only DOM helpers are used; no direct Tauri invoke or local readiness mutation;
   - ready settlement requires both the authoritative ready title and the real contenteditable message-composer DOM boundary;
-  - no stale textarea composer selector remains, and editable clearing is observed through the actual contenteditable text.
+  - no stale textarea composer selector remains, editable clearing is observed through exact contenteditable `textContent`, and `selectComposerText` uses a DOM Range;
+  - existing release source-contract assertions flip from the textarea literal to the role-based contenteditable literal and assert the stale selector is absent.
 - Run the release contract suite, typecheck/lint, secret scan, deterministic Linux module/probe checks, and Playwright gate.
 - Run the containerized Tuwunel `local-send` lane to green and retain only private-safe evidence tokens.
 - Run full repository gates once after formal full-diff review, then CI 7/7.
