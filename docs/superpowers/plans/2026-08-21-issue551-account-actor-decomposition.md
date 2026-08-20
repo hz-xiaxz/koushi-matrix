@@ -4,7 +4,8 @@
 
 - Design: `reviewer-flash` approved the base design, bounded visibility amendments, and final 66-name/test-ownership amendment as `Correct-to-implement`; test integration may resume.
 - Implementation: integrated centrally from the immutable baseline after incomplete/ambiguous worker drafts were rejected; bidirectional exactness and focused gates are green.
-- Full-diff review, final repository gates, PR CI, and merge: pending.
+- Full-diff review: `reviewer-flash` reviewed the complete implementation and the `1d9af8c` correction delta, then recorded `Correct-to-merge`; no finding remains.
+- Delivery: final repository gates, PR CI, and merge remain pending.
 
 ## Objective
 
