@@ -95,15 +95,15 @@ describe("desktop release scripts", () => {
     );
   });
 
-  test("linux GUI local login selects the first room when timeline subscription is still missing", () => {
+  test("linux GUI local login selects the first room when the room pane is not ready", () => {
     const source = readLinuxProductionSource();
 
-    expect(source).toContain("shouldSelectFirstRoom(status, selectedRoom)");
+    expect(source).toContain("shouldSelectFirstRoom(status, selectedRoom, composerVisible)");
     expect(source).toMatch(
-      /function shouldSelectFirstRoom\(status, selectedRoom\)[\s\S]*status\.active_room === false \|\| status\.timeline_subscribed === false/
+      /function shouldSelectFirstRoom\(status, selectedRoom, composerVisible\)[\s\S]*status\.session !== "ready" \|\| status\.rooms <= 0[\s\S]*!composerVisible \|\| status\.active_room === false \|\| status\.timeline_subscribed === false/
     );
     expect(source).toMatch(
-      /if \(shouldSelectFirstRoom\(status, selectedRoom\)\) \{[\s\S]*selectedRoom = await selectFirstRoom\(browser\);/
+      /if \(shouldSelectFirstRoom\(status, selectedRoom, composerVisible\)\) \{[\s\S]*selectedRoom = await selectFirstRoom\(browser\);/
     );
   });
 
@@ -597,6 +597,37 @@ describe("desktop release scripts", () => {
     expect(source).toContain("passwordB");
     expect(source).toContain(".local-secrets");
     expect(source).not.toContain("console.log(fixture");
+  });
+
+  test("linux GUI local login completes only the new-identity bootstrap form without retaining secrets", () => {
+    const source = readFileSync(
+      new URL("../../../../scripts/desktop-linux-gui-qa/local-session.mjs", import.meta.url),
+      "utf8"
+    );
+
+    expect(source).toContain("completeNewIdentityBootstrapIfOffered");
+    expect(source).toContain('status.session === "awaitingVerification"');
+    expect(source).toContain('"Recovery key destination"');
+    expect(source).toContain('"Backup passphrase"');
+    expect(source).toContain('"Create secure backup"');
+    expect(source).toContain('"I saved the recovery key"');
+    expect(source).toContain("MESSAGE_COMPOSER_SELECTOR");
+    expect(source).toContain("mkdtempSync(join(tmpdir()");
+    expect(source).toContain("randomBytes(32).toString(\"base64url\")");
+    expect(source).toContain("bootstrapAttempt.attempted = true");
+    expect(source).toContain("let bootstrapDir");
+    expect(source).toContain("bootstrapTempDirs.add");
+    expect(source).toContain("if (bootstrapDir)");
+    expect(source).toContain("bootstrapTempDirs.delete");
+    expect(source).toContain("rmSync(bootstrapDir, { recursive: true, force: true })");
+    expect(source).not.toContain("console.log(bootstrapPassphrase");
+    expect(source).not.toContain("process.env.KOUSHI_QA_BOOTSTRAP");
+    expect(source).not.toContain("invoke(\"start_session_bootstrap\"");
+
+    const runnerSource = readLinuxProductionSource();
+    expect(runnerSource).toMatch(
+      /runLocalLogoutReloginScenario\(\)[\s\S]*session\.allowNewIdentityBootstrap = false;[\s\S]*submitLoginForm/
+    );
   });
 
   test("headless local QA routes SDK and Core output through the validated artifact boundary", () => {

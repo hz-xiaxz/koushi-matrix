@@ -80,7 +80,10 @@ export async function runSignedOutScenario() {
     if (realLogin) {
       await writeRealLoginPipe(qaLoginPipePath, realLogin);
       realLoginCleanupRequired = true;
-      await waitForLocalLoginReady(browser, timeoutMs);
+      await waitForLocalLoginReady(
+        { browser, allowNewIdentityBootstrap: false, bootstrapTempDirs: new Set() },
+        timeoutMs
+      );
       console.log("gui_real_login=ok");
       await exerciseRealRoomSelection(browser, timeoutMs);
       await exerciseRealSpaceSelection(browser, timeoutMs);
@@ -135,7 +138,7 @@ export async function runLocalLoginScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await recordLocalGuiEvidence(session);
     console.log("gui_local_login=ok");
   } finally {
@@ -148,15 +151,16 @@ export async function runLocalLogoutReloginScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     await requestQaLogout(session.qaControlPipePath);
     await waitForSignedOutTitle(session.browser, timeoutMs);
     await waitForAuthScreen(session.browser, timeoutMs);
     console.log("gui_local_logout=ok");
 
+    session.allowNewIdentityBootstrap = false;
     await submitLoginForm(session.browser, session.credentials, timeoutMs);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await recordLocalGuiEvidence(session);
     console.log("gui_local_relogin=ok");
   } finally {
@@ -169,7 +173,7 @@ export async function runLocalInvitesDmScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     const inviteRoom = await createRoom(session.credentials.homeserver, session.helperAccessToken, {
       name: session.seedInviteRoomName

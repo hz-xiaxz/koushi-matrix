@@ -9,7 +9,7 @@ export async function runLocalSettingsScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     const keyboardSettings = await session.browser.$('button[aria-label="Keyboard settings"]');
     await keyboardSettings.waitForDisplayed({ timeout: timeoutMs });
@@ -63,7 +63,7 @@ export async function runLocalE2eeKeyManagementScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     await ensureUserSettingsKeyManagementOpen(session.browser, timeoutMs);
 

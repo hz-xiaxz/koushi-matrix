@@ -338,7 +338,14 @@ describe("desktop release scripts", () => {
     const source = readLinuxProductionSource();
 
     expect(source).toContain("export async function runLocalComposerScenario()");
-    expect(source).toContain('textarea[aria-label="Message composer"]');
+    expect(source).toContain('.composer-inline-editor[role="textbox"]');
+    expect(source).not.toContain('textarea[aria-label="Message composer"]');
+    expect(source).toContain("range.selectNodeContents(editor)");
+    expect(source).toContain('editable.textContent ?? ""');
+    expect(source).toContain("expected private-safe editable state");
+    expect(source).not.toContain("waitForTextareaValue");
+    expect(source).not.toContain("innerText");
+    expect(source).not.toContain("setSelectionRange");
     expect(source).toContain('button[role="option"]');
     expect(source).toContain('button[aria-label="Bold"]');
     expect(source).toContain("Mention Helper");
