@@ -428,5 +428,3 @@ export function ensureDbusSession(logPath, env) {
     pid
   };
 }
-
-

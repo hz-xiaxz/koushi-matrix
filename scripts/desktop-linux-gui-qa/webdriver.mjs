@@ -1943,5 +1943,3 @@ export async function safeDeleteSession(browser) {
     // ignore cleanup failures
   }
 }
-
-

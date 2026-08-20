@@ -695,4 +695,3 @@ export async function submitLoginForm(browser, credentials, timeout) {
 export function createNamedPipe(path) {
   execFileSync("mkfifo", [path], { stdio: "ignore" });
 }
-

@@ -94,4 +94,3 @@ export function timestamp() {
 export function safeTimestamp() {
   return `${Date.now()}_${process.pid}`.replaceAll("-", "_");
 }
-

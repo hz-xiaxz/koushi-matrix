@@ -153,4 +153,3 @@ export async function run() {
   }
   throw new Error(`unsupported --scenario: ${guiScenario}`);
 }
-
