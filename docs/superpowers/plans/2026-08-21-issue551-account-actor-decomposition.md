@@ -2,7 +2,7 @@
 
 ## Status
 
-- Design: `reviewer-flash` approved the base and first visibility amendment as `Correct-to-implement`. A second compile exposed the existing scheduled-send admission return type as one additional visibility edge; the 65-name appendix amendment is pending bounded re-review before compile work resumes.
+- Design: `reviewer-flash` approved the base design and both compile-discovered visibility amendments as `Correct-to-implement`, most recently the 65-name scheduled-admission return-type amendment through `9a7e6c7`; compile work may resume.
 - Implementation: blocked until the design reviewer records `Correct-to-implement`.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 
