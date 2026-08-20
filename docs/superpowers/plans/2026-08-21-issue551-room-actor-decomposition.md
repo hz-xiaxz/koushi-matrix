@@ -303,7 +303,7 @@ Run wire/generated checks despite the prohibition on contract changes. A local h
 - Bidirectional AST/token inventory: 227/227 production keys with matching multiplicity, 10/10 public/crate declarations and exact root exports, 85/85 unit-test names; the 17 reviewed source-test functions are the only body allowlist.
 - Focused: Core lib default and `test-hooks` each 1,014 passed/8 ignored; DM-space 1, residency 25, room-list 6, preferences 2, selection-scale 4; all-target/all-feature check green.
 - Rust workspace final rerun: 2,394 passed, 13 ignored, 0 failed across 97 suites; desktop lib 149 passed/1 ignored; Headless Core QA 129 passed.
-- The first workspace run hit the existing eight-second `runtime_room_list_sync` event deadline at 8.12 seconds under concurrent suite load. The exact failed test passed focused in 7.21 seconds, and the complete workspace rerun was green; no expectation was changed or waived.
+- The first workspace run hit the existing five-second `runtime_room_list_sync` event deadline after about 8.12 seconds total wall-clock under concurrent suite load. The exact failed test passed focused in 7.21 seconds total wall-clock, and the complete workspace rerun was green; no expectation was changed or waived.
 - Frontend: typecheck/lint green; Vitest 1,367 passed; UI-headless timeline store 76 passed and Playwright 248 passed with `CHOKIDAR_USEPOLLING=true`; production build green.
 - Boundary/policy: Tauri adapter, domain dependencies, secret scan, release gates, SDK submodule, agents docs, IPC generated-wire contract, `cargo deny`, rustfmt, and diff checks green.
 - Compilation, tests, exactness, and formal review found no runtime-path ambiguity, so the design's conditional local homeserver/GUI lane was not triggered.
