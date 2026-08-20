@@ -4,14 +4,14 @@ import { sendRoomEmoteMessage,sendRoomFormattedMessage,sendRoomNoticeMessage } f
 import { safeTimestamp } from "../evidence.mjs";
 import { cleanupLocalGuiScenario,recordLocalGuiEvidence,startLocalGuiScenario,waitForAuthScreen,waitForLocalLoginReady,writeLocalLoginPipe } from "../local-session.mjs";
 import { timeoutMs } from "../options.mjs";
-import { clickReadyComposerSendButton,clickVisibleButtonByAriaLabel,elementCount,ensureReadyImageMedia,readyImageMediaXpath,readyImageOpenButtonXpath,selectRoomByName,setSyntheticFileInput,setTextInputValueByLabel,waitForActiveRoomName,waitForCompressedImageMedia,waitForDocumentText,waitForElementAttribute,waitForElementCount,waitForElementCountGreaterThan,waitForInputValue,waitForQaTitle,waitForReadyImageHoverActions,waitForStagedUpload,waitForStagedUploadsCleared,waitForTimelineViewMounted,writePngFixture } from "../webdriver.mjs";
+import { MESSAGE_COMPOSER_SELECTOR,clickReadyComposerSendButton,clickVisibleButtonByAriaLabel,elementCount,ensureReadyImageMedia,readyImageMediaXpath,readyImageOpenButtonXpath,selectRoomByName,setSyntheticFileInput,setTextInputValueByLabel,waitForActiveRoomName,waitForCompressedImageMedia,waitForDocumentText,waitForElementAttribute,waitForElementCount,waitForElementCountGreaterThan,waitForInputValue,waitForQaTitle,waitForReadyImageHoverActions,waitForStagedUpload,waitForStagedUploadsCleared,waitForTimelineViewMounted,writePngFixture } from "../webdriver.mjs";
 
 export async function runLocalMediaScenario() {
   const session = await startLocalGuiScenario();
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await selectRoomByName(session.browser, "QA Seed Room", timeoutMs);
     await waitForActiveRoomName(session.browser, "QA Seed Room", timeoutMs);
     await waitForQaTitle(
@@ -27,7 +27,7 @@ export async function runLocalMediaScenario() {
     const caption = `QA media caption ${safeTimestamp()}`;
     const fixturePath = join(session.runDir, filename);
     writeFileSync(fixturePath, "Koushi Linux GUI media fixture\n", "utf8");
-    const composer = await session.browser.$('textarea[aria-label="Message composer"]');
+    const composer = await session.browser.$(MESSAGE_COMPOSER_SELECTOR);
     await composer.waitForDisplayed({ timeout: timeoutMs });
     await composer.click();
     const fileInputSelector = 'input[type="file"][aria-label="Attach file input"]';
@@ -244,7 +244,7 @@ export async function runLocalImageCompressionScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await waitForQaTitle(
       session.browser,
       (status) => status.timeline_room === true,
@@ -337,7 +337,7 @@ export async function runLocalMessageTypesScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await selectRoomByName(session.browser, "QA Seed Room", timeoutMs);
     await waitForActiveRoomName(session.browser, "QA Seed Room", timeoutMs);
     await waitForTimelineViewMounted(session.browser, timeoutMs);

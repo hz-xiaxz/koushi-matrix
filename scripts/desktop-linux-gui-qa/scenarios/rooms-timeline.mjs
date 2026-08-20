@@ -3,16 +3,16 @@ import { parseQaTitle,safeTimestamp,timestamp } from "../evidence.mjs";
 import { cleanupLocalGuiScenario,recordLocalGuiEvidence,startLocalGuiScenario,waitForAuthScreen,waitForComposerSendSettled,waitForLocalLoginReady,waitForLocalSendSuccess,writeLocalLoginPipe } from "../local-session.mjs";
 import { timeoutMs } from "../options.mjs";
 import { sleep } from "../runtime.mjs";
-import { clickLatestMessageRedactButtonByText,clickMenuItemByText,clickRoomMemberAliasClear,clickVisibleButtonByAriaLabelInElement,clickVisibleButtonByTextPrefix,clickVisibleMenuItemByText,clickWorkspaceButton,driveTimelineToBottom,elementCount,getRoomEvent,localDatetimeInputValue,openRoomContextMenu,scrollTimelineToTop,selectComposerText,selectRoomByName,setDatetimeLocalValue,timelineDateJumpDiagnostics,waitForActiveRoomName,waitForCjkVisualContract,waitForDocumentText,waitForElementAttribute,waitForElementCount,waitForElementCountGreaterThan,waitForLatestEventMessageRow,waitForLatestMessageActionButton,waitForMessageSourceDialog,waitForPinnedRegionCleared,waitForPinnedRegionVisible,waitForQaTitle,waitForReplyLanded,waitForRichFormattedTimeline,waitForRoomInSection,waitForRoomManagementTopic,waitForRoomMemberAlias,waitForRoomMemberRole,waitForTextareaValue,waitForTimelineAwayFromBottom,waitForTimelineFocusedContextReady,waitForTimelineScrollable,waitForTimelineScrolledToBottom,waitForTimelineSenderLabel,waitForTimelineViewMounted,waitForWorkspaceActive,waitForWorkspaceButton } from "../webdriver.mjs";
+import { MESSAGE_COMPOSER_SELECTOR,clickLatestMessageRedactButtonByText,clickMenuItemByText,clickRoomMemberAliasClear,clickVisibleButtonByAriaLabelInElement,clickVisibleButtonByTextPrefix,clickVisibleMenuItemByText,clickWorkspaceButton,driveTimelineToBottom,elementCount,getRoomEvent,localDatetimeInputValue,openRoomContextMenu,scrollTimelineToTop,selectComposerText,selectRoomByName,setDatetimeLocalValue,timelineDateJumpDiagnostics,waitForActiveRoomName,waitForCjkVisualContract,waitForDocumentText,waitForElementAttribute,waitForElementCount,waitForElementCountGreaterThan,waitForLatestEventMessageRow,waitForLatestMessageActionButton,waitForMessageSourceDialog,waitForPinnedRegionCleared,waitForPinnedRegionVisible,waitForQaTitle,waitForReplyLanded,waitForRichFormattedTimeline,waitForRoomInSection,waitForRoomManagementTopic,waitForRoomMemberAlias,waitForRoomMemberRole,waitForEditableValue,waitForTimelineAwayFromBottom,waitForTimelineFocusedContextReady,waitForTimelineScrollable,waitForTimelineScrolledToBottom,waitForTimelineSenderLabel,waitForTimelineViewMounted,waitForWorkspaceActive,waitForWorkspaceButton } from "../webdriver.mjs";
 
 export async function runLocalSendScenario() {
   const session = await startLocalGuiScenario();
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
-    const composer = await session.browser.$('textarea[aria-label="Message composer"]');
+    const composer = await session.browser.$(MESSAGE_COMPOSER_SELECTOR);
     await composer.waitForDisplayed({ timeout: timeoutMs });
     const message = `Koushi GUI QA ${timestamp()}`;
     await composer.click();
@@ -31,7 +31,7 @@ export async function runLocalCreateRoomScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     const baselineRooms = parseQaTitle(
       await session.browser.execute(() => document.title)
@@ -64,7 +64,7 @@ export async function runLocalCreateSpaceScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     const baselineSpaces = parseQaTitle(
       await session.browser.execute(() => document.title)
@@ -97,7 +97,7 @@ export async function runLocalSpacesNavScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     const baselineSpaces = parseQaTitle(
       await session.browser.execute(() => document.title)
@@ -160,11 +160,11 @@ export async function runLocalReplyScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     // A reply needs a real, server-acked event to target. Send one first so a
     // timeline row with a reply affordance exists.
-    const composer = await session.browser.$('textarea[aria-label="Message composer"]');
+    const composer = await session.browser.$(MESSAGE_COMPOSER_SELECTOR);
     await composer.waitForDisplayed({ timeout: timeoutMs });
     await composer.click();
     await composer.setValue(`QA reply root ${timestamp()}`);
@@ -204,7 +204,7 @@ export async function runLocalRoomTagsScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     const roomName = "QA Seed Room";
     await waitForRoomInSection(
@@ -274,7 +274,7 @@ export async function runLocalRoomManagementScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     const roomInfoButton = await session.browser.$('button[aria-label="Room info"]');
     await roomInfoButton.waitForDisplayed({ timeout: timeoutMs });
@@ -335,7 +335,7 @@ export async function runLocalActivityScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     const activityButton = await session.browser.$('button[aria-label="Activity"]');
     await activityButton.waitForDisplayed({ timeout: timeoutMs });
@@ -382,7 +382,7 @@ export async function runLocalExploreScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
     const baselineRooms = parseQaTitle(await session.browser.execute(() => document.title)).rooms;
     const exploreButton = await session.browser.$('button[aria-label="Explore"]');
@@ -435,7 +435,7 @@ export async function runLocalMessageActionsScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await selectRoomByName(session.browser, "QA Seed Room", timeoutMs);
     await waitForActiveRoomName(session.browser, "QA Seed Room", timeoutMs);
     await waitForQaTitle(
@@ -449,7 +449,7 @@ export async function runLocalMessageActionsScenario() {
     await waitForTimelineViewMounted(session.browser, timeoutMs);
     await sleep(1000);
     const seedBaselineMessages = await elementCount(session.browser, ".message");
-    const composer = await session.browser.$('textarea[aria-label="Message composer"]');
+    const composer = await session.browser.$(MESSAGE_COMPOSER_SELECTOR);
     await composer.waitForDisplayed({ timeout: timeoutMs });
     await composer.click();
     await composer.setValue("QA message action seed");
@@ -497,7 +497,7 @@ export async function runLocalMessageActionsScenario() {
     );
     const hideRedactedBody = "QA hide redacted seed";
     const hideRedactedBaselineMessages = await elementCount(session.browser, ".message");
-    const hideRedactedComposer = await session.browser.$('textarea[aria-label="Message composer"]');
+    const hideRedactedComposer = await session.browser.$(MESSAGE_COMPOSER_SELECTOR);
     await hideRedactedComposer.waitForDisplayed({ timeout: timeoutMs });
     await hideRedactedComposer.click();
     await hideRedactedComposer.setValue(hideRedactedBody);
@@ -573,7 +573,7 @@ export async function runLocalPinsScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await selectRoomByName(session.browser, "QA Seed Room", timeoutMs);
     await waitForActiveRoomName(session.browser, "QA Seed Room", timeoutMs);
     await waitForQaTitle(
@@ -620,9 +620,9 @@ export async function runLocalComposerScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
-    const composer = await session.browser.$('textarea[aria-label="Message composer"]');
+    const composer = await session.browser.$(MESSAGE_COMPOSER_SELECTOR);
     await composer.waitForDisplayed({ timeout: timeoutMs });
     await composer.click();
     await composer.setValue("@qa");
@@ -647,9 +647,9 @@ export async function runLocalComposerScenario() {
     const boldButton = await session.browser.$('button[aria-label="Bold"]');
     await boldButton.waitForDisplayed({ timeout: timeoutMs });
     await boldButton.click();
-    await waitForTextareaValue(
+    await waitForEditableValue(
       session.browser,
-      'textarea[aria-label="Message composer"]',
+      MESSAGE_COMPOSER_SELECTOR,
       "**world**",
       timeoutMs,
       "local GUI bold markdown"
@@ -674,9 +674,9 @@ export async function runLocalScheduledSendScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
 
-    const composer = await session.browser.$('textarea[aria-label="Message composer"]');
+    const composer = await session.browser.$(MESSAGE_COMPOSER_SELECTOR);
     await composer.waitForDisplayed({ timeout: timeoutMs });
     await composer.click();
     await composer.setValue(`QA scheduled body ${safeTimestamp()}`);
@@ -704,9 +704,9 @@ export async function runLocalScheduledSendScenario() {
       timeoutMs,
       "local GUI scheduled send create"
     );
-    await waitForTextareaValue(
+    await waitForEditableValue(
       session.browser,
-      'textarea[aria-label="Message composer"]',
+      MESSAGE_COMPOSER_SELECTOR,
       "",
       timeoutMs,
       "local GUI scheduled send draft clear"
@@ -758,7 +758,7 @@ export async function runLocalTimelineNavigationScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await selectRoomByName(session.browser, "QA Seed Room", timeoutMs);
     await waitForActiveRoomName(session.browser, "QA Seed Room", timeoutMs);
     await waitForTimelineViewMounted(session.browser, timeoutMs);
@@ -774,7 +774,7 @@ export async function runLocalTimelineNavigationScenario() {
       "local GUI timeline navigation initial bottom"
     );
     const baselineMessages = await elementCount(session.browser, ".message");
-    const composer = await session.browser.$('textarea[aria-label="Message composer"]');
+    const composer = await session.browser.$(MESSAGE_COMPOSER_SELECTOR);
     await composer.waitForDisplayed({ timeout: timeoutMs });
     await composer.click();
     await composer.setValue(`QA timeline navigation baseline ${safeTimestamp()}`);
@@ -923,7 +923,7 @@ export async function runLocalAliasScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await selectRoomByName(session.browser, "QA Seed Room", timeoutMs);
     await waitForActiveRoomName(session.browser, "QA Seed Room", timeoutMs);
     await waitForTimelineViewMounted(session.browser, timeoutMs);
@@ -994,7 +994,7 @@ export async function runLocalRichFormattingScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await selectRoomByName(session.browser, "QA Seed Room", timeoutMs);
     await waitForActiveRoomName(session.browser, "QA Seed Room", timeoutMs);
 
@@ -1038,7 +1038,7 @@ export async function runLocalCjkScenario() {
   try {
     await waitForAuthScreen(session.browser, timeoutMs);
     await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
-    await waitForLocalLoginReady(session.browser, timeoutMs);
+    await waitForLocalLoginReady(session, timeoutMs);
     await waitForDocumentText(
       session.browser,
       [session.cjkRoomName],
@@ -1046,7 +1046,7 @@ export async function runLocalCjkScenario() {
       "local GUI CJK room name"
     );
 
-    const composer = await session.browser.$('textarea[aria-label="Message composer"]');
+    const composer = await session.browser.$(MESSAGE_COMPOSER_SELECTOR);
     await composer.waitForDisplayed({ timeout: timeoutMs });
     await composer.click();
     await composer.setValue(session.cjkMessageBody);

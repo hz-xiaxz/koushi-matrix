@@ -77,20 +77,26 @@ export async function waitForElementAttribute(browser, selector, attribute, expe
 }
 
 
-export async function waitForTextareaValue(browser, selector, expected, timeout, description) {
+export const MESSAGE_COMPOSER_SELECTOR = '.composer-inline-editor[role="textbox"]';
+
+export async function waitForEditableValue(browser, selector, expected, timeout, description) {
   const startedAt = Date.now();
-  let lastValue = "";
   while (Date.now() - startedAt < timeout) {
-    lastValue = await browser.execute((cssSelector) => {
-      const textarea = document.querySelector(cssSelector);
-      return textarea instanceof HTMLTextAreaElement ? textarea.value : "";
+    const value = await browser.execute((cssSelector) => {
+      const editable = document.querySelector(cssSelector);
+      if (editable instanceof HTMLInputElement || editable instanceof HTMLTextAreaElement) {
+        return editable.value;
+      }
+      return editable instanceof HTMLElement && editable.isContentEditable
+        ? editable.textContent ?? ""
+        : null;
     }, selector);
-    if (lastValue === expected) {
+    if (value === expected) {
       return;
     }
     await sleep(250);
   }
-  throw new Error(`${description} did not reach expected textarea value. Last value: ${lastValue}`);
+  throw new Error(`${description} did not reach the expected private-safe editable state`);
 }
 
 
@@ -938,14 +944,18 @@ export async function clickRoomMemberAliasClear(browser, aliasLabel, timeout) {
 
 
 export async function selectComposerText(browser) {
-  await browser.execute(() => {
-    const textarea = document.querySelector('textarea[aria-label="Message composer"]');
-    if (!(textarea instanceof HTMLTextAreaElement)) {
+  await browser.execute((selector) => {
+    const editor = document.querySelector(selector);
+    if (!(editor instanceof HTMLElement) || !editor.isContentEditable) {
       return;
     }
-    textarea.focus();
-    textarea.setSelectionRange(0, textarea.value.length);
-  });
+    editor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, MESSAGE_COMPOSER_SELECTOR);
 }
 
 
@@ -1676,7 +1686,7 @@ export function readyImageOpenButtonXpath(filename) {
 }
 
 
-function xpathLiteral(value) {
+export function xpathLiteral(value) {
   if (!value.includes("'")) {
     return `'${value}'`;
   }

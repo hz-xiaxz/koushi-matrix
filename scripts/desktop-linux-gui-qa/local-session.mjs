@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync,writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkInstalledHomeserver,createRoom,freePort,inviteUser as inviteUserToRoom,joinRoom,registerUser,sendRoomFormattedMessage,sendRoomMessage,setDisplayName,startHomeserver,stopProcess,tuwunelConfig,waitForHomeserver } from "../lib/local-homeserver-qa.mjs";
 import { writeSensitivePayloadToPath } from "../lib/sensitive-fifo.mjs";
@@ -7,7 +9,18 @@ import { parseQaTitle,qaStatusHasSendSuccess,qaStatusIsReady,safeTimestamp,times
 import { artifactRoot,desktopDir,guiScenario,timeoutMs } from "./options.mjs";
 import { childEnvironment } from "./redaction.mjs";
 import { checkLinuxTools,ensureAppBinary,ensureDbusSession,guiScenarioServerKind,qaDataDirForRun,settleChild,sleep,spawnLogged,startDbusMonitor,startXvfb,terminateProcessGroup,triggerNotificationSmoke,waitForDbusMonitorReady,waitForDbusMonitorToken,waitForPort } from "./runtime.mjs";
-import { importDesktopWebdriverio,safeDeleteSession,waitForQaTitle,waitForTextareaValue,webdriverCapabilities } from "./webdriver.mjs";
+import {
+  MESSAGE_COMPOSER_SELECTOR,
+  clickVisibleButtonByTextPrefix,
+  elementCount,
+  importDesktopWebdriverio,
+  safeDeleteSession,
+  setTextInputValueByLabel,
+  waitForQaTitle,
+  waitForEditableValue,
+  webdriverCapabilities,
+  xpathLiteral
+} from "./webdriver.mjs";
 
 const TIMELINE_NAVIGATION_SEED_MESSAGE_COUNT = 24;
 const TIMELINE_NAVIGATION_SEED_LINE_COUNT = 12;
@@ -33,6 +46,8 @@ export async function startLocalGuiScenario() {
 
   const session = {
     appDataDir,
+    allowNewIdentityBootstrap: true,
+    bootstrapTempDirs: new Set(),
     browser: null,
     buildEnv: null,
     dbusMonitor: null,
@@ -335,6 +350,7 @@ export async function startLocalGuiScenario() {
 
 
 export async function cleanupLocalGuiScenario(session) {
+  cleanupBootstrapTempDirs(session);
   try {
     if (session.dbusMonitor) {
       terminateProcessGroup(session.dbusMonitor.child, "SIGTERM");
@@ -365,6 +381,17 @@ export async function cleanupLocalGuiScenario(session) {
   }
 }
 
+function cleanupBootstrapTempDirs(session) {
+  for (const bootstrapDir of session.bootstrapTempDirs ?? []) {
+    try {
+      rmSync(bootstrapDir, { recursive: true, force: true });
+    } catch {
+      // Best effort: never turn process teardown into a secret-bearing error.
+    }
+    session.bootstrapTempDirs.delete(bootstrapDir);
+  }
+}
+
 
 export async function recordLocalGuiEvidence(session) {
   session.dbusMonitor = startDbusMonitor(session.logPath, session.buildEnv);
@@ -384,20 +411,29 @@ export async function waitForAuthScreen(browser, timeout) {
 }
 
 
-export async function waitForLocalLoginReady(browser, timeout) {
-  const startedAt = Date.now();
+export async function waitForLocalLoginReady(session, timeout) {
+  const browser = session.browser;
+  const deadline = Date.now() + timeout;
+  const bootstrapAttempt = { attempted: false };
   let lastTitle = "";
   let selectedRoom = false;
-  while (Date.now() - startedAt < timeout) {
+  while (Date.now() < deadline) {
     lastTitle = await browser.execute(() => document.title);
     const status = parseQaTitle(lastTitle);
     if (status.errors > 0) {
       throw new Error(`local GUI login reported errors. Last title: ${lastTitle}`);
     }
-    if (qaStatusIsReady(status, false, true)) {
+    const composerVisible = (await elementCount(browser, MESSAGE_COMPOSER_SELECTOR)) > 0;
+    if (qaStatusIsReady(status, false, true) && composerVisible) {
       return lastTitle;
     }
-    if (shouldSelectFirstRoom(status, selectedRoom)) {
+    if (
+      status.session === "awaitingVerification" &&
+      session.allowNewIdentityBootstrap === true
+    ) {
+      await completeNewIdentityBootstrapIfOffered(session, deadline, bootstrapAttempt);
+    }
+    if (shouldSelectFirstRoom(status, selectedRoom, composerVisible)) {
       selectedRoom = await selectFirstRoom(browser);
     }
     await sleep(250);
@@ -405,11 +441,65 @@ export async function waitForLocalLoginReady(browser, timeout) {
   throw new Error(`local GUI login did not reach a ready state. Last title: ${lastTitle}`);
 }
 
+async function completeNewIdentityBootstrapIfOffered(session, deadline, bootstrapAttempt) {
+  if (bootstrapAttempt.attempted) return false;
+  const browser = session.browser;
+  const labels = {
+    destination: "Recovery key destination",
+    passphrase: "Backup passphrase",
+    submit: "Create secure backup",
+    saved: "I saved the recovery key"
+  };
+  const [destinationInputs, passphraseInputs, submitButtons] = await Promise.all([
+    browser.$$(`//input[@aria-label=${xpathLiteral(labels.destination)}]`),
+    browser.$$(`//input[@aria-label=${xpathLiteral(labels.passphrase)}]`),
+    browser.$$(`//button[normalize-space(.)=${xpathLiteral(labels.submit)}]`)
+  ]);
+  if (destinationInputs.length === 0 || passphraseInputs.length === 0 || submitButtons.length === 0) {
+    return false;
+  }
+
+  bootstrapAttempt.attempted = true;
+  let bootstrapDir;
+  try {
+    bootstrapDir = mkdtempSync(join(tmpdir(), "koushi-linux-gui-bootstrap-"));
+    session.bootstrapTempDirs.add(bootstrapDir);
+    const destination = join(bootstrapDir, "recovery-key.txt");
+    const bootstrapPassphrase = randomBytes(32).toString("base64url");
+    await setTextInputValueByLabel(browser, destination, labels.destination);
+    await setTextInputValueByLabel(browser, bootstrapPassphrase, labels.passphrase);
+    await clickVisibleButtonByTextPrefix(
+      browser,
+      labels.submit,
+      Math.max(1, deadline - Date.now()),
+      "new-identity bootstrap submit"
+    );
+    await clickVisibleButtonByTextPrefix(
+      browser,
+      labels.saved,
+      Math.max(1, deadline - Date.now()),
+      "new-identity bootstrap confirmation"
+    );
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (bootstrapDir) {
+      try {
+        rmSync(bootstrapDir, { recursive: true, force: true });
+        session.bootstrapTempDirs.delete(bootstrapDir);
+      } catch {
+        // The session teardown keeps the directory tracked for one final cleanup attempt.
+      }
+    }
+  }
+}
+
 
 export async function waitForComposerSendSettled(browser, timeout, description) {
-  await waitForTextareaValue(
+  await waitForEditableValue(
     browser,
-    'textarea[aria-label="Message composer"]',
+    MESSAGE_COMPOSER_SELECTOR,
     "",
     timeout,
     `${description} clear`
@@ -453,14 +543,16 @@ async function selectFirstRoom(browser) {
 }
 
 
-function shouldSelectFirstRoom(status, selectedRoom) {
+function shouldSelectFirstRoom(status, selectedRoom, composerVisible) {
   if (selectedRoom) {
     return false;
   }
   if (status.session !== "ready" || status.rooms <= 0) {
     return false;
   }
-  return status.active_room === false || status.timeline_subscribed === false;
+  return (
+    !composerVisible || status.active_room === false || status.timeline_subscribed === false
+  );
 }
 
 
