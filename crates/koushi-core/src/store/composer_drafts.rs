@@ -1,7 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
-use super::{CoreFailure, StoreActor, COMPOSER_DRAFTS_FILE_MAGIC, COMPOSER_DRAFTS_NONCE_LEN};
-use chacha20poly1305::{aead::{Aead, OsRng, rand_core::RngCore}, ChaCha20Poly1305, Key, KeyInit, Nonce};
+use super::{
+    COMPOSER_DRAFTS_FILE_MAGIC, COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor,
+    atomic_replace_file, decode_composer_draft_payload_json, encode_composer_draft_payload_json,
+};
+use chacha20poly1305::{
+    ChaCha20Poly1305, Key, KeyInit, Nonce,
+    aead::{Aead, OsRng, rand_core::RngCore},
+};
 use koushi_key::{LocalUnlockSecret, SessionKeyId};
 
 use koushi_state::{
@@ -703,159 +710,158 @@ mod tests {
 
 impl StoreActor {
     pub fn load_composer_drafts(
-    &self,
-    key_id: &SessionKeyId,
-) -> Result<ComposerDraftStore, CoreFailure> {
-    #[cfg(any(test, feature = "test-hooks"))]
-    self.notify_composer_draft_load_started_for_testing();
-    let result = (|| {
+        &self,
+        key_id: &SessionKeyId,
+    ) -> Result<ComposerDraftStore, CoreFailure> {
+        #[cfg(any(test, feature = "test-hooks"))]
+        self.notify_composer_draft_load_started_for_testing();
+        let result = (|| {
+            let path = self.account_composer_drafts_file(key_id);
+            let bytes = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(ComposerDraftStore::default());
+                }
+                Err(_) => return Err(CoreFailure::StoreUnavailable),
+            };
+            decrypt_composer_drafts_payload(&self.load_unlock_secret(key_id)?, &bytes)
+        })();
+        #[cfg(any(test, feature = "test-hooks"))]
+        self.notify_composer_draft_load_completed_for_testing();
+        result
+    }
+
+    pub(crate) fn save_composer_drafts(
+        &self,
+        key_id: &SessionKeyId,
+        drafts: &PersistedComposerDraftStoreV3,
+    ) -> Result<(), CoreFailure> {
+        #[cfg(any(test, feature = "test-hooks"))]
+        self.wait_for_composer_draft_save_release_for_testing();
+        let result = self.save_composer_drafts_inner(key_id, drafts);
+        #[cfg(any(test, feature = "test-hooks"))]
+        self.notify_composer_draft_save_completed_for_testing();
+        result
+    }
+
+    fn save_composer_drafts_inner(
+        &self,
+        key_id: &SessionKeyId,
+        drafts: &PersistedComposerDraftStoreV3,
+    ) -> Result<(), CoreFailure> {
         let path = self.account_composer_drafts_file(key_id);
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(ComposerDraftStore::default());
+        if drafts.is_empty() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => return Ok(()),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(_) => return Err(CoreFailure::StoreUnavailable),
             }
-            Err(_) => return Err(CoreFailure::StoreUnavailable),
-        };
-        decrypt_composer_drafts_payload(&self.load_unlock_secret(key_id)?, &bytes)
-    })();
-    #[cfg(any(test, feature = "test-hooks"))]
-    self.notify_composer_draft_load_completed_for_testing();
-    result
-}
-
-pub(crate) fn save_composer_drafts(
-    &self,
-    key_id: &SessionKeyId,
-    drafts: &PersistedComposerDraftStoreV3,
-) -> Result<(), CoreFailure> {
-    #[cfg(any(test, feature = "test-hooks"))]
-    self.wait_for_composer_draft_save_release_for_testing();
-    let result = self.save_composer_drafts_inner(key_id, drafts);
-    #[cfg(any(test, feature = "test-hooks"))]
-    self.notify_composer_draft_save_completed_for_testing();
-    result
-}
-
-fn save_composer_drafts_inner(
-    &self,
-    key_id: &SessionKeyId,
-    drafts: &PersistedComposerDraftStoreV3,
-) -> Result<(), CoreFailure> {
-    let path = self.account_composer_drafts_file(key_id);
-    if drafts.is_empty() {
-        match std::fs::remove_file(&path) {
-            Ok(()) => return Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(_) => return Err(CoreFailure::StoreUnavailable),
         }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|_| CoreFailure::StoreUnavailable)?;
+        }
+        let payload =
+            encrypt_composer_drafts_payload(&self.load_or_create_unlock_secret(key_id)?, drafts)?;
+        #[cfg(test)]
+        let fail_before_persist = self
+            .composer_draft_replace_fault
+            .swap(false, std::sync::atomic::Ordering::AcqRel);
+        #[cfg(not(test))]
+        let fail_before_persist = false;
+        atomic_replace_file(&path, &payload, fail_before_persist)
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|_| CoreFailure::StoreUnavailable)?;
-    }
-    let payload =
-        encrypt_composer_drafts_payload(&self.load_or_create_unlock_secret(key_id)?, drafts)?;
+
     #[cfg(test)]
-    let fail_before_persist = self
-        .composer_draft_replace_fault
-        .swap(false, std::sync::atomic::Ordering::AcqRel);
-    #[cfg(not(test))]
-    let fail_before_persist = false;
-    atomic_replace_file(&path, &payload, fail_before_persist)
-}
+    fn fail_next_composer_draft_replace_for_testing(&self) {
+        self.composer_draft_replace_fault
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
 
-#[cfg(test)]
-fn fail_next_composer_draft_replace_for_testing(&self) {
-    self.composer_draft_replace_fault
-        .store(true, std::sync::atomic::Ordering::Release);
-}
-
-#[cfg(any(test, feature = "test-hooks"))]
-pub(crate) fn install_composer_draft_io_probe(
-    &self,
-    save_started: tokio::sync::oneshot::Sender<()>,
-    save_release: std::sync::mpsc::Receiver<()>,
-    save_completed: tokio::sync::oneshot::Sender<()>,
-    load_started: tokio::sync::oneshot::Sender<()>,
-    load_completed: tokio::sync::oneshot::Sender<()>,
-) {
-    *self
-        .composer_draft_io_probe
-        .lock()
-        .expect("composer draft I/O probe mutex") = Some(ComposerDraftIoProbe {
-        save_started: Some(save_started),
-        save_release: Some(save_release),
-        save_completed: Some(save_completed),
-        load_started: Some(load_started),
-        load_completed: Some(load_completed),
-    });
-}
-
-#[cfg(any(test, feature = "test-hooks"))]
-fn wait_for_composer_draft_save_release_for_testing(&self) {
-    let (started, release) = {
-        let mut probe = self
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub(crate) fn install_composer_draft_io_probe(
+        &self,
+        save_started: tokio::sync::oneshot::Sender<()>,
+        save_release: std::sync::mpsc::Receiver<()>,
+        save_completed: tokio::sync::oneshot::Sender<()>,
+        load_started: tokio::sync::oneshot::Sender<()>,
+        load_completed: tokio::sync::oneshot::Sender<()>,
+    ) {
+        *self
             .composer_draft_io_probe
             .lock()
-            .expect("composer draft I/O probe mutex");
-        let Some(probe) = probe.as_mut() else {
-            return;
+            .expect("composer draft I/O probe mutex") = Some(super::ComposerDraftIoProbe {
+            save_started: Some(save_started),
+            save_release: Some(save_release),
+            save_completed: Some(save_completed),
+            load_started: Some(load_started),
+            load_completed: Some(load_completed),
+        });
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    fn wait_for_composer_draft_save_release_for_testing(&self) {
+        let (started, release) = {
+            let mut probe = self
+                .composer_draft_io_probe
+                .lock()
+                .expect("composer draft I/O probe mutex");
+            let Some(probe) = probe.as_mut() else {
+                return;
+            };
+            (probe.save_started.take(), probe.save_release.take())
         };
-        (probe.save_started.take(), probe.save_release.take())
-    };
-    if let Some(started) = started {
-        let _ = started.send(());
+        if let Some(started) = started {
+            let _ = started.send(());
+        }
+        if let Some(release) = release {
+            let _ = release.recv();
+        }
     }
-    if let Some(release) = release {
-        let _ = release.recv();
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    fn notify_composer_draft_save_completed_for_testing(&self) {
+        let completed = self
+            .composer_draft_io_probe
+            .lock()
+            .expect("composer draft I/O probe mutex")
+            .as_mut()
+            .and_then(|probe| probe.save_completed.take());
+        if let Some(completed) = completed {
+            let _ = completed.send(());
+        }
     }
-}
 
-#[cfg(any(test, feature = "test-hooks"))]
-fn notify_composer_draft_save_completed_for_testing(&self) {
-    let completed = self
-        .composer_draft_io_probe
-        .lock()
-        .expect("composer draft I/O probe mutex")
-        .as_mut()
-        .and_then(|probe| probe.save_completed.take());
-    if let Some(completed) = completed {
-        let _ = completed.send(());
+    #[cfg(any(test, feature = "test-hooks"))]
+    fn notify_composer_draft_load_started_for_testing(&self) {
+        let started = self
+            .composer_draft_io_probe
+            .lock()
+            .expect("composer draft I/O probe mutex")
+            .as_mut()
+            .and_then(|probe| probe.load_started.take());
+        if let Some(started) = started {
+            let _ = started.send(());
+        }
     }
-}
 
-#[cfg(any(test, feature = "test-hooks"))]
-fn notify_composer_draft_load_started_for_testing(&self) {
-    let started = self
-        .composer_draft_io_probe
-        .lock()
-        .expect("composer draft I/O probe mutex")
-        .as_mut()
-        .and_then(|probe| probe.load_started.take());
-    if let Some(started) = started {
-        let _ = started.send(());
+    #[cfg(any(test, feature = "test-hooks"))]
+    fn notify_composer_draft_load_completed_for_testing(&self) {
+        let completed = self
+            .composer_draft_io_probe
+            .lock()
+            .expect("composer draft I/O probe mutex")
+            .as_mut()
+            .and_then(|probe| probe.load_completed.take());
+        if let Some(completed) = completed {
+            let _ = completed.send(());
+        }
     }
-}
 
-#[cfg(any(test, feature = "test-hooks"))]
-fn notify_composer_draft_load_completed_for_testing(&self) {
-    let completed = self
-        .composer_draft_io_probe
-        .lock()
-        .expect("composer draft I/O probe mutex")
-        .as_mut()
-        .and_then(|probe| probe.load_completed.take());
-    if let Some(completed) = completed {
-        let _ = completed.send(());
+    fn account_composer_drafts_file(&self, key_id: &SessionKeyId) -> PathBuf {
+        self.account_root_dir(key_id)
+            .join("composer-drafts")
+            .join("drafts.v1.enc")
     }
-}
-
-fn account_composer_drafts_file(&self, key_id: &SessionKeyId) -> PathBuf {
-    self.account_root_dir(key_id)
-        .join("composer-drafts")
-        .join("drafts.v1.enc")
-}
-
 }
 
 fn encrypt_composer_drafts_payload(
@@ -915,10 +921,19 @@ fn decrypt_composer_drafts_payload(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::test_support::{file_store_actor, make_key_id};
-    use super::{CoreFailure, StoreActor};
+mod store_tests {
+    use super::super::test_support::{file_store_actor, make_key_id};
+    use super::super::*;
+    use super::{
+        CoreFailure, PersistedComposerDraftStoreV3, StoreActor,
+        encrypt_composer_drafts_fixture_payload,
+    };
+    use koushi_state::ComposerDraftStore;
     use tempfile::tempdir;
+
+    fn persisted_composer_drafts(drafts: &ComposerDraftStore) -> PersistedComposerDraftStoreV3 {
+        super::persisted_projection(drafts, &koushi_state::ComposerDraftProtection::default())
+    }
 
     #[test]
     fn composer_drafts_are_encrypted_and_reject_corruption() {
@@ -929,27 +944,31 @@ mod tests {
         let plaintext = "secret draft body";
         let mut drafts = ComposerDraftStore::default();
         drafts.set_room_draft("!room:test.example.com".to_owned(), plaintext.to_owned());
-        assert!(drafts
-            .apply_room_draft(
-                "!sent:test.example.com".to_owned(),
-                "accepted body".to_owned(),
-                7.into(),
-            )
-            .expect("room draft revision should apply"));
+        assert!(
+            drafts
+                .apply_room_draft(
+                    "!sent:test.example.com".to_owned(),
+                    "accepted body".to_owned(),
+                    7.into(),
+                )
+                .expect("room draft revision should apply")
+        );
         assert_eq!(
             drafts
                 .advance_room_revision("!sent:test.example.com", 7.into())
                 .expect("room acceptance should advance"),
             8.into()
         );
-        assert!(drafts
-            .apply_thread_draft(
-                "!room:test.example.com".to_owned(),
-                "$root:test.example.com".to_owned(),
-                "thread accepted body".to_owned(),
-                11.into(),
-            )
-            .expect("thread draft revision should apply"));
+        assert!(
+            drafts
+                .apply_thread_draft(
+                    "!room:test.example.com".to_owned(),
+                    "$root:test.example.com".to_owned(),
+                    "thread accepted body".to_owned(),
+                    11.into(),
+                )
+                .expect("thread draft revision should apply")
+        );
         assert_eq!(
             drafts
                 .advance_thread_revision(
@@ -967,9 +986,11 @@ mod tests {
 
         let path = actor.account_composer_drafts_file(&key_id);
         let bytes = std::fs::read(&path).expect("read encrypted drafts");
-        assert!(!bytes
-            .windows(plaintext.len())
-            .any(|window| window == plaintext.as_bytes()));
+        assert!(
+            !bytes
+                .windows(plaintext.len())
+                .any(|window| window == plaintext.as_bytes())
+        );
 
         let loaded = actor
             .load_composer_drafts(&key_id)
@@ -987,11 +1008,13 @@ mod tests {
             loaded.thread_revision("!room:test.example.com", "$root:test.example.com"),
             12.into()
         );
-        assert!(loaded
-            .threads
-            .get("!room:test.example.com")
-            .and_then(|threads| threads.get("$root:test.example.com"))
-            .is_none());
+        assert!(
+            loaded
+                .threads
+                .get("!room:test.example.com")
+                .and_then(|threads| threads.get("$root:test.example.com"))
+                .is_none()
+        );
 
         let mut corrupted = bytes;
         let last = corrupted.last_mut().expect("non-empty encrypted payload");
@@ -1115,9 +1138,11 @@ mod tests {
             .save_composer_drafts(&key_b, &persisted_composer_drafts(&account_b))
             .expect("write account B v2");
 
-        assert!(account_a
-            .apply_room_draft("zz-new".to_owned(), String::new(), 1.into())
-            .expect("collect account A independently"));
+        assert!(
+            account_a
+                .apply_room_draft("zz-new".to_owned(), String::new(), 1.into())
+                .expect("collect account A independently")
+        );
         actor
             .save_composer_drafts(&key_a, &persisted_composer_drafts(&account_a))
             .expect("write collected account A v2");
@@ -1205,10 +1230,12 @@ mod tests {
             )
             .expect("save empty drafts");
         assert!(!path.exists());
-        assert!(actor
-            .load_composer_drafts(&key_id)
-            .expect("load removed drafts")
-            .is_empty());
+        assert!(
+            actor
+                .load_composer_drafts(&key_id)
+                .expect("load removed drafts")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1242,10 +1269,12 @@ mod tests {
             loaded.rooms.len(),
             koushi_state::MAX_PERSISTED_COMPOSER_DRAFT_ROOM_COUNT + 8
         );
-        assert!(loaded
-            .rooms
-            .values()
-            .all(|draft| draft.len() <= koushi_state::MAX_PERSISTED_COMPOSER_DRAFT_BYTES));
+        assert!(
+            loaded
+                .rooms
+                .values()
+                .all(|draft| draft.len() <= koushi_state::MAX_PERSISTED_COMPOSER_DRAFT_BYTES)
+        );
         let thread_count = loaded
             .threads
             .values()
@@ -1255,11 +1284,13 @@ mod tests {
             thread_count,
             koushi_state::MAX_PERSISTED_COMPOSER_DRAFT_THREAD_COUNT + 8
         );
-        assert!(loaded
-            .threads
-            .values()
-            .flat_map(|room_threads| room_threads.values())
-            .all(|draft| draft.len() <= koushi_state::MAX_PERSISTED_COMPOSER_DRAFT_BYTES));
+        assert!(
+            loaded
+                .threads
+                .values()
+                .flat_map(|room_threads| room_threads.values())
+                .all(|draft| draft.len() <= koushi_state::MAX_PERSISTED_COMPOSER_DRAFT_BYTES)
+        );
     }
 
     #[test]
@@ -1271,23 +1302,27 @@ mod tests {
         let mut drafts = ComposerDraftStore::default();
 
         for index in 0..koushi_state::MAX_PERSISTED_COMPOSER_DRAFT_ROOM_COUNT {
-            assert!(drafts
-                .apply_room_draft(
-                    format!("!a-tombstone-{index:04}:test.example.com"),
-                    String::new(),
-                    1.into(),
-                )
-                .expect("room tombstone should apply"));
+            assert!(
+                drafts
+                    .apply_room_draft(
+                        format!("!a-tombstone-{index:04}:test.example.com"),
+                        String::new(),
+                        1.into(),
+                    )
+                    .expect("room tombstone should apply")
+            );
         }
         for index in 0..koushi_state::MAX_PERSISTED_COMPOSER_DRAFT_THREAD_COUNT {
-            assert!(drafts
-                .apply_thread_draft(
-                    "!thread-room:test.example.com".to_owned(),
-                    format!("$a-tombstone-{index:04}"),
-                    String::new(),
-                    1.into(),
-                )
-                .expect("thread tombstone should apply"));
+            assert!(
+                drafts
+                    .apply_thread_draft(
+                        "!thread-room:test.example.com".to_owned(),
+                        format!("$a-tombstone-{index:04}"),
+                        String::new(),
+                        1.into(),
+                    )
+                    .expect("thread tombstone should apply")
+            );
         }
         drafts.set_room_draft(
             "!z-active:test.example.com".to_owned(),

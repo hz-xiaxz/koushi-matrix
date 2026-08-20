@@ -1,17 +1,17 @@
 use super::{
-    CoreFailure, StoreActor, COMPOSER_DRAFTS_NONCE_LEN, READ_STATE_OUTBOX_FILE_MAGIC,
-    READ_STATE_OUTBOX_GENERATIONS, READ_STATE_OUTBOX_MAX_BYTES, READ_STATE_OUTBOX_VERSION,
-    READ_STATE_OUTBOX_WRITERS,
+    COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, READ_STATE_OUTBOX_FILE_MAGIC, StoreActor,
+    atomic_replace_file,
 };
 use chacha20poly1305::{
-    aead::{rand_core::RngCore, Aead, OsRng},
     ChaCha20Poly1305, Key, KeyInit, Nonce,
+    aead::{Aead, OsRng, rand_core::RngCore},
 };
 use koushi_key::LocalUnlockSecret;
+use koushi_key::SessionKeyId;
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 const READ_STATE_OUTBOX_VERSION: u8 = 1;
@@ -161,6 +161,60 @@ impl StoreActor {
     }
 }
 
+fn save_read_state_outbox_generation_fenced(
+    path: &std::path::Path,
+    session_generation: u64,
+    save_generation: u64,
+    write: impl FnOnce() -> Result<(), CoreFailure>,
+) -> Result<bool, CoreFailure> {
+    let writer = {
+        let mut writers = READ_STATE_OUTBOX_WRITERS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map_err(|_| CoreFailure::StoreUnavailable)?;
+        Arc::clone(
+            writers
+                .entry(path.to_path_buf())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
+    };
+    let _writer = writer.lock().map_err(|_| CoreFailure::StoreUnavailable)?;
+    let proposed = (session_generation, save_generation);
+    {
+        let mut generations = READ_STATE_OUTBOX_GENERATIONS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map_err(|_| CoreFailure::StoreUnavailable)?;
+        if generations
+            .get(path)
+            .is_some_and(|current| *current > proposed)
+        {
+            return Ok(false);
+        }
+        generations.insert(path.to_path_buf(), proposed);
+    }
+
+    // Credential/keychain access, encryption, fsync, and atomic replacement
+    // happen outside the global generation mutex. Only this path's writer is
+    // serialized, so timeout-driven session invalidation remains bounded.
+    write()?;
+
+    let still_current = READ_STATE_OUTBOX_GENERATIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| CoreFailure::StoreUnavailable)?
+        .get(path)
+        .is_some_and(|current| *current == proposed);
+    if !still_current {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(CoreFailure::StoreUnavailable),
+        }
+    }
+    Ok(still_current)
+}
+
 fn encrypt_read_state_outbox_payload(
     secret: &LocalUnlockSecret,
     snapshot: &crate::read_state::ReadPersistenceSnapshot,
@@ -222,7 +276,9 @@ fn decrypt_read_state_outbox_payload(
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{file_store_actor, make_key_id};
+    use super::super::test_support::{file_store_actor, make_key_id};
+    use super::super::*;
+    use super::*;
     use super::{CoreFailure, StoreActor};
     use tempfile::tempdir;
 
@@ -264,25 +320,31 @@ mod tests {
 
         let path = actor.account_read_state_outbox_file(&key_id);
         let bytes = std::fs::read(&path).expect("read encrypted outbox");
-        assert!(!bytes
-            .windows(room_id.len())
-            .any(|window| window == room_id.as_bytes()));
-        assert!(!bytes
-            .windows(event_id.len())
-            .any(|window| window == event_id.as_bytes()));
+        assert!(
+            !bytes
+                .windows(room_id.len())
+                .any(|window| window == room_id.as_bytes())
+        );
+        assert!(
+            !bytes
+                .windows(event_id.len())
+                .any(|window| window == event_id.as_bytes())
+        );
         assert_eq!(
             actor
                 .load_read_state_outbox(&key_id)
                 .expect("load encrypted outbox"),
             snapshot
         );
-        assert!(std::fs::read_dir(path.parent().expect("outbox parent"))
-            .expect("read outbox parent")
-            .all(|entry| !entry
-                .expect("directory entry")
-                .file_name()
-                .to_string_lossy()
-                .ends_with(".tmp")));
+        assert!(
+            std::fs::read_dir(path.parent().expect("outbox parent"))
+                .expect("read outbox parent")
+                .all(|entry| !entry
+                    .expect("directory entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp"))
+        );
     }
 
     #[test]
@@ -372,12 +434,16 @@ mod tests {
         let newer = snapshot("$newer:test.example.com");
         let stale = snapshot("$stale:test.example.com");
 
-        assert!(actor
-            .save_read_state_outbox_if_current(&key_id, 2, 1, &newer)
-            .expect("newer session save"));
-        assert!(!actor
-            .save_read_state_outbox_if_current(&key_id, 1, u64::MAX, &stale)
-            .expect("stale session is rejected"));
+        assert!(
+            actor
+                .save_read_state_outbox_if_current(&key_id, 2, 1, &newer)
+                .expect("newer session save")
+        );
+        assert!(
+            !actor
+                .save_read_state_outbox_if_current(&key_id, 1, u64::MAX, &stale)
+                .expect("stale session is rejected")
+        );
         assert_eq!(
             actor
                 .load_read_state_outbox(&key_id)

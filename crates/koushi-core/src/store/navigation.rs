@@ -1,12 +1,13 @@
-use super::{
-    atomic_replace, CoreFailure, StoreActor, COMPOSER_DRAFTS_NONCE_LEN, NAVIGATION_FILE_MAGIC,
-};
+use super::{COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor};
 use chacha20poly1305::{
-    aead::{rand_core::RngCore, Aead, OsRng},
     ChaCha20Poly1305, Key, KeyInit, Nonce,
+    aead::{Aead, OsRng, rand_core::RngCore},
 };
 use koushi_key::LocalUnlockSecret;
+use koushi_key::SessionKeyId;
 use koushi_state::NavigationState;
+use std::io::Write;
+use std::path::PathBuf;
 
 const NAVIGATION_FILE_MAGIC: &[u8] = b"KOUSHI-NAVIGATION-V1\0";
 
@@ -140,7 +141,8 @@ fn decrypt_navigation_payload(
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{file_store_actor, make_key_id};
+    use super::super::test_support::{file_store_actor, make_key_id};
+    use super::super::*;
     use super::{CoreFailure, StoreActor};
     use tempfile::tempdir;
 
@@ -177,9 +179,11 @@ mod tests {
         let bytes = std::fs::read(&path).expect("read encrypted navigation");
         assert!(!path.with_extension("tmp").exists());
         for plaintext in ["!space:test.example.com", "!room:test.example.com"] {
-            assert!(!bytes
-                .windows(plaintext.len())
-                .any(|window| window == plaintext.as_bytes()));
+            assert!(
+                !bytes
+                    .windows(plaintext.len())
+                    .any(|window| window == plaintext.as_bytes())
+            );
         }
 
         let loaded = actor
@@ -245,9 +249,11 @@ mod tests {
         let encrypted_path = actor.account_navigation_file(&key_id);
         let bytes = std::fs::read(&encrypted_path).expect("read encrypted navigation");
         for plaintext in ["!space:test.example.com", "!room:test.example.com"] {
-            assert!(!bytes
-                .windows(plaintext.len())
-                .any(|window| window == plaintext.as_bytes()));
+            assert!(
+                !bytes
+                    .windows(plaintext.len())
+                    .any(|window| window == plaintext.as_bytes())
+            );
         }
     }
 

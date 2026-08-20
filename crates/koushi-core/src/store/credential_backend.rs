@@ -1,10 +1,19 @@
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
+
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 
 use koushi_key::{CredentialStore, LocalUnlockSecret, SessionKeyId};
 use koushi_state::LocalEncryptionHealth;
 
-use super::{AccountSearchIndexConfig, AccountStoreConfig, StoreActor};
+use super::{
+    AccountSearchIndexConfig, AccountStoreConfig, CREDENTIAL_STORE_SERVICE_NAME,
+    ENV_FILE_CREDENTIAL_STORE_DIR, StoreActor,
+};
 use crate::failure::CoreFailure;
 
 /// Credential store backend. Production = either OS keychain (injected from
@@ -519,19 +528,19 @@ impl OsCredentialStore {
     }
 }
 
-fn missing_credential_error() -> koushi_key::LocalSecretError {
+pub(super) fn missing_credential_error() -> koushi_key::LocalSecretError {
     koushi_key::LocalSecretError::CredentialBackend(
         koushi_key::CredentialBackendErrorKind::MissingCredential,
     )
 }
 
-fn unavailable_credential_error() -> koushi_key::LocalSecretError {
+pub(super) fn unavailable_credential_error() -> koushi_key::LocalSecretError {
     koushi_key::LocalSecretError::CredentialBackend(
         koushi_key::CredentialBackendErrorKind::Unavailable,
     )
 }
 
-fn vault_error_to_local_secret_error(
+pub(super) fn vault_error_to_local_secret_error(
     error: crate::credential_vault::CredentialVaultError,
 ) -> koushi_key::LocalSecretError {
     let kind = match error {
@@ -686,7 +695,7 @@ impl FileCredentialStore {
 
 /// Make a name filesystem-safe by replacing all non-alphanumeric chars with `_`.
 #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
-fn safe_filename(name: String) -> String {
+pub(super) fn safe_filename(name: String) -> String {
     name.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' {
@@ -702,7 +711,7 @@ fn safe_filename(name: String) -> String {
 /// builds along with its only call site (the file credential store branch in
 /// `CredentialStoreBackend::resolve`).
 #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
-fn record_file_credential_store_active() {
+pub(super) fn record_file_credential_store_active() {
     record(
         DiagnosticEvent::new(DiagnosticLevel::Debug, "core.store", "credential_store")
             .field(DiagnosticField::token("outcome", "file_backend_active")),
@@ -720,7 +729,7 @@ pub(super) fn record_local_unlock_secret(purpose: Option<&'static str>, outcome:
     );
 }
 
-fn record_credential_vault_access(outcome: &'static str) {
+pub(super) fn record_credential_vault_access(outcome: &'static str) {
     record(
         DiagnosticEvent::new(
             DiagnosticLevel::Debug,
@@ -731,7 +740,9 @@ fn record_credential_vault_access(outcome: &'static str) {
     );
 }
 
-fn credential_vault_failure_outcome(error: &koushi_key::LocalSecretError) -> &'static str {
+pub(super) fn credential_vault_failure_outcome(
+    error: &koushi_key::LocalSecretError,
+) -> &'static str {
     match error {
         koushi_key::LocalSecretError::CredentialBackend(
             koushi_key::CredentialBackendErrorKind::LockedOrInaccessible,
@@ -905,7 +916,7 @@ mod tests {
     }
     #[test]
     fn file_credential_store_is_available_to_release_qa_binary_only() {
-        let source = include_str!("store.rs");
+        let source = include_str!("credential_backend.rs");
         assert!(
             source.contains("cfg(any(debug_assertions, test, feature = \"qa-bin\"))"),
             "release headless QA builds need the file credential backend, while production release builds omit qa-bin"

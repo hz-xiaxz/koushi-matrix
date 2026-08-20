@@ -1,10 +1,12 @@
-use super::{CoreFailure, StoreActor, COMPOSER_DRAFTS_NONCE_LEN, ROOM_PREFERENCES_FILE_MAGIC};
+use super::{COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor};
 use chacha20poly1305::{
-    aead::{rand_core::RngCore, Aead, OsRng},
     ChaCha20Poly1305, Key, KeyInit, Nonce,
+    aead::{Aead, OsRng, rand_core::RngCore},
 };
 use koushi_key::LocalUnlockSecret;
-use koushi_state::{RoomPreference, RoomPreferencesState};
+use koushi_key::SessionKeyId;
+use koushi_state::RoomPreferencesState;
+use std::path::PathBuf;
 
 const ROOM_PREFERENCES_FILE_MAGIC: &[u8] = b"KOUSHI-ROOM-PREFERENCES-V1\0";
 
@@ -96,7 +98,8 @@ fn decrypt_room_preferences_payload(
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{file_store_actor, make_key_id};
+    use super::super::test_support::{file_store_actor, make_key_id};
+    use super::super::*;
     use super::{CoreFailure, StoreActor};
     use tempfile::tempdir;
 
@@ -123,9 +126,11 @@ mod tests {
 
         let path = actor.account_room_preferences_file(&key_id);
         let bytes = std::fs::read(&path).expect("read encrypted room preferences");
-        assert!(!bytes
-            .windows(room_id.len())
-            .any(|window| window == room_id.as_bytes()));
+        assert!(
+            !bytes
+                .windows(room_id.len())
+                .any(|window| window == room_id.as_bytes())
+        );
 
         let loaded = actor
             .load_room_preferences(&key_id)

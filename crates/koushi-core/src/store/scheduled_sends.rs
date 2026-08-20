@@ -1,10 +1,12 @@
-use super::{CoreFailure, StoreActor, COMPOSER_DRAFTS_NONCE_LEN, SCHEDULED_SENDS_FILE_MAGIC};
+use super::{COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor};
 use chacha20poly1305::{
-    aead::{rand_core::RngCore, Aead, OsRng},
     ChaCha20Poly1305, Key, KeyInit, Nonce,
+    aead::{Aead, OsRng, rand_core::RngCore},
 };
 use koushi_key::LocalUnlockSecret;
+use koushi_key::SessionKeyId;
 use koushi_state::ScheduledSendStore;
+use std::path::PathBuf;
 
 const SCHEDULED_SENDS_FILE_MAGIC: &[u8] = b"KOUSHI-SCHEDULED-SENDS-V1\0";
 
@@ -97,7 +99,8 @@ fn decrypt_scheduled_sends_payload(
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{file_store_actor, make_key_id};
+    use super::super::test_support::{file_store_actor, make_key_id};
+    use super::super::*;
     use super::{CoreFailure, StoreActor};
     use tempfile::tempdir;
 
@@ -128,9 +131,11 @@ mod tests {
 
         let path = actor.account_scheduled_sends_file(&key_id);
         let bytes = std::fs::read(&path).expect("read encrypted scheduled sends");
-        assert!(!bytes
-            .windows(plaintext.len())
-            .any(|window| window == plaintext.as_bytes()));
+        assert!(
+            !bytes
+                .windows(plaintext.len())
+                .any(|window| window == plaintext.as_bytes())
+        );
 
         let loaded = actor
             .load_scheduled_sends(&key_id)
@@ -205,10 +210,12 @@ mod tests {
             .save_scheduled_sends(&key_id, &ScheduledSendStore::default())
             .expect("save empty scheduled sends");
         assert!(!path.exists());
-        assert!(actor
-            .load_scheduled_sends(&key_id)
-            .expect("load removed scheduled sends")
-            .items
-            .is_empty());
+        assert!(
+            actor
+                .load_scheduled_sends(&key_id)
+                .expect("load removed scheduled sends")
+                .items
+                .is_empty()
+        );
     }
 }
