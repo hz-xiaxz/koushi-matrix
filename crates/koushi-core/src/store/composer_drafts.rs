@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+#[cfg(any(test, feature = "test-hooks"))]
+use super::ComposerDraftIoProbe;
 use super::{
-    COMPOSER_DRAFTS_FILE_MAGIC, COMPOSER_DRAFTS_NONCE_LEN, ComposerDraftIoProbe, CoreFailure,
-    StoreActor, atomic_replace_file, decode_composer_draft_payload_json,
-    encode_composer_draft_payload_json,
+    COMPOSER_DRAFTS_FILE_MAGIC, COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor,
+    atomic_replace_file, decode_composer_draft_payload_json, encode_composer_draft_payload_json,
 };
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit, Nonce,
