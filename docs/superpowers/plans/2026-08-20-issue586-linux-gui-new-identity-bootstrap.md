@@ -43,7 +43,7 @@ In `scripts/desktop-linux-gui-qa/local-session.mjs`:
 3. Call the helper only while the authoritative parsed title is `awaitingVerification`; otherwise preserve the existing readiness loop and deadline.
 4. Keep the existing absolute timeout budget. Form detection and both clicks use only the remaining time; no phase restarts a fresh full timeout.
 5. Fence before field fill/submit. If the product rejects bootstrap and returns to `awaitingVerification`, suppress any second attempt and let the existing readiness deadline produce the existing fail-closed timeout; do not replace it with a retry or a mid-flow secret-bearing error.
-6. Import existing generic DOM functions directly from `webdriver.mjs`; use `elementCount` plus `xpathLiteral` for exact form detection and existing field/click helpers for actions. Do not duplicate polling/input/click logic or introduce a new lifecycle owner.
+6. Import existing generic DOM functions directly from `webdriver.mjs`; use WebDriver's native `browser.$$` with `xpathLiteral` for exact form detection (the existing `elementCount` helper is CSS-only), and existing field/click helpers for actions. Do not duplicate polling/input/click logic or introduce a new lifecycle owner.
 
 No product Rust/React/Tauri behavior, DTO, command, state, token registry, or scenario name changes.
 
