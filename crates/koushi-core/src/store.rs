@@ -358,7 +358,6 @@ fn atomic_replace_file(
         .map_err(|_| CoreFailure::StoreUnavailable)
 }
 
-/// Derive a filesystem-safe directory name from a `SessionKeyId`.
 /// Convert a `SessionInfo` (from koushi-state) into a `SessionKeyId`
 /// (from koushi-key). This is the canonical mapping used everywhere
 /// in the codebase.
