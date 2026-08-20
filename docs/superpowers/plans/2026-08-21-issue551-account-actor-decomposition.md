@@ -2,7 +2,7 @@
 
 ## Status
 
-- Design: `reviewer-flash` approved the base design and bounded visibility amendments as `Correct-to-implement`. Test-module compile found four test ownership corrections plus one shared diagnostic-token production edge; the 66-name/test-count appendix amendment is pending re-review before test integration resumes.
+- Design: `reviewer-flash` approved the base design and bounded visibility amendments as `Correct-to-implement`. Test-module compile found three test ownership corrections plus one shared diagnostic-token production edge; the 66-name/test-count appendix amendment is pending re-review before test integration resumes.
 - Implementation: blocked until the design reviewer records `Correct-to-implement`.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 
@@ -184,7 +184,7 @@ Preserve exactly:
 
 Move all 150 unit tests exactly once beside their production owner. Each production module uses a private cfg-test child module. A single private cfg-test support module may own a fixture/parser only when at least two owner suites consume the exact existing helper; single-owner fixtures move with their owner. No helper is copied.
 
-The normative appendix lists every test name exactly once and pins per-owner counts: account-management 1, actor 1, local-data-cleanup 5, profile 5, recovery-backup 20, routing 8, runtime-children 6, scheduled-send 9, session-lifecycle 35, sliding-sync 5, trust-gate 35, verification 20. The sum is 150.
+The normative appendix lists every test name exactly once and pins per-owner counts: account-management 1, actor 2, local-data-cleanup 5, profile 5, recovery-backup 20, routing 7, runtime-children 6, scheduled-send 9, session-lifecycle 35, sliding-sync 5, trust-gate 35, verification 20. The sum is 150.
 
 Four ignored diagnostic child tests and the event-cache ignored child keep their parent/child behavior. Their five `--exact`/prefix literals are retargeted only to the final owner-local test paths. Test bodies and ignored cfg remain unchanged.
 
