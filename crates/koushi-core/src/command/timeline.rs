@@ -1,4 +1,13 @@
-use super::*;
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+use crate::event::TimelineViewportObservation;
+use crate::ids::{RequestId, TimelineKey};
+use koushi_state::{
+    ComposerDocument, ComposerDraftRevision, FormattedMessageDraft, ImageUploadCompressionMode,
+    SubmissionId,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum UploadMediaKind {
@@ -717,8 +726,9 @@ impl fmt::Debug for TimelineCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::fake_rid;
+    use super::super::{CoreCommand, test_support::fake_rid};
     use super::*;
+    use crate::ids::AccountKey;
     use koushi_state::{ImageUploadCompressionMode, MentionIntent, MentionTarget};
 
     fn test_session_key() -> koushi_key::SessionKeyId {

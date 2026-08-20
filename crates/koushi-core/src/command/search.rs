@@ -1,4 +1,8 @@
-use super::*;
+use std::fmt;
+
+use koushi_state::{AttachmentFilter, AttachmentScope, AttachmentSort, SearchRoomFilter};
+
+use crate::ids::RequestId;
 
 pub enum SearchCommand {
     Query {

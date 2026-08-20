@@ -1,4 +1,10 @@
-use super::*;
+use std::{fmt, path::PathBuf};
+
+use crate::ids::{AccountKey, RequestId};
+use koushi_state::{
+    DisplayPlatform, IdentityResetAuthRequest, LoginRequest, PresenceKind, RecoveryRequest,
+    VerificationCancelReason, VerificationTarget,
+};
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct RoomKeyExportRequest {
@@ -767,7 +773,7 @@ impl fmt::Debug for AccountCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::fake_rid;
+    use super::super::{CoreCommand, test_support::fake_rid};
     use super::*;
 
     #[test]

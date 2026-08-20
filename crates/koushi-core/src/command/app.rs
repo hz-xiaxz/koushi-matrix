@@ -1,4 +1,14 @@
-use super::*;
+use std::fmt;
+
+use koushi_state::{
+    ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, ComposerDocument,
+    ComposerDraftRevision, FilesViewScope, FormattedMessageDraft, InviteScopeSelection,
+    JapaneseCatalogProfile, LocalEncryptionHealth, NativeAttentionDispatchId,
+    NativeAttentionSoundOutcome, NativeAttentionState, RoomListFilter, SettingsPatch,
+    StagedUploadCompressionChoice, StagedUploadItem, TimelineScrollAnchor,
+};
+
+use crate::ids::{RequestId, TimelineBatchId, TimelineGeneration, TimelineKey};
 
 pub enum AppCommand {
     Shutdown {
@@ -694,8 +704,9 @@ fn settings_patch_field_names(patch: &SettingsPatch) -> Vec<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::fake_rid;
+    use super::super::{CoreCommand, test_support::fake_rid};
     use super::*;
+    use crate::ids::AccountKey;
     use koushi_state::{
         ImageUploadCompressionMode, MentionIntent, NativeAttentionCandidate,
         NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,

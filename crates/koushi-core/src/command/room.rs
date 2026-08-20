@@ -1,4 +1,11 @@
-use super::*;
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+use crate::ids::{AccountKey, RequestId};
+use koushi_state::{
+    DirectoryQuery, InviteScopeSelection, RoomModerationAction, RoomSettingChange, RoomTagKind,
+};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -588,7 +595,7 @@ impl fmt::Debug for RoomCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::fake_rid;
+    use super::super::{CoreCommand, test_support::fake_rid};
     use super::*;
 
     #[test]
