@@ -40,7 +40,7 @@ In `scripts/desktop-linux-gui-qa/local-session.mjs`:
 
 1. Add one private helper that, once per `waitForLocalLoginReady` call, detects the exact new-identity bootstrap form, creates the unique temporary directory and non-existing destination, generates the passphrase, fills the two labeled inputs, clicks `Create secure backup`, waits for and clicks `I saved the recovery key`, and removes the temporary directory in `finally`.
 2. Let `waitForLocalLoginReady` receive the local-session object (rather than only its browser) so the one session owner tracks bootstrap temp directories and teardown can reap them. Update callers mechanically.
-3. Call the helper only while the authoritative parsed title is `awaitingVerification`; otherwise preserve the existing readiness loop and deadline.
+3. Call the helper only while the authoritative parsed title is `awaitingVerification`. After bootstrap, do not accept the first `session=ready` title alone: the secure-backup gate can still own the DOM briefly. Require the existing real message-composer element to be present before returning readiness, using the same loop and deadline.
 4. Keep the existing absolute timeout budget. Form detection and both clicks use only the remaining time; no phase restarts a fresh full timeout.
 5. Fence before field fill/submit. If the product rejects bootstrap and returns to `awaitingVerification`, suppress any second attempt and let the existing readiness deadline produce the existing fail-closed timeout; do not replace it with a retry or a mid-flow secret-bearing error.
 6. Import existing generic DOM functions directly from `webdriver.mjs`; use WebDriver's native `browser.$$` with `xpathLiteral` for exact form detection (the existing `elementCount` helper is CSS-only), and existing field/click helpers for actions. Do not duplicate polling/input/click logic or introduce a new lifecycle owner.
@@ -55,7 +55,8 @@ No product Rust/React/Tauri behavior, DTO, command, state, token registry, or sc
   - the attempt is fenced before click;
   - passphrase uses `randomBytes` and never console/env/args;
   - destination is a non-existing child of a unique `mkdtempSync` directory, with recursive forced removal in helper `finally` and session teardown;
-  - only DOM helpers are used; no direct Tauri invoke or local readiness mutation.
+  - only DOM helpers are used; no direct Tauri invoke or local readiness mutation;
+  - ready settlement requires both the authoritative ready title and the real message-composer DOM boundary.
 - Run the release contract suite, typecheck/lint, secret scan, deterministic Linux module/probe checks, and Playwright gate.
 - Run the containerized Tuwunel `local-send` lane to green and retain only private-safe evidence tokens.
 - Run full repository gates once after formal full-diff review, then CI 7/7.
