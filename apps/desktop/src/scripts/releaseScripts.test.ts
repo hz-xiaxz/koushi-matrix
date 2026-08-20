@@ -4705,16 +4705,16 @@ fn test_only() {
     // The credential store moved into koushi-core (StoreActor) when
     // src-tauri became a pure transport adapter; the compile-time gate lives
     // there now.
-    const coreStore = readFileSync(
-      new URL("../../../../crates/koushi-core/src/store.rs", import.meta.url),
+    const credentialStore = readFileSync(
+      new URL("../../../../crates/koushi-core/src/store/credential_backend.rs", import.meta.url),
       "utf8"
     );
 
-    expect(coreStore).toContain("const ENV_FILE_CREDENTIAL_STORE_DIR");
-    expect(coreStore).toMatch(
+    expect(credentialStore).toContain("const ENV_FILE_CREDENTIAL_STORE_DIR");
+    expect(credentialStore).toMatch(
       /#\[cfg\(any\(debug_assertions, test, feature = "qa-bin"\)\)\]\nconst ENV_FILE_CREDENTIAL_STORE_DIR/
     );
-    expect(coreStore).toMatch(
+    expect(credentialStore).toMatch(
       /#\[cfg\(any\(debug_assertions, test, feature = "qa-bin"\)\)\]\n(?:#\[derive\([^\n]+\)\]\n)?pub struct FileCredentialStore/
     );
 
