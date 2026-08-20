@@ -3,7 +3,7 @@
 ## Status
 
 - Design: `reviewer-flash` approved the base design, bounded visibility amendments, and final 66-name/test-ownership amendment as `Correct-to-implement`; test integration may resume.
-- Implementation: blocked until the design reviewer records `Correct-to-implement`.
+- Implementation: integrated centrally from the immutable baseline after incomplete/ambiguous worker drafts were rejected; bidirectional exactness and focused gates are green.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 
 ## Objective
@@ -222,6 +222,16 @@ A temporary non-repository `syn` verifier compares the immutable baseline with t
 9. All 32 inline and one external source guard match the appendix's explicit source sets; no concatenation exists and only the approved test plumbing differs.
 
 Pre-existing warnings are baseline artifacts, not permission to add or suppress warnings.
+
+## Integrated implementation evidence
+
+- `account.rs`: 19,819 → 24 lines; twelve private production owners plus two cfg-test-only support files.
+- Bidirectional `syn`/token inventory: 391/391 production keys with matching multiplicity, including 200/200 `AccountActor` methods and one macro; five/five public/crate façade declarations; 150/150 tests; 35/35 test helpers.
+- The only 37 test-body allowlist entries are the 32 source-characterization tests and five ignored-child path parents. All other test attrs/bodies match immutable tokens after approved qualification/visibility normalization.
+- The 32 source contracts use explicit owner files without concatenation; the one global negative contract scans all twelve production prefixes independently. The external thumbnail guard reads only `account/profile.rs`.
+- Root contains only private module declarations and five explicit re-exports. No glob/barrel, wrapper, compatibility alias, new state object, duplicate helper, TODO, new dependency, or new dead-code allowance exists.
+- Compiler warning head count and the sole AccountActor warning category match baseline: 129 warning heads and the pre-existing `LeasedTimelineCommand` dead-code warning.
+- Core lib default and `test-hooks`: 1,014 passed/8 ignored each. Focused integration tests: session 8, device-session 2, E2EE 2, scheduled-send 12, activity 9, search 1, timeline 21, room-list 6, intent-lifecycle 5, residency 25. All-target/all-feature check is green.
 
 ## Verification
 
