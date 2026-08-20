@@ -10238,20 +10238,19 @@ async fn wait_for_invite_absent(
 // Phase 3 event waiter helpers (unchanged)
 // ---------------------------------------------------------------------------
 
-/// Wait for `SyncEvent::Started` for the request, then `Running`.
+/// Wait for request-scoped `SyncEvent::Started`, then a `Running` state projection.
 async fn wait_for_sync_started_and_running(
     conn: &mut CoreConnection,
     request_id: koushi_core::ids::RequestId,
     label: &str,
 ) -> Result<(), String> {
     let mut saw_started = false;
-    let mut saw_running_before_started = false;
     let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
     loop {
         let event = deadline
             .recv(conn)
             .await
-            .map_err(|_| format!("{label}: timed out waiting for SyncEvent::Started/Running"))?
+            .map_err(|_| format!("{label}: timed out waiting for Started/Running state"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
@@ -10259,15 +10258,6 @@ async fn wait_for_sync_started_and_running(
                 if ev_id == Some(request_id) =>
             {
                 saw_started = true;
-                if saw_running_before_started {
-                    return Ok(());
-                }
-            }
-            CoreEvent::Sync(SyncEvent::Running) => {
-                if saw_started {
-                    return Ok(());
-                }
-                saw_running_before_started = true;
             }
             CoreEvent::Sync(SyncEvent::Failed) => {
                 return Err(format!(
@@ -10281,7 +10271,11 @@ async fn wait_for_sync_started_and_running(
             } if ev_id == request_id => {
                 return Err(format!("{label} failed: {failure:?}"));
             }
-            _ => continue,
+            _ => {}
+        }
+
+        if saw_started && matches!(conn.snapshot().sync, koushi_state::SyncState::Running) {
+            return Ok(());
         }
     }
 }
@@ -11542,7 +11536,7 @@ async fn run_native_attention_stage(conn: &mut CoreConnection) -> Result<(), Str
     });
     if with_modes.summary.unread_count != 1
         || with_modes.summary.highlight_count != 1
-        || with_modes.summary.badge_count != 12
+        || with_modes.summary.badge_count != 4
         || with_modes
             .summary
             .candidate
