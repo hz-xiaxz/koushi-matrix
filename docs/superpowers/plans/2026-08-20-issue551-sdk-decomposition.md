@@ -196,7 +196,7 @@ Two external whole-crate tests remain whole-crate:
 - `tests/send_backup_policy.rs::all_session_constructors_leave_the_per_send_backup_fence_disabled` sums matches over every production source returned by `tests/support/mod.rs` and still requires exactly four false/zero true occurrences.
 - `tests/timeline_gap_adapter.rs::committed_room_checkpoint_has_no_legacy_or_room_absent_api` checks every production source for every forbidden token.
 
-`tests/support/mod.rs` contains an explicit, fixed list of `include_str!` inputs for `lib.rs`, existing `sliding_sync_discovery.rs`, and every new production module. It returns a slice; it does not concatenate or impose a false cross-module order. A source-contract test asserts that this manifest names every production `.rs` file exactly once. The integration owner is explicitly authorized to create this helper and to change only the source-window plumbing in those two external tests.
+`tests/support/mod.rs` contains an explicit, fixed list of `include_str!` inputs for the library production-source universe: `src/lib.rs`, existing `src/sliding_sync_discovery.rs`, and every new non-test library module. It intentionally excludes `src/bin/**` and cfg(test)-only `test_source.rs`. It returns a slice; it does not concatenate or impose a false cross-module order. The existing `tests/send_backup_policy.rs` target hosts a source-contract test asserting that this manifest names every file in that library production-source universe exactly once. The integration owner is explicitly authorized to create this helper and to change only the source-window plumbing in those two external tests.
 
 No new public test hook or standalone integration-test target is introduced.
 
