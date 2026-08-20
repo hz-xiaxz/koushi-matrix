@@ -90,7 +90,7 @@ Baseline clusters: 723–838, 2360–2472, auth-owned declarations within 5828�
 
 Owns own-profile, aliases, ignore/unignore, profile/reporting operations, errors, mappings, and tests.
 
-Baseline clusters: 6322–6343 (`MatrixOwnProfile` and `MatrixLocalUserAliases`), 6673–6768, 8724–8910, 13054–13174, and corresponding tests in the mixed root test module. `MatrixUserProfile` is excluded because it is a room/member projection DTO.
+Baseline clusters: 6322–6342 (`MatrixOwnProfile` and `MatrixLocalUserAliases`), 6673–6768, 8724–8910, 13054–13174, and corresponding tests in the mixed root test module. `MatrixUserProfile` is excluded because it is a room/member projection DTO.
 
 ### `sync.rs`
 
@@ -114,7 +114,7 @@ Baseline clusters: 4152–4214, 6027–6050, 7110–7122, 10792–10887, and foc
 
 Owns room-list/space/activity/invite/member projection DTOs, room-list snapshots/diffs, normalization, direct-account-data mapping, attention projection, SDK-to-adapter mapping, and tests.
 
-Baseline clusters: 6051–6058, 6127–6321, `MatrixUserProfile` at 6344–6363, 6435–6613, `room_list_snapshot_blocking` at 7070–7080, 10888–11036, 11050–11070, 11307–12173, 12295–13053 excluding profile helpers 13054–13174, `matrix_parent_space_ids` and `matrix_space_child_room_ids` at 13175–13216, and focused tests.
+Baseline clusters: 6051–6058, 6127–6321, `MatrixUserProfile` with its attached derive at 6343–6363, 6435–6613, `room_list_snapshot_blocking` at 7070–7080, 10888–11036, 11050–11070, 11307–12173, 12295–13053 excluding profile helpers 13054–13174, `matrix_parent_space_ids` and `matrix_space_child_room_ids` at 13175–13216, and focused tests.
 
 ### `room_operations.rs`
 
@@ -146,7 +146,8 @@ Integration order:
 4. room projection + room operations
 5. E2EE
 6. QA reports
-7. root façade/API manifest and exactness audit
+7. remove temporary `MatrixOwnProfile`/`MatrixLocalUserAliases` copies from `room_projection.rs` after `profile.rs` owns them, before any root re-export wiring
+8. root façade/API manifest and exactness audit
 
 This order minimizes temporary sibling visibility. It is not permission to add forwarding wrappers.
 
