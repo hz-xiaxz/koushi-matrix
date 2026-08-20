@@ -38,32 +38,33 @@ This is a move-only decomposition. If extraction reveals a behavior defect, stop
 
 Create `scripts/desktop-linux-gui-qa/`:
 
-- `main.mjs`: the existing top-level argument/probe/run composition. It executes on import; wrapping it in a new function is unnecessary. It imports registry dispatch plus the lower-level probe functions it already calls: child-environment projection from `redaction`, WebDriver capabilities from `webdriver`, QA-title/artifact projections from `evidence`, and tool checks from `runtime`. `assertSdkSubmoduleSynced` remains imported from the existing `../lib/sdk-submodule-status.mjs` here.
-- `registry.mjs`: the one exhaustive scenario/checklist registry and dispatch owner.
-- `runtime.mjs`: tool/build/Xvfb/DBus/app/WebDriver process startup and generic final process settlement.
-- `webdriver.mjs`: WebDriver loading/capabilities/session deletion and generic DOM action/wait primitives.
-- `local-session.mjs`: disposable homeserver/users/rooms, local session object, FIFO path creation/writes, and the one ordered local-session teardown. It imports `writeSensitivePayloadToPath` from the existing shared `../lib/sensitive-fifo.mjs`; it must not copy or wrap that writer. Existing local-homeserver helpers remain direct imports from `../lib/local-homeserver-qa.mjs`.
-- `evidence.mjs`: screenshots, QA-title/window/DBus parsing, artifact paths, and private-data-free evidence projection.
+- `main.mjs`: the existing top-level argument/probe/run composition. It executes on import; wrapping it in a new function is unnecessary. It imports registry dispatch plus the lower-level probe functions it already calls: child-environment projection from `redaction`, WebDriver capabilities from `webdriver`, QA-title/artifact projections from `evidence`, and tool checks from `runtime`.
+- `registry.mjs`: the one exhaustive scenario/checklist registry and dispatch owner. Move `run`, `checks`, scenario validation, `repoRoot`, and the direct existing `../lib/sdk-submodule-status.mjs` import together here so dispatch does not bypass the registry.
+- `runtime.mjs`: tool/build/Xvfb/DBus/app/WebDriver process startup and generic final process settlement. The cohesive DBus/process group stays here: `startDbusMonitor`, `triggerNotificationSmoke`, both DBus waiters, `recordProcessOutput`, `terminateProcessGroup`, `settleChild`, and `sleep`.
+- `webdriver.mjs`: WebDriver loading/capabilities/session deletion and all generic DOM/action/polling primitives. Neutral room selection/context helpers (`openRoomContextMenu`, room selection/active-room/timeline-mounted diagnostics, section lookup) also stay here because multiple feature scenarios use them.
+- `local-session.mjs`: disposable homeserver/users/rooms, local session object, FIFO path creation/writes, `recordLocalGuiEvidence`, and the one ordered local-session teardown. It imports `writeSensitivePayloadToPath` from the existing shared `../lib/sensitive-fifo.mjs`; it must not copy or wrap that writer. Existing local-homeserver helpers remain direct imports from `../lib/local-homeserver-qa.mjs`. It depends directly on runtime process settlement and WebDriver session deletion; neither lower owner imports local-session.
+- `evidence.mjs`: pure QA-title/window/DBus parsing, artifact paths, and private-data-free evidence projection only; it does not start or wait on processes.
 - `redaction.mjs`: child environment filtering and captured-output sanitization.
-- `scenarios/auth.mjs`, `rooms.mjs`, `timeline.mjs`, `media.mjs`, `settings-security.mjs`: feature-specific scenario bodies and feature-only helpers.
+- `scenarios/auth.mjs`, `rooms-timeline.mjs`, `media.mjs`, `settings-security.mjs`: feature-specific scenario bodies and feature-only helpers. Room and timeline scenarios remain one owner because their workspace selection/context helpers are shared; generic DOM pieces still move down to `webdriver`. No scenario imports a sibling.
 
 The root keeps the shebang and imports `main.mjs` for side effects. It contains no second registry, token list, cleanup, or redaction rule.
 
 Dependency direction is:
 
 ```text
-redaction, webdriver
-  -> evidence
-  -> runtime, local-session
+redaction + webdriver + pure evidence projections
+  -> runtime
+  -> local-session
   -> scenario modules
   -> registry
   -> main
   -> root entrypoint
 
 main -> redaction, webdriver, evidence, runtime  # probe-only direct imports
+local-session -> runtime, webdriver               # ordered teardown/evidence orchestration
 ```
 
-`runtime` and `local-session` may share low-level modules but never import scenarios. Scenario modules never import siblings, registry, main, or root. `registry` imports each scenario owner directly and remains the exhaustive dispatch point. “Reverse import” means a lower ownership layer importing a higher layer; `main` directly importing lower-layer probe functions is intentional and not a reverse edge.
+`runtime` never imports local-session or scenarios. `local-session` may import runtime, webdriver, evidence, and redaction but never scenarios. Scenario modules never import siblings, registry, main, or root. `registry` imports each scenario owner directly and remains the exhaustive dispatch point. “Reverse import” means a lower ownership layer importing a higher layer; `main` directly importing lower-layer probe functions and local-session importing lower teardown primitives are intentional downward edges.
 
 Source-characterization consumers in `releaseScripts` and `scripts/build-structure-contract.test.mjs` must read the owning module or a deterministic list of all production modules. The real-homeserver negative whole-source privacy assertions likewise read its deterministic production-module concatenation rather than only the root. Public CLI probes remain byte-for-byte equivalent.
 
@@ -114,7 +115,7 @@ Flow siblings never import each other. Lower layers never import a flow.
 
 Use four isolated worktrees from the immutable base:
 
-1. Linux runner modules and its root façade.
+1. Linux runner modules and its root façade, using the revised four-scenario-owner graph above.
 2. Diagnostic scanner plus its 25 tests.
 3. Remaining 129 release/QA contract tests and shared support.
 4. Real-homeserver Rust modules and tests.
