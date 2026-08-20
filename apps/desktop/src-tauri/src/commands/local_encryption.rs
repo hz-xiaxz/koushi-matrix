@@ -1,4 +1,7 @@
+use super::navigation::SelectEventSource;
 use super::*;
+#[cfg(test)]
+use crate::commands::contracts::fake_request_id;
 
 #[tauri::command]
 pub async fn probe_local_encryption_health(
@@ -126,6 +129,11 @@ pub(super) fn build_reset_local_data_command(request_id: koushi_core::RequestId)
 }
 
 #[cfg(test)]
+fn commands_source() -> String {
+    crate::commands::contracts::production_source()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -206,5 +214,34 @@ mod tests {
             reset_command_source.contains("wait_for_local_data_reset"),
             "Tauri reset must not return the pre-reset snapshot before the correlated signed-out projection"
         );
+    }
+}
+
+#[cfg(test)]
+mod issue551_moved_tests {
+    use super::*;
+    use crate::commands::contracts::{ScriptedSelectSource, fake_request_id};
+    use koushi_core::CoreEvent;
+    use koushi_state::AppState;
+    use std::collections::VecDeque;
+    #[tokio::test]
+    async fn reset_local_data_waits_for_the_correlated_signed_out_projection() {
+        let request_id = fake_request_id(48);
+        let mut signed_out = AppState::default();
+        signed_out.session = SessionState::SignedOut;
+        let mut before_reset = AppState::default();
+        before_reset.session = SessionState::Restoring;
+        let mut source = ScriptedSelectSource {
+            snapshot: before_reset,
+            events: VecDeque::from([Ok(CoreEvent::StateChanged(signed_out))]),
+        };
+
+        super::wait_for_local_data_reset(
+            &mut source,
+            request_id,
+            std::time::Duration::from_millis(10),
+        )
+        .await
+        .expect("reset should settle only after signed-out is projected");
     }
 }

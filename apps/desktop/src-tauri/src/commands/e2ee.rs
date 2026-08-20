@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::commands::contracts::fake_request_id;
 
 #[tauri::command]
 pub async fn retry_current_device_trust_discovery(
@@ -576,6 +578,11 @@ pub(super) fn build_submit_identity_reset_oauth_command(
         flow_id,
         request: IdentityResetAuthRequest::OAuthApproved,
     })
+}
+
+#[cfg(test)]
+fn commands_source() -> String {
+    crate::commands::contracts::production_source()
 }
 
 #[cfg(test)]

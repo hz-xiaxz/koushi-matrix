@@ -1,5 +1,11 @@
+use super::room::{
+    ROOM_OPERATION_EVENT_TIMEOUT, build_refresh_pinned_events_command, wait_for_room_operation,
+};
+use super::timeline::{
+    build_observe_timeline_viewport_command, build_open_timeline_at_timestamp_command,
+    build_update_navigation_scroll_anchor_command, trace_tauri_timeline_command,
+};
 use super::*;
-
 #[tauri::command]
 pub async fn select_space(
     space_id: Option<String>,
@@ -101,7 +107,7 @@ pub async fn select_room(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    super::room::super::room::wait_for_room_operation(
+    wait_for_room_operation(
         &mut event_conn,
         refresh_request_id,
         ROOM_OPERATION_EVENT_TIMEOUT,
@@ -430,6 +436,18 @@ pub(super) trait SelectEventSource {
     ) -> Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + '_>>;
 }
 
+impl SelectEventSource for CoreConnection {
+    fn snapshot(&self) -> koushi_state::AppState {
+        CoreConnection::snapshot(self)
+    }
+
+    fn recv_event(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + '_>> {
+        Box::pin(CoreConnection::recv_event(self))
+    }
+}
+
 fn select_active_room_trace_label(
     snapshot: &koushi_state::AppState,
     selected_room_id: &str,
@@ -493,10 +511,6 @@ fn snapshot_matches_main_timeline_settlement(
             snapshot_has_live_main_timeline(snapshot, room_id)
         }
     }
-}
-
-fn snapshot_has_active_room(snapshot: &koushi_state::AppState, room_id: &str) -> bool {
-    snapshot.navigation.active_room_id.as_deref() == Some(room_id)
 }
 
 async fn wait_for_focused_context_closed(
@@ -809,7 +823,11 @@ pub(super) async fn wait_for_selected_room<S: SelectEventSource + ?Sized>(
     }
 }
 
-pub(crate) fn build_select_space_command(
+fn snapshot_has_active_room(snapshot: &koushi_state::AppState, room_id: &str) -> bool {
+    snapshot.navigation.active_room_id.as_deref() == Some(room_id)
+}
+
+pub(super) fn build_select_space_command(
     request_id: koushi_core::RequestId,
     space_id: Option<String>,
 ) -> CoreCommand {
@@ -819,7 +837,7 @@ pub(crate) fn build_select_space_command(
     })
 }
 
-pub(crate) fn build_reorder_spaces_command(
+pub(super) fn build_reorder_spaces_command(
     request_id: koushi_core::RequestId,
     space_ids: Vec<String>,
 ) -> CoreCommand {
@@ -829,7 +847,7 @@ pub(crate) fn build_reorder_spaces_command(
     })
 }
 
-pub(crate) fn build_select_room_command(
+pub(super) fn build_select_room_command(
     request_id: koushi_core::RequestId,
     room_id: String,
 ) -> CoreCommand {
@@ -839,55 +857,26 @@ pub(crate) fn build_select_room_command(
     })
 }
 
-pub(crate) fn build_open_timeline_at_timestamp_command(
-    request_id: koushi_core::RequestId,
-    room_id: String,
-    timestamp_ms: u64,
-) -> CoreCommand {
-    CoreCommand::App(AppCommand::OpenTimelineAtTimestamp {
-        request_id,
-        room_id,
-        timestamp_ms,
-    })
+pub(super) const SELECT_ROOM_EVENT_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(10);
+
+const FOCUSED_CONTEXT_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+#[derive(Clone, Copy)]
+enum MainTimelineSettlement {
+    Anchor,
+    LiveFallback,
 }
 
-pub(crate) fn build_update_navigation_scroll_anchor_command(
-    request_id: koushi_core::RequestId,
-    room_id: String,
-    anchor: TimelineScrollAnchor,
-) -> CoreCommand {
-    CoreCommand::App(AppCommand::TimelineScrollAnchorUpdated {
-        request_id,
-        room_id,
-        anchor,
-    })
-}
-
-pub(crate) fn build_observe_timeline_viewport_command(
-    request_id: koushi_core::RequestId,
-    account_key: AccountKey,
-    room_id: String,
-    first_visible_event_id: Option<String>,
-    last_visible_event_id: Option<String>,
-    visible_gap_ids: Vec<TimelineGapId>,
-    at_bottom: bool,
-) -> CoreCommand {
-    CoreCommand::Timeline(TimelineCommand::ObserveViewport {
-        request_id,
-        key: build_timeline_key(account_key, room_id),
-        observation: TimelineViewportObservation {
-            first_visible_event_id,
-            last_visible_event_id,
-            visible_gap_ids,
-            at_bottom,
-        },
-    })
+#[cfg(test)]
+fn commands_source() -> String {
+    crate::commands::contracts::production_source()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::contracts::{ScriptedSelectSource, fake_request_id};
+    use crate::commands::contracts::fake_request_id;
 
     #[test]
     fn select_room_waits_for_core_selection_without_resubscribing_timeline() {
@@ -947,8 +936,8 @@ mod tests {
             "Tauri command layer must expose a private-data-free timeline trace helper"
         );
         assert!(
-            source.contains("koushi.desktop"),
-            "Tauri command traces must share a stable koushi.desktop prefix"
+            source.contains("desktop.timeline"),
+            "Tauri command traces must preserve the desktop.timeline source token"
         );
         let select_start = source
             .find("pub async fn select_room")
@@ -1046,92 +1035,6 @@ mod tests {
         assert!(
             select_offset < wait_offset && wait_offset < open_offset && open_offset < anchor_offset,
             "focused event timeline should open and become the main anchored timeline only after the selected room state is observed"
-        );
-    }
-
-    #[test]
-    fn open_activity_event_opens_anchored_main_timeline_without_room_resubscribe() {
-        let source = commands_source();
-        let fn_name = "async fn open_anchored_timeline";
-        let open_token = "OpenAnchoredTimeline";
-
-        let fn_offset = source
-            .find(fn_name)
-            .expect("open_activity_event command should exist");
-        let rest = &source[fn_offset..];
-        let end = rest
-            .find("pub async fn acknowledge_timeline_projection")
-            .expect("projection acknowledgement command should follow the shared helper");
-        let command_source = &rest[..end];
-
-        assert!(
-            command_source.contains("build_select_room_command"),
-            "activity event navigation should select the destination room"
-        );
-        assert!(
-            !command_source.contains("build_subscribe_timeline_command"),
-            "activity event navigation should rely on room selection reducers for timeline subscription"
-        );
-        assert!(
-            command_source.contains(open_token),
-            "activity event navigation should subscribe the focused event timeline"
-        );
-        assert!(!command_source.contains("EnterAnchoredTimeline"));
-        assert!(!command_source.contains("wait_for_focused_timeline_event"));
-        assert!(
-            command_source.contains("wait_for_main_timeline_anchor"),
-            "activity event navigation should wait for the main anchored timeline"
-        );
-        assert!(
-            !command_source.contains("build_update_navigation_scroll_anchor_command"),
-            "activity event navigation must not anchor an event that may be absent from the live timeline"
-        );
-    }
-
-    #[test]
-    fn open_activity_event_waits_before_opening_anchored_event_timeline() {
-        let source = commands_source();
-        let fn_name = "async fn open_anchored_timeline";
-        let open_token = "OpenAnchoredTimeline";
-
-        let fn_offset = source
-            .find(fn_name)
-            .expect("open_activity_event command should exist");
-        let rest = &source[fn_offset..];
-        let end = rest
-            .find("pub async fn acknowledge_timeline_projection")
-            .expect("projection acknowledgement command should follow the shared helper");
-        let command_source = &rest[..end];
-
-        let close_offset = command_source
-            .find("CloseFocusedContext")
-            .expect("activity event navigation should close any focused main timeline first");
-        let wait_close_offset = command_source
-            .find("wait_for_focused_context_closed")
-            .expect(
-                "activity event navigation must wait until focused context/main anchor is closed",
-            );
-        let select_offset = command_source
-            .find("build_select_room_command")
-            .expect("activity event navigation should select the destination room");
-        let wait_select_offset = command_source
-            .find("wait_for_selected_room")
-            .expect("activity event navigation should wait for the selected room state");
-        let open_offset = command_source
-            .find(open_token)
-            .expect("activity event navigation should open the focused event timeline");
-        let wait_anchor_offset = command_source[open_offset..]
-            .find("wait_for_main_timeline_anchor")
-            .map(|offset| open_offset + offset)
-            .expect("activity navigation should wait for the acknowledged Core anchor");
-
-        assert!(
-            close_offset < wait_close_offset
-                && wait_close_offset < select_offset
-                && select_offset < wait_select_offset
-                && wait_select_offset < open_offset
-                && open_offset < wait_anchor_offset,
-            "activity event navigation must clear the previous owner, select the room, start one Core-owned focused navigation, then wait for its acknowledged anchor"
         );
     }
 
@@ -1389,5 +1292,87 @@ mod tests {
                 )
             )
         }));
+    }
+}
+
+#[cfg(test)]
+mod issue551_moved_tests {
+    use koushi_state::AppState;
+    fn commands_source() -> String {
+        crate::commands::contracts::production_source()
+    }
+    #[test]
+    fn select_space_command_records_private_data_free_transition_trace() {
+        let source = commands_source();
+        let production_source = source
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .expect("command production source should precede tests");
+        let select_space_source = production_source
+            .split("pub async fn select_space")
+            .nth(1)
+            .expect("select_space command should exist")
+            .split("#[tauri::command]\npub async fn reorder_spaces")
+            .next()
+            .expect("reorder_spaces command should follow select_space");
+
+        let submit_offset = select_space_source
+            .find("\"desktop.space.transition\", \"submit\"")
+            .expect("select_space should record submit trace");
+        let command_offset = select_space_source
+            .find("build_select_space_command")
+            .expect("select_space should submit the SelectSpace command");
+        let snapshot_offset = select_space_source
+            .find("\"snapshot\"")
+            .expect("select_space should record snapshot-return trace");
+
+        assert!(submit_offset < command_offset);
+        assert!(command_offset < snapshot_offset);
+        assert!(select_space_source.contains("DiagnosticField::request_id"));
+        assert!(select_space_source.contains("DiagnosticField::milliseconds"));
+        assert!(select_space_source.contains("DiagnosticField::boolean"));
+    }
+
+    #[test]
+    fn main_timeline_lifecycle_requires_the_matching_settled_snapshot() {
+        let room_id = "!room:example.invalid";
+        let event_id = "$event:example.invalid";
+        let mut state = AppState::default();
+        state.navigation.active_room_id = Some(room_id.to_owned());
+
+        assert!(!super::snapshot_matches_main_timeline_settlement(
+            &state,
+            room_id,
+            event_id,
+            Some(super::MainTimelineSettlement::Anchor),
+        ));
+        state.navigation.main_timeline_anchor = Some(koushi_state::MainTimelineAnchor {
+            event_id: event_id.to_owned(),
+        });
+        assert!(super::snapshot_matches_main_timeline_settlement(
+            &state,
+            room_id,
+            event_id,
+            Some(super::MainTimelineSettlement::Anchor),
+        ));
+
+        state.navigation.main_timeline_anchor = None;
+        state.focused_context = koushi_state::FocusedContextState::Opening {
+            room_id: room_id.to_owned(),
+            event_id: event_id.to_owned(),
+        };
+        assert!(!super::snapshot_matches_main_timeline_settlement(
+            &state,
+            room_id,
+            event_id,
+            Some(super::MainTimelineSettlement::LiveFallback),
+        ));
+        state.focused_context = koushi_state::FocusedContextState::Closed;
+        assert!(super::snapshot_matches_main_timeline_settlement(
+            &state,
+            room_id,
+            event_id,
+            Some(super::MainTimelineSettlement::LiveFallback),
+        ));
     }
 }

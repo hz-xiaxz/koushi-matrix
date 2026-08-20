@@ -1,5 +1,4 @@
 use super::*;
-
 #[tauri::command]
 pub async fn set_display_name(
     display_name: Option<String>,
@@ -256,12 +255,15 @@ pub(super) fn build_download_avatar_thumbnail_command(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+fn commands_source() -> String {
+    crate::commands::contracts::production_source()
+}
 
+#[cfg(test)]
+mod tests {
     #[test]
     fn profile_tauri_command_contracts_are_present() {
-        let commands_source = commands_source();
+        let commands_source = super::commands_source();
         let lib_source = include_str!("../lib.rs");
         for (command_name, route_name, registration_name) in [
             (

@@ -1,4 +1,10 @@
+use super::account::{
+    build_erase_device_cleanup_local_data_anyway_command, build_start_device_cleanup_command,
+    build_submit_device_cleanup_uia_command,
+};
 use super::*;
+#[cfg(test)]
+use koushi_state::AppState;
 
 #[derive(serde::Serialize)]
 pub struct OidcAuthorizationResponse {
@@ -543,6 +549,11 @@ pub(super) fn build_change_homeserver_command(request_id: koushi_core::RequestId
 
 pub(super) fn build_restart_sync_command(request_id: koushi_core::RequestId) -> CoreCommand {
     CoreCommand::Sync(SyncCommand::Restart { request_id })
+}
+
+#[cfg(test)]
+fn commands_source() -> String {
+    crate::commands::contracts::production_source()
 }
 
 #[cfg(test)]

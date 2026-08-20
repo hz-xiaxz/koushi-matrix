@@ -1,4 +1,8 @@
 use super::*;
+#[cfg(test)]
+use crate::commands::contracts::fake_request_id;
+#[cfg(test)]
+use koushi_state::{AppearanceSettings, LocaleSettings, TextDirectionPreference, ThemePreference};
 
 #[tauri::command]
 pub async fn update_settings(
@@ -71,6 +75,11 @@ pub(super) fn build_set_room_url_preview_override_command(
         room_id,
         enabled,
     })
+}
+
+#[cfg(test)]
+fn commands_source() -> String {
+    crate::commands::contracts::production_source()
 }
 
 #[cfg(test)]

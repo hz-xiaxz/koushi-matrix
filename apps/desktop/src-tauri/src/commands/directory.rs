@@ -1,5 +1,6 @@
+use super::navigation::{SELECT_ROOM_EVENT_TIMEOUT, SelectEventSource};
+use super::room::{ROOM_OPERATION_EVENT_TIMEOUT, snapshot_contains_room};
 use super::*;
-
 #[tauri::command]
 pub async fn query_directory(
     term: Option<String>,
@@ -125,7 +126,7 @@ pub async fn dismiss_directory_preview(
     current_snapshot(state.inner()).await
 }
 
-async fn wait_for_room_created(
+pub(super) async fn wait_for_room_created(
     event_conn: &mut CoreConnection,
     create_request_id: RequestId,
     timeout: std::time::Duration,
@@ -156,7 +157,7 @@ async fn wait_for_room_created(
     }
 }
 
-async fn wait_for_space_created(
+pub(super) async fn wait_for_space_created(
     event_conn: &mut CoreConnection,
     create_request_id: RequestId,
     timeout: std::time::Duration,
@@ -187,7 +188,7 @@ async fn wait_for_space_created(
     }
 }
 
-async fn wait_for_direct_message_started<S: SelectEventSource + ?Sized>(
+pub(super) async fn wait_for_direct_message_started<S: SelectEventSource + ?Sized>(
     event_conn: &mut S,
     operation_request_id: RequestId,
     timeout: std::time::Duration,
@@ -223,7 +224,7 @@ async fn wait_for_direct_message_started<S: SelectEventSource + ?Sized>(
 /// DM is announced by `DirectMessageStarted` before the asynchronous
 /// room-list refresh lands, so selecting it immediately would race the
 /// known-room state (#368).
-async fn wait_for_room_in_state<S: SelectEventSource + ?Sized>(
+pub(super) async fn wait_for_room_in_state<S: SelectEventSource + ?Sized>(
     event_conn: &mut S,
     room_id: &str,
     timeout: std::time::Duration,
@@ -267,7 +268,7 @@ fn normalize_join_target(
     Some((room_id_or_alias, via_servers))
 }
 
-pub(crate) fn build_create_room_command(
+pub(super) fn build_create_room_command(
     request_id: koushi_core::RequestId,
     options: CreateRoomOptions,
 ) -> CoreCommand {
@@ -277,14 +278,14 @@ pub(crate) fn build_create_room_command(
     })
 }
 
-pub(crate) fn build_create_space_command(
+pub(super) fn build_create_space_command(
     request_id: koushi_core::RequestId,
     name: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::CreateSpace { request_id, name })
 }
 
-pub(crate) fn build_join_room_command(
+pub(super) fn build_join_room_command(
     request_id: koushi_core::RequestId,
     room_id: String,
 ) -> Option<CoreCommand> {
@@ -298,7 +299,7 @@ pub(crate) fn build_join_room_command(
     }))
 }
 
-pub(crate) fn build_set_space_child_command(
+pub(super) fn build_set_space_child_command(
     request_id: koushi_core::RequestId,
     space_id: String,
     child_room_id: String,
@@ -312,7 +313,7 @@ pub(crate) fn build_set_space_child_command(
     })
 }
 
-pub(crate) fn build_accept_invite_command(
+pub(super) fn build_accept_invite_command(
     request_id: koushi_core::RequestId,
     room_id: String,
 ) -> CoreCommand {
@@ -322,7 +323,7 @@ pub(crate) fn build_accept_invite_command(
     })
 }
 
-pub(crate) fn build_decline_invite_command(
+pub(super) fn build_decline_invite_command(
     request_id: koushi_core::RequestId,
     room_id: String,
 ) -> CoreCommand {
@@ -332,7 +333,7 @@ pub(crate) fn build_decline_invite_command(
     })
 }
 
-pub(crate) fn build_start_direct_message_command(
+pub(super) fn build_start_direct_message_command(
     request_id: koushi_core::RequestId,
     user_id: String,
 ) -> CoreCommand {
@@ -342,7 +343,7 @@ pub(crate) fn build_start_direct_message_command(
     })
 }
 
-pub(crate) fn build_invite_user_command(
+pub(super) fn build_invite_user_command(
     request_id: koushi_core::RequestId,
     room_id: String,
     user_id: String,
@@ -354,7 +355,7 @@ pub(crate) fn build_invite_user_command(
     })
 }
 
-pub(crate) fn build_invite_user_to_space_command(
+pub(super) fn build_invite_user_to_space_command(
     request_id: koushi_core::RequestId,
     space_id: String,
     user_id: String,
@@ -368,7 +369,7 @@ pub(crate) fn build_invite_user_to_space_command(
     })
 }
 
-pub(crate) fn build_cancel_space_invite_command(
+pub(super) fn build_cancel_space_invite_command(
     request_id: koushi_core::RequestId,
     space_id: String,
     user_id: String,
@@ -382,7 +383,7 @@ pub(crate) fn build_cancel_space_invite_command(
     })
 }
 
-pub(crate) fn build_open_invite_workflow_command(
+pub(super) fn build_open_invite_workflow_command(
     request_id: koushi_core::RequestId,
     room_id: String,
 ) -> CoreCommand {
@@ -392,13 +393,13 @@ pub(crate) fn build_open_invite_workflow_command(
     })
 }
 
-pub(crate) fn build_close_invite_workflow_command(
+pub(super) fn build_close_invite_workflow_command(
     request_id: koushi_core::RequestId,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::CloseInviteWorkflow { request_id })
 }
 
-pub(crate) fn build_search_invite_targets_command(
+pub(super) fn build_search_invite_targets_command(
     request_id: koushi_core::RequestId,
     room_id: String,
     query: String,
@@ -410,7 +411,7 @@ pub(crate) fn build_search_invite_targets_command(
     })
 }
 
-pub(crate) fn build_set_invite_scope_command(
+pub(super) fn build_set_invite_scope_command(
     request_id: koushi_core::RequestId,
     room_id: String,
     scope: InviteScopeSelection,
@@ -422,7 +423,7 @@ pub(crate) fn build_set_invite_scope_command(
     })
 }
 
-pub(crate) fn build_select_invite_target_command(
+pub(super) fn build_select_invite_target_command(
     request_id: koushi_core::RequestId,
     room_id: String,
     user_id: String,
@@ -434,7 +435,7 @@ pub(crate) fn build_select_invite_target_command(
     })
 }
 
-pub(crate) fn build_remove_invite_target_command(
+pub(super) fn build_remove_invite_target_command(
     request_id: koushi_core::RequestId,
     user_id: String,
 ) -> CoreCommand {
@@ -444,7 +445,7 @@ pub(crate) fn build_remove_invite_target_command(
     })
 }
 
-pub(crate) fn build_invite_targets_command(
+pub(super) fn build_invite_targets_command(
     request_id: koushi_core::RequestId,
     room_id: String,
     user_ids: Vec<String>,
@@ -487,7 +488,7 @@ pub(super) async fn wait_for_room_joined(
     }
 }
 
-pub(crate) fn build_query_directory_command(
+pub(super) fn build_query_directory_command(
     request_id: koushi_core::RequestId,
     term: Option<String>,
     server_name: Option<String>,
@@ -505,7 +506,7 @@ pub(crate) fn build_query_directory_command(
     })
 }
 
-pub(crate) fn build_preview_join_target_command(
+pub(super) fn build_preview_join_target_command(
     request_id: koushi_core::RequestId,
     room_id_or_alias: String,
     via_servers: Vec<String>,
@@ -518,13 +519,13 @@ pub(crate) fn build_preview_join_target_command(
     }))
 }
 
-pub(crate) fn build_dismiss_directory_preview_command(
+pub(super) fn build_dismiss_directory_preview_command(
     request_id: koushi_core::RequestId,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::DismissDirectoryPreview { request_id })
 }
 
-pub(crate) fn build_join_directory_room_command(
+pub(super) fn build_join_directory_room_command(
     request_id: koushi_core::RequestId,
     room_id_or_alias: String,
     via_servers: Vec<String>,
@@ -538,9 +539,73 @@ pub(crate) fn build_join_directory_room_command(
 }
 
 #[cfg(test)]
+fn commands_source() -> String {
+    crate::commands::contracts::production_source()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::contracts::{ScriptedSelectSource, fake_request_id};
+    use koushi_state::{AppState, RoomSummary, RoomTags};
+    use std::collections::VecDeque;
+
+    fn dm_room_summary(room_id: &str) -> RoomSummary {
+        RoomSummary {
+            room_id: room_id.to_owned(),
+            display_name: "DM".to_owned(),
+            display_label: "DM".to_owned(),
+            original_display_label: "DM".to_owned(),
+            avatar: None,
+            is_dm: true,
+            dm_user_ids: vec!["@dm-target:example.invalid".to_owned()],
+            tags: RoomTags::default(),
+            unread_count: 0,
+            notification_count: 0,
+            highlight_count: 0,
+            marked_unread: false,
+            recency_stamp: None,
+            conversation_activity: None,
+            latest_event: None,
+            parent_space_ids: vec![],
+            dm_space_ids: vec![],
+            is_encrypted: false,
+            joined_members: 2,
+        }
+    }
+
+    struct SequencedSelectSource {
+        snapshots: std::sync::Mutex<VecDeque<AppState>>,
+        events: VecDeque<Result<CoreEvent, koushi_core::EventStreamLag>>,
+    }
+
+    impl SelectEventSource for SequencedSelectSource {
+        fn snapshot(&self) -> AppState {
+            let mut snapshots = self.snapshots.lock().expect("snapshots lock");
+            if snapshots.len() > 1 {
+                snapshots.pop_front().expect("non-empty snapshot queue")
+            } else {
+                snapshots
+                    .front()
+                    .cloned()
+                    .expect("at least one scripted snapshot")
+            }
+        }
+
+        fn recv_event(
+            &mut self,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<CoreEvent, koushi_core::EventStreamLag>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(std::future::ready(self.events.pop_front().unwrap_or_else(
+                || Err(koushi_core::EventStreamLag { skipped: 0 }),
+            )))
+        }
+    }
 
     #[tokio::test]
     async fn direct_message_start_returns_the_started_room_id() {

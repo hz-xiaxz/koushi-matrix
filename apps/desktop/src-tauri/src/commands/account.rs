@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::commands::contracts::fake_request_id;
 
 #[tauri::command]
 pub async fn query_devices(

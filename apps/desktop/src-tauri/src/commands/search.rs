@@ -1,5 +1,5 @@
 use super::*;
-use koushi_diagnostics::{record, DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use std::{future::Future, pin::Pin};
 
 fn search_scope_kind_trace_label(scope: SearchScopeKind) -> &'static str {
@@ -289,7 +289,7 @@ pub(super) fn build_close_search_command(request_id: koushi_core::RequestId) -> 
     CoreCommand::App(AppCommand::CloseSearch { request_id })
 }
 
-fn resolve_search_scope_from_active_room(
+pub(super) fn resolve_search_scope_from_active_room(
     scope: SearchScopeKind,
     active_room_id: Option<String>,
     active_space_id: Option<String>,
@@ -309,30 +309,52 @@ fn resolve_search_scope_from_active_room(
     }
 }
 
-fn resolve_search_scope_from_active_room(
-    scope: SearchScopeKind,
-    active_room_id: Option<String>,
-    active_space_id: Option<String>,
-) -> SearchScope {
-    match scope {
-        SearchScopeKind::CurrentRoom => active_room_id
-            .map(|room_id| SearchScope::CurrentRoom { room_id })
-            .unwrap_or_else(|| SearchScope::CurrentRoom {
-                room_id: String::new(),
-            }),
-        SearchScopeKind::CurrentSpace => active_space_id
-            .map(|space_id| SearchScope::CurrentSpace { space_id })
-            .unwrap_or_else(|| SearchScope::CurrentSpace {
-                space_id: String::new(),
-            }),
-        SearchScopeKind::AllRooms => SearchScope::AllRooms,
+fn snapshot_has_started_search(snapshot: &koushi_state::AppState, request_id: RequestId) -> bool {
+    match &snapshot.search {
+        koushi_state::SearchState::Searching {
+            request_id: state_request_id,
+            ..
+        }
+        | koushi_state::SearchState::Results {
+            request_id: state_request_id,
+            ..
+        }
+        | koushi_state::SearchState::TooShort {
+            request_id: state_request_id,
+            ..
+        }
+        | koushi_state::SearchState::Failed {
+            request_id: state_request_id,
+            ..
+        } => *state_request_id == request_id.sequence,
+        _ => false,
     }
+}
+
+fn snapshot_has_closed_search(snapshot: &koushi_state::AppState) -> bool {
+    snapshot.search == koushi_state::SearchState::Closed
+}
+
+async fn resolve_search_scope(
+    scope: SearchScopeKind,
+    state: &CoreRuntimeState,
+) -> koushi_core::SearchScope {
+    let snapshot = state.connection.lock().await.snapshot();
+    resolve_search_scope_from_active_room(
+        scope,
+        snapshot.navigation.active_room_id,
+        snapshot.navigation.active_space_id,
+    )
+}
+
+#[cfg(test)]
+fn commands_source() -> String {
+    crate::commands::contracts::production_source()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::contracts::fake_request_id;
 
     #[test]
     fn search_scope_resolution_preserves_non_all_scope_contract() {
@@ -350,13 +372,13 @@ mod tests {
             .expect("async search scope resolver should follow pure resolver");
 
         assert!(
-                resolver.contains("SearchScope::CurrentSpace"),
-                "current-space searches must preserve the selected scope kind instead of collapsing to global"
-            );
+            resolver.contains("SearchScope::CurrentSpace"),
+            "current-space searches must preserve the selected scope kind instead of collapsing to global"
+        );
         assert!(
-                resolver.contains("SearchScope::CurrentRoom"),
-                "Room/DM searches must preserve the selected conversation instead of collapsing to global"
-            );
+            resolver.contains("SearchScope::CurrentRoom"),
+            "Room/DM searches must preserve the selected conversation instead of collapsing to global"
+        );
         assert!(
             !resolver.contains("unwrap_or(SearchScope::AllRooms)"),
             "non-all search scopes must not silently round-trip as allRooms"
@@ -366,7 +388,10 @@ mod tests {
     #[test]
     fn submit_search_returns_after_correlated_search_start_before_result_completion() {
         let source = commands_source();
-        let search_source = include_str!("search.rs");
+        let search_source = include_str!("search.rs")
+            .split("\n#[cfg(test)]\nmod ")
+            .next()
+            .expect("search production source should precede tests");
         let fn_name = "pub async fn submit_search";
 
         let fn_offset = source
@@ -411,9 +436,9 @@ mod tests {
             "submit_search should return the searching snapshot after the production path"
         );
         assert!(
-                !helper_source.contains("let request_id = event_conn.next_request_id()"),
-                "submit_search must not use transient event-connection sequence numbers for state correlation"
-            );
+            !helper_source.contains("let request_id = event_conn.next_request_id()"),
+            "submit_search must not use transient event-connection sequence numbers for state correlation"
+        );
         assert!(
             !helper_source.contains("wait_for_search_completed"),
             "submit_search must not block the renderer on search result completion"

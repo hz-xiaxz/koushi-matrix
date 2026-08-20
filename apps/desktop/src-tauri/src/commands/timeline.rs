@@ -1,8 +1,8 @@
 use super::*;
 
-const TIMELINE_BACKWARDS_PAGE_EVENT_COUNT: u16 = 100;
+pub(super) const TIMELINE_BACKWARDS_PAGE_EVENT_COUNT: u16 = 100;
 #[cfg(test)]
-const TIMELINE_RESTORE_ANCHOR_MAX_BATCHES: u16 = 6;
+pub(super) const TIMELINE_RESTORE_ANCHOR_MAX_BATCHES: u16 = 6;
 
 pub(super) fn trace_tauri_timeline_command(
     stage: &'static str,
@@ -104,14 +104,15 @@ impl std::fmt::Debug for StageUploadBytesInputItem {
     }
 }
 
-fn build_timeline_key(account_key: AccountKey, room_id: String) -> TimelineKey {
+pub(super) fn build_timeline_key(account_key: AccountKey, room_id: String) -> TimelineKey {
     TimelineKey {
         account_key,
         kind: TimelineKind::Room { room_id },
     }
 }
 
-pub(crate) fn build_subscribe_focused_timeline_command(
+#[cfg(test)]
+pub(super) fn build_subscribe_focused_timeline_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -126,7 +127,7 @@ pub(crate) fn build_subscribe_focused_timeline_command(
     })
 }
 
-pub(crate) fn build_paginate_timeline_backwards_command(
+pub(super) fn build_paginate_timeline_backwards_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -139,7 +140,7 @@ pub(crate) fn build_paginate_timeline_backwards_command(
     })
 }
 
-pub(crate) fn build_paginate_thread_timeline_backwards_command(
+pub(super) fn build_paginate_thread_timeline_backwards_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -159,7 +160,7 @@ pub(crate) fn build_paginate_thread_timeline_backwards_command(
     })
 }
 
-pub(crate) fn build_restore_timeline_anchor_command(
+pub(super) fn build_restore_timeline_anchor_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     timeline_key: TimelineKey,
@@ -179,7 +180,7 @@ pub(crate) fn build_restore_timeline_anchor_command(
     })
 }
 
-pub(crate) fn build_open_timeline_at_timestamp_command(
+pub(super) fn build_open_timeline_at_timestamp_command(
     request_id: koushi_core::RequestId,
     room_id: String,
     timestamp_ms: u64,
@@ -191,7 +192,7 @@ pub(crate) fn build_open_timeline_at_timestamp_command(
     })
 }
 
-pub(crate) fn build_update_navigation_scroll_anchor_command(
+pub(super) fn build_update_navigation_scroll_anchor_command(
     request_id: koushi_core::RequestId,
     room_id: String,
     anchor: TimelineScrollAnchor,
@@ -203,7 +204,7 @@ pub(crate) fn build_update_navigation_scroll_anchor_command(
     })
 }
 
-pub(crate) fn build_observe_timeline_viewport_command(
+pub(super) fn build_observe_timeline_viewport_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -224,7 +225,8 @@ pub(crate) fn build_observe_timeline_viewport_command(
     })
 }
 
-pub(crate) fn build_send_text_command(
+#[cfg(test)]
+pub(super) fn build_send_text_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -242,7 +244,7 @@ pub(crate) fn build_send_text_command(
     }))
 }
 
-pub(crate) fn build_submit_text_command(
+pub(super) fn build_submit_text_command(
     request_id: RequestId,
     expected_account: koushi_key::SessionKeyId,
     submission_id: SubmissionId,
@@ -266,7 +268,7 @@ pub(crate) fn build_submit_text_command(
     }))
 }
 
-pub(crate) fn build_schedule_send_command(
+pub(super) fn build_schedule_send_command(
     request_id: koushi_core::RequestId,
     expected_account: koushi_key::SessionKeyId,
     target: koushi_state::ComposerTarget,
@@ -295,7 +297,7 @@ pub(crate) fn build_schedule_send_command(
     }))
 }
 
-pub(crate) fn build_set_upload_staging_command(
+pub(super) fn build_set_upload_staging_command(
     request_id: koushi_core::RequestId,
     room_id: String,
     items: Vec<StageUploadInputItem>,
@@ -330,7 +332,7 @@ pub(crate) fn build_set_upload_staging_command(
     })
 }
 
-pub(crate) fn build_cancel_scheduled_send_command(
+pub(super) fn build_cancel_scheduled_send_command(
     request_id: koushi_core::RequestId,
     scheduled_id: String,
 ) -> Option<CoreCommand> {
@@ -343,7 +345,7 @@ pub(crate) fn build_cancel_scheduled_send_command(
     }))
 }
 
-pub(crate) fn build_reschedule_scheduled_send_command(
+pub(super) fn build_reschedule_scheduled_send_command(
     request_id: koushi_core::RequestId,
     scheduled_id: String,
     body: String,
@@ -360,7 +362,7 @@ pub(crate) fn build_reschedule_scheduled_send_command(
     }))
 }
 
-pub(crate) fn build_retry_send_command(
+pub(super) fn build_retry_send_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -376,7 +378,7 @@ pub(crate) fn build_retry_send_command(
     }))
 }
 
-pub(crate) fn build_cancel_send_command(
+pub(super) fn build_cancel_send_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -392,7 +394,7 @@ pub(crate) fn build_cancel_send_command(
     }))
 }
 
-pub(crate) fn build_upload_media_command(
+pub(super) fn build_upload_media_command(
     request_id: koushi_core::RequestId,
     expected_account: koushi_key::SessionKeyId,
     account_key: AccountKey,
@@ -522,7 +524,7 @@ fn media_caption_from_composer_body(
     ))
 }
 
-pub(crate) fn build_download_media_command(
+pub(super) fn build_download_media_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -539,7 +541,7 @@ pub(crate) fn build_download_media_command(
     }))
 }
 
-pub(crate) fn build_load_message_source_command(
+pub(super) fn build_load_message_source_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -555,7 +557,7 @@ pub(crate) fn build_load_message_source_command(
     }))
 }
 
-pub(crate) fn build_request_room_key_command(
+pub(super) fn build_request_room_key_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -581,7 +583,7 @@ pub(crate) fn build_request_room_key_command(
     }))
 }
 
-pub(crate) fn build_request_late_decryption_command(
+pub(super) fn build_request_late_decryption_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -599,7 +601,7 @@ pub(crate) fn build_request_late_decryption_command(
     ))
 }
 
-pub(crate) fn build_load_link_previews_command(
+pub(super) fn build_load_link_previews_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -615,7 +617,7 @@ pub(crate) fn build_load_link_previews_command(
     }))
 }
 
-pub(crate) fn build_hide_link_preview_command(
+pub(super) fn build_hide_link_preview_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -631,7 +633,7 @@ pub(crate) fn build_hide_link_preview_command(
     }))
 }
 
-pub(crate) fn build_forward_message_command(
+pub(super) fn build_forward_message_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -654,7 +656,7 @@ pub(crate) fn build_forward_message_command(
     }))
 }
 
-pub(crate) fn build_edit_message_command(
+pub(super) fn build_edit_message_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -672,7 +674,7 @@ pub(crate) fn build_edit_message_command(
     }))
 }
 
-pub(crate) fn build_redact_message_command(
+pub(super) fn build_redact_message_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -685,7 +687,7 @@ pub(crate) fn build_redact_message_command(
     })
 }
 
-pub(crate) fn build_toggle_reaction_command(
+pub(super) fn build_toggle_reaction_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -703,7 +705,7 @@ pub(crate) fn build_toggle_reaction_command(
     }))
 }
 
-pub(crate) fn build_send_reaction_command(
+pub(super) fn build_send_reaction_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -721,7 +723,7 @@ pub(crate) fn build_send_reaction_command(
     }))
 }
 
-pub(crate) fn build_redact_reaction_command(
+pub(super) fn build_redact_reaction_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -744,7 +746,7 @@ pub(crate) fn build_redact_reaction_command(
     }))
 }
 
-pub(crate) fn build_send_read_receipt_command(
+pub(super) fn build_send_read_receipt_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -771,7 +773,7 @@ pub(crate) fn build_send_read_receipt_command(
     }))
 }
 
-pub(crate) fn build_set_fully_read_command(
+pub(super) fn build_set_fully_read_command(
     request_id: koushi_core::RequestId,
     account_key: AccountKey,
     room_id: String,
@@ -3121,6 +3123,207 @@ pub async fn send_thread_reply(
     Ok(response)
 }
 
+const UPLOAD_STAGING_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ComposerDraftAcceptanceResponse {
+    pub accepted_revision: Option<ComposerDraftRevision>,
+    pub snapshot: FrontendDesktopSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SubmissionFailure {
+    Invalid,
+    SubmitFailed,
+    Timeout,
+    Disconnected,
+    Lagged,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SubmissionOutcome {
+    Accepted,
+    Rejected {
+        kind: koushi_core::TimelineFailureKind,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SubmissionResponse {
+    pub outcome: SubmissionOutcome,
+    pub submission_id: SubmissionId,
+    pub transaction_id: Option<String>,
+    pub snapshot: FrontendDesktopSnapshot,
+}
+
+#[cfg(test)]
+pub(super) fn build_send_reply_command(
+    request_id: koushi_core::RequestId,
+    account_key: AccountKey,
+    room_id: String,
+    transaction_id: String,
+    in_reply_to_event_id: String,
+    document: ComposerDocument,
+) -> Option<CoreCommand> {
+    if document.plain_body().trim().is_empty() {
+        return None;
+    }
+    Some(CoreCommand::Timeline(TimelineCommand::SendReply {
+        request_id,
+        key: build_timeline_key(account_key, room_id),
+        transaction_id,
+        in_reply_to_event_id,
+        document,
+    }))
+}
+
+#[cfg(test)]
+pub(super) fn build_send_thread_reply_command(
+    request_id: koushi_core::RequestId,
+    account_key: AccountKey,
+    room_id: String,
+    root_event_id: String,
+    transaction_id: String,
+    document: ComposerDocument,
+) -> Option<CoreCommand> {
+    if document.plain_body().trim().is_empty() {
+        return None;
+    }
+    Some(CoreCommand::Timeline(TimelineCommand::SendReply {
+        request_id,
+        key: TimelineKey {
+            account_key,
+            kind: TimelineKind::Thread {
+                room_id,
+                root_event_id: root_event_id.clone(),
+            },
+        },
+        transaction_id,
+        in_reply_to_event_id: root_event_id,
+        document,
+    }))
+}
+
+pub(super) fn build_set_composer_draft_command(
+    request_id: koushi_core::RequestId,
+    expected_account: koushi_key::SessionKeyId,
+    room_id: String,
+    document: ComposerDocument,
+    revision: ComposerDraftRevision,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::SetComposerDraft {
+        request_id,
+        expected_account,
+        room_id,
+        document,
+        revision,
+    })
+}
+
+pub(super) fn build_set_thread_composer_draft_command(
+    request_id: koushi_core::RequestId,
+    expected_account: koushi_key::SessionKeyId,
+    room_id: String,
+    root_event_id: String,
+    document: ComposerDocument,
+    revision: ComposerDraftRevision,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::SetThreadComposerDraft {
+        request_id,
+        expected_account,
+        room_id,
+        root_event_id,
+        document,
+        revision,
+    })
+}
+
+pub(super) fn build_submit_reply_command(
+    request_id: RequestId,
+    expected_account: koushi_key::SessionKeyId,
+    submission_id: SubmissionId,
+    account_key: AccountKey,
+    room_id: String,
+    transaction_id: String,
+    in_reply_to_event_id: String,
+    document: ComposerDocument,
+    draft_revision: ComposerDraftRevision,
+) -> Option<CoreCommand> {
+    if document.plain_body().trim().is_empty() {
+        return None;
+    }
+    Some(CoreCommand::Timeline(TimelineCommand::SubmitReply {
+        request_id,
+        expected_account,
+        submission_id,
+        key: build_timeline_key(account_key, room_id),
+        transaction_id,
+        in_reply_to_event_id,
+        document,
+        draft_revision,
+    }))
+}
+
+pub(super) fn build_submit_thread_reply_command(
+    request_id: RequestId,
+    expected_account: koushi_key::SessionKeyId,
+    submission_id: SubmissionId,
+    account_key: AccountKey,
+    room_id: String,
+    root_event_id: String,
+    transaction_id: String,
+    document: ComposerDocument,
+    draft_revision: ComposerDraftRevision,
+) -> Option<CoreCommand> {
+    if document.plain_body().trim().is_empty() {
+        return None;
+    }
+    Some(CoreCommand::Timeline(TimelineCommand::SubmitReply {
+        request_id,
+        expected_account,
+        submission_id,
+        key: TimelineKey {
+            account_key,
+            kind: TimelineKind::Thread {
+                room_id,
+                root_event_id: root_event_id.clone(),
+            },
+        },
+        transaction_id,
+        in_reply_to_event_id: root_event_id,
+        document,
+        draft_revision,
+    }))
+}
+
+async fn image_upload_compression_contract_from_snapshot(
+    state: &CoreRuntimeState,
+) -> (ImageUploadCompressionMode, ImageUploadCompressionPolicy) {
+    let media = state
+        .connection
+        .lock()
+        .await
+        .snapshot()
+        .settings
+        .values
+        .media;
+    (
+        // #305 retired the stored mode. The direct upload path keeps the former
+        // default so its behavior matches a user who never changed the setting.
+        ImageUploadCompressionMode::default(),
+        ImageUploadCompressionPolicy {
+            threshold_bytes: media.image_upload_compression_policy.threshold_bytes,
+            threshold_long_edge: media.image_upload_compression_policy.threshold_long_edge,
+            target_long_edge: media.image_upload_compression_policy.target_long_edge,
+            quality_percent: media.image_upload_compression_policy.quality_percent,
+        },
+    )
+}
+
 #[cfg(test)]
 mod submission_settlement_tests {
     use std::collections::VecDeque;
@@ -3573,5 +3776,398 @@ mod save_downloaded_media_tests {
     fn selected_save_destination_path_rejects_empty_and_relative_paths() {
         assert!(selected_save_destination_path("").is_err());
         assert!(selected_save_destination_path("Downloads/file.png").is_err());
+    }
+}
+
+#[cfg(test)]
+mod issue551_moved_tests {
+    use super::*;
+    use crate::commands::contracts::{fake_request_id, synthetic_session_key};
+    use koushi_core::{AccountKey, CoreCommand, PaginationDirection, TimelineCommand};
+    use koushi_state::ComposerDocument;
+    fn commands_source() -> String {
+        crate::commands::contracts::production_source()
+    }
+    #[test]
+    fn acknowledge_timeline_batch_rendered_routes_every_generation_fence() {
+        let source = include_str!("navigation.rs");
+        let start = source
+            .find("pub async fn acknowledge_timeline_batch_rendered")
+            .expect("rendered batch acknowledgement command should exist");
+        let command_source = &source[start..];
+
+        for field in [
+            "key: TimelineKey",
+            "actor_generation: u64",
+            "timeline_generation: TimelineGeneration",
+            "repair_generation: u64",
+            "batch_id: TimelineBatchId",
+            "AppCommand::AcknowledgeTimelineBatchRendered",
+        ] {
+            assert!(command_source.contains(field), "missing {field}");
+        }
+    }
+
+    #[test]
+    fn build_subscribe_focused_timeline_command_routes_to_focused_timeline_kind() {
+        let account_key = AccountKey("@alice:example.org".to_owned());
+        let command = build_subscribe_focused_timeline_command(
+            fake_request_id(21),
+            account_key.clone(),
+            "!room:example.org".to_owned(),
+            "$event".to_owned(),
+        );
+
+        match command {
+            CoreCommand::Timeline(TimelineCommand::Subscribe { request_id, key }) => {
+                assert_eq!(request_id, fake_request_id(21));
+                assert_eq!(key.account_key, account_key);
+                assert_eq!(
+                    key.kind,
+                    koushi_core::TimelineKind::Focused {
+                        room_id: "!room:example.org".to_owned(),
+                        event_id: "$event".to_owned(),
+                    }
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn composer_key_resolver_command_contract_is_present() {
+        let commands_source = commands_source();
+        let lib_source = include_str!("../lib.rs");
+        let command_name = "pub async fn resolve_composer_key_action";
+        let route_name = "koushi_state::resolve_composer_key_action";
+        let settings_token = "settings.values.keyboard.composer_send_shortcut";
+        let registration_name = "commands::timeline::resolve_composer_key_action";
+
+        assert!(
+            commands_source.contains(command_name),
+            "Tauri command should expose resolve_composer_key_action"
+        );
+        assert!(
+            commands_source.contains(route_name),
+            "Tauri command should route through the Rust-owned resolver"
+        );
+        assert!(
+            commands_source.contains(settings_token),
+            "resolver should derive the send shortcut from Rust-owned settings"
+        );
+        assert!(
+            lib_source.contains(registration_name),
+            "Tauri command should be registered in generate_handler"
+        );
+    }
+
+    #[test]
+    fn hide_link_preview_tauri_command_contract_is_present() {
+        let request_id = koushi_core::RequestId {
+            connection_id: koushi_core::RuntimeConnectionId(1),
+            sequence: 1,
+        };
+        let command = build_hide_link_preview_command(
+            request_id,
+            AccountKey("@u:example.test".to_owned()),
+            "!room:example.test".to_owned(),
+            "$event:example.test".to_owned(),
+        );
+        assert!(matches!(
+            command,
+            Some(CoreCommand::Timeline(
+                TimelineCommand::HideLinkPreview { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn load_link_previews_tauri_command_contract_is_present() {
+        let request_id = koushi_core::RequestId {
+            connection_id: koushi_core::RuntimeConnectionId(1),
+            sequence: 1,
+        };
+        let command = build_load_link_previews_command(
+            request_id,
+            AccountKey("@u:example.test".to_owned()),
+            "!room:example.test".to_owned(),
+            "$event:example.test".to_owned(),
+        );
+        assert!(matches!(
+            command,
+            Some(CoreCommand::Timeline(
+                TimelineCommand::LoadLinkPreviews { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn reaction_tauri_command_contracts_are_present() {
+        let commands_source = commands_source();
+        let lib_source = include_str!("../lib.rs");
+        for (command_name, route_name, registration_name, trace_kind) in [
+            (
+                "pub async fn send_reaction",
+                "build_send_reaction_command",
+                "commands::timeline::send_reaction",
+                "send_reaction",
+            ),
+            (
+                "pub async fn redact_reaction",
+                "build_redact_reaction_command",
+                "commands::timeline::redact_reaction",
+                "redact_reaction",
+            ),
+        ] {
+            assert!(
+                commands_source.contains(command_name),
+                "Tauri command should expose {command_name}"
+            );
+            assert!(
+                commands_source.contains(route_name),
+                "Tauri command should route through {route_name}"
+            );
+            assert!(
+                lib_source.contains(registration_name),
+                "Tauri command should register {registration_name}"
+            );
+            assert!(
+                commands_source.contains(&format!(
+                    "trace_tauri_timeline_command(\"submit\", \"{trace_kind}\""
+                )),
+                "Tauri command should trace submit for {trace_kind}"
+            );
+            assert!(
+                commands_source.contains(&format!(
+                    "trace_tauri_timeline_command_elapsed(\n        \"done\",\n        \"{trace_kind}\""
+                )),
+                "Tauri command should trace completion latency for {trace_kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn read_signal_tauri_commands_emit_latency_trace_tokens() {
+        let commands_source = commands_source();
+        for trace_kind in ["send_read_receipt", "set_fully_read"] {
+            assert!(
+                commands_source.contains(&format!(
+                    "trace_tauri_timeline_command(\"submit\", \"{trace_kind}\""
+                )),
+                "read-signal command should trace submit for {trace_kind}"
+            );
+            assert!(
+                commands_source.contains(&format!(
+                    "trace_tauri_timeline_command_elapsed(\n        \"done\",\n        \"{trace_kind}\""
+                )),
+                "read-signal command should trace completion latency for {trace_kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn scheduled_send_tauri_command_contracts_are_present() {
+        let commands_source = commands_source();
+        let lib_source = include_str!("../lib.rs");
+        for (command_name, route_name, registration_name) in [
+            (
+                "pub async fn schedule_send",
+                "build_schedule_send_command",
+                "commands::timeline::schedule_send",
+            ),
+            (
+                "pub async fn cancel_scheduled_send",
+                "build_cancel_scheduled_send_command",
+                "commands::timeline::cancel_scheduled_send",
+            ),
+            (
+                "pub async fn reschedule_scheduled_send",
+                "build_reschedule_scheduled_send_command",
+                "commands::timeline::reschedule_scheduled_send",
+            ),
+        ] {
+            assert!(
+                commands_source.contains(command_name),
+                "Tauri command should expose {command_name}"
+            );
+            assert!(
+                commands_source.contains(route_name),
+                "Tauri command should route through {route_name}"
+            );
+            assert!(
+                lib_source.contains(registration_name),
+                "Tauri command should register {registration_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn send_queue_tauri_command_contracts_are_present() {
+        let commands_source = commands_source();
+        let lib_source = include_str!("../lib.rs");
+        for (command_name, route_name, registration_name) in [
+            (
+                "pub async fn retry_send",
+                "build_retry_send_command",
+                "commands::timeline::retry_send",
+            ),
+            (
+                "pub async fn cancel_send",
+                "build_cancel_send_command",
+                "commands::timeline::cancel_send",
+            ),
+        ] {
+            assert!(
+                commands_source.contains(command_name),
+                "Tauri command should expose {command_name}"
+            );
+            assert!(
+                commands_source.contains(route_name),
+                "Tauri command should route through {route_name}"
+            );
+            assert!(
+                lib_source.contains(registration_name),
+                "Tauri command should register {registration_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn tauri_command_routes_blank_message_bodies_return_no_command() {
+        let account_key = AccountKey("@alice:example.org".to_owned());
+        let room_id = "!room:example.org".to_owned();
+
+        assert!(
+            build_send_text_command(
+                fake_request_id(14),
+                account_key.clone(),
+                room_id.clone(),
+                "desktop-14".to_owned(),
+                ComposerDocument::from_plain_text("   "),
+            )
+            .is_none()
+        );
+        assert!(
+            build_edit_message_command(
+                fake_request_id(15),
+                account_key,
+                room_id,
+                "$event".to_owned(),
+                ComposerDocument::from_plain_text("\n\t "),
+            )
+            .is_none()
+        );
+        assert!(
+            build_upload_media_command(
+                fake_request_id(17),
+                synthetic_session_key(),
+                AccountKey("@alice:example.org".to_owned()),
+                "!room:example.org".to_owned(),
+                "desktop-media-empty".to_owned(),
+                "empty.bin".to_owned(),
+                "application/octet-stream".to_owned(),
+                vec![],
+                None,
+                ImageUploadCompressionMode::Never,
+                ImageUploadCompressionPolicy::default(),
+                None,
+                None,
+                None,
+            )
+            .is_none()
+        );
+        assert!(
+            build_download_media_command(
+                fake_request_id(18),
+                AccountKey("@alice:example.org".to_owned()),
+                "!room:example.org".to_owned(),
+                "\n\t ".to_owned(),
+            )
+            .is_none()
+        );
+        assert!(
+            build_send_thread_reply_command(
+                fake_request_id(16),
+                AccountKey("@alice:example.org".to_owned()),
+                "!room:example.org".to_owned(),
+                "$root".to_owned(),
+                "desktop-16".to_owned(),
+                ComposerDocument::from_plain_text("\n\t "),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn thread_timeline_backwards_pagination_builder_targets_thread_key() {
+        let account_key = AccountKey("@alice:example.org".to_owned());
+        let room_id = "!room:example.org".to_owned();
+        let root_event_id = "$thread-root".to_owned();
+
+        match build_paginate_thread_timeline_backwards_command(
+            fake_request_id(22),
+            account_key.clone(),
+            room_id.clone(),
+            root_event_id.clone(),
+        ) {
+            CoreCommand::Timeline(TimelineCommand::Paginate {
+                request_id,
+                key,
+                direction,
+                event_count,
+            }) => {
+                assert_eq!(request_id, fake_request_id(22));
+                assert_eq!(key.account_key, account_key);
+                assert_eq!(
+                    key.kind,
+                    koushi_core::TimelineKind::Thread {
+                        room_id,
+                        root_event_id,
+                    }
+                );
+                assert_eq!(direction, PaginationDirection::Backward);
+                assert_eq!(event_count, 100);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn thread_timeline_backwards_pagination_contract_is_present() {
+        let commands_source = commands_source();
+        let lib_source = include_str!("../lib.rs");
+        let helper_name = "build_paginate_thread_timeline_backwards_command";
+        let command_name = "pub async fn paginate_thread_timeline_backwards";
+        let registration_name = "commands::timeline::paginate_thread_timeline_backwards";
+
+        let helper_offset = commands_source
+            .find(helper_name)
+            .expect("thread pagination builder helper should exist");
+        let helper_source = &commands_source[helper_offset..];
+        let helper_end = helper_source
+            .find("fn build_send_text_command")
+            .expect("thread pagination builder should live before send_text builder");
+        let helper_source = &helper_source[..helper_end];
+
+        assert!(
+            commands_source.contains(command_name),
+            "Tauri command should expose thread pagination"
+        );
+        assert!(
+            lib_source.contains(registration_name),
+            "Tauri command should be registered in generate_handler"
+        );
+        assert!(
+            helper_source.contains("TimelineKind::Thread"),
+            "thread pagination builder should use a thread timeline key"
+        );
+        assert!(
+            helper_source.contains("PaginationDirection::Backward"),
+            "thread pagination builder should request backward pagination"
+        );
+        assert!(
+            helper_source.contains("event_count: TIMELINE_BACKWARDS_PAGE_EVENT_COUNT"),
+            "thread pagination should keep the shared room pagination event count"
+        );
     }
 }
