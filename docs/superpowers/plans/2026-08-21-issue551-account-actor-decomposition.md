@@ -2,7 +2,7 @@
 
 ## Status
 
-- Design: initial cross-model review returned `Changes-required`; the follow-up found one omitted existing macro. The corrected immutable 391-key inventory, 150-test ownership, 32-source-test table, qualified verifier keys, and exact sibling visibility amendment are recorded for re-review.
+- Design: after two `Changes-required` rounds fixed the immutable inventory/source-test/macro omissions, `reviewer-flash` (read-only, cross-model) reviewed the complete design plus normative appendix through `0b4b6712` and recorded `Correct-to-implement`; no blocking finding remains.
 - Implementation: blocked until the design reviewer records `Correct-to-implement`.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 

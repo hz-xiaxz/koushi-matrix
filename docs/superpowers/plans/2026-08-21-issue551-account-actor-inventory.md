@@ -81,7 +81,7 @@ The external `renderable_thumbnail.rs` guard reads only `account/profile.rs`, fr
 
 ## Planned sibling visibility
 
-All fields of the one `AccountActor` become `pub(super)` because sibling inherent impls operate on the unchanged struct. The immutable call graph requires exactly these **147** AccountActor methods to become `pub(super)`; the other 53 remain at their original public/crate visibility or private to their owner. An additional method requires a design amendment rather than an opportunistic promotion.
+All fields of the one `AccountActor` become `pub(super)` because sibling inherent impls operate on the unchanged struct. The immutable call graph requires exactly these **147** AccountActor methods to become `pub(super)`; the other 53 remain at their original public/crate visibility or private to their owner. Promoting any of those 53 requires a concrete new sibling edge and a reviewed design amendment rather than an opportunistic compile fix.
 
 - `account_management` (7): `handle_change_password`, `handle_deactivate_account`, `handle_delete_devices`, `handle_load_account_management_capabilities`, `handle_query_devices`, `handle_rename_device`, `handle_submit_account_management_uia`.
 - `actor` (5): `active_account_key`, `emit`, `emit_event_cache_status`, `emit_failure`, `send_actions`.
