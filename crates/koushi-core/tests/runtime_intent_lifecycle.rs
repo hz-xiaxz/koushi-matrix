@@ -205,7 +205,7 @@ async fn select_room_present_emits_committed() {
 #[test]
 fn select_room_routing_is_reliable_and_correlated() {
     let runtime_source = include_str!("../src/runtime.rs");
-    let command_source = include_str!("../src/command.rs");
+    let room_command_source = include_str!("../src/command/room.rs");
 
     assert!(
         runtime_source.contains("User-intent lane: for SelectRoom, record the request_id→room_id")
@@ -222,7 +222,7 @@ fn select_room_routing_is_reliable_and_correlated() {
         "SelectRoom must not be routed through a drop-on-full command path"
     );
     assert!(
-        command_source.contains("User-intent lane: room selection is request-id correlated"),
+        room_command_source.contains("User-intent lane: room selection is request-id correlated"),
         "RoomCommand::SelectRoom should carry an explicit user-intent lane comment"
     );
 }
