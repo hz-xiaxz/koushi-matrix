@@ -1,6 +1,55 @@
-use super::*;
+use super::actor::RoomActor;
+use super::operations::{RoomOperationKind, classify_room_error, operation_failure_kind};
+use crate::event::{CoreEvent, RoomEvent};
+use crate::failure::CoreFailure;
+use crate::ids::RequestId;
+use koushi_sdk::{
+    MatrixPreviewJoinability, MatrixPreviewMembership, MatrixPublicRoomDirectoryQuery,
+    MatrixPublicRoomDirectoryRoom, MatrixRoomPreview,
+};
+use koushi_state::{
+    AppAction, DirectoryPreviewJoinability, DirectoryPreviewMembership, DirectoryQuery,
+    DirectoryRoomPreview, DirectoryRoomSummary, OperationFailureKind,
+};
 
-    async fn handle_create_public_directory_room(
+fn directory_room_summary_from_sdk(room: MatrixPublicRoomDirectoryRoom) -> DirectoryRoomSummary {
+    DirectoryRoomSummary {
+        room_id: room.room_id,
+        canonical_alias: room.canonical_alias,
+        room_type: room.room_type,
+        name: room.name,
+        topic: room.topic,
+        avatar_url: room.avatar_url,
+        joined_members: room.joined_members,
+        world_readable: room.world_readable,
+        guest_can_join: room.guest_can_join,
+    }
+}
+
+fn directory_room_preview_from_sdk(preview: MatrixRoomPreview) -> DirectoryRoomPreview {
+    DirectoryRoomPreview {
+        room_id: preview.room_id,
+        canonical_alias: preview.canonical_alias,
+        room_type: preview.room_type,
+        name: preview.name,
+        topic: preview.topic,
+        joined_members: preview.joined_members,
+        joinability: match preview.joinability {
+            MatrixPreviewJoinability::Open => DirectoryPreviewJoinability::Open,
+            MatrixPreviewJoinability::InviteOnly => DirectoryPreviewJoinability::InviteOnly,
+            MatrixPreviewJoinability::Restricted => DirectoryPreviewJoinability::Restricted,
+            MatrixPreviewJoinability::Unknown => DirectoryPreviewJoinability::Unknown,
+        },
+        membership: match preview.membership {
+            MatrixPreviewMembership::Joined => DirectoryPreviewMembership::Joined,
+            MatrixPreviewMembership::Invited => DirectoryPreviewMembership::Invited,
+            MatrixPreviewMembership::None => DirectoryPreviewMembership::None,
+        },
+    }
+}
+
+impl RoomActor {
+    pub(super) async fn handle_create_public_directory_room(
         &self,
         request_id: RequestId,
         name: String,
@@ -26,8 +75,11 @@ use super::*;
         }
     }
 
-
-    async fn handle_query_directory(&self, request_id: RequestId, query: DirectoryQuery) {
+    pub(super) async fn handle_query_directory(
+        &self,
+        request_id: RequestId,
+        query: DirectoryQuery,
+    ) {
         self.reduce_reliable(vec![AppAction::DirectoryQueryRequested {
             request_id: request_id.sequence,
             query: query.clone(),
@@ -84,8 +136,7 @@ use super::*;
         }
     }
 
-
-    async fn handle_preview_join_target(
+    pub(super) async fn handle_preview_join_target(
         &self,
         request_id: RequestId,
         room_id_or_alias: String,
@@ -140,8 +191,7 @@ use super::*;
         }
     }
 
-
-    async fn handle_join_directory_room(
+    pub(super) async fn handle_join_directory_room(
         &self,
         request_id: RequestId,
         room_id_or_alias: String,
@@ -226,72 +276,26 @@ use super::*;
             }
         }
     }
-
-
-fn directory_room_summary_from_sdk(room: MatrixPublicRoomDirectoryRoom) -> DirectoryRoomSummary {
-    DirectoryRoomSummary {
-        room_id: room.room_id,
-        canonical_alias: room.canonical_alias,
-        room_type: room.room_type,
-        name: room.name,
-        topic: room.topic,
-        avatar_url: room.avatar_url,
-        joined_members: room.joined_members,
-        world_readable: room.world_readable,
-        guest_can_join: room.guest_can_join,
-    }
 }
-
-
-fn directory_room_preview_from_sdk(preview: MatrixRoomPreview) -> DirectoryRoomPreview {
-    DirectoryRoomPreview {
-        room_id: preview.room_id,
-        canonical_alias: preview.canonical_alias,
-        room_type: preview.room_type,
-        name: preview.name,
-        topic: preview.topic,
-        joined_members: preview.joined_members,
-        joinability: match preview.joinability {
-            MatrixPreviewJoinability::Open => DirectoryPreviewJoinability::Open,
-            MatrixPreviewJoinability::InviteOnly => DirectoryPreviewJoinability::InviteOnly,
-            MatrixPreviewJoinability::Restricted => DirectoryPreviewJoinability::Restricted,
-            MatrixPreviewJoinability::Unknown => DirectoryPreviewJoinability::Unknown,
-        },
-        membership: match preview.membership {
-            MatrixPreviewMembership::Joined => DirectoryPreviewMembership::Joined,
-            MatrixPreviewMembership::Invited => DirectoryPreviewMembership::Invited,
-            MatrixPreviewMembership::None => DirectoryPreviewMembership::None,
-        },
-    }
-}
-
-
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
-        fn directory_join_selects_room_before_room_joined_event_is_emitted() {
-            let source = include_str!("../room.rs");
-            let join_body = source
-                .split("async fn handle_join_directory_room")
-                .nth(1)
-                .expect("directory join handler")
-                .split("async fn handle_mark_room_as_read")
-                .next()
-                .expect("directory join body");
-            let success_reduce = join_body
-                .find("AppAction::DirectoryJoinSucceeded")
-                .expect("directory join success reduction");
-            let joined_event = join_body
-                .find("RoomEvent::RoomJoined")
-                .expect("directory join completion event");
-    
-            assert!(
-                success_reduce < joined_event,
-                "DirectoryJoinSucceeded must select the room before Tauri observes RoomJoined"
-            );
-        }
+    fn directory_join_selects_room_before_room_joined_event_is_emitted() {
+        let source = include_str!("directory.rs");
+        let join_body =
+            crate::room::test_source::item_body(source, "async fn handle_join_directory_room");
+        let success_reduce = join_body
+            .find("AppAction::DirectoryJoinSucceeded")
+            .expect("directory join success reduction");
+        let joined_event = join_body
+            .find("RoomEvent::RoomJoined")
+            .expect("directory join completion event");
 
+        assert!(
+            success_reduce < joined_event,
+            "DirectoryJoinSucceeded must select the room before Tauri observes RoomJoined"
+        );
+    }
 }

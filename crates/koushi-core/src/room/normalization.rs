@@ -1,12 +1,19 @@
-// ---------------------------------------------------------------------------
-// Normalization helpers: auth snapshot → state DTOs
-// ---------------------------------------------------------------------------
+use super::mentions::user_profile_mention_search_terms;
+use koushi_sdk::MatrixRoomTags;
+use koushi_state::{
+    AvatarImage, AvatarThumbnailState, InvitePreview, RoomSummary, RoomTagInfo, RoomTags,
+    SpaceSummary, UserProfile,
+};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, RwLock},
+};
 
 /// Convert `MatrixRoomListSnapshot` spaces into `SpaceSummary` values with
 /// child room id lists. Homeservers may sync one side of the Matrix space
 /// relationship before the other, so the projection uses both the space's
 /// `m.space.child` state and rooms' `m.space.parent` state.
-fn normalize_spaces(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec<SpaceSummary> {
+pub(super) fn normalize_spaces(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec<SpaceSummary> {
     snapshot
         .spaces
         .iter()
@@ -39,7 +46,7 @@ fn normalize_space_child_room_ids(
 }
 
 /// Convert `MatrixRoomListSnapshot` rooms into `RoomSummary` values.
-fn normalize_rooms(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec<RoomSummary> {
+pub(super) fn normalize_rooms(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec<RoomSummary> {
     let mut rooms: Vec<RoomSummary> = snapshot
         .rooms
         .iter()
@@ -165,7 +172,9 @@ fn normalize_room_tags(tags: &MatrixRoomTags) -> RoomTags {
     }
 }
 
-fn normalize_user_profiles(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec<UserProfile> {
+pub(super) fn normalize_user_profiles(
+    snapshot: &koushi_sdk::MatrixRoomListSnapshot,
+) -> Vec<UserProfile> {
     snapshot
         .user_profiles
         .iter()
@@ -191,20 +200,20 @@ fn normalize_user_profiles(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec
         })
         .collect()
 }
-fn user_profile_mention_search_terms(user_id: &str, display_name: Option<&str>) -> Vec<String> {
-    let mut terms = Vec::new();
-    if let Some(display_name) = display_name
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        terms.push(display_name.to_owned());
+
+pub(super) fn replace_known_room_ids(
+    known_room_ids: &Arc<RwLock<BTreeSet<String>>>,
+    rooms: &[RoomSummary],
+) {
+    if let Ok(mut known_room_ids) = known_room_ids.write() {
+        *known_room_ids = rooms.iter().map(|room| room.room_id.clone()).collect();
     }
-    if !terms.iter().any(|term| term == user_id) {
-        terms.push(user_id.to_owned());
-    }
-    terms
 }
-fn normalize_invites(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec<InvitePreview> {
+
+/// Convert `MatrixRoomListSnapshot` invites into Rust-owned invite previews.
+pub(super) fn normalize_invites(
+    snapshot: &koushi_sdk::MatrixRoomListSnapshot,
+) -> Vec<InvitePreview> {
     snapshot
         .invites
         .iter()
@@ -220,179 +229,506 @@ fn normalize_invites(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec<Invit
         .collect()
 }
 
-fn room_member_summary_from_sdk(member: MatrixRoomMemberSummary) -> RoomMemberSummary {
-    let display_label = member
-        .display_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|display_name| !display_name.is_empty())
-        .unwrap_or(member.user_id.as_str())
-        .to_owned();
-    RoomMemberSummary {
-        user_id: member.user_id,
-        display_name: member.display_name,
-        display_label: display_label.clone(),
-        original_display_label: display_label,
-        avatar_url: member.avatar_url,
-        power_level: member.power_level,
-        role: room_member_role_from_sdk(member.role),
-        user_trust: member.user_trust.map(user_trust_state_from_sdk),
-    }
-}
-
-fn user_trust_state_from_sdk(state: MatrixUserTrustState) -> UserTrustState {
-    match state {
-        MatrixUserTrustState::Unverified => UserTrustState::Unverified,
-        MatrixUserTrustState::Verified => UserTrustState::Verified,
-        MatrixUserTrustState::IdentityReset => UserTrustState::IdentityReset,
-    }
-}
-
-fn room_member_role_from_sdk(role: MatrixRoomMemberRole) -> RoomMemberRole {
-    match role {
-        MatrixRoomMemberRole::Creator => RoomMemberRole::Creator,
-        MatrixRoomMemberRole::Administrator => RoomMemberRole::Administrator,
-        MatrixRoomMemberRole::Moderator => RoomMemberRole::Moderator,
-        MatrixRoomMemberRole::User => RoomMemberRole::User,
-    }
-}
-
-fn room_join_rule_from_sdk(join_rule: MatrixRoomJoinRule) -> RoomJoinRule {
-    match join_rule {
-        MatrixRoomJoinRule::Public => RoomJoinRule::Public,
-        MatrixRoomJoinRule::Invite => RoomJoinRule::Invite,
-        MatrixRoomJoinRule::Knock => RoomJoinRule::Knock,
-        MatrixRoomJoinRule::Restricted => RoomJoinRule::Restricted,
-        MatrixRoomJoinRule::Private => RoomJoinRule::Private,
-    }
-}
-
-fn room_join_rule_to_sdk(join_rule: RoomJoinRule) -> MatrixRoomJoinRule {
-    match join_rule {
-        RoomJoinRule::Public => MatrixRoomJoinRule::Public,
-        RoomJoinRule::Invite => MatrixRoomJoinRule::Invite,
-        RoomJoinRule::Knock => MatrixRoomJoinRule::Knock,
-        RoomJoinRule::Restricted => MatrixRoomJoinRule::Restricted,
-        RoomJoinRule::Private => MatrixRoomJoinRule::Private,
-    }
-}
-
-fn room_history_visibility_from_sdk(
-    history_visibility: MatrixRoomHistoryVisibility,
-) -> RoomHistoryVisibility {
-    match history_visibility {
-        MatrixRoomHistoryVisibility::WorldReadable => RoomHistoryVisibility::WorldReadable,
-        MatrixRoomHistoryVisibility::Shared => RoomHistoryVisibility::Shared,
-        MatrixRoomHistoryVisibility::Invited => RoomHistoryVisibility::Invited,
-        MatrixRoomHistoryVisibility::Joined => RoomHistoryVisibility::Joined,
-    }
-}
-
-fn room_history_visibility_to_sdk(
-    history_visibility: RoomHistoryVisibility,
-) -> MatrixRoomHistoryVisibility {
-    match history_visibility {
-        RoomHistoryVisibility::WorldReadable => MatrixRoomHistoryVisibility::WorldReadable,
-        RoomHistoryVisibility::Shared => MatrixRoomHistoryVisibility::Shared,
-        RoomHistoryVisibility::Invited => MatrixRoomHistoryVisibility::Invited,
-        RoomHistoryVisibility::Joined => MatrixRoomHistoryVisibility::Joined,
-    }
-}
-
-fn room_permission_facts_from_sdk(permissions: MatrixRoomPermissionFacts) -> RoomPermissionFacts {
-    RoomPermissionFacts {
-        can_edit_settings: permissions.can_edit_settings,
-        can_edit_roles: permissions.can_edit_roles,
-        can_invite: permissions.can_invite,
-        can_kick: permissions.can_kick,
-        can_ban: permissions.can_ban,
-        can_unban: permissions.can_unban,
-    }
-}
-
-fn room_setting_change_to_sdk(change: RoomSettingChange) -> MatrixRoomSettingChange {
-    match change {
-        RoomSettingChange::Name(name) => MatrixRoomSettingChange::Name(name),
-        RoomSettingChange::Topic(topic) => MatrixRoomSettingChange::Topic(topic),
-        RoomSettingChange::AvatarUrl(avatar_url) => MatrixRoomSettingChange::AvatarUrl(avatar_url),
-        RoomSettingChange::JoinRule(join_rule) => {
-            MatrixRoomSettingChange::JoinRule(room_join_rule_to_sdk(join_rule))
-        }
-        RoomSettingChange::HistoryVisibility(history_visibility) => {
-            MatrixRoomSettingChange::HistoryVisibility(room_history_visibility_to_sdk(
-                history_visibility,
-            ))
-        }
-    }
-}
-
-fn room_moderation_action_to_sdk(action: RoomModerationAction) -> MatrixRoomModerationAction {
-    match action {
-        RoomModerationAction::Kick => MatrixRoomModerationAction::Kick,
-        RoomModerationAction::Ban => MatrixRoomModerationAction::Ban,
-        RoomModerationAction::Unban => MatrixRoomModerationAction::Unban,
-    }
-}
-
-fn room_moderation_allowed(
-    permissions: &RoomPermissionFacts,
-    action: RoomModerationAction,
-) -> bool {
-    match action {
-        RoomModerationAction::Kick => permissions.can_kick,
-        RoomModerationAction::Ban => permissions.can_ban,
-        RoomModerationAction::Unban => permissions.can_unban,
-    }
-}
-
-fn avatar_from_mxc_uri(mxc_uri: Option<&str>) -> Option<AvatarImage> {
+pub(super) fn avatar_from_mxc_uri(mxc_uri: Option<&str>) -> Option<AvatarImage> {
     mxc_uri.map(|mxc_uri| AvatarImage {
         mxc_uri: mxc_uri.to_owned(),
         thumbnail: AvatarThumbnailState::NotRequested,
     })
 }
 
-fn sdk_room_tag_kind(tag: RoomTagKind) -> MatrixRoomTagKind {
-    match tag {
-        RoomTagKind::Favourite => MatrixRoomTagKind::Favourite,
-        RoomTagKind::LowPriority => MatrixRoomTagKind::LowPriority,
+#[cfg(test)]
+mod tests {
+    use super::{normalize_invites, normalize_rooms, normalize_spaces, normalize_user_profiles};
+
+    use koushi_sdk::{
+        MatrixConversationActivity, MatrixConversationActivitySource, MatrixInvitePreview,
+        MatrixRoomTagInfo,
+    };
+    use koushi_sdk::{
+        MatrixRoomListRoom, MatrixRoomListSnapshot, MatrixRoomListSpace, MatrixRoomTags,
+    };
+
+    use koushi_state::{AvatarImage, AvatarThumbnailState, RoomTagInfo, UserProfile};
+
+    #[test]
+    fn normalize_rooms_preserves_typed_conversation_activity_and_opaque_recency() {
+        let snapshot = MatrixRoomListSnapshot {
+            rooms: vec![MatrixRoomListRoom {
+                room_id: "!dm:example.test".to_owned(),
+                display_name: "Synthetic DM".to_owned(),
+                avatar_mxc_uri: None,
+                is_dm: true,
+                dm_user_ids: vec!["@member:example.test".to_owned()],
+                tags: MatrixRoomTags::default(),
+                unread_count: 0,
+                notification_count: 0,
+                highlight_count: 0,
+                marked_unread: false,
+                recency_stamp: Some(9),
+                conversation_activity: Some(MatrixConversationActivity {
+                    timestamp_ms: 42,
+                    source: MatrixConversationActivitySource::EncryptedMessage,
+                }),
+                latest_event: None,
+                parent_space_ids: Vec::new(),
+                is_encrypted: true,
+                joined_members: 2,
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+
+        let rooms = normalize_rooms(&snapshot);
+        let room = rooms.first().expect("normalized room");
+
+        assert_eq!(room.recency_stamp, Some(9));
+        assert_eq!(
+            room.conversation_activity,
+            Some(koushi_state::ConversationActivity {
+                timestamp_ms: 42,
+                source: koushi_state::ConversationActivitySource::EncryptedMessage,
+            })
+        );
     }
-}
 
-fn room_tag_info_from_order(order: Option<f64>) -> RoomTagInfo {
-    RoomTagInfo {
-        order: order.map(|order| order.to_string()),
+    #[test]
+    fn normalize_spaces_with_child_rooms() {
+        let snapshot = MatrixRoomListSnapshot {
+            spaces: vec![MatrixRoomListSpace {
+                space_id: "!space1:example.test".to_owned(),
+                display_name: "My Space".to_owned(),
+                avatar_mxc_uri: None,
+                child_room_ids: Vec::new(),
+                member_user_ids: Vec::new(),
+            }],
+            rooms: vec![
+                MatrixRoomListRoom {
+                    room_id: "!room1:example.test".to_owned(),
+                    display_name: "Room 1".to_owned(),
+                    avatar_mxc_uri: None,
+                    is_dm: false,
+                    dm_user_ids: Vec::new(),
+                    tags: MatrixRoomTags::default(),
+                    unread_count: 0,
+                    notification_count: 0,
+                    highlight_count: 0,
+                    marked_unread: false,
+                    recency_stamp: None,
+                    conversation_activity: None,
+                    latest_event: None,
+                    parent_space_ids: vec!["!space1:example.test".to_owned()],
+                    is_encrypted: false,
+                    joined_members: 0,
+                },
+                MatrixRoomListRoom {
+                    room_id: "!room2:example.test".to_owned(),
+                    display_name: "Room 2".to_owned(),
+                    avatar_mxc_uri: None,
+                    is_dm: false,
+                    dm_user_ids: Vec::new(),
+                    tags: MatrixRoomTags::default(),
+                    unread_count: 0,
+                    notification_count: 0,
+                    highlight_count: 0,
+                    marked_unread: false,
+                    recency_stamp: None,
+                    conversation_activity: None,
+                    latest_event: None,
+                    parent_space_ids: vec![],
+                    is_encrypted: false,
+                    joined_members: 0,
+                },
+            ],
+            ..MatrixRoomListSnapshot::default()
+        };
+        let spaces = normalize_spaces(&snapshot);
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].space_id, "!space1:example.test");
+        assert_eq!(spaces[0].child_room_ids, vec!["!room1:example.test"]);
     }
-}
 
-fn operation_failure_kind(kind: RoomFailureKind) -> OperationFailureKind {
-    match kind {
-        RoomFailureKind::Forbidden => OperationFailureKind::Forbidden,
-        RoomFailureKind::Network => OperationFailureKind::Network,
-        RoomFailureKind::NotFound => OperationFailureKind::NotFound,
-        RoomFailureKind::Sdk => OperationFailureKind::Sdk,
+    #[test]
+    fn normalize_spaces_uses_direct_space_child_state() {
+        let snapshot = MatrixRoomListSnapshot {
+            spaces: vec![MatrixRoomListSpace {
+                space_id: "!space1:example.test".to_owned(),
+                display_name: "My Space".to_owned(),
+                avatar_mxc_uri: None,
+                child_room_ids: vec!["!room1:example.test".to_owned()],
+                member_user_ids: Vec::new(),
+            }],
+            rooms: vec![MatrixRoomListRoom {
+                room_id: "!room1:example.test".to_owned(),
+                display_name: "Room 1".to_owned(),
+                avatar_mxc_uri: None,
+                is_dm: false,
+                dm_user_ids: Vec::new(),
+                tags: MatrixRoomTags::default(),
+                unread_count: 0,
+                notification_count: 0,
+                highlight_count: 0,
+                marked_unread: false,
+                recency_stamp: None,
+                conversation_activity: None,
+                latest_event: None,
+                parent_space_ids: Vec::new(),
+                is_encrypted: false,
+                joined_members: 0,
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+
+        let spaces = normalize_spaces(&snapshot);
+
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].child_room_ids, vec!["!room1:example.test"]);
     }
-}
 
-enum InviteTargetOutcome {
-    Invited,
-    AlreadyInSpace,
-    Failed,
-}
-
-async fn invite_target_to_space_if_needed(
-    session: &MatrixClientSession,
-    space_id: &str,
-    user_id: &str,
-) -> InviteTargetOutcome {
-    match koushi_sdk::room_has_active_member_no_sync(session, space_id, user_id).await {
-        Ok(true) => return InviteTargetOutcome::AlreadyInSpace,
-        Ok(false) => {}
-        Err(_error) => return InviteTargetOutcome::Failed,
+    #[test]
+    fn normalize_spaces_no_children() {
+        let snapshot = MatrixRoomListSnapshot {
+            spaces: vec![MatrixRoomListSpace {
+                space_id: "!space:example.test".to_owned(),
+                display_name: "Empty Space".to_owned(),
+                avatar_mxc_uri: None,
+                child_room_ids: Vec::new(),
+                member_user_ids: Vec::new(),
+            }],
+            rooms: vec![],
+            ..MatrixRoomListSnapshot::default()
+        };
+        let spaces = normalize_spaces(&snapshot);
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].child_room_ids, Vec::<String>::new());
     }
 
-    match koushi_sdk::invite_user_to_room(session, space_id, user_id).await {
-        Ok(()) => InviteTargetOutcome::Invited,
-        Err(_error) => InviteTargetOutcome::Failed,
+    #[test]
+    fn normalize_spaces_preserves_avatar_mxc_as_unrequested_thumbnail() {
+        let snapshot = MatrixRoomListSnapshot {
+            spaces: vec![MatrixRoomListSpace {
+                space_id: "!space:example.test".to_owned(),
+                display_name: "Space".to_owned(),
+                avatar_mxc_uri: Some("mxc://example.test/space-avatar".to_owned()),
+                child_room_ids: Vec::new(),
+                member_user_ids: Vec::new(),
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+        let spaces = normalize_spaces(&snapshot);
+
+        let avatar = spaces[0].avatar.as_ref().expect("space avatar");
+        assert_eq!(avatar.mxc_uri, "mxc://example.test/space-avatar");
+        assert_eq!(avatar.thumbnail, AvatarThumbnailState::NotRequested);
+    }
+
+    #[test]
+    fn normalize_rooms_preserves_dm_and_unread() {
+        let snapshot = MatrixRoomListSnapshot {
+            spaces: vec![],
+            rooms: vec![MatrixRoomListRoom {
+                room_id: "!dm:example.test".to_owned(),
+                display_name: "Alice".to_owned(),
+                avatar_mxc_uri: None,
+                is_dm: true,
+                dm_user_ids: vec!["@alice:example.test".to_owned()],
+                tags: MatrixRoomTags::default(),
+                unread_count: 3,
+                notification_count: 3,
+                highlight_count: 1,
+                marked_unread: false,
+                recency_stamp: None,
+                conversation_activity: None,
+                latest_event: None,
+                parent_space_ids: vec![],
+                is_encrypted: false,
+                joined_members: 0,
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+        let rooms = normalize_rooms(&snapshot);
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].room_id, "!dm:example.test");
+        assert!(rooms[0].is_dm);
+        assert_eq!(rooms[0].unread_count, 3);
+        assert_eq!(rooms[0].notification_count, 3);
+        assert_eq!(rooms[0].highlight_count, 1);
+    }
+
+    #[test]
+    fn normalize_rooms_non_dm() {
+        let snapshot = MatrixRoomListSnapshot {
+            spaces: vec![],
+            rooms: vec![MatrixRoomListRoom {
+                room_id: "!room:example.test".to_owned(),
+                display_name: "General".to_owned(),
+                avatar_mxc_uri: None,
+                is_dm: false,
+                dm_user_ids: Vec::new(),
+                tags: MatrixRoomTags::default(),
+                unread_count: 0,
+                notification_count: 0,
+                highlight_count: 0,
+                marked_unread: false,
+                recency_stamp: None,
+                conversation_activity: None,
+                latest_event: None,
+                parent_space_ids: vec!["!space:example.test".to_owned()],
+                is_encrypted: false,
+                joined_members: 0,
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+        let rooms = normalize_rooms(&snapshot);
+        assert_eq!(rooms.len(), 1);
+        assert!(!rooms[0].is_dm);
+        assert_eq!(rooms[0].parent_space_ids, vec!["!space:example.test"]);
+        assert_eq!(rooms[0].notification_count, 0);
+        assert_eq!(rooms[0].highlight_count, 0);
+    }
+
+    #[test]
+    fn normalize_rooms_uses_direct_space_child_state_as_parent() {
+        let snapshot = MatrixRoomListSnapshot {
+            spaces: vec![MatrixRoomListSpace {
+                space_id: "!space:example.test".to_owned(),
+                display_name: "Space".to_owned(),
+                avatar_mxc_uri: None,
+                child_room_ids: vec!["!room:example.test".to_owned()],
+                member_user_ids: Vec::new(),
+            }],
+            rooms: vec![MatrixRoomListRoom {
+                room_id: "!room:example.test".to_owned(),
+                display_name: "General".to_owned(),
+                avatar_mxc_uri: None,
+                is_dm: false,
+                dm_user_ids: Vec::new(),
+                tags: MatrixRoomTags::default(),
+                unread_count: 0,
+                notification_count: 0,
+                highlight_count: 0,
+                marked_unread: false,
+                recency_stamp: None,
+                conversation_activity: None,
+                latest_event: None,
+                parent_space_ids: Vec::new(),
+                is_encrypted: false,
+                joined_members: 0,
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+
+        let rooms = normalize_rooms(&snapshot);
+
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms[0].parent_space_ids, vec!["!space:example.test"]);
+    }
+
+    #[test]
+    fn normalize_rooms_assigns_dm_space_ids_by_counterpart_membership() {
+        let snapshot = MatrixRoomListSnapshot {
+            spaces: vec![MatrixRoomListSpace {
+                space_id: "space-a".to_owned(),
+                display_name: "Space A".to_owned(),
+                avatar_mxc_uri: None,
+                child_room_ids: Vec::new(),
+                member_user_ids: vec!["@alice".to_owned()],
+            }],
+            rooms: vec![
+                MatrixRoomListRoom {
+                    room_id: "dm-alice".to_owned(),
+                    display_name: "Alice".to_owned(),
+                    avatar_mxc_uri: None,
+                    is_dm: true,
+                    dm_user_ids: vec!["@alice".to_owned()],
+                    tags: MatrixRoomTags::default(),
+                    unread_count: 0,
+                    notification_count: 0,
+                    highlight_count: 0,
+                    marked_unread: false,
+                    recency_stamp: None,
+                    conversation_activity: None,
+                    latest_event: None,
+                    parent_space_ids: Vec::new(),
+                    is_encrypted: false,
+                    joined_members: 0,
+                },
+                MatrixRoomListRoom {
+                    room_id: "dm-bob".to_owned(),
+                    display_name: "Bob".to_owned(),
+                    avatar_mxc_uri: None,
+                    is_dm: true,
+                    dm_user_ids: vec!["@bob".to_owned()],
+                    tags: MatrixRoomTags::default(),
+                    unread_count: 0,
+                    notification_count: 0,
+                    highlight_count: 0,
+                    marked_unread: false,
+                    recency_stamp: None,
+                    conversation_activity: None,
+                    latest_event: None,
+                    parent_space_ids: Vec::new(),
+                    is_encrypted: false,
+                    joined_members: 0,
+                },
+            ],
+            ..MatrixRoomListSnapshot::default()
+        };
+        let rooms = normalize_rooms(&snapshot);
+        let alice_room = rooms.iter().find(|r| r.room_id == "dm-alice").unwrap();
+        let bob_room = rooms.iter().find(|r| r.room_id == "dm-bob").unwrap();
+        assert_eq!(alice_room.dm_space_ids, vec!["space-a"]);
+        assert_eq!(bob_room.dm_space_ids, Vec::<String>::new());
+    }
+
+    #[test]
+    fn normalize_rooms_preserves_avatar_mxc_as_unrequested_thumbnail() {
+        let snapshot = MatrixRoomListSnapshot {
+            rooms: vec![MatrixRoomListRoom {
+                room_id: "!room:example.test".to_owned(),
+                display_name: "General".to_owned(),
+                avatar_mxc_uri: Some("mxc://example.test/room-avatar".to_owned()),
+                is_dm: false,
+                dm_user_ids: Vec::new(),
+                tags: MatrixRoomTags::default(),
+                unread_count: 0,
+                notification_count: 0,
+                highlight_count: 0,
+                marked_unread: false,
+                recency_stamp: None,
+                conversation_activity: None,
+                latest_event: None,
+                parent_space_ids: vec![],
+                is_encrypted: false,
+                joined_members: 0,
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+        let rooms = normalize_rooms(&snapshot);
+
+        let avatar = rooms[0].avatar.as_ref().expect("room avatar");
+        assert_eq!(avatar.mxc_uri, "mxc://example.test/room-avatar");
+        assert_eq!(avatar.thumbnail, AvatarThumbnailState::NotRequested);
+    }
+
+    #[test]
+    fn normalize_invites_preserves_preview_fields() {
+        let snapshot = MatrixRoomListSnapshot {
+            invites: vec![MatrixInvitePreview {
+                room_id: "!invite:example.test".to_owned(),
+                display_name: "Project invite".to_owned(),
+                avatar_mxc_uri: None,
+                topic: Some("Project topic".to_owned()),
+                inviter_display_name: Some("Inviter".to_owned()),
+                inviter_user_id: Some("@inviter:example.test".to_owned()),
+                is_dm: true,
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+        let invites = normalize_invites(&snapshot);
+
+        assert_eq!(invites.len(), 1);
+        assert_eq!(invites[0].room_id, "!invite:example.test");
+        assert_eq!(invites[0].display_name, "Project invite");
+        assert_eq!(invites[0].topic.as_deref(), Some("Project topic"));
+        assert_eq!(invites[0].inviter_display_name.as_deref(), Some("Inviter"));
+        assert!(invites[0].is_dm);
+    }
+
+    #[test]
+    fn normalize_invites_preserves_avatar_mxc_as_unrequested_thumbnail() {
+        let snapshot = MatrixRoomListSnapshot {
+            invites: vec![MatrixInvitePreview {
+                room_id: "!invite:example.test".to_owned(),
+                display_name: "Invite".to_owned(),
+                avatar_mxc_uri: Some("mxc://example.test/invite-avatar".to_owned()),
+                topic: None,
+                inviter_display_name: None,
+                inviter_user_id: None,
+                is_dm: false,
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+        let invites = normalize_invites(&snapshot);
+
+        let avatar = invites[0].avatar.as_ref().expect("invite avatar");
+        assert_eq!(avatar.mxc_uri, "mxc://example.test/invite-avatar");
+        assert_eq!(avatar.thumbnail, AvatarThumbnailState::NotRequested);
+    }
+
+    #[test]
+    fn normalize_user_profiles_preserves_member_profile_fields() {
+        let snapshot = MatrixRoomListSnapshot {
+            user_profiles: vec![koushi_sdk::MatrixUserProfile {
+                user_id: "@alice:example.test".to_owned(),
+                display_name: Some("Alice".to_owned()),
+                avatar_mxc_uri: Some("mxc://example.test/alice".to_owned()),
+            }],
+            ..MatrixRoomListSnapshot::default()
+        };
+
+        let profiles = normalize_user_profiles(&snapshot);
+
+        assert_eq!(
+            profiles,
+            vec![UserProfile {
+                user_id: "@alice:example.test".to_owned(),
+                display_name: Some("Alice".to_owned()),
+                display_label: "Alice".to_owned(),
+                original_display_label: "Alice".to_owned(),
+                mention_search_terms: vec!["Alice".to_owned(), "@alice:example.test".to_owned(),],
+                avatar: Some(AvatarImage {
+                    mxc_uri: "mxc://example.test/alice".to_owned(),
+                    thumbnail: AvatarThumbnailState::NotRequested,
+                }),
+            }]
+        );
+    }
+
+    #[test]
+    fn normalize_rooms_carries_sdk_room_tags() {
+        let snapshot = MatrixRoomListSnapshot {
+            spaces: vec![],
+            rooms: vec![MatrixRoomListRoom {
+                room_id: "!room1:example.test".to_owned(),
+                display_name: "Room 1".to_owned(),
+                avatar_mxc_uri: None,
+                is_dm: false,
+                dm_user_ids: Vec::new(),
+                tags: MatrixRoomTags {
+                    favourite: Some(MatrixRoomTagInfo {
+                        order: Some("0.25".to_owned()),
+                    }),
+                    low_priority: None,
+                },
+                unread_count: 0,
+                notification_count: 0,
+                highlight_count: 0,
+                marked_unread: false,
+                recency_stamp: None,
+                conversation_activity: None,
+                latest_event: None,
+                parent_space_ids: vec![],
+                is_encrypted: false,
+                joined_members: 0,
+            }],
+            invites: vec![],
+            user_profiles: vec![],
+        };
+
+        let rooms = normalize_rooms(&snapshot);
+
+        assert_eq!(
+            rooms[0].tags.favourite,
+            Some(RoomTagInfo {
+                order: Some("0.25".to_owned())
+            })
+        );
+        assert_eq!(rooms[0].tags.low_priority, None);
+    }
+
+    #[test]
+    fn normalize_empty_snapshot() {
+        let snapshot = MatrixRoomListSnapshot::default();
+        assert!(normalize_spaces(&snapshot).is_empty());
+        assert!(normalize_rooms(&snapshot).is_empty());
     }
 }

@@ -1,190 +1,50 @@
-//! RoomActor: room list normalization and room operations.
-//!
-//! ## Ownership
-//! `RoomActor` is owned by `AccountActor`. Its task handle lives inside
-//! `AccountActor`; colocated as a child task per the spec
-//! ("Actor Deployment And Supervision — boundaries define ownership, not one
-//! task per actor").
-//!
-//! ## Room list normalization (canon: overview.md RoomActor bullet)
-//! Constructing ad-hoc `RoomListService` instances is PROHIBITED: they are
-//! not driven by the sync loop, race the running `SyncService`, and return
-//! entries without the live service's `required_state` (e.g. `m.room.create`
-//! for space classification when a homeserver omits the required room state).
-//!
-//! `RoomMessage::SyncStarted` carries the ONE live `RoomListService` owned by
-//! the running `SyncService` (`sync_service.room_list_service()`). The actor
-//! subscribes to its `all_rooms()` entries stream
-//! (`entries_with_dynamic_adapters` with the non-left filter) and KEEPS
-//! CONSUMING it, re-normalizing rooms and invites on each diff batch (Async
-//! rule 1: actors relay the SDK's observable streams).
-//!
-//! Snapshots are projected as generation-fenced room-list bootstrap actions +
-//! `RoomEvent::RoomListUpdated`.
-//!
-//! Operation-triggered refreshes after the actor's own mutations mean
-//! "re-normalize from the live service's current entries" (a refresh request
-//! to the observation loop), never "new service". Before sync starts, cached
-//! rows remain reducer-owned; RoomActor does not synthesize a live snapshot
-//! from the base client.
-//!
-//! ## Room operations
-//! `CreateRoom`, `CreateSpace`, `SetSpaceChild`, `InviteUser`, `JoinRoom`,
-//! `LeaveRoom`, and `ForgetRoom` call `koushi-sdk` primitives and emit
-//! domain events with `request_id`. Errors are classified into
-//! `RoomFailureKind` (never raw SDK text).
-//!
-//! ## SelectSpace / SelectRoom
-//! Pure navigation — project `AppAction::SelectSpace` / `AppAction::SelectRoom`
-//! through the action channel. Core applies the navigation state update here
-//! and does not consume reducer effects in this actor.
-//!
-//! ## Security
-//! Raw SDK error text never appears in events or AppState. All errors are
-//! classified into `RoomFailureKind`.
-
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    future::Future,
-    sync::{
-        Arc, RwLock,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
+use super::encryption_debug::{EncryptionDebugCompletion, EncryptionDebugFence};
+#[cfg(feature = "test-hooks")]
+use super::encryption_debug::{EncryptionDebugTestControl, EncryptionDebugTestControlSlot};
+use super::list_observer::{
+    RoomListObservation, RoomListObservationCommand, room_stop_matches_generation,
 };
-
+use super::mentions::MentionDemand;
+use super::operations::SpaceChildLinkKey;
+#[cfg(feature = "test-hooks")]
+use super::operations::{RoomOperationTestControl, RoomOperationTestControlSlot};
+use super::space_members::{SpaceMemberDemand, SpaceMemberRefreshFence};
+use crate::account_work::AccountWorkScheduler;
+use crate::command::RoomCommand;
+use crate::event::CoreEvent;
+use crate::executor;
+use crate::failure::CoreFailure;
+use crate::ids::RequestId;
+#[cfg(test)]
+use crate::ids::RuntimeConnectionId;
+use crate::timeline::{
+    RoomMembershipTransition, TimelineSubscriptionResidencyHandle, VisibleRoomObservation,
+};
+use koushi_sdk::{
+    MatrixClientSession, MatrixJoinedMemberSnapshot, MatrixRoomOperationError,
+    MatrixSpaceMembersProjection,
+};
+use koushi_state::{AppAction, MentionSurface, RoomListFailureKind, RoomListSource};
 #[cfg(feature = "test-hooks")]
 use std::sync::{Mutex, atomic::AtomicUsize};
-
-use futures_util::FutureExt;
-use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_sdk::{
-    MatrixClientSession, MatrixCreateRoomOptions, MatrixCreateRoomParentSpace,
-    MatrixCreateRoomVisibility, MatrixJoinedMemberSnapshot, MatrixPreviewJoinability,
-    MatrixPreviewMembership, MatrixPublicRoomDirectoryQuery, MatrixPublicRoomDirectoryRoom,
-    MatrixRoomHistoryVisibility, MatrixRoomJoinRule, MatrixRoomListRoom, MatrixRoomListSnapshot,
-    MatrixRoomListSpace, MatrixRoomMemberRole, MatrixRoomMemberSummary, MatrixRoomModerationAction,
-    MatrixRoomOperationError, MatrixRoomPermissionFacts, MatrixRoomPreview,
-    MatrixRoomSettingChange, MatrixRoomSettingsSnapshot, MatrixRoomTagKind, MatrixRoomTags,
-    MatrixSpaceMemberEntry, MatrixSpaceMembersProjection, MatrixUserTrustState,
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::{Arc, RwLock},
+    time::Duration,
 };
-use koushi_state::{
-    AppAction, AvatarImage, AvatarThumbnailState, BasicOperationRequest,
-    DirectoryPreviewJoinability, DirectoryPreviewMembership, DirectoryQuery, DirectoryRoomPreview,
-    DirectoryRoomSummary, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
-    INVITE_ALREADY_IN_SPACE_MESSAGE, InviteDestination, InviteDestinationResult,
-    InviteDestinationResultKind, InvitePreview, InviteScopeSelection,
-    MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
-    OperationFailureKind, PinnedEvent, PinnedEventState, RoomHistoryVisibility, RoomJoinRule,
-    RoomListFailureKind, RoomListSource, RoomMemberRole, RoomMemberSummary, RoomMentionPermission,
-    RoomModerationAction, RoomNotificationMode, RoomPermissionFacts, RoomSettingChange,
-    RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SpaceMemberEntry,
-    SpaceMemberInviteOutcome, SpaceMemberMembership, SpaceMembersProjection, SpaceSummary,
-    UserProfile, UserTrustState,
-};
-#[cfg(test)]
-use koushi_state::{ProfileResolutionInput, ProfileResolutionSource, resolve_people_label};
-use matrix_sdk::ruma::events::direct::DirectEvent;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
-use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
-use crate::direct_message_classification::{DirectAccountDataSource, DirectClassificationState};
-use crate::event::{
-    CoreEvent, EncryptionDebugOperationOutcome as CoreEncryptionDebugOutcome, ReportKind,
-    RoomEvent, RoomKeyReshareOutcome,
-};
-use crate::executor;
-use crate::failure::{CoreFailure, RoomFailureKind};
-use crate::ids::{RequestId, RuntimeConnectionId};
-use crate::mention_candidates::{MentionMemberInput, project_candidates};
-use crate::timeline::{
-    RoomMembershipTransition, RoomMembershipTransitionKind, RoomRemovalCause,
-    TimelineSubscriptionResidencyHandle, TimelineSubscriptionResidencyPermit,
-    VisibleRoomObservation,
-};
-use crate::unread_trace;
-
-/// Fixed, content-free messages recorded in `AppState.errors` when a basic
-/// operation fails. Raw SDK errors are classified into `RoomFailureKind` for the
-/// transport `OperationFailed` event and never placed in product state.
-const CREATE_ROOM_FAILED_MESSAGE: &str = "Room creation failed";
-const CREATE_SPACE_FAILED_MESSAGE: &str = "Space creation failed";
-const LINK_SPACE_CHILD_FAILED_MESSAGE: &str = "Linking the room to the space failed";
-
-type SpaceChildLinkKey = (String, String);
-
-fn room_key_reshare_outcome_from_sdk(
-    outcome: koushi_sdk::MatrixRoomKeyReshareOutcome,
-) -> RoomKeyReshareOutcome {
-    match outcome {
-        koushi_sdk::MatrixRoomKeyReshareOutcome::Sent {
-            request_count,
-            recipient_count,
-            failed_recipient_count,
-        } => RoomKeyReshareOutcome::Sent {
-            request_count,
-            recipient_count,
-            failed_recipient_count,
-        },
-        koushi_sdk::MatrixRoomKeyReshareOutcome::NoSession => RoomKeyReshareOutcome::NoSession,
-        koushi_sdk::MatrixRoomKeyReshareOutcome::NoRecipients => {
-            RoomKeyReshareOutcome::NoRecipients
-        }
-        koushi_sdk::MatrixRoomKeyReshareOutcome::StaleSession => {
-            RoomKeyReshareOutcome::StaleSession
-        }
-    }
-}
-
-fn record_manual_room_key_reshare(outcome: &koushi_sdk::MatrixRoomKeyReshareOutcome) {
-    let (token, request_count, recipient_count, failed_recipient_count) = match outcome {
-        koushi_sdk::MatrixRoomKeyReshareOutcome::Sent {
-            request_count,
-            recipient_count,
-            failed_recipient_count,
-        } => (
-            "sent",
-            *request_count,
-            *recipient_count,
-            *failed_recipient_count,
-        ),
-        koushi_sdk::MatrixRoomKeyReshareOutcome::NoSession => ("no_session", 0, 0, 0),
-        koushi_sdk::MatrixRoomKeyReshareOutcome::NoRecipients => ("no_recipients", 0, 0, 0),
-        koushi_sdk::MatrixRoomKeyReshareOutcome::StaleSession => ("cancelled", 0, 0, 0),
-    };
-    record(
-        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
-            .field(DiagnosticField::token("trigger", "manual"))
-            .field(DiagnosticField::token("outcome", token))
-            .field(DiagnosticField::count(
-                "request_count",
-                request_count.try_into().unwrap_or(u64::MAX),
-            ))
-            .field(DiagnosticField::count(
-                "recipient_count",
-                recipient_count.try_into().unwrap_or(u64::MAX),
-            ))
-            .field(DiagnosticField::count(
-                "failed_recipient_count",
-                failed_recipient_count.try_into().unwrap_or(u64::MAX),
-            )),
-    );
-}
-
-const SPACE_MEMBER_REFRESH_CONNECTION_ID: RuntimeConnectionId = RuntimeConnectionId(0);
 const ROOM_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
-// Long enough to cover the SDK encryption-debug operations' 10s monotonic
-// deadline plus inline settlement/reset, so Shutdown never aborts the actor
-// mid-join of an encryption-debug fence (issue #538).
-const ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(30);
-const ROOM_OBSERVATION_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub(super) const ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub(super) const ROOM_OBSERVATION_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MissingSpaceChildLink {
-    space_id: String,
-    child_room_id: String,
-    via_server: String,
+    pub(super) space_id: String,
+    pub(super) child_room_id: String,
+    pub(super) via_server: String,
 }
 
 /// Messages sent to the RoomActor from AccountActor / SyncActor.
@@ -309,90 +169,10 @@ pub enum RoomMessage {
     Shutdown,
 }
 
-/// Closed membership-operation kinds used by the test-only result seam.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RoomOperationKind {
-    LeaveRoom,
-    DeclineInvite,
-    AcceptInvite,
-    JoinRoom,
-    JoinDirectoryRoom,
-}
-
-#[cfg(feature = "test-hooks")]
-pub(crate) struct RoomOperationTestControl {
-    pub(crate) kind: RoomOperationKind,
-    pub(crate) reached: oneshot::Sender<()>,
-    pub(crate) completion: oneshot::Receiver<Result<String, MatrixRoomOperationError>>,
-}
-
-#[cfg(feature = "test-hooks")]
-pub(crate) struct EncryptionDebugTestControl {
-    pub(crate) kind: EncryptionDebugOperationKind,
-    pub(crate) reached: oneshot::Sender<()>,
-    pub(crate) completion: oneshot::Receiver<CoreEncryptionDebugOutcome>,
-}
-
-#[cfg(feature = "test-hooks")]
-type EncryptionDebugTestControlSlot = Arc<Mutex<Option<EncryptionDebugTestControl>>>;
-
-#[cfg(feature = "test-hooks")]
-fn take_encryption_debug_test_control(
-    control: &mut Option<EncryptionDebugTestControl>,
-    kind: EncryptionDebugOperationKind,
-) -> Option<EncryptionDebugTestControl> {
-    if control.as_ref().is_some_and(|control| control.kind == kind) {
-        control.take()
-    } else {
-        None
-    }
-}
-
-#[cfg(feature = "test-hooks")]
-fn take_matching_room_operation_test_control(
-    control: &mut Option<RoomOperationTestControl>,
-    kind: RoomOperationKind,
-) -> Option<RoomOperationTestControl> {
-    if control.as_ref().is_some_and(|control| control.kind == kind) {
-        control.take()
-    } else {
-        None
-    }
-}
-
-#[cfg(feature = "test-hooks")]
-type RoomOperationTestControlSlot = Arc<Mutex<Option<RoomOperationTestControl>>>;
-
-#[cfg(all(test, feature = "test-hooks"))]
-#[test]
-fn room_operation_test_control_matches_and_consumes_once() {
-    let (reached, _reached_rx) = oneshot::channel();
-    let (_completion, completion_rx) = oneshot::channel();
-    let mut control = Some(RoomOperationTestControl {
-        kind: RoomOperationKind::LeaveRoom,
-        reached,
-        completion: completion_rx,
-    });
-
-    assert!(
-        take_matching_room_operation_test_control(&mut control, RoomOperationKind::JoinRoom,)
-            .is_none()
-    );
-    assert!(control.is_some());
-    assert!(
-        take_matching_room_operation_test_control(&mut control, RoomOperationKind::LeaveRoom,)
-            .is_some()
-    );
-    assert!(
-        take_matching_room_operation_test_control(&mut control, RoomOperationKind::LeaveRoom,)
-            .is_none()
-    );
-}
-
 #[derive(Clone)]
-struct TimelineResidencyBinding {
-    session: Arc<MatrixClientSession>,
-    handle: TimelineSubscriptionResidencyHandle,
+pub(super) struct TimelineResidencyBinding {
+    pub(super) session: Arc<MatrixClientSession>,
+    pub(super) handle: TimelineSubscriptionResidencyHandle,
 }
 
 /// Handle to the RoomActor background task (owned by AccountActor).
@@ -596,126 +376,70 @@ impl RoomActorHandle {
     }
 }
 
-/// Handle on the spawned room-list observation loop: oneshot stop signal plus
-/// the task handle so teardown can await completion. Operation-triggered
-/// refreshes are always sent to the observation loop so command handling never
-    session: Option<Arc<MatrixClientSession>>,
-    timeline_residency: watch::Receiver<Option<TimelineResidencyBinding>>,
+pub enum RoomListReconcileAck {
+    Projected {
+        backend_generation: u64,
+        room_generation: u64,
+        response_sequence: u64,
+    },
+    Reconciled {
+        backend_generation: u64,
+        room_generation: u64,
+        response_sequence: u64,
+    },
+    Superseded {
+        backend_generation: u64,
+        room_generation: u64,
+        response_sequence: u64,
+    },
+}
+
+pub struct RoomActor {
+    pub(super) session: Option<Arc<MatrixClientSession>>,
+    pub(super) timeline_residency: watch::Receiver<Option<TimelineResidencyBinding>>,
     session_slot: watch::Sender<Option<Arc<MatrixClientSession>>>,
     #[cfg(feature = "test-hooks")]
-    room_operation_test_control: RoomOperationTestControlSlot,
+    pub(super) room_operation_test_control: RoomOperationTestControlSlot,
     #[cfg(feature = "test-hooks")]
-    room_operation_test_reached_count: Arc<AtomicUsize>,
+    pub(super) room_operation_test_reached_count: Arc<AtomicUsize>,
     #[cfg(feature = "test-hooks")]
-    encryption_debug_test_control: EncryptionDebugTestControlSlot,
-    observation: Option<RoomListObservation>,
+    pub(super) encryption_debug_test_control: EncryptionDebugTestControlSlot,
+    pub(super) observation: Option<RoomListObservation>,
     room_list_generation: u64,
     room_list_source: Option<RoomListSource>,
     room_list_backend_generation: Option<u64>,
-    known_room_ids: Arc<RwLock<BTreeSet<String>>>,
-    attempted_space_child_repairs: Arc<RwLock<BTreeSet<SpaceChildLinkKey>>>,
-    mention_demands: HashMap<(String, MentionSurface), MentionDemand>,
-    mention_member_snapshots: HashMap<String, MatrixJoinedMemberSnapshot>,
-    mention_refresh_generations: HashMap<String, u64>,
-    mention_refresh_sequence: u64,
-    mention_session_generation: u64,
-    mention_local_aliases: BTreeMap<String, String>,
-    space_member_demand: Option<SpaceMemberDemand>,
-    space_member_demand_generation: u64,
-    space_member_refresh_sequence: u64,
-    space_member_session_generation: u64,
-    space_member_refresh_in_flight: Option<SpaceMemberRefreshFence>,
-    space_member_refresh_pending: bool,
+    pub(super) known_room_ids: Arc<RwLock<BTreeSet<String>>>,
+    pub(super) attempted_space_child_repairs: Arc<RwLock<BTreeSet<SpaceChildLinkKey>>>,
+    pub(super) mention_demands: HashMap<(String, MentionSurface), MentionDemand>,
+    pub(super) mention_member_snapshots: HashMap<String, MatrixJoinedMemberSnapshot>,
+    pub(super) mention_refresh_generations: HashMap<String, u64>,
+    pub(super) mention_refresh_sequence: u64,
+    pub(super) mention_session_generation: u64,
+    pub(super) mention_local_aliases: BTreeMap<String, String>,
+    pub(super) space_member_demand: Option<SpaceMemberDemand>,
+    pub(super) space_member_demand_generation: u64,
+    pub(super) space_member_refresh_sequence: u64,
+    pub(super) space_member_session_generation: u64,
+    pub(super) space_member_refresh_in_flight: Option<SpaceMemberRefreshFence>,
+    pub(super) space_member_refresh_pending: bool,
     /// In-flight temporary dangerous encryption-debug operations (issue
     /// #538): at most one per room, keyed by room id and fenced by request
     /// id. A start is rejected only when that same room already has an
     /// in-flight operation.
-    encryption_debug_fences: std::collections::HashMap<String, EncryptionDebugFence>,
+    pub(super) encryption_debug_fences: std::collections::HashMap<String, EncryptionDebugFence>,
     /// Reliable nonblocking completion ingress for the encryption-debug
     /// operation task (issue #538). Unbounded so the join during teardown
     /// cannot deadlock on a full mailbox, and lossless so the reducer never
     /// stays pending.
     encryption_debug_completion_rx: mpsc::UnboundedReceiver<EncryptionDebugCompletion>,
-    encryption_debug_completion_tx: mpsc::UnboundedSender<EncryptionDebugCompletion>,
-    action_tx: mpsc::Sender<Vec<AppAction>>,
-    event_tx: broadcast::Sender<CoreEvent>,
-    sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
-    self_tx: mpsc::Sender<RoomMessage>,
+    pub(super) encryption_debug_completion_tx: mpsc::UnboundedSender<EncryptionDebugCompletion>,
+    pub(super) action_tx: mpsc::Sender<Vec<AppAction>>,
+    pub(super) event_tx: broadcast::Sender<CoreEvent>,
+    pub(super) sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+    pub(super) self_tx: mpsc::Sender<RoomMessage>,
     command_rx: mpsc::Receiver<RoomMessage>,
-    account_work: AccountWorkScheduler,
+    pub(super) account_work: AccountWorkScheduler,
 }
-
-#[derive(Clone)]
-struct MentionDemand {
-    request_id: RequestId,
-    generation: u64,
-    query: String,
-}
-
-#[derive(Clone)]
-struct SpaceMemberDemand {
-    space_id: String,
-    generation: u64,
-    child_room_ids: BTreeSet<String>,
-    demand_generation: u64,
-}
-
-/// Fence for the in-flight temporary dangerous encryption-debug operation
-/// (issue #538). Holds the cancellation sender (so logout/leave can stop
-/// the SDK executor's wire effects), the actor session snapshot (post-check
-/// fails closed if the session changed), and the spawned task handle for
-/// bounded join on teardown.
-struct EncryptionDebugFence {
-    request_id: RequestId,
-    room_id: String,
-    kind: EncryptionDebugOperationKind,
-    session: Arc<koushi_sdk::MatrixClientSession>,
-    cancel: broadcast::Sender<()>,
-    /// Actor-owned lifecycle flag: set on logout/leave so the spawned task's
-    /// validator fails closed before further wire effects.
-    cancelled: Arc<std::sync::atomic::AtomicBool>,
-    join: executor::JoinHandle<()>,
-}
-
-/// Reliable completion result of the encryption-debug operation task.
-struct EncryptionDebugCompletion {
-    room_id: String,
-    request_id: RequestId,
-    kind: EncryptionDebugOperationKind,
-    outcome: CoreEncryptionDebugOutcome,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-struct SpaceMemberRefreshFence {
-    request_id: RequestId,
-    session_generation: u64,
-    demand_generation: u64,
-    refresh_generation: u64,
-}
-
-struct AdmittedRoomOperation {
-    session: Arc<MatrixClientSession>,
-    residency: TimelineSubscriptionResidencyHandle,
-    permit: TimelineSubscriptionResidencyPermit,
-}
-
-impl AdmittedRoomOperation {
-    async fn room_left(&self, room_id: &str, cause: RoomRemovalCause) -> bool {
-        let Ok(room_id) = room_id.parse() else {
-            return false;
-        };
-        self.residency.room_left(&self.permit, room_id, cause).await
-    }
-
-    async fn room_rejoined(&self, room_id: &str) -> bool {
-        let Ok(room_id) = room_id.parse() else {
-            return false;
-        };
-        self.residency.room_rejoined(&self.permit, room_id).await
-    }
-}
-
-impl RoomActor {
 
 impl RoomActor {
     pub fn spawn(
@@ -730,9 +454,7 @@ impl RoomActor {
             AccountWorkScheduler::default(),
         )
     }
-}
 
-impl RoomActor {
     pub(crate) fn spawn_with_account_work(
         action_tx: mpsc::Sender<Vec<AppAction>>,
         event_tx: broadcast::Sender<CoreEvent>,
@@ -802,9 +524,7 @@ impl RoomActor {
             task: Some(task),
         }
     }
-}
 
-impl RoomActor {
     async fn run(mut self) {
         loop {
             let msg = tokio::select! {
@@ -1104,240 +824,9 @@ impl RoomActor {
             }
         }
     }
-}
 
-impl RoomActor {
-    async fn handle_encryption_debug_completion(&mut self, completion: EncryptionDebugCompletion) {
-        let EncryptionDebugCompletion {
-            room_id,
-            request_id,
-            kind,
-            outcome,
-        } = completion;
-        let Some(fence) = self.encryption_debug_fences.get(&room_id) else {
-            return;
-        };
-        if fence.request_id != request_id || fence.room_id != room_id || fence.kind != kind {
-            return;
-        }
-        let fence = self
-            .encryption_debug_fences
-            .remove(&room_id)
-            .expect("matched fence");
-        let joined = match koushi_sdk::room_is_joined(&fence.session, &room_id).await {
-            Ok(joined) => joined,
-            Err(_) => false,
-        };
-        let outcome = if joined
-            && self
-                .session
-                .as_ref()
-                .is_some_and(|current| std::sync::Arc::ptr_eq(current, &fence.session))
-        {
-            outcome
-        } else {
-            // The session changed or the user left the room while the
-            // operation ran; fail closed rather than apply the result.
-            CoreEncryptionDebugOutcome::CancelledStale
-        };
-        self.emit_encryption_debug_outcome(request_id, room_id, kind, outcome)
-            .await;
-    }
-}
-
-impl RoomActor {
     fn placeholder_never_called() {}
-}
 
-impl RoomActor {
-    async fn handle_test_visible_rooms_observed(
-        &mut self,
-        core_generation: u64,
-        reconciliation_is_complete: bool,
-        room_ids: Vec<VisibleRoomObservation>,
-        forwarded: oneshot::Sender<bool>,
-    ) {
-        let entries_count = room_ids.len();
-        let distinct_identity_count = room_ids
-            .iter()
-            .map(|observation| observation.room_id.as_str())
-            .collect::<BTreeSet<_>>()
-            .len();
-        let current_session = self.session.as_ref();
-        let timeline_residency = self
-            .timeline_residency
-            .borrow()
-            .as_ref()
-            .filter(|binding| {
-                current_session.is_some_and(|session| Arc::ptr_eq(&binding.session, session))
-            })
-            .map(|binding| binding.handle.clone());
-        let forwarded_result = forward_visible_rooms_if_authoritative(
-            timeline_residency.as_ref(),
-            core_generation,
-            reconciliation_is_complete,
-            entries_count,
-            distinct_identity_count,
-            room_ids,
-        )
-        .await;
-        let _ = forwarded.send(forwarded_result);
-    }
-}
-
-impl RoomActor {
-    async fn handle_test_membership_observed(
-        &mut self,
-        core_generation: u64,
-        transitions: Vec<RoomMembershipTransition>,
-        forwarded: oneshot::Sender<bool>,
-    ) {
-        let current_session = self.session.as_ref();
-        let timeline_residency = self
-            .timeline_residency
-            .borrow()
-            .as_ref()
-            .filter(|binding| {
-                current_session.is_some_and(|session| Arc::ptr_eq(&binding.session, session))
-            })
-            .map(|binding| binding.handle.clone());
-        let forwarded_result =
-            forward_membership_batches(timeline_residency.as_ref(), core_generation, [transitions])
-                .await;
-        let _ = forwarded.send(forwarded_result);
-    }
-}
-
-impl RoomActor {
-    fn start_live_observation(
-        &mut self,
-        session: Arc<MatrixClientSession>,
-        service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
-        generation: u64,
-        source: RoomListSource,
-        timeline_residency: Option<TimelineSubscriptionResidencyHandle>,
-    ) {
-        let (stop_tx, stop_rx) = oneshot::channel::<()>();
-        let (command_tx, command_rx) = mpsc::channel::<RoomListObservationCommand>(8);
-        let authoritative = Arc::new(AtomicBool::new(false));
-        let task = executor::spawn(run_live_room_list_observation(
-            session,
-            service,
-            self.known_room_ids.clone(),
-            self.self_tx.clone(),
-            self.action_tx.clone(),
-            self.event_tx.clone(),
-            command_rx,
-            stop_rx,
-            generation,
-            source,
-            authoritative.clone(),
-            self.sliding_sync_diagnostics.clone(),
-            timeline_residency,
-        ));
-        self.observation = Some(RoomListObservation {
-            stop_tx,
-            task,
-            command_tx,
-            generation,
-            source,
-        });
-    }
-}
-
-impl RoomActor {
-    async fn handle_missing_space_child_links(&mut self, links: Vec<MissingSpaceChildLink>) {
-        let Some(session) = self.session.clone() else {
-            return;
-        };
-
-        for link in links {
-            let key = (link.space_id.clone(), link.child_room_id.clone());
-            let already_repaired = self
-                .attempted_space_child_repairs
-                .read()
-                .map(|attempts| attempts.contains(&key))
-                .unwrap_or(true);
-            if already_repaired {
-                continue;
-            }
-
-            match koushi_sdk::set_space_child(
-                &session,
-                &link.space_id,
-                &link.child_room_id,
-                &link.via_server,
-            )
-            .await
-            {
-                Ok(()) => {
-                    if let Ok(mut attempts) = self.attempted_space_child_repairs.write() {
-                        attempts.insert(key);
-                    }
-                    self.refresh_room_list();
-                }
-                Err(error) => {
-                    let _kind = classify_room_error(&error);
-                }
-            }
-        }
-    }
-}
-
-impl RoomActor {
-    async fn cancel_encryption_debug_for_rooms(&mut self, room_ids: &BTreeSet<String>) {
-        let fences = room_ids
-            .iter()
-            .filter_map(|room_id| {
-                self.encryption_debug_fences
-                    .remove(room_id)
-                    .map(|fence| (room_id.clone(), fence))
-            })
-            .collect::<Vec<_>>();
-        for (room_id, mut fence) in fences {
-            fence
-                .cancelled
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            let _ = fence.cancel.send(());
-            if tokio::time::timeout(ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut fence.join)
-                .await
-                .is_err()
-            {
-                fence.join.abort();
-                let _ = fence.join.await;
-            }
-            self.emit_encryption_debug_outcome(
-                fence.request_id,
-                room_id.clone(),
-                fence.kind,
-                CoreEncryptionDebugOutcome::CancelledStale,
-            )
-            .await;
-            self.reduce_reliable(vec![AppAction::EncryptionDebugOperationReset { room_id }])
-                .await;
-        }
-    }
-}
-
-impl RoomActor {
-    async fn stop_observation(&mut self) {
-        if let Some(mut observation) = self.observation.take() {
-            let _ = observation.stop_tx.send(());
-            if executor::timeout(
-                ROOM_OBSERVATION_SHUTDOWN_JOIN_TIMEOUT,
-                &mut observation.task,
-            )
-            .await
-            .is_err()
-            {
-                observation.task.abort();
-                let _ = observation.task.await;
-            }
-        }
-    }
-}
-
-impl RoomActor {
     async fn handle_command(&mut self, command: RoomCommand) {
         match command {
             RoomCommand::CreateRoom {
@@ -1661,68 +1150,362 @@ impl RoomActor {
             }
         }
     }
-}
 
-impl RoomActor {
-    fn refresh_room_list(&self) {
-        self.refresh_room_list_with_command(RoomListObservationCommand::Refresh);
-    }
-}
-
-impl RoomActor {
-    fn refresh_room_list_with_command(&self, command: RoomListObservationCommand) {
-        if let Some(observation) = &self.observation {
-            let retry_room_id = match &command {
-                RoomListObservationCommand::Refresh => None,
-                RoomListObservationCommand::RefreshRoom { room_id } => Some(room_id.clone()),
-                RoomListObservationCommand::Reconcile { .. } => return,
-            };
-            let command_tx = observation.command_tx.clone();
-            let _ = command_tx.try_send(command);
-            // A successful local mutation can update the SDK room store just
-            // after the immediate refresh observes the live list. Keep the
-            // same live-service projection authoritative by retrying a few
-            // bounded wakes; this never creates another service or network
-            // sync loop.
-            let _ = executor::spawn(async move {
-                for delay in [
-                    Duration::from_millis(100),
-                    Duration::from_millis(300),
-                    Duration::from_millis(1_000),
-                ] {
-                    executor::sleep(delay).await;
-                    let retry_command = match retry_room_id.as_deref() {
-                        Some(room_id) => RoomListObservationCommand::RefreshRoom {
-                            room_id: room_id.to_owned(),
-                        },
-                        None => RoomListObservationCommand::Refresh,
-                    };
-                    if command_tx.send(retry_command).await.is_err() {
-                        break;
-                    }
-                }
-            });
+    fn clear_known_rooms(&self) {
+        if let Ok(mut known_room_ids) = self.known_room_ids.write() {
+            known_room_ids.clear();
         }
     }
-}
 
-impl RoomActor {
-    fn emit(&self, event: CoreEvent) {
+    pub(super) fn emit(&self, event: CoreEvent) {
         let _ = self.event_tx.send(event);
     }
-}
 
-impl RoomActor {
-    fn emit_failure(&self, request_id: RequestId, failure: CoreFailure) {
+    pub(super) fn emit_failure(&self, request_id: RequestId, failure: CoreFailure) {
         self.emit(CoreEvent::OperationFailed {
             request_id,
             failure,
         });
     }
+
+    /// Reliable projection for one-shot, non-re-projected actions (navigation,
+    /// command results) that MUST NOT be dropped under large-account sync load.
+    /// Backpressures instead of dropping; the AppActor drains the action inbox
+    /// continuously, so this does not deadlock.
+    pub(super) async fn reduce_reliable(&self, actions: Vec<AppAction>) {
+        let _ = self.action_tx.send(actions).await;
+    }
 }
 
-impl RoomActor {
-    async fn reduce_reliable(&self, actions: Vec<AppAction>) {
-        let _ = self.action_tx.send(actions).await;
+#[cfg(test)]
+pub(super) fn make_request_id(seq: u64) -> RequestId {
+    RequestId {
+        connection_id: RuntimeConnectionId(1),
+        sequence: seq,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::make_request_id;
+    use super::{RoomActor, RoomActorHandle, RoomMessage};
+
+    use crate::command::RoomCommand;
+
+    use crate::event::RoomEvent;
+    use crate::executor;
+
+    use koushi_sdk::MatrixClientSession;
+
+    use koushi_state::SessionInfo;
+    use koushi_state::{AppAction, RoomListSource};
+
+    #[cfg(feature = "test-hooks")]
+    use std::sync::{Mutex, atomic::AtomicUsize};
+    use std::{sync::Arc, time::Duration};
+    use tokio::sync::{broadcast, mpsc, oneshot, watch};
+
+    #[tokio::test]
+    async fn room_actor_shutdown_aborts_when_its_mailbox_cannot_accept_shutdown() {
+        let (tx, _rx) = mpsc::channel(1);
+        tx.send(RoomMessage::Shutdown).await.expect("fill mailbox");
+        let (timeline_residency, _timeline_residency_rx) = watch::channel(None);
+        let (session, _session_rx) = watch::channel(None);
+        let mut handle = RoomActorHandle {
+            tx,
+            timeline_residency,
+            session,
+            #[cfg(feature = "test-hooks")]
+            room_operation_test_control: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "test-hooks")]
+            room_operation_test_reached_count: Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "test-hooks")]
+            encryption_debug_test_control: Arc::new(Mutex::new(None)),
+            task: Some(executor::spawn(std::future::pending())),
+        };
+
+        assert!(
+            !handle
+                .shutdown_with_timeouts(Duration::from_millis(10), Duration::from_millis(10))
+                .await
+        );
+        assert!(handle.task.is_none());
+    }
+
+    #[tokio::test]
+    async fn select_space_projects_action() {
+        let (action_tx, mut action_rx) = mpsc::channel(16);
+        let (event_tx, _event_rx) = broadcast::channel(16);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
+
+        handle
+            .send(RoomMessage::Command(RoomCommand::SelectSpace {
+                request_id: make_request_id(1),
+                space_id: Some("!space:example.test".to_owned()),
+            }))
+            .await;
+
+        let actions = action_rx.recv().await.expect("actions");
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [AppAction::SelectSpace {
+                    space_id: Some(id)
+                }] if id == "!space:example.test"
+            ),
+            "expected SelectSpace action, got {actions:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn reorder_spaces_projects_action() {
+        let (action_tx, mut action_rx) = mpsc::channel(16);
+        let (event_tx, _event_rx) = broadcast::channel(16);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
+
+        handle
+            .send(RoomMessage::Command(RoomCommand::ReorderSpaces {
+                request_id: make_request_id(1),
+                space_ids: vec![
+                    "!space-b:example.test".to_owned(),
+                    "!space-a:example.test".to_owned(),
+                ],
+            }))
+            .await;
+
+        let actions = action_rx.recv().await.expect("actions");
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [AppAction::ReorderSpaces { space_ids }]
+                    if space_ids == &vec![
+                        "!space-b:example.test".to_owned(),
+                        "!space-a:example.test".to_owned()
+                    ]
+            ),
+            "expected ReorderSpaces action, got {actions:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn select_room_projects_action() {
+        let (action_tx, mut action_rx) = mpsc::channel(16);
+        let (event_tx, _event_rx) = broadcast::channel(16);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
+
+        handle
+            .send(RoomMessage::Command(RoomCommand::SelectRoom {
+                request_id: make_request_id(2),
+                room_id: "!room:example.test".to_owned(),
+            }))
+            .await;
+
+        let actions = action_rx.recv().await.expect("actions");
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [AppAction::SelectRoom { room_id }] if room_id == "!room:example.test"
+            ),
+            "expected SelectRoom action, got {actions:?}"
+        );
+    }
+
+    #[test]
+    fn room_actor_command_loop_never_awaits_room_list_refresh() {
+        let source = include_str!("actor.rs");
+        let production_source = crate::room::test_source::item_body(source, "async fn run");
+
+        assert!(
+            !production_source.contains("refresh_room_list().await"),
+            "RoomActor command handling must not await room-list normalization; it can block user-visible operations under large room lists"
+        );
+    }
+
+    #[test]
+    fn sync_started_requires_one_live_room_list_service() {
+        let source = include_str!("actor.rs");
+        let variant = source
+            .split("SyncStarted {")
+            .nth(1)
+            .expect("SyncStarted variant")
+            .split("ReconcileCommittedRange")
+            .next()
+            .expect("SyncStarted fields");
+        assert!(variant.contains("Arc<matrix_sdk_ui::room_list_service::RoomListService>"));
+        assert!(!variant.contains("Option<"));
+
+        let sync_started_body = source
+            .split("RoomMessage::SyncStarted")
+            .nth(1)
+            .expect("SyncStarted match arm")
+            .split("RoomMessage::ReconcileCommittedRange")
+            .next()
+            .expect("SyncStarted body");
+        assert!(
+            !sync_started_body.contains("self.clear_known_rooms();"),
+            "backend handoff must retain the actor-known cached rooms until the new generation settles"
+        );
+        assert!(sync_started_body.contains("self.start_live_observation("));
+        assert!(!sync_started_body.contains("match room_list_service"));
+    }
+
+    #[test]
+    fn room_event_carries_request_id() {
+        let request_id = make_request_id(10);
+        let event = RoomEvent::RoomCreated {
+            request_id,
+            room_id: "!room:example.test".to_owned(),
+        };
+        match event {
+            RoomEvent::RoomCreated {
+                request_id: ev_id, ..
+            } => assert_eq!(ev_id, request_id),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn session_lifecycle_messages_without_session_complete_cleanly() {
+        let (action_tx, _action_rx) = mpsc::channel(16);
+        let (event_tx, _event_rx) = broadcast::channel(16);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
+
+        // No session, no observation loop: both must be no-ops, and the
+        // actor task must still exit on Shutdown.
+        let (stop_ack_tx, stop_ack_rx) = oneshot::channel();
+        assert!(
+            handle
+                .send(RoomMessage::StopSyncObservation {
+                    backend_generation: 1,
+                    ack: stop_ack_tx,
+                })
+                .await
+        );
+        stop_ack_rx.await.expect("stop acknowledgement");
+        let (ack_tx, _ack_rx) = oneshot::channel();
+        assert!(
+            handle
+                .send(RoomMessage::SessionCleared { ack: ack_tx })
+                .await
+        );
+        assert!(handle.send(RoomMessage::Shutdown).await);
+        tokio::time::timeout(std::time::Duration::from_secs(5), handle.join())
+            .await
+            .expect("actor task must exit after Shutdown");
+    }
+
+    #[tokio::test]
+    async fn stale_stop_generation_does_not_stop_replacement_observation() {
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let session = Arc::new(MatrixClientSession::from_client_for_testing(
+            client.clone(),
+            SessionInfo {
+                homeserver: server.uri(),
+                user_id: "@observer:example.invalid".to_owned(),
+                device_id: "OBSERVER".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        ));
+        let first_service = Arc::new(
+            matrix_sdk_ui::room_list_service::RoomListService::new(client.clone())
+                .await
+                .expect("first room-list service"),
+        );
+        let replacement_service = Arc::new(
+            matrix_sdk_ui::room_list_service::RoomListService::new(client)
+                .await
+                .expect("replacement room-list service"),
+        );
+        let (action_tx, _action_rx) = mpsc::channel(16);
+        let (event_tx, _event_rx) = broadcast::channel(16);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
+
+        assert!(
+            handle
+                .send(RoomMessage::SyncStarted {
+                    session: session.clone(),
+                    room_list_service: first_service,
+                    source: RoomListSource::Live,
+                    backend_generation: 1,
+                })
+                .await
+        );
+        assert!(
+            handle
+                .send(RoomMessage::SyncStarted {
+                    session,
+                    room_list_service: replacement_service,
+                    source: RoomListSource::Live,
+                    backend_generation: 2,
+                })
+                .await
+        );
+
+        let (stale_ack_tx, stale_ack_rx) = oneshot::channel();
+        assert!(
+            handle
+                .send(RoomMessage::StopSyncObservation {
+                    backend_generation: 1,
+                    ack: stale_ack_tx,
+                })
+                .await
+        );
+        stale_ack_rx.await.expect("stale stop acknowledgement");
+
+        let (inspect_tx, inspect_rx) = oneshot::channel();
+        assert!(
+            handle
+                .send(RoomMessage::InspectObservationGeneration {
+                    response: inspect_tx,
+                })
+                .await
+        );
+        assert_eq!(inspect_rx.await.expect("observation generation"), Some(2));
+
+        let (active_ack_tx, active_ack_rx) = oneshot::channel();
+        assert!(
+            handle
+                .send(RoomMessage::StopSyncObservation {
+                    backend_generation: 2,
+                    ack: active_ack_tx,
+                })
+                .await
+        );
+        active_ack_rx.await.expect("active stop acknowledgement");
+
+        let (inspect_tx, inspect_rx) = oneshot::channel();
+        assert!(
+            handle
+                .send(RoomMessage::InspectObservationGeneration {
+                    response: inspect_tx,
+                })
+                .await
+        );
+        assert_eq!(inspect_rx.await.expect("stopped observation"), None);
+        assert!(handle.send(RoomMessage::Shutdown).await);
+        handle.join().await;
     }
 }

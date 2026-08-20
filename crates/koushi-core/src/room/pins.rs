@@ -1,162 +1,16 @@
-use super::*;
+use super::actor::RoomActor;
+use super::list_observer::state_contains_pinned_events;
+use super::operations::{classify_room_error, operation_failure_kind};
+use crate::event::{CoreEvent, RoomEvent};
+use crate::failure::{CoreFailure, RoomFailureKind};
+use crate::ids::RequestId;
+use koushi_sdk::MatrixClientSession;
+use koushi_state::{AppAction, PinnedEvent, PinnedEventState};
+use std::collections::{BTreeSet, HashSet};
 
-    async fn handle_pin_event(&self, request_id: RequestId, room_id: String, event_id: String) {
-        let Some(session) = &self.session else {
-            self.emit_failure(request_id, CoreFailure::SessionRequired);
-            return;
-        };
-
-        self.reduce_reliable(vec![AppAction::PinEventRequested {
-            request_id: request_id.sequence,
-            room_id: room_id.clone(),
-            event_id: event_id.clone(),
-        }])
-        .await;
-        if !self.ensure_known_room_for_message_interaction(request_id, &room_id) {
-            return;
-        }
-        match koushi_sdk::pin_event(session, &room_id, &event_id).await {
-            Ok(()) => {
-                self.reduce_reliable(vec![AppAction::PinEventCompleted {
-                    request_id: request_id.sequence,
-                    room_id: room_id.clone(),
-                }])
-                .await;
-                self.emit(CoreEvent::Room(RoomEvent::PinEventCompleted {
-                    request_id,
-                    room_id: room_id.clone(),
-                }));
-                self.project_pinned_events_after_success(request_id, room_id)
-                    .await;
-            }
-            Err(error) => {
-                let kind = classify_room_error(&error);
-                self.reduce_reliable(vec![AppAction::PinEventFailed {
-                    request_id: request_id.sequence,
-                    room_id,
-                    kind: operation_failure_kind(kind),
-                }])
-                .await;
-                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
-            }
-        }
-    }
-
-    async fn handle_unpin_event(&self, request_id: RequestId, room_id: String, event_id: String) {
-        let Some(session) = &self.session else {
-            self.emit_failure(request_id, CoreFailure::SessionRequired);
-            return;
-        };
-
-        self.reduce_reliable(vec![AppAction::UnpinEventRequested {
-            request_id: request_id.sequence,
-            room_id: room_id.clone(),
-            event_id: event_id.clone(),
-        }])
-        .await;
-        if !self.ensure_known_room_for_message_interaction(request_id, &room_id) {
-            return;
-        }
-        match koushi_sdk::unpin_event(session, &room_id, &event_id).await {
-            Ok(()) => {
-                self.reduce_reliable(vec![AppAction::UnpinEventCompleted {
-                    request_id: request_id.sequence,
-                    room_id: room_id.clone(),
-                }])
-                .await;
-                self.emit(CoreEvent::Room(RoomEvent::UnpinEventCompleted {
-                    request_id,
-                    room_id: room_id.clone(),
-                }));
-                self.project_pinned_events_after_success(request_id, room_id)
-                    .await;
-            }
-            Err(error) => {
-                let kind = classify_room_error(&error);
-                self.reduce_reliable(vec![AppAction::UnpinEventFailed {
-                    request_id: request_id.sequence,
-                    room_id,
-                    kind: operation_failure_kind(kind),
-                }])
-                .await;
-                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
-            }
-        }
-    }
-
-    async fn handle_refresh_pinned_events(&self, request_id: RequestId, room_id: String) {
-        let Some(session) = &self.session else {
-            self.emit_failure(request_id, CoreFailure::SessionRequired);
-            return;
-        };
-        match load_pinned_events_for_room(session, &room_id).await {
-            Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
-            Err(kind) => {
-                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
-            }
-        }
-    }
-
-    async fn handle_pinned_events_changed(&self, room_ids: BTreeSet<String>) {
-        let Some(session) = &self.session else {
-            return;
-        };
-        for room_id in room_ids {
-            match load_pinned_events_for_room(session, &room_id).await {
-                Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
-                Err(_kind) => {
-                    // A background sync refresh has no request to fail. Keep
-                    // the previous projection and wait for the next state
-                    // update; only classified failure state may cross the
-                    // Core boundary.
-                }
-            }
-        }
-    }
-
-    async fn project_pinned_events_after_success(&self, request_id: RequestId, room_id: String) {
-        let Some(session) = &self.session else {
-            return;
-        };
-        match load_pinned_events_for_room(session, &room_id).await {
-            Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
-            Err(kind) => {
-                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
-            }
-        }
-    }
-
-    async fn project_pinned_events(&self, room_id: String, pinned: Vec<PinnedEvent>) {
-        self.reduce_reliable(vec![AppAction::RoomPinnedEventsUpdated {
-            room_id: room_id.clone(),
-            pinned: pinned.clone(),
-        }])
-        .await;
-        self.emit(CoreEvent::Room(RoomEvent::PinnedEventsUpdated {
-            room_id,
-            pinned,
-        }));
-    }
-
-fn state_contains_pinned_events(state: &matrix_sdk_base::sync::State) -> bool {
-    let events = match state {
-        matrix_sdk_base::sync::State::Before(events)
-        | matrix_sdk_base::sync::State::After(events) => events,
-    };
-    events.iter().any(|event| {
-        serde_json::from_str::<serde_json::Value>(event.json().get())
-            .ok()
-            .and_then(|json| {
-                json.get("type")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned)
-            })
-            .as_deref()
-            == Some("m.room.pinned_events")
-    })
-}
-
-fn pinned_event_room_ids(updates: &matrix_sdk_base::sync::RoomUpdates) -> BTreeSet<String> {
+pub(super) fn pinned_event_room_ids(
+    updates: &matrix_sdk_base::sync::RoomUpdates,
+) -> BTreeSet<String> {
     updates
         .joined
         .iter()
@@ -277,116 +131,327 @@ fn pinned_event_from_raw(event_id: String, raw_json: &str) -> PinnedEvent {
     }
 }
 
+impl RoomActor {
+    pub(super) async fn handle_pin_event(
+        &self,
+        request_id: RequestId,
+        room_id: String,
+        event_id: String,
+    ) {
+        let Some(session) = &self.session else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+
+        self.reduce_reliable(vec![AppAction::PinEventRequested {
+            request_id: request_id.sequence,
+            room_id: room_id.clone(),
+            event_id: event_id.clone(),
+        }])
+        .await;
+        if !self.ensure_known_room_for_message_interaction(request_id, &room_id) {
+            return;
+        }
+        match koushi_sdk::pin_event(session, &room_id, &event_id).await {
+            Ok(()) => {
+                self.reduce_reliable(vec![AppAction::PinEventCompleted {
+                    request_id: request_id.sequence,
+                    room_id: room_id.clone(),
+                }])
+                .await;
+                self.emit(CoreEvent::Room(RoomEvent::PinEventCompleted {
+                    request_id,
+                    room_id: room_id.clone(),
+                }));
+                self.project_pinned_events_after_success(request_id, room_id)
+                    .await;
+            }
+            Err(error) => {
+                let kind = classify_room_error(&error);
+                self.reduce_reliable(vec![AppAction::PinEventFailed {
+                    request_id: request_id.sequence,
+                    room_id,
+                    kind: operation_failure_kind(kind),
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
+            }
+        }
+    }
+
+    pub(super) async fn handle_unpin_event(
+        &self,
+        request_id: RequestId,
+        room_id: String,
+        event_id: String,
+    ) {
+        let Some(session) = &self.session else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+
+        self.reduce_reliable(vec![AppAction::UnpinEventRequested {
+            request_id: request_id.sequence,
+            room_id: room_id.clone(),
+            event_id: event_id.clone(),
+        }])
+        .await;
+        if !self.ensure_known_room_for_message_interaction(request_id, &room_id) {
+            return;
+        }
+        match koushi_sdk::unpin_event(session, &room_id, &event_id).await {
+            Ok(()) => {
+                self.reduce_reliable(vec![AppAction::UnpinEventCompleted {
+                    request_id: request_id.sequence,
+                    room_id: room_id.clone(),
+                }])
+                .await;
+                self.emit(CoreEvent::Room(RoomEvent::UnpinEventCompleted {
+                    request_id,
+                    room_id: room_id.clone(),
+                }));
+                self.project_pinned_events_after_success(request_id, room_id)
+                    .await;
+            }
+            Err(error) => {
+                let kind = classify_room_error(&error);
+                self.reduce_reliable(vec![AppAction::UnpinEventFailed {
+                    request_id: request_id.sequence,
+                    room_id,
+                    kind: operation_failure_kind(kind),
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
+            }
+        }
+    }
+
+    pub(super) async fn handle_refresh_pinned_events(
+        &self,
+        request_id: RequestId,
+        room_id: String,
+    ) {
+        let Some(session) = &self.session else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        match load_pinned_events_for_room(session, &room_id).await {
+            Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
+            Err(kind) => {
+                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
+            }
+        }
+    }
+
+    pub(super) async fn handle_pinned_events_changed(&self, room_ids: BTreeSet<String>) {
+        let Some(session) = &self.session else {
+            return;
+        };
+        for room_id in room_ids {
+            match load_pinned_events_for_room(session, &room_id).await {
+                Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
+                Err(_kind) => {
+                    // A background sync refresh has no request to fail. Keep
+                    // the previous projection and wait for the next state
+                    // update; only classified failure state may cross the
+                    // Core boundary.
+                }
+            }
+        }
+    }
+
+    async fn project_pinned_events_after_success(&self, request_id: RequestId, room_id: String) {
+        let Some(session) = &self.session else {
+            return;
+        };
+        match load_pinned_events_for_room(session, &room_id).await {
+            Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
+            Err(kind) => {
+                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
+            }
+        }
+    }
+
+    async fn project_pinned_events(&self, room_id: String, pinned: Vec<PinnedEvent>) {
+        self.reduce_reliable(vec![AppAction::RoomPinnedEventsUpdated {
+            room_id: room_id.clone(),
+            pinned: pinned.clone(),
+        }])
+        .await;
+        self.emit(CoreEvent::Room(RoomEvent::PinnedEventsUpdated {
+            room_id,
+            pinned,
+        }));
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::pinned_event_from_raw;
+
+    use crate::command::RoomCommand;
+
+    use crate::event::CoreEvent;
+
+    use crate::failure::CoreFailure;
+
+    use crate::room::actor::make_request_id;
+    use crate::room::actor::{RoomActor, RoomMessage};
+
+    use koushi_state::PinnedEventState;
+
+    use tokio::sync::{broadcast, mpsc};
+
+    #[tokio::test]
+    async fn pin_event_without_session_emits_session_required() {
+        let (action_tx, _action_rx) = mpsc::channel(16);
+        let (event_tx, mut event_rx) = broadcast::channel(16);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
+
+        let request_id = make_request_id(8);
+        handle
+            .send(RoomMessage::Command(RoomCommand::PinEvent {
+                request_id,
+                room_id: "!room:example.test".to_owned(),
+                event_id: "$event:example.test".to_owned(),
+            }))
+            .await;
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("timeout")
+            .expect("event");
+
+        match event {
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } => {
+                assert_eq!(ev_id, request_id);
+                assert_eq!(failure, CoreFailure::SessionRequired);
+            }
+            other => panic!("expected OperationFailed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn unpin_event_without_session_emits_session_required() {
+        let (action_tx, _action_rx) = mpsc::channel(16);
+        let (event_tx, mut event_rx) = broadcast::channel(16);
+        let handle = RoomActor::spawn(
+            action_tx,
+            event_tx,
+            crate::SlidingSyncDiagnostics::default(),
+        );
+
+        let request_id = make_request_id(9);
+        handle
+            .send(RoomMessage::Command(RoomCommand::UnpinEvent {
+                request_id,
+                room_id: "!room:example.test".to_owned(),
+                event_id: "$event:example.test".to_owned(),
+            }))
+            .await;
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("timeout")
+            .expect("event");
+
+        match event {
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } => {
+                assert_eq!(ev_id, request_id);
+                assert_eq!(failure, CoreFailure::SessionRequired);
+            }
+            other => panic!("expected OperationFailed, got {other:?}"),
+        }
+    }
 
     #[test]
-        fn pin_success_settles_pending_before_pinned_projection_reload() {
-            let source = include_str!("../room.rs");
-            let pin_body = source
-                .split("async fn handle_pin_event")
-                .nth(1)
-                .expect("pin handler")
-                .split("async fn handle_unpin_event")
-                .next()
-                .expect("pin body");
-            let unpin_body = source
-                .split("async fn handle_unpin_event")
-                .nth(1)
-                .expect("unpin handler")
-                .split("async fn project_pinned_events_after_success")
-                .next()
-                .expect("unpin body");
-            let projection_body = source
-                .split("async fn project_pinned_events_after_success")
-                .nth(1)
-                .expect("projection helper")
-                .split("    /// Refresh the room list")
-                .next()
-                .expect("projection body");
-    
-            let pin_completion = pin_body
-                .find("self.reduce_reliable(vec![AppAction::PinEventCompleted")
-                .expect("pin completion action");
-            let pin_reload = pin_body
-                .find("project_pinned_events_after_success")
-                .expect("pin projection reload");
-            assert!(pin_completion < pin_reload);
-    
-            let unpin_completion = unpin_body
-                .find("self.reduce_reliable(vec![AppAction::UnpinEventCompleted")
-                .expect("unpin completion action");
-            let unpin_reload = unpin_body
-                .find("project_pinned_events_after_success")
-                .expect("unpin projection reload");
-            assert!(unpin_completion < unpin_reload);
-    
-            assert!(!projection_body.contains("AppAction::PinEventCompleted"));
-            assert!(!projection_body.contains("AppAction::UnpinEventCompleted"));
-        }
+    fn pin_success_settles_pending_before_pinned_projection_reload() {
+        let source = include_str!("pins.rs");
+        let pin_body = crate::room::test_source::item_body(source, "async fn handle_pin_event");
+        let unpin_body = crate::room::test_source::item_body(source, "async fn handle_unpin_event");
+        let projection_body = crate::room::test_source::item_body(
+            source,
+            "async fn project_pinned_events_after_success",
+        );
+
+        let pin_completion = pin_body
+            .find("self.reduce_reliable(vec![AppAction::PinEventCompleted")
+            .expect("pin completion action");
+        let pin_reload = pin_body
+            .find("project_pinned_events_after_success")
+            .expect("pin projection reload");
+        assert!(pin_completion < pin_reload);
+
+        let unpin_completion = unpin_body
+            .find("self.reduce_reliable(vec![AppAction::UnpinEventCompleted")
+            .expect("unpin completion action");
+        let unpin_reload = unpin_body
+            .find("project_pinned_events_after_success")
+            .expect("unpin projection reload");
+        assert!(unpin_completion < unpin_reload);
+
+        assert!(!projection_body.contains("AppAction::PinEventCompleted"));
+        assert!(!projection_body.contains("AppAction::UnpinEventCompleted"));
+    }
 
     #[test]
-        fn pinned_raw_projection_preserves_event_order_metadata_and_thread_relation() {
-            let event = pinned_event_from_raw(
-                "$fallback:example.invalid".to_owned(),
-                r#"{
-                    "event_id":"$reply:example.invalid",
-                    "sender":"@bob:example.invalid",
-                    "origin_server_ts":1800000000000,
-                    "type":"m.room.message",
-                    "content":{
-                        "msgtype":"m.text",
-                        "body":"Pinned reply",
-                        "m.relates_to":{"rel_type":"m.thread","event_id":"$root:example.invalid"}
-                    }
-                }"#,
-            );
-    
-            assert_eq!(event.event_id, "$reply:example.invalid");
-            assert_eq!(event.sender.as_deref(), Some("@bob:example.invalid"));
-            assert_eq!(event.timestamp_ms, Some(1_800_000_000_000));
-            assert_eq!(event.body_preview.as_deref(), Some("Pinned reply"));
-            assert_eq!(
-                event.thread_root_event_id.as_deref(),
-                Some("$root:example.invalid")
-            );
-            assert_eq!(event.state, PinnedEventState::Ready);
-        }
+    fn pinned_raw_projection_preserves_event_order_metadata_and_thread_relation() {
+        let event = pinned_event_from_raw(
+            "$fallback:example.invalid".to_owned(),
+            r#"{
+                "event_id":"$reply:example.invalid",
+                "sender":"@bob:example.invalid",
+                "origin_server_ts":1800000000000,
+                "type":"m.room.message",
+                "content":{
+                    "msgtype":"m.text",
+                    "body":"Pinned reply",
+                    "m.relates_to":{"rel_type":"m.thread","event_id":"$root:example.invalid"}
+                }
+            }"#,
+        );
+
+        assert_eq!(event.event_id, "$reply:example.invalid");
+        assert_eq!(event.sender.as_deref(), Some("@bob:example.invalid"));
+        assert_eq!(event.timestamp_ms, Some(1_800_000_000_000));
+        assert_eq!(event.body_preview.as_deref(), Some("Pinned reply"));
+        assert_eq!(
+            event.thread_root_event_id.as_deref(),
+            Some("$root:example.invalid")
+        );
+        assert_eq!(event.state, PinnedEventState::Ready);
+    }
 
     #[test]
-        fn pin_and_unpin_commands_require_actor_known_room_guard_before_sdk_call() {
-            let source = include_str!("../room.rs");
-            let pin_body = source
-                .split("async fn handle_pin_event")
-                .nth(1)
-                .expect("pin handler")
-                .split("async fn handle_unpin_event")
-                .next()
-                .expect("pin body");
-            let unpin_body = source
-                .split("async fn handle_unpin_event")
-                .nth(1)
-                .expect("unpin handler")
-                .split("async fn project_pinned_events_after_success")
-                .next()
-                .expect("unpin body");
-    
-            let pin_guard = pin_body
-                .find("ensure_known_room_for_message_interaction")
-                .expect("pin known-room guard");
-            let pin_sdk = pin_body
-                .find("koushi_sdk::pin_event")
-                .expect("pin sdk call");
-            assert!(pin_guard < pin_sdk);
-    
-            let unpin_guard = unpin_body
-                .find("ensure_known_room_for_message_interaction")
-                .expect("unpin known-room guard");
-            let unpin_sdk = unpin_body
-                .find("koushi_sdk::unpin_event")
-                .expect("unpin sdk call");
-            assert!(unpin_guard < unpin_sdk);
-        }
+    fn pin_and_unpin_commands_require_actor_known_room_guard_before_sdk_call() {
+        let source = include_str!("pins.rs");
+        let pin_body = crate::room::test_source::item_body(source, "async fn handle_pin_event");
+        let unpin_body = crate::room::test_source::item_body(source, "async fn handle_unpin_event");
 
+        let pin_guard = pin_body
+            .find("ensure_known_room_for_message_interaction")
+            .expect("pin known-room guard");
+        let pin_sdk = pin_body
+            .find("koushi_sdk::pin_event")
+            .expect("pin sdk call");
+        assert!(pin_guard < pin_sdk);
+
+        let unpin_guard = unpin_body
+            .find("ensure_known_room_for_message_interaction")
+            .expect("unpin known-room guard");
+        let unpin_sdk = unpin_body
+            .find("koushi_sdk::unpin_event")
+            .expect("unpin sdk call");
+        assert!(unpin_guard < unpin_sdk);
+    }
 }

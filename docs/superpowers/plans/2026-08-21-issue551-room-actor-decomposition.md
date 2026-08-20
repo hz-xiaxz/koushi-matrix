@@ -2,7 +2,9 @@
 
 ## Status
 
-Design approved. `reviewer-flash` (read-only, cross-model) recorded `Correct-to-implement`; the four naming/visibility clarifications were incorporated in `c7d65f3` and the bounded amendment review again recorded `Correct-to-implement` with no findings.
+- Design: `reviewer-flash` (read-only, cross-model) recorded `Correct-to-implement`; the four naming/visibility clarifications were incorporated in `c7d65f3` and the bounded amendment review again recorded `Correct-to-implement` with no findings.
+- Implementation: integrated from the immutable baseline after worker ambiguity was rejected; bidirectional AST/token exactness and all focused gates are green.
+- Delivery: awaiting formal full-diff review and final repository gates.
 
 ## Objective
 
@@ -175,6 +177,7 @@ Normal shutdown must still cancel and join every in-flight operation without abo
 - Do not route sibling calls through root re-exports.
 - Do not promote a helper merely for tests; owner-local tests use private access.
 - Record every visibility promotion and its concrete sibling caller in the exactness report.
+- `classify_room_error` and `EncryptionDebugTestControl` have no current root-path consumer, but the reviewed ten-name façade requires those existing crate-internal paths. Their root re-exports use a narrowly scoped `allow(unused_imports)` rather than routing production siblings through the façade or broadening them to public API; this is façade compatibility, not a dead-code allowance.
 
 ## Test redistribution
 
@@ -204,7 +207,7 @@ Seventeen tests currently read `include_str!("room.rs")`. Preserve every asserti
 - space members: membership refresh routing and failure/no-empty-projection contracts;
 - pins: pending-before-reload and known-room guard.
 
-Use one private `#[cfg(test)]` brace/string/comment-aware `item_body` helper owned by `actor.rs` test support or a minimal private `room/test_source.rs` only if multiple modules require it. Prefer the former; add the extra file only if Rust privacy/import mechanics make duplication otherwise necessary. No public test hook is allowed.
+Use one private `#[cfg(test)]` brace/string/comment-aware `item_body` helper. Integration selected the approved `room/test_source.rs` fallback because seven owner modules consume it; one private helper avoids duplicate parsers and keeps source-contract tests owner-local. No public test hook is allowed.
 
 ## Mechanical integration
 
