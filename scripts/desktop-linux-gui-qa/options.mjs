@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname,isAbsolute,join,resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -39,7 +39,6 @@ export {
   qaProfile,
   realLoginFromStdin,
   repoRoot,
-  resolveArtifactRoot,
   serverOption,
   timeoutMs
 };

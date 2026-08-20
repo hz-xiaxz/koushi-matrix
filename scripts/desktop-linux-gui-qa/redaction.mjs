@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync,mkdirSync,writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { qaProfile, realLoginFromStdin } from "./options.mjs";
+import { qaProfile,realLoginFromStdin } from "./options.mjs";
 
 export function childEnvironment(dataDir, qaLoginPipePath = null, qaControlPipePath = null) {
   const allowedKeys = [
@@ -68,7 +68,7 @@ export function childEnvironment(dataDir, qaLoginPipePath = null, qaControlPipeP
 }
 
 
-export function nssWrapperEnvironment(dataDir) {
+function nssWrapperEnvironment(dataDir) {
   const libraryPath = "/usr/lib/x86_64-linux-gnu/libnss_wrapper.so";
   if (!existsSync(libraryPath)) {
     return {};
@@ -96,7 +96,7 @@ export function nssWrapperEnvironment(dataDir) {
 }
 
 
-export function buildLdPreload(libraryPath) {
+function buildLdPreload(libraryPath) {
   const existing = process.env.LD_PRELOAD?.trim();
   return existing ? `${libraryPath} ${existing}` : libraryPath;
 }

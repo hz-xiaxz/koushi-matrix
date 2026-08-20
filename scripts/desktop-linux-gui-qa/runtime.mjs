@@ -1,12 +1,9 @@
-import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync } from "node:fs";
+import { execFileSync,spawn } from "node:child_process";
+import { appendFileSync,existsSync } from "node:fs";
 import * as net from "node:net";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { createRequire } from "node:module";
-import { childEnvironment, nssWrapperEnvironment, buildLdPreload } from "./redaction.mjs";
-import { args, desktopDir, optionValue, qaProfile, repoRoot, serverOption, timeoutMs } from "./options.mjs";
-import { parseQaTitle, qaStatusHasAttentionBaseline } from "./evidence.mjs";
+import { isAbsolute,join,resolve } from "node:path";
+import { parseQaTitle,qaStatusHasAttentionBaseline } from "./evidence.mjs";
+import { args,desktopDir,optionValue,qaProfile,repoRoot,serverOption,timeoutMs } from "./options.mjs";
 
 export function guiScenarioServerKind() {
   if (serverOption === "tuwunel") {
@@ -52,7 +49,7 @@ export function qaDataDirForRun(runDir) {
 }
 
 
-export function validatedQaProfileName() {
+function validatedQaProfileName() {
   if (!qaProfile || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(qaProfile)) {
     throw new Error("qa profile must be 1-64 characters of letters, numbers, underscore, or dash");
   }
@@ -114,7 +111,7 @@ export function spawnLogged(command, argsList, { cwd, env, detached = false, log
 }
 
 
-export function recordProcessOutput(child, logPath, label) {
+function recordProcessOutput(child, logPath, label) {
   const prefix = `[${label}] `;
   child.stdout.on("data", (chunk) => appendFileSync(logPath, prefix + chunk.toString()));
   child.stderr.on("data", (chunk) => appendFileSync(logPath, prefix + chunk.toString()));
@@ -124,7 +121,7 @@ export function recordProcessOutput(child, logPath, label) {
 }
 
 
-export async function runLoggedCommand(command, argsList, { cwd, env, logPath, label }) {
+async function runLoggedCommand(command, argsList, { cwd, env, logPath, label }) {
   const child = spawn(command, argsList, {
     cwd,
     env,
@@ -145,7 +142,7 @@ export async function runLoggedCommand(command, argsList, { cwd, env, logPath, l
 }
 
 
-export function resolveDebugAppBinary() {
+function resolveDebugAppBinary() {
   const cargoTargetDir = process.env.CARGO_TARGET_DIR;
   const candidates = [];
   if (cargoTargetDir) {
@@ -193,7 +190,7 @@ export async function ensureAppBinary({ cwd, env, logPath }) {
 }
 
 
-export async function waitForDisplaySocket(display, timeout) {
+async function waitForDisplaySocket(display, timeout) {
   const socketPath = `/tmp/.X11-unix/X${display}`;
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeout) {
@@ -206,7 +203,7 @@ export async function waitForDisplaySocket(display, timeout) {
 }
 
 
-export async function findFreeDisplayNumber() {
+async function findFreeDisplayNumber() {
   for (let display = 90; display < 200; display += 1) {
     if (!existsSync(`/tmp/.X11-unix/X${display}`)) {
       return display;
@@ -232,7 +229,7 @@ export async function waitForPort(hostname, port, timeout) {
 }
 
 
-export function connectOnce(hostname, port, timeout) {
+function connectOnce(hostname, port, timeout) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host: hostname, port });
     const fail = (error) => {

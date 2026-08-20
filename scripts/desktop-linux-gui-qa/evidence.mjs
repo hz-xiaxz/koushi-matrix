@@ -1,6 +1,4 @@
-import { existsSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { repoRoot } from "./options.mjs";
+import { existsSync,statSync } from "node:fs";
 
 export function parseQaTitle(title) {
   const status = {};
@@ -30,7 +28,7 @@ export function qaStatusHasAttentionBaseline(status) {
 }
 
 
-export function normalizePath(path) {
+function normalizePath(path) {
   return path.replace(/\\/g, "/");
 }
 

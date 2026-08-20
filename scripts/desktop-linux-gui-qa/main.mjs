@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { checks, run } from "./registry.mjs";
+import { parseQaTitle,qaStatusHasAttentionBaseline,qaStatusHasRequiredPanel,qaStatusHasSendSuccess,qaStatusIsReady,qaWindowStatePathHasContract } from "./evidence.mjs";
+import { allowEmptyTimeline,args,artifactRoot,optionValue } from "./options.mjs";
 import { childEnvironment } from "./redaction.mjs";
+import { checks,run } from "./registry.mjs";
+import { checkLinuxTools,qaDataDirForRun } from "./runtime.mjs";
 import { webdriverCapabilities } from "./webdriver.mjs";
-import { parseQaTitle, qaStatusHasAttentionBaseline, qaStatusHasRequiredPanel, qaStatusHasSendSuccess, qaStatusIsReady, qaWindowStatePathHasContract } from "./evidence.mjs";
-import { checkLinuxTools, qaDataDirForRun } from "./runtime.mjs";
-import { allowEmptyTimeline, artifactRoot, args, optionValue, realLoginFromStdin, timeoutMs } from "./options.mjs";
 
 if (args.has("--print-artifact-root")) {
   console.log(artifactRoot);

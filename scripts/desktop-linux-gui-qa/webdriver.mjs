@@ -1,12 +1,11 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync,writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { deflateSync } from "node:zlib";
-import { desktopPackageRequire, timeoutMs } from "./options.mjs";
 import { parseQaTitle } from "./evidence.mjs";
+import { desktopPackageRequire,timeoutMs } from "./options.mjs";
 import { sleep } from "./runtime.mjs";
 
-export const pngCrc32Table = Array.from({ length: 256 }, (_, index) => {
+const pngCrc32Table = Array.from({ length: 256 }, (_, index) => {
   let value = index;
   for (let bit = 0; bit < 8; bit += 1) {
     value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
@@ -149,7 +148,7 @@ export async function ensureUserSettingsKeyManagementOpen(browser, timeout) {
 }
 
 
-export async function documentContainsAll(browser, expectedTexts) {
+async function documentContainsAll(browser, expectedTexts) {
   return browser.execute((texts) => {
     const bodyText = document.body.textContent ?? "";
     return texts.every((text) => bodyText.includes(text));
@@ -157,7 +156,7 @@ export async function documentContainsAll(browser, expectedTexts) {
 }
 
 
-export async function safeUserSettingsDiagnostics(browser) {
+async function safeUserSettingsDiagnostics(browser) {
   return browser.execute(() => {
     const userSettings = document.querySelector('button[aria-label="User settings"]');
     const active = document.activeElement;
@@ -557,7 +556,7 @@ export async function ensureReadyImageMedia(browser, filename, timeout) {
 }
 
 
-export async function waitForReadyImageMedia(browser, filename, timeout) {
+async function waitForReadyImageMedia(browser, filename, timeout) {
   const startedAt = Date.now();
   let lastState = null;
   while (Date.now() - startedAt < timeout) {
@@ -798,7 +797,7 @@ export async function waitForPinnedRegionCleared(browser, timeout, description) 
 }
 
 
-export async function pinnedRegionDiagnostics(browser) {
+async function pinnedRegionDiagnostics(browser) {
   return browser.execute(() => {
     const regions = Array.from(
       document.querySelectorAll('section.pinned-events[aria-label="Pinned messages"]')
@@ -1031,7 +1030,7 @@ export async function clickWorkspaceButton(browser, label, timeout, description)
 }
 
 
-export async function workspaceButtonState(browser, label) {
+async function workspaceButtonState(browser, label) {
   return browser.execute((targetLabel) => {
     const rail = document.querySelector(".workspace-rail");
     const button = Array.from(rail?.querySelectorAll("button") ?? []).find(
@@ -1093,7 +1092,7 @@ export async function scrollTimelineToTop(browser) {
 }
 
 
-export async function scrollTimelineToBottom(browser) {
+async function scrollTimelineToBottom(browser) {
   await browser.execute(() => {
     const timeline = document.querySelector('[data-testid="timeline-view"]');
     if (timeline instanceof HTMLElement) {
@@ -1169,7 +1168,7 @@ export async function waitForTimelineAwayFromBottom(browser, timeout, descriptio
 }
 
 
-export async function timelineScrollMetrics(browser) {
+async function timelineScrollMetrics(browser) {
   return browser.execute(() => {
     const timeline = document.querySelector('[data-testid="timeline-view"]');
     if (!(timeline instanceof HTMLElement)) {
@@ -1191,7 +1190,7 @@ export async function timelineScrollMetrics(browser) {
 }
 
 
-export async function activeRoomDiagnostics(browser) {
+async function activeRoomDiagnostics(browser) {
   return browser.execute(() => {
     const textFor = (element) =>
       element ? (element.textContent ?? "").replace(/\s+/g, " ").trim() : "";
@@ -1455,7 +1454,7 @@ export async function waitForMessageSourceDialog(browser, timeout) {
 }
 
 
-export async function messageActionDiagnostics(browser) {
+async function messageActionDiagnostics(browser) {
   return browser.execute(() => {
     const textFor = (element) =>
       element ? (element.textContent ?? "").replace(/\s+/g, " ").trim() : "";
@@ -1537,7 +1536,7 @@ export async function waitForLatestEventMessageRow(browser, timeout, description
 }
 
 
-export async function waitForLatestEventMessageRowByText(browser, bodyText, timeout, description) {
+async function waitForLatestEventMessageRowByText(browser, bodyText, timeout, description) {
   const startedAt = Date.now();
   let lastDiagnostics = null;
   while (Date.now() - startedAt < timeout) {
@@ -1579,7 +1578,7 @@ export async function waitForRoomInSection(browser, sectionId, roomName, expecte
 }
 
 
-export async function roomExistsInSection(browser, sectionId, roomName) {
+async function roomExistsInSection(browser, sectionId, roomName) {
   const sectionSelector = roomSectionSelector(sectionId);
   const roomButtonSelector = 'button[data-testid="room-item"]';
   return browser.execute(
@@ -1599,7 +1598,7 @@ export async function roomExistsInSection(browser, sectionId, roomName) {
 }
 
 
-export function roomSectionSelector(sectionId) {
+function roomSectionSelector(sectionId) {
   switch (sectionId) {
     case "favourites":
       return 'section[data-room-section="favourites"]';
@@ -1657,12 +1656,12 @@ export async function waitForInputValue(browser, label, expectedValue, timeout, 
 }
 
 
-export function roomButtonXpath(sectionId, roomName) {
+function roomButtonXpath(sectionId, roomName) {
   return `//section[@data-room-section=${xpathLiteral(sectionId)}]//button[@data-testid="room-item"][.//span[normalize-space()=${xpathLiteral(roomName)}]]`;
 }
 
 
-export function keyManagementFormInputXpath(formLabel, fieldLabel) {
+function keyManagementFormInputXpath(formLabel, fieldLabel) {
   return `//form[@aria-label=${xpathLiteral(formLabel)}]//label[.//span[normalize-space()=${xpathLiteral(fieldLabel)}]]//input`;
 }
 
@@ -1677,7 +1676,7 @@ export function readyImageOpenButtonXpath(filename) {
 }
 
 
-export function xpathLiteral(value) {
+function xpathLiteral(value) {
   if (!value.includes("'")) {
     return `'${value}'`;
   }
@@ -1724,7 +1723,7 @@ export function writePngFixture(path, width, height) {
 }
 
 
-export function pngChunk(type, data) {
+function pngChunk(type, data) {
   const typeBuffer = Buffer.from(type, "ascii");
   const length = Buffer.alloc(4);
   length.writeUInt32BE(data.length, 0);
@@ -1734,7 +1733,7 @@ export function pngChunk(type, data) {
 }
 
 
-export function crc32(buffer) {
+function crc32(buffer) {
   let crc = 0xffffffff;
   for (const byte of buffer) {
     crc = pngCrc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
@@ -1760,7 +1759,7 @@ export async function setSyntheticFileInput(browser, selector, fixturePath, file
 }
 
 
-export async function fileInputFileNames(browser, selector) {
+async function fileInputFileNames(browser, selector) {
   return browser.execute((cssSelector) => {
     const input = document.querySelector(cssSelector);
     return input instanceof HTMLInputElement
@@ -1770,7 +1769,7 @@ export async function fileInputFileNames(browser, selector) {
 }
 
 
-export async function setSyntheticFileList(browser, selector, filename, mimeType, contents) {
+async function setSyntheticFileList(browser, selector, filename, mimeType, contents) {
   const result = await browser.execute(
     (cssSelector, fileName, type, payload) => {
       const input = document.querySelector(cssSelector);
@@ -1805,7 +1804,7 @@ export async function setSyntheticFileList(browser, selector, filename, mimeType
 }
 
 
-export async function makeFileInputInteractable(browser, selector) {
+async function makeFileInputInteractable(browser, selector) {
   const result = await browser.execute((cssSelector) => {
     const input = document.querySelector(cssSelector);
     if (!(input instanceof HTMLInputElement)) {
@@ -1833,7 +1832,7 @@ export async function makeFileInputInteractable(browser, selector) {
 }
 
 
-export async function restoreFileInputPresentation(browser, selector) {
+async function restoreFileInputPresentation(browser, selector) {
   await browser.execute((cssSelector) => {
     const input = document.querySelector(cssSelector);
     if (!(input instanceof HTMLInputElement)) {
@@ -1850,7 +1849,7 @@ export async function restoreFileInputPresentation(browser, selector) {
 }
 
 
-export async function dispatchFileInputChange(browser, selector) {
+async function dispatchFileInputChange(browser, selector) {
   const result = await browser.execute((cssSelector) => {
     const input = document.querySelector(cssSelector);
     if (!(input instanceof HTMLInputElement)) {

@@ -1,18 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync,writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkInstalledHomeserver, createRoom, freePort, inviteUser as inviteUserToRoom, joinRoom, registerUser, sendRoomFormattedMessage, sendRoomMessage, setDisplayName, startHomeserver, stopProcess, tuwunelConfig, waitForHomeserver } from "../lib/local-homeserver-qa.mjs";
+import { checkInstalledHomeserver,createRoom,freePort,inviteUser as inviteUserToRoom,joinRoom,registerUser,sendRoomFormattedMessage,sendRoomMessage,setDisplayName,startHomeserver,stopProcess,tuwunelConfig,waitForHomeserver } from "../lib/local-homeserver-qa.mjs";
 import { writeSensitivePayloadToPath } from "../lib/sensitive-fifo.mjs";
-import { artifactRoot, desktopDir, guiScenario, timeoutMs } from "./options.mjs";
-import { checkLinuxTools, ensureAppBinary, ensureDbusSession, guiScenarioServerKind, qaDataDirForRun, sleep, spawnLogged, startDbusMonitor, startXvfb, settleChild, terminateProcessGroup, triggerNotificationSmoke, waitForDbusMonitorReady, waitForDbusMonitorToken, waitForPort } from "./runtime.mjs";
-import { importDesktopWebdriverio, safeDeleteSession, webdriverCapabilities, waitForQaTitle, waitForTextareaValue } from "./webdriver.mjs";
-import { parseQaTitle, qaStatusHasSendSuccess, qaStatusIsReady, safeTimestamp, timestamp } from "./evidence.mjs";
+import { parseQaTitle,qaStatusHasSendSuccess,qaStatusIsReady,safeTimestamp,timestamp } from "./evidence.mjs";
+import { artifactRoot,desktopDir,guiScenario,timeoutMs } from "./options.mjs";
 import { childEnvironment } from "./redaction.mjs";
+import { checkLinuxTools,ensureAppBinary,ensureDbusSession,guiScenarioServerKind,qaDataDirForRun,settleChild,sleep,spawnLogged,startDbusMonitor,startXvfb,terminateProcessGroup,triggerNotificationSmoke,waitForDbusMonitorReady,waitForDbusMonitorToken,waitForPort } from "./runtime.mjs";
+import { importDesktopWebdriverio,safeDeleteSession,waitForQaTitle,waitForTextareaValue,webdriverCapabilities } from "./webdriver.mjs";
 
-export const TIMELINE_NAVIGATION_SEED_MESSAGE_COUNT = 24;
-export const TIMELINE_NAVIGATION_SEED_LINE_COUNT = 12;
+const TIMELINE_NAVIGATION_SEED_MESSAGE_COUNT = 24;
+const TIMELINE_NAVIGATION_SEED_LINE_COUNT = 12;
 
-export function timelineNavigationSeedBody(index) {
+function timelineNavigationSeedBody(index) {
   return Array.from(
     { length: TIMELINE_NAVIGATION_SEED_LINE_COUNT },
     (_, lineIndex) =>
@@ -438,7 +438,7 @@ export async function waitForLocalSendSuccess(browser, timeout) {
 }
 
 
-export async function selectFirstRoom(browser) {
+async function selectFirstRoom(browser) {
   const roomItems = await browser.$$("[data-testid='room-item'], .room-item");
   if (!roomItems.length) {
     return false;
@@ -453,7 +453,7 @@ export async function selectFirstRoom(browser) {
 }
 
 
-export function shouldSelectFirstRoom(status, selectedRoom) {
+function shouldSelectFirstRoom(status, selectedRoom) {
   if (selectedRoom) {
     return false;
   }
@@ -499,12 +499,12 @@ export function readRealLoginCredentials() {
 }
 
 
-export function completeRealLoginInputWasReceived(input) {
+function completeRealLoginInputWasReceived(input) {
   return (input.replace(/\r/g, "").match(/\n/g) ?? []).length >= 5;
 }
 
 
-export function realLoginCredentialsFromInput(input) {
+function realLoginCredentialsFromInput(input) {
   const [homeserverInput, username, password, deviceNameInput, recoverySecretInput] = input
     .replace(/\r/g, "")
     .split("\n");
@@ -562,7 +562,7 @@ export async function exerciseRealRoomSelection(browser, timeout) {
 }
 
 
-export async function realRoomSelectionDiagnostics(browser, targetLabel = null) {
+async function realRoomSelectionDiagnostics(browser, targetLabel = null) {
   return await browser.execute((target) => {
     const normalize = (value) => (value ?? "").replace(/\s+/g, " ").trim();
     const rows = Array.from(
@@ -620,7 +620,7 @@ export async function exerciseRealSpaceSelection(browser, timeout) {
 }
 
 
-export async function realSpaceSelectionDiagnostics(browser) {
+async function realSpaceSelectionDiagnostics(browser) {
   return await browser.execute(() => {
     const spaces = Array.from(document.querySelectorAll("button.workspace-space-button"));
     const home = document.querySelector("button.workspace-home-button");

@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 import { assertSdkSubmoduleSynced } from "../lib/sdk-submodule-status.mjs";
-import { repoRoot, guiScenario } from "./options.mjs";
-import { runSignedOutScenario, runLocalLoginScenario, runLocalLogoutReloginScenario } from "./scenarios/auth.mjs";
-import { runLocalSendScenario, runLocalCreateRoomScenario, runLocalCreateSpaceScenario, runLocalSpacesNavScenario, runLocalReplyScenario, runLocalRoomTagsScenario, runLocalRoomManagementScenario, runLocalActivityScenario, runLocalExploreScenario, runLocalMessageActionsScenario, runLocalPinsScenario, runLocalComposerScenario, runLocalScheduledSendScenario, runLocalTimelineNavigationScenario, runLocalAliasScenario, runLocalRichFormattingScenario, runLocalCjkScenario } from "./scenarios/rooms-timeline.mjs";
-import { runLocalInvitesDmScenario } from "./scenarios/auth.mjs";
-import { runLocalMessageTypesScenario } from "./scenarios/media.mjs";
-import { runLocalMediaScenario, runLocalImageCompressionScenario } from "./scenarios/media.mjs";
-import { runLocalSettingsScenario, runLocalE2eeKeyManagementScenario } from "./scenarios/settings-security.mjs";
+import { guiScenario,repoRoot } from "./options.mjs";
+import { runLocalInvitesDmScenario,runLocalLoginScenario,runLocalLogoutReloginScenario,runSignedOutScenario } from "./scenarios/auth.mjs";
+import { runLocalImageCompressionScenario,runLocalMediaScenario,runLocalMessageTypesScenario } from "./scenarios/media.mjs";
+import { runLocalActivityScenario,runLocalAliasScenario,runLocalCjkScenario,runLocalComposerScenario,runLocalCreateRoomScenario,runLocalCreateSpaceScenario,runLocalExploreScenario,runLocalMessageActionsScenario,runLocalPinsScenario,runLocalReplyScenario,runLocalRichFormattingScenario,runLocalRoomManagementScenario,runLocalRoomTagsScenario,runLocalScheduledSendScenario,runLocalSendScenario,runLocalSpacesNavScenario,runLocalTimelineNavigationScenario } from "./scenarios/rooms-timeline.mjs";
+import { runLocalE2eeKeyManagementScenario,runLocalSettingsScenario } from "./scenarios/settings-security.mjs";
 
 export const checks = [
   "scenario signed-out",
