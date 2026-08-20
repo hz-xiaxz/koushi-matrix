@@ -2,7 +2,7 @@
 
 ## Status
 
-- Design: drafted from immutable-source, dependency, lifecycle, test, and integration-test inventory; cross-model review pending.
+- Design: initial cross-model review returned `Changes-required`; the immutable 390-key inventory, 150-test ownership, 32-source-test table, and exact sibling visibility amendment are recorded for re-review.
 - Implementation: blocked until the design reviewer records `Correct-to-implement`.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 
@@ -18,14 +18,14 @@ This is source ownership only. It does not redesign AccountActor, split its stat
 - Source: `crates/koushi-core/src/account.rs`
 - Size: 19,819 newline-terminated lines; 775,269 bytes
 - SHA-256: `7a50ba636f35d3f1c773d96243e47c815382050122c61f7efcb5cf1301b0fac7`
-- Named production/cfg-test top-level items plus associated methods outside the inline test module: 373
+- Named production/cfg-test top-level items plus associated methods outside the inline test module: 390 (170 top-level declarations + 220 associated methods)
 - `AccountActor` methods: 200
 - Account unit tests: 150 unique names
 - Inline source-characterization tests/sites: 32/32; one additional external account-source site exists in `renderable_thumbnail.rs`
 - Core lib baseline, default and `test-hooks`: 1,014 passed, 8 ignored
 - Focused integration baselines: session 8, device-session 2, E2EE 2, scheduled-send 12, activity 9, search 1, timeline 21, room-list 6, intent-lifecycle 5, residency 25; all green
 
-Every extraction and body/token comparison uses `/tmp/account-baseline.rs`, copied from this immutable commit before any edit. Line ranges are navigation hints only.
+Every extraction and body/token comparison uses `/tmp/account-baseline.rs`, copied from this immutable commit before any edit. Line ranges are navigation hints only. The normative per-owner key, test, source-site, and visibility inventories are in [2026-08-21-issue551-account-actor-inventory.md](2026-08-21-issue551-account-actor-inventory.md); its production counts sum to 390 and its test counts sum to 150.
 
 ## One ownership-area PR
 
@@ -153,9 +153,10 @@ Owns local-encryption health, device-cleanup UIA/remote/local phases, erase-anyw
 ## Cross-module visibility and dependency direction
 
 - Modules remain private; existing `pub`/`pub(crate)` root APIs retain their exact visibility.
-- The actor fields remain one struct. Fields used by sibling inherent impls become only `pub(super)`, restoring the former `account`-module scope without exposing them outside the private subtree.
-- Leaf methods called by `actor.rs` or a proven sibling become only `pub(super)`; owner-local helpers remain private.
-- Shared private state types used by the actor field declaration become only `pub(super)` from their owner.
+- The actor fields remain one struct. All fields become only `pub(super)` because the twelve sibling inherent impls operate on the unchanged field set; this restores the former `account`-module scope without exposing it outside the private subtree.
+- The immutable call graph pins exactly 147 `AccountActor` methods for `pub(super)` sibling use and leaves the other 53 at their original public/crate visibility or owner-private. The appendix lists all 147 by owner.
+- The immutable top-level/type/helper graph pins 62 cross-owner names in the appendix. Existing public/crate names retain their visibility; only a listed private name may become `pub(super)`, with its cfg unchanged. Test-only use never promotes production visibility.
+- An unlisted required sibling edge is not a compile-fix opportunity: stop, amend this design/appendix, and re-review before broadening it.
 - Leaves call the existing actor methods directly. They do not route through façade re-exports or introduce wrapper/helper methods solely to cross a module boundary.
 - `actor.rs` may depend on every leaf for dispatch; leaves may depend on `actor` contracts and on explicitly proven siblings. No leaf re-exports another leaf, and no circular state owner is introduced.
 - Record every visibility change with its concrete sibling field/caller in the exactness report.
@@ -182,28 +183,15 @@ Preserve exactly:
 
 Move all 150 unit tests exactly once beside their production owner. Each production module uses a private cfg-test child module. A single private cfg-test support module may own a fixture/parser only when at least two owner suites consume the exact existing helper; single-owner fixtures move with their owner. No helper is copied.
 
-Owner groups:
-
-- actor: exhaustive mailbox/command routing and reliable action delivery contracts;
-- routing: room/timeline/sync/search/activity/event-cache routing;
-- scheduled-send: backup admission and local/server scheduled settlement;
-- runtime-children: child ownership, read persistence, shutdown order;
-- session-lifecycle: login/OIDC/restore/switch/logout/teardown/store/session-change;
-- sliding-sync: capability/admission/revalidation/evidence;
-- trust-gate: provisional encryption sync, trust/status/method discovery;
-- recovery-backup: recovery, backup, room-key, identity-reset SDK results;
-- verification: incoming/outgoing request, SAS, observers/timeouts/auth continuation;
-- profile: profile/alias/avatar/hydration/ignore/report;
-- account-management: device/password/deactivation/UIA;
-- local-data-cleanup: device cleanup, health, reset.
+The normative appendix lists every test name exactly once and pins per-owner counts: account-management 1, actor 2, local-data-cleanup 5, profile 5, recovery-backup 22, routing 6, runtime-children 6, scheduled-send 10, session-lifecycle 35, sliding-sync 5, trust-gate 33, verification 20. The sum is 150.
 
 Four ignored diagnostic child tests and the event-cache ignored child keep their parent/child behavior. Their five `--exact`/prefix literals are retargeted only to the final owner-local test paths. Test bodies and ignored cfg remain unchanged.
 
 ### Source-characterization migration
 
-The 32 inline source tests currently read `include_str!("account.rs")`. Each reads only its explicit new owner file and uses one private brace/string/comment-aware `item_body` helper where an item boundary is required. Preserve every searched production token and assertion; only source path/item-boundary plumbing and owner-local test path literals may change.
+The 32 inline source tests currently read `include_str!("account.rs")`. The normative appendix lists all 32 by test owner and explicit production source set. A single-owner contract reads that owner file; a cross-owner contract reads each listed file separately and applies the private brace/string/comment-aware `item_body` helper per item. No source strings are concatenated. The global reliable-delivery negative contract scans all twelve production files independently and combines only boolean results. All 150 test functions and every assertion remain intact; approved changes are limited to explicit source paths, brace-aware item boundaries, and the five ignored-child exact path literals.
 
-The external `renderable_thumbnail.rs` account-source guard is retargeted to `account/profile.rs`. No façade concatenation, generated omnibus source, self-satisfying test literal, or public test hook is allowed. Source assertions remain structural guards, not behavioral proof.
+The external `renderable_thumbnail.rs` account-source guard is retargeted to `account/profile.rs`. No façade concatenation, generated omnibus source, self-satisfying test literal, split/duplicated test, or public test hook is allowed. Source assertions remain structural guards, not behavioral proof.
 
 ## Mechanical integration
 
@@ -214,7 +202,7 @@ After design approval, Luna/low write-capable workers copy complete AST items fr
 - C: `trust_gate`, `recovery_backup`, `verification`;
 - D: `scheduled_send`, `profile`, `account_management`, `local_data_cleanup`.
 
-Workers do not edit `account.rs`, another worker's destination, shared manifests/contracts, or behavior. They report production/test item inventories, body hashes, required sibling visibility, and ambiguity. A worker stops rather than infers ownership or changes logic.
+Workers do not edit `account.rs`, another worker's destination, shared manifests/contracts, or behavior. They copy only the exact owner keys/tests in the normative appendix, report body hashes and listed sibling visibility, and stop on any missing/extra/ambiguous item or edge rather than inferring ownership or changing logic.
 
 One integration owner alone replaces the parent once, writes the façade/test-source support, resolves explicit sibling imports/visibility, retargets the one external source guard, and performs the exactness audit. Never cut from a line-shifted intermediate file.
 
@@ -222,15 +210,15 @@ One integration owner alone replaces the parent once, writes the façade/test-so
 
 A temporary non-repository `syn` verifier compares the immutable baseline with the integrated tree:
 
-1. All 373 named production/cfg-test items and associated methods exist exactly once, including all 200 `AccountActor` methods.
+1. All 390 named production/cfg-test keys exist exactly once: 170 top-level declarations plus 220 associated methods, including all 200 `AccountActor` methods.
 2. All 150 unit-test names exist exactly once; attrs and bodies match except the enumerated source-path/item-boundary and exact-child-path plumbing.
 3. Public/crate declarations, method signatures, fields, enum variants, cfg/target gates, docs, derives, timeout values, strings, match arms, diagnostic arrays, and call bodies match bidirectionally.
 4. Root named exports equal the five-name baseline façade set exactly, with `SyntheticVerificationTerminal` retaining its test cfg.
 5. Non-`AccountActor` impls match whole-token form; split AccountActor methods match individually.
 6. Moved production bodies match after normalization limited to required `super`/sibling qualification and `pub(super)` scope restoration.
 7. Root contains no production/test body or behavioral constant; no glob, wrapper, duplicate helper, compatibility alias, TODO, or newly introduced dead code exists.
-8. The sibling dependency/visibility report proves one owner per item/task/subscription and names every cross-owner edge.
-9. All 32 inline and one external source guard point to explicit owners; only the approved test plumbing differs.
+8. The sibling dependency/visibility report matches the appendix's 147 AccountActor method and 62 top-level/type/helper cross-owner names exactly; every promoted name has a concrete edge and no unlisted visibility broadening exists.
+9. All 32 inline and one external source guard match the appendix's explicit source sets; no concatenation exists and only the approved test plumbing differs.
 
 Pre-existing warnings are baseline artifacts, not permission to add or suppress warnings.
 
@@ -294,5 +282,5 @@ Stop and amend/re-review the design before proceeding if:
 - any production/test body, order, cfg, public path, command/event/DTO/wire shape, timeout, retry, cleanup, privacy, or diagnostic token changes beyond approved qualification/visibility/test-source plumbing;
 - any session, task, observer, subscription, timer, continuation, child actor, teardown, secure-backup, residency, or reliable-settlement owner changes;
 - a worker needs to edit the parent or another worker's destination;
-- exactness cannot prove all 373 production keys, 200 actor methods, 150 tests, five façade names, and 33 source sites;
+- exactness cannot prove all 390 production keys, 200 actor methods, 150 tests, five façade names, 33 source sites, 147 sibling methods, and 62 shared top-level/type/helper names;
 - a test exposes a behavior defect.
