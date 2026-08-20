@@ -26,7 +26,8 @@ An existing-identity gate without that bootstrap form remains fail-closed and ti
 The bootstrap passphrase and generated recovery key are secrets:
 
 - Generate the passphrase in the runner with `randomBytes`; never put it in CLI args, environment variables, process output, error messages, QA title, screenshots, or retained state.
-- Use a per-run file under the OS temporary directory, not the artifact directory or app data directory.
+- Create a unique per-attempt directory with `mkdtempSync` under `os.tmpdir()` and choose a child destination path that does not exist. Never touch or pre-create the file: the product deliberately uses `create_new(true)`, refuses overwrite/symlink targets, and creates the recovery-key file itself with mode 0600.
+- Track the temporary directory on the local-session object. Remove it in the helper `finally`, and have `cleanupLocalGuiScenario` best-effort reap any tracked directory as a second cleanup net.
 - Fill both values through generic WebDriver DOM helpers.
 - Set the attempt fence before submitting so unrelated events/retries cannot issue duplicate bootstrap commands.
 - Wait for the authoritative `I saved the recovery key` control before confirming.
@@ -37,10 +38,12 @@ The bootstrap passphrase and generated recovery key are secrets:
 
 In `scripts/desktop-linux-gui-qa/local-session.mjs`:
 
-1. Add one private helper that, once per `waitForLocalLoginReady` call, detects the exact new-identity bootstrap form, generates the temporary destination/passphrase, fills the two labeled inputs, clicks `Create secure backup`, waits for and clicks `I saved the recovery key`, and removes the temporary key file in `finally`.
-2. Call it only while the authoritative parsed title is `awaitingVerification`; otherwise preserve the existing readiness loop and deadline.
-3. Keep the existing absolute timeout budget. The helper receives the same deadline or remaining time; it must not restart a fresh full timeout per phase.
-4. Import existing generic DOM functions directly from `webdriver.mjs`; do not duplicate polling/input/click logic or introduce a new lifecycle owner.
+1. Add one private helper that, once per `waitForLocalLoginReady` call, detects the exact new-identity bootstrap form, creates the unique temporary directory and non-existing destination, generates the passphrase, fills the two labeled inputs, clicks `Create secure backup`, waits for and clicks `I saved the recovery key`, and removes the temporary directory in `finally`.
+2. Let `waitForLocalLoginReady` receive the local-session object (rather than only its browser) so the one session owner tracks bootstrap temp directories and teardown can reap them. Update callers mechanically.
+3. Call the helper only while the authoritative parsed title is `awaitingVerification`; otherwise preserve the existing readiness loop and deadline.
+4. Keep the existing absolute timeout budget. Form detection and both clicks use only the remaining time; no phase restarts a fresh full timeout.
+5. Fence before field fill/submit. If the product rejects bootstrap and returns to `awaitingVerification`, suppress any second attempt and let the existing readiness deadline produce the existing fail-closed timeout; do not replace it with a retry or a mid-flow secret-bearing error.
+6. Import existing generic DOM functions directly from `webdriver.mjs`; use `elementCount` plus `xpathLiteral` for exact form detection and existing field/click helpers for actions. Do not duplicate polling/input/click logic or introduce a new lifecycle owner.
 
 No product Rust/React/Tauri behavior, DTO, command, state, token registry, or scenario name changes.
 
@@ -51,7 +54,7 @@ No product Rust/React/Tauri behavior, DTO, command, state, token registry, or sc
   - automation is gated by `awaitingVerification` plus the exact bootstrap form;
   - the attempt is fenced before click;
   - passphrase uses `randomBytes` and never console/env/args;
-  - destination uses the OS temp directory and `rmSync(..., { force: true })` in `finally`;
+  - destination is a non-existing child of a unique `mkdtempSync` directory, with recursive forced removal in helper `finally` and session teardown;
   - only DOM helpers are used; no direct Tauri invoke or local readiness mutation.
 - Run the release contract suite, typecheck/lint, secret scan, deterministic Linux module/probe checks, and Playwright gate.
 - Run the containerized Tuwunel `local-send` lane to green and retain only private-safe evidence tokens.
