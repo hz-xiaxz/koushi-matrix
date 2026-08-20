@@ -4,7 +4,8 @@
 
 - Design review: `reviewer-flash` (read-only, cross-model), final verdict `Correct-to-implement` after ownership/API exactness amendments.
 - Implementation: integrated from the immutable baseline; focused SDK gates and bidirectional AST/token exactness audit are green.
-- Delivery gate: awaiting the formal read-only full-diff verdict and final repository gates.
+- Full-diff review: `reviewer-flash` (read-only, cross-model) reviewed `19fa81a2..66881f2` and recorded `Correct-to-merge`; no findings.
+- Delivery gate: all required local repository gates are green; PR CI and merge remain pending.
 
 ## Objective
 
@@ -277,6 +278,15 @@ git diff --check
 ```
 
 Run wire/generated artifact checks even though no wire change is allowed. A local homeserver/GUI lane is required only if compilation/tests or review reveal a runtime-path ambiguity; no behavior change may be waived into this PR.
+
+### Final local evidence
+
+- Bidirectional AST/token inventory: 566/566 production keys, 299/299 public declarations and exact root named exports, 143/143 unit-test names; approved source-test plumbing is the only body allowlist.
+- SDK package with `test-hooks`: 220 tests across the lib and integration targets; all-target/all-feature and `smoke` bin checks green.
+- Rust workspace: 2,394 passed, 13 ignored, 0 failed across 97 suites; desktop lib 149 passed/1 ignored; headless Core QA 129 passed.
+- Frontend: typecheck/lint green; Vitest 1,367 passed; UI-headless timeline store 76 passed and Playwright 248 passed with `CHOKIDAR_USEPOLLING=true`; production build green.
+- Boundary/policy: Tauri adapter, domain dependencies, secret scan, release gates, SDK submodule, agents docs, IPC generated-wire contract, `cargo deny`, rustfmt, and diff checks green.
+- No runtime-path ambiguity was found by compilation, tests, exactness audit, or the formal full-diff review, so the design's conditional local homeserver/GUI lane was not triggered.
 
 ## Stop conditions
 
