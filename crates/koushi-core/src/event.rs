@@ -46,11 +46,13 @@ pub use timeline::{
 /// Serializable UI snapshot. The full timeline item lists never live here
 /// (Async rule 4); timeline data flows as diffs.
 pub type AppStateSnapshot = koushi_state::AppState;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VersionedAppStateSnapshot {
     pub generation: u64,
     pub state: AppStateSnapshot,
 }
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReportKind {
@@ -58,6 +60,7 @@ pub enum ReportKind {
     Room,
     User,
 }
+
 /// Reason a SelectRoom intent produced no state change.
 ///
 /// `AlreadyActive` is a benign idempotent no-op (the room was already
@@ -79,6 +82,7 @@ pub enum IntentNoOpReason {
     /// navigation safely returned to the room's live timeline.
     TimelineTargetMissing,
 }
+
 /// Terminal outcome of a user-intent command (§4.7 Slice 1 telemetry-lane
 /// event). Carried by `CoreEvent::IntentLifecycle`.
 ///
@@ -99,6 +103,7 @@ pub enum IntentOutcome {
     /// error rather than a silent timeout.
     FailedNoOp(IntentNoOpReason),
 }
+
 #[derive(Clone, Debug)]
 pub enum CoreEvent {
     StateDelta(StateDelta),
@@ -132,6 +137,7 @@ pub enum CoreEvent {
         outcome: IntentOutcome,
     },
 }
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum SyncEvent {
@@ -141,6 +147,7 @@ pub enum SyncEvent {
     Failed,
     Stopped { request_id: Option<RequestId> },
 }
+
 pub fn timeline_projection_own_user_id(state: &AppState) -> Option<&str> {
     match &state.session {
         SessionState::Ready(info) => Some(info.user_id.as_str()),

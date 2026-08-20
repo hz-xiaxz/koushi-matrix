@@ -1,7 +1,8 @@
 use std::fmt;
 
-use super::timeline::{RoomKeyRequestStage, RoomKeyRequestWithheldCode};
-use super::{ReportKind, timeline_projection_own_user_id};
+use super::{
+    ReportKind, RoomKeyRequestStage, RoomKeyRequestWithheldCode, timeline_projection_own_user_id,
+};
 use crate::ids::{RequestId, TimelineKey};
 use koushi_state::{
     AppState, DirectoryQuery, DirectoryRoomPreview, DirectoryRoomSummary, InviteDestinationResult,
