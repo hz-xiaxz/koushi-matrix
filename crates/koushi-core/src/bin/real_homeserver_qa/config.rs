@@ -1,4 +1,5 @@
-use super::*;
+use super::{CreateRoomOptions, CreateRoomVisibility};
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Env var constants

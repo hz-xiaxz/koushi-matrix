@@ -1,4 +1,5 @@
-use super::*;
+use super::{AppState, CoreConnection, CoreEvent, EventStreamLag};
+use std::time::Duration;
 
 #[cfg(any(debug_assertions, test))]
 pub(super) type QaEventFuture<'a> = std::pin::Pin<

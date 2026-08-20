@@ -1,34 +1,29 @@
-use super::cleanup::*;
-use super::config::*;
-use super::credentials::*;
-use super::startup_latency::*;
-use super::waiters::*;
-use super::*;
+use super::cleanup::{RealQaCleanupState, do_logout};
+use super::config::{
+    EDIT_REDACT_TIMEOUT, PAGINATE_TIMEOUT, ROOM_LIST_TIMEOUT, RealQaScenario, SEARCH_TIMEOUT,
+    SPACE_CHILD_PROJECTION_TIMEOUT, SYNC_TIMEOUT, build_real_homeserver_qa_message_plan,
+    private_room_options,
+};
+use super::credentials::RealCredentials;
+use super::waiters::{
+    RecoveryOutcome, poll_search_until_found_or_timeout, wait_for_body_substring_in_timeline,
+    wait_for_edit_diff, wait_for_initial_items, wait_for_logged_in, wait_for_non_empty_room_list,
+    wait_for_operation_failed_and_signed_out, wait_for_paginate_end_reached,
+    wait_for_post_login_ready_snapshot, wait_for_ready_snapshot, wait_for_recovery_outcome,
+    wait_for_recovery_required_after_sync, wait_for_redact_diff, wait_for_room_created,
+    wait_for_room_forgotten, wait_for_room_left, wait_for_room_list_space_child,
+    wait_for_send_completed, wait_for_session_restored_with_recovery, wait_for_space_child_set,
+    wait_for_space_created, wait_for_sync_running, wait_for_sync_started, wait_for_sync_stopped,
+};
+use super::{
+    AccountCommand, ComposerDocument, CoreCommand, CoreFailure, CoreRuntime, LoginRequest,
+    PaginationDirection, RecoveryRequest, RoomCommand, SyncCommand, TimelineCommand, TimelineKey,
+};
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Async QA flow
 // ---------------------------------------------------------------------------
-
-/// Catch-all wrapper around the QA flow. Computes the per-run `data_dir` once,
-/// runs the inner flow, and — on ANY failure (including `?`-propagated ones)
-/// that did not already reach the final logout — runs a best-effort cleanup
-/// pass that leaves/forgets every created room/space and logs out. This is the
-/// finally-ish path required by the Secrets/QA canon: no stale device, room, or
-/// space may survive a failed run.
-#[cfg(any(debug_assertions, test))]
-pub(super) async fn run_async(
-    creds: &RealCredentials,
-    scenario: RealQaScenario,
-    transcript: &mut Vec<String>,
-) -> Result<String, String> {
-    let data_dir = real_qa_data_dir();
-    let mut cleanup = RealQaCleanupState::default();
-    let result = run_async_inner(creds, scenario, &data_dir, transcript, &mut cleanup).await;
-    if result.is_err() && !cleanup.logged_out {
-        cleanup_real_qa_resources(creds, &data_dir, transcript, &mut cleanup).await;
-    }
-    result
-}
 
 #[cfg(any(debug_assertions, test))]
 pub(super) async fn run_async_inner(
@@ -38,13 +33,6 @@ pub(super) async fn run_async_inner(
     transcript: &mut Vec<String>,
     cleanup: &mut RealQaCleanupState,
 ) -> Result<String, String> {
-    // The startup_latency scenario is read-only and has its own entry path:
-    // restore-or-login, macro timing, subscribe+paginate, optional teardown.
-    // Dispatch early so it never enters the compat create/send/paginate flow.
-    if matches!(scenario, RealQaScenario::StartupLatency) {
-        return run_startup_latency_scenario(creds, data_dir, transcript, cleanup).await;
-    }
-
     // -----------------------------------------------------------------------
     // Step 1: HTTPS login (single login per run - rate limit rule)
     // -----------------------------------------------------------------------

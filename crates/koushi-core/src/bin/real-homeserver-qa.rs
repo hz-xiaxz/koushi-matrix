@@ -54,7 +54,6 @@
 #![allow(dead_code)]
 
 use std::process::ExitCode;
-use std::time::Duration;
 
 use koushi_core::command::{
     AccountCommand, CoreCommand, CreateRoomOptions, CreateRoomVisibility, RoomCommand,
@@ -144,8 +143,12 @@ async fn run_async(
 ) -> Result<String, String> {
     let data_dir = real_qa_data_dir();
     let mut cleanup = RealQaCleanupState::default();
-    let result =
-        compat_flow::run_async_inner(creds, scenario, &data_dir, transcript, &mut cleanup).await;
+    let result = if matches!(scenario, RealQaScenario::StartupLatency) {
+        startup_latency::run_startup_latency_scenario(creds, &data_dir, transcript, &mut cleanup)
+            .await
+    } else {
+        compat_flow::run_async_inner(creds, scenario, &data_dir, transcript, &mut cleanup).await
+    };
     if result.is_err() && !cleanup.logged_out {
         cleanup_real_qa_resources(creds, &data_dir, transcript, &mut cleanup).await;
     }
@@ -158,7 +161,6 @@ mod cleanup;
 #[cfg(any(debug_assertions, test))]
 #[path = "real_homeserver_qa/compat_flow.rs"]
 mod compat_flow;
-#[cfg(any(debug_assertions, test))]
 #[cfg(any(debug_assertions, test))]
 #[path = "real_homeserver_qa/config.rs"]
 mod config;
@@ -179,8 +181,8 @@ mod tests;
 mod waiters;
 
 #[cfg(any(debug_assertions, test))]
-use cleanup::*;
+use cleanup::{RealQaCleanupState, cleanup_real_qa_resources};
 #[cfg(any(debug_assertions, test))]
-use config::*;
+use config::{RealQaScenario, real_qa_data_dir};
 #[cfg(any(debug_assertions, test))]
-use credentials::*;
+use credentials::{RealCredentials, assert_file_credential_store_active};

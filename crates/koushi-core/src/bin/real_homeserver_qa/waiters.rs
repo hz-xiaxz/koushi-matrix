@@ -1,7 +1,20 @@
-use super::config::*;
-use super::credentials::*;
+use super::RecoveryFailureKind;
+use super::config::{EVENT_TIMEOUT, SYNC_TIMEOUT};
+use super::credentials::RealCredentials;
 use super::event_source::{QaEventDeadline, QaEventSource, QaSnapshotEventSource};
-use super::*;
+use super::{
+    AccountCommand, AccountEvent, AccountKey, AppState, CoreCommand, CoreConnection, CoreEvent,
+    CoreFailure, PaginationDirection, PaginationState, RecoveryRequest, RequestId, RoomEvent,
+    SearchCommand, SearchEvent, SearchScope, SessionState, SyncEvent, TimelineCommand,
+    TimelineEvent, TimelineKey,
+};
+use std::time::Duration;
+
+#[cfg(any(debug_assertions, test))]
+pub(super) enum RecoveryOutcome {
+    Completed,
+    Failed(RecoveryFailureKind),
+}
 
 // ---------------------------------------------------------------------------
 // Event waiter helpers

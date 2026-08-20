@@ -1,4 +1,5 @@
-use super::*;
+use super::AuthSecret;
+use super::config::{ENV_CREDENTIALS_PATH, ENV_FILE_CREDENTIAL_STORE_DIR};
 
 // ---------------------------------------------------------------------------
 // Credentials (only loaded in debug/test builds)
