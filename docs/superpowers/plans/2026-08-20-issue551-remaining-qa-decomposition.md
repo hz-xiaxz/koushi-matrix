@@ -38,11 +38,12 @@ This is a move-only decomposition. If extraction reveals a behavior defect, stop
 
 Create `scripts/desktop-linux-gui-qa/`:
 
-- `main.mjs`: the existing top-level argument/probe/run composition. It executes on import; wrapping it in a new function is unnecessary. It imports registry dispatch plus the lower-level probe functions it already calls: child-environment projection from `redaction`, WebDriver capabilities from `webdriver`, QA-title/artifact projections from `evidence`, and tool checks from `runtime`.
-- `registry.mjs`: the one exhaustive scenario/checklist registry and dispatch owner. Move `run`, `checks`, scenario validation, `repoRoot`, and the direct existing `../lib/sdk-submodule-status.mjs` import together here so dispatch does not bypass the registry.
+- `options.mjs`: the one leaf owner of `repoRoot`, `desktopDir`, `desktopPackageRequire`, `args`, `optionValue`, all immutable CLI-derived values (`guiScenario`, server/profile/login flags, artifact root, timeout), and their pure validation/path derivation. Every consumer imports these live immutable bindings directly; no module imports `main` for configuration.
+- `main.mjs`: the existing top-level probe/run/usage composition. It executes on import; wrapping it in a new function is unnecessary. It imports immutable values from `options`, registry dispatch, plus the lower-level probe functions it already calls: child-environment projection from `redaction`, WebDriver capabilities from `webdriver`, QA-title/window projections from `evidence`, and tool checks from `runtime`.
+- `registry.mjs`: the one exhaustive scenario/checklist registry and dispatch owner. Move `run`, `checks`, scenario validation, and the direct existing `../lib/sdk-submodule-status.mjs` import together here so dispatch does not bypass the registry; import `repoRoot` from `options`.
 - `runtime.mjs`: tool/build/Xvfb/DBus/app/WebDriver process startup and generic final process settlement. The cohesive DBus/process group stays here: `startDbusMonitor`, `triggerNotificationSmoke`, both DBus waiters, `recordProcessOutput`, `terminateProcessGroup`, `settleChild`, and `sleep`.
 - `webdriver.mjs`: WebDriver loading/capabilities/session deletion and all generic DOM/action/polling primitives. Neutral room selection/context helpers (`openRoomContextMenu`, room selection/active-room/timeline-mounted diagnostics, section lookup) also stay here because multiple feature scenarios use them.
-- `local-session.mjs`: disposable homeserver/users/rooms, local session object, FIFO path creation/writes, `recordLocalGuiEvidence`, and the one ordered local-session teardown. It imports `writeSensitivePayloadToPath` from the existing shared `../lib/sensitive-fifo.mjs`; it must not copy or wrap that writer. Existing local-homeserver helpers remain direct imports from `../lib/local-homeserver-qa.mjs`. It depends directly on runtime process settlement and WebDriver session deletion; neither lower owner imports local-session.
+- `local-session.mjs`: disposable homeserver/users/rooms, local session object, FIFO path creation/writes, deterministic timeline-navigation seed constants/body, `recordLocalGuiEvidence`, and the one ordered local-session teardown. It imports `writeSensitivePayloadToPath` from the existing shared `../lib/sensitive-fifo.mjs`; it must not copy or wrap that writer. Existing local-homeserver helpers remain direct imports from `../lib/local-homeserver-qa.mjs`. It depends directly on options, runtime process settlement, WebDriver session deletion, evidence, and redaction; neither lower owner imports local-session. Scenario code imports the seed helper downward instead of duplicating it.
 - `evidence.mjs`: pure QA-title/window/DBus parsing, artifact paths, and private-data-free evidence projection only; it does not start or wait on processes.
 - `redaction.mjs`: child environment filtering and captured-output sanitization.
 - `scenarios/auth.mjs`, `rooms-timeline.mjs`, `media.mjs`, `settings-security.mjs`: feature-specific scenario bodies and feature-only helpers. Room and timeline scenarios remain one owner because their workspace selection/context helpers are shared; generic DOM pieces still move down to `webdriver`. No scenario imports a sibling.
@@ -52,7 +53,7 @@ The root keeps the shebang and imports `main.mjs` for side effects. It contains 
 Dependency direction is:
 
 ```text
-redaction + webdriver + pure evidence projections
+options + redaction + webdriver + pure evidence projections
   -> runtime
   -> local-session
   -> scenario modules
@@ -60,11 +61,12 @@ redaction + webdriver + pure evidence projections
   -> main
   -> root entrypoint
 
-main -> redaction, webdriver, evidence, runtime  # probe-only direct imports
-local-session -> runtime, webdriver               # ordered teardown/evidence orchestration
+main -> options, redaction, webdriver, evidence, runtime  # probe-only direct imports
+registry/runtime/webdriver/evidence/redaction -> options   # immutable configuration only
+local-session -> options, runtime, webdriver, evidence, redaction
 ```
 
-`runtime` never imports local-session or scenarios. `local-session` may import runtime, webdriver, evidence, and redaction but never scenarios. Scenario modules never import siblings, registry, main, or root. `registry` imports each scenario owner directly and remains the exhaustive dispatch point. “Reverse import” means a lower ownership layer importing a higher layer; `main` directly importing lower-layer probe functions and local-session importing lower teardown primitives are intentional downward edges.
+`options` imports no project module. `runtime`, `webdriver`, `evidence`, and `redaction` may import options but never local-session or scenarios. `local-session` may import options, runtime, webdriver, evidence, and redaction but never scenarios. Scenario modules never import siblings, registry, main, or root. `registry` imports each scenario owner directly and remains the exhaustive dispatch point. “Reverse import” means a lower ownership layer importing a higher layer; `main` directly importing lower-layer probe functions and local-session importing lower teardown primitives are intentional downward edges.
 
 Source-characterization consumers in `releaseScripts` and `scripts/build-structure-contract.test.mjs` must read the owning module or a deterministic list of all production modules. The real-homeserver negative whole-source privacy assertions likewise read its deterministic production-module concatenation rather than only the root. Public CLI probes remain byte-for-byte equivalent.
 
@@ -126,7 +128,7 @@ Before integration, each worker proves body hashes/names, symbol counts, duplica
 
 ## Deterministic verification
 
-- Linux: all 199 declarations exactly once after normalizing direct `export`; 26 scenarios/order/tokens unchanged; no cycle/reverse import; CLI probe output hashes unchanged.
+- Linux: all 199 baseline declarations exactly once after normalizing direct `export`; the new `options` module introduces no duplicate owner; `timelineNavigationSeedBody` exists only in local-session; 26 scenarios/order/tokens unchanged; no cycle/reverse import; CLI probe output hashes unchanged.
 - Release contracts: all 154 test names/bodies exactly once with owner counts `25 + 13 + 28 + 39 + 45 + 4`; scanner support declarations exactly once; no aggregate compatibility file.
 - Real binary: all 75 production items exactly once after normalizing `pub(super)` and all 13 tests exactly once; Cargo target bytes unchanged; module graph acyclic.
 
@@ -134,6 +136,8 @@ Focused gates:
 
 ```bash
 find scripts/desktop-linux-gui-qa -name '*.mjs' -print0 | xargs -0 -n1 node --check
+# checkJs integration catches missing/incorrect exports and free identifiers
+apps/desktop/node_modules/.bin/tsc --allowJs --checkJs --noEmit --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck scripts/desktop-linux-gui-qa.mjs scripts/desktop-linux-gui-qa/*.mjs scripts/desktop-linux-gui-qa/scenarios/*.mjs
 node --check scripts/desktop-linux-gui-qa.mjs
 node scripts/desktop-linux-gui-qa.mjs --list
 node scripts/desktop-linux-gui-qa.mjs --check-tools
