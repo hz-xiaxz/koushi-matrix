@@ -1,19 +1,37 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, atomic::Ordering};
+
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+
+use crate::event::{TimelineDiff, TimelineItem, TimelineItemId, TimelineViewportObservation};
+use crate::ids::{TimelineKey, TimelineKind};
+
+// BEGIN GENERATED SIBLING IMPORTS
+use super::navigation::{
+    DISPLAY_PROJECTION_RESET_FALLBACKS, ROOM_REPLAY_INITIAL_ITEMS_MAX, TimelineActorGenerationGate,
+    TimelineActorGenerationLease,
+};
+// END GENERATED SIBLING IMPORTS
+
 #[derive(Clone, Debug, Eq, PartialEq)]
+
 struct DisplayProjectionSlot {
     canonical_index: usize,
     item: TimelineItem,
 }
+
 /// Pre-normalization ownership for the exact canonical slots represented by
 /// the desktop's current display window. Duplicate render identities remain
 /// separate slots here even though `display_items` contains only their first
 /// rendered owner.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct DisplayProjectionState {
+pub(super) struct DisplayProjectionState {
     slots: Vec<DisplayProjectionSlot>,
     display_items: Vec<TimelineItem>,
 }
+
 impl DisplayProjectionState {
-    fn from_canonical_window(
+    pub(super) fn from_canonical_window(
         canonical_items: &[TimelineItem],
         window: std::ops::Range<usize>,
     ) -> Self {
@@ -34,13 +52,16 @@ impl DisplayProjectionState {
             display_items,
         }
     }
-    fn display_items(&self) -> &[TimelineItem] {
+
+    pub(super) fn display_items(&self) -> &[TimelineItem] {
         &self.display_items
     }
+
     fn refresh_display_items(&mut self) {
         self.display_items = normalize_display_projection_slots(&self.slots);
     }
 }
+
 fn flush_pending_canonical_push_fronts(
     canonical_items: &mut Vec<TimelineItem>,
     pending_push_fronts: &mut Vec<TimelineItem>,
@@ -52,6 +73,7 @@ fn flush_pending_canonical_push_fronts(
     let prefix = std::mem::take(pending_push_fronts);
     canonical_items.splice(0..0, prefix);
 }
+
 /// Sparse weighted sequence for display membership. `Gap` compresses any
 /// canonical-only run while subtree weights translate the next SDK index
 /// without rescanning the bounded display or traversing/cloning the N-item
@@ -70,6 +92,7 @@ enum DisplayMembershipCell {
     Gap(usize),
     Slot(TimelineItem),
 }
+
 impl DisplayMembershipCell {
     fn canonical_len(&self) -> usize {
         match self {
@@ -77,11 +100,14 @@ impl DisplayMembershipCell {
             Self::Slot(_) => 1,
         }
     }
+
     fn visible_len(&self) -> usize {
         usize::from(matches!(self, Self::Slot(_)))
     }
 }
+
 type DisplayMembershipLink = Option<Box<DisplayMembershipNode>>;
+
 struct DisplayMembershipNode {
     cell: DisplayMembershipCell,
     left: DisplayMembershipLink,
@@ -90,12 +116,14 @@ struct DisplayMembershipNode {
     canonical_len: usize,
     visible_len: usize,
 }
+
 struct PendingDisplayMembershipNode {
     cell: Option<DisplayMembershipCell>,
     left: Option<usize>,
     right: Option<usize>,
     priority: u64,
 }
+
 impl DisplayMembershipNode {
     fn new(cell: DisplayMembershipCell, priority: u64) -> Box<Self> {
         let canonical_len = cell.canonical_len();
@@ -109,6 +137,7 @@ impl DisplayMembershipNode {
             visible_len,
         })
     }
+
     fn refresh(&mut self) {
         self.canonical_len = display_membership_canonical_len(&self.left)
             .saturating_add(self.cell.canonical_len())
@@ -118,12 +147,15 @@ impl DisplayMembershipNode {
             .saturating_add(display_membership_visible_len(&self.right));
     }
 }
+
 fn display_membership_canonical_len(link: &DisplayMembershipLink) -> usize {
     link.as_ref().map_or(0, |node| node.canonical_len)
 }
+
 fn display_membership_visible_len(link: &DisplayMembershipLink) -> usize {
     link.as_ref().map_or(0, |node| node.visible_len)
 }
+
 struct DisplayMembershipRope {
     root: DisplayMembershipLink,
     next_seed: u64,
@@ -140,6 +172,7 @@ struct DisplayMembershipRope {
     #[cfg(test)]
     structural_node_visits: usize,
 }
+
 impl DisplayMembershipRope {
     fn empty(display_payload_visits: usize) -> Self {
         #[cfg(not(test))]
@@ -153,12 +186,14 @@ impl DisplayMembershipRope {
             structural_node_visits: 0,
         }
     }
+
     fn record_structural_node_visit(&mut self) {
         #[cfg(test)]
         {
             self.structural_node_visits = self.structural_node_visits.saturating_add(1);
         }
     }
+
     fn merge(
         &mut self,
         left: DisplayMembershipLink,
@@ -181,6 +216,7 @@ impl DisplayMembershipRope {
             }
         }
     }
+
     fn from_projection_state(
         canonical_len: usize,
         display_state: &mut DisplayProjectionState,
@@ -204,6 +240,7 @@ impl DisplayMembershipRope {
         ));
         (Self::from_cells(cells, payload_visits), ambiguous)
     }
+
     fn from_canonical_window(
         canonical_items: &[TimelineItem],
         window: std::ops::Range<usize>,
@@ -218,12 +255,15 @@ impl DisplayMembershipRope {
         cells.push(DisplayMembershipCell::Gap(canonical_items.len() - end));
         Self::from_cells(cells, end - start)
     }
+
     fn canonical_len(&self) -> usize {
         display_membership_canonical_len(&self.root)
     }
+
     fn visible_len(&self) -> usize {
         display_membership_visible_len(&self.root)
     }
+
     fn next_priority(&mut self) -> u64 {
         let mut value = self.next_seed;
         self.next_seed = self.next_seed.wrapping_add(1);
@@ -232,10 +272,12 @@ impl DisplayMembershipRope {
         value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         value ^ (value >> 31)
     }
+
     fn node(&mut self, cell: DisplayMembershipCell) -> DisplayMembershipLink {
         self.record_structural_node_visit();
         Some(DisplayMembershipNode::new(cell, self.next_priority()))
     }
+
     /// Build the initial implicit treap in one Cartesian-tree pass. Repeated
     /// `merge` appends would add an avoidable `W log W` construction term.
     fn from_cells(cells: Vec<DisplayMembershipCell>, display_payload_visits: usize) -> Self {
@@ -291,6 +333,7 @@ impl DisplayMembershipRope {
         }
         rope
     }
+
     fn split(
         &mut self,
         link: DisplayMembershipLink,
@@ -338,10 +381,12 @@ impl DisplayMembershipRope {
         let right = self.merge(right_gap, node.right.take());
         (left, right)
     }
+
     fn split_root(&mut self, index: usize) -> (DisplayMembershipLink, DisplayMembershipLink) {
         let root = self.root.take();
         self.split(root, index)
     }
+
     fn edge_is_visible(&mut self, link: &DisplayMembershipLink, first: bool) -> bool {
         let Some(mut node) = link.as_deref() else {
             return false;
@@ -359,6 +404,7 @@ impl DisplayMembershipRope {
             node = next;
         }
     }
+
     fn insert(&mut self, index: usize, item: TimelineItem, include: Option<bool>) -> bool {
         if index > self.canonical_len() {
             return false;
@@ -382,6 +428,7 @@ impl DisplayMembershipRope {
         self.root = self.merge(left, right);
         true
     }
+
     fn split_one(
         &mut self,
         index: usize,
@@ -398,6 +445,7 @@ impl DisplayMembershipRope {
         let middle = middle?;
         (middle.canonical_len == 1).then_some((left, middle, right))
     }
+
     fn set(&mut self, index: usize, item: TimelineItem, expected_render_id: &str) -> bool {
         let Some((left, mut middle, right)) = self.split_one(index) else {
             return false;
@@ -419,6 +467,7 @@ impl DisplayMembershipRope {
         self.root = self.merge(left, right);
         valid
     }
+
     fn remove(&mut self, index: usize, expected_render_id: &str) -> bool {
         let Some((left, middle, right)) = self.split_one(index) else {
             return false;
@@ -436,13 +485,16 @@ impl DisplayMembershipRope {
         self.root = self.merge(left, right);
         valid
     }
+
     fn truncate(&mut self, length: usize) {
         let (left, _) = self.split_root(length.min(self.canonical_len()));
         self.root = left;
     }
+
     fn clear(&mut self) {
         self.root = None;
     }
+
     fn hide_first_visible(&mut self, link: &mut DisplayMembershipLink, remaining: &mut usize) {
         if *remaining == 0 || display_membership_visible_len(link) == 0 {
             return;
@@ -459,6 +511,7 @@ impl DisplayMembershipRope {
         self.hide_first_visible(&mut node.right, remaining);
         node.refresh();
     }
+
     fn trim_to_live_edge(&mut self, max_items: Option<usize>) {
         let Some(max_items) = max_items else {
             return;
@@ -468,6 +521,7 @@ impl DisplayMembershipRope {
         self.hide_first_visible(&mut root, &mut excess);
         self.root = root;
     }
+
     fn materialize(mut self, display_state: &mut DisplayProjectionState) -> (usize, usize) {
         let visible_len = self.visible_len();
         let mut slots = Vec::with_capacity(visible_len);
@@ -516,14 +570,16 @@ impl DisplayMembershipRope {
         }
     }
 }
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct DisplayProjectionContext {
+pub(super) struct DisplayProjectionContext {
     max_live_edge_items: Option<usize>,
     include_prepend: bool,
     include_append: bool,
 }
+
 impl DisplayProjectionContext {
-    fn for_timeline(
+    pub(super) fn for_timeline(
         kind: &TimelineKind,
         observation: &TimelineViewportObservation,
         restoring_anchor: bool,
@@ -536,6 +592,7 @@ impl DisplayProjectionContext {
             include_append: true,
         }
     }
+
     #[cfg(test)]
     fn bounded_live_edge() -> Self {
         Self {
@@ -545,17 +602,19 @@ impl DisplayProjectionContext {
         }
     }
 }
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct DisplayProjectionBatch {
+pub(super) struct DisplayProjectionBatch {
     display_after: Vec<TimelineItem>,
-    display_diffs: Vec<TimelineDiff>,
+    pub(super) display_diffs: Vec<TimelineDiff>,
     used_reset_fallback: bool,
     #[cfg(test)]
     display_payload_visits: usize,
     #[cfg(test)]
     structural_node_visits: usize,
 }
-fn commit_sdk_batch_for_generation<R>(
+
+pub(super) fn commit_sdk_batch_for_generation<R>(
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
     actor_generation: u64,
@@ -574,6 +633,7 @@ fn commit_sdk_batch_for_generation<R>(
     let projection = project_sdk_batch(canonical_items, display_state, canonical_diffs, context);
     Some(publish(&lease, projection, canonical_items, display_state))
 }
+
 fn project_sdk_batch(
     canonical_items: &mut Vec<TimelineItem>,
     display_state: &mut DisplayProjectionState,
@@ -688,6 +748,7 @@ fn project_sdk_batch(
         structural_node_visits,
     }
 }
+
 fn normalize_display_projection_slots(slots: &[DisplayProjectionSlot]) -> Vec<TimelineItem> {
     let mut seen = HashSet::new();
     slots
@@ -696,11 +757,13 @@ fn normalize_display_projection_slots(slots: &[DisplayProjectionSlot]) -> Vec<Ti
         .map(|slot| slot.item.clone())
         .collect()
 }
+
 /// Diff program produced by the one projection builder. Keeping the wrapper's
 /// field private prevents the validator from silently becoming a generic
 /// arbitrary-diff interpreter: the builder emits only a constant number of
 /// structural groups, so validation is `O(W + D)` rather than `O(W * D)`.
 struct BuiltDisplayProjectionDiffs(Vec<TimelineDiff>);
+
 fn finalize_display_projection_diffs(
     display_before: &[TimelineItem],
     display_after: &[TimelineItem],
@@ -724,6 +787,7 @@ fn finalize_display_projection_diffs(
     };
     (display_diffs, used_reset_fallback)
 }
+
 fn build_display_projection_diffs(
     display_before: &[TimelineItem],
     display_after: &[TimelineItem],
@@ -868,6 +932,7 @@ fn build_display_projection_diffs(
     }
     Some(BuiltDisplayProjectionDiffs(diffs))
 }
+
 fn validate_display_projection_diffs(
     display_before: &[TimelineItem],
     diffs: &BuiltDisplayProjectionDiffs,
@@ -999,6 +1064,7 @@ fn validate_display_projection_diffs(
     }
     items == expected_after
 }
+
 fn rebuild_display_projection_index(
     items: &[TimelineItem],
     index_by_id: &mut HashMap<String, usize>,
@@ -1011,6 +1077,7 @@ fn rebuild_display_projection_index(
             .map(|(index, item)| (timeline_item_render_id(item), index)),
     );
 }
+
 fn record_display_projection_reset_fallback() {
     let fallback_count = DISPLAY_PROJECTION_RESET_FALLBACKS.fetch_add(1, Ordering::Relaxed) + 1;
     koushi_diagnostics::record(
@@ -1025,8 +1092,9 @@ fn record_display_projection_reset_fallback() {
         )),
     );
 }
+
 #[cfg(test)]
-fn apply_timeline_diffs_to_items(items: &mut Vec<TimelineItem>, diffs: &[TimelineDiff]) {
+pub(super) fn apply_timeline_diffs_to_items(items: &mut Vec<TimelineItem>, diffs: &[TimelineDiff]) {
     for diff in diffs {
         match diff {
             TimelineDiff::PushFront { item } => items.insert(0, item.clone()),
@@ -1057,12 +1125,16 @@ fn apply_timeline_diffs_to_items(items: &mut Vec<TimelineItem>, diffs: &[Timelin
         }
     }
 }
+
 /// Applies the same render-identity normalization used by the desktop
 /// TimelineStore. A bounded replay can overlap later scrollback diffs, so this
 /// mirror must not retain duplicate event, transaction, or synthetic rows that
 /// the webview collapses before it derives latest-reply placement.
 #[cfg(test)]
-fn apply_timeline_diffs_to_display_items(items: &mut Vec<TimelineItem>, diffs: &[TimelineDiff]) {
+pub(super) fn apply_timeline_diffs_to_display_items(
+    items: &mut Vec<TimelineItem>,
+    diffs: &[TimelineDiff],
+) {
     for diff in diffs {
         match diff {
             TimelineDiff::PushFront { item } => insert_display_timeline_item(items, item, 0),
@@ -1086,6 +1158,7 @@ fn apply_timeline_diffs_to_display_items(items: &mut Vec<TimelineItem>, diffs: &
         }
     }
 }
+
 /// Applies actor-originated item revisions to the bounded display mirror.
 ///
 /// The local `Set` index names an exact owner in the actor's canonical
@@ -1093,7 +1166,7 @@ fn apply_timeline_diffs_to_display_items(items: &mut Vec<TimelineItem>, diffs: &
 /// on every pre-normalization slot, so duplicate render identities cannot make
 /// us revise the wrong owner. An owner outside the bounded window is omitted;
 /// replay reconciliation refreshes it separately from canonical state.
-fn apply_non_sdk_item_set_diffs_to_display_items(
+pub(super) fn apply_non_sdk_item_set_diffs_to_display_items(
     display_projection: &mut DisplayProjectionState,
     diffs: &[TimelineDiff],
 ) -> Vec<TimelineDiff> {
@@ -1114,6 +1187,7 @@ fn apply_non_sdk_item_set_diffs_to_display_items(
     let display_after = display_projection.display_items.clone();
     finalize_display_projection_diffs(&display_before, &display_after, false).0
 }
+
 #[cfg(test)]
 fn insert_display_timeline_item(items: &mut Vec<TimelineItem>, item: &TimelineItem, index: usize) {
     let item_id = timeline_item_render_id(item);
@@ -1125,6 +1199,7 @@ fn insert_display_timeline_item(items: &mut Vec<TimelineItem>, item: &TimelineIt
     }
     items.insert(index.min(items.len()), item.clone());
 }
+
 #[cfg(test)]
 fn set_display_timeline_item(items: &mut [TimelineItem], index: usize, item: &TimelineItem) {
     if index >= items.len() {
@@ -1144,6 +1219,7 @@ fn set_display_timeline_item(items: &mut [TimelineItem], index: usize, item: &Ti
     }
     items[index] = item.clone();
 }
+
 #[cfg(test)]
 fn normalize_display_timeline_items(items: &[TimelineItem]) -> Vec<TimelineItem> {
     let mut seen = HashSet::new();
@@ -1153,6 +1229,7 @@ fn normalize_display_timeline_items(items: &[TimelineItem]) -> Vec<TimelineItem>
         .cloned()
         .collect()
 }
+
 /// Matches `timelineItemDomId` in the TypeScript TimelineStore exactly.
 fn timeline_item_render_id(item: &TimelineItem) -> String {
     match &item.id {
@@ -1161,7 +1238,8 @@ fn timeline_item_render_id(item: &TimelineItem) -> String {
         TimelineItemId::Synthetic { synthetic_id } => format!("syn:{synthetic_id}"),
     }
 }
-fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
+
+pub(super) fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
     diffs.iter().any(|diff| match diff {
         TimelineDiff::PushFront { .. } => true,
         TimelineDiff::Insert { index, .. } => *index == 0,
@@ -1173,6 +1251,46 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
         | TimelineDiff::Clear => false,
     })
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::collections::HashSet;
+
+    use std::sync::{Arc, Mutex};
+
+    use koushi_state::AppAction;
+
+    use tokio::sync::{broadcast, mpsc};
+
+    use crate::event::{
+        CoreEvent, ThreadSummaryDto, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent,
+        TimelineItem, TimelineItemId, TimelineMediaKind, TimelineViewportObservation,
+    };
+
+    use crate::ids::{TimelineBatchId, TimelineGeneration};
+
+    use super::super::item_projection::timeline_item_event_id;
+    use super::super::navigation::{
+        ROOM_REPLAY_INITIAL_ITEMS_MAX, RestoreSettlement, TimelineActorGenerationGate,
+        accept_projection_ack_for_active_actor, derive_timeline_navigation_snapshot,
+        publish_restore_settlement_for_generation, publish_restore_settlement_with_lease,
+    };
+    use super::super::test_support::{
+        fake_rid, focused_key, replacement_generation_fixture, replay_projection_services,
+        room_key, timeline_item, timeline_media_item,
+    };
+    use super::super::thread_projection::{
+        ReplayKnownDisplayContext, ReplayKnownThreadRootProjectionRegistry,
+        reconcile_replay_known_root_projections_after_navigation_update,
+        refresh_replay_known_root_projections,
+    };
+    use super::{
+        DisplayProjectionBatch, DisplayProjectionContext, DisplayProjectionState,
+        apply_timeline_diffs_to_display_items, apply_timeline_diffs_to_items,
+        commit_sdk_batch_for_generation, project_sdk_batch,
+    };
+
     #[test]
     fn sdk_canonical_indices_project_to_bounded_display_and_converge_local_echo() {
         let mut canonical_items = synthetic_projection_items(9_039);
@@ -1238,6 +1356,72 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             );
         }
     }
+
+    fn synthetic_projection_items(count: usize) -> Vec<TimelineItem> {
+        (0..count)
+            .map(|index| {
+                timeline_item(
+                    &format!("$canonical-{index}:test"),
+                    Some("synthetic"),
+                    "@sender:test",
+                    false,
+                )
+            })
+            .collect()
+    }
+
+    fn historical_display_projection_context() -> DisplayProjectionContext {
+        DisplayProjectionContext {
+            max_live_edge_items: None,
+            include_prepend: true,
+            include_append: true,
+        }
+    }
+
+    fn deep_display_projection_fixture() -> (Vec<TimelineItem>, DisplayProjectionState) {
+        let canonical_items = synthetic_projection_items(9_040);
+        let start = canonical_items.len() - ROOM_REPLAY_INITIAL_ITEMS_MAX;
+        let state = DisplayProjectionState::from_canonical_window(
+            &canonical_items,
+            start..canonical_items.len(),
+        );
+        (canonical_items, state)
+    }
+
+    fn additive_display_payload_visit_bound(batch_len: usize) -> usize {
+        ROOM_REPLAY_INITIAL_ITEMS_MAX
+            .saturating_add(batch_len)
+            .saturating_mul(2)
+    }
+
+    fn expected_log_display_structural_visit_bound(
+        represented_width: usize,
+        batch_len: usize,
+    ) -> usize {
+        let represented_nodes = represented_width
+            .saturating_add(batch_len.saturating_mul(3))
+            .saturating_add(2);
+        let expected_log =
+            usize::BITS.saturating_sub(represented_nodes.max(1).leading_zeros()) as usize;
+        represented_width
+            .saturating_mul(4)
+            .saturating_add(
+                batch_len
+                    .saturating_mul(expected_log.max(1))
+                    .saturating_mul(48),
+            )
+            .saturating_add(256)
+    }
+
+    fn assert_display_projection_converges(
+        display_before: Vec<TimelineItem>,
+        projection: &DisplayProjectionBatch,
+    ) {
+        let mut desktop_model = display_before;
+        apply_timeline_diffs_to_items(&mut desktop_model, &projection.display_diffs);
+        assert_eq!(desktop_model, projection.display_after);
+    }
+
     #[test]
     fn display_projection_retains_duplicate_identity_until_its_last_owner_is_removed() {
         let first_owner = timeline_item("$duplicate:test", Some("first"), "@sender:test", false);
@@ -1269,6 +1453,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             1
         );
     }
+
     #[test]
     fn display_projection_media_duplicate_keeps_indexed_confirmation_in_display_space() {
         let owner = timeline_media_item(
@@ -1356,6 +1541,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             Some("confirmed.png")
         );
     }
+
     #[test]
     fn display_projection_ignores_out_of_window_index_mutations() {
         let mut canonical_items = synthetic_projection_items(200);
@@ -1391,6 +1577,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
         assert_display_projection_converges(display_before.clone(), &projection);
         assert_eq!(projection.display_after, display_before);
     }
+
     #[test]
     fn display_projection_includes_boundary_adjacent_insert() {
         let mut canonical_items = synthetic_projection_items(200);
@@ -1412,6 +1599,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
         assert_display_projection_converges(display_before, &projection);
         assert_eq!(state.display_items().first(), Some(&boundary));
     }
+
     #[test]
     fn display_projection_live_edge_push_back_stays_bounded() {
         let mut canonical_items = synthetic_projection_items(200);
@@ -1438,6 +1626,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             Some("$canonical-81:test")
         );
     }
+
     #[test]
     fn display_projection_payload_work_does_not_rescan_window_per_prepend() {
         let (mut canonical_items, mut state) = deep_display_projection_fixture();
@@ -1465,6 +1654,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             "visible payload work must stay within binding plus materialization passes"
         );
     }
+
     #[test]
     fn display_projection_payload_work_does_not_rescan_window_per_indexed_diff() {
         let (mut canonical_items, mut state) = deep_display_projection_fixture();
@@ -1508,6 +1698,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             "indexed diffs must not rescan all visible payloads per operation"
         );
     }
+
     #[test]
     fn uncapped_restore_structural_visits_stay_inside_expected_log_envelope() {
         let represented_width = 2_048;
@@ -1563,6 +1754,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             "uncapped restore structural work exceeded the deterministic expected-log envelope"
         );
     }
+
     #[test]
     fn sparse_indexed_structural_envelope_is_independent_of_canonical_history_length() {
         let represented_width = 256;
@@ -1606,6 +1798,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             );
         }
     }
+
     #[test]
     fn display_projection_backward_push_front_prepends_historical_page() {
         let mut canonical_items = synthetic_projection_items(200);
@@ -1630,6 +1823,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             ROOM_REPLAY_INITIAL_ITEMS_MAX + 1
         );
     }
+
     #[test]
     fn display_projection_clear_and_reset_replace_authoritative_display() {
         let mut canonical_items = vec![
@@ -1668,6 +1862,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
         assert_display_projection_converges(reset_before, &reset);
         assert_eq!(state.display_items(), reset_items);
     }
+
     #[test]
     fn display_projection_invalid_translation_uses_validated_reset_fallback() {
         let mut canonical_items = vec![timeline_item(
@@ -1693,6 +1888,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
         ));
         assert_display_projection_converges(display_before, &projection);
     }
+
     #[tokio::test]
     async fn restore_terminal_flush_publishes_two_projected_batches_once_then_rebounds_live_edge() {
         let key = room_key();
@@ -1846,6 +2042,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
         assert_eq!(state.display_items().len(), ROOM_REPLAY_INITIAL_ITEMS_MAX);
         assert_eq!(state.display_items().last(), Some(&live));
     }
+
     #[tokio::test]
     async fn sdk_batch_generation_fence_rejects_activity_and_state_together() {
         let key = room_key();
@@ -1887,6 +2084,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
             Err(mpsc::error::TryRecvError::Empty)
         ));
     }
+
     #[test]
     fn replay_known_display_mirror_matches_webview_identity_normalization() {
         let mut before = timeline_item("$before:test", Some("before"), "@a:test", false);
@@ -2066,6 +2264,7 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
         assert!(unchanged.ready.is_empty());
         assert!(unchanged.stale.is_empty());
     }
+
     #[tokio::test]
     async fn projection_ack_requires_exact_identity_and_current_actor_generation() {
         let key = focused_key();
@@ -2123,3 +2322,4 @@ fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
         ));
         assert!(acknowledged);
     }
+}

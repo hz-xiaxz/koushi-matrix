@@ -1,8 +1,57 @@
-//! Exact AST extraction draft from immutable timeline baseline.
+use std::collections::{HashMap, HashSet};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 
-const INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT: u16 = 100;
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+use koushi_state::ActivityRow;
 
-const ROOM_REPLAY_INITIAL_ITEMS_MAX: usize = 120;
+use matrix_sdk_ui::timeline::Timeline;
+use tokio::sync::{broadcast, mpsc, watch};
+
+use crate::account_work::{AccountWorkKind, AccountWorkPermit, AccountWorkScheduler};
+use crate::event::{
+    CoreEvent, PaginationDirection, PaginationState, ThreadRootProjectionDto,
+    ThreadRootProjectionSourceDto, ThreadRootProjectionStateDto, TimelineAnchorRestoreStatus,
+    TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId, TimelineNavigationSnapshot,
+    TimelineUnreadPosition, TimelineViewportObservation,
+};
+use crate::executor;
+use crate::failure::{CoreFailure, TimelineFailureKind};
+use crate::ids::{RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
+use crate::live_tail_freshness::LiveTailSchedulerAction;
+use crate::startup_trace::{self};
+use crate::threads_list::ThreadRootProjectionService;
+use koushi_sdk::MatrixLiveTailRefreshOutcome as LiveTailRefreshOutcome;
+
+// BEGIN GENERATED SIBLING IMPORTS
+use super::actor::{TimelineActor, TimelineActorControl, TimelineActorMessage};
+use super::diagnostics::{
+    record_live_tail_queue, record_live_tail_state, record_subscribe_stage,
+    timeline_key_trace_kind, trace_timeline_items, trace_timeline_paginate,
+};
+use super::display_projection::{
+    DisplayProjectionState, apply_non_sdk_item_set_diffs_to_display_items,
+};
+use super::gap_repair::{LIVE_TAIL_CANCELLATION_DEADLINE, RestoreCausalProjectionBuffer};
+use super::item_projection::{
+    has_user_visible_content, is_unread_navigation_item, item_index_for_event_id,
+    timeline_item_event_id,
+};
+use super::manager::TimelineManagerActor;
+use super::thread_projection::{
+    JAVASCRIPT_SAFE_INTEGER_MAX, ReplayKnownDisplayContext, ReplayKnownThreadRootProjection,
+    ReplayKnownThreadRootProjectionRegistry, ReplayKnownThreadRootProjectionUpdate,
+    ThreadAttentionObservation, ThreadAttentionTracker,
+    known_thread_root_projections_for_display_context, replay_known_candidates_for_display_items,
+    replay_known_timeline_events_with_hydration_handoffs,
+};
+// END GENERATED SIBLING IMPORTS
+
+pub(super) const INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT: u16 = 100;
+
+pub(super) const ROOM_REPLAY_INITIAL_ITEMS_MAX: usize = 120;
 
 /// Backstop tick count for the anchor-relay wait. After the SDK signals
 /// `anchor_present == true`, the anchor's diff has been broadcast through the
@@ -66,9 +115,7 @@ impl NavigationProjectionIngress {
         let (tx, rx) = watch::channel(None);
         (Self { tx }, rx)
     }
-}
 
-impl NavigationProjectionIngress {
     pub(crate) fn subscribe(&self) -> watch::Receiver<Option<NavigationProjectionIntent>> {
         let receiver = self.tx.subscribe();
         // A replacement manager must observe the retained latest desired
@@ -76,9 +123,7 @@ impl NavigationProjectionIngress {
         self.tx.send_modify(|_| {});
         receiver
     }
-}
 
-impl NavigationProjectionIngress {
     pub(crate) fn admit(&self, intent: NavigationProjectionIntent) -> bool {
         let retained = self.tx.borrow().clone();
         let next = match retained {
@@ -108,8 +153,8 @@ impl NavigationProjectionIngress {
 /// intentionally never spans an `.await`; it protects only `Mutex` mutation
 /// and synchronous `broadcast::Sender::send` calls.
 #[derive(Default)]
-struct TimelineActorGenerationGateState {
-    entries: HashMap<TimelineKey, TimelineActorGenerationGateEntry>,
+pub(super) struct TimelineActorGenerationGateState {
+    pub(super) entries: HashMap<TimelineKey, TimelineActorGenerationGateEntry>,
 }
 
 /// Process-global owner epoch. TimelineManagerActor may be recreated during
@@ -117,7 +162,7 @@ struct TimelineActorGenerationGateState {
 /// therefore per-manager counters are not a valid replacement fence.
 static NEXT_TIMELINE_ACTOR_GENERATION: AtomicU64 = AtomicU64::new(1);
 
-static DISPLAY_PROJECTION_RESET_FALLBACKS: AtomicU64 = AtomicU64::new(0);
+pub(super) static DISPLAY_PROJECTION_RESET_FALLBACKS: AtomicU64 = AtomicU64::new(0);
 
 /// QA/test observation point for the process-global projection reset fallback
 /// counter. Product behavior never branches on this diagnostic value.
@@ -126,23 +171,23 @@ pub fn display_projection_reset_fallback_count() -> u64 {
     DISPLAY_PROJECTION_RESET_FALLBACKS.load(Ordering::Relaxed)
 }
 
-struct TimelineActorGenerationGateEntry {
+pub(super) struct TimelineActorGenerationGateEntry {
     generation: u64,
     active_leases: usize,
     replacing: bool,
 }
 
-struct TimelineActorGenerationGate {
-    state: Mutex<TimelineActorGenerationGateState>,
+pub(super) struct TimelineActorGenerationGate {
+    pub(super) state: Mutex<TimelineActorGenerationGateState>,
     changes: watch::Sender<u64>,
 }
 
-struct TimelineActorGenerationActivation {
-    generation: u64,
+pub(super) struct TimelineActorGenerationActivation {
+    pub(super) generation: u64,
     previous_generation: Option<u64>,
 }
 
-struct TimelineActorGenerationLease {
+pub(super) struct TimelineActorGenerationLease {
     gate: Arc<TimelineActorGenerationGate>,
     key: TimelineKey,
     generation: u64,
@@ -162,7 +207,7 @@ impl TimelineActorGenerationGate {
     /// Starts a new actor generation only after every old-generation replay
     /// lease has completed. No synchronous mutex is held while waiting for a
     /// watch notification.
-    async fn activate_after_quiescence(
+    pub(super) async fn activate_after_quiescence(
         &self,
         key: &TimelineKey,
     ) -> TimelineActorGenerationActivation {
@@ -223,13 +268,11 @@ impl TimelineActorGenerationGate {
             }
         }
     }
-}
 
-impl TimelineActorGenerationGate {
     /// Restores an actor generation if construction of its replacement failed
     /// before an actor handle was returned. A successful spawn is never
     /// restored: its handle atomically supersedes the old one in the manager.
-    fn restore_failed_activation(
+    pub(super) fn restore_failed_activation(
         &self,
         key: &TimelineKey,
         activation: TimelineActorGenerationActivation,
@@ -262,13 +305,11 @@ impl TimelineActorGenerationGate {
         self.changes
             .send_modify(|revision| *revision = revision.wrapping_add(1));
     }
-}
 
-impl TimelineActorGenerationGate {
     /// Unsubscribe/shutdown removes ownership only after a prior synchronous
     /// replay lease has finished. As with replacement, the mutex is dropped
     /// before awaiting a watch change.
-    async fn invalidate_and_quiesce(&self, key: &TimelineKey) {
+    pub(super) async fn invalidate_and_quiesce(&self, key: &TimelineKey) {
         let mut changes = self.changes.subscribe();
         loop {
             let complete = {
@@ -297,10 +338,8 @@ impl TimelineActorGenerationGate {
             }
         }
     }
-}
 
-impl TimelineActorGenerationGate {
-    fn try_acquire(
+    pub(super) fn try_acquire(
         self: &Arc<Self>,
         key: &TimelineKey,
         generation: u64,
@@ -320,10 +359,8 @@ impl TimelineActorGenerationGate {
             generation,
         })
     }
-}
 
-impl TimelineActorGenerationGate {
-    fn current_generation(&self, key: &TimelineKey) -> Option<u64> {
+    pub(super) fn current_generation(&self, key: &TimelineKey) -> Option<u64> {
         self.state
             .lock()
             .expect("timeline actor generation lock must not be poisoned")
@@ -356,7 +393,7 @@ fn next_timeline_actor_generation(_state: &mut TimelineActorGenerationGateState)
     NEXT_TIMELINE_ACTOR_GENERATION.fetch_add(1, Ordering::Relaxed)
 }
 
-fn accept_projection_ack_for_active_actor(
+pub(super) fn accept_projection_ack_for_active_actor(
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
     actor_generation: u64,
@@ -377,7 +414,7 @@ fn accept_projection_ack_for_active_actor(
     true
 }
 
-fn projection_acknowledgement_for_current_items(
+pub(super) fn projection_acknowledgement_for_current_items(
     key: &TimelineKey,
     items: &[TimelineItem],
     accepted: bool,
@@ -395,7 +432,7 @@ fn projection_acknowledgement_for_current_items(
     }
 }
 
-fn replay_projection_request_id(
+pub(super) fn replay_projection_request_id(
     projection_request_id: RequestId,
     projection_acknowledged: bool,
 ) -> Option<RequestId> {
@@ -403,22 +440,20 @@ fn replay_projection_request_id(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct InitialItemsRequestIdentity {
+pub(super) struct InitialItemsRequestIdentity {
     projection_request_id: Option<RequestId>,
     cause_request_id: Option<RequestId>,
 }
 
 impl InitialItemsRequestIdentity {
-    fn fresh(request_id: RequestId) -> Self {
+    pub(super) fn fresh(request_id: RequestId) -> Self {
         Self {
             projection_request_id: Some(request_id),
             cause_request_id: Some(request_id),
         }
     }
-}
 
-impl InitialItemsRequestIdentity {
-    fn replay(
+    pub(super) fn replay(
         projection_request_id: RequestId,
         projection_acknowledged: bool,
         cause_request_id: Option<RequestId>,
@@ -431,10 +466,8 @@ impl InitialItemsRequestIdentity {
             cause_request_id,
         }
     }
-}
 
-impl InitialItemsRequestIdentity {
-    fn recovery() -> Self {
+    pub(super) fn recovery() -> Self {
         Self {
             projection_request_id: None,
             cause_request_id: None,
@@ -447,7 +480,7 @@ impl InitialItemsRequestIdentity {
 /// The lease is held solely for the synchronous broadcast send(s). It never
 /// crosses an await, yet replacement cannot activate a new actor generation
 /// between an old actor's current-generation check and this event delivery.
-fn emit_timeline_events_for_generation(
+pub(super) fn emit_timeline_events_for_generation(
     event_tx: &broadcast::Sender<CoreEvent>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
@@ -492,7 +525,7 @@ async fn acquire_pagination_permit_and_emit_paginating(
 /// Emits an already-authorized group atomically with respect to generation
 /// replacement. Callers must keep `lease` alive for this entire synchronous
 /// call; this helper deliberately does not acquire a second lease.
-fn emit_timeline_events_with_lease(
+pub(super) fn emit_timeline_events_with_lease(
     event_tx: &broadcast::Sender<CoreEvent>,
     _lease: &TimelineActorGenerationLease,
     events: Vec<TimelineEvent>,
@@ -509,7 +542,7 @@ fn emit_timeline_events_with_lease(
 ///
 /// The helper is deliberately synchronous. In particular, no root hydration,
 /// media work, or reducer delivery may run while the lease is held.
-fn emit_items_updated_and_reconcile_replay_known_for_generation(
+pub(super) fn emit_items_updated_and_reconcile_replay_known_for_generation(
     event_tx: &broadcast::Sender<CoreEvent>,
     registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
     thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
@@ -551,7 +584,7 @@ fn emit_items_updated_and_reconcile_replay_known_for_generation(
 /// retained until the display-safe `ItemsUpdated` event and scoped replay
 /// Ready/Clear events have all been synchronously broadcast. This is the same
 /// current-generation boundary used for SDK diff batches.
-fn emit_non_sdk_item_sets_and_reconcile_replay_known_for_generation(
+pub(super) fn emit_non_sdk_item_sets_and_reconcile_replay_known_for_generation(
     event_tx: &broadcast::Sender<CoreEvent>,
     registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
     thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
@@ -587,7 +620,7 @@ fn emit_non_sdk_item_sets_and_reconcile_replay_known_for_generation(
 /// under a generation lease already acquired by the caller.
 /// Keeping the registry mutation and every broadcast in this helper prevents
 /// an observer from seeing only one half of a display transition.
-fn emit_items_updated_and_reconcile_replay_known_with_lease(
+pub(super) fn emit_items_updated_and_reconcile_replay_known_with_lease(
     event_tx: &broadcast::Sender<CoreEvent>,
     registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
     thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
@@ -628,9 +661,9 @@ fn emit_items_updated_and_reconcile_replay_known_with_lease(
 /// this group is published while the same actor-generation lease is held so a
 /// replacement actor cannot expose an `ItemsUpdated` without its matching
 /// navigation/terminal state (or vice versa).
-struct RestoreSettlement {
-    navigation_snapshot: Option<TimelineNavigationSnapshot>,
-    terminal: Option<(RequestId, TimelineAnchorRestoreStatus)>,
+pub(super) struct RestoreSettlement {
+    pub(super) navigation_snapshot: Option<TimelineNavigationSnapshot>,
+    pub(super) terminal: Option<(RequestId, TimelineAnchorRestoreStatus)>,
 }
 
 /// Publish a restore terminal group for the current actor generation.
@@ -638,7 +671,7 @@ struct RestoreSettlement {
 /// `None` means the actor was already stale and no state, buffer, batch id, or
 /// event was changed.  `Some(true)` means a coalesced `ItemsUpdated` batch was
 /// included; `Some(false)` means only navigation/terminal events were needed.
-fn publish_restore_settlement_for_generation(
+pub(super) fn publish_restore_settlement_for_generation(
     restore_emit_buffer: &mut Vec<TimelineDiff>,
     force_items_updated: bool,
     next_batch_id: &mut TimelineBatchId,
@@ -670,7 +703,7 @@ fn publish_restore_settlement_for_generation(
     ))
 }
 
-fn publish_restore_settlement_with_lease(
+pub(super) fn publish_restore_settlement_with_lease(
     restore_emit_buffer: &mut Vec<TimelineDiff>,
     force_items_updated: bool,
     next_batch_id: &mut TimelineBatchId,
@@ -734,7 +767,7 @@ fn publish_restore_settlement_with_lease(
 /// after the frontend has replaced its window but before its replay-known
 /// Ready is registered. Event order remains `InitialItems`, then any scoped
 /// replay Clear/Ready/hydration handoff events.
-fn emit_initial_items_and_reconcile_replay_known_for_generation(
+pub(super) fn emit_initial_items_and_reconcile_replay_known_for_generation(
     event_tx: &broadcast::Sender<CoreEvent>,
     registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
     thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
@@ -844,14 +877,14 @@ fn emit_initial_items_and_reconcile_replay_known_with_lease_after_initial<F>(
     emit_timeline_events_with_lease(event_tx, lease, events);
 }
 
-struct PreparedInitialWindow {
-    display_projection: DisplayProjectionState,
-    navigation_items: Option<Vec<TimelineItem>>,
-    emitted_items: Vec<TimelineItem>,
-    replay_known_candidates: Vec<ThreadRootProjectionDto>,
+pub(super) struct PreparedInitialWindow {
+    pub(super) display_projection: DisplayProjectionState,
+    pub(super) navigation_items: Option<Vec<TimelineItem>>,
+    pub(super) emitted_items: Vec<TimelineItem>,
+    pub(super) replay_known_candidates: Vec<ThreadRootProjectionDto>,
 }
 
-fn commit_prepared_initial_window_for_generation(
+pub(super) fn commit_prepared_initial_window_for_generation(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,
     event_tx: &broadcast::Sender<CoreEvent>,
@@ -886,7 +919,7 @@ fn commit_prepared_initial_window_for_generation(
     true
 }
 
-fn commit_prepared_initial_window_with_lease<F>(
+pub(super) fn commit_prepared_initial_window_with_lease<F>(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,
     event_tx: &broadcast::Sender<CoreEvent>,
@@ -931,7 +964,7 @@ fn commit_prepared_initial_window_with_lease<F>(
 }
 
 #[cfg(test)]
-fn emit_initial_items_and_reconcile_replay_known_for_generation_with_test_hook<F>(
+pub(super) fn emit_initial_items_and_reconcile_replay_known_for_generation_with_test_hook<F>(
     event_tx: &broadcast::Sender<CoreEvent>,
     registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
     thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
@@ -965,16 +998,14 @@ where
 impl ReplayKnownThreadRootProjectionRegistry {
     /// Replaces this replay's known snapshots and returns roots that were in a
     /// prior replay for the same key but are no longer eligible for display.
-    fn replace(
+    pub(super) fn replace(
         &mut self,
         key: &TimelineKey,
         projections: Vec<ThreadRootProjectionDto>,
     ) -> ReplayKnownThreadRootProjectionUpdate {
         self.replace_with_emit_unchanged(key, projections, true)
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
     fn replace_with_emit_unchanged(
         &mut self,
         key: &TimelineKey,
@@ -1043,10 +1074,8 @@ impl ReplayKnownThreadRootProjectionRegistry {
         }
         ReplayKnownThreadRootProjectionUpdate { ready, stale }
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
-    fn clear(&mut self, key: &TimelineKey) -> Vec<ReplayKnownThreadRootProjection> {
+    pub(super) fn clear(&mut self, key: &TimelineKey) -> Vec<ReplayKnownThreadRootProjection> {
         self.suppressed_hydration_terminals.remove(key);
         self.emitted_hydration_terminals.remove(key);
         self.entries
@@ -1054,10 +1083,8 @@ impl ReplayKnownThreadRootProjectionRegistry {
             .map(|entries| entries.into_values().collect())
             .unwrap_or_default()
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
-    fn reconcile_navigation(
+    pub(super) fn reconcile_navigation(
         &mut self,
         key: &TimelineKey,
         navigation_items: &[TimelineItem],
@@ -1069,31 +1096,29 @@ impl ReplayKnownThreadRootProjectionRegistry {
             false,
         )
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
     /// True when this Room timeline currently owns the root with a
     /// replay-known snapshot. Manager-owned hydration workers consult this
     /// before they publish late terminal events, while still recording their
     /// result in the hydration service/reducer state.
-    fn owns_root(&self, key: &TimelineKey, root_event_id: &str) -> bool {
+    pub(super) fn owns_root(&self, key: &TimelineKey, root_event_id: &str) -> bool {
         self.entries
             .get(key)
             .is_some_and(|entries| entries.contains_key(root_event_id))
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
-    fn mark_hydration_terminal_suppressed(&mut self, key: &TimelineKey, root_event_id: String) {
+    pub(super) fn mark_hydration_terminal_suppressed(
+        &mut self,
+        key: &TimelineKey,
+        root_event_id: String,
+    ) {
         self.suppressed_hydration_terminals
             .entry(key.clone())
             .or_default()
             .insert(root_event_id);
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
-    fn take_suppressed_hydration_terminal(
+    pub(super) fn take_suppressed_hydration_terminal(
         &mut self,
         key: &TimelineKey,
         root_event_id: &str,
@@ -1107,19 +1132,23 @@ impl ReplayKnownThreadRootProjectionRegistry {
         }
         was_suppressed
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
-    fn mark_hydration_terminal_emitted(&mut self, key: &TimelineKey, root_event_id: String) {
+    pub(super) fn mark_hydration_terminal_emitted(
+        &mut self,
+        key: &TimelineKey,
+        root_event_id: String,
+    ) {
         self.emitted_hydration_terminals
             .entry(key.clone())
             .or_default()
             .insert(root_event_id);
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
-    fn take_emitted_hydration_terminal(&mut self, key: &TimelineKey, root_event_id: &str) -> bool {
+    pub(super) fn take_emitted_hydration_terminal(
+        &mut self,
+        key: &TimelineKey,
+        root_event_id: &str,
+    ) -> bool {
         let Some(roots) = self.emitted_hydration_terminals.get_mut(key) else {
             return false;
         };
@@ -1129,9 +1158,7 @@ impl ReplayKnownThreadRootProjectionRegistry {
         }
         was_emitted
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
     /// Allocate a positive JavaScript-safe source epoch that does not collide
     /// with any owner in the current replacement group. The registry is
     /// bounded to 32 entries, so this loop cannot approach the safe range's
@@ -1158,23 +1185,22 @@ impl ReplayKnownThreadRootProjectionRegistry {
             };
         }
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
     #[cfg(test)]
-    fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-}
 
-impl ReplayKnownThreadRootProjectionRegistry {
     #[cfg(test)]
-    fn get(&self, key: &TimelineKey) -> Option<&HashMap<String, ReplayKnownThreadRootProjection>> {
+    pub(super) fn get(
+        &self,
+        key: &TimelineKey,
+    ) -> Option<&HashMap<String, ReplayKnownThreadRootProjection>> {
         self.entries.get(key)
     }
 }
 
-async fn receive_navigation_projection(
+pub(super) async fn receive_navigation_projection(
     receiver: &mut Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
 ) -> Option<NavigationProjectionIntent> {
     let Some(active) = receiver.as_mut() else {
@@ -1188,7 +1214,10 @@ async fn receive_navigation_projection(
 }
 
 impl TimelineManagerActor {
-    async fn handle_navigation_projection(&mut self, intent: NavigationProjectionIntent) {
+    pub(super) async fn handle_navigation_projection(
+        &mut self,
+        intent: NavigationProjectionIntent,
+    ) {
         if intent.generation < self.last_navigation_projection_generation {
             return;
         }
@@ -1230,10 +1259,7 @@ impl TimelineManagerActor {
         )
         .await;
     }
-}
-
-impl TimelineManagerActor {
-    async fn handle_committed_room_selection(
+    pub(super) async fn handle_committed_room_selection(
         &mut self,
         request_id: RequestId,
         key: TimelineKey,
@@ -1308,10 +1334,7 @@ impl TimelineManagerActor {
             }
         }
     }
-}
-
-impl TimelineManagerActor {
-    async fn restore_foreground_gap_demand(&mut self, key: &TimelineKey) {
+    pub(super) async fn restore_foreground_gap_demand(&mut self, key: &TimelineKey) {
         if self.live_tail_refreshes.active_key() != Some(key) {
             return;
         }
@@ -1330,7 +1353,7 @@ impl TimelineManagerActor {
 /// actor ownership and publish while the short generation lease is held.
 /// Replacement may win during the capacity await; in that case the prepared
 /// value is discarded and no stale continuation escapes.
-async fn send_generation_fenced<T>(
+pub(super) async fn send_generation_fenced<T>(
     tx: &mpsc::Sender<T>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
@@ -1347,15 +1370,15 @@ async fn send_generation_fenced<T>(
     true
 }
 
-struct ActivePaginationTask {
-    serial: u64,
+pub(super) struct ActivePaginationTask {
+    pub(super) serial: u64,
     direction: PaginationDirection,
     event_count: u16,
-    task: executor::JoinHandle<()>,
+    pub(super) task: executor::JoinHandle<()>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct PaginationCompletion {
+pub(super) struct PaginationCompletion {
     state: PaginationState,
     prepend_expected: Option<bool>,
 }
@@ -1371,22 +1394,22 @@ impl PaginationCompletion {
 }
 
 #[derive(Clone, Debug)]
-struct RestoreTimelineAnchorState {
-    request_id: RequestId,
-    event_id: String,
-    max_batches_remaining: u16,
-    event_count: u16,
-    in_flight: bool,
-    awaiting_diff_batch: bool,
-    continuation_scheduled: bool,
-    continuation_serial: Option<u64>,
+pub(super) struct RestoreTimelineAnchorState {
+    pub(super) request_id: RequestId,
+    pub(super) event_id: String,
+    pub(super) max_batches_remaining: u16,
+    pub(super) event_count: u16,
+    pub(super) in_flight: bool,
+    pub(super) awaiting_diff_batch: bool,
+    pub(super) continuation_scheduled: bool,
+    pub(super) continuation_serial: Option<u64>,
     /// Set to `Some(RESTORE_ANCHOR_RELAY_WAIT_TICKS)` after the SDK confirms
     /// `anchor_present == true` (load-until-anchor found the anchor in a loaded
     /// chunk; its broadcast has been fired and WILL propagate through the 3-hop
     /// relay). While non-zero, each tick re-checks `timeline_contains(anchor)`
     /// and re-ticks until Found or the backstop runs out. `None` during the
     /// normal walk.
-    anchor_relay_wait: Option<u8>,
+    pub(super) anchor_relay_wait: Option<u8>,
 }
 
 fn backward_pagination_changed_oldest_edge(
@@ -1406,7 +1429,7 @@ async fn oldest_observable_event_id(timeline: &Timeline) -> Option<String> {
 }
 
 impl TimelineActor {
-    async fn handle_paginate(
+    pub(super) async fn handle_paginate(
         &mut self,
         request_id: RequestId,
         direction: PaginationDirection,
@@ -1513,9 +1536,6 @@ impl TimelineActor {
             task,
         });
     }
-}
-
-impl TimelineActor {
     async fn paginate_once(
         &mut self,
         request_id: RequestId,
@@ -1537,9 +1557,6 @@ impl TimelineActor {
         self.emit_pagination_completion(request_id, direction, completion);
         completion.into_result()
     }
-}
-
-impl TimelineActor {
     async fn paginate_once_for(
         request_id: RequestId,
         key: TimelineKey,
@@ -1635,10 +1652,7 @@ impl TimelineActor {
             prepend_expected,
         }
     }
-}
-
-impl TimelineActor {
-    fn emit_pagination_completion(
+    pub(super) fn emit_pagination_completion(
         &self,
         request_id: RequestId,
         direction: PaginationDirection,
@@ -1652,10 +1666,7 @@ impl TimelineActor {
             prepend_expected: completion.prepend_expected,
         }));
     }
-}
-
-impl TimelineActor {
-    fn handle_cancel_pagination(&mut self, request_id: RequestId) {
+    pub(super) fn handle_cancel_pagination(&mut self, request_id: RequestId) {
         let Some(active) = self.pagination_task.take() else {
             return;
         };
@@ -1678,10 +1689,7 @@ impl TimelineActor {
             prepend_expected: None,
         }));
     }
-}
-
-impl TimelineActor {
-    async fn handle_restore_timeline_anchor(
+    pub(super) async fn handle_restore_timeline_anchor(
         &mut self,
         request_id: RequestId,
         event_id: String,
@@ -1750,10 +1758,7 @@ impl TimelineActor {
 
         self.schedule_restore_anchor_continue(restore).await;
     }
-}
-
-impl TimelineActor {
-    async fn handle_restore_timeline_anchor_continue(&mut self, serial: u64) {
+    pub(super) async fn handle_restore_timeline_anchor_continue(&mut self, serial: u64) {
         let Some(mut restore) = self.restore_anchor.take() else {
             return;
         };
@@ -2004,10 +2009,7 @@ impl TimelineActor {
             }
         }
     }
-}
-
-impl TimelineActor {
-    async fn maybe_continue_restore_anchor_after_diff(&mut self) {
+    pub(super) async fn maybe_continue_restore_anchor_after_diff(&mut self) {
         let Some(mut restore) = self.restore_anchor.take() else {
             return;
         };
@@ -2045,9 +2047,6 @@ impl TimelineActor {
         restore.awaiting_diff_batch = false;
         self.schedule_restore_anchor_continue(restore).await;
     }
-}
-
-impl TimelineActor {
     async fn schedule_restore_anchor_continue(&mut self, mut restore: RestoreTimelineAnchorState) {
         self.next_restore_anchor_serial = self.next_restore_anchor_serial.wrapping_add(1);
         let serial = self.next_restore_anchor_serial;
@@ -2059,14 +2058,11 @@ impl TimelineActor {
             .send(TimelineActorMessage::RestoreTimelineAnchorContinue { serial })
             .await;
     }
-}
-
-impl TimelineActor {
     /// Re-emit `navigation_items` as `InitialItems` without touching the SDK
     /// subscription or tearing down the actor. Idempotent Subscribe supplies
     /// an exact cause; internal replay recovery does not. The projection ACK
     /// identity remains owned by the actor in both cases.
-    fn handle_replay_initial_items(&mut self, cause_request_id: Option<RequestId>) {
+    pub(super) fn handle_replay_initial_items(&mut self, cause_request_id: Option<RequestId>) {
         let window = replay_initial_items_window_range(
             &self.key.kind,
             self.navigation_items.len(),
@@ -2122,10 +2118,7 @@ impl TimelineActor {
             Some(item_count),
         );
     }
-}
-
-impl TimelineActor {
-    fn acknowledge_projection(
+    pub(super) fn acknowledge_projection(
         &mut self,
         projection_request_id: RequestId,
         generation: TimelineGeneration,
@@ -2141,10 +2134,7 @@ impl TimelineActor {
             &mut self.projection_acknowledged,
         )
     }
-}
-
-impl TimelineActor {
-    fn emit_navigation_if_changed(&mut self) {
+    pub(super) fn emit_navigation_if_changed(&mut self) {
         let snapshot = derive_timeline_navigation_snapshot(
             &self.navigation_items,
             self.fully_read_event_id.as_deref(),
@@ -2169,9 +2159,6 @@ impl TimelineActor {
             snapshot,
         }));
     }
-}
-
-impl TimelineActor {
     fn emit_anchor_restore_finished(
         &self,
         request_id: RequestId,
@@ -2183,9 +2170,6 @@ impl TimelineActor {
             status,
         }));
     }
-}
-
-impl TimelineActor {
     /// Publish the deferred display batch, changed navigation projection, and
     /// optional restore terminal under one actor-generation lease.  Returning
     /// `None` means a replacement actor won the generation fence; in that case
@@ -2238,14 +2222,14 @@ impl TimelineActor {
         }
         Some(published_items)
     }
-}
-
-impl TimelineActor {
     /// Emit one canonical batch plus replay-known ownership changes. This is
     /// the sole normal/restore flush path for `ItemsUpdated`; it preserves the
     /// intentional restore buffering while keeping the final group atomic
     /// with respect to actor-generation replacement.
-    fn emit_items_updated_and_reconcile_replay_known(&mut self, diffs: Vec<TimelineDiff>) -> bool {
+    pub(super) fn emit_items_updated_and_reconcile_replay_known(
+        &mut self,
+        diffs: Vec<TimelineDiff>,
+    ) -> bool {
         let batch_id = self.next_batch_id;
         if emit_items_updated_and_reconcile_replay_known_for_generation(
             &self.event_tx,
@@ -2266,15 +2250,12 @@ impl TimelineActor {
             false
         }
     }
-}
-
-impl TimelineActor {
     /// Commit a local actor mutation through the same generation-fenced
     /// display/replay group as an SDK diff. The bounded replay mirror resolves
     /// each local Set through the exact canonical owner retained on its slot;
     /// roots omitted from the bounded window intentionally produce no display
     /// diff and are handled by replay reconciliation.
-    fn emit_non_sdk_item_sets_and_reconcile_replay_known(
+    pub(super) fn emit_non_sdk_item_sets_and_reconcile_replay_known(
         &mut self,
         diffs: Vec<TimelineDiff>,
     ) -> bool {
@@ -2298,14 +2279,11 @@ impl TimelineActor {
             false
         }
     }
-}
-
-impl TimelineActor {
     /// Terminate a restore walk: flush the buffered diffs (Change 2) then emit
     /// `AnchorRestoreFinished`. Call this at every terminal restore path in
     /// place of `emit_anchor_restore_finished` when the diff buffer may be
     /// non-empty.
-    fn finish_anchor_restore(
+    pub(super) fn finish_anchor_restore(
         &mut self,
         request_id: RequestId,
         status: TimelineAnchorRestoreStatus,
@@ -2320,7 +2298,7 @@ impl TimelineActor {
 }
 
 #[cfg(test)]
-fn replay_initial_items_window(
+pub(super) fn replay_initial_items_window(
     kind: &TimelineKind,
     items: &[TimelineItem],
     observation: &TimelineViewportObservation,
@@ -2344,11 +2322,14 @@ fn replay_initial_items_window_range(
     start..item_count
 }
 
-fn should_hydrate_empty_initial_room_timeline(kind: &TimelineKind, item_count: usize) -> bool {
+pub(super) fn should_hydrate_empty_initial_room_timeline(
+    kind: &TimelineKind,
+    item_count: usize,
+) -> bool {
     matches!(kind, TimelineKind::Room { .. }) && item_count == 0
 }
 
-fn activity_rows_from_timeline_items(
+pub(super) fn activity_rows_from_timeline_items(
     key: &TimelineKey,
     items: &[TimelineItem],
 ) -> Vec<ActivityRow> {
@@ -2361,7 +2342,7 @@ fn activity_rows_from_timeline_items(
         .collect()
 }
 
-fn activity_rows_from_timeline_diffs(
+pub(super) fn activity_rows_from_timeline_diffs(
     key: &TimelineKey,
     diffs: &[TimelineDiff],
 ) -> Vec<ActivityRow> {
@@ -2416,7 +2397,7 @@ fn activity_row_from_timeline_item(room_id: &str, item: &TimelineItem) -> Option
     Some(row)
 }
 
-fn derive_timeline_navigation_snapshot(
+pub(super) fn derive_timeline_navigation_snapshot(
     items: &[TimelineItem],
     fully_read_event_id: Option<&str>,
     observation: &TimelineViewportObservation,
@@ -2658,7 +2639,7 @@ fn timeline_unread_consistency_diagnostic_event(
     ))
 }
 
-fn record_timeline_unread_consistency(
+pub(super) fn record_timeline_unread_consistency(
     stage: &'static str,
     key: &TimelineKey,
     canonical_items: &[TimelineItem],
@@ -2748,6 +2729,91 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
         _ => TimelineFailureKind::Sdk,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_source::item_body;
+
+    use std::collections::{BTreeSet, HashMap};
+
+    use std::sync::{Arc, Mutex};
+
+    use std::time::Duration;
+
+    use koushi_sdk::{MatrixClientSession, MatrixLiveTailRefreshOutcome};
+
+    use koushi_state::AppAction;
+
+    use matrix_sdk_ui::timeline::{GapRepairProjectionId, TimelineFocus};
+    use tokio::sync::{broadcast, mpsc, oneshot, watch};
+
+    use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
+    #[cfg(test)]
+    use crate::causal_projection::{CAUSAL_PROJECTION_DOMAIN_BIT, CAUSAL_PROJECTION_SERIAL_MAX};
+    use crate::causal_projection::{
+        CausalProjectionDomain, CausalProjectionId, CausalProjectionOperationId,
+        next_causal_projection_serial,
+    };
+    use crate::command::TimelineCommand;
+    use crate::event::{
+        CoreEvent, PaginationDirection, PaginationState, ThreadSummaryDto, TimelineEvent,
+        TimelineItemId, TimelineUnreadPosition, TimelineViewportObservation,
+    };
+    use crate::executor;
+    use crate::failure::{CoreFailure, TimelineFailureKind};
+    #[cfg(any(test, feature = "test-hooks"))]
+    use crate::ids::AccountKey;
+    use crate::ids::{TimelineBatchId, TimelineKey, TimelineKind};
+    use crate::link_preview::LinkPreviewContext;
+
+    use crate::live_tail_freshness::{
+        FOREGROUND_LIVE_TAIL_LIMIT, LiveTailFreshnessState, LiveTailRefreshCoordinator,
+        LiveTailSchedulerAction,
+    };
+
+    use crate::threads_list::ThreadRootProjectionService;
+    use koushi_sdk::MatrixLiveTailRefreshOutcome as LiveTailRefreshOutcome;
+
+    use koushi_diagnostics::DiagnosticValue;
+    use koushi_state::{SessionInfo, SessionState};
+
+    use crate::command::CoreCommand;
+    use crate::runtime::CoreRuntime;
+
+    use super::super::actor::{
+        TimelineActor, TimelineActorCleanupIngress, TimelineActorCleanupState,
+        TimelineActorControl, TimelineActorHandle, TimelineActorMessage,
+    };
+    use super::super::display_projection::apply_timeline_diffs_to_items;
+    use super::super::gap_repair::{
+        CausalProjectionObservation, TimelineGapProjectionCompletion,
+        TimelineGapProjectionCorrelation, live_tail_causal_projection_operation,
+        observe_causal_projection,
+    };
+    use super::super::item_projection::{
+        sdk_item_to_timeline_item, sdk_vector_diffs_to_timeline_diffs, timeline_item_event_id,
+    };
+    use super::super::manager::{TimelineManagerActor, TimelineManagerControl, TimelineMessage};
+    use super::super::outbound_send::{
+        SharedSendCompletionCoordinator, TimelineSendEnqueueContext, TimelineSendTerminalIngress,
+    };
+    use super::super::relay::koushi_timeline_builder;
+    use super::super::test_support::{
+        fake_rid, focused_key, gap_demand_test_actor_handle, live_tail_test_manager, room_key,
+        test_timeline_actor_handle, thread_key, timeline_item,
+    };
+    use super::super::thread_projection::{
+        ReplayKnownThreadRootProjectionRegistry, ThreadAttentionTracker,
+    };
+    use super::{
+        NavigationProjectionCleanup, NavigationProjectionIngress, NavigationProjectionIntent,
+        ROOM_REPLAY_INITIAL_ITEMS_MAX, TimelineActorGenerationGate,
+        acquire_pagination_permit_and_emit_paginating, activity_row_from_timeline_item,
+        backward_pagination_changed_oldest_edge, derive_timeline_navigation_snapshot,
+        projection_acknowledgement_for_current_items, receive_navigation_projection,
+        replay_initial_items_window, should_hydrate_empty_initial_room_timeline,
+        timeline_unread_consistency_diagnostic_event,
+    };
 
     #[test]
     fn backward_pagination_detects_only_a_changed_oldest_edge_as_prepend() {
@@ -2934,6 +3000,150 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
 
         assert!(!should_hydrate_empty_initial_room_timeline(&thread, 0));
         assert!(!should_hydrate_empty_initial_room_timeline(&focused, 0));
+    }
+
+    fn cleanup_probe_timeline_actor_handle() -> (
+        TimelineActorHandle,
+        watch::Receiver<TimelineActorCleanupState>,
+    ) {
+        let mut handle = test_timeline_actor_handle();
+        let (cleanup, receiver) = TimelineActorCleanupIngress::channel();
+        handle.enqueue_context = Some(TimelineSendEnqueueContext::CleanupProbe { cleanup });
+        (handle, receiver)
+    }
+
+    fn live_tail_test_actor_handle(
+        label: &'static str,
+        log: Arc<Mutex<Vec<String>>>,
+    ) -> TimelineActorHandle {
+        let (tx, mut rx) = mpsc::channel(8);
+        let task = executor::spawn(async move {
+            let mut operation_epochs = HashMap::new();
+            while let Some(message) = rx.recv().await {
+                match message {
+                    TimelineActorMessage::StartLiveTailRefresh {
+                        epoch,
+                        operation_generation,
+                        limit,
+                    } => {
+                        operation_epochs.insert(operation_generation, epoch);
+                        log.lock()
+                            .expect("live-tail log lock")
+                            .push(format!("start:{label}:epoch={epoch}:limit={limit}"));
+                    }
+                    TimelineActorMessage::CancelLiveTailNetwork {
+                        operation_generation,
+                        acknowledged,
+                    } => {
+                        let epoch = operation_epochs
+                            .get(&operation_generation)
+                            .copied()
+                            .expect("cancelled operation was started");
+                        log.lock()
+                            .expect("live-tail log lock")
+                            .push(format!("cancel-network:{label}:epoch={epoch}"));
+                        let _ = acknowledged.send(());
+                    }
+                    _ => {}
+                }
+            }
+        });
+        TimelineActorHandle {
+            tx,
+            control_tx: None,
+            position_rx: None,
+            task: Some(task),
+            auxiliary_tasks: Vec::new(),
+            subscription_generation: None,
+            enqueue_context: None,
+        }
+    }
+
+    fn stalled_live_tail_cancel_actor_handle(
+        label: &'static str,
+        log: Arc<Mutex<Vec<String>>>,
+    ) -> TimelineActorHandle {
+        let (tx, mut rx) = mpsc::channel(8);
+        let task = executor::spawn(async move {
+            let mut held_acknowledgements = Vec::new();
+            while let Some(message) = rx.recv().await {
+                match message {
+                    TimelineActorMessage::StartLiveTailRefresh {
+                        epoch,
+                        operation_generation: _,
+                        limit,
+                    } => log
+                        .lock()
+                        .expect("stalled live-tail log lock")
+                        .push(format!("start:{label}:epoch={epoch}:limit={limit}")),
+                    TimelineActorMessage::CancelLiveTailNetwork {
+                        operation_generation: _,
+                        acknowledged,
+                    } => {
+                        log.lock()
+                            .expect("stalled live-tail log lock")
+                            .push(format!("cancel-network:{label}"));
+                        held_acknowledgements.push(acknowledged);
+                    }
+                    _ => {}
+                }
+            }
+        });
+        TimelineActorHandle {
+            tx,
+            control_tx: None,
+            position_rx: None,
+            task: Some(task),
+            auxiliary_tasks: Vec::new(),
+            subscription_generation: None,
+            enqueue_context: None,
+        }
+    }
+
+    fn live_tail_replacement_test_actor_handle(
+        key: TimelineKey,
+        labels: Arc<Mutex<HashMap<TimelineKey, &'static str>>>,
+        log: Arc<Mutex<Vec<String>>>,
+    ) -> TimelineActorHandle {
+        let (tx, mut rx) = mpsc::channel(8);
+        let task = executor::spawn(async move {
+            while let Some(message) = rx.recv().await {
+                let label = labels
+                    .lock()
+                    .expect("live-tail replacement labels lock")
+                    .get(&key)
+                    .copied()
+                    .expect("replacement actor label");
+                match message {
+                        TimelineActorMessage::StartLiveTailRefresh {
+                            epoch,
+                            operation_generation,
+                            limit,
+                        } => log.lock().expect("live-tail replacement log lock").push(format!(
+                            "start:{label}:epoch={epoch}:operation={operation_generation}:limit={limit}"
+                        )),
+                        TimelineActorMessage::CancelLiveTailNetwork {
+                            operation_generation,
+                            acknowledged,
+                        } => {
+                            log.lock().expect("live-tail replacement log lock").push(format!(
+                                "cancel-network:{label}:operation={operation_generation}"
+                            ));
+                            let _ = acknowledged.send(());
+                        }
+                        _ => {}
+                    }
+            }
+        });
+        TimelineActorHandle {
+            tx,
+            control_tx: None,
+            position_rx: None,
+            task: Some(task),
+            auxiliary_tasks: Vec::new(),
+            subscription_generation: None,
+            enqueue_context: None,
+        }
     }
 
     #[tokio::test]
@@ -3894,35 +4104,35 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
             "wrong actor, operation, and batch identities cannot prove freshness",
         );
         let matching_projection = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let (actor_tx, state_tx, state_rx) = snapshot(&manager, &room_a);
-                actor_tx
-                    .send(TimelineActorMessage::TestRestoreCausalState(state_tx))
-                    .await
-                    .expect("snapshot request");
-                let (pending, completion_waiting, buffered_diff_count, projections) =
-                    state_rx.await.expect("matching-tag snapshot");
-                if let Some(projection) = projections.iter().copied().find(|projection| {
-                    projection.actor_generation == actor_generation
-                        && projection.operation == operation
-                        && projection.projection_batch != u32::MAX
-                }) && completion_waiting
-                {
-                    assert!(
-                        pending,
-                        "matching metadata remains pending until publication"
-                    );
-                    assert!(
-                        buffered_diff_count >= 2,
-                        "two real SDK batches must reach the actor restore buffer before terminal publication"
-                    );
-                    break projection;
+                loop {
+                    let (actor_tx, state_tx, state_rx) = snapshot(&manager, &room_a);
+                    actor_tx
+                        .send(TimelineActorMessage::TestRestoreCausalState(state_tx))
+                        .await
+                        .expect("snapshot request");
+                    let (pending, completion_waiting, buffered_diff_count, projections) =
+                        state_rx.await.expect("matching-tag snapshot");
+                    if let Some(projection) = projections.iter().copied().find(|projection| {
+                        projection.actor_generation == actor_generation
+                            && projection.operation == operation
+                            && projection.projection_batch != u32::MAX
+                    }) && completion_waiting
+                    {
+                        assert!(
+                            pending,
+                            "matching metadata remains pending until publication"
+                        );
+                        assert!(
+                            buffered_diff_count >= 2,
+                            "two real SDK batches must reach the actor restore buffer before terminal publication"
+                        );
+                        break projection;
+                    }
+                    tokio::task::yield_now().await;
                 }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("real tagged SDK diff reached the restore buffer");
+            })
+            .await
+            .expect("real tagged SDK diff reached the restore buffer");
         assert_ne!(matching_projection.projection_batch, u32::MAX);
 
         let manager_tx = manager.msg_tx.clone();
@@ -4617,7 +4827,7 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
 
     #[test]
     fn timeline_pagination_uses_the_account_work_scheduler() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("navigation.rs");
         let admission_source = source
             .split("async fn acquire_pagination_permit_and_emit_paginating")
             .nth(1)
@@ -4655,31 +4865,17 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
 
     #[test]
     fn timeline_pagination_is_abortable_without_dropping_the_actor() {
-        let source = include_str!("timeline.rs");
-        let actor_source = source
-            .split("struct TimelineActor {")
-            .nth(1)
-            .expect("TimelineActor should exist")
-            .split("impl Drop for TimelineActor")
-            .next()
-            .expect("TimelineActor fields should precede Drop impl");
-        let handle_paginate_source = source
-            .split("async fn handle_paginate")
-            .nth(1)
-            .and_then(|section| section.split("async fn paginate_once").next())
-            .expect("handle_paginate should exist");
-        let handle_cancel_source = source
-            .split("fn handle_cancel_pagination")
-            .nth(1)
-            .and_then(|section| {
-                section
-                    .split("async fn handle_restore_timeline_anchor")
-                    .next()
-            })
-            .expect("cancel pagination handler should exist");
-
+        let actor_source = item_body(
+            include_str!("actor.rs"),
+            "pub(super) struct TimelineActor {",
+        );
+        let actor_messages = include_str!("actor.rs");
+        let handle_paginate_source =
+            item_body(include_str!("navigation.rs"), "async fn handle_paginate");
+        let handle_cancel_source =
+            item_body(include_str!("navigation.rs"), "fn handle_cancel_pagination");
         assert!(
-            source.contains("CancelPagination"),
+            actor_messages.contains("CancelPagination"),
             "timeline manager must expose a cancellation message for in-flight pagination"
         );
         assert!(
@@ -4698,24 +4894,17 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
 
     #[test]
     fn pagination_terminal_is_emitted_after_active_task_release() {
-        let source = include_str!("timeline.rs");
-        let completion_branch = source
-            .split("async fn handle_msg")
-            .nth(1)
-            .expect("TimelineActor message handler should exist")
+        let handler = item_body(include_str!("actor.rs"), "async fn handle_msg");
+        let branch = handler
             .split("TimelineActorMessage::PaginationFinished {")
             .nth(1)
-            .expect("pagination completion branch should exist")
-            .split("TimelineActorMessage::OwnReadReceiptChanged")
-            .next()
-            .expect("own-read-receipt branch should follow pagination completion");
-        let release_offset = completion_branch
+            .expect("pagination completion branch should exist");
+        let release_offset = branch
             .find("self.pagination_task = None")
             .expect("pagination completion must release active task ownership");
-        let terminal_offset = completion_branch
+        let terminal_offset = branch
             .find("self.emit_pagination_completion")
             .expect("pagination completion must emit its terminal state");
-
         assert!(
             release_offset < terminal_offset,
             "the terminal event must not wake React until the actor can accept its next request"
@@ -4724,7 +4913,7 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
 
     #[test]
     fn restore_anchor_handler_is_room_only_and_bounded() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("navigation.rs");
         let helper_source = source
             .split("async fn handle_restore_timeline_anchor(")
             .nth(1)
@@ -4913,7 +5102,7 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
     /// multi-thousand chunk walk that blocks entering the room.
     #[test]
     fn restore_anchor_budget_respects_frontend_hint() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("navigation.rs");
         // Limit to production code so test strings cannot self-satisfy.
         let production = source.split("\nmod tests").next().unwrap_or(source);
 
@@ -4940,24 +5129,15 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
 
     #[test]
     fn restore_walk_coalesces_items_updated_to_single_flush() {
-        let source = include_str!("timeline.rs");
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-
-        // 1. The buffer field must exist on TimelineActor.
+        let actor = item_body(
+            include_str!("actor.rs"),
+            "pub(super) struct TimelineActor {",
+        );
         assert!(
-            production.contains("restore_emit_buffer: Vec<TimelineDiff>"),
+            actor.contains("restore_emit_buffer: Vec<TimelineDiff>"),
             "TimelineActor must carry restore_emit_buffer to coalesce diffs"
         );
-
-        // 2. handle_diff_batch must gate on restore_anchor.is_some() before
-        //    buffering vs. emitting.
-        let diff_batch_src = production
-            .split("async fn handle_diff_batch(")
-            .nth(1)
-            .expect("handle_diff_batch must exist")
-            .split("async fn handle_ignored_users_updated")
-            .next()
-            .expect("handle_diff_batch must end before handle_ignored_users_updated");
+        let diff_batch_src = item_body(include_str!("relay.rs"), "async fn handle_diff_batch");
         assert!(
             diff_batch_src.contains("restore_anchor.is_some()"),
             "handle_diff_batch must check restore_anchor.is_some() to gate buffering"
@@ -4966,34 +5146,17 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
             diff_batch_src.contains("restore_emit_buffer"),
             "handle_diff_batch must use restore_emit_buffer to accumulate diffs"
         );
-        // The emit path for non-restore diffs must still exist (else emit is lost).
         assert!(
             diff_batch_src.contains("ItemsUpdated"),
             "handle_diff_batch must still emit ItemsUpdated on the non-restore branch"
         );
-
-        // 3. Every real terminal delegates directly to the one
-        //    generation-fenced settlement boundary. The boundary drains the
-        //    buffer and emits ItemsUpdated, changed navigation, and terminal
-        //    as one lease-held group.
-        let finish_src = production
-            .split("fn finish_anchor_restore(")
-            .nth(1)
-            .expect("finish_anchor_restore must exist")
-            .split("async fn emit_action_reliable")
-            .next()
-            .expect("action helper must follow restore finish");
+        let navigation = include_str!("navigation.rs");
+        let finish_src = item_body(navigation, "fn finish_anchor_restore");
         assert!(
             finish_src.contains("publish_restore_settlement(Some((request_id, status)))"),
             "real restore terminals must delegate to the atomic settlement"
         );
-        let settlement_src = production
-            .split("fn publish_restore_settlement_with_lease(")
-            .nth(1)
-            .expect("restore settlement helper must exist")
-            .split("fn emit_initial_items_and_reconcile_replay_known_for_generation")
-            .next()
-            .expect("initial-items helper must follow restore settlement");
+        let settlement_src = item_body(navigation, "fn publish_restore_settlement_with_lease");
         assert!(
             settlement_src.contains("std::mem::take"),
             "settlement must drain the buffer only after acquiring the lease"
@@ -5003,62 +5166,25 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
                 && settlement_src.contains("TimelineEvent::AnchorRestoreFinished"),
             "settlement must publish navigation and terminal under the same lease"
         );
-
-        // 4. finish_anchor_restore must use the atomic terminal settlement;
-        //    a second raw terminal emit would permit half-publication.
-        let finish_src = production
-            .split("fn finish_anchor_restore(")
-            .nth(1)
-            .expect("finish_anchor_restore wrapper must exist")
-            .split("fn emit_action_reliable")
-            .next()
-            .expect("reliable action helper must follow restore finish");
-        assert!(
-            finish_src.contains("publish_restore_settlement(Some((request_id, status)))"),
-            "finish_anchor_restore must publish one atomic terminal settlement"
-        );
         assert!(
             !finish_src.contains("emit_anchor_restore_finished"),
             "finish_anchor_restore must not publish a second raw terminal"
         );
-
-        // 5. Every ACTIVE-restore terminal path must call finish_anchor_restore (not raw
-        //    emit_anchor_restore_finished), ensuring the buffer is always flushed.
-        //    Exception: the invalid-request early-return in handle_restore_timeline_anchor
-        //    (empty event_id / max_batches==0 / event_count==0) intentionally uses raw
-        //    emit_anchor_restore_finished so it does NOT flush a DIFFERENT restore's buffer.
-        //    That path is exempt: it fires before any restore state is set, and must not
-        //    touch an active restore's restore_emit_buffer.
-        //
-        // To verify the valid-request (post-early-return) path, check that
-        // handle_restore_timeline_anchor has at most ONE emit_anchor_restore_finished call
-        // (the exempt invalid-request path), while the continuation uses none directly.
-        let restore_handler_src = production
-            .split("async fn handle_restore_timeline_anchor(")
-            .nth(1)
-            .expect("handle_restore_timeline_anchor must exist")
-            .split("async fn handle_restore_timeline_anchor_continue")
-            .next()
-            .expect("restore handler must end before continuation");
+        let restore_handler_src = item_body(navigation, "async fn handle_restore_timeline_anchor(");
         let raw_emit_count = restore_handler_src
             .matches("self.emit_anchor_restore_finished(")
             .count();
         assert!(
             raw_emit_count <= 1,
-            "handle_restore_timeline_anchor may have at most ONE raw emit_anchor_restore_finished \
-             call (the invalid-request exempt path); found {raw_emit_count}"
+            "handle_restore_timeline_anchor may have at most ONE raw emit_anchor_restore_finished call (the invalid-request exempt path); found {raw_emit_count}"
         );
-        let continue_handler_src = production
-            .split("async fn handle_restore_timeline_anchor_continue(")
-            .nth(1)
-            .expect("handle_restore_timeline_anchor_continue must exist")
-            .split("async fn maybe_continue_restore_anchor_after_diff")
-            .next()
-            .expect("continue handler must end before maybe_continue helper");
+        let continue_handler_src = item_body(
+            navigation,
+            "async fn handle_restore_timeline_anchor_continue(",
+        );
         assert!(
             !continue_handler_src.contains("self.emit_anchor_restore_finished("),
-            "handle_restore_timeline_anchor_continue must use finish_anchor_restore (never raw \
-             emit_anchor_restore_finished) — all its terminals have an active restore buffer"
+            "handle_restore_timeline_anchor_continue must use finish_anchor_restore (never raw emit_anchor_restore_finished) — all its terminals have an active restore buffer"
         );
     }
 
@@ -5075,7 +5201,7 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
     /// structural contracts.
     #[test]
     fn restore_terminal_is_anchor_present_not_timing_dependent() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("navigation.rs");
         let production = source.split("\nmod tests").next().unwrap_or(source);
 
         // 1. anchor_relay_wait must exist on RestoreTimelineAnchorState.
@@ -5307,4 +5433,4 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
             Some("$own2".to_owned())
         );
     }
-
+}

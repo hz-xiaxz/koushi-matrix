@@ -1,4 +1,43 @@
-//! Exact AST extraction draft from immutable timeline baseline.
+use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
+
+use futures_util::stream::FuturesUnordered;
+use koushi_sdk::MatrixClientSession;
+use koushi_state::AppAction;
+
+use matrix_sdk::room::Receipts;
+use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType as SendReceiptType;
+use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk_ui::timeline::TimelineItem as SdkTimelineItem;
+use tokio::sync::{mpsc, oneshot, watch};
+
+use crate::event::{CoreEvent, LiveSignalsEvent};
+use crate::executor;
+use crate::failure::{CoreFailure, TimelineFailureKind};
+use crate::ids::{RequestId, TimelineKey, TimelineKind};
+use crate::read_state::{
+    ReadAdmissionStatus, ReadCompletionDisposition, ReadNetworkOutcome, ReadOperation,
+    ReadOperationFence, ReadPersistenceSnapshot, ReadStateEngine, ReadStateKey, ReadTarget,
+    ReadWaiterId, ReadWaiterTerminal, ReadWakeResult,
+};
+
+// BEGIN GENERATED SIBLING IMPORTS
+use super::actor::{
+    TimelineActor, TimelineActorControl, TimelineActorHandle, TimelineActorMessage,
+};
+use super::diagnostics::{
+    private_read_receipt_event_id_from_room_for_fully_read, read_state_key_for_command,
+    read_state_room_id, record_read_admission, record_read_completion, record_read_retry,
+    timeline_key_matches_read_state_key,
+};
+use super::item_projection::{collect_live_event_receipts_from_diff, timeline_room_id};
+use super::manager::{TimelineManagerActor, TimelineMessage};
+use super::navigation::{derive_timeline_navigation_snapshot, record_timeline_unread_consistency};
+use super::outbound_send::newest_provable_receipt_event_id;
+// END GENERATED SIBLING IMPORTS
 
 const READ_NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -30,21 +69,15 @@ impl ReadPersistenceRequest {
             snapshot,
         }
     }
-}
 
-impl ReadPersistenceRequest {
     pub(crate) fn session_generation(&self) -> u64 {
         self.session_generation
     }
-}
 
-impl ReadPersistenceRequest {
     pub(crate) fn save_generation(&self) -> u64 {
         self.save_generation
     }
-}
 
-impl ReadPersistenceRequest {
     pub(crate) fn snapshot(&self) -> &ReadPersistenceSnapshot {
         &self.snapshot
     }
@@ -67,9 +100,7 @@ impl ReadPersistenceIngress {
         let (tx, rx) = watch::channel(None);
         (Self { tx }, rx)
     }
-}
 
-impl ReadPersistenceIngress {
     pub(crate) fn publish(&self, request: ReadPersistenceRequest) {
         self.tx.send_replace(Some(request));
     }
@@ -91,13 +122,13 @@ struct SyntheticReadNetworkRequest {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ReadCommandKind {
+pub(super) enum ReadCommandKind {
     Receipt,
     FullyRead,
 }
 
 #[derive(Clone, Copy)]
-enum ReadRetrySource {
+pub(super) enum ReadRetrySource {
     Backoff,
     Reconnect,
     Checkpoint,
@@ -106,7 +137,7 @@ enum ReadRetrySource {
 }
 
 impl ReadRetrySource {
-    fn token(self) -> &'static str {
+    pub(super) fn token(self) -> &'static str {
         match self {
             Self::Backoff => "backoff",
             Self::Reconnect => "reconnect",
@@ -117,21 +148,21 @@ impl ReadRetrySource {
     }
 }
 
-struct ReadCommandWaiter {
-    request_id: RequestId,
+pub(super) struct ReadCommandWaiter {
+    pub(super) request_id: RequestId,
     key: TimelineKey,
     event_id: String,
     kind: ReadCommandKind,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ReadActorApplyKind {
+pub(super) enum ReadActorApplyKind {
     ThreadReceipt,
     FullyRead,
 }
 
 #[derive(Clone)]
-struct ReadRetryToken {
+pub(super) struct ReadRetryToken {
     epoch: Arc<()>,
     serial: u64,
 }
@@ -144,7 +175,7 @@ impl PartialEq for ReadRetryToken {
 
 impl Eq for ReadRetryToken {}
 
-enum ReadWorkerCompletion {
+pub(super) enum ReadWorkerCompletion {
     Network {
         operation: ReadOperation,
         outcome: ReadNetworkOutcome,
@@ -176,14 +207,14 @@ impl ReadWorkerCompletion {
 
 type ReadWorkerFuture = Pin<Box<dyn Future<Output = ReadWorkerCompletion> + Send + 'static>>;
 
-struct ReadWorkerSupervisor {
+pub(super) struct ReadWorkerSupervisor {
     state: ReadStateEngine,
     network: Option<ReadNetworkContext>,
     network_timeout: Duration,
-    tasks: FuturesUnordered<ReadWorkerFuture>,
-    retry_tasks: FuturesUnordered<ReadWorkerFuture>,
+    pub(super) tasks: FuturesUnordered<ReadWorkerFuture>,
+    pub(super) retry_tasks: FuturesUnordered<ReadWorkerFuture>,
     cancellations: HashMap<ReadOperationFence, oneshot::Sender<()>>,
-    waiters: HashMap<ReadWaiterId, ReadCommandWaiter>,
+    pub(super) waiters: HashMap<ReadWaiterId, ReadCommandWaiter>,
     next_waiter_id: u64,
     retry_base_delay: Duration,
     retry_max_delay: Duration,
@@ -224,16 +255,12 @@ impl ReadWorkerSupervisor {
             save_generation: 0,
         }
     }
-}
 
-impl ReadWorkerSupervisor {
-    fn unavailable() -> Self {
+    pub(super) fn unavailable() -> Self {
         Self::new(0, None, READ_NETWORK_TIMEOUT)
     }
-}
 
-impl ReadWorkerSupervisor {
-    fn matrix(
+    pub(super) fn matrix(
         session: Arc<MatrixClientSession>,
         session_generation: u64,
         restored: ReadPersistenceSnapshot,
@@ -270,9 +297,7 @@ impl ReadWorkerSupervisor {
         }
         supervisor
     }
-}
 
-impl ReadWorkerSupervisor {
     #[cfg(test)]
     fn synthetic(
         requests: mpsc::UnboundedSender<SyntheticReadNetworkRequest>,
@@ -280,9 +305,7 @@ impl ReadWorkerSupervisor {
     ) -> Self {
         Self::new(1, Some(ReadNetworkContext::Synthetic { requests }), timeout)
     }
-}
 
-impl ReadWorkerSupervisor {
     #[cfg(test)]
     fn synthetic_with_retry(
         requests: mpsc::UnboundedSender<SyntheticReadNetworkRequest>,
@@ -296,9 +319,7 @@ impl ReadWorkerSupervisor {
         supervisor.retry_max_delay = retry_max_delay;
         supervisor
     }
-}
 
-impl ReadWorkerSupervisor {
     #[cfg(test)]
     fn synthetic_restored(
         requests: mpsc::UnboundedSender<SyntheticReadNetworkRequest>,
@@ -335,17 +356,13 @@ impl ReadWorkerSupervisor {
         }
         supervisor
     }
-}
 
-impl ReadWorkerSupervisor {
     fn allocate_waiter(&mut self) -> Option<ReadWaiterId> {
         let next = self.next_waiter_id.checked_add(1)?;
         self.next_waiter_id = next;
         Some(ReadWaiterId::new(next))
     }
-}
 
-impl ReadWorkerSupervisor {
     fn spawn_network(&mut self, operation: ReadOperation) -> bool {
         let Some(network) = self.network.clone() else {
             return false;
@@ -376,9 +393,7 @@ impl ReadWorkerSupervisor {
         }));
         true
     }
-}
 
-impl ReadWorkerSupervisor {
     fn spawn_actor_apply<F>(&mut self, operation: ReadOperation, apply: F)
     where
         F: Future<Output = bool> + Send + 'static,
@@ -401,25 +416,19 @@ impl ReadWorkerSupervisor {
             }
         }));
     }
-}
 
-impl ReadWorkerSupervisor {
     fn cancel(&mut self, fence: ReadOperationFence) {
         if let Some(cancel) = self.cancellations.remove(&fence) {
             let _ = cancel.send(());
         }
     }
-}
 
-impl ReadWorkerSupervisor {
     fn finish(&mut self, completion: &ReadWorkerCompletion) {
         if let Some(fence) = completion.fence() {
             self.cancellations.remove(&fence);
         }
     }
-}
 
-impl ReadWorkerSupervisor {
     fn schedule_retry(&mut self, key: &ReadStateKey) {
         if self.scheduled_retries.contains_key(key) {
             return;
@@ -462,9 +471,7 @@ impl ReadWorkerSupervisor {
             }
         }));
     }
-}
 
-impl ReadWorkerSupervisor {
     fn accept_retry_wake(&mut self, key: &ReadStateKey, generation: ReadRetryToken) -> bool {
         if self
             .scheduled_retries
@@ -476,24 +483,18 @@ impl ReadWorkerSupervisor {
         self.scheduled_retries.remove(key);
         true
     }
-}
 
-impl ReadWorkerSupervisor {
     fn invalidate_retry(&mut self, key: &ReadStateKey) {
         if let Some((_, cancel)) = self.scheduled_retries.remove(key) {
             let _ = cancel.send(());
         }
     }
-}
 
-impl ReadWorkerSupervisor {
     fn reset_retry(&mut self, key: &ReadStateKey) {
         self.invalidate_retry(key);
         self.retry_attempts.remove(key);
     }
-}
 
-impl ReadWorkerSupervisor {
     fn desired_keys(&self) -> Vec<ReadStateKey> {
         self.state
             .persistence_snapshot()
@@ -502,22 +503,16 @@ impl ReadWorkerSupervisor {
             .map(|entry| entry.key().clone())
             .collect()
     }
-}
 
-impl ReadWorkerSupervisor {
     fn reconciliation_pending(&self, key: &ReadStateKey) -> bool {
         self.reconciliation_pending.contains(key)
     }
-}
 
-impl ReadWorkerSupervisor {
     fn finish_reconciliation(&mut self, key: &ReadStateKey) {
         self.reconciliation_pending.remove(key);
     }
-}
 
-impl ReadWorkerSupervisor {
-    fn publish_persistence(&mut self) {
+    pub(super) fn publish_persistence(&mut self) {
         let Some(persistence) = self.persistence.as_ref() else {
             return;
         };
@@ -528,10 +523,8 @@ impl ReadWorkerSupervisor {
             self.state.persistence_snapshot(),
         ));
     }
-}
 
-impl ReadWorkerSupervisor {
-    fn cancel_all(&mut self) {
+    pub(super) fn cancel_all(&mut self) {
         for (_, cancel) in self.cancellations.drain() {
             let _ = cancel.send(());
         }
@@ -542,9 +535,7 @@ impl ReadWorkerSupervisor {
         self.retry_tasks = FuturesUnordered::new();
         self.retry_attempts.clear();
     }
-}
 
-impl ReadWorkerSupervisor {
     #[cfg(test)]
     fn retry_bookkeeping_key_count(&self) -> usize {
         self.retry_attempts
@@ -629,7 +620,7 @@ async fn perform_read_network_operation(
 }
 
 impl TimelineManagerActor {
-    fn route_read_command(
+    pub(super) fn route_read_command(
         &mut self,
         request_id: RequestId,
         key: TimelineKey,
@@ -715,9 +706,6 @@ impl TimelineManagerActor {
         self.read_workers.publish_persistence();
         self.wake_read_operation(&read_key);
     }
-}
-
-impl TimelineManagerActor {
     fn wake_read_operation(&mut self, key: &ReadStateKey) {
         if self.read_workers.reconciliation_pending(key) {
             self.read_workers.schedule_retry(key);
@@ -768,10 +756,7 @@ impl TimelineManagerActor {
             }
         }
     }
-}
-
-impl TimelineManagerActor {
-    fn wake_all_desired_reads(&mut self, source: ReadRetrySource) {
+    pub(super) fn wake_all_desired_reads(&mut self, source: ReadRetrySource) {
         for key in self.read_workers.desired_keys() {
             record_read_retry(
                 &key,
@@ -787,10 +772,7 @@ impl TimelineManagerActor {
             self.wake_read_operation(&key);
         }
     }
-}
-
-impl TimelineManagerActor {
-    fn wake_desired_reads_for_room(&mut self, room_id: &str, source: ReadRetrySource) {
+    pub(super) fn wake_desired_reads_for_room(&mut self, room_id: &str, source: ReadRetrySource) {
         let keys = self
             .read_workers
             .desired_keys()
@@ -812,10 +794,7 @@ impl TimelineManagerActor {
             self.wake_read_operation(&key);
         }
     }
-}
-
-impl TimelineManagerActor {
-    async fn handle_authoritative_read_state_observed(
+    pub(super) async fn handle_authoritative_read_state_observed(
         &mut self,
         timeline_key: &TimelineKey,
         actor_generation: u64,
@@ -914,10 +893,7 @@ impl TimelineManagerActor {
         }
         self.read_workers.publish_persistence();
     }
-}
-
-impl TimelineManagerActor {
-    async fn handle_read_worker_completion(&mut self, completion: ReadWorkerCompletion) {
+    pub(super) async fn handle_read_worker_completion(&mut self, completion: ReadWorkerCompletion) {
         self.read_workers.finish(&completion);
         match completion {
             ReadWorkerCompletion::RetryWake {
@@ -982,9 +958,6 @@ impl TimelineManagerActor {
             }
         }
     }
-}
-
-impl TimelineManagerActor {
     fn spawn_read_actor_apply(&mut self, operation: ReadOperation) -> bool {
         let apply_kind = match operation.key() {
             ReadStateKey::PublicUnthreaded { .. } => return false,
@@ -1018,9 +991,6 @@ impl TimelineManagerActor {
         });
         true
     }
-}
-
-impl TimelineManagerActor {
     fn read_timeline_key_for_operation(&self, operation: &ReadOperation) -> Option<TimelineKey> {
         self.read_workers
             .waiters
@@ -1037,9 +1007,6 @@ impl TimelineManagerActor {
                     .cloned()
             })
     }
-}
-
-impl TimelineManagerActor {
     async fn settle_read_operation(
         &mut self,
         operation: ReadOperation,
@@ -1068,9 +1035,6 @@ impl TimelineManagerActor {
             self.read_workers.publish_persistence();
         }
     }
-}
-
-impl TimelineManagerActor {
     async fn settle_read_waiters(
         &mut self,
         settlements: Vec<crate::read_state::ReadWaiterSettlement>,
@@ -1129,7 +1093,11 @@ impl TimelineManagerActor {
 }
 
 impl TimelineActor {
-    async fn handle_read_success(&mut self, kind: ReadActorApplyKind, event_id: String) -> bool {
+    pub(super) async fn handle_read_success(
+        &mut self,
+        kind: ReadActorApplyKind,
+        event_id: String,
+    ) -> bool {
         match kind {
             ReadActorApplyKind::ThreadReceipt => {
                 if !matches!(self.key.kind, TimelineKind::Thread { .. }) {
@@ -1185,10 +1153,7 @@ impl TimelineActor {
             }
         }
     }
-}
-
-impl TimelineActor {
-    async fn handle_own_read_receipt_changed(&mut self) {
+    pub(super) async fn handle_own_read_receipt_changed(&mut self) {
         let Some(own_user_id) = self.own_user_id.as_deref() else {
             return;
         };
@@ -1212,10 +1177,7 @@ impl TimelineActor {
         )
         .await;
     }
-}
-
-impl TimelineActor {
-    async fn publish_authoritative_read_state(&self) {
+    pub(super) async fn publish_authoritative_read_state(&self) {
         let receipt_event_id = if let Some(own_user_id) = self.own_user_id.as_deref() {
             self.timeline
                 .latest_user_read_receipt_timeline_event_id(own_user_id)
@@ -1242,9 +1204,6 @@ impl TimelineActor {
         )
         .await;
     }
-}
-
-impl TimelineActor {
     async fn publish_authoritative_read_observation(
         &self,
         read_key: ReadStateKey,
@@ -1260,10 +1219,7 @@ impl TimelineActor {
             })
             .await;
     }
-}
-
-impl TimelineActor {
-    async fn handle_set_typing(&mut self, request_id: RequestId, is_typing: bool) {
+    pub(super) async fn handle_set_typing(&mut self, request_id: RequestId, is_typing: bool) {
         match self.timeline.room().typing_notice(is_typing).await {
             Ok(()) => {
                 self.emit(CoreEvent::LiveSignals(LiveSignalsEvent::TypingSet {
@@ -1282,10 +1238,7 @@ impl TimelineActor {
             }
         }
     }
-}
-
-impl TimelineActor {
-    fn live_receipts_action_from_sdk_diffs(
+    pub(super) fn live_receipts_action_from_sdk_diffs(
         key: &TimelineKey,
         diffs: &[eyeball_im::VectorDiff<Arc<SdkTimelineItem>>],
     ) -> Option<AppAction> {
@@ -1306,7 +1259,7 @@ impl TimelineActor {
     }
 }
 
-async fn run_typing_notifications(
+pub(super) async fn run_typing_notifications(
     actor_tx: mpsc::Sender<TimelineActorMessage>,
     _guard: matrix_sdk::event_handler::EventHandlerDropGuard,
     mut typing_rx: tokio::sync::broadcast::Receiver<Vec<matrix_sdk::ruma::OwnedUserId>>,
@@ -1332,9 +1285,65 @@ async fn run_typing_notifications(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::super::test_source::item_body;
+    use futures_util::{FutureExt, StreamExt};
+
+    use std::collections::{HashMap, HashSet};
+
+    use std::sync::Arc;
+
+    use std::time::Duration;
+
+    use koushi_sdk::MatrixClientSession;
+    use koushi_sdk::MatrixUserProfile;
+
+    use koushi_state::UserProfile;
+    use koushi_state::{AppAction, LiveEventReceipts, LiveReadReceipt};
+
+    use matrix_sdk_ui::timeline::TimelineFocus;
+    use tokio::sync::{broadcast, mpsc, oneshot, watch};
+
+    use crate::command::TimelineCommand;
+    use crate::event::{CoreEvent, LiveSignalsEvent};
+    use crate::executor;
+    use crate::failure::{CoreFailure, TimelineFailureKind};
+    #[cfg(any(test, feature = "test-hooks"))]
+    use crate::ids::AccountKey;
+    use crate::ids::TimelineKey;
+
+    use crate::read_state::{
+        ReadPersistenceSnapshot, ReadStateEngine, ReadStateKey, ReadTarget, ReadWaiterId,
+    };
+
+    use koushi_diagnostics::DiagnosticValue;
+    use koushi_state::{SessionInfo, SessionState};
+
+    use super::super::actor::{TimelineActorControl, TimelineActorHandle, TimelinePositionIndex};
+    use super::super::diagnostics::{
+        FullyReadReceiptContext, private_read_receipt_event_id_for_fully_read,
+    };
+    use super::super::item_projection::{
+        build_live_receipt_observation_actions, collect_live_event_receipts_from_diff,
+        emit_live_receipt_observation_actions, live_receipt_observation_actions_from_sdk_receipts,
+    };
+    use super::super::manager::TimelineMessage;
+    use super::super::navigation::TimelineActorGenerationGate;
+
+    use super::super::relay::koushi_timeline_builder;
+    use super::{
+        ReadActorApplyKind, ReadCommandKind, ReadPersistenceIngress, ReadRetrySource,
+        ReadWorkerCompletion, ReadWorkerSupervisor, read_retry_delay_for_attempt,
+    };
+
+    use super::super::test_support::{
+        fake_rid, live_tail_test_manager, room_key, test_timeline_actor_handle,
+    };
+
     #[test]
     fn set_fully_read_success_uses_private_read_receipt_before_clearing_room_unread_summary() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("read_state.rs");
         let network = source
             .split("async fn perform_read_network_operation")
             .nth(1)
@@ -1452,7 +1461,7 @@ async fn run_typing_notifications(
 
     #[test]
     fn send_read_receipt_uses_threaded_receipt_for_thread_timelines() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("read_state.rs");
         let worker = source
             .split("async fn perform_read_network_operation")
             .nth(1)
@@ -1473,6 +1482,19 @@ async fn run_typing_notifications(
             worker.contains("send_single_receipt"),
             "threaded read receipts must use the SDK single-receipt endpoint that accepts a thread"
         );
+    }
+
+    fn restored_public_read_snapshot(room_id: &str, event_id: &str) -> ReadPersistenceSnapshot {
+        let mut engine = ReadStateEngine::new(7);
+        engine.admit(
+            7,
+            ReadStateKey::PublicUnthreaded {
+                room_id: room_id.to_owned(),
+            },
+            ReadTarget::new(event_id.to_owned()),
+            ReadWaiterId::new(1),
+        );
+        engine.persistence_snapshot()
     }
 
     #[tokio::test]
@@ -2605,14 +2627,7 @@ async fn run_typing_notifications(
 
     #[test]
     fn manager_read_completion_lane_precedes_ordinary_mailbox() {
-        let source = include_str!("timeline.rs");
-        let manager_run = source
-            .split("    async fn run(mut self) {")
-            .nth(1)
-            .expect("timeline manager run loop")
-            .split("    async fn handle_navigation_projection")
-            .next()
-            .expect("manager run boundary");
+        let manager_run = item_body(include_str!("manager.rs"), "async fn run(mut self)");
         let read_completion = manager_run
             .find("completion = self.read_workers.tasks.next()")
             .expect("manager read completion lane");
@@ -2627,15 +2642,10 @@ async fn run_typing_notifications(
 
     #[test]
     fn replaying_thread_initial_items_preserves_semantic_attention_tracker() {
-        let source = include_str!("timeline.rs");
-        let replay_helper = source
-            .split("fn handle_replay_initial_items")
-            .nth(1)
-            .expect("replay helper should exist")
-            .split("async fn handle_paginate")
-            .next()
-            .expect("pagination handler should follow replay helper");
-
+        let replay_helper = item_body(
+            include_str!("navigation.rs"),
+            "fn handle_replay_initial_items",
+        );
         assert!(
             replay_helper.contains("ThreadAttentionObservation::Replay")
                 && !replay_helper.contains("ThreadAttentionTracker::default()"),
@@ -2645,7 +2655,7 @@ async fn run_typing_notifications(
 
     #[test]
     fn timeline_builder_does_not_track_state_event_read_receipts() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("relay.rs");
         let production = source.split("\nmod tests").next().unwrap_or(source);
         let builder_source = production
             .split("fn koushi_timeline_builder")
@@ -3259,23 +3269,15 @@ async fn run_typing_notifications(
 
     #[test]
     fn production_receipt_diff_path_uses_fenced_ordered_observation_delivery() {
-        let source = include_str!("timeline.rs");
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-        let diff_handler = production
-            .split("async fn handle_diff_batch(")
-            .nth(1)
-            .expect("TimelineActor diff handler exists")
-            .split("/// Detect Room thread replies")
-            .next()
-            .expect("diff handler ends before thread hydration");
+        let diff_handler = item_body(include_str!("relay.rs"), "async fn handle_diff_batch");
+        let delivery = item_body(
+            include_str!("item_projection.rs"),
+            "async fn emit_receipt_observation_actions",
+        );
         assert!(
             diff_handler.contains("emit_live_receipt_observation_actions"),
             "receipt diffs must use the production profile-observation delivery path"
         );
-        let delivery = production
-            .split("async fn emit_receipt_observation_actions(")
-            .nth(1)
-            .expect("production receipt delivery helper exists");
         assert!(
             delivery.contains("send_generation_fenced"),
             "receipt profile actions must use the actor-generation fence"
@@ -3288,7 +3290,7 @@ async fn run_typing_notifications(
 
     #[test]
     fn initial_receipts_use_the_ordered_local_profile_observation_batch() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("actor.rs");
         let startup = source
             .split("let initial_receipts = live_event_receipts_from_sdk_items")
             .nth(1)
@@ -3313,14 +3315,14 @@ async fn run_typing_notifications(
 
     #[test]
     fn authoritative_recovery_receipts_use_the_same_ordered_observation_batch() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("relay.rs");
         let recovery = source
-            .split("async fn handle_relay_overflow")
-            .nth(1)
-            .expect("authoritative recovery handler exists")
-            .split("// ---------------------------------------------------------------------------\n// Relay task")
-            .next()
-            .expect("authoritative recovery handler boundary exists");
+                .split("async fn handle_relay_overflow")
+                .nth(1)
+                .expect("authoritative recovery handler exists")
+                .split("// ---------------------------------------------------------------------------\n// Relay task")
+                .next()
+                .expect("authoritative recovery handler boundary exists");
 
         assert!(
             recovery.contains("emit_receipt_observation_actions"),
@@ -3331,4 +3333,4 @@ async fn run_typing_notifications(
             "authoritative recovery must not publish an unobserved receipt action directly"
         );
     }
-
+}

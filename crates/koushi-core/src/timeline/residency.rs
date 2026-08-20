@@ -1,4 +1,58 @@
-//! Exact AST extraction draft from immutable timeline baseline.
+use std::collections::BTreeSet;
+#[cfg(any(test, feature = "test-hooks"))]
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
+
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+use koushi_sdk::MatrixCommittedRoomTimelineCheckpoint as MatrixRoomSubscriptionCheckpoint;
+#[cfg(any(test, feature = "test-hooks"))]
+use koushi_state::ComposerFormattingOptions;
+
+use matrix_sdk::ruma::OwnedRoomId;
+#[cfg(any(test, feature = "test-hooks"))]
+use tokio::sync::broadcast;
+use tokio::sync::{mpsc, oneshot, watch};
+
+#[cfg(any(test, feature = "test-hooks"))]
+use crate::account_work::AccountWorkScheduler;
+#[cfg(any(test, feature = "test-hooks"))]
+use crate::command::TimelineCommand;
+use crate::executor;
+#[cfg(any(test, feature = "test-hooks"))]
+use crate::ids::AccountKey;
+use crate::ids::{TimelineKey, TimelineKind};
+#[cfg(any(test, feature = "test-hooks"))]
+use crate::link_preview::LinkPreviewContext;
+#[cfg(any(test, feature = "test-hooks"))]
+use crate::live_tail_freshness::LiveTailRefreshCoordinator;
+#[cfg(any(test, feature = "test-hooks"))]
+use crate::threads_list::ThreadRootProjectionService;
+
+// BEGIN GENERATED SIBLING IMPORTS
+#[cfg(any(test, feature = "test-hooks"))]
+use super::actor::TimelineActorHandle;
+use super::actor::TimelineActorMessage;
+use super::diagnostics::{
+    record_residency_intent, record_subscription_reconcile, record_subscription_room_coverage,
+    subscription_count_bucket,
+};
+use super::gap_repair::GlobalResponseCommit;
+use super::manager::{TimelineManagerActor, TimelineMessage, internal_timeline_request_id};
+#[cfg(any(test, feature = "test-hooks"))]
+use super::navigation::TimelineActorGenerationGate;
+#[cfg(any(test, feature = "test-hooks"))]
+use super::outbound_send::{
+    SendEnqueueWorkerSupervisor, SharedSendCompletionCoordinator, SubmissionAdmissionLedger,
+    TimelineSendTerminalIngress,
+};
+use super::read_state::ReadRetrySource;
+#[cfg(any(test, feature = "test-hooks"))]
+use super::read_state::ReadWorkerSupervisor;
+#[cfg(any(test, feature = "test-hooks"))]
+use super::thread_projection::{
+    ReplayKnownThreadRootProjectionRegistry, ThreadRootProjectionFetchRegistry,
+};
+// END GENERATED SIBLING IMPORTS
 
 /// The only successful local room-removal causes that may mutate session
 /// residency. Session teardown does not send a live removal message.
@@ -42,7 +96,7 @@ struct MembershipOperationGateState {
 }
 
 #[derive(Clone)]
-struct MembershipOperationGate {
+pub(super) struct MembershipOperationGate {
     state: Arc<Mutex<MembershipOperationGateState>>,
     active_count: watch::Sender<usize>,
 }
@@ -52,7 +106,7 @@ pub(crate) struct TimelineSubscriptionResidencyPermit {
 }
 
 impl MembershipOperationGate {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let (active_count, _) = watch::channel(0_usize);
         Self {
             state: Arc::new(Mutex::new(MembershipOperationGateState {
@@ -62,9 +116,7 @@ impl MembershipOperationGate {
             active_count,
         }
     }
-}
 
-impl MembershipOperationGate {
     fn begin_operation(&self) -> Option<TimelineSubscriptionResidencyPermit> {
         let mut state = self.state.lock().expect("membership operation gate lock");
         if !state.accepting {
@@ -74,9 +126,7 @@ impl MembershipOperationGate {
         self.active_count.send_replace(state.active_count);
         Some(TimelineSubscriptionResidencyPermit { gate: self.clone() })
     }
-}
 
-impl MembershipOperationGate {
     async fn close_and_drain(&self) {
         {
             let mut state = self.state.lock().expect("membership operation gate lock");
@@ -85,9 +135,7 @@ impl MembershipOperationGate {
         let mut active_count = self.active_count.subscribe();
         let _ = active_count.wait_for(|count| *count == 0).await;
     }
-}
 
-impl MembershipOperationGate {
     #[cfg(feature = "test-hooks")]
     fn snapshot(&self) -> (bool, usize) {
         let state = self.state.lock().expect("membership operation gate lock");
@@ -113,8 +161,8 @@ impl Drop for TimelineSubscriptionResidencyPermit {
 /// command authority.
 #[derive(Clone)]
 pub(crate) struct TimelineSubscriptionResidencyHandle {
-    tx: mpsc::Sender<TimelineMessage>,
-    gate: MembershipOperationGate,
+    pub(super) tx: mpsc::Sender<TimelineMessage>,
+    pub(super) gate: MembershipOperationGate,
 }
 
 impl TimelineSubscriptionResidencyHandle {
@@ -124,22 +172,16 @@ impl TimelineSubscriptionResidencyHandle {
         }
         self.gate.begin_operation()
     }
-}
 
-impl TimelineSubscriptionResidencyHandle {
     pub(crate) async fn close_and_drain(&self) {
         self.gate.close_and_drain().await;
     }
-}
 
-impl TimelineSubscriptionResidencyHandle {
     #[cfg(feature = "test-hooks")]
     pub(crate) fn gate_snapshot(&self) -> (bool, usize) {
         self.gate.snapshot()
     }
-}
 
-impl TimelineSubscriptionResidencyHandle {
     #[cfg(feature = "test-hooks")]
     pub(crate) async fn gate_probe_for_testing(&self) -> (bool, usize, bool, bool) {
         let permit = self
@@ -156,9 +198,7 @@ impl TimelineSubscriptionResidencyHandle {
         let rejected = self.begin_operation().is_none();
         (accepting, active_count, rejected, active_count == 0)
     }
-}
 
-impl TimelineSubscriptionResidencyHandle {
     pub(crate) async fn visible_rooms_observed(
         &self,
         core_generation: u64,
@@ -172,9 +212,7 @@ impl TimelineSubscriptionResidencyHandle {
             .await
             .is_ok()
     }
-}
 
-impl TimelineSubscriptionResidencyHandle {
     pub(crate) async fn membership_observed(
         &self,
         core_generation: u64,
@@ -188,9 +226,7 @@ impl TimelineSubscriptionResidencyHandle {
             .await
             .is_ok()
     }
-}
 
-impl TimelineSubscriptionResidencyHandle {
     pub(crate) async fn room_left(
         &self,
         _permit: &TimelineSubscriptionResidencyPermit,
@@ -212,9 +248,7 @@ impl TimelineSubscriptionResidencyHandle {
         }
         acknowledgement.await.is_ok()
     }
-}
 
-impl TimelineSubscriptionResidencyHandle {
     pub(crate) async fn room_rejoined(
         &self,
         _permit: &TimelineSubscriptionResidencyPermit,
@@ -240,14 +274,14 @@ impl TimelineSubscriptionResidencyHandle {
 /// only an ordered SDK left→joined/invited observation or an admitted local
 /// rejoin may do so.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RoomLeaveState {
+pub(super) enum RoomLeaveState {
     PendingLeftObservation,
     LeftObserved,
 }
 
 /// Why one subscription reconciliation was requested (issue #518).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SubscriptionReconcileTrigger {
+pub(super) enum SubscriptionReconcileTrigger {
     RoomSelected,
     ThreadOpened,
     FocusedOpened,
@@ -279,7 +313,7 @@ impl SubscriptionReconcileTrigger {
 
 impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
-    fn room_subscription_residency_test_actor_handle() -> TimelineActorHandle {
+    pub(super) fn room_subscription_residency_test_actor_handle() -> TimelineActorHandle {
         let (tx, mut rx) = mpsc::channel(1);
         let task = executor::spawn(async move { while rx.recv().await.is_some() {} });
         TimelineActorHandle {
@@ -292,9 +326,6 @@ impl TimelineManagerActor {
             enqueue_context: None,
         }
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) fn room_subscription_residency_test_manager(
@@ -353,9 +384,6 @@ impl TimelineManagerActor {
             test_session_available: true,
         }
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) fn room_subscription_residency_test_handle(
@@ -366,9 +394,6 @@ impl TimelineManagerActor {
             gate: MembershipOperationGate::new(),
         }
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_gate_probe() -> (bool, usize, bool, bool) {
@@ -379,18 +404,12 @@ impl TimelineManagerActor {
         };
         handle.gate_probe_for_testing().await
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_admit_key(&mut self, key: TimelineKey) {
         self.handle_subscribe(internal_timeline_request_id(), key, false, false)
             .await;
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_admit_build_failure(
@@ -407,9 +426,6 @@ impl TimelineManagerActor {
         self.handle_subscribe(internal_timeline_request_id(), key, false, false)
             .await;
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_unsubscribe(&mut self, key: TimelineKey) {
@@ -419,9 +435,6 @@ impl TimelineManagerActor {
         })
         .await;
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) fn room_subscription_residency_test_snapshot(
@@ -463,9 +476,6 @@ impl TimelineManagerActor {
             sdk_generation,
         )
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_seed_sdk_subscriptions(
@@ -478,9 +488,6 @@ impl TimelineManagerActor {
                 .await;
         }
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_expire_sdk_subscriptions(&mut self) {
@@ -491,9 +498,6 @@ impl TimelineManagerActor {
                 .await;
         }
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_pump_next_ingress(&mut self) {
@@ -544,9 +548,6 @@ impl TimelineManagerActor {
             }
         }
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_sync_started(
@@ -558,9 +559,6 @@ impl TimelineManagerActor {
             self.handle_sync_started(service, core_generation).await;
         }
     }
-}
-
-impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_offer_restore(
@@ -579,10 +577,7 @@ impl TimelineManagerActor {
             self.handle_sync_started(service, core_generation).await;
         }
     }
-}
-
-impl TimelineManagerActor {
-    async fn handle_sync_started(
+    pub(super) async fn handle_sync_started(
         &mut self,
         room_list_service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
         core_generation: u64,
@@ -632,10 +627,7 @@ impl TimelineManagerActor {
         self.apply_live_tail_scheduler_actions(replacement_starts)
             .await;
     }
-}
-
-impl TimelineManagerActor {
-    async fn handle_visible_rooms_observed(
+    pub(super) async fn handle_visible_rooms_observed(
         &mut self,
         core_generation: u64,
         room_ids: Vec<VisibleRoomObservation>,
@@ -674,10 +666,7 @@ impl TimelineManagerActor {
         self.reconcile_subscriptions(SubscriptionReconcileTrigger::VisibleRange)
             .await;
     }
-}
-
-impl TimelineManagerActor {
-    async fn handle_room_membership_observed(
+    pub(super) async fn handle_room_membership_observed(
         &mut self,
         core_generation: u64,
         transitions: Vec<RoomMembershipTransition>,
@@ -713,10 +702,7 @@ impl TimelineManagerActor {
         self.reconcile_subscriptions(SubscriptionReconcileTrigger::Membership)
             .await;
     }
-}
-
-impl TimelineManagerActor {
-    async fn handle_room_left(&mut self, room_id: OwnedRoomId, cause: RoomRemovalCause) {
+    pub(super) async fn handle_room_left(&mut self, room_id: OwnedRoomId, cause: RoomRemovalCause) {
         self.room_leave_states
             .insert(room_id.clone(), RoomLeaveState::PendingLeftObservation);
         self.session_subscribed_rooms.remove(&room_id);
@@ -724,19 +710,13 @@ impl TimelineManagerActor {
         self.reconcile_subscriptions(SubscriptionReconcileTrigger::RoomLeft)
             .await;
     }
-}
-
-impl TimelineManagerActor {
-    async fn handle_room_rejoined(&mut self, room_id: OwnedRoomId) {
+    pub(super) async fn handle_room_rejoined(&mut self, room_id: OwnedRoomId) {
         self.room_leave_states.remove(&room_id);
         self.session_subscribed_rooms.insert(room_id);
         record_residency_intent("room_rejoined", "acknowledged", 1, 0);
         self.reconcile_subscriptions(SubscriptionReconcileTrigger::RoomRejoined)
             .await;
     }
-}
-
-impl TimelineManagerActor {
     /// Stable process-local ordinal for a room's coverage-correlation records.
     fn room_ordinal_for(&mut self, room_id: OwnedRoomId) -> u64 {
         if let Some(ordinal) = self.subscription_room_ordinals.get(&room_id) {
@@ -747,18 +727,12 @@ impl TimelineManagerActor {
         self.subscription_room_ordinals.insert(room_id, ordinal);
         ordinal
     }
-}
-
-impl TimelineManagerActor {
     /// Add a room-ID lease for a live Timeline actor.
-    fn lease_room(&mut self, room_id: OwnedRoomId) {
+    pub(super) fn lease_room(&mut self, room_id: OwnedRoomId) {
         *self.subscribed_room_leases.entry(room_id).or_default() += 1;
     }
-}
-
-impl TimelineManagerActor {
     /// Release one room-ID lease; returns true when the last lease was dropped.
-    fn release_room_lease(&mut self, room_id: &OwnedRoomId) -> bool {
+    pub(super) fn release_room_lease(&mut self, room_id: &OwnedRoomId) -> bool {
         let Some(count) = self.subscribed_room_leases.get_mut(room_id) else {
             return false;
         };
@@ -770,23 +744,17 @@ impl TimelineManagerActor {
             false
         }
     }
-}
-
-impl TimelineManagerActor {
     /// Whether a room currently has live lease coverage.
-    fn room_is_leased(&self, room_id: &str) -> bool {
+    pub(super) fn room_is_leased(&self, room_id: &str) -> bool {
         matrix_sdk::ruma::RoomId::parse(room_id)
             .ok()
             .is_some_and(|room_id| self.subscribed_room_leases.contains_key(&room_id))
     }
-}
-
-impl TimelineManagerActor {
     /// Atomically reconcile the live Sliding Sync room-subscription set to the
     /// session-resident desired set. Exact-set reconciles are true no-ops:
     /// retained rooms are never invalidated and presentation-only timeline
     /// changes never replace a live subscription.
-    async fn reconcile_subscriptions(&mut self, trigger: SubscriptionReconcileTrigger) {
+    pub(super) async fn reconcile_subscriptions(&mut self, trigger: SubscriptionReconcileTrigger) {
         let Some(service) = &self.room_list_service else {
             return;
         };
@@ -869,9 +837,6 @@ impl TimelineManagerActor {
             &result,
         );
     }
-}
-
-impl TimelineManagerActor {
     async fn subscribe_existing_timeline_rooms(
         &mut self,
         service: &Arc<matrix_sdk_ui::room_list_service::RoomListService>,
@@ -929,9 +894,6 @@ impl TimelineManagerActor {
         })
         .await;
     }
-}
-
-impl TimelineManagerActor {
     async fn rebuild_existing_room_timelines_after_sync_started(&mut self) {
         let keys = self
             .timelines
@@ -944,9 +906,6 @@ impl TimelineManagerActor {
                 .await;
         }
     }
-}
-
-impl TimelineManagerActor {
     async fn replace_existing_room_timeline_after_sync_started(&mut self, key: TimelineKey) {
         let request_id = internal_timeline_request_id();
         // The activation fences the previous actor before the replacement can
@@ -987,6 +946,27 @@ impl TimelineManagerActor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::collections::{BTreeSet, HashMap};
+
+    use std::sync::Arc;
+
+    use tokio::sync::mpsc;
+
+    use crate::command::TimelineCommand;
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    use crate::ids::AccountKey;
+    use crate::ids::{TimelineKey, TimelineKind};
+
+    use super::super::actor::{TimelineActorHandle, TimelineActorMessage};
+    use super::super::test_support::{fake_rid, live_tail_test_manager};
+    use super::{
+        MembershipOperationGate, SubscriptionReconcileTrigger, TimelineSubscriptionResidencyHandle,
+    };
 
     #[cfg(feature = "test-hooks")]
     #[tokio::test]
@@ -1219,6 +1199,19 @@ impl TimelineManagerActor {
         }
     }
 
+    fn placeholder_actor_handle() -> TimelineActorHandle {
+        let (tx, _rx) = mpsc::channel(1);
+        TimelineActorHandle {
+            tx,
+            control_tx: None,
+            position_rx: None,
+            task: None,
+            auxiliary_tasks: Vec::new(),
+            subscription_generation: None,
+            enqueue_context: None,
+        }
+    }
+
     #[tokio::test]
     async fn sync_started_reconciles_the_full_session_residency_set_once() {
         use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -1249,4 +1242,4 @@ impl TimelineManagerActor {
             BTreeSet::from([room_a, room_b])
         );
     }
-
+}

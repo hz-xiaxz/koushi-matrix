@@ -1,3 +1,17 @@
+use koushi_state::{
+    ComposerDocument, ComposerFormattingOptions, ComposerSendIntent, FormattedMessageDraft,
+    MentionIntent, SlashCommandIntent, resolve_composer_send_intent,
+    resolve_composer_send_intent_with_options,
+};
+
+use matrix_sdk::ruma::UserId;
+use matrix_sdk::ruma::events::Mentions;
+use matrix_sdk::ruma::events::room::message::{
+    RoomMessageEventContent, RoomMessageEventContentWithoutRelation, TextMessageEventContent,
+};
+
+use crate::failure::TimelineFailureKind;
+
 pub(crate) fn validate_composer_body_for_timeline_send(
     body: &str,
 ) -> Result<(), TimelineFailureKind> {
@@ -16,6 +30,7 @@ pub(crate) fn validate_composer_body_for_timeline_send(
         } => Ok(()),
     }
 }
+
 #[cfg(test)]
 pub(crate) fn build_room_message_content_from_composer_document(
     document: ComposerDocument,
@@ -25,7 +40,8 @@ pub(crate) fn build_room_message_content_from_composer_document(
         ComposerFormattingOptions::default(),
     )
 }
-fn build_room_message_content_from_composer_document_with_options(
+
+pub(super) fn build_room_message_content_from_composer_document_with_options(
     document: ComposerDocument,
     formatting_options: ComposerFormattingOptions,
 ) -> Result<RoomMessageEventContent, TimelineFailureKind> {
@@ -35,7 +51,8 @@ fn build_room_message_content_from_composer_document_with_options(
     )
     .map(|content| content.with_relation(None))
 }
-fn build_room_message_content_without_relation_from_composer_document_with_options(
+
+pub(super) fn build_room_message_content_without_relation_from_composer_document_with_options(
     document: ComposerDocument,
     formatting_options: ComposerFormattingOptions,
 ) -> Result<RoomMessageEventContentWithoutRelation, TimelineFailureKind> {
@@ -58,6 +75,7 @@ fn build_room_message_content_without_relation_from_composer_document_with_optio
     }
     Ok(content)
 }
+
 pub(crate) fn build_room_message_content_from_composer_body(
     body: &str,
     mentions: MentionIntent,
@@ -68,6 +86,7 @@ pub(crate) fn build_room_message_content_from_composer_body(
         ComposerFormattingOptions::default(),
     )
 }
+
 pub(crate) fn build_room_message_content_from_composer_body_with_options(
     body: &str,
     mentions: MentionIntent,
@@ -80,6 +99,7 @@ pub(crate) fn build_room_message_content_from_composer_body_with_options(
     )
     .map(|content| content.with_relation(None))
 }
+
 fn build_room_message_content_without_relation_from_composer_body_with_options(
     body: &str,
     mentions: MentionIntent,
@@ -104,6 +124,7 @@ fn build_room_message_content_without_relation_from_composer_body_with_options(
         }
     }
 }
+
 fn without_relation_content_from_formatted_draft(
     draft: FormattedMessageDraft,
     emote: bool,
@@ -124,7 +145,10 @@ fn without_relation_content_from_formatted_draft(
     }
     content
 }
-fn media_caption_content_from_draft(draft: &FormattedMessageDraft) -> TextMessageEventContent {
+
+pub(super) fn media_caption_content_from_draft(
+    draft: &FormattedMessageDraft,
+) -> TextMessageEventContent {
     match &draft.formatted_body {
         Some(formatted_body) => {
             TextMessageEventContent::html(draft.plain_body.clone(), formatted_body.clone())
@@ -132,7 +156,8 @@ fn media_caption_content_from_draft(draft: &FormattedMessageDraft) -> TextMessag
         None => TextMessageEventContent::plain(draft.plain_body.clone()),
     }
 }
-fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
+
+pub(super) fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
     let user_ids = intent
         .user_ids()
         .into_iter()
@@ -152,6 +177,41 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
     mentions.room = mentions_room;
     Some(mentions)
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::sync::Arc;
+
+    use koushi_state::{
+        AppAction, AvatarThumbnailState, ComposerDocument, ComposerInline, MentionIntent,
+        MentionTarget,
+    };
+
+    use matrix_sdk::room::reply::EnforceThread;
+
+    use matrix_sdk::ruma::events::room::message::{MessageType, ReplyWithinThread};
+
+    use matrix_sdk_ui::timeline::{Profile, TimelineDetails};
+    use tokio::sync::mpsc;
+
+    use crate::failure::TimelineFailureKind;
+
+    use super::super::item_projection::{
+        attachment_reply_for_key, reply_enforce_thread_for_key,
+        timeline_sender_avatar_from_profile, timeline_sender_label_from_profile,
+    };
+    use super::super::navigation::TimelineActorGenerationGate;
+    use super::super::outbound_send::{
+        SubmissionAdmissionLedger, deliver_submission_terminal_action,
+    };
+    use super::super::test_support::{room_key, thread_key};
+    use super::{
+        build_room_message_content_from_composer_body,
+        build_room_message_content_from_composer_body_with_options,
+        build_room_message_content_from_composer_document,
+    };
+
     #[tokio::test]
     async fn composer_terminals_survive_replacement_during_reducer_capacity_wait() {
         use koushi_state::{
@@ -223,6 +283,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
             assert!(ledger.get(&submission_id).is_some());
         }
     }
+
     #[test]
     fn composer_document_builds_body_html_and_mentions_from_one_source() {
         let content =
@@ -262,6 +323,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
             "@alice:example.test"
         );
     }
+
     #[test]
     fn composer_core_builds_markdown_send_content_with_mentions() {
         let content = build_room_message_content_from_composer_body(
@@ -296,6 +358,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
                 .any(|user_id| user_id.as_str() == "@alice:example.test")
         );
     }
+
     #[test]
     fn composer_core_builds_me_slash_command_as_emote_content() {
         let content = build_room_message_content_from_composer_body(
@@ -318,6 +381,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
             other => panic!("expected emote content, got {other:?}"),
         }
     }
+
     #[test]
     fn composer_core_builds_spoiler_markdown_as_formatted_body() {
         let content = build_room_message_content_from_composer_body(
@@ -339,6 +403,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
             other => panic!("expected text content, got {other:?}"),
         }
     }
+
     #[test]
     fn composer_core_builds_math_markdown_as_matrix_math_html() {
         let content = build_room_message_content_from_composer_body(
@@ -360,6 +425,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
             other => panic!("expected text content, got {other:?}"),
         }
     }
+
     #[test]
     fn composer_core_respects_math_mode_off_for_sent_content() {
         let content = build_room_message_content_from_composer_body_with_options(
@@ -377,6 +443,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
             other => panic!("expected text content, got {other:?}"),
         }
     }
+
     #[test]
     fn sender_profile_projects_display_name_and_avatar_mxc() {
         let profile = TimelineDetails::Ready(Profile {
@@ -395,6 +462,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
         assert_eq!(avatar.mxc_uri, "mxc://matrix.org/avatar");
         assert_eq!(avatar.thumbnail, AvatarThumbnailState::NotRequested);
     }
+
     #[test]
     fn composer_core_sends_unknown_slash_text_literally() {
         // Issue #450: unknown leading-slash text is ordinary content.
@@ -405,6 +473,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
             assert_eq!(content.body(), body);
         }
     }
+
     #[test]
     fn composer_core_rejects_recognized_unavailable_commands_locally() {
         // Issue #450: /me is sent (emote); /join and /invite are recognized
@@ -424,6 +493,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
             );
         }
     }
+
     #[test]
     fn thread_composer_sends_regular_thread_messages_for_element_compatibility() {
         assert_eq!(
@@ -431,6 +501,7 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
             EnforceThread::Threaded(ReplyWithinThread::No)
         );
     }
+
     #[test]
     fn thread_media_uses_the_same_regular_thread_relation() {
         let reply = attachment_reply_for_key(&thread_key()).expect("thread media relation");
@@ -441,3 +512,4 @@ fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentions> {
         assert_eq!(reply.event_id.as_str(), "$root:test");
         assert!(attachment_reply_for_key(&room_key()).is_none());
     }
+}

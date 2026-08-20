@@ -3,7 +3,8 @@
 ## Status
 
 - Design: `reviewer-flash` reviewed the full design/inventory, required explicit empty-impl and cross-owner source-guard amendments, verified both correction rounds against the immutable source, and recorded `Correct-to-implement`.
-- Implementation: approved but not started.
+- Implementation: integrated from immutable AST items; bidirectional exactness, warning parity, both Core lib configurations, focused integrations, all-target/all-feature check, rustfmt and diff checks are green.
+- Full-diff review: pending.
 - Delivery: pending.
 
 ## Objective
@@ -225,6 +226,17 @@ A temporary non-repository `syn` verifier must prove bidirectionally:
 9. No wrapper, duplicate, compatibility shim, new state object, trait, callback registry, TODO, dead-code allowance, dependency, diagnostic field/token, or behavior change exists.
 
 Pre-existing warnings are baseline artifacts, not permission to add or suppress warnings.
+
+## Integrated implementation evidence
+
+- `timeline.rs`: 48,486 → 99 lines. It contains the unchanged module canon docs, fifteen private production declarations, two cfg-test support declarations, and the exact thirty-name flat façade; no production/test body or behavioral constant remains.
+- Production exactness: 1,050/1,050 named keys and 72/72 logical impl identities/memberships, including 84/84 TimelineManagerActor and 112/112 TimelineActor methods.
+- Test exactness: 410/410 tests and 44/44 existing helpers. All non-source test attrs/bodies match immutable tokens; the only twenty body-token deltas are source-characterization plumbing that replaces cross-file positional slicing with explicit per-item `item_body` predicates. All 55 source-contract tests read explicit owner files, and no source is concatenated.
+- Façade: 30/30 baseline public/crate names, exact cfg gates, no public child module, glob, barrel or compatibility alias.
+- Warning parity: fresh baseline/current `cargo check -p koushi-core --lib` both report 30 koushi-core warnings with the same categories; no warning or allow-list was added.
+- Core lib default and `test-hooks`: 1,014 passed/8 ignored each. The pinned Account ordering test passed three focused runs before the post-move full suite.
+- Focused integrations: runtime timeline 21, send queue 13, room-subscription residency 25, intent lifecycle 5, room-selection scale 4, activity 9, composer-draft lifecycle 7, scheduled send 12; all green.
+- `cargo check -p koushi-core --all-targets --all-features`, `cargo fmt --all -- --check`, and `git diff --check` are green.
 
 ## Verification
 

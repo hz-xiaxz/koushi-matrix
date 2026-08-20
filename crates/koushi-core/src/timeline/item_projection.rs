@@ -1,6 +1,79 @@
-const REPLY_QUOTE_PREVIEW_MAX_CHARS: usize = 160;
+use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Instant;
+
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_sdk::MatrixClientSession;
+use koushi_sdk::MatrixUserProfile;
+use koushi_search::{AttachmentDocument, SensitiveString};
+use koushi_state::UserProfile;
+use koushi_state::{
+    AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState, ComposerDocument, ComposerInline,
+    LiveEventReceipts, LiveReadReceipt, MentionIntent, MentionTarget, ReplyQuote,
+    ReplyQuoteCodeBlock, ReplyQuoteFormattedBody, ReplyQuoteState,
+};
+
+use matrix_sdk::attachment::{AttachmentInfo, BaseFileInfo, BaseImageInfo, Thumbnail};
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSettings};
+use matrix_sdk::room::edit::EditedContent;
+use matrix_sdk::room::reply::{EnforceThread, Reply};
+use matrix_sdk::ruma::events::room::message::FormattedBody;
+use matrix_sdk::ruma::events::room::message::{
+    AddMentions, MessageFormat, MessageType, ReplyWithinThread,
+    RoomMessageEventContentWithoutRelation,
+};
+use matrix_sdk::ruma::events::room::{MediaSource, ThumbnailInfo};
+use matrix_sdk::ruma::events::{StateEventContentChange, room::name::RoomNameEventContent};
+use matrix_sdk::ruma::html::{Html, SanitizerConfig};
+use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, SendHandle};
+use matrix_sdk_ui::timeline::{
+    AnyOtherStateEventContentChange, EmbeddedEvent, EncryptedMessage,
+    EventSendState as SdkEventSendState, EventTimelineItem, InReplyToDetails, MembershipChange,
+    Profile, ReactionStatus, ReactionsByKeyBySender, Timeline, TimelineDetails,
+    TimelineEventItemId, TimelineItem as SdkTimelineItem, TimelineItemContent, TimelineItemKind,
+};
+use tokio::sync::mpsc;
+
+use crate::account_work::AccountWorkKind;
+use crate::command::{MediaDownloadSelection, UploadMediaKind, UploadMediaRequest};
+use crate::event::{
+    CoreEvent, LinkPreview, LinkPreviewState, ReactionSender, RoomKeyRequestStage,
+    RoomKeyRequestStateDto, RoomKeyRequestWithheldCode, ThreadSummaryDto, TimelineDiff,
+    TimelineEvent, TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind,
+    TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions, TimelineMessageKind,
+    TimelineMessageSource, TimelineNoticeI18n, TimelineNoticeI18nKey, TimelineSendFailureReason,
+    TimelineSendState, TimelineSpoilerSpan, TimelineUnableToDecrypt, TimelineUnableToDecryptReason,
+    TimelineViewportObservation, message_actions_for_timeline_item,
+    message_source_for_timeline_item,
+};
+use crate::executor;
+use crate::failure::{CoreFailure, TimelineFailureKind};
+use crate::ids::{RequestId, TimelineKey, TimelineKind};
+use crate::link_preview::{LinkPreviewContext, extract_link_ranges};
+use crate::search::SearchIndexMessage;
+
+// BEGIN GENERATED SIBLING IMPORTS
+use super::actor::{TimelineActor, TimelineActorMessage};
+use super::composer::ruma_mentions_from_intent;
+use super::diagnostics::{
+    trace_timeline_actor_operation, trace_timeline_actor_scan, trace_timeline_link_preview,
+};
+use super::manager::TimelineManagerActor;
+use super::media::PrivateMediaEntry;
+use super::navigation::{
+    TimelineActorGenerationGate, activity_rows_from_timeline_diffs, send_generation_fenced,
+};
+use super::room_key_recovery::{DecryptRetryReason, KeyRequestUiState};
+// END GENERATED SIBLING IMPORTS
+
+pub(super) const REPLY_QUOTE_PREVIEW_MAX_CHARS: usize = 160;
+
 impl TimelineManagerActor {
-    async fn handle_ignored_users_updated(&mut self, user_ids: std::collections::BTreeSet<String>) {
+    pub(super) async fn handle_ignored_users_updated(
+        &mut self,
+        user_ids: std::collections::BTreeSet<String>,
+    ) {
         self.ignored_user_ids = user_ids.clone();
         for handle in self.timelines.values() {
             let _ = handle
@@ -9,6 +82,7 @@ impl TimelineManagerActor {
         }
     }
 }
+
 fn spawn_link_preview_fetch(
     session: Arc<MatrixClientSession>,
     msg_tx: mpsc::Sender<TimelineActorMessage>,
@@ -56,6 +130,7 @@ fn spawn_link_preview_fetch(
             .await;
     })
 }
+
 fn spawn_reply_detail_fetch(
     timeline: Arc<Timeline>,
     msg_tx: mpsc::Sender<TimelineActorMessage>,
@@ -70,13 +145,19 @@ fn spawn_reply_detail_fetch(
             .await;
     })
 }
+
 struct ReactionTargetState {
     item_id: TimelineEventItemId,
     can_react: bool,
     my_reaction_event_id: Option<String>,
 }
+
 impl TimelineActor {
-    async fn handle_load_message_source(&mut self, request_id: RequestId, event_id: String) {
+    pub(super) async fn handle_load_message_source(
+        &mut self,
+        request_id: RequestId,
+        event_id: String,
+    ) {
         let Some(source) = self.project_message_source_for_event(&event_id).await else {
             self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendTarget);
             return;
@@ -88,7 +169,7 @@ impl TimelineActor {
             source,
         }));
     }
-    async fn handle_edit_text(
+    pub(super) async fn handle_edit_text(
         &mut self,
         request_id: RequestId,
         event_id: String,
@@ -180,7 +261,7 @@ impl TimelineActor {
         // Edit success: the local-echo Set diff on the original item identity
         // arrives through the subscription; no dedicated EditCompleted event.
     }
-    async fn handle_redact(&mut self, request_id: RequestId, event_id: String) {
+    pub(super) async fn handle_redact(&mut self, request_id: RequestId, event_id: String) {
         // Same rationale as edits: redact through the SDK Timeline so the
         // diff is produced locally instead of waiting for the server echo.
         let candidates = self.item_ids_for_event(&event_id);
@@ -215,7 +296,7 @@ impl TimelineActor {
         }
         // Redact success: timeline diff reflects it (removal or redacted-state Set diff).
     }
-    async fn handle_toggle_reaction(
+    pub(super) async fn handle_toggle_reaction(
         &mut self,
         request_id: RequestId,
         event_id: String,
@@ -257,7 +338,7 @@ impl TimelineActor {
             );
         }
     }
-    async fn handle_send_reaction(
+    pub(super) async fn handle_send_reaction(
         &mut self,
         request_id: RequestId,
         event_id: String,
@@ -379,7 +460,7 @@ impl TimelineActor {
             }
         }
     }
-    async fn handle_redact_reaction(
+    pub(super) async fn handle_redact_reaction(
         &mut self,
         request_id: RequestId,
         event_id: String,
@@ -504,7 +585,10 @@ impl TimelineActor {
             }
         }
     }
-    async fn handle_ignored_users_updated(&mut self, user_ids: std::collections::BTreeSet<String>) {
+    pub(super) async fn handle_ignored_users_updated(
+        &mut self,
+        user_ids: std::collections::BTreeSet<String>,
+    ) {
         if self.ignored_user_ids == user_ids {
             return;
         }
@@ -546,7 +630,11 @@ impl TimelineActor {
         }];
         self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs)
     }
-    async fn handle_load_link_previews(&mut self, request_id: RequestId, event_id: String) {
+    pub(super) async fn handle_load_link_previews(
+        &mut self,
+        request_id: RequestId,
+        event_id: String,
+    ) {
         let trace_started = Some(std::time::Instant::now());
         let Some(index) = self.navigation_items.iter().position(
             |item| matches!(&item.id, TimelineItemId::Event { event_id: id } if id == &event_id),
@@ -627,7 +715,7 @@ impl TimelineActor {
             previous.abort();
         }
     }
-    async fn handle_link_previews_fetched(
+    pub(super) async fn handle_link_previews_fetched(
         &mut self,
         request_id: RequestId,
         event_id: String,
@@ -718,7 +806,7 @@ impl TimelineActor {
             Some(if changed { "updated" } else { "discarded" }),
         );
     }
-    fn handle_cancel_link_previews(&mut self, request_id: RequestId) {
+    pub(super) fn handle_cancel_link_previews(&mut self, request_id: RequestId) {
         let fetch_count = self.link_preview_fetches.len();
         if fetch_count == 0 {
             return;
@@ -755,7 +843,11 @@ impl TimelineActor {
 
         let _ = self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs);
     }
-    async fn handle_hide_link_preview(&mut self, _request_id: RequestId, event_id: String) {
+    pub(super) async fn handle_hide_link_preview(
+        &mut self,
+        _request_id: RequestId,
+        event_id: String,
+    ) {
         let mut context = self.link_preview_policy.for_room(self.key.room_id());
         if !context.hidden_event_ids.insert(event_id.clone()) {
             return;
@@ -780,7 +872,7 @@ impl TimelineActor {
 
         let _ = self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs);
     }
-    async fn handle_link_preview_policy_changed(
+    pub(super) async fn handle_link_preview_policy_changed(
         &mut self,
         unencrypted_global_enabled: bool,
         encrypted_global_enabled: bool,
@@ -811,7 +903,7 @@ impl TimelineActor {
 
         let _ = self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs);
     }
-    fn maybe_fetch_visible_reply_details(&mut self) {
+    pub(super) fn maybe_fetch_visible_reply_details(&mut self) {
         let event_ids = visible_missing_reply_detail_event_ids(
             &self.navigation_items,
             &self.viewport_observation,
@@ -842,7 +934,7 @@ impl TimelineActor {
             .emit_search_messages_reliable(self.search_index_messages_for_diff(diff))
             .await;
     }
-    fn search_index_messages_for_diff(
+    pub(super) fn search_index_messages_for_diff(
         &self,
         diff: &eyeball_im::VectorDiff<Arc<SdkTimelineItem>>,
     ) -> Vec<SearchIndexMessage> {
@@ -984,7 +1076,7 @@ impl TimelineActor {
             }]
         }
     }
-    async fn forward_initial_items_to_search(
+    pub(super) async fn forward_initial_items_to_search(
         &self,
         items: impl IntoIterator<Item = Arc<SdkTimelineItem>>,
     ) {
@@ -1095,12 +1187,12 @@ impl TimelineActor {
         }
         ids
     }
-    fn timeline_contains_event_id(&self, event_id: &str) -> bool {
+    pub(super) fn timeline_contains_event_id(&self, event_id: &str) -> bool {
         self.navigation_items.iter().any(
             |item| matches!(&item.id, TimelineItemId::Event { event_id: id } if id == event_id),
         )
     }
-    async fn project_message_source_for_event(
+    pub(super) async fn project_message_source_for_event(
         &self,
         event_id: &str,
     ) -> Option<TimelineMessageSource> {
@@ -1200,14 +1292,16 @@ impl TimelineActor {
         None
     }
 }
-fn timeline_room_id(key: &TimelineKey) -> Option<String> {
+
+pub(super) fn timeline_room_id(key: &TimelineKey) -> Option<String> {
     match &key.kind {
         TimelineKind::Room { room_id }
         | TimelineKind::Thread { room_id, .. }
         | TimelineKind::Focused { room_id, .. } => Some(room_id.clone()),
     }
 }
-fn apply_ignored_sender_suppression(
+
+pub(super) fn apply_ignored_sender_suppression(
     item: &mut TimelineItem,
     ignored_user_ids: &std::collections::BTreeSet<String>,
 ) {
@@ -1217,7 +1311,8 @@ fn apply_ignored_sender_suppression(
         .is_some_and(|sender| ignored_user_ids.contains(sender));
     item.is_hidden = item.is_hidden || sender_ignored;
 }
-fn apply_ignored_sender_suppression_to_diff(
+
+pub(super) fn apply_ignored_sender_suppression_to_diff(
     diff: &mut TimelineDiff,
     ignored_user_ids: &std::collections::BTreeSet<String>,
 ) {
@@ -1236,7 +1331,8 @@ fn apply_ignored_sender_suppression_to_diff(
         TimelineDiff::Remove { .. } | TimelineDiff::Truncate { .. } | TimelineDiff::Clear => {}
     }
 }
-async fn apply_link_previews_to_item(
+
+pub(super) async fn apply_link_previews_to_item(
     item: &mut TimelineItem,
     room_id: &str,
     context: &LinkPreviewContext,
@@ -1265,6 +1361,7 @@ async fn apply_link_previews_to_item(
         context,
     );
 }
+
 fn reset_loading_link_previews_to_pending(item: &mut TimelineItem) -> bool {
     let Some(previews) = item.link_previews.as_mut() else {
         return false;
@@ -1278,7 +1375,8 @@ fn reset_loading_link_previews_to_pending(item: &mut TimelineItem) -> bool {
     }
     changed
 }
-fn is_unread_navigation_item(item: &TimelineItem, own_user_id: Option<&str>) -> bool {
+
+pub(super) fn is_unread_navigation_item(item: &TimelineItem, own_user_id: Option<&str>) -> bool {
     if item.is_hidden || !has_user_visible_content(item) {
         return false;
     }
@@ -1287,14 +1385,16 @@ fn is_unread_navigation_item(item: &TimelineItem, own_user_id: Option<&str>) -> 
     }
     matches!(item.id, TimelineItemId::Event { .. })
 }
-fn has_user_visible_content(item: &TimelineItem) -> bool {
+
+pub(super) fn has_user_visible_content(item: &TimelineItem) -> bool {
     timeline_content_is_renderable(
         item.body.as_deref(),
         item.media.as_ref(),
         item.formatted.as_ref(),
     )
 }
-fn timeline_content_is_renderable(
+
+pub(super) fn timeline_content_is_renderable(
     body: Option<&str>,
     media: Option<&TimelineMedia>,
     formatted: Option<&crate::event::TimelineFormattedBody>,
@@ -1303,20 +1403,29 @@ fn timeline_content_is_renderable(
         || media.is_some()
         || formatted.is_some_and(timeline_formatted_body_is_renderable)
 }
-fn timeline_formatted_body_is_renderable(formatted: &crate::event::TimelineFormattedBody) -> bool {
+
+pub(super) fn timeline_formatted_body_is_renderable(
+    formatted: &crate::event::TimelineFormattedBody,
+) -> bool {
     !formatted.plain_text.trim().is_empty()
         || formatted
             .code_blocks
             .iter()
             .any(|block| !block.body.trim().is_empty())
 }
-fn timeline_sender_label_from_profile(profile: &TimelineDetails<Profile>) -> Option<String> {
+
+pub(super) fn timeline_sender_label_from_profile(
+    profile: &TimelineDetails<Profile>,
+) -> Option<String> {
     match profile {
         TimelineDetails::Ready(profile) => profile.display_name.clone(),
         TimelineDetails::Unavailable | TimelineDetails::Pending | TimelineDetails::Error(_) => None,
     }
 }
-fn timeline_sender_avatar_from_profile(profile: &TimelineDetails<Profile>) -> Option<AvatarImage> {
+
+pub(super) fn timeline_sender_avatar_from_profile(
+    profile: &TimelineDetails<Profile>,
+) -> Option<AvatarImage> {
     let TimelineDetails::Ready(profile) = profile else {
         return None;
     };
@@ -1326,17 +1435,20 @@ fn timeline_sender_avatar_from_profile(profile: &TimelineDetails<Profile>) -> Op
         thumbnail: AvatarThumbnailState::NotRequested,
     })
 }
+
 fn original_json_for_event_item(event_item: &EventTimelineItem) -> Option<serde_json::Value> {
     event_item
         .original_json()
         .and_then(|raw| serde_json::from_str(raw.json().get()).ok())
 }
-fn megolm_session_fingerprint(session_id: &str) -> String {
+
+pub(super) fn megolm_session_fingerprint(session_id: &str) -> String {
     // Matrix Megolm session IDs are random base64 strings. A 12-character
     // prefix is compact while providing enough entropy to distinguish session
     // rotation without exposing the complete identifier in the UI.
     session_id.chars().take(12).collect()
 }
+
 fn effective_message_content(raw: &serde_json::Value) -> Option<&serde_json::Value> {
     let content = raw.get("content")?;
     Some(
@@ -1350,6 +1462,7 @@ fn effective_message_content(raw: &serde_json::Value) -> Option<&serde_json::Val
             .unwrap_or(content),
     )
 }
+
 fn mention_intent_from_event_json(raw: &serde_json::Value) -> Option<MentionIntent> {
     let effective_content = effective_message_content(raw)?;
     let mentions = effective_content.get("m.mentions")?;
@@ -1378,6 +1491,7 @@ fn mention_intent_from_event_json(raw: &serde_json::Value) -> Option<MentionInte
     }
     (!targets.is_empty()).then_some(MentionIntent { targets })
 }
+
 fn composer_document_from_event_json(raw: &serde_json::Value) -> Option<ComposerDocument> {
     let content = effective_message_content(raw)?;
     let body = content.get("body")?.as_str()?;
@@ -1417,6 +1531,7 @@ fn composer_document_from_event_json(raw: &serde_json::Value) -> Option<Composer
     let document = ComposerDocument::new(inlines);
     (!document.mention_intent().targets.is_empty()).then_some(document)
 }
+
 fn collect_composer_inlines_from_nodes(
     nodes: impl Iterator<Item = matrix_sdk::ruma::html::NodeRef>,
     mentions: &MentionIntent,
@@ -1465,6 +1580,7 @@ fn collect_composer_inlines_from_nodes(
         }
     }
 }
+
 fn matrix_to_mention_target(href: &str) -> Option<MentionTarget> {
     let url = url::Url::parse(href).ok()?;
     if url.scheme() != "https" || url.host_str()? != "matrix.to" {
@@ -1486,6 +1602,7 @@ fn matrix_to_mention_target(href: &str) -> Option<MentionTarget> {
         None
     }
 }
+
 fn allowed_editable_mention_target(
     target: MentionTarget,
     mentions: &MentionIntent,
@@ -1507,6 +1624,7 @@ fn allowed_editable_mention_target(
         MentionTarget::RoomMention { .. } => None,
     }
 }
+
 fn percent_decode_matrix_identifier(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
@@ -1524,6 +1642,7 @@ fn percent_decode_matrix_identifier(value: &str) -> Option<String> {
     }
     String::from_utf8(decoded).ok()
 }
+
 fn hex_value(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
@@ -1532,10 +1651,12 @@ fn hex_value(byte: u8) -> Option<u8> {
         _ => None,
     }
 }
+
 fn timeline_item_should_be_hidden(has_renderable_content: bool, is_redacted: bool) -> bool {
     !has_renderable_content && !is_redacted
 }
-fn timeline_item_should_be_hidden_for_key(
+
+pub(super) fn timeline_item_should_be_hidden_for_key(
     _key: &TimelineKey,
     has_renderable_content: bool,
     is_redacted: bool,
@@ -1543,18 +1664,20 @@ fn timeline_item_should_be_hidden_for_key(
 ) -> bool {
     timeline_item_should_be_hidden(has_renderable_content, is_redacted)
 }
+
 /// Koushi threads are linear, so a thread-keyed reply command is always an
 /// ordinary thread message: the relation is threaded and the target event is
 /// never promoted to a rich reply. The product UI offers no thread-pane reply
 /// action, and this projection keeps a thread rich reply unreachable even if a
 /// caller passes a non-root target.
-fn reply_enforce_thread_for_key(key: &TimelineKey) -> EnforceThread {
+pub(super) fn reply_enforce_thread_for_key(key: &TimelineKey) -> EnforceThread {
     match key.kind {
         TimelineKind::Thread { .. } => EnforceThread::Threaded(ReplyWithinThread::No),
         TimelineKind::Room { .. } | TimelineKind::Focused { .. } => EnforceThread::MaybeThreaded,
     }
 }
-fn attachment_reply_for_key(key: &TimelineKey) -> Option<Reply> {
+
+pub(super) fn attachment_reply_for_key(key: &TimelineKey) -> Option<Reply> {
     let TimelineKind::Thread { root_event_id, .. } = &key.kind else {
         return None;
     };
@@ -1564,7 +1687,8 @@ fn attachment_reply_for_key(key: &TimelineKey) -> Option<Reply> {
         add_mentions: AddMentions::No,
     })
 }
-fn thread_root_from_original_json(original_json: &serde_json::Value) -> Option<String> {
+
+pub(super) fn thread_root_from_original_json(original_json: &serde_json::Value) -> Option<String> {
     let relates_to = original_json.get("content")?.get("m.relates_to")?;
     if relates_to.get("rel_type")?.as_str()? != "m.thread" {
         return None;
@@ -1572,11 +1696,13 @@ fn thread_root_from_original_json(original_json: &serde_json::Value) -> Option<S
     let event_id = relates_to.get("event_id")?.as_str()?.trim();
     (!event_id.is_empty()).then(|| event_id.to_owned())
 }
-fn item_index_for_event_id(items: &[TimelineItem], event_id: &str) -> Option<usize> {
+
+pub(super) fn item_index_for_event_id(items: &[TimelineItem], event_id: &str) -> Option<usize> {
     items
         .iter()
         .position(|item| timeline_item_event_id(item) == Some(event_id))
 }
+
 fn visible_missing_reply_detail_event_ids(
     items: &[TimelineItem],
     observation: &TimelineViewportObservation,
@@ -1609,13 +1735,15 @@ fn visible_missing_reply_detail_event_ids(
         })
         .collect()
 }
-fn timeline_item_event_id(item: &TimelineItem) -> Option<&str> {
+
+pub(super) fn timeline_item_event_id(item: &TimelineItem) -> Option<&str> {
     match &item.id {
         TimelineItemId::Event { event_id } => Some(event_id.as_str()),
         TimelineItemId::Transaction { .. } | TimelineItemId::Synthetic { .. } => None,
     }
 }
-fn live_event_receipts_from_sdk_items<'a>(
+
+pub(super) fn live_event_receipts_from_sdk_items<'a>(
     items: impl IntoIterator<Item = &'a Arc<SdkTimelineItem>>,
 ) -> Vec<LiveEventReceipts> {
     items
@@ -1623,11 +1751,13 @@ fn live_event_receipts_from_sdk_items<'a>(
         .filter_map(|item| live_event_receipts_from_sdk_item(item, false))
         .collect()
 }
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum ReceiptObservationTarget {
+pub(super) enum ReceiptObservationTarget {
     Live,
     Authoritative { scoped_event_ids: Vec<String> },
 }
+
 fn build_receipt_observation_actions(
     room_id: &str,
     receipts_by_event: Vec<LiveEventReceipts>,
@@ -1683,7 +1813,8 @@ fn build_receipt_observation_actions(
     });
     actions
 }
-fn build_live_receipt_observation_actions(
+
+pub(super) fn build_live_receipt_observation_actions(
     room_id: &str,
     receipts_by_event: Vec<LiveEventReceipts>,
     profiles: Vec<MatrixUserProfile>,
@@ -1695,7 +1826,8 @@ fn build_live_receipt_observation_actions(
         ReceiptObservationTarget::Live,
     )
 }
-async fn live_receipt_observation_actions_from_sdk_receipts(
+
+pub(super) async fn live_receipt_observation_actions_from_sdk_receipts(
     session: &MatrixClientSession,
     room_id: &str,
     receipts_by_event: Vec<LiveEventReceipts>,
@@ -1708,6 +1840,7 @@ async fn live_receipt_observation_actions_from_sdk_receipts(
     )
     .await
 }
+
 async fn receipt_observation_actions_from_sdk_receipts(
     session: &MatrixClientSession,
     room_id: &str,
@@ -1739,7 +1872,8 @@ async fn receipt_observation_actions_from_sdk_receipts(
     );
     build_receipt_observation_actions(room_id, receipts_by_event, profiles, target)
 }
-async fn emit_receipt_observation_actions(
+
+pub(super) async fn emit_receipt_observation_actions(
     session: &MatrixClientSession,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
@@ -1761,7 +1895,8 @@ async fn emit_receipt_observation_actions(
     )
     .await
 }
-async fn emit_live_receipt_observation_actions(
+
+pub(super) async fn emit_live_receipt_observation_actions(
     session: &MatrixClientSession,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
@@ -1782,6 +1917,7 @@ async fn emit_live_receipt_observation_actions(
     )
     .await
 }
+
 fn record_live_receipt_profile_lookup(
     receipt_count: usize,
     requested_user_count: usize,
@@ -1810,7 +1946,8 @@ fn record_live_receipt_profile_lookup(
         .field(DiagnosticField::boolean("network_lookup_attempted", false)),
     );
 }
-fn collect_live_event_receipts_from_diff(
+
+pub(super) fn collect_live_event_receipts_from_diff(
     diff: &eyeball_im::VectorDiff<Arc<SdkTimelineItem>>,
     out: &mut Vec<LiveEventReceipts>,
 ) {
@@ -1839,6 +1976,7 @@ fn collect_live_event_receipts_from_diff(
         | VectorDiff::PopBack => {}
     }
 }
+
 fn live_event_receipts_from_sdk_item(
     item: &Arc<SdkTimelineItem>,
     include_empty: bool,
@@ -1868,6 +2006,7 @@ fn live_event_receipts_from_sdk_item(
 
     Some(LiveEventReceipts { event_id, receipts })
 }
+
 /// Convert a single SDK `TimelineItem` to our `TimelineItem` DTO.
 pub fn sdk_item_to_timeline_item(
     key: &TimelineKey,
@@ -1884,6 +2023,7 @@ pub fn sdk_item_to_timeline_item(
         None,
     )
 }
+
 /// Build the closed room-key request presentation state for an event
 /// (issue #460). Only closed tokens cross the wire.
 fn request_state_for_item(
@@ -1921,10 +2061,11 @@ fn request_state_for_item(
         withheld_code,
     })
 }
+
 /// Map an internal stage literal to the closed wire token. Internal stages
 /// are compile-time literals only; the fallback keeps the wire contract closed
 /// even if a future literal is added before the mapping is extended.
-fn key_request_stage_token(stage: &str) -> RoomKeyRequestStage {
+pub(super) fn key_request_stage_token(stage: &str) -> RoomKeyRequestStage {
     match stage {
         "sent" => RoomKeyRequestStage::Sent,
         "automatic" => RoomKeyRequestStage::Automatic,
@@ -1935,8 +2076,9 @@ fn key_request_stage_token(stage: &str) -> RoomKeyRequestStage {
         _ => RoomKeyRequestStage::StillWaiting,
     }
 }
+
 /// Map an internal withheld-code literal to the closed wire token.
-fn key_request_withheld_code_token(code: &str) -> Option<RoomKeyRequestWithheldCode> {
+pub(super) fn key_request_withheld_code_token(code: &str) -> Option<RoomKeyRequestWithheldCode> {
     match code {
         "blacklisted" => Some(RoomKeyRequestWithheldCode::Blacklisted),
         "unverified" => Some(RoomKeyRequestWithheldCode::Unverified),
@@ -1945,7 +2087,8 @@ fn key_request_withheld_code_token(code: &str) -> Option<RoomKeyRequestWithheldC
         _ => None,
     }
 }
-fn sdk_item_to_timeline_item_with_send_states(
+
+pub(super) fn sdk_item_to_timeline_item_with_send_states(
     key: &TimelineKey,
     item: &Arc<SdkTimelineItem>,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
@@ -2179,10 +2322,11 @@ fn sdk_item_to_timeline_item_with_send_states(
         }
     }
 }
+
 /// Event id of a requestable UTD event for automatic key requests (issue
 /// #460): decryptable-retry eligible (session known) and the original JSON is
 /// available to re-request from.
-fn thread_auto_requestable_event_id(item: &Arc<SdkTimelineItem>) -> Option<String> {
+pub(super) fn thread_auto_requestable_event_id(item: &Arc<SdkTimelineItem>) -> Option<String> {
     let event_item = item.as_event()?;
     let event_id = event_item.event_id()?.to_string();
     let requestable = event_item.content().is_unable_to_decrypt()
@@ -2192,15 +2336,21 @@ fn thread_auto_requestable_event_id(item: &Arc<SdkTimelineItem>) -> Option<Strin
             .is_some();
     requestable.then_some(event_id)
 }
+
 /// Whether a late withheld observation should update/publish a presentation
 /// state (issue #460): terminal stages are never regressed, and a stage
 /// already settled `withheld` by a diff still gains the typed code when the
 /// independent observation arrives later with a different code.
-fn withheld_update_should_publish(stage: &str, current_code: Option<&str>, new_code: &str) -> bool {
+pub(super) fn withheld_update_should_publish(
+    stage: &str,
+    current_code: Option<&str>,
+    new_code: &str,
+) -> bool {
     !matches!(stage, "decryption_recovered" | "send_failed")
         && (stage != "withheld" || current_code != Some(new_code))
 }
-fn unable_to_decrypt_from_content(
+
+pub(super) fn unable_to_decrypt_from_content(
     content: &TimelineItemContent,
 ) -> Option<TimelineUnableToDecrypt> {
     let encrypted = content.as_unable_to_decrypt()?;
@@ -2220,7 +2370,10 @@ fn unable_to_decrypt_from_content(
         recovery_guidance: None,
     })
 }
-fn decrypt_retry_reason_from_content(content: &TimelineItemContent) -> DecryptRetryReason {
+
+pub(super) fn decrypt_retry_reason_from_content(
+    content: &TimelineItemContent,
+) -> DecryptRetryReason {
     unable_to_decrypt_from_content(content)
         .map(|unable_to_decrypt| match unable_to_decrypt.reason {
             TimelineUnableToDecryptReason::MissingRoomKey => DecryptRetryReason::MissingRoomKey,
@@ -2230,7 +2383,10 @@ fn decrypt_retry_reason_from_content(content: &TimelineItemContent) -> DecryptRe
         })
         .unwrap_or(DecryptRetryReason::Unknown)
 }
-fn thread_summary_from_sdk(summary: matrix_sdk_ui::timeline::ThreadSummary) -> ThreadSummaryDto {
+
+pub(super) fn thread_summary_from_sdk(
+    summary: matrix_sdk_ui::timeline::ThreadSummary,
+) -> ThreadSummaryDto {
     let mut dto = ThreadSummaryDto {
         reply_count: summary.num_replies,
         latest_event_id: None,
@@ -2256,16 +2412,18 @@ fn thread_summary_from_sdk(summary: matrix_sdk_ui::timeline::ThreadSummary) -> T
 
     dto
 }
-struct MessageProjection {
-    body: Option<String>,
-    notice_i18n: Option<TimelineNoticeI18n>,
-    body_is_user_content: bool,
-    message_kind: TimelineMessageKind,
-    spoiler_spans: Vec<TimelineSpoilerSpan>,
-    media: Option<TimelineMedia>,
-    formatted: Option<crate::event::TimelineFormattedBody>,
+
+pub(super) struct MessageProjection {
+    pub(super) body: Option<String>,
+    pub(super) notice_i18n: Option<TimelineNoticeI18n>,
+    pub(super) body_is_user_content: bool,
+    pub(super) message_kind: TimelineMessageKind,
+    pub(super) spoiler_spans: Vec<TimelineSpoilerSpan>,
+    pub(super) media: Option<TimelineMedia>,
+    pub(super) formatted: Option<crate::event::TimelineFormattedBody>,
 }
-fn link_ranges_for_message_projection(
+
+pub(super) fn link_ranges_for_message_projection(
     body: Option<&str>,
     formatted: Option<&crate::event::TimelineFormattedBody>,
 ) -> Vec<crate::event::TimelineLinkRange> {
@@ -2275,6 +2433,7 @@ fn link_ranges_for_message_projection(
         .unwrap_or("");
     extract_link_ranges(source)
 }
+
 fn reply_quote_from_details(details: &InReplyToDetails) -> ReplyQuote {
     match &details.event {
         TimelineDetails::Ready(event) => reply_quote_from_embedded_event(details, event),
@@ -2290,6 +2449,7 @@ fn reply_quote_from_details(details: &InReplyToDetails) -> ReplyQuote {
         }
     }
 }
+
 fn reply_quote_from_embedded_event(
     details: &InReplyToDetails,
     event: &EmbeddedEvent,
@@ -2312,6 +2472,7 @@ fn reply_quote_from_embedded_event(
         .map(|msg| message_projection_from_msgtype(msg.msgtype(), msg.body()));
     reply_quote_from_message_projection(&details.event_id.to_string(), sender, projection)
 }
+
 fn reply_quote_from_message_projection(
     event_id: &str,
     sender: Option<String>,
@@ -2339,6 +2500,7 @@ fn reply_quote_from_message_projection(
         state,
     }
 }
+
 fn reply_quote_formatted_body_from_timeline(
     formatted: &crate::event::TimelineFormattedBody,
 ) -> ReplyQuoteFormattedBody {
@@ -2355,6 +2517,7 @@ fn reply_quote_formatted_body_from_timeline(
             .collect(),
     }
 }
+
 fn reply_quote_preview_from_message_projection(projection: &MessageProjection) -> Option<String> {
     let source = projection.body.as_deref().or_else(|| {
         projection
@@ -2364,6 +2527,7 @@ fn reply_quote_preview_from_message_projection(projection: &MessageProjection) -
     })?;
     collapsed_preview(&source, REPLY_QUOTE_PREVIEW_MAX_CHARS)
 }
+
 fn message_projection_from_timeline_content(content: &TimelineItemContent) -> MessageProjection {
     if let Some(message) = content.as_message() {
         return message_projection_from_msgtype(message.msgtype(), message.body());
@@ -2418,7 +2582,8 @@ fn message_projection_from_timeline_content(content: &TimelineItemContent) -> Me
         .unwrap_or_else(|| "unsupported Matrix event".to_owned());
     state_event_notice_projection(&event_type)
 }
-fn sticker_projection_from_body(body: &str) -> MessageProjection {
+
+pub(super) fn sticker_projection_from_body(body: &str) -> MessageProjection {
     let body = body.trim();
     MessageProjection {
         body: (!body.is_empty()).then(|| body.to_owned()),
@@ -2430,6 +2595,7 @@ fn sticker_projection_from_body(body: &str) -> MessageProjection {
         formatted: None,
     }
 }
+
 fn state_event_notice_projection(event_type: &str) -> MessageProjection {
     MessageProjection {
         body: Some(state_event_notice_body(event_type).into_owned()),
@@ -2445,6 +2611,7 @@ fn state_event_notice_projection(event_type: &str) -> MessageProjection {
         formatted: None,
     }
 }
+
 fn state_event_notice_body(event_type: &str) -> Cow<'_, str> {
     match event_type {
         "m.room.create" => Cow::Borrowed("created the room"),
@@ -2458,6 +2625,7 @@ fn state_event_notice_body(event_type: &str) -> Cow<'_, str> {
         _ => Cow::Owned(format!("Unsupported event: {event_type}")),
     }
 }
+
 fn state_event_notice_i18n(event_type: &str) -> Option<TimelineNoticeI18nKey> {
     match event_type {
         "m.room.create" => Some(TimelineNoticeI18nKey::RoomCreate),
@@ -2471,6 +2639,7 @@ fn state_event_notice_i18n(event_type: &str) -> Option<TimelineNoticeI18nKey> {
         _ => None,
     }
 }
+
 fn room_name_notice_projection(
     change: &StateEventContentChange<RoomNameEventContent>,
 ) -> MessageProjection {
@@ -2535,6 +2704,7 @@ fn room_name_notice_projection(
         formatted: None,
     }
 }
+
 fn membership_change_projection(
     display_name: &str,
     change: Option<MembershipChange>,
@@ -2562,6 +2732,7 @@ fn membership_change_projection(
     };
     non_user_content_projection(&format!("{display_name} {action}"))
 }
+
 fn profile_change_projection(
     change: &matrix_sdk_ui::timeline::MemberProfileChange,
 ) -> MessageProjection {
@@ -2576,7 +2747,8 @@ fn profile_change_projection(
     };
     non_user_content_projection(body)
 }
-fn non_user_content_projection(body: &str) -> MessageProjection {
+
+pub(super) fn non_user_content_projection(body: &str) -> MessageProjection {
     MessageProjection {
         body: Some(body.to_owned()),
         notice_i18n: None,
@@ -2587,7 +2759,8 @@ fn non_user_content_projection(body: &str) -> MessageProjection {
         formatted: None,
     }
 }
-fn collapsed_preview(value: &str, max_chars: usize) -> Option<String> {
+
+pub(super) fn collapsed_preview(value: &str, max_chars: usize) -> Option<String> {
     let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
         return None;
@@ -2601,7 +2774,8 @@ fn collapsed_preview(value: &str, max_chars: usize) -> Option<String> {
     preview.push_str("...");
     Some(preview)
 }
-fn message_projection_from_msgtype(
+
+pub(super) fn message_projection_from_msgtype(
     msgtype: &MessageType,
     fallback_body: &str,
 ) -> MessageProjection {
@@ -2659,6 +2833,7 @@ fn message_projection_from_msgtype(
         },
     }
 }
+
 fn message_projection_from_body_and_formatted(
     body: Option<&str>,
     formatted_body: Option<&FormattedBody>,
@@ -2690,10 +2865,12 @@ fn message_projection_from_body_and_formatted(
         formatted,
     }
 }
+
 struct PlainBodyProjection {
     body: String,
     spoiler_spans: Vec<TimelineSpoilerSpan>,
 }
+
 fn project_plain_body_with_spoilers(body: &str) -> PlainBodyProjection {
     let mut rendered = String::with_capacity(body.len());
     let mut spoiler_spans = Vec::new();
@@ -2731,10 +2908,12 @@ fn project_plain_body_with_spoilers(body: &str) -> PlainBodyProjection {
         spoiler_spans,
     }
 }
+
 struct FormattedBodyProjection {
     formatted: crate::event::TimelineFormattedBody,
     spoiler_spans: Vec<TimelineSpoilerSpan>,
 }
+
 fn project_formatted_body(formatted_body: &FormattedBody) -> Option<FormattedBodyProjection> {
     if !matches!(&formatted_body.format, MessageFormat::Html) {
         return None;
@@ -2770,11 +2949,13 @@ fn project_formatted_body(formatted_body: &FormattedBody) -> Option<FormattedBod
         spoiler_spans,
     })
 }
+
 fn plain_text_from_html(html: &Html) -> String {
     let mut text = String::new();
     collect_plain_text_from_nodes(html.children(), &mut text);
     text
 }
+
 fn collect_plain_text_from_nodes(
     nodes: impl Iterator<Item = matrix_sdk::ruma::html::NodeRef>,
     out: &mut String,
@@ -2790,6 +2971,7 @@ fn collect_plain_text_from_nodes(
         }
     }
 }
+
 fn spoiler_spans_from_html(html: &Html) -> Vec<TimelineSpoilerSpan> {
     let mut spans = Vec::new();
     let mut offset_utf16 = 0;
@@ -2797,6 +2979,7 @@ fn spoiler_spans_from_html(html: &Html) -> Vec<TimelineSpoilerSpan> {
     spans.sort_by_key(|span| (span.start_utf16, span.end_utf16));
     spans
 }
+
 fn collect_spoiler_spans_from_nodes(
     nodes: impl Iterator<Item = matrix_sdk::ruma::html::NodeRef>,
     offset_utf16: &mut usize,
@@ -2832,11 +3015,13 @@ fn collect_spoiler_spans_from_nodes(
         }
     }
 }
+
 fn code_blocks_from_html(html: &Html) -> Vec<crate::event::TimelineCodeBlock> {
     let mut blocks = Vec::new();
     collect_code_blocks_from_nodes(html.children(), &mut blocks);
     blocks
 }
+
 fn collect_code_blocks_from_nodes(
     nodes: impl Iterator<Item = matrix_sdk::ruma::html::NodeRef>,
     out: &mut Vec<crate::event::TimelineCodeBlock>,
@@ -2878,6 +3063,7 @@ fn collect_code_blocks_from_nodes(
         collect_code_blocks_from_nodes(node.children(), out);
     }
 }
+
 fn timeline_media_from_audio(
     content: &matrix_sdk::ruma::events::room::message::AudioMessageEventContent,
 ) -> TimelineMedia {
@@ -2893,6 +3079,7 @@ fn timeline_media_from_audio(
         thumbnail: None,
     }
 }
+
 fn timeline_media_from_image(
     content: &matrix_sdk::ruma::events::room::message::ImageMessageEventContent,
 ) -> TimelineMedia {
@@ -2913,6 +3100,7 @@ fn timeline_media_from_image(
         }),
     }
 }
+
 fn timeline_media_from_file(
     content: &matrix_sdk::ruma::events::room::message::FileMessageEventContent,
 ) -> TimelineMedia {
@@ -2933,6 +3121,7 @@ fn timeline_media_from_file(
         }),
     }
 }
+
 fn timeline_media_from_video(
     content: &matrix_sdk::ruma::events::room::message::VideoMessageEventContent,
 ) -> TimelineMedia {
@@ -2953,7 +3142,8 @@ fn timeline_media_from_video(
         }),
     }
 }
-fn timeline_media_source_from_sdk(source: &MediaSource) -> TimelineMediaSource {
+
+pub(super) fn timeline_media_source_from_sdk(source: &MediaSource) -> TimelineMediaSource {
     match source {
         MediaSource::Plain(uri) => TimelineMediaSource {
             mxc_uri: uri.to_string(),
@@ -2967,6 +3157,7 @@ fn timeline_media_source_from_sdk(source: &MediaSource) -> TimelineMediaSource {
         },
     }
 }
+
 fn timeline_media_thumbnail_from_sdk(
     source: Option<&MediaSource>,
     info: Option<&ThumbnailInfo>,
@@ -2979,7 +3170,10 @@ fn timeline_media_thumbnail_from_sdk(
         height: info.and_then(|info| uint_to_u64(info.height.as_ref())),
     })
 }
-fn timeline_send_state_from_sdk(state: Option<&SdkEventSendState>) -> Option<TimelineSendState> {
+
+pub(super) fn timeline_send_state_from_sdk(
+    state: Option<&SdkEventSendState>,
+) -> Option<TimelineSendState> {
     match state {
         Some(SdkEventSendState::NotSentYet { .. }) => Some(TimelineSendState::Sending),
         Some(SdkEventSendState::SendingFailed { is_recoverable, .. }) => {
@@ -2991,14 +3185,16 @@ fn timeline_send_state_from_sdk(state: Option<&SdkEventSendState>) -> Option<Tim
         None => None,
     }
 }
-fn send_failure_reason(is_recoverable: bool) -> TimelineSendFailureReason {
+
+pub(super) fn send_failure_reason(is_recoverable: bool) -> TimelineSendFailureReason {
     if is_recoverable {
         TimelineSendFailureReason::Recoverable
     } else {
         TimelineSendFailureReason::Unrecoverable
     }
 }
-fn remember_local_echo(
+
+pub(super) fn remember_local_echo(
     statuses: &mut HashMap<String, TimelineSendState>,
     handles: &mut HashMap<String, SendHandle>,
     echo: &LocalEcho,
@@ -3021,6 +3217,7 @@ fn remember_local_echo(
         handles.insert(transaction_id, send_handle.clone());
     }
 }
+
 fn private_media_entry_from_msgtype(msgtype: &MessageType) -> Option<PrivateMediaEntry> {
     match msgtype {
         MessageType::Image(content) => {
@@ -3078,7 +3275,8 @@ fn private_media_entry_from_msgtype(msgtype: &MessageType) -> Option<PrivateMedi
         _ => None,
     }
 }
-fn cache_sdk_item_media_source(
+
+pub(super) fn cache_sdk_item_media_source(
     cache: &mut HashMap<String, PrivateMediaEntry>,
     item: &Arc<SdkTimelineItem>,
 ) {
@@ -3099,7 +3297,8 @@ fn cache_sdk_item_media_source(
 
     cache.insert(event_id.to_string(), entry);
 }
-fn attachment_info_for_upload(request: &UploadMediaRequest) -> AttachmentInfo {
+
+pub(super) fn attachment_info_for_upload(request: &UploadMediaRequest) -> AttachmentInfo {
     let size = u64::try_from(request.bytes.len())
         .ok()
         .and_then(uint_from_u64);
@@ -3114,7 +3313,8 @@ fn attachment_info_for_upload(request: &UploadMediaRequest) -> AttachmentInfo {
         UploadMediaKind::File => AttachmentInfo::File(BaseFileInfo { size }),
     }
 }
-fn thumbnail_for_upload(request: &UploadMediaRequest) -> Option<Thumbnail> {
+
+pub(super) fn thumbnail_for_upload(request: &UploadMediaRequest) -> Option<Thumbnail> {
     let thumbnail = request.thumbnail.as_ref()?;
     Some(Thumbnail {
         data: thumbnail.bytes.clone(),
@@ -3124,7 +3324,8 @@ fn thumbnail_for_upload(request: &UploadMediaRequest) -> Option<Thumbnail> {
         size: uint_from_u64(u64::try_from(thumbnail.bytes.len()).ok()?)?,
     })
 }
-fn media_request_for_download(
+
+pub(super) fn media_request_for_download(
     entry: &PrivateMediaEntry,
     selection: &MediaDownloadSelection,
 ) -> Option<MediaRequestParameters> {
@@ -3150,6 +3351,7 @@ fn media_request_for_download(
         }
     }
 }
+
 /// Produce a path-safe hex string from a Matrix identifier.
 ///
 /// Matrix room ids and event ids contain `!`, `$`, `#`, `:`, `.`, and `/`
@@ -3157,7 +3359,7 @@ fn media_request_for_download(
 /// and some POSIX contexts.  We hash the identifier to a fixed-length hex
 /// string so the path component is always safe.  The original identifier is
 /// never written to the filesystem; it is only used as the hash input.
-fn sanitize_matrix_id_for_path(id: &str) -> String {
+pub(super) fn sanitize_matrix_id_for_path(id: &str) -> String {
     use std::hash::Hash;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     id.hash(&mut hasher);
@@ -3167,12 +3369,15 @@ fn sanitize_matrix_id_for_path(id: &str) -> String {
         .take(16)
         .collect()
 }
+
 fn uint_to_u64(value: Option<&matrix_sdk::ruma::UInt>) -> Option<u64> {
     value.map(|value| (*value).into())
 }
+
 fn uint_from_u64(value: u64) -> Option<matrix_sdk::ruma::UInt> {
     matrix_sdk::ruma::UInt::try_from(value).ok()
 }
+
 pub(crate) fn timeline_item_can_react(
     is_event_backed: bool,
     can_hold_reactions: bool,
@@ -3181,6 +3386,7 @@ pub(crate) fn timeline_item_can_react(
 ) -> bool {
     is_event_backed && can_hold_reactions && !is_redacted && has_renderable_content
 }
+
 pub(crate) fn validate_send_reaction(
     can_react: bool,
     my_reaction_event_id: Option<&str>,
@@ -3193,6 +3399,7 @@ pub(crate) fn validate_send_reaction(
     }
     Ok(())
 }
+
 pub(crate) fn validate_redact_reaction(
     can_react: bool,
     my_reaction_event_id: Option<&str>,
@@ -3206,6 +3413,7 @@ pub(crate) fn validate_redact_reaction(
         _ => Err(TimelineFailureKind::InvalidReactionState),
     }
 }
+
 pub(crate) fn timeline_item_can_redact(
     is_event_backed: bool,
     is_own_message: bool,
@@ -3214,6 +3422,7 @@ pub(crate) fn timeline_item_can_redact(
 ) -> bool {
     is_event_backed && is_own_message && !is_redacted && has_renderable_content
 }
+
 pub(crate) fn timeline_item_can_edit(
     is_event_backed: bool,
     is_own_message: bool,
@@ -3222,6 +3431,7 @@ pub(crate) fn timeline_item_can_edit(
 ) -> bool {
     is_event_backed && is_own_message && !is_redacted && has_editable_body
 }
+
 /// Shape of a media message, used for the edit decision and its diagnostics.
 ///
 /// The presence of a shape is what marks a message type as media; it is the
@@ -3233,6 +3443,7 @@ struct MediaMessageShape {
     has_info: bool,
     has_caption: bool,
 }
+
 fn msgtype_media_shape(msgtype: &MessageType) -> Option<MediaMessageShape> {
     fn shape(source: &MediaSource, has_info: bool, has_caption: bool) -> Option<MediaMessageShape> {
         Some(MediaMessageShape {
@@ -3266,6 +3477,7 @@ fn msgtype_media_shape(msgtype: &MessageType) -> Option<MediaMessageShape> {
         _ => None,
     }
 }
+
 /// Whether the SDK can edit this message type's caption in place.
 ///
 /// Media message types carry the attachment in the same `m.room.message`
@@ -3274,6 +3486,7 @@ fn msgtype_media_shape(msgtype: &MessageType) -> Option<MediaMessageShape> {
 fn msgtype_carries_editable_caption(msgtype: &MessageType) -> bool {
     msgtype_media_shape(msgtype).is_some()
 }
+
 /// Resolve the SDK message type behind an edit target.
 ///
 /// This mirrors the SDK's own `rfind_event_by_item_id`, which `Timeline::edit`
@@ -3317,6 +3530,7 @@ fn edit_target_msgtype<'items>(
             .map(|message| message.msgtype())
     })
 }
+
 /// Choose the replacement content for an edit of `body`.
 ///
 /// A media message keeps its attachment (`url`/`file`/`info`/`filename`) in the
@@ -3361,6 +3575,7 @@ fn edited_document_content_for_edit_target(
     }
     EditedContent::RoomMessage(content)
 }
+
 #[cfg(test)]
 fn edited_content_for_edit_target(
     msgtype: Option<&MessageType>,
@@ -3385,6 +3600,7 @@ fn edited_content_for_edit_target(
     }
     EditedContent::RoomMessage(content)
 }
+
 fn message_edit_target_token(msgtype: Option<&MessageType>) -> &'static str {
     match msgtype {
         None => "unresolved",
@@ -3398,6 +3614,7 @@ fn message_edit_target_token(msgtype: Option<&MessageType>) -> &'static str {
         Some(_) => "other",
     }
 }
+
 /// Record which replacement shape an edit chose for its target.
 ///
 /// Private-data-free: message type tokens and presence booleans only, never
@@ -3439,6 +3656,7 @@ fn trace_message_edit_target(msgtype: Option<&MessageType>, content: &EditedCont
         )),
     );
 }
+
 fn mention_summary_for_message_type(msgtype: Option<&MessageType>) -> (HashSet<String>, bool) {
     let Some(msgtype) = msgtype else {
         return (HashSet::new(), false);
@@ -3463,6 +3681,7 @@ fn mention_summary_for_message_type(msgtype: Option<&MessageType>) -> (HashSet<S
         .unwrap_or(false);
     (users, room)
 }
+
 fn mention_counts_for_edit(
     original: Option<&MessageType>,
     edited: &EditedContent,
@@ -3494,6 +3713,7 @@ fn mention_counts_for_edit(
     let revision_count = next.0.difference(&old.0).count() + usize::from(next.1 && !old.1);
     (final_count, revision_count)
 }
+
 fn trace_message_edit_lifecycle(
     stage: &'static str,
     target: &'static str,
@@ -3523,6 +3743,7 @@ fn trace_message_edit_lifecycle(
     }
     koushi_diagnostics::record(event);
 }
+
 pub(crate) fn validate_retry_send(
     state: Option<&TimelineSendState>,
 ) -> Result<(), TimelineFailureKind> {
@@ -3534,6 +3755,7 @@ pub(crate) fn validate_retry_send(
         None => Err(TimelineFailureKind::InvalidSendTarget),
     }
 }
+
 pub(crate) fn validate_cancel_send(
     state: Option<&TimelineSendState>,
 ) -> Result<(), TimelineFailureKind> {
@@ -3545,6 +3767,7 @@ pub(crate) fn validate_cancel_send(
         None => Err(TimelineFailureKind::InvalidSendTarget),
     }
 }
+
 pub(crate) fn reaction_groups_from_sdk(
     reactions: &ReactionsByKeyBySender,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
@@ -3586,10 +3809,11 @@ pub(crate) fn reaction_groups_from_sdk(
         })
         .collect()
 }
+
 /// Convert one ordered SDK diff batch while tracking the evolving canonical
 /// length. `PopBack` has no explicit index and `Append` has no equivalent wire
 /// variant, so both must be expanded with the batch's actual preceding state.
-fn sdk_vector_diffs_to_timeline_diffs(
+pub(super) fn sdk_vector_diffs_to_timeline_diffs(
     diffs: &[eyeball_im::VectorDiff<Arc<SdkTimelineItem>>],
     initial_canonical_len: usize,
     key: &TimelineKey,
@@ -3724,6 +3948,7 @@ fn sdk_vector_diffs_to_timeline_diffs(
     }
     converted
 }
+
 fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFailureKind {
     match err {
         matrix_sdk_ui::timeline::Error::EventNotInTimeline(_) => {
@@ -3732,6 +3957,60 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         _ => TimelineFailureKind::Sdk,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_source::item_body;
+
+    use std::collections::HashSet;
+
+    use koushi_state::{
+        ComposerDocument, ComposerInline, MentionIntent, MentionTarget, ReplyQuote, ReplyQuoteState,
+    };
+
+    use matrix_sdk::room::edit::EditedContent;
+
+    use matrix_sdk::ruma::events::room::message::{MessageType, TextMessageEventContent};
+
+    use matrix_sdk::ruma::events::{
+        Mentions, StateEventContentChange, room::name::RoomNameEventContent,
+    };
+
+    use matrix_sdk_ui::timeline::{MembershipChange, ReactionStatus, ReactionsByKeyBySender};
+
+    use crate::command::TimelineCommand;
+    use crate::event::{
+        LinkPreview, LinkPreviewState, TimelineItemId, TimelineMessageKind, TimelineNoticeI18n,
+        TimelineNoticeI18nKey, TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan,
+        TimelineViewportObservation, message_actions_for_timeline_item,
+    };
+
+    use crate::failure::TimelineFailureKind;
+
+    use koushi_diagnostics::DiagnosticValue;
+
+    use matrix_sdk::ruma::events::room::message::{
+        EmoteMessageEventContent, NoticeMessageEventContent,
+    };
+    use matrix_sdk::ruma::{OwnedUserId, uint};
+    use matrix_sdk_ui::timeline::ReactionInfo;
+
+    use super::super::diagnostics::timeline_item_diagnostic_event;
+    use super::{
+        composer_document_from_event_json, edited_content_for_edit_target,
+        edited_document_content_for_edit_target, has_user_visible_content,
+        link_ranges_for_message_projection, membership_change_projection,
+        message_edit_target_token, message_projection_from_msgtype,
+        msgtype_carries_editable_caption, reaction_groups_from_sdk,
+        reply_quote_from_message_projection, reset_loading_link_previews_to_pending,
+        room_name_notice_projection, state_event_notice_body, state_event_notice_projection,
+        timeline_item_can_edit, timeline_item_can_react, timeline_item_can_redact,
+        timeline_item_should_be_hidden, validate_cancel_send, validate_redact_reaction,
+        validate_retry_send, validate_send_reaction, visible_missing_reply_detail_event_ids,
+    };
+
+    use super::super::test_support::{fake_rid, room_key, timeline_item};
+
     #[test]
     fn visible_missing_reply_detail_event_ids_only_returns_visible_unrequested_missing_replies() {
         let mut before = timeline_item("$before:test", Some("before"), "@alice:test", false);
@@ -3810,19 +4089,57 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
 
         assert_eq!(event_ids, vec!["$missing:test".to_owned()]);
     }
+
+    fn reaction_groups_fixture() -> ReactionsByKeyBySender {
+        let mut reactions = ReactionsByKeyBySender::default();
+        let thumbs = reactions.entry("👍".to_owned()).or_default();
+        thumbs.insert(
+            OwnedUserId::try_from("@me:test").expect("user id"),
+            ReactionInfo {
+                timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(1)),
+                status: ReactionStatus::RemoteToRemote(
+                    matrix_sdk::ruma::OwnedEventId::try_from("$reaction:me").expect("event id"),
+                ),
+            },
+        );
+        thumbs.insert(
+            OwnedUserId::try_from("@alice:test").expect("user id"),
+            ReactionInfo {
+                timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(2)),
+                status: ReactionStatus::LocalToRemote(None),
+            },
+        );
+        thumbs.insert(
+            OwnedUserId::try_from("@bob:test").expect("user id"),
+            ReactionInfo {
+                timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(3)),
+                status: ReactionStatus::LocalToRemote(None),
+            },
+        );
+        thumbs.insert(
+            OwnedUserId::try_from("@carol:test").expect("user id"),
+            ReactionInfo {
+                timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(4)),
+                status: ReactionStatus::LocalToRemote(None),
+            },
+        );
+
+        reactions
+    }
+
     #[test]
     fn editable_document_uses_formatted_links_for_duplicate_mention_identity() {
         let document = composer_document_from_event_json(&serde_json::json!({
-            "content": {
-                "body": "**hello** @Same @Same typed @Same",
-                "format": "org.matrix.custom.html",
-                "formatted_body": "<strong>hello</strong> <a href=\"https://matrix.to/#/%40alice%3Aexample.test\">@Same</a> <a href=\"https://matrix.to/#/%40bob%3Aexample.test\">@Same</a> typed @Same",
-                "m.mentions": {
-                    "user_ids": ["@alice:example.test", "@bob:example.test"]
+                "content": {
+                    "body": "**hello** @Same @Same typed @Same",
+                    "format": "org.matrix.custom.html",
+                    "formatted_body": "<strong>hello</strong> <a href=\"https://matrix.to/#/%40alice%3Aexample.test\">@Same</a> <a href=\"https://matrix.to/#/%40bob%3Aexample.test\">@Same</a> typed @Same",
+                    "m.mentions": {
+                        "user_ids": ["@alice:example.test", "@bob:example.test"]
+                    }
                 }
-            }
-        }))
-        .expect("structured document");
+            }))
+            .expect("structured document");
 
         assert_eq!(document.plain_body(), "**hello** @Same @Same typed @Same");
         assert_eq!(
@@ -3833,16 +4150,17 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             matches!(document.inlines.last(), Some(ComposerInline::Text { text }) if text.ends_with("typed @Same"))
         );
     }
+
     #[test]
     fn editable_document_keeps_room_link_identity_without_user_mentions_metadata() {
         let document = composer_document_from_event_json(&serde_json::json!({
-            "content": {
-                "body": "visit **@Project**",
-                "format": "org.matrix.custom.html",
-                "formatted_body": "visit <strong><a href=\"https://matrix.to/#/%23project%3Aexample.test\">@Project</a></strong>"
-            }
-        }))
-        .expect("structured room mention");
+                "content": {
+                    "body": "visit **@Project**",
+                    "format": "org.matrix.custom.html",
+                    "formatted_body": "visit <strong><a href=\"https://matrix.to/#/%23project%3Aexample.test\">@Project</a></strong>"
+                }
+            }))
+            .expect("structured room mention");
 
         assert_eq!(document.plain_body(), "visit **@Project**");
         assert!(matches!(
@@ -3853,6 +4171,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             } if room_id == "#project:example.test"
         ));
     }
+
     #[test]
     fn editable_document_rejects_unsafe_links_even_when_labels_match() {
         let document = composer_document_from_event_json(&serde_json::json!({
@@ -3866,6 +4185,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
 
         assert!(document.is_none());
     }
+
     #[test]
     fn message_projection_carries_msgtype_and_plain_spoiler_spans() {
         let projection = message_projection_from_msgtype(
@@ -3884,6 +4204,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             }]
         );
     }
+
     #[test]
     fn membership_change_projection_is_a_supported_notice() {
         let projection =
@@ -3900,9 +4221,10 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
                 .contains("Unsupported event: m.room.member")
         );
     }
+
     #[test]
     fn profile_change_projection_does_not_emit_user_id_body() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("item_projection.rs");
         let profile_branch = source
             .split("TimelineItemContent::ProfileChange(change)")
             .nth(1)
@@ -3920,6 +4242,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "timeline row body must not contain a raw Matrix user id for profile changes"
         );
     }
+
     #[test]
     fn pinned_events_projection_is_a_supported_notice() {
         assert_eq!(
@@ -3959,6 +4282,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "Unsupported event: m.room.topic"
         );
     }
+
     #[test]
     fn supported_state_event_notices_carry_i18n_keys() {
         let projection = state_event_notice_projection("m.room.power_levels");
@@ -3974,6 +4298,20 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         );
         assert_eq!(projection.body_is_user_content, false);
     }
+
+    fn original_room_name_change(
+        name: &str,
+        previous_name: Option<&str>,
+    ) -> StateEventContentChange<RoomNameEventContent> {
+        StateEventContentChange::Original {
+            content: RoomNameEventContent::new(name.to_owned()),
+            prev_content: previous_name.map(|previous_name| {
+                serde_json::from_value(serde_json::json!({ "name": previous_name }))
+                    .expect("previous room name should deserialize")
+            }),
+        }
+    }
+
     #[test]
     fn room_name_notice_projects_initial_name_as_structured_set_notice() {
         let projection = room_name_notice_projection(&original_room_name_change("研究室 🧪", None));
@@ -3993,6 +4331,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert_eq!(projection.message_kind, TimelineMessageKind::Notice);
         assert!(!projection.body_is_user_content);
     }
+
     #[test]
     fn room_name_notice_projects_old_and_new_names_for_change() {
         let projection = room_name_notice_projection(&original_room_name_change(
@@ -4013,6 +4352,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             })
         );
     }
+
     #[test]
     fn room_name_notice_projects_empty_name_as_removal() {
         let projection =
@@ -4028,6 +4368,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             })
         );
     }
+
     #[test]
     fn room_name_notice_uses_set_wording_for_identical_names() {
         let projection =
@@ -4038,6 +4379,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             Some(TimelineNoticeI18nKey::RoomNameSet)
         );
     }
+
     #[test]
     fn room_name_notice_projects_redacted_content_as_safe_generic_notice() {
         let redacted = StateEventContentChange::Redacted(
@@ -4057,6 +4399,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         );
         assert!(!projection.body.unwrap_or_default().contains("m.room.name"));
     }
+
     #[test]
     fn message_projection_extracts_formatted_spoiler_spans_with_reason() {
         let msgtype = MessageType::Emote(EmoteMessageEventContent::html(
@@ -4076,6 +4419,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             }]
         );
     }
+
     #[test]
     fn message_projection_sanitizes_formatted_html_and_extracts_code_blocks() {
         let msgtype = MessageType::Text(TextMessageEventContent::html(
@@ -4098,6 +4442,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert_eq!(formatted.code_blocks[0].language.as_deref(), Some("rust"));
         assert_eq!(formatted.code_blocks[0].body, "fn main() {}");
     }
+
     #[test]
     fn formatted_message_link_ranges_use_formatted_plain_text_basis() {
         let msgtype = MessageType::Text(TextMessageEventContent::html(
@@ -4119,6 +4464,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "Visit https://example.invalid/path".encode_utf16().count()
         );
     }
+
     #[test]
     fn message_projection_keeps_allowed_formatted_blocks_and_spoilers() {
         let msgtype = MessageType::Emote(EmoteMessageEventContent::html(
@@ -4136,6 +4482,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert!(formatted.html.contains("data-mx-spoiler=\"reason\""));
         assert!(formatted.html.contains(">secret<"));
     }
+
     #[test]
     fn reply_quote_projection_retains_sanitized_formatted_body() {
         let msgtype = MessageType::Text(TextMessageEventContent::html(
@@ -4158,6 +4505,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert_eq!(formatted.code_blocks[0].language.as_deref(), Some("rust"));
         assert_eq!(formatted.code_blocks[0].body, "fn main() {}");
     }
+
     #[test]
     fn captionless_media_projections_can_reply_and_keep_filename_reply_quotes() {
         for msgtype in media_msgtype_fixtures() {
@@ -4193,6 +4541,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             assert_eq!(quote.body_preview.as_deref(), Some(filename.as_str()));
         }
     }
+
     #[test]
     fn message_projection_falls_back_to_plain_body_when_formatted_body_is_empty() {
         let msgtype = MessageType::Text(TextMessageEventContent::html("plain fallback", "   "));
@@ -4202,6 +4551,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert_eq!(projection.body.as_deref(), Some("plain fallback"));
         assert!(projection.formatted.is_none());
     }
+
     #[test]
     fn message_projection_falls_back_to_plain_body_when_formatted_body_has_only_markup() {
         let msgtype = MessageType::Text(TextMessageEventContent::html(
@@ -4214,6 +4564,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert_eq!(projection.body.as_deref(), Some("plain fallback"));
         assert!(projection.formatted.is_none());
     }
+
     #[test]
     fn user_visible_content_includes_formatted_body() {
         let mut item = timeline_item("$formatted:test", None, "@alice:test", false);
@@ -4225,12 +4576,14 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
 
         assert!(has_user_visible_content(&item));
     }
+
     #[test]
     fn bodyless_event_backed_items_are_hidden_unless_redacted() {
         assert!(timeline_item_should_be_hidden(false, false));
         assert!(!timeline_item_should_be_hidden(true, false));
         assert!(!timeline_item_should_be_hidden(false, true));
     }
+
     #[test]
     fn timeline_item_structured_fields_match_private_legacy_semantics() {
         let key = room_key();
@@ -4281,9 +4634,10 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             assert!(!serialized.contains(private_value));
         }
     }
+
     #[test]
     fn timeline_search_index_mutations_use_reliable_delivery() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("item_projection.rs");
         let forwarder = source
             .split("async fn forward_diff_to_search")
             .nth(1)
@@ -4301,31 +4655,15 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "search index mutation delivery must not silently drop redactions or edits"
         );
     }
+
     #[test]
     fn media_gallery_and_thread_attention_projections_use_reliable_delivery() {
-        let source = include_str!("timeline.rs");
-        let initial_subscribe = source
-            .split("// Emit InitialItems")
-            .nth(1)
-            .expect("initial subscribe emission should exist")
-            .split("// Spawn the diff relay task")
-            .next()
-            .expect("initial projection block should precede relay spawn");
-        let diff_batch = source
-            .split("async fn handle_diff_batch")
-            .nth(1)
-            .expect("diff batch handler should exist")
-            .split("async fn handle_ignored_users_updated")
-            .next()
-            .expect("ignored-users handler should follow diff batch");
-        let media_gallery_helper = source
-            .split("async fn emit_media_gallery_if_changed")
-            .nth(1)
-            .expect("media gallery helper should be async")
-            .split("fn emit_navigation_if_changed")
-            .next()
-            .expect("navigation helper should follow media gallery helper");
-
+        let initial_subscribe = item_body(include_str!("actor.rs"), "async fn spawn(");
+        let diff_batch = item_body(include_str!("relay.rs"), "async fn handle_diff_batch");
+        let media_gallery_helper = item_body(
+            include_str!("media.rs"),
+            "async fn emit_media_gallery_if_changed",
+        );
         assert!(
             initial_subscribe.contains("action_tx.send(vec![action]).await"),
             "initial media gallery projection must use reliable delivery"
@@ -4340,6 +4678,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "media gallery dedupe ledger must not advance behind a dropped try_send"
         );
     }
+
     #[test]
     fn send_operation_guards_allow_retry_and_cancel_only_from_outbound_states() {
         assert_eq!(
@@ -4375,9 +4714,10 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             Err(TimelineFailureKind::InvalidSendTarget)
         );
     }
+
     #[test]
     fn retry_send_reenables_sdk_room_queue_before_unwedge() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("outbound_send.rs");
         let retry_handler = source
             .split("async fn handle_retry_send")
             .nth(1)
@@ -4395,9 +4735,10 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "room send queue must be re-enabled before SendHandle::unwedge()"
         );
     }
+
     #[test]
     fn cancel_send_reenables_sdk_room_queue_after_abort() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("outbound_send.rs");
         let cancel_handler = source
             .split("async fn handle_cancel_send")
             .nth(1)
@@ -4415,6 +4756,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "room send queue must be re-enabled after a successful abort"
         );
     }
+
     #[test]
     fn reaction_groups_project_my_sender_and_remote_event_id() {
         let own_user_id = OwnedUserId::try_from("@me:test").expect("user id");
@@ -4438,6 +4780,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             vec!["@me:test", "@alice:test", "@bob:test"]
         );
     }
+
     #[test]
     fn reaction_groups_count_unique_senders_after_sdk_deduplication() {
         let mut reactions = ReactionsByKeyBySender::default();
@@ -4474,6 +4817,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             vec!["@alice:test"]
         );
     }
+
     #[test]
     fn reaction_groups_follow_sdk_redaction_removal() {
         let mut reactions = reaction_groups_fixture();
@@ -4490,6 +4834,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert!(!groups[0].reacted_by_me);
         assert_eq!(groups[0].my_reaction_event_id, None);
     }
+
     #[test]
     fn timeline_item_can_react_requires_event_backed_renderable_content() {
         assert!(timeline_item_can_react(true, true, false, true));
@@ -4498,6 +4843,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert!(!timeline_item_can_react(true, true, false, false));
         assert!(!timeline_item_can_react(true, true, true, true));
     }
+
     #[test]
     fn send_reaction_guard_requires_reactable_target_without_existing_own_reaction() {
         assert_eq!(validate_send_reaction(true, None), Ok(()));
@@ -4510,6 +4856,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             Err(TimelineFailureKind::InvalidReactionState)
         );
     }
+
     #[test]
     fn redact_reaction_guard_requires_matching_own_reaction_event() {
         assert_eq!(
@@ -4541,44 +4888,43 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             Err(TimelineFailureKind::InvalidReactionState)
         );
     }
+
     #[test]
     fn reaction_and_read_signal_handlers_emit_private_latency_traces() {
-        let source = include_str!("timeline.rs");
+        let item = include_str!("item_projection.rs");
+        let diagnostics = include_str!("diagnostics.rs");
+        let manager = include_str!("manager.rs");
+        let read = include_str!("read_state.rs");
+        let sources = [item, diagnostics, manager, read];
         for kind in ["send_reaction", "redact_reaction"] {
-            assert!(
-                source.contains(&format!(
-                    "trace_timeline_actor_operation(\n            \"actor_start\",\n            \"{kind}\""
-                )),
-                "{kind} should trace actor start"
-            );
-            assert!(
-                source.contains(&format!(
-                    "trace_timeline_actor_operation(\n                    \"actor_finish\",\n                    \"{kind}\""
-                )) || source.contains(&format!(
-                    "trace_timeline_actor_operation(\n                \"actor_finish\",\n                \"{kind}\""
-                )),
-                "{kind} should trace actor completion"
-            );
+            assert!(sources.iter().any(|source| source.contains(&format!("trace_timeline_actor_operation(\n            \"actor_start\",\n            \"{kind}\""))), "{kind} should trace actor start");
+            assert!(sources.iter().any(|source| source.contains(&format!("trace_timeline_actor_operation(\n                    \"actor_finish\",\n                    \"{kind}\"")) || source.contains(&format!("trace_timeline_actor_operation(\n                \"actor_finish\",\n                \"{kind}\""))), "{kind} should trace actor completion");
         }
         for kind in ["send_read_receipt", "set_fully_read"] {
             assert!(
-                source.contains(&format!(
+                sources.iter().any(|source| source.contains(&format!(
                     "trace_timeline_route(\"manager_received\", \"{kind}\""
-                )),
+                ))),
                 "{kind} should trace manager admission"
             );
         }
         assert!(
-            source.contains("ReadWorkerCompletion::Network")
-                && source.contains("ReadWorkerCompletion::ActorApplied"),
+            sources
+                .iter()
+                .any(|source| source.contains("ReadWorkerCompletion::Network"))
+                && sources
+                    .iter()
+                    .any(|source| source.contains("ReadWorkerCompletion::ActorApplied")),
             "read operations must expose manager-owned network and state-apply completion stages"
         );
         assert!(
-            source.contains("trace_timeline_actor_scan(\n                    \"target_scan\"")
-                || source.contains("trace_timeline_actor_scan(\n                \"target_scan\""),
+            sources.iter().any(|source| source
+                .contains("trace_timeline_actor_scan(\n                    \"target_scan\"")
+                || source.contains("trace_timeline_actor_scan(\n                \"target_scan\"")),
             "reaction target scan should expose item count and elapsed time"
         );
     }
+
     #[test]
     fn timeline_item_can_redact_requires_own_renderable_event_content() {
         assert!(timeline_item_can_redact(true, true, false, true));
@@ -4587,6 +4933,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert!(!timeline_item_can_redact(true, true, true, true));
         assert!(!timeline_item_can_redact(true, true, false, false));
     }
+
     #[test]
     fn timeline_item_can_edit_requires_own_editable_body() {
         assert!(timeline_item_can_edit(true, true, false, true));
@@ -4595,6 +4942,46 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert!(!timeline_item_can_edit(true, true, true, true));
         assert!(!timeline_item_can_edit(true, true, false, false));
     }
+
+    fn media_msgtype_fixtures() -> Vec<MessageType> {
+        use matrix_sdk::ruma::events::room::message::{
+            AudioMessageEventContent, FileMessageEventContent, ImageMessageEventContent,
+            VideoMessageEventContent,
+        };
+        use matrix_sdk::ruma::owned_mxc_uri;
+
+        vec![
+            MessageType::Audio(AudioMessageEventContent::plain(
+                "fixture-audio".to_owned(),
+                owned_mxc_uri!("mxc://fixture.invalid/audio"),
+            )),
+            MessageType::File(FileMessageEventContent::plain(
+                "fixture-file".to_owned(),
+                owned_mxc_uri!("mxc://fixture.invalid/file"),
+            )),
+            MessageType::Image(ImageMessageEventContent::plain(
+                "fixture-image".to_owned(),
+                owned_mxc_uri!("mxc://fixture.invalid/image"),
+            )),
+            MessageType::Video(VideoMessageEventContent::plain(
+                "fixture-video".to_owned(),
+                owned_mxc_uri!("mxc://fixture.invalid/video"),
+            )),
+        ]
+    }
+
+    fn non_media_msgtype_fixtures() -> Vec<MessageType> {
+        use matrix_sdk::ruma::events::room::message::{
+            EmoteMessageEventContent, NoticeMessageEventContent, TextMessageEventContent,
+        };
+
+        vec![
+            MessageType::Emote(EmoteMessageEventContent::plain("fixture-emote")),
+            MessageType::Notice(NoticeMessageEventContent::plain("fixture-notice")),
+            MessageType::Text(TextMessageEventContent::plain("fixture-text")),
+        ]
+    }
+
     #[test]
     fn edit_replacement_preserves_media_attachment_as_caption() {
         // A text replacement carries no url/file/info/filename, so it silently
@@ -4625,6 +5012,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             }
         }
     }
+
     #[test]
     fn edit_replacement_preserves_non_media_message_kind() {
         for msgtype in non_media_msgtype_fixtures() {
@@ -4649,6 +5037,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             }
         }
     }
+
     #[test]
     fn edit_replacement_stays_plain_text_for_unresolved_target() {
         // A target missing from the timeline, or one that is not an
@@ -4659,6 +5048,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             EditedContent::RoomMessage(_)
         ));
     }
+
     #[test]
     fn structured_edit_preserves_final_mentions_and_formats_text_and_media_captions() {
         let document = ComposerDocument::new(vec![
@@ -4702,6 +5092,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert!(formatted_caption.is_some());
         assert_eq!(mentions.expect("caption mentions").user_ids.len(), 1);
     }
+
     #[test]
     fn edit_replacement_carries_final_mentions_and_sdk_filters_revision_mentions() {
         use matrix_sdk::ruma::events::room::message::ReplacementMetadata;
@@ -4783,6 +5174,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             vec![alice.to_owned(), bob.to_owned()]
         );
     }
+
     #[test]
     fn edit_replacement_caption_support_matches_media_projection() {
         // Both sides of this equality are load-bearing: a type projected with
@@ -4804,6 +5196,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             );
         }
     }
+
     #[test]
     fn timeline_send_command_bodies_are_not_visible_in_debug() {
         // Manager-owned enqueue payloads originate from the public command, so
@@ -4826,9 +5219,10 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "txn_id should be visible: {debug}"
         );
     }
+
     #[test]
     fn timeline_link_preview_load_emits_private_data_free_trace_tokens() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("diagnostics.rs");
         let production = source.split("\nmod tests").next().unwrap_or(source);
         assert!(
             production.contains("fn trace_timeline_link_preview"),
@@ -4851,9 +5245,10 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             );
         }
     }
+
     #[test]
     fn timeline_link_preview_fetches_do_not_block_actor_command_queue() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("item_projection.rs");
         let production = source.split("\nmod tests").next().unwrap_or(source);
         let load_src = production
             .split("async fn handle_load_link_previews")
@@ -4874,23 +5269,15 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "link preview worker results must return to the TimelineActor explicitly"
         );
     }
+
     #[test]
     fn timeline_link_preview_fetches_are_abortable_without_dropping_the_actor() {
-        let source = include_str!("timeline.rs");
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-        let handle_cancel_source = production
-            .split("fn handle_cancel_link_previews")
-            .nth(1)
-            .and_then(|section| section.split("async fn handle_hide_link_preview").next())
-            .expect("cancel link previews handler should exist");
-        let fetched_source = production
-            .split("async fn handle_link_previews_fetched")
-            .nth(1)
-            .and_then(|section| section.split("fn handle_cancel_link_previews").next())
-            .expect("link preview fetched handler should exist");
-
+        let item = include_str!("item_projection.rs");
+        let actor = include_str!("actor.rs");
+        let handle_cancel_source = item_body(item, "fn handle_cancel_link_previews");
+        let fetched_source = item_body(item, "async fn handle_link_previews_fetched");
         assert!(
-            production.contains("CancelLinkPreviews"),
+            actor.contains("CancelLinkPreviews"),
             "timeline manager must expose a cancellation message for in-flight link previews"
         );
         assert!(
@@ -4906,6 +5293,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "late results from cancelled link preview workers must be ignored"
         );
     }
+
     #[test]
     fn cancelled_link_preview_loads_return_loading_previews_to_pending() {
         let mut item = timeline_item(
@@ -4937,6 +5325,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         assert_eq!(previews[1].state, LinkPreviewState::Ready);
         assert!(!reset_loading_link_previews_to_pending(&mut item));
     }
+
     /// Proves that during a restore walk the diff-batch handler buffers
     /// `TimelineDiff`s rather than emitting `ItemsUpdated` per chunk, and that
     /// all terminal paths flush the buffer exactly once.  React therefore
@@ -4945,7 +5334,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
     /// up-to-date every batch so the anchor can be found mid-walk.
     #[test]
     fn initial_timeline_items_are_forwarded_to_search_index() {
-        let source = include_str!("timeline.rs");
+        let source = include_str!("actor.rs");
         let production = source.split("\nmod tests").next().unwrap_or(source);
         let spawn_src = production
             .split("async fn spawn(")
@@ -4964,3 +5353,4 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
             "initial items must be forwarded before the actor starts processing later diffs"
         );
     }
+}

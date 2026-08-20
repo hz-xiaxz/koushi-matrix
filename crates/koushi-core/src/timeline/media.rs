@@ -1,18 +1,49 @@
-//! Exact AST extraction draft from immutable timeline baseline.
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+use koushi_sdk::MatrixClientSession;
+use koushi_state::{
+    AppAction, MediaTransferProgress, OperationFailureKind, TimelineMediaDownloadState,
+    TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
+    TimelineMediaGalleryThumbnail, TimelineMediaKind as GalleryTimelineMediaKind,
+};
+
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
+use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk_ui::timeline::TimelineItem as SdkTimelineItem;
+
+use crate::command::MediaDownloadSelection;
+use crate::event::{
+    CoreEvent, TimelineEvent, TimelineItem, TimelineItemId, TimelineMediaKind, TimelineMediaSource,
+    TimelineMediaThumbnail,
+};
+use crate::executor;
+use crate::failure::TimelineFailureKind;
+use crate::ids::{RequestId, TimelineKey, TimelineKind};
+
+// BEGIN GENERATED SIBLING IMPORTS
+use super::actor::{TimelineActor, TimelineActorMessage};
+use super::item_projection::{
+    cache_sdk_item_media_source, media_request_for_download, sanitize_matrix_id_for_path,
+};
+// END GENERATED SIBLING IMPORTS
 
 const MEDIA_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
-struct PrivateMediaEntry {
-    source: MediaSource,
-    thumbnail_source: Option<MediaSource>,
-    mimetype: Option<String>,
-    size: u64,
-    width: Option<u64>,
-    height: Option<u64>,
+pub(super) struct PrivateMediaEntry {
+    pub(super) source: MediaSource,
+    pub(super) thumbnail_source: Option<MediaSource>,
+    pub(super) mimetype: Option<String>,
+    pub(super) size: u64,
+    pub(super) width: Option<u64>,
+    pub(super) height: Option<u64>,
 }
 
-struct MediaDownloadReady {
+pub(super) struct MediaDownloadReady {
     download_state: TimelineMediaDownloadState,
     source_url: String,
     byte_count: u64,
@@ -21,7 +52,7 @@ struct MediaDownloadReady {
     height: Option<u64>,
 }
 
-enum MediaDownloadOutcome {
+pub(super) enum MediaDownloadOutcome {
     Ready(MediaDownloadReady),
     Failed(TimelineFailureKind),
 }
@@ -249,7 +280,7 @@ fn io_error_kind_token(kind: std::io::ErrorKind) -> &'static str {
 }
 
 impl TimelineActor {
-    fn sdk_room_for_key(&self) -> Option<matrix_sdk::Room> {
+    pub(super) fn sdk_room_for_key(&self) -> Option<matrix_sdk::Room> {
         let room_id_str = match &self.key.kind {
             TimelineKind::Room { room_id }
             | TimelineKind::Thread { room_id, .. }
@@ -258,7 +289,7 @@ impl TimelineActor {
         let room_id = matrix_sdk::ruma::RoomId::parse(room_id_str).ok()?;
         self.session.client().get_room(&room_id)
     }
-    async fn handle_download_media(
+    pub(super) async fn handle_download_media(
         &mut self,
         request_id: RequestId,
         event_id: String,
@@ -460,7 +491,7 @@ impl TimelineActor {
             height: entry.height,
         })
     }
-    async fn handle_media_download_finished(
+    pub(super) async fn handle_media_download_finished(
         &mut self,
         request_id: RequestId,
         event_id: String,
@@ -550,7 +581,7 @@ impl TimelineActor {
         })
         .await;
     }
-    async fn emit_media_gallery_if_changed(&mut self) {
+    pub(super) async fn emit_media_gallery_if_changed(&mut self) {
         let items = media_gallery_items_from_timeline_items(&self.key, &self.navigation_items);
         if items == self.media_gallery_items {
             return;
@@ -563,7 +594,7 @@ impl TimelineActor {
         self.media_gallery_items =
             media_gallery_items_from_timeline_items(&self.key, &self.navigation_items);
     }
-    fn apply_sdk_media_cache_diff(
+    pub(super) fn apply_sdk_media_cache_diff(
         media_sources: &mut HashMap<String, PrivateMediaEntry>,
         diff: &eyeball_im::VectorDiff<Arc<SdkTimelineItem>>,
     ) {
@@ -598,7 +629,7 @@ impl TimelineActor {
     }
 }
 
-fn media_gallery_updated_action(
+pub(super) fn media_gallery_updated_action(
     key: &TimelineKey,
     items: Vec<TimelineMediaGalleryItem>,
 ) -> Option<AppAction> {
@@ -612,12 +643,12 @@ fn media_gallery_updated_action(
     })
 }
 
-struct AuthoritativeMediaGalleryReplacement {
-    items: Vec<TimelineMediaGalleryItem>,
-    action: AppAction,
+pub(super) struct AuthoritativeMediaGalleryReplacement {
+    pub(super) items: Vec<TimelineMediaGalleryItem>,
+    pub(super) action: AppAction,
 }
 
-fn authoritative_media_gallery_replacement(
+pub(super) fn authoritative_media_gallery_replacement(
     key: &TimelineKey,
     current: &[TimelineMediaGalleryItem],
     authoritative_items: &[TimelineItem],
@@ -630,7 +661,7 @@ fn authoritative_media_gallery_replacement(
     Some(AuthoritativeMediaGalleryReplacement { items, action })
 }
 
-fn media_gallery_items_from_timeline_items(
+pub(super) fn media_gallery_items_from_timeline_items(
     key: &TimelineKey,
     items: &[TimelineItem],
 ) -> Vec<TimelineMediaGalleryItem> {
@@ -728,3 +759,278 @@ fn classify_media_download_error(error: &matrix_sdk::Error) -> TimelineFailureKi
     TimelineFailureKind::Sdk
 }
 
+#[cfg(test)]
+mod tests {
+
+    use koushi_state::{AppAction, TimelineMediaKind as GalleryTimelineMediaKind};
+
+    use matrix_sdk::attachment::AttachmentInfo;
+
+    use crate::command::{UploadMediaKind, UploadMediaRequest};
+    use crate::event::{TimelineDiff, TimelineItemId, TimelineMediaKind};
+
+    use matrix_sdk::ruma::uint;
+
+    use crate::command::{
+        ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
+        ImageUploadVariantInfo, ImageUploadVariantKind,
+    };
+
+    use super::super::display_projection::apply_timeline_diffs_to_items;
+    use super::super::item_projection::attachment_info_for_upload;
+    use super::super::test_support::{room_key, timeline_item, timeline_media_item};
+    use super::{authoritative_media_gallery_replacement, media_gallery_items_from_timeline_items};
+
+    #[test]
+    fn media_gallery_projection_keeps_event_media_newest_first() {
+        let mut transaction_media = timeline_media_item(
+            "$local:test",
+            "@me:test",
+            None,
+            3,
+            "local.png",
+            TimelineMediaKind::Image,
+        );
+        transaction_media.id = TimelineItemId::Transaction {
+            transaction_id: "txn-local".to_owned(),
+        };
+        let items = vec![
+            timeline_media_item(
+                "$old:test",
+                "@alice:test",
+                Some("Alice"),
+                1,
+                "old.png",
+                TimelineMediaKind::Image,
+            ),
+            timeline_item("$text:test", Some("text"), "@bob:test", false),
+            transaction_media,
+            timeline_media_item(
+                "$new:test",
+                "@carol:test",
+                Some("Carol"),
+                2,
+                "new.png",
+                TimelineMediaKind::Image,
+            ),
+        ];
+
+        let gallery = media_gallery_items_from_timeline_items(&room_key(), &items);
+
+        assert_eq!(gallery.len(), 2);
+        assert_eq!(gallery[0].event_id, "$new:test");
+        assert_eq!(gallery[0].sender.as_deref(), Some("@carol:test"));
+        assert_eq!(gallery[0].sender_label.as_deref(), Some("Carol"));
+        assert_eq!(gallery[0].timestamp_ms, 2);
+        assert_eq!(gallery[0].media.kind, GalleryTimelineMediaKind::Image);
+        assert_eq!(gallery[0].media.filename, "new.png");
+        assert!(gallery[0].media.source.encrypted);
+        assert_eq!(
+            gallery[0].media.thumbnail.as_ref().map(|thumb| thumb.width),
+            Some(Some(160))
+        );
+        assert_eq!(gallery[1].event_id, "$old:test");
+    }
+
+    #[test]
+    fn media_gallery_projection_recomputes_after_timeline_diffs() {
+        let mut items = vec![
+            timeline_media_item(
+                "$old:test",
+                "@alice:test",
+                None,
+                1,
+                "old.png",
+                TimelineMediaKind::Image,
+            ),
+            timeline_media_item(
+                "$new:test",
+                "@bob:test",
+                None,
+                2,
+                "new.png",
+                TimelineMediaKind::Image,
+            ),
+        ];
+
+        apply_timeline_diffs_to_items(&mut items, &[TimelineDiff::Remove { index: 1 }]);
+        let gallery = media_gallery_items_from_timeline_items(&room_key(), &items);
+        assert_eq!(gallery.len(), 1);
+        assert_eq!(gallery[0].event_id, "$old:test");
+
+        apply_timeline_diffs_to_items(&mut items, &[TimelineDiff::Reset { items: Vec::new() }]);
+        assert!(media_gallery_items_from_timeline_items(&room_key(), &items).is_empty());
+    }
+
+    #[test]
+    fn relay_overflow_authoritative_snapshot_replaces_media_gallery_and_emits_action() {
+        let key = room_key();
+        let old_navigation = vec![timeline_media_item(
+            "$old:test",
+            "@alice:test",
+            None,
+            1,
+            "old.png",
+            TimelineMediaKind::Image,
+        )];
+        let new_navigation = vec![timeline_media_item(
+            "$new:test",
+            "@bob:test",
+            None,
+            2,
+            "new.png",
+            TimelineMediaKind::Image,
+        )];
+        let old_gallery = media_gallery_items_from_timeline_items(&key, &old_navigation);
+        let replacement =
+            authoritative_media_gallery_replacement(&key, &old_gallery, &new_navigation)
+                .expect("changed authoritative snapshot must emit gallery replacement");
+        assert_eq!(replacement.items.len(), 1);
+        assert_eq!(replacement.items[0].event_id, "$new:test");
+        assert!(matches!(
+            replacement.action,
+            AppAction::MediaGalleryUpdated { items, .. }
+                if items.len() == 1 && items[0].event_id == "$new:test"
+        ));
+    }
+
+    #[test]
+    fn attachment_info_for_image_upload_uses_selected_variant_metadata() {
+        let request = UploadMediaRequest {
+            filename: "private-screenshot.jpg".to_owned(),
+            mime_type: "image/jpeg".to_owned(),
+            bytes: vec![1, 2, 3, 4],
+            kind: UploadMediaKind::Image {
+                width: Some(1200),
+                height: Some(900),
+            },
+            compression: Some(ImageUploadCompressionState {
+                mode: koushi_state::ImageUploadCompressionMode::Always,
+                policy: ImageUploadCompressionPolicy::default(),
+                original: ImageUploadVariantInfo {
+                    mime_type: "image/jpeg".to_owned(),
+                    byte_count: 3_200_000,
+                    dimensions: Some(ImageUploadDimensions {
+                        width: 4032,
+                        height: 3024,
+                    }),
+                },
+                selected: ImageUploadVariantInfo {
+                    mime_type: "image/jpeg".to_owned(),
+                    byte_count: 4,
+                    dimensions: Some(ImageUploadDimensions {
+                        width: 1200,
+                        height: 900,
+                    }),
+                },
+                selected_variant: ImageUploadVariantKind::Compressed,
+                skipped_small_image: false,
+                metadata_stripped: true,
+                thumbnail_refreshed: true,
+            }),
+            thumbnail: None,
+            caption: None,
+        };
+
+        match attachment_info_for_upload(&request) {
+            AttachmentInfo::Image(info) => {
+                assert_eq!(info.width, Some(uint!(1200)));
+                assert_eq!(info.height, Some(uint!(900)));
+                assert_eq!(info.size, Some(uint!(4)));
+            }
+            other => panic!("expected image info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn media_downloads_spawn_bounded_tasks_and_report_all_exits() {
+        let source = include_str!("media.rs");
+        let handler = source
+            .split("async fn handle_download_media")
+            .nth(1)
+            .expect("download handler should exist")
+            .split("async fn download_media_for")
+            .next()
+            .expect("download worker should follow handler");
+        let worker = source
+            .split("async fn download_media_for")
+            .nth(1)
+            .expect("download worker should exist")
+            .split("async fn handle_media_download_finished")
+            .next()
+            .expect("download completion handler should follow worker");
+
+        assert!(
+            handler.contains("TimelineActorMessage::MediaDownloadFinished"),
+            "download worker must report terminal state back to the actor"
+        );
+        assert!(
+            handler.contains("executor::spawn(async move"),
+            "media download transfer must not run inline on the actor loop"
+        );
+        assert!(
+            !handler.contains(".get_media_content("),
+            "actor-loop download handler must not await the SDK media transfer directly"
+        );
+        assert!(
+            handler.contains("emit_media_download_current_state"),
+            "duplicate in-flight clicks must reproject current download state instead of returning silently"
+        );
+        assert!(
+            worker.contains("executor::timeout(") && worker.contains("MEDIA_DOWNLOAD_TIMEOUT"),
+            "media downloads need a modeled timeout exit"
+        );
+        assert!(
+            worker.contains("classify_media_download_error(&error)"),
+            "download SDK/media failures must keep coarse network/forbidden/sdk classification"
+        );
+        assert!(
+            worker.contains("TimelineFailureKind::Timeout"),
+            "download timeout must settle the pending state with a timeout failure"
+        );
+    }
+
+    #[test]
+    fn media_downloads_diagnose_stage_and_failure_boundaries() {
+        let source = include_str!("media.rs");
+        let production = source
+            .rsplit_once("\n#[cfg(test)]\nmod tests")
+            .map(|(production, _)| production)
+            .unwrap_or(source);
+        assert!(
+            production.contains("\"core.media_download\""),
+            "media download diagnostics need a dedicated source"
+        );
+        for stage in [
+            "\"request_received\"",
+            "\"request_rejected\"",
+            "\"cache_hit\"",
+            "\"sdk_fetch_started\"",
+            "\"sdk_fetch_failed\"",
+            "\"file_write_failed\"",
+            "\"completed\"",
+        ] {
+            assert!(
+                production.contains(stage),
+                "media download diagnostics must include {stage}"
+            );
+        }
+        for field in [
+            "\"selection\"",
+            "\"source_encrypted\"",
+            "\"thumbnail_source_present\"",
+            "\"failure\"",
+            "\"raw_os_error\"",
+            "\"data_dir_present\"",
+            "\"target_dir_exists\"",
+            "\"target_path_exists\"",
+            "\"target_path_is_file\"",
+            "\"target_path_is_dir\"",
+        ] {
+            assert!(
+                production.contains(field),
+                "media download diagnostics must include privacy-safe field {field}"
+            );
+        }
+    }
+}
