@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::{
-    COMPOSER_DRAFTS_FILE_MAGIC, COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor,
-    atomic_replace_file, decode_composer_draft_payload_json, encode_composer_draft_payload_json,
+    COMPOSER_DRAFTS_FILE_MAGIC, COMPOSER_DRAFTS_NONCE_LEN, ComposerDraftIoProbe, CoreFailure,
+    StoreActor, atomic_replace_file, decode_composer_draft_payload_json,
+    encode_composer_draft_payload_json,
 };
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit, Nonce,
@@ -789,7 +790,7 @@ impl StoreActor {
         *self
             .composer_draft_io_probe
             .lock()
-            .expect("composer draft I/O probe mutex") = Some(super::ComposerDraftIoProbe {
+            .expect("composer draft I/O probe mutex") = Some(ComposerDraftIoProbe {
             save_started: Some(save_started),
             save_release: Some(save_release),
             save_completed: Some(save_completed),
@@ -926,12 +927,13 @@ mod store_tests {
     use super::super::*;
     use super::{
         CoreFailure, PersistedComposerDraftStoreV3, encrypt_composer_drafts_fixture_payload,
+        persisted_projection,
     };
     use koushi_state::ComposerDraftStore;
     use tempfile::tempdir;
 
     fn persisted_composer_drafts(drafts: &ComposerDraftStore) -> PersistedComposerDraftStoreV3 {
-        super::persisted_projection(drafts, &koushi_state::ComposerDraftProtection::default())
+        persisted_projection(drafts, &koushi_state::ComposerDraftProtection::default())
     }
 
     #[test]
