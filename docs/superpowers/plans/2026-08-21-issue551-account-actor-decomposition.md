@@ -5,7 +5,7 @@
 - Design: `reviewer-flash` approved the base design, bounded visibility amendments, and final 66-name/test-ownership amendment as `Correct-to-implement`; test integration may resume.
 - Implementation: integrated centrally from the immutable baseline after incomplete/ambiguous worker drafts were rejected; bidirectional exactness and focused gates are green.
 - Full-diff review: `reviewer-flash` reviewed the complete implementation and the `1d9af8c` correction delta, then recorded `Correct-to-merge`; no finding remains.
-- Delivery: final repository gates, PR CI, and merge remain pending.
+- Delivery: all required local repository gates are green; PR CI and merge remain pending.
 
 ## Objective
 
@@ -233,6 +233,15 @@ Pre-existing warnings are baseline artifacts, not permission to add or suppress 
 - Root contains only private module declarations and five explicit re-exports. No glob/barrel, wrapper, compatibility alias, new state object, duplicate helper, TODO, new dependency, or new dead-code allowance exists.
 - Compiler warning head count and the sole AccountActor warning category match baseline: 129 warning heads and the pre-existing `LeasedTimelineCommand` dead-code warning.
 - Core lib default and `test-hooks`: 1,014 passed/8 ignored each. Focused integration tests: session 8, device-session 2, E2EE 2, scheduled-send 12, activity 9, search 1, timeline 21, room-list 6, intent-lifecycle 5, residency 25. All-target/all-feature check is green.
+
+### Final local evidence
+
+- Rust workspace final rerun: 2,394 passed, 13 ignored, 0 failed across 97 suites; desktop lib 149 passed/1 ignored; Headless Core QA 129 passed.
+- The first workspace run and its immediate focused retry hit the existing five-second `runtime_room_list_sync` event fence. The immutable `origin/main` test passed in 3.95 seconds, the unchanged current test then passed in 2.16 seconds, and the complete workspace rerun passed. No timeout, expectation, or product code was changed or waived.
+- Frontend: typecheck/lint green; Vitest 1,367 passed; UI-headless timeline-store 76 passed and Playwright 248 passed with `CHOKIDAR_USEPOLLING=true`; production build green.
+- Boundary/policy: Tauri adapter, domain dependencies, tracked/staged secret scan, release gates, SDK submodule, agents docs, IPC generated-wire contract, `cargo deny`, rustfmt, and diff checks green.
+- The corrected event-cache diagnostic parent demonstrably ran its ignored child (`account::routing::tests::event_cache_repair_diagnostic_records_without_trace_environment`) before the full 1,014/8 lib rerun passed.
+- Compilation, exactness, tests, and formal review found no product runtime-path ambiguity, so the design's conditional local homeserver/GUI lane was not triggered.
 
 ## Verification
 
