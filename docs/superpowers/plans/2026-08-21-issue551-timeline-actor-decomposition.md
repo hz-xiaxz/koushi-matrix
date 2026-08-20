@@ -4,8 +4,8 @@
 
 - Design: `reviewer-flash` reviewed the full design/inventory, required explicit empty-impl and cross-owner source-guard amendments, verified both correction rounds against the immutable source, and recorded `Correct-to-implement`.
 - Implementation: integrated from immutable AST items; bidirectional exactness, warning parity, both Core lib configurations, focused integrations, all-target/all-feature check, rustfmt and diff checks are green.
-- Full-diff review: pending.
-- Delivery: pending.
+- Full-diff review: `reviewer-flash` inspected the complete `origin/main...c935f377` diff, ownership/lifecycle graph, façade, tests and source guards and recorded `Correct-to-merge`; no finding remains.
+- Delivery: final repository gates, PR CI and merge pending.
 
 ## Objective
 
