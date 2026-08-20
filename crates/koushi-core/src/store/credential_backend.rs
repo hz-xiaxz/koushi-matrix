@@ -1,20 +1,19 @@
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::Duration;
-
-use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 
 use koushi_key::{CredentialStore, LocalUnlockSecret, SessionKeyId};
 use koushi_state::LocalEncryptionHealth;
 
-use super::{
-    AccountSearchIndexConfig, AccountStoreConfig, CREDENTIAL_STORE_SERVICE_NAME,
-    ENV_FILE_CREDENTIAL_STORE_DIR, StoreActor,
-};
-use crate::failure::CoreFailure;
+use super::CREDENTIAL_STORE_SERVICE_NAME;
+
+/// Env var for QA/debug file-based credential store override.
+/// Only honored in debug/test/qa-bin builds; production release builds ignore it.
+#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+const ENV_FILE_CREDENTIAL_STORE_DIR: &str = "KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR";
 
 /// Credential store backend. Production = either OS keychain (injected from
 /// the platform layer) or in-memory; debug/test/qa-bin may use a file dir
@@ -775,6 +774,7 @@ pub fn resolved_credential_backend_is_file_dir() -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::StoreActor;
     use super::super::test_support::{file_store_actor, make_key_id};
     use super::*;
     use tempfile::tempdir;

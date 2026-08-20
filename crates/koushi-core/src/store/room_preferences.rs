@@ -99,8 +99,8 @@ fn decrypt_room_preferences_payload(
 #[cfg(test)]
 mod tests {
     use super::super::test_support::{file_store_actor, make_key_id};
-    use super::super::*;
-    use super::{CoreFailure, StoreActor};
+    use super::*;
+    use koushi_state::{RoomPreference, RoomPreferencesState};
     use tempfile::tempdir;
 
     #[test]

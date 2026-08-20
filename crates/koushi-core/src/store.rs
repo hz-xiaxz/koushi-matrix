@@ -21,30 +21,17 @@ mod scheduled_sends;
 #[cfg(test)]
 mod test_support;
 
-use std::collections::HashMap;
-use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{
-    Arc, Mutex, OnceLock,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Arc;
+#[cfg(any(test, feature = "test-hooks"))]
+use std::sync::Mutex;
 
-use chacha20poly1305::{
-    ChaCha20Poly1305, Key, KeyInit, Nonce,
-    aead::{Aead, OsRng, rand_core::RngCore},
-};
-use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_key::{CredentialStore, LocalUnlockSecret, SessionKeyId};
+use koushi_key::{LocalUnlockSecret, SessionKeyId};
 use koushi_sdk::{
     MatrixClientStoreConfig, MatrixClientStoreKey, MatrixSearchIndexKey,
     MatrixSearchIndexStoreConfig,
 };
-#[cfg(test)]
-use koushi_state::RoomPreference;
-use koushi_state::{
-    ComposerDraftStore, LocalEncryptionHealth, NavigationState, RoomPreferencesState,
-    ScheduledSendStore,
-};
+use koushi_state::LocalEncryptionHealth;
 
 use crate::failure::CoreFailure;
 pub use credential_backend::{CredentialStoreBackend, OsCredentialStore};
@@ -52,40 +39,20 @@ pub use credential_backend::{CredentialStoreBackend, OsCredentialStore};
 pub use credential_backend::{FileCredentialStore, resolved_credential_backend_is_file_dir};
 
 use composer_drafts::{
-    PersistedComposerDraftStoreV3, decode_payload_json as decode_composer_draft_payload_json,
+    decode_payload_json as decode_composer_draft_payload_json,
     encode_payload_json as encode_composer_draft_payload_json,
 };
-use credential_backend::{
-    credential_vault_failure_outcome, local_secret_error_health, missing_credential_error,
-    record_credential_vault_access, record_file_credential_store_active,
-    record_local_unlock_secret, safe_filename, unavailable_credential_error,
-    vault_error_to_local_secret_error,
-};
+use credential_backend::{local_secret_error_health, record_local_unlock_secret};
 
 /// Service name used for OS keyring entries. This is user-visible in macOS
 /// Keychain Access, so keep it aligned with the shipped product name.
 const CREDENTIAL_STORE_SERVICE_NAME: &str = "koushi-desktop";
 const COMPOSER_DRAFTS_FILE_MAGIC: &[u8] = b"KOUSHI-DRAFTS-V1\0";
-const SCHEDULED_SENDS_FILE_MAGIC: &[u8] = b"KOUSHI-SCHEDULED-SENDS-V1\0";
-const NAVIGATION_FILE_MAGIC: &[u8] = b"KOUSHI-NAVIGATION-V1\0";
-const ROOM_PREFERENCES_FILE_MAGIC: &[u8] = b"KOUSHI-ROOM-PREFERENCES-V1\0";
-const READ_STATE_OUTBOX_FILE_MAGIC: &[u8] = b"KOUSHI-READ-STATE-OUTBOX-V1\0";
 const COMPOSER_DRAFTS_NONCE_LEN: usize = 12;
-const READ_STATE_OUTBOX_VERSION: u8 = 1;
-const READ_STATE_OUTBOX_MAX_BYTES: usize = 256 * 1024;
-static READ_STATE_OUTBOX_GENERATIONS: OnceLock<Mutex<HashMap<PathBuf, (u64, u64)>>> =
-    OnceLock::new();
-static READ_STATE_OUTBOX_WRITERS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
-    OnceLock::new();
 
 fn account_dir_name(key_id: &SessionKeyId) -> String {
     key_id.account_name()
 }
-
-/// Env var for QA/debug file-based credential store override.
-/// Only honored in debug/test/qa-bin builds; production release builds ignore it.
-#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
-const ENV_FILE_CREDENTIAL_STORE_DIR: &str = "KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR";
 
 /// Resolved store configuration for one account.
 ///

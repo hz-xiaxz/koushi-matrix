@@ -142,8 +142,8 @@ fn decrypt_navigation_payload(
 #[cfg(test)]
 mod tests {
     use super::super::test_support::{file_store_actor, make_key_id};
-    use super::super::*;
-    use super::{CoreFailure, StoreActor};
+    use super::CoreFailure;
+    use koushi_state::NavigationState;
     use tempfile::tempdir;
 
     #[test]

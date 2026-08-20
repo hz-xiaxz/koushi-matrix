@@ -1,7 +1,4 @@
-use super::{
-    COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, READ_STATE_OUTBOX_FILE_MAGIC, StoreActor,
-    atomic_replace_file,
-};
+use super::{COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor, atomic_replace_file};
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit, Nonce,
     aead::{Aead, OsRng, rand_core::RngCore},
@@ -14,6 +11,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
+const READ_STATE_OUTBOX_FILE_MAGIC: &[u8] = b"KOUSHI-READ-STATE-OUTBOX-V1\0";
 const READ_STATE_OUTBOX_VERSION: u8 = 1;
 const READ_STATE_OUTBOX_MAX_BYTES: usize = 256 * 1024;
 static READ_STATE_OUTBOX_GENERATIONS: OnceLock<Mutex<HashMap<PathBuf, (u64, u64)>>> =
@@ -104,60 +102,6 @@ impl StoreActor {
         self.account_root_dir(key_id)
             .join("read-state")
             .join("outbox.v1.enc")
-    }
-
-    fn save_read_state_outbox_generation_fenced(
-        path: &std::path::Path,
-        session_generation: u64,
-        save_generation: u64,
-        write: impl FnOnce() -> Result<(), CoreFailure>,
-    ) -> Result<bool, CoreFailure> {
-        let writer = {
-            let mut writers = READ_STATE_OUTBOX_WRITERS
-                .get_or_init(|| Mutex::new(HashMap::new()))
-                .lock()
-                .map_err(|_| CoreFailure::StoreUnavailable)?;
-            Arc::clone(
-                writers
-                    .entry(path.to_path_buf())
-                    .or_insert_with(|| Arc::new(Mutex::new(()))),
-            )
-        };
-        let _writer = writer.lock().map_err(|_| CoreFailure::StoreUnavailable)?;
-        let proposed = (session_generation, save_generation);
-        {
-            let mut generations = READ_STATE_OUTBOX_GENERATIONS
-                .get_or_init(|| Mutex::new(HashMap::new()))
-                .lock()
-                .map_err(|_| CoreFailure::StoreUnavailable)?;
-            if generations
-                .get(path)
-                .is_some_and(|current| *current > proposed)
-            {
-                return Ok(false);
-            }
-            generations.insert(path.to_path_buf(), proposed);
-        }
-
-        // Credential/keychain access, encryption, fsync, and atomic replacement
-        // happen outside the global generation mutex. Only this path's writer is
-        // serialized, so timeout-driven session invalidation remains bounded.
-        write()?;
-
-        let still_current = READ_STATE_OUTBOX_GENERATIONS
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-            .map_err(|_| CoreFailure::StoreUnavailable)?
-            .get(path)
-            .is_some_and(|current| *current == proposed);
-        if !still_current {
-            match std::fs::remove_file(path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => return Err(CoreFailure::StoreUnavailable),
-            }
-        }
-        Ok(still_current)
     }
 }
 
@@ -278,8 +222,8 @@ fn decrypt_read_state_outbox_payload(
 mod tests {
     use super::super::test_support::{file_store_actor, make_key_id};
     use super::super::*;
+    use super::CoreFailure;
     use super::*;
-    use super::{CoreFailure, StoreActor};
     use tempfile::tempdir;
 
     #[test]

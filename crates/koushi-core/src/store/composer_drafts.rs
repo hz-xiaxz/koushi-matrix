@@ -925,8 +925,7 @@ mod store_tests {
     use super::super::test_support::{file_store_actor, make_key_id};
     use super::super::*;
     use super::{
-        CoreFailure, PersistedComposerDraftStoreV3, StoreActor,
-        encrypt_composer_drafts_fixture_payload,
+        CoreFailure, PersistedComposerDraftStoreV3, encrypt_composer_drafts_fixture_payload,
     };
     use koushi_state::ComposerDraftStore;
     use tempfile::tempdir;
