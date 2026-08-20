@@ -2,7 +2,7 @@
 
 ## Status
 
-- Design: `reviewer-flash` recorded `Correct-to-implement` through `0b4b6712`; the first compile then exposed one omitted cross-owner associated method/field-visibility rule. The appendix amendment pins that edge and is pending bounded re-review before compile work resumes.
+- Design: `reviewer-flash` recorded `Correct-to-implement` through `0b4b6712`; after the first compile exposed one omitted cross-owner associated method/field-visibility rule, the reviewer approved the bounded `6454379` amendment as `Correct-to-implement`. The two non-blocking caller/count wording slips are corrected in place; compile work may resume.
 - Implementation: blocked until the design reviewer records `Correct-to-implement`.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 
