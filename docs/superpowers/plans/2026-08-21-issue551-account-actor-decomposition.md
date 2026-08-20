@@ -2,7 +2,7 @@
 
 ## Status
 
-- Design: `reviewer-flash` recorded `Correct-to-implement` through `0b4b6712`; after the first compile exposed one omitted cross-owner associated method/field-visibility rule, the reviewer approved the bounded `6454379` amendment as `Correct-to-implement`. The two non-blocking caller/count wording slips are corrected in place; compile work may resume.
+- Design: `reviewer-flash` approved the base and first visibility amendment as `Correct-to-implement`. A second compile exposed the existing scheduled-send admission return type as one additional visibility edge; the 65-name appendix amendment is pending bounded re-review before compile work resumes.
 - Implementation: blocked until the design reviewer records `Correct-to-implement`.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 
@@ -155,7 +155,7 @@ Owns local-encryption health, device-cleanup UIA/remote/local phases, erase-anyw
 - Modules remain private; existing `pub`/`pub(crate)` root APIs retain their exact visibility.
 - The actor fields remain one struct. All fields become only `pub(super)` because the twelve sibling inherent impls operate on the unchanged field set; this restores the former `account`-module scope without exposing it outside the private subtree.
 - The immutable call graph pins exactly 147 `AccountActor` methods for `pub(super)` sibling use and leaves the other 53 at their original public/crate visibility or owner-private. The appendix lists all 147 by owner.
-- The immutable top-level/type/helper/macro/associated-method graph pins 64 cross-owner names in the appendix, including `trace_restore` and `PendingSlidingSyncAdmission::key_id`. Existing public/crate names retain their visibility; only a listed private name may become `pub(super)`, with its cfg unchanged.
+- The immutable top-level/type/helper/macro/associated-method graph pins 65 cross-owner names in the appendix, including `trace_restore`, `PendingSlidingSyncAdmission::key_id`, and `AuthoritativeRoomEncryption` as the unchanged return type of the cross-owner admission function. Existing public/crate names retain their visibility; only a listed private name may become `pub(super)`, with its cfg unchanged.
 - Every field of an appendix-listed shared private struct also becomes `pub(super)` to restore the old parent-module scope; enum variant fields continue following their enum visibility. Test-only use never promotes production visibility.
 - An unlisted required sibling edge is not a compile-fix opportunity: stop, amend this design/appendix, and re-review before broadening it.
 - Leaves call the existing actor methods directly. They do not route through façade re-exports or introduce wrapper/helper methods solely to cross a module boundary.
@@ -218,7 +218,7 @@ A temporary non-repository `syn` verifier compares the immutable baseline with t
 5. Non-`AccountActor` impls match whole-token form; split AccountActor methods match individually.
 6. Moved production bodies match after normalization limited to required `super`/sibling qualification and `pub(super)` scope restoration.
 7. Root contains no production/test body or behavioral constant; no glob, wrapper, duplicate helper, compatibility alias, TODO, or newly introduced dead code exists.
-8. The sibling dependency/visibility report matches the appendix's 147 AccountActor method and 64 top-level/type/helper/macro/associated-method cross-owner names exactly; every promoted name and shared-struct field has a concrete edge and no unlisted visibility broadening exists.
+8. The sibling dependency/visibility report matches the appendix's 147 AccountActor method and 65 top-level/type/helper/macro/associated-method cross-owner names exactly; every promoted name and shared-struct field has a concrete edge and no unlisted visibility broadening exists.
 9. All 32 inline and one external source guard match the appendix's explicit source sets; no concatenation exists and only the approved test plumbing differs.
 
 Pre-existing warnings are baseline artifacts, not permission to add or suppress warnings.
@@ -283,5 +283,5 @@ Stop and amend/re-review the design before proceeding if:
 - any production/test body, order, cfg, public path, command/event/DTO/wire shape, timeout, retry, cleanup, privacy, or diagnostic token changes beyond approved qualification/visibility/test-source plumbing;
 - any session, task, observer, subscription, timer, continuation, child actor, teardown, secure-backup, residency, or reliable-settlement owner changes;
 - a worker needs to edit the parent or another worker's destination;
-- exactness cannot prove all 391 production keys, 200 actor methods, 150 tests, five façade names, 33 source sites, 147 sibling methods, 64 shared top-level/type/helper/macro/associated-method names, and shared-private-struct field scope;
+- exactness cannot prove all 391 production keys, 200 actor methods, 150 tests, five façade names, 33 source sites, 147 sibling methods, 65 shared top-level/type/helper/macro/associated-method names, and shared-private-struct field scope;
 - a test exposes a behavior defect.
