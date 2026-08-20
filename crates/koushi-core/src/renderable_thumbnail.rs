@@ -591,7 +591,10 @@ mod tests {
 
     #[test]
     fn avatar_and_preview_thumbnail_helpers_do_not_use_legacy_plaintext_paths() {
-        let account_source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/account.rs"));
+        let account_source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/account/profile.rs"
+        ));
         let account_body = account_source
             .split("async fn download_avatar_thumbnail")
             .nth(1)

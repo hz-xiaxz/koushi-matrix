@@ -1,0 +1,2377 @@
+//! `recovery_backup` ownership for AccountActor.
+
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use futures_util::StreamExt;
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_sdk::MatrixClientSession;
+use koushi_state::{
+    AppAction, AuthFailureKind, CrossSigningStatus, IdentityResetAuthType, IdentityResetState,
+    RecoveryKeyDeliveryState, RecoveryRequest, TrustOperationFailureKind,
+};
+
+use crate::command::{
+    RoomKeyExportRequest, RoomKeyImportRequest, SecureBackupPassphraseChangeRequest,
+    SecureBackupSetupRequest,
+};
+use crate::event::{AccountEvent, CoreEvent, E2eeTrustEvent};
+use crate::executor;
+use crate::failure::{CoreFailure, RecoveryFailureKind};
+use crate::ids::{AccountKey, RequestId};
+
+use super::actor::{AccountActor, AccountMessage};
+use super::local_data_cleanup::record_device_cleanup_offer;
+use super::trust_gate::{current_device_trust_token, verification_gate_failure_kind};
+use super::verification::recovery_failure_token;
+
+const RECOVERY_TRUST_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(20);
+
+const RECOVERY_TRUST_SETTLEMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+const SECURE_BACKUP_INSPECTION_TIMEOUT: Duration = Duration::from_secs(30);
+
+const SECURE_BACKUP_RETRY_DELAY: Duration = Duration::from_secs(5);
+
+const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(60);
+
+pub(super) fn secure_backup_monitor_wakeup_is_current(
+    current_generation: u64,
+    current_monitor_serial: u64,
+    session_promoted: bool,
+    wake_generation: u64,
+    wake_monitor_serial: u64,
+) -> bool {
+    session_promoted
+        && wake_generation == current_generation
+        && wake_monitor_serial == current_monitor_serial
+}
+
+pub(super) struct PendingRecoveryTask {
+    pub(super) generation: u64,
+    pub(super) flow_id: u64,
+    pub(super) request_id: RequestId,
+    pub(super) task: crate::executor::JoinHandle<()>,
+}
+
+pub(super) struct PendingRecoveryCompletion {
+    pub(super) generation: u64,
+    pub(super) flow_id: u64,
+    pub(super) request_id: RequestId,
+    pub(super) account_key: AccountKey,
+}
+
+pub(super) fn recovery_verification_event(stage: &'static str, flow_id: u64) -> DiagnosticEvent {
+    DiagnosticEvent::new(DiagnosticLevel::Info, "core.recovery_verification", stage)
+        .field(DiagnosticField::count("flow_id", flow_id))
+        .field(DiagnosticField::token("flow_type", "recovery_key"))
+}
+
+pub(super) fn record_recovery_verification_event(event: DiagnosticEvent) {
+    koushi_diagnostics::record_and_stderr(event);
+}
+
+fn secure_backup_inspection_completion_action(
+    current_generation: u64,
+    session_promoted: bool,
+    generation: u64,
+    result: Result<
+        koushi_sdk::MatrixSecureBackupInspection,
+        koushi_state::SecureBackupGateFailureKind,
+    >,
+) -> Option<AppAction> {
+    if generation != current_generation || !session_promoted {
+        return None;
+    }
+    let gate = match result {
+        Ok(inspection) => inspection.recommended_gate_state(),
+        Err(
+            failure @ (koushi_state::SecureBackupGateFailureKind::Network
+            | koushi_state::SecureBackupGateFailureKind::RateLimited
+            | koushi_state::SecureBackupGateFailureKind::Timeout),
+        ) => koushi_state::SecureBackupGateState::DegradedRetrying { failure },
+        Err(failure) => koushi_state::SecureBackupGateState::BlockedFailed { failure },
+    };
+    Some(AppAction::SecureBackupGateChanged(gate))
+}
+
+fn secure_backup_gate_token(gate: &koushi_state::SecureBackupGateState) -> &'static str {
+    use koushi_state::SecureBackupGateState;
+    match gate {
+        SecureBackupGateState::Inactive => "inactive",
+        SecureBackupGateState::Checking => "checking",
+        SecureBackupGateState::ExistingBackupNeedsRecovery { .. } => "recovery_required",
+        SecureBackupGateState::SecureStorageIncomplete => "secure_storage_incomplete",
+        SecureBackupGateState::SetupRequired => "setup_required",
+        SecureBackupGateState::ExplicitlyDisabledRequiresSetup => "explicitly_disabled",
+        SecureBackupGateState::CreatingBackup => "creating",
+        SecureBackupGateState::RecoveryKeyDeliveryRequired => "delivery_required",
+        SecureBackupGateState::UploadingExistingKeys { .. } => "uploading",
+        SecureBackupGateState::DegradedRetrying { .. } => "degraded",
+        SecureBackupGateState::BlockedFailed { .. } => "blocked_failed",
+        SecureBackupGateState::Ready => "ready",
+    }
+}
+
+fn recovery_result_is_current(
+    generation: u64,
+    current_generation: u64,
+    flow_id: u64,
+    current_flow_id: u64,
+    request_id: RequestId,
+    current_request_id: RequestId,
+    has_session: bool,
+) -> bool {
+    has_session
+        && generation == current_generation
+        && flow_id == current_flow_id
+        && request_id == current_request_id
+}
+
+/// Map an `E2eeRecoveryError` to a coarse `RecoveryFailureKind` without
+/// exposing raw SDK error text in public events or error messages.
+/// Conservative classification: prefer InvalidRecoveryKey for auth-type SDK
+/// errors, Network for network errors, Server for anything else.
+fn classify_recovery_error(
+    error: &koushi_sdk::E2eeRecoveryError,
+) -> crate::failure::RecoveryFailureKind {
+    use crate::failure::RecoveryFailureKind;
+    use koushi_sdk::E2eeRecoveryError;
+    match error {
+        E2eeRecoveryError::Runtime(_) => RecoveryFailureKind::Network,
+        E2eeRecoveryError::Sdk(message) => {
+            // Classify by error text fragments — these fragments come from the
+            // SDK/server and are used only for kind selection, never emitted.
+            if message.contains("invalid")
+                || message.contains("Invalid")
+                || message.contains("M_FORBIDDEN")
+                || message.contains("401")
+                || message.contains("403")
+            {
+                RecoveryFailureKind::InvalidRecoveryKey
+            } else if message.contains("network")
+                || message.contains("timeout")
+                || message.contains("connection")
+                || message.contains("connect")
+            {
+                RecoveryFailureKind::Network
+            } else {
+                RecoveryFailureKind::Server
+            }
+        }
+    }
+}
+
+pub(super) fn classify_e2ee_trust_error(
+    error: &koushi_sdk::E2eeTrustError,
+) -> TrustOperationFailureKind {
+    match error {
+        koushi_sdk::E2eeTrustError::Classified(kind) => match kind {
+            koushi_sdk::E2eeTrustFailureKind::Network => TrustOperationFailureKind::Network,
+            koushi_sdk::E2eeTrustFailureKind::Forbidden => TrustOperationFailureKind::Forbidden,
+            koushi_sdk::E2eeTrustFailureKind::InvalidBackup => TrustOperationFailureKind::Mismatch,
+            koushi_sdk::E2eeTrustFailureKind::Timeout => TrustOperationFailureKind::Timeout,
+            koushi_sdk::E2eeTrustFailureKind::Sdk => TrustOperationFailureKind::Sdk,
+        },
+        koushi_sdk::E2eeTrustError::NoOlmMachine
+        | koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive
+        | koushi_sdk::E2eeTrustError::SecureBackupAlreadyExists
+        | koushi_sdk::E2eeTrustError::SecureBackupReenableConfirmationRequired
+        | koushi_sdk::E2eeTrustError::SecureBackupUploadFailed
+        | koushi_sdk::E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed => {
+            TrustOperationFailureKind::Sdk
+        }
+        koushi_sdk::E2eeTrustError::Sdk(message) => {
+            let lower = message.to_ascii_lowercase();
+            if lower.contains("passphrase")
+                || lower.contains("mac")
+                || lower.contains("decrypt")
+                || lower.contains("recovery key")
+                || lower.contains("invalid key")
+            {
+                TrustOperationFailureKind::InvalidPassphrase
+            } else if lower.contains("timeout") {
+                TrustOperationFailureKind::Timeout
+            } else if lower.contains("forbidden")
+                || lower.contains("m_forbidden")
+                || lower.contains("401")
+                || lower.contains("403")
+            {
+                TrustOperationFailureKind::Forbidden
+            } else if lower.contains("network")
+                || lower.contains("connection")
+                || lower.contains("connect")
+            {
+                TrustOperationFailureKind::Network
+            } else {
+                TrustOperationFailureKind::Sdk
+            }
+        }
+    }
+}
+
+fn classify_secure_backup_gate_failure(
+    error: &koushi_sdk::E2eeTrustError,
+) -> koushi_state::SecureBackupGateFailureKind {
+    use koushi_sdk::E2eeTrustError;
+    use koushi_state::SecureBackupGateFailureKind;
+
+    match error {
+        E2eeTrustError::SecureBackupUploadFailed => SecureBackupGateFailureKind::Network,
+        E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed => {
+            SecureBackupGateFailureKind::ArtifactDelivery
+        }
+        E2eeTrustError::SecureBackupInspectionInconclusive => SecureBackupGateFailureKind::Sdk,
+        E2eeTrustError::SecureBackupAlreadyExists => SecureBackupGateFailureKind::BackupKeyMismatch,
+        E2eeTrustError::NoOlmMachine | E2eeTrustError::SecureBackupReenableConfirmationRequired => {
+            SecureBackupGateFailureKind::Sdk
+        }
+        E2eeTrustError::Classified(_) => match classify_e2ee_trust_error(error) {
+            TrustOperationFailureKind::Timeout => SecureBackupGateFailureKind::Timeout,
+            TrustOperationFailureKind::Forbidden => SecureBackupGateFailureKind::Forbidden,
+            TrustOperationFailureKind::Network => SecureBackupGateFailureKind::Network,
+            TrustOperationFailureKind::Mismatch => SecureBackupGateFailureKind::BackupKeyMismatch,
+            _ => SecureBackupGateFailureKind::Sdk,
+        },
+        E2eeTrustError::Sdk(_) => match classify_e2ee_trust_error(error) {
+            TrustOperationFailureKind::InvalidPassphrase => {
+                SecureBackupGateFailureKind::InvalidRecoveryKey
+            }
+            TrustOperationFailureKind::Timeout => SecureBackupGateFailureKind::Timeout,
+            TrustOperationFailureKind::Forbidden => SecureBackupGateFailureKind::Forbidden,
+            TrustOperationFailureKind::Network => SecureBackupGateFailureKind::Network,
+            TrustOperationFailureKind::Mismatch => SecureBackupGateFailureKind::BackupKeyMismatch,
+            TrustOperationFailureKind::Cancelled | TrustOperationFailureKind::Sdk => {
+                SecureBackupGateFailureKind::Sdk
+            }
+        },
+    }
+}
+
+pub(super) fn classify_e2ee_trust_auth_failure(
+    error: &koushi_sdk::E2eeTrustError,
+) -> AuthFailureKind {
+    match classify_e2ee_trust_error(error) {
+        TrustOperationFailureKind::Network => AuthFailureKind::Network,
+        TrustOperationFailureKind::Forbidden => AuthFailureKind::Forbidden,
+        TrustOperationFailureKind::Timeout => AuthFailureKind::Timeout,
+        TrustOperationFailureKind::Cancelled
+        | TrustOperationFailureKind::Mismatch
+        | TrustOperationFailureKind::InvalidPassphrase
+        | TrustOperationFailureKind::Sdk => AuthFailureKind::Sdk,
+    }
+}
+
+fn project_bootstrap_cross_signing_result(
+    request_id: RequestId,
+    account_key: AccountKey,
+    result: Result<koushi_state::CrossSigningStatus, koushi_sdk::E2eeTrustError>,
+) -> (Vec<AppAction>, Vec<CoreEvent>) {
+    match result {
+        Ok(status) => (
+            vec![AppAction::CrossSigningStatusChanged {
+                status: status.clone(),
+            }],
+            vec![CoreEvent::E2eeTrust(E2eeTrustEvent::CrossSigningChanged {
+                account_key,
+                status,
+            })],
+        ),
+        Err(error) => {
+            let kind = classify_e2ee_trust_error(&error);
+            let status = koushi_state::CrossSigningStatus::Failed {
+                request_id: request_id.sequence,
+                kind,
+            };
+            (
+                vec![AppAction::BootstrapCrossSigningFailed {
+                    request_id: request_id.sequence,
+                    kind,
+                }],
+                vec![CoreEvent::E2eeTrust(E2eeTrustEvent::CrossSigningChanged {
+                    account_key,
+                    status,
+                })],
+            )
+        }
+    }
+}
+
+fn project_enable_key_backup_result(
+    request_id: RequestId,
+    account_key: AccountKey,
+    result: Result<koushi_state::KeyBackupStatus, koushi_sdk::E2eeTrustError>,
+) -> (Vec<AppAction>, Vec<CoreEvent>) {
+    match result {
+        Ok(koushi_state::KeyBackupStatus::Enabled { version }) => {
+            let status = koushi_state::KeyBackupStatus::Enabled {
+                version: version.clone(),
+            };
+            (
+                vec![AppAction::KeyBackupEnabled {
+                    request_id: request_id.sequence,
+                    version,
+                }],
+                vec![CoreEvent::E2eeTrust(E2eeTrustEvent::KeyBackupChanged {
+                    account_key,
+                    status,
+                })],
+            )
+        }
+        Ok(status) => (
+            vec![AppAction::KeyBackupFailed {
+                request_id: request_id.sequence,
+                kind: TrustOperationFailureKind::Sdk,
+            }],
+            vec![CoreEvent::E2eeTrust(E2eeTrustEvent::KeyBackupChanged {
+                account_key,
+                status,
+            })],
+        ),
+        Err(error) => {
+            let kind = classify_e2ee_trust_error(&error);
+            let status = koushi_state::KeyBackupStatus::Failed {
+                request_id: request_id.sequence,
+                kind,
+            };
+            (
+                vec![AppAction::KeyBackupFailed {
+                    request_id: request_id.sequence,
+                    kind,
+                }],
+                vec![CoreEvent::E2eeTrust(E2eeTrustEvent::KeyBackupChanged {
+                    account_key,
+                    status,
+                })],
+            )
+        }
+    }
+}
+
+fn project_restore_key_backup_result(
+    request_id: RequestId,
+    account_key: AccountKey,
+    result: Result<koushi_sdk::KeyBackupRestoreSummary, koushi_sdk::E2eeTrustError>,
+) -> (Vec<AppAction>, Vec<CoreEvent>) {
+    match result {
+        Ok(summary) => {
+            let progress_status = koushi_state::KeyBackupStatus::Restoring {
+                request_id: request_id.sequence,
+                version: summary.version.clone(),
+                restored_rooms: summary.restored_rooms,
+                total_rooms: summary.total_rooms,
+            };
+            let restored_status = match summary.version.clone() {
+                Some(version) => koushi_state::KeyBackupStatus::Enabled { version },
+                None => koushi_state::KeyBackupStatus::Unknown,
+            };
+            (
+                vec![
+                    AppAction::KeyBackupRestoreProgress {
+                        request_id: request_id.sequence,
+                        restored_rooms: summary.restored_rooms,
+                        total_rooms: summary.total_rooms,
+                    },
+                    AppAction::KeyBackupRestored {
+                        request_id: request_id.sequence,
+                        version: summary.version,
+                    },
+                ],
+                vec![
+                    CoreEvent::E2eeTrust(E2eeTrustEvent::KeyBackupChanged {
+                        account_key: account_key.clone(),
+                        status: progress_status,
+                    }),
+                    CoreEvent::E2eeTrust(E2eeTrustEvent::KeyBackupChanged {
+                        account_key,
+                        status: restored_status,
+                    }),
+                ],
+            )
+        }
+        Err(error) => {
+            let kind = classify_e2ee_trust_error(&error);
+            let status = koushi_state::KeyBackupStatus::Failed {
+                request_id: request_id.sequence,
+                kind,
+            };
+            (
+                vec![AppAction::KeyBackupFailed {
+                    request_id: request_id.sequence,
+                    kind,
+                }],
+                vec![CoreEvent::E2eeTrust(E2eeTrustEvent::KeyBackupChanged {
+                    account_key,
+                    status,
+                })],
+            )
+        }
+    }
+}
+
+pub(super) fn project_reset_identity_completed(
+    request_id: RequestId,
+    account_key: AccountKey,
+) -> (Vec<AppAction>, Vec<CoreEvent>) {
+    (
+        vec![AppAction::ResetIdentityCompleted {
+            request_id: request_id.sequence,
+        }],
+        vec![CoreEvent::E2eeTrust(E2eeTrustEvent::IdentityResetChanged {
+            account_key,
+            state: IdentityResetState::Idle,
+        })],
+    )
+}
+
+fn project_reset_identity_auth_required(
+    request_id: RequestId,
+    account_key: AccountKey,
+    auth_type: IdentityResetAuthType,
+) -> (Vec<AppAction>, Vec<CoreEvent>) {
+    let state = IdentityResetState::AwaitingAuth {
+        request_id: request_id.sequence,
+        auth_type,
+    };
+    (
+        vec![AppAction::ResetIdentityAuthRequired {
+            request_id: request_id.sequence,
+            auth_type,
+        }],
+        vec![CoreEvent::E2eeTrust(E2eeTrustEvent::IdentityResetChanged {
+            account_key,
+            state,
+        })],
+    )
+}
+
+pub(super) fn project_reset_identity_error(
+    request_id: RequestId,
+    account_key: AccountKey,
+    error: koushi_sdk::E2eeTrustError,
+) -> (Vec<AppAction>, Vec<CoreEvent>) {
+    let kind = classify_e2ee_trust_error(&error);
+    let state = IdentityResetState::Failed {
+        request_id: request_id.sequence,
+        kind,
+    };
+    (
+        vec![AppAction::ResetIdentityFailed {
+            request_id: request_id.sequence,
+            kind,
+        }],
+        vec![
+            CoreEvent::E2eeTrust(E2eeTrustEvent::CrossSigningChanged {
+                account_key: account_key.clone(),
+                status: CrossSigningStatus::Failed {
+                    request_id: request_id.sequence,
+                    kind,
+                },
+            }),
+            CoreEvent::E2eeTrust(E2eeTrustEvent::IdentityResetChanged { account_key, state }),
+        ],
+    )
+}
+
+pub(super) fn project_identity_reset_failed_event(
+    request_id: u64,
+    account_key: AccountKey,
+    kind: TrustOperationFailureKind,
+) -> Vec<CoreEvent> {
+    vec![
+        CoreEvent::E2eeTrust(E2eeTrustEvent::CrossSigningChanged {
+            account_key: account_key.clone(),
+            status: CrossSigningStatus::Failed { request_id, kind },
+        }),
+        CoreEvent::E2eeTrust(E2eeTrustEvent::IdentityResetChanged {
+            account_key,
+            state: IdentityResetState::Failed { request_id, kind },
+        }),
+    ]
+}
+
+impl AccountActor {
+    pub(super) async fn handle_bootstrap_cross_signing(
+        &self,
+        request_id: RequestId,
+        auth: Option<koushi_state::AuthSecret>,
+    ) {
+        let session = match &self.session {
+            Some(session) => session.clone(),
+            None => {
+                self.send_actions(vec![AppAction::BootstrapCrossSigningFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+        let account_key = AccountKey(session.info.user_id.clone());
+        let result = koushi_sdk::bootstrap_cross_signing(&session, auth.as_ref()).await;
+        let (actions, events) =
+            project_bootstrap_cross_signing_result(request_id, account_key, result);
+        self.send_actions(actions).await;
+        for event in events {
+            self.emit(event);
+        }
+    }
+
+    pub(super) async fn handle_enable_key_backup(
+        &self,
+        request_id: RequestId,
+        passphrase: Option<koushi_state::AuthSecret>,
+    ) {
+        let session = match &self.session {
+            Some(session) => session.clone(),
+            None => {
+                self.send_actions(vec![AppAction::KeyBackupFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+        let account_key = AccountKey(session.info.user_id.clone());
+        let result = koushi_sdk::enable_key_backup(&session, passphrase.as_ref()).await;
+        drop(passphrase);
+        let (actions, events) = project_enable_key_backup_result(request_id, account_key, result);
+        self.send_actions(actions).await;
+        for event in events {
+            self.emit(event);
+        }
+    }
+
+    pub(super) async fn handle_restore_key_backup(
+        &self,
+        request_id: RequestId,
+        version: Option<String>,
+        request: RecoveryRequest,
+    ) {
+        let session = match &self.session {
+            Some(session) => session.clone(),
+            None => {
+                self.send_actions(vec![AppAction::KeyBackupFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+        let account_key = AccountKey(session.info.user_id.clone());
+        let result = koushi_sdk::restore_key_backup(&session, &request, version.as_deref()).await;
+        drop(request);
+
+        let (actions, events) = project_restore_key_backup_result(request_id, account_key, result);
+        self.send_actions(actions).await;
+        for event in events {
+            self.emit(event);
+        }
+    }
+
+    pub(super) async fn handle_export_room_keys(
+        &self,
+        request_id: RequestId,
+        request: RoomKeyExportRequest,
+    ) {
+        let session = match &self.session {
+            Some(session) => session.clone(),
+            None => {
+                self.send_actions(vec![AppAction::RoomKeyExportFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+
+        let RoomKeyExportRequest {
+            destination_path,
+            passphrase,
+        } = request;
+        let result =
+            koushi_sdk::export_room_keys_to_file(&session, destination_path, &passphrase).await;
+        drop(passphrase);
+        match result {
+            Ok(summary) => {
+                self.send_actions(vec![AppAction::RoomKeyExported {
+                    request_id: request_id.sequence,
+                    exported_sessions: summary.exported_sessions,
+                }])
+                .await;
+            }
+            Err(error) => {
+                let kind = classify_e2ee_trust_error(&error);
+                self.send_actions(vec![AppAction::RoomKeyExportFailed {
+                    request_id: request_id.sequence,
+                    kind,
+                }])
+                .await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: classify_e2ee_trust_auth_failure(&error),
+                    },
+                );
+            }
+        }
+    }
+
+    pub(super) async fn handle_import_room_keys(
+        &self,
+        request_id: RequestId,
+        request: RoomKeyImportRequest,
+    ) {
+        let session = match &self.session {
+            Some(session) => session.clone(),
+            None => {
+                self.send_actions(vec![AppAction::RoomKeyImportFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+
+        let RoomKeyImportRequest {
+            source_path,
+            passphrase,
+        } = request;
+        let result =
+            koushi_sdk::import_room_keys_from_file(&session, source_path, &passphrase).await;
+        drop(passphrase);
+        match result {
+            Ok(summary) => {
+                self.send_actions(vec![AppAction::RoomKeyImported {
+                    request_id: request_id.sequence,
+                    imported_count: summary.imported_count,
+                    total_count: summary.total_count,
+                }])
+                .await;
+            }
+            Err(error) => {
+                let kind = classify_e2ee_trust_error(&error);
+                self.send_actions(vec![AppAction::RoomKeyImportFailed {
+                    request_id: request_id.sequence,
+                    kind,
+                }])
+                .await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: classify_e2ee_trust_auth_failure(&error),
+                    },
+                );
+            }
+        }
+    }
+
+    pub(super) async fn handle_bootstrap_secure_backup(
+        &mut self,
+        request_id: RequestId,
+        request: SecureBackupSetupRequest,
+    ) {
+        let session = match &self.session {
+            Some(session) => session.clone(),
+            None => {
+                self.send_actions(vec![AppAction::SecureBackupSetupFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+
+        let SecureBackupSetupRequest {
+            passphrase,
+            recovery_key_destination_path,
+            explicit_reenable_confirmed,
+        } = request;
+        if recovery_key_destination_path.is_none() {
+            self.send_actions(vec![AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
+            )])
+            .await;
+            self.emit_failure(
+                request_id,
+                CoreFailure::AccountOperationFailed {
+                    kind: AuthFailureKind::Sdk,
+                },
+            );
+            return;
+        }
+        self.send_actions(vec![AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::CreatingBackup,
+        )])
+        .await;
+        let result = if explicit_reenable_confirmed {
+            session
+                .reenable_secure_backup(passphrase.as_ref(), recovery_key_destination_path)
+                .await
+        } else {
+            session
+                .setup_secure_backup(passphrase.as_ref(), recovery_key_destination_path)
+                .await
+        };
+        drop(passphrase);
+        match result {
+            Ok(summary) => {
+                self.recovery_key_delivery_pending = false;
+                let delivery = if summary.recovery_key_written {
+                    RecoveryKeyDeliveryState::Written
+                } else {
+                    RecoveryKeyDeliveryState::NotWritten
+                };
+                self.send_actions(vec![
+                    AppAction::SecureBackupRecoveryKeyReady {
+                        request_id: request_id.sequence,
+                        delivery,
+                    },
+                    AppAction::SecureBackupSetupEnabled {
+                        request_id: request_id.sequence,
+                    },
+                ])
+                .await;
+                self.start_secure_backup_inspection();
+            }
+            Err(error) => {
+                let kind = classify_e2ee_trust_error(&error);
+                let mut actions = vec![AppAction::SecureBackupSetupFailed {
+                    request_id: request_id.sequence,
+                    kind,
+                }];
+                if matches!(
+                    error,
+                    koushi_sdk::E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed
+                ) {
+                    self.recovery_key_delivery_pending = true;
+                    self.set_secure_backup_send_admitted(false);
+                    actions.push(AppAction::SecureBackupGateChanged(
+                        koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
+                    ));
+                }
+                self.send_actions(actions).await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: classify_e2ee_trust_auth_failure(&error),
+                    },
+                );
+            }
+        }
+    }
+
+    pub(super) async fn handle_recover_secure_backup(
+        &mut self,
+        request_id: RequestId,
+        request: RecoveryRequest,
+    ) {
+        let Some(session) = self.session.clone().filter(|_| self.session_promoted) else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        self.send_actions(vec![AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::Checking,
+        )])
+        .await;
+        match session.recover_secure_backup(&request).await {
+            Ok(()) => self.start_secure_backup_inspection(),
+            Err(error) => {
+                self.send_actions(vec![AppAction::SecureBackupGateChanged(
+                    koushi_state::SecureBackupGateState::ExistingBackupNeedsRecovery {
+                        failure: Some(classify_secure_backup_gate_failure(&error)),
+                    },
+                )])
+                .await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: classify_e2ee_trust_auth_failure(&error),
+                    },
+                );
+            }
+        }
+    }
+
+    pub(super) async fn handle_change_secure_backup_passphrase(
+        &self,
+        request_id: RequestId,
+        request: SecureBackupPassphraseChangeRequest,
+    ) {
+        let session = match &self.session {
+            Some(session) => session.clone(),
+            None => {
+                self.send_actions(vec![AppAction::SecureBackupPassphraseChangeFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+
+        let SecureBackupPassphraseChangeRequest {
+            old_secret,
+            new_passphrase,
+            recovery_key_destination_path,
+        } = request;
+        let result = koushi_sdk::change_secure_backup_passphrase(
+            &session,
+            &old_secret,
+            &new_passphrase,
+            recovery_key_destination_path,
+        )
+        .await;
+        drop(old_secret);
+        drop(new_passphrase);
+        match result {
+            Ok(summary) => {
+                let delivery = if summary.recovery_key_written {
+                    RecoveryKeyDeliveryState::Written
+                } else {
+                    RecoveryKeyDeliveryState::NotWritten
+                };
+                self.send_actions(vec![AppAction::SecureBackupPassphraseChanged {
+                    request_id: request_id.sequence,
+                    delivery,
+                }])
+                .await;
+            }
+            Err(error) => {
+                let kind = classify_e2ee_trust_error(&error);
+                self.send_actions(vec![AppAction::SecureBackupPassphraseChangeFailed {
+                    request_id: request_id.sequence,
+                    kind,
+                }])
+                .await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: classify_e2ee_trust_auth_failure(&error),
+                    },
+                );
+            }
+        }
+    }
+
+    pub(super) async fn handle_reset_identity(&mut self, request_id: RequestId) {
+        let session = match &self.session {
+            Some(session) => session.clone(),
+            None => {
+                self.cancel_identity_reset_handle().await;
+                self.send_actions(vec![AppAction::ResetIdentityFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+        let account_key = AccountKey(session.info.user_id.clone());
+        match koushi_sdk::reset_identity(&session).await {
+            Ok(koushi_sdk::IdentityResetOutcome::Completed) => {
+                self.cancel_identity_reset_handle().await;
+                let (actions, events) = project_reset_identity_completed(request_id, account_key);
+                self.send_actions(actions).await;
+                for event in events {
+                    self.emit(event);
+                }
+            }
+            Ok(koushi_sdk::IdentityResetOutcome::AuthRequired(handle)) => {
+                let auth_type = handle.desktop_auth_type();
+                self.cancel_identity_reset_handle().await;
+                self.identity_reset_flow_id = Some(request_id.sequence);
+                self.spawn_identity_reset_auth_timeout(request_id.sequence);
+                self.identity_reset_handle = Some(handle);
+                let (actions, events) =
+                    project_reset_identity_auth_required(request_id, account_key, auth_type);
+                self.send_actions(actions).await;
+                for event in events {
+                    self.emit(event);
+                }
+            }
+            Err(error) => {
+                self.cancel_identity_reset_handle().await;
+                let (actions, events) =
+                    project_reset_identity_error(request_id, account_key, error);
+                self.send_actions(actions).await;
+                for event in events {
+                    self.emit(event);
+                }
+            }
+        }
+    }
+
+    pub(super) async fn handle_start_session_bootstrap(
+        &mut self,
+        request_id: RequestId,
+        flow_id: u64,
+        auth: Option<koushi_state::AuthSecret>,
+        request: SecureBackupSetupRequest,
+    ) {
+        let Some(session) = self.session.clone() else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        if request.recovery_key_destination_path.is_none() {
+            self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
+                flow_id,
+                kind: koushi_state::VerificationGateFailureKind::Sdk,
+            }])
+            .await;
+            return;
+        }
+        if let Err(error) = koushi_sdk::bootstrap_cross_signing(&session, auth.as_ref()).await {
+            drop(auth);
+            self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
+                flow_id,
+                kind: verification_gate_failure_kind(&error),
+            }])
+            .await;
+            return;
+        }
+        drop(auth);
+        let SecureBackupSetupRequest {
+            passphrase,
+            recovery_key_destination_path,
+            explicit_reenable_confirmed: _,
+        } = request;
+        let result = koushi_sdk::bootstrap_secure_backup(
+            &session,
+            passphrase.as_ref(),
+            recovery_key_destination_path,
+        )
+        .await;
+        drop(passphrase);
+        match result {
+            Ok(summary) if summary.recovery_key_written => {
+                self.send_actions(vec![AppAction::BootstrapRecoveryKeyDelivered { flow_id }])
+                    .await;
+            }
+            Ok(_) => {
+                self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
+                    flow_id,
+                    kind: koushi_state::VerificationGateFailureKind::Sdk,
+                }])
+                .await;
+            }
+            Err(error) => {
+                self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
+                    flow_id,
+                    kind: verification_gate_failure_kind(&error),
+                }])
+                .await;
+            }
+        }
+    }
+
+    /// Submit a recovery secret. Calls the auth crate's `recover_e2ee`
+    /// primitive. On success, the accepted proof is not enough to enter Ready:
+    /// wait until the SDK reports the current device as Verified. On failure:
+    /// classify conservatively to
+    /// InvalidRecoveryKey/Network/Server (never raw error text) and emit
+    /// OperationFailed with RecoveryFailed.
+    ///
+    /// The recovery secret is NEVER logged, included in error messages, or
+    /// stored in any event/snapshot.
+    pub(super) async fn handle_submit_recovery(
+        &mut self,
+        request_id: RequestId,
+        request: RecoveryRequest,
+    ) {
+        let session = match &self.session {
+            Some(s) => s.clone(),
+            None => {
+                self.emit_failure(request_id, CoreFailure::SessionRequired);
+                return;
+            }
+        };
+
+        self.stop_recovery_task().await;
+        self.stop_recovery_trust_settlement_task().await;
+        self.pending_recovery_completion = None;
+        let generation = self.trust_generation;
+        let flow_id = request_id.sequence;
+        let provisional_encryption_sync_was_active = self.provisional_encryption_sync.is_some();
+        self.stop_provisional_encryption_sync().await;
+        record_recovery_verification_event(
+            recovery_verification_event("provisional_encryption_sync_paused", flow_id).field(
+                DiagnosticField::boolean("was_active", provisional_encryption_sync_was_active),
+            ),
+        );
+        record_recovery_verification_event(recovery_verification_event("submitted", flow_id));
+        let tx = self.self_tx.clone();
+        #[cfg(test)]
+        let recovery_result_override = self
+            .recovery_result_override
+            .lock()
+            .expect("recovery result lock")
+            .take();
+        let task = crate::executor::spawn(async move {
+            #[cfg(test)]
+            let result = if let Some(completion) = recovery_result_override {
+                completion.await.unwrap_or_else(|_| {
+                    Err(koushi_sdk::E2eeRecoveryError::Runtime(
+                        "synthetic recovery result channel closed".to_owned(),
+                    ))
+                })
+            } else {
+                koushi_sdk::recover_e2ee(&session, &request).await
+            };
+            #[cfg(not(test))]
+            let result = koushi_sdk::recover_e2ee(&session, &request).await;
+            drop(request);
+            let _ = tx
+                .send(AccountMessage::RecoveryFinished {
+                    generation,
+                    flow_id,
+                    request_id,
+                    result,
+                })
+                .await;
+        });
+        self.recovery_task = Some(PendingRecoveryTask {
+            generation,
+            flow_id,
+            request_id,
+            task,
+        });
+    }
+
+    pub(super) async fn handle_recovery_finished(
+        &mut self,
+        generation: u64,
+        flow_id: u64,
+        request_id: RequestId,
+        result: Result<(), koushi_sdk::E2eeRecoveryError>,
+    ) {
+        let is_current = self.recovery_task.as_ref().is_some_and(|pending| {
+            recovery_result_is_current(
+                generation,
+                self.trust_generation,
+                flow_id,
+                pending.flow_id,
+                request_id,
+                pending.request_id,
+                self.session.is_some(),
+            ) && pending.generation == generation
+        });
+        if !is_current {
+            return;
+        }
+        if let Some(pending) = self.recovery_task.take() {
+            let _ = pending.task.await;
+        }
+        let Some(session) = self.session.clone() else {
+            return;
+        };
+        let account_key = AccountKey(session.info.user_id.clone());
+        match result {
+            Ok(()) => {
+                record_recovery_verification_event(
+                    recovery_verification_event("settled", flow_id)
+                        .field(DiagnosticField::token("terminal", "success")),
+                );
+                let trust_after_recovery = session.current_device_trust();
+                record_recovery_verification_event(
+                    recovery_verification_event("post_recovery_trust_read", flow_id)
+                        .field(DiagnosticField::count("generation", generation))
+                        .field(DiagnosticField::request_id(
+                            "request_id",
+                            request_id.connection_id.0,
+                            request_id.sequence,
+                        ))
+                        .field(DiagnosticField::token(
+                            "trust",
+                            current_device_trust_token(trust_after_recovery),
+                        )),
+                );
+                if trust_after_recovery != koushi_state::CurrentDeviceTrustState::Verified {
+                    self.resume_provisional_encryption_sync_after_recovery(
+                        session.clone(),
+                        generation,
+                        flow_id,
+                    );
+                    self.pending_recovery_completion = Some(PendingRecoveryCompletion {
+                        generation,
+                        flow_id,
+                        request_id,
+                        account_key,
+                    });
+                    record_recovery_verification_event(
+                        recovery_verification_event("trust_pending", flow_id)
+                            .field(DiagnosticField::count("generation", generation))
+                            .field(DiagnosticField::request_id(
+                                "request_id",
+                                request_id.connection_id.0,
+                                request_id.sequence,
+                            ))
+                            .field(DiagnosticField::token(
+                                "trust",
+                                current_device_trust_token(trust_after_recovery),
+                            )),
+                    );
+                    let transition_id = self.next_trust_transition_id();
+                    self.send_actions(vec![AppAction::AuthoritativeDeviceTrustChanged {
+                        generation,
+                        transition_id,
+                        trust: trust_after_recovery,
+                    }])
+                    .await;
+                    self.start_recovery_trust_settlement_poll(
+                        generation, flow_id, request_id, session,
+                    )
+                    .await;
+                    return;
+                }
+                if !self
+                    .promote_recovered_session_runtime(generation, flow_id, request_id)
+                    .await
+                {
+                    return;
+                }
+                self.send_actions(vec![AppAction::E2eeRecoverySucceeded])
+                    .await;
+                self.complete_recovery_after_verified(request_id, account_key, session)
+                    .await;
+            }
+            Err(error) => {
+                self.resume_provisional_encryption_sync_after_recovery(
+                    session.clone(),
+                    generation,
+                    flow_id,
+                );
+                self.pending_recovery_completion = None;
+                let kind = classify_recovery_error(&error);
+                record_recovery_verification_event(
+                    recovery_verification_event("settled", flow_id)
+                        .field(DiagnosticField::token("terminal", "failed"))
+                        .field(DiagnosticField::token(
+                            "failure_kind",
+                            recovery_failure_token(kind),
+                        )),
+                );
+                // Project failure: Recovering → NeedsRecovery.
+                record_device_cleanup_offer("recovery_failed");
+                self.send_actions(vec![AppAction::E2eeRecoveryFailed {
+                    message: "recovery failed".to_owned(),
+                }])
+                .await;
+                self.emit_failure(request_id, CoreFailure::RecoveryFailed { kind });
+            }
+        }
+    }
+
+    pub(super) async fn complete_recovery_after_verified(
+        &mut self,
+        request_id: RequestId,
+        account_key: AccountKey,
+        session: Arc<MatrixClientSession>,
+    ) {
+        self.send_actions(vec![AppAction::RestoreKeyBackupRequested {
+            request_id: request_id.sequence,
+            version: None,
+        }])
+        .await;
+        #[cfg(test)]
+        let recovery_download_override = self
+            .recovery_download_override
+            .lock()
+            .expect("recovery download lock")
+            .take();
+        #[cfg(test)]
+        let restore_result = if let Some(completion) = recovery_download_override {
+            if completion.await.unwrap_or(false) {
+                Ok(koushi_sdk::KeyBackupRestoreSummary {
+                    scope: koushi_sdk::KeyBackupRestoreScope::JoinedRooms,
+                    version: None,
+                    restored_rooms: 0,
+                    total_rooms: Some(0),
+                })
+            } else {
+                Err(koushi_sdk::E2eeTrustError::Sdk(
+                    "controlled recovery download failure".to_owned(),
+                ))
+            }
+        } else {
+            koushi_sdk::download_joined_room_keys_from_backup(&session, None).await
+        };
+        #[cfg(not(test))]
+        let restore_result =
+            koushi_sdk::download_joined_room_keys_from_backup(&session, None).await;
+        let (actions, events) =
+            project_restore_key_backup_result(request_id, account_key.clone(), restore_result);
+        self.send_actions(actions).await;
+        for event in events {
+            self.emit(event);
+        }
+        self.emit(CoreEvent::Account(AccountEvent::RecoveryCompleted {
+            request_id,
+            account_key,
+        }));
+    }
+
+    async fn start_recovery_trust_settlement_poll(
+        &mut self,
+        generation: u64,
+        flow_id: u64,
+        request_id: RequestId,
+        session: Arc<MatrixClientSession>,
+    ) {
+        self.stop_recovery_trust_settlement_task().await;
+        let tx = self.self_tx.clone();
+        record_recovery_verification_event(
+            recovery_verification_event("trust_settlement_wait_started", flow_id)
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                )),
+        );
+        self.recovery_trust_settlement_task = Some(executor::spawn(async move {
+            let started = Instant::now();
+            let mut trust = session.current_device_trust();
+            while started.elapsed() < RECOVERY_TRUST_SETTLEMENT_TIMEOUT {
+                if trust == koushi_state::CurrentDeviceTrustState::Verified {
+                    record_recovery_verification_event(
+                        recovery_verification_event("trust_settlement_wait_finished", flow_id)
+                            .field(DiagnosticField::count("generation", generation))
+                            .field(DiagnosticField::token("outcome", "verified"))
+                            .field(DiagnosticField::milliseconds(
+                                "elapsed_ms",
+                                started.elapsed().as_millis(),
+                            )),
+                    );
+                    let _ = tx
+                        .send(AccountMessage::CurrentDeviceTrustChanged { generation, trust })
+                        .await;
+                    return;
+                }
+                executor::sleep(RECOVERY_TRUST_SETTLEMENT_POLL_INTERVAL).await;
+                trust = session.current_device_trust();
+            }
+            record_recovery_verification_event(
+                recovery_verification_event("trust_settlement_wait_finished", flow_id)
+                    .field(DiagnosticField::count("generation", generation))
+                    .field(DiagnosticField::token("outcome", "timeout"))
+                    .field(DiagnosticField::token(
+                        "trust",
+                        current_device_trust_token(trust),
+                    ))
+                    .field(DiagnosticField::milliseconds(
+                        "elapsed_ms",
+                        started.elapsed().as_millis(),
+                    )),
+            );
+            let _ = tx
+                .send(AccountMessage::RecoveryTrustSettlementTimedOut {
+                    generation,
+                    flow_id,
+                    request_id,
+                    trust,
+                })
+                .await;
+        }));
+    }
+
+    pub(super) async fn handle_recovery_trust_settlement_timed_out(
+        &mut self,
+        generation: u64,
+        flow_id: u64,
+        request_id: RequestId,
+        trust: koushi_state::CurrentDeviceTrustState,
+    ) {
+        let is_current = self
+            .pending_recovery_completion
+            .as_ref()
+            .is_some_and(|pending| {
+                pending.generation == generation
+                    && pending.flow_id == flow_id
+                    && pending.request_id == request_id
+                    && generation == self.trust_generation
+                    && self.session.is_some()
+            });
+        if !is_current {
+            record_recovery_verification_event(
+                recovery_verification_event("trust_settlement_timeout_ignored", flow_id)
+                    .field(DiagnosticField::count("generation", generation))
+                    .field(DiagnosticField::request_id(
+                        "request_id",
+                        request_id.connection_id.0,
+                        request_id.sequence,
+                    ))
+                    .field(DiagnosticField::token(
+                        "trust",
+                        current_device_trust_token(trust),
+                    )),
+            );
+            return;
+        }
+        self.pending_recovery_completion = None;
+        self.recovery_trust_settlement_task = None;
+        record_recovery_verification_event(
+            recovery_verification_event("trust_settlement_timeout_projected", flow_id)
+                .field(DiagnosticField::count("generation", generation))
+                .field(DiagnosticField::request_id(
+                    "request_id",
+                    request_id.connection_id.0,
+                    request_id.sequence,
+                ))
+                .field(DiagnosticField::token(
+                    "trust",
+                    current_device_trust_token(trust),
+                ))
+                .field(DiagnosticField::token("failure_kind", "timeout")),
+        );
+        record_device_cleanup_offer("recovery_failed");
+        self.send_actions(vec![AppAction::E2eeRecoveryFailed {
+            message: "session verification timed out".to_owned(),
+        }])
+        .await;
+        self.emit_failure(
+            request_id,
+            CoreFailure::RecoveryFailed {
+                kind: RecoveryFailureKind::Timeout,
+            },
+        );
+    }
+
+    pub(super) async fn stop_recovery_task(&mut self) -> Option<u64> {
+        let pending = self.recovery_task.take()?;
+        let flow_id = pending.flow_id;
+        pending.task.abort();
+        let _ = pending.task.await;
+        Some(flow_id)
+    }
+
+    pub(super) async fn stop_recovery_trust_settlement_task(&mut self) {
+        if let Some(task) = self.recovery_trust_settlement_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    pub(super) fn start_secure_backup_inspection(&mut self) {
+        self.set_secure_backup_send_admitted(false);
+        if self.secure_backup_inspection_task.is_some() {
+            self.secure_backup_inspection_pending = true;
+            return;
+        }
+        self.retire_secure_backup_monitor();
+        let Some(session) = self.session.clone().filter(|_| self.session_promoted) else {
+            return;
+        };
+        let generation = self.trust_generation;
+        record(DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.secure_backup",
+            "inspection_started",
+        ));
+        let tx = self.self_tx.clone();
+        self.secure_backup_inspection_task = Some(executor::spawn(async move {
+            let result = match executor::timeout(
+                SECURE_BACKUP_INSPECTION_TIMEOUT,
+                session.inspect_secure_backup(),
+            )
+            .await
+            {
+                Ok(Ok(inspection)) => Ok(inspection),
+                Ok(Err(error)) => Err(classify_secure_backup_gate_failure(&error)),
+                Err(_) => Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+            };
+            let _ = tx
+                .send(AccountMessage::SecureBackupInspectionFinished { generation, result })
+                .await;
+        }));
+    }
+
+    pub(super) async fn finish_secure_backup_inspection(
+        &mut self,
+        generation: u64,
+        result: Result<
+            koushi_sdk::MatrixSecureBackupInspection,
+            koushi_state::SecureBackupGateFailureKind,
+        >,
+    ) {
+        self.secure_backup_inspection_task = None;
+        if std::mem::take(&mut self.secure_backup_inspection_pending) {
+            self.start_secure_backup_inspection();
+            return;
+        }
+        let Some(mut action) = secure_backup_inspection_completion_action(
+            self.trust_generation,
+            self.session_promoted,
+            generation,
+            result,
+        ) else {
+            if self.session_promoted {
+                self.start_secure_backup_inspection();
+            }
+            return;
+        };
+        if self.recovery_key_delivery_pending
+            && matches!(
+                action,
+                AppAction::SecureBackupGateChanged(koushi_state::SecureBackupGateState::Ready)
+            )
+        {
+            action = AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
+            );
+        }
+        if let AppAction::SecureBackupGateChanged(gate) = &action {
+            let admitted = matches!(gate, koushi_state::SecureBackupGateState::Ready);
+            self.set_secure_backup_send_admitted(admitted);
+            let retrying = matches!(
+                gate,
+                koushi_state::SecureBackupGateState::DegradedRetrying { .. }
+            );
+            record(
+                DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "core.secure_backup",
+                    "inspection_settled",
+                )
+                .field(DiagnosticField::token(
+                    "gate",
+                    secure_backup_gate_token(gate),
+                )),
+            );
+            self.schedule_secure_backup_monitor(generation, retrying);
+        }
+        self.send_actions(vec![action]).await;
+    }
+
+    fn schedule_secure_backup_monitor(&mut self, generation: u64, retrying: bool) {
+        self.retire_secure_backup_monitor();
+        let monitor_serial = self.secure_backup_monitor_serial;
+        let (delay, cadence) = if retrying {
+            (SECURE_BACKUP_RETRY_DELAY, "retry_5s")
+        } else {
+            (SECURE_BACKUP_MONITOR_INTERVAL, "periodic_60s")
+        };
+        record(
+            DiagnosticEvent::new(
+                DiagnosticLevel::Debug,
+                "core.secure_backup",
+                "monitor_scheduled",
+            )
+            .field(DiagnosticField::token("cadence", cadence)),
+        );
+        let tx = self.self_tx.clone();
+        self.secure_backup_monitor_task = Some(executor::spawn(async move {
+            executor::sleep(delay).await;
+            let _ = tx
+                .send(AccountMessage::RetrySecureBackupInspection {
+                    generation,
+                    monitor_serial,
+                })
+                .await;
+        }));
+    }
+
+    fn retire_secure_backup_monitor(&mut self) {
+        self.secure_backup_monitor_serial =
+            self.secure_backup_monitor_serial.wrapping_add(1).max(1);
+        if let Some(task) = self.secure_backup_monitor_task.take() {
+            task.abort();
+        }
+    }
+
+    pub(super) async fn cancel_secure_backup_inspection(&mut self) {
+        self.secure_backup_inspection_pending = false;
+        if let Some(task) = self.secure_backup_inspection_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+        self.secure_backup_monitor_serial =
+            self.secure_backup_monitor_serial.wrapping_add(1).max(1);
+        if let Some(task) = self.secure_backup_monitor_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    pub(super) fn start_secure_backup_observer(&mut self, session: Arc<MatrixClientSession>) {
+        if let Some(task) = self.secure_backup_observer.take() {
+            task.abort();
+        }
+        let generation = self.trust_generation;
+        let mut observation = session.observe_secure_backup_state();
+        let tx = self.self_tx.clone();
+        self.secure_backup_observer = Some(executor::spawn(async move {
+            while let Some(state) = observation.updates.next().await {
+                if tx
+                    .send(AccountMessage::SecureBackupStateChanged { generation, state })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+    }
+
+    pub(super) async fn handle_secure_backup_state_changed(
+        &mut self,
+        generation: u64,
+        _state: koushi_sdk::MatrixSecureBackupState,
+    ) {
+        if generation != self.trust_generation || !self.session_promoted {
+            return;
+        }
+        self.set_secure_backup_send_admitted(false);
+        self.send_actions(vec![AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::Checking,
+        )])
+        .await;
+        self.start_secure_backup_inspection();
+    }
+
+    pub(super) async fn stop_secure_backup_observer(&mut self) {
+        if let Some(task) = self.secure_backup_observer.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use koushi_state::{AppAction, AuthFailureKind, VerificationCancelReason};
+
+    use tokio::sync::oneshot;
+
+    use super::{
+        classify_e2ee_trust_auth_failure, classify_e2ee_trust_error, classify_recovery_error,
+        project_bootstrap_cross_signing_result, project_enable_key_backup_result,
+        project_reset_identity_auth_required, project_reset_identity_completed,
+        project_restore_key_backup_result, recovery_result_is_current,
+        secure_backup_inspection_completion_action, secure_backup_monitor_wakeup_is_current,
+    };
+    use crate::account::actor::AccountMessage;
+    use crate::account::test_support::{
+        acknowledge_next_verified_projection, inspect_session_runtime, inspect_sync_owners,
+        login_gated_actor, shutdown_and_ack, spawn_actor_with_dirs, test_request_id,
+    };
+    use crate::account::verification::incoming_verification_request_id;
+    use crate::command::AccountCommand;
+
+    use crate::event::CoreEvent;
+    use crate::executor;
+
+    use crate::failure::CoreFailure;
+    use crate::ids::{AccountKey, RequestId, RuntimeConnectionId};
+
+    use tempfile::tempdir;
+
+    fn ready_secure_backup_inspection() -> koushi_sdk::MatrixSecureBackupInspection {
+        koushi_sdk::MatrixSecureBackupInspection {
+            server: koushi_sdk::MatrixSecureBackupServerState::Present,
+            local: koushi_sdk::MatrixSecureBackupLocalState::Enabled,
+            recovery: koushi_sdk::MatrixSecureBackupRecoveryState::Enabled,
+            upload: koushi_sdk::MatrixSecureBackupUploadState::Settled,
+            trust: koushi_sdk::MatrixSecureBackupTrustState::Trusted,
+            recovery_key_delivery_pending: false,
+        }
+    }
+
+    #[test]
+    fn secure_backup_completion_rejects_stale_or_unpromoted_sessions() {
+        for (current_generation, promoted, completed_generation) in [(5, true, 4), (5, false, 5)] {
+            assert!(
+                secure_backup_inspection_completion_action(
+                    current_generation,
+                    promoted,
+                    completed_generation,
+                    Ok(ready_secure_backup_inspection()),
+                )
+                .is_none()
+            );
+        }
+
+        assert!(matches!(
+            secure_backup_inspection_completion_action(
+                5,
+                true,
+                5,
+                Ok(ready_secure_backup_inspection()),
+            ),
+            Some(AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::Ready
+            ))
+        ));
+        assert!(matches!(
+            secure_backup_inspection_completion_action(
+                5,
+                true,
+                5,
+                Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+            ),
+            Some(AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::DegradedRetrying {
+                    failure: koushi_state::SecureBackupGateFailureKind::Timeout
+                }
+            ))
+        ));
+    }
+
+    #[test]
+    fn secure_backup_monitor_has_one_sixty_second_timer_owner() {
+        let recovery_source = include_str!("recovery_backup.rs");
+        let actor_source = include_str!("actor.rs");
+        assert!(
+            recovery_source.contains(
+                "const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(60);"
+            )
+        );
+        assert!(
+            actor_source
+                .contains("secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>")
+        );
+        let scheduler = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "fn schedule_secure_backup_monitor",
+        );
+        let retire = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "fn retire_secure_backup_monitor",
+        );
+        assert!(retire.contains("secure_backup_monitor_task.take()"));
+        assert!(scheduler.contains("SECURE_BACKUP_MONITOR_INTERVAL"));
+        assert!(scheduler.contains("monitor_serial"));
+
+        let inspection_start = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "fn start_secure_backup_inspection",
+        );
+        assert!(inspection_start.contains("retire_secure_backup_monitor()"));
+    }
+
+    #[test]
+    fn secure_backup_monitor_rejects_stale_generation_serial_and_locked_session_wakeups() {
+        assert!(secure_backup_monitor_wakeup_is_current(7, 11, true, 7, 11));
+        assert!(!secure_backup_monitor_wakeup_is_current(7, 11, true, 6, 11));
+        assert!(!secure_backup_monitor_wakeup_is_current(7, 11, true, 7, 10));
+        assert!(!secure_backup_monitor_wakeup_is_current(
+            7, 11, false, 7, 11
+        ));
+    }
+
+    #[test]
+    fn recovery_result_requires_current_generation_flow_request_and_session() {
+        let current = test_request_id();
+        let other = RequestId {
+            connection_id: current.connection_id,
+            sequence: current.sequence + 1,
+        };
+
+        assert!(recovery_result_is_current(
+            4, 4, 9, 9, current, current, true
+        ));
+        assert!(!recovery_result_is_current(
+            3, 4, 9, 9, current, current, true
+        ));
+        assert!(!recovery_result_is_current(
+            4, 4, 8, 9, current, current, true
+        ));
+        assert!(!recovery_result_is_current(
+            4, 4, 9, 9, other, current, true
+        ));
+        assert!(!recovery_result_is_current(
+            4, 4, 9, 9, current, current, false
+        ));
+    }
+
+    #[tokio::test]
+    async fn recovery_proof_success_waits_for_verified_trust_before_promotion() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        let flow_id = 81;
+        let request_id = incoming_verification_request_id(flow_id);
+        handle
+            .send(AccountMessage::ConfigureSyntheticRecoveryTask {
+                flow_id,
+                pending: false,
+            })
+            .await;
+        let (download_release, download) = oneshot::channel();
+        handle
+            .send(AccountMessage::ConfigureRecoveryDownload {
+                completion: download,
+            })
+            .await;
+        download_release
+            .send(true)
+            .expect("release recovery download");
+        handle
+            .send(AccountMessage::RecoveryFinished {
+                generation: 2,
+                flow_id,
+                request_id,
+                result: Ok(()),
+            })
+            .await;
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (true, false, false, true),
+            "accepted recovery proof must not promote until SDK current-device trust is Verified"
+        );
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::AuthoritativeDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Unknown,
+                ..
+            }])
+        ));
+
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await;
+        acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (true, true, true, true),
+            "Verified trust must complete promotion after recovery proof settlement"
+        );
+        loop {
+            let actions = executor::timeout(Duration::from_secs(1), action_rx.recv())
+                .await
+                .expect("restore-key-backup request after recovery verification")
+                .expect("account actions");
+            if matches!(
+                actions.as_slice(),
+                [AppAction::RestoreKeyBackupRequested { .. }]
+            ) {
+                break;
+            }
+        }
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn recovery_submission_pauses_and_failure_resumes_the_single_provisional_owner() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        assert_eq!(inspect_sync_owners(&handle).await, (true, false, false));
+
+        let (completion_tx, completion) = oneshot::channel();
+        handle
+            .send(AccountMessage::ConfigureRecoveryResult { completion })
+            .await;
+        handle
+            .send(AccountMessage::Command(AccountCommand::SubmitRecovery {
+                request_id: RequestId {
+                    connection_id: RuntimeConnectionId(1),
+                    sequence: 901,
+                },
+                request: koushi_state::RecoveryRequest {
+                    secret: koushi_state::AuthSecret::new("synthetic-recovery-secret"),
+                },
+            }))
+            .await;
+        assert_eq!(
+            inspect_sync_owners(&handle).await,
+            (false, false, false),
+            "recovery submission must stop and join provisional encryption sync"
+        );
+
+        completion_tx
+            .send(Err(koushi_sdk::E2eeRecoveryError::Sdk(
+                "synthetic failure".to_owned(),
+            )))
+            .expect("release recovery result");
+        loop {
+            let actions = action_rx.recv().await.expect("recovery failure action");
+            if matches!(actions.as_slice(), [AppAction::E2eeRecoveryFailed { .. }]) {
+                break;
+            }
+        }
+        assert_eq!(
+            inspect_sync_owners(&handle).await,
+            (true, false, false),
+            "failed recovery must resume exactly one provisional encryption owner"
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
+        let (handle, mut action_rx) = login_gated_actor().await;
+        let flow_id = 80;
+        let request_id = incoming_verification_request_id(flow_id);
+        handle
+            .send(AccountMessage::ConfigureSyntheticRecoveryTask {
+                flow_id,
+                pending: false,
+            })
+            .await;
+        handle
+            .send(AccountMessage::RecoveryFinished {
+                generation: 2,
+                flow_id,
+                request_id,
+                result: Ok(()),
+            })
+            .await;
+        assert!(matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::AuthoritativeDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Unknown,
+                ..
+            }])
+        ));
+        handle
+            .send(AccountMessage::RecoveryTrustSettlementTimedOut {
+                generation: 2,
+                flow_id,
+                request_id,
+                trust: koushi_state::CurrentDeviceTrustState::Unknown,
+            })
+            .await;
+        loop {
+            let actions = executor::timeout(Duration::from_secs(1), action_rx.recv())
+                .await
+                .expect("recovery timeout failure projection")
+                .expect("account actions");
+            if matches!(actions.as_slice(), [AppAction::E2eeRecoveryFailed { .. }]) {
+                break;
+            }
+        }
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (true, false, false, true),
+            "recovery trust timeout must not promote the session or leave normal runtime running"
+        );
+        assert!(
+            koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+                .iter()
+                .any(|record| {
+                    record.event.source == "core.recovery_verification"
+                        && record.event.stage == "trust_settlement_timeout_projected"
+                        && record.event.fields.iter().any(|field| {
+                            field.key == "failure_kind"
+                                && field.value
+                                    == koushi_diagnostics::DiagnosticValue::Token("timeout")
+                        })
+                }),
+            "timeout projection must be visible in diagnostics"
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn invalid_recovery_terminal_stays_gated_without_normal_runtime() {
+        let (handle, mut action_rx) = login_gated_actor().await;
+        let flow_id = 82;
+        let request_id = incoming_verification_request_id(flow_id);
+        handle
+            .send(AccountMessage::ConfigureSyntheticRecoveryTask {
+                flow_id,
+                pending: false,
+            })
+            .await;
+        handle
+            .send(AccountMessage::RecoveryFinished {
+                generation: 2,
+                flow_id,
+                request_id,
+                result: Err(koushi_sdk::E2eeRecoveryError::Sdk(
+                    "invalid fixture secret".to_owned(),
+                )),
+            })
+            .await;
+        while !matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::E2eeRecoveryFailed { .. }])
+        ) {}
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (true, false, false, true)
+        );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn recovery_cancel_is_processed_while_task_is_pending_and_stale_result_is_ignored() {
+        let cred_dir = tempdir().expect("tempdir");
+        let data_dir = tempdir().expect("tempdir");
+        let (handle, mut action_rx, _event_rx) =
+            spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
+        let flow_id = 71;
+        assert!(
+            handle
+                .send(AccountMessage::ConfigureSyntheticRecoveryTask {
+                    flow_id,
+                    pending: true
+                })
+                .await
+        );
+        assert!(
+            handle
+                .send(AccountMessage::Command(
+                    AccountCommand::CancelVerification {
+                        request_id: test_request_id(),
+                        flow_id,
+                        reason: VerificationCancelReason::User,
+                    },
+                ))
+                .await
+        );
+        let actions = tokio::time::timeout(std::time::Duration::from_secs(1), action_rx.recv())
+            .await
+            .expect("cancel projection timeout")
+            .expect("cancel projection");
+        assert_eq!(
+            actions,
+            vec![AppAction::VerificationGateAttemptFailed {
+                flow_id,
+                kind: koushi_state::VerificationGateFailureKind::Cancelled,
+            }]
+        );
+        let (response, pending) = oneshot::channel();
+        assert!(
+            handle
+                .send(AccountMessage::InspectRecoveryTask { response })
+                .await
+        );
+        assert!(!pending.await.expect("recovery task inspection"));
+
+        assert!(
+            handle
+                .send(AccountMessage::RecoveryFinished {
+                    generation: 0,
+                    flow_id,
+                    request_id: incoming_verification_request_id(flow_id),
+                    result: Ok(()),
+                })
+                .await
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), action_rx.recv())
+                .await
+                .is_err(),
+            "stale recovery result must not project a second terminal"
+        );
+        shutdown_and_ack(&handle).await;
+    }
+
+    /// Verify classify_recovery_error maps SDK error text to coarse kinds
+    /// without leaking the raw message in any public type.
+    #[test]
+    fn recovery_error_classification_invalid_key() {
+        let err = koushi_sdk::E2eeRecoveryError::Sdk("invalid recovery key".to_owned());
+        assert_eq!(
+            classify_recovery_error(&err),
+            crate::failure::RecoveryFailureKind::InvalidRecoveryKey,
+            "SDK 'invalid' text must map to InvalidRecoveryKey"
+        );
+    }
+
+    #[test]
+    fn recovery_error_classification_network() {
+        let err = koushi_sdk::E2eeRecoveryError::Runtime("runtime error".to_owned());
+        assert_eq!(
+            classify_recovery_error(&err),
+            crate::failure::RecoveryFailureKind::Network,
+            "Runtime error must map to Network"
+        );
+    }
+
+    #[test]
+    fn recovery_error_classification_server_fallback() {
+        let err = koushi_sdk::E2eeRecoveryError::Sdk("unexpected server error".to_owned());
+        assert_eq!(
+            classify_recovery_error(&err),
+            crate::failure::RecoveryFailureKind::Server,
+            "Unknown SDK error must map to Server (conservative)"
+        );
+    }
+
+    /// Verify that RecoveryRequest's Debug output does not leak the secret.
+    #[test]
+    fn recovery_request_debug_redacts_secret() {
+        use koushi_state::AuthSecret;
+        let req = koushi_state::RecoveryRequest {
+            secret: AuthSecret::new("super-secret-recovery-key"),
+        };
+        let debug = format!("{req:?}");
+        assert!(
+            !debug.contains("super-secret-recovery-key"),
+            "RecoveryRequest Debug must redact the secret: {debug}"
+        );
+    }
+
+    /// Network-free: SubmitRecovery without an active session must emit
+    /// SessionRequired, not panic or crash.
+    #[tokio::test]
+    async fn submit_recovery_without_session_emits_session_required() {
+        use koushi_state::AuthSecret;
+        let cred_dir = tempdir().expect("tempdir");
+        let data_dir = tempdir().expect("tempdir");
+        let (handle, _action_rx, mut event_rx) =
+            spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
+
+        let request_id = test_request_id();
+        assert!(
+            handle
+                .send(AccountMessage::Command(AccountCommand::SubmitRecovery {
+                    request_id,
+                    request: koushi_state::RecoveryRequest {
+                        secret: AuthSecret::new("some-key"),
+                    },
+                }))
+                .await
+        );
+
+        match event_rx.recv().await.expect("event") {
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } => {
+                assert_eq!(ev_id, request_id);
+                assert_eq!(failure, CoreFailure::SessionRequired);
+            }
+            other => panic!("expected OperationFailed(SessionRequired), got {other:?}"),
+        }
+    }
+
+    /// Network-free: E2EE trust commands require an active store-backed
+    /// session. Runtime may allow recovery commands while AppState is
+    /// NeedsRecovery; without an actor session they must still fail as
+    /// SessionRequired, not as local-encryption unavailable.
+    #[tokio::test]
+    async fn e2ee_trust_commands_without_session_emit_session_required() {
+        let cred_dir = tempdir().expect("tempdir");
+        let data_dir = tempdir().expect("tempdir");
+        let (handle, mut action_rx, mut event_rx) =
+            spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
+
+        let request_id = test_request_id();
+        assert!(
+            handle
+                .send(AccountMessage::Command(
+                    AccountCommand::BootstrapCrossSigning {
+                        request_id,
+                        auth: None,
+                    }
+                ))
+                .await
+        );
+
+        let actions = action_rx.recv().await.expect("trust failure action batch");
+        assert_eq!(
+            actions,
+            vec![AppAction::BootstrapCrossSigningFailed {
+                request_id: request_id.sequence,
+                kind: koushi_state::TrustOperationFailureKind::Sdk,
+            }]
+        );
+
+        match event_rx.recv().await.expect("event") {
+            CoreEvent::OperationFailed {
+                request_id: ev_id,
+                failure,
+            } => {
+                assert_eq!(ev_id, request_id);
+                assert_eq!(failure, CoreFailure::SessionRequired);
+            }
+            other => panic!("expected OperationFailed(SessionRequired), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn e2ee_trust_error_classification_is_kind_only() {
+        assert_eq!(
+            classify_e2ee_trust_error(&koushi_sdk::E2eeTrustError::NoOlmMachine),
+            koushi_state::TrustOperationFailureKind::Sdk
+        );
+        assert_eq!(
+            classify_e2ee_trust_error(&koushi_sdk::E2eeTrustError::Sdk(
+                "timeout while talking to @alice:example.test".to_owned()
+            )),
+            koushi_state::TrustOperationFailureKind::Timeout
+        );
+        assert_eq!(
+            classify_e2ee_trust_error(&koushi_sdk::E2eeTrustError::Sdk("M_FORBIDDEN".to_owned())),
+            koushi_state::TrustOperationFailureKind::Forbidden
+        );
+        let invalid_passphrase =
+            koushi_sdk::E2eeTrustError::Sdk("invalid passphrase MAC".to_owned());
+        assert_eq!(
+            classify_e2ee_trust_error(&invalid_passphrase),
+            koushi_state::TrustOperationFailureKind::InvalidPassphrase
+        );
+        assert_eq!(
+            classify_e2ee_trust_auth_failure(&invalid_passphrase),
+            AuthFailureKind::Sdk
+        );
+    }
+
+    #[test]
+    fn e2ee_key_management_failures_use_typed_classification() {
+        let recovery_source = include_str!("recovery_backup.rs");
+        let export_handler = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "async fn handle_export_room_keys",
+        );
+        let import_handler = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "async fn handle_import_room_keys",
+        );
+        let setup_handler = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "async fn handle_bootstrap_secure_backup",
+        );
+        let passphrase_handler = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "async fn handle_change_secure_backup_passphrase",
+        );
+
+        for handler in [
+            export_handler,
+            import_handler,
+            setup_handler,
+            passphrase_handler,
+        ] {
+            assert!(
+                handler.contains("classify_e2ee_trust_error(&error)"),
+                "E2EE key-management failures must preserve coarse typed failure kinds"
+            );
+            assert!(
+                !handler.contains("Err(_)"),
+                "E2EE key-management handlers must not erase typed errors before classification"
+            );
+        }
+        assert!(
+            recovery_source.contains("InvalidPassphrase"),
+            "trust failure kinds must distinguish invalid room-key/backup passphrases"
+        );
+    }
+
+    #[test]
+    fn e2ee_trust_sdk_results_project_actions_and_typed_events() {
+        let request_id = test_request_id();
+        let account_key = AccountKey("@alice:example.test".to_owned());
+
+        let (actions, events) = project_bootstrap_cross_signing_result(
+            request_id,
+            account_key.clone(),
+            Ok(koushi_state::CrossSigningStatus::Trusted),
+        );
+        assert_eq!(
+            actions,
+            vec![AppAction::CrossSigningStatusChanged {
+                status: koushi_state::CrossSigningStatus::Trusted,
+            }]
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [CoreEvent::E2eeTrust(
+                crate::event::E2eeTrustEvent::CrossSigningChanged {
+                    status: koushi_state::CrossSigningStatus::Trusted,
+                    ..
+                }
+            )]
+        ));
+
+        let (actions, events) = project_bootstrap_cross_signing_result(
+            request_id,
+            account_key,
+            Err(koushi_sdk::E2eeTrustError::Sdk(
+                "timeout from @alice:example.test".to_owned(),
+            )),
+        );
+        assert_eq!(
+            actions,
+            vec![AppAction::BootstrapCrossSigningFailed {
+                request_id: request_id.sequence,
+                kind: koushi_state::TrustOperationFailureKind::Timeout,
+            }]
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [CoreEvent::E2eeTrust(
+                crate::event::E2eeTrustEvent::CrossSigningChanged {
+                    status: koushi_state::CrossSigningStatus::Failed {
+                        kind: koushi_state::TrustOperationFailureKind::Timeout,
+                        ..
+                    },
+                    ..
+                }
+            )]
+        ));
+        let debug = format!("{events:?}");
+        assert!(!debug.contains("@alice:example.test"));
+        assert!(!debug.contains("timeout from"));
+
+        let (actions, events) = project_enable_key_backup_result(
+            request_id,
+            AccountKey("@alice:example.test".to_owned()),
+            Ok(koushi_state::KeyBackupStatus::Enabled {
+                version: "available".to_owned(),
+            }),
+        );
+        assert_eq!(
+            actions,
+            vec![AppAction::KeyBackupEnabled {
+                request_id: request_id.sequence,
+                version: "available".to_owned(),
+            }]
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [CoreEvent::E2eeTrust(
+                crate::event::E2eeTrustEvent::KeyBackupChanged {
+                    status: koushi_state::KeyBackupStatus::Enabled { .. },
+                    ..
+                }
+            )]
+        ));
+
+        let (actions, events) = project_restore_key_backup_result(
+            request_id,
+            AccountKey("@alice:example.test".to_owned()),
+            Ok(koushi_sdk::KeyBackupRestoreSummary {
+                scope: koushi_sdk::KeyBackupRestoreScope::JoinedRooms,
+                version: Some("available".to_owned()),
+                restored_rooms: 2,
+                total_rooms: Some(3),
+            }),
+        );
+        assert_eq!(
+            actions,
+            vec![
+                AppAction::KeyBackupRestoreProgress {
+                    request_id: request_id.sequence,
+                    restored_rooms: 2,
+                    total_rooms: Some(3),
+                },
+                AppAction::KeyBackupRestored {
+                    request_id: request_id.sequence,
+                    version: Some("available".to_owned()),
+                },
+            ]
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [
+                CoreEvent::E2eeTrust(crate::event::E2eeTrustEvent::KeyBackupChanged {
+                    status: koushi_state::KeyBackupStatus::Restoring {
+                        restored_rooms: 2,
+                        total_rooms: Some(3),
+                        ..
+                    },
+                    ..
+                }),
+                CoreEvent::E2eeTrust(crate::event::E2eeTrustEvent::KeyBackupChanged {
+                    status: koushi_state::KeyBackupStatus::Enabled { .. },
+                    ..
+                })
+            ]
+        ));
+    }
+
+    #[test]
+    fn submit_recovery_hydrates_joined_room_keys_after_secret_recovery() {
+        let submit = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "async fn handle_submit_recovery",
+        );
+        let complete = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "async fn complete_recovery_after_verified",
+        );
+
+        let recover_offset = submit
+            .find("koushi_sdk::recover_e2ee")
+            .expect("submit recovery should recover the secret first");
+        let restore_request_offset = submit.len()
+            + complete
+                .find("AppAction::RestoreKeyBackupRequested")
+                .expect("submit recovery should project key backup restore state");
+        let restore_offset = submit.len()
+            + complete
+                .find("koushi_sdk::download_joined_room_keys_from_backup")
+                .expect("submit recovery should hydrate joined room keys from backup");
+
+        assert!(recover_offset < restore_request_offset);
+        assert!(restore_request_offset < restore_offset);
+    }
+
+    #[test]
+    fn identity_reset_sdk_results_project_actions_and_typed_events() {
+        let request_id = test_request_id();
+        let account_key = AccountKey("@alice:example.test".to_owned());
+
+        let (actions, events) = project_reset_identity_completed(request_id, account_key.clone());
+        assert_eq!(
+            actions,
+            vec![AppAction::ResetIdentityCompleted {
+                request_id: request_id.sequence,
+            }]
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [CoreEvent::E2eeTrust(
+                crate::event::E2eeTrustEvent::IdentityResetChanged {
+                    state: koushi_state::IdentityResetState::Idle,
+                    ..
+                }
+            )]
+        ));
+
+        let (actions, events) = project_reset_identity_auth_required(
+            request_id,
+            account_key,
+            koushi_state::IdentityResetAuthType::Uiaa,
+        );
+        assert_eq!(
+            actions,
+            vec![AppAction::ResetIdentityAuthRequired {
+                request_id: request_id.sequence,
+                auth_type: koushi_state::IdentityResetAuthType::Uiaa,
+            }]
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [CoreEvent::E2eeTrust(
+                crate::event::E2eeTrustEvent::IdentityResetChanged {
+                    state: koushi_state::IdentityResetState::AwaitingAuth {
+                        auth_type: koushi_state::IdentityResetAuthType::Uiaa,
+                        ..
+                    },
+                    ..
+                }
+            )]
+        ));
+
+        let debug = format!("{events:?}");
+        assert!(!debug.contains("@alice:example.test"));
+    }
+}
