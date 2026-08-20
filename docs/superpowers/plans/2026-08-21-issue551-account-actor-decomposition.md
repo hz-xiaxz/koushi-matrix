@@ -2,7 +2,7 @@
 
 ## Status
 
-- Design: initial cross-model review returned `Changes-required`; the immutable 390-key inventory, 150-test ownership, 32-source-test table, and exact sibling visibility amendment are recorded for re-review.
+- Design: initial cross-model review returned `Changes-required`; the follow-up found one omitted existing macro. The corrected immutable 391-key inventory, 150-test ownership, 32-source-test table, qualified verifier keys, and exact sibling visibility amendment are recorded for re-review.
 - Implementation: blocked until the design reviewer records `Correct-to-implement`.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 
@@ -18,14 +18,14 @@ This is source ownership only. It does not redesign AccountActor, split its stat
 - Source: `crates/koushi-core/src/account.rs`
 - Size: 19,819 newline-terminated lines; 775,269 bytes
 - SHA-256: `7a50ba636f35d3f1c773d96243e47c815382050122c61f7efcb5cf1301b0fac7`
-- Named production/cfg-test top-level items plus associated methods outside the inline test module: 390 (170 top-level declarations + 220 associated methods)
+- Named production/cfg-test top-level items plus associated methods outside the inline test module: 391 (171 top-level declarations, including the existing `trace_restore` macro, + 220 type-qualified associated methods)
 - `AccountActor` methods: 200
 - Account unit tests: 150 unique names
 - Inline source-characterization tests/sites: 32/32; one additional external account-source site exists in `renderable_thumbnail.rs`
 - Core lib baseline, default and `test-hooks`: 1,014 passed, 8 ignored
 - Focused integration baselines: session 8, device-session 2, E2EE 2, scheduled-send 12, activity 9, search 1, timeline 21, room-list 6, intent-lifecycle 5, residency 25; all green
 
-Every extraction and body/token comparison uses `/tmp/account-baseline.rs`, copied from this immutable commit before any edit. Line ranges are navigation hints only. The normative per-owner key, test, source-site, and visibility inventories are in [2026-08-21-issue551-account-actor-inventory.md](2026-08-21-issue551-account-actor-inventory.md); its production counts sum to 390 and its test counts sum to 150.
+Every extraction and body/token comparison uses `/tmp/account-baseline.rs`, copied from this immutable commit before any edit. Line ranges are navigation hints only. The normative per-owner key, test, source-site, and visibility inventories are in [2026-08-21-issue551-account-actor-inventory.md](2026-08-21-issue551-account-actor-inventory.md); its production counts sum to 391 and its test counts sum to 150.
 
 ## One ownership-area PR
 
@@ -77,7 +77,7 @@ Owns the irreducible actor composition boundary:
 - `AccountMessage`, `AccountActorHandle` and its existing impl, and `AccountActor` with the complete unchanged field set;
 - `spawn`, `spawn_with_diagnostics`, `run`, and exhaustive mailbox routing;
 - `handle_command` and exhaustive `AccountCommand` routing;
-- common `send_actions`, `emit`, `emit_failure`, and `active_account_key` output/access helpers.
+- the existing `trace_restore` diagnostic macro, imported by routing/session siblings through one `pub(super) use`, plus common `trace_account_request`, `send_actions`, `emit`, `emit_failure`, `emit_event_cache_status`, `active_account_key`, and `current_epoch_ms` helpers.
 
 Mailbox and command matches remain direct and exhaustive. The module may call leaf methods directly at `pub(super)` scope; it must not add forwarding wrappers, function tables, feature traits, or a second dispatcher.
 
@@ -155,7 +155,7 @@ Owns local-encryption health, device-cleanup UIA/remote/local phases, erase-anyw
 - Modules remain private; existing `pub`/`pub(crate)` root APIs retain their exact visibility.
 - The actor fields remain one struct. All fields become only `pub(super)` because the twelve sibling inherent impls operate on the unchanged field set; this restores the former `account`-module scope without exposing it outside the private subtree.
 - The immutable call graph pins exactly 147 `AccountActor` methods for `pub(super)` sibling use and leaves the other 53 at their original public/crate visibility or owner-private. The appendix lists all 147 by owner.
-- The immutable top-level/type/helper graph pins 62 cross-owner names in the appendix. Existing public/crate names retain their visibility; only a listed private name may become `pub(super)`, with its cfg unchanged. Test-only use never promotes production visibility.
+- The immutable top-level/type/helper graph pins 63 cross-owner names in the appendix, including the existing `trace_restore` macro. Existing public/crate names retain their visibility; only a listed private name may become `pub(super)`, with its cfg unchanged. Test-only use never promotes production visibility.
 - An unlisted required sibling edge is not a compile-fix opportunity: stop, amend this design/appendix, and re-review before broadening it.
 - Leaves call the existing actor methods directly. They do not route through façade re-exports or introduce wrapper/helper methods solely to cross a module boundary.
 - `actor.rs` may depend on every leaf for dispatch; leaves may depend on `actor` contracts and on explicitly proven siblings. No leaf re-exports another leaf, and no circular state owner is introduced.
@@ -210,14 +210,14 @@ One integration owner alone replaces the parent once, writes the façade/test-so
 
 A temporary non-repository `syn` verifier compares the immutable baseline with the integrated tree:
 
-1. All 390 named production/cfg-test keys exist exactly once: 170 top-level declarations plus 220 associated methods, including all 200 `AccountActor` methods.
+1. All 391 named production/cfg-test keys exist exactly once: 171 top-level declarations (including `trace_restore`) plus 220 type-qualified associated methods, including all 200 `AccountActor` methods. Associated keys include the self type, so the same method name on `AccountActorHandle` and `AccountActor` remains distinct.
 2. All 150 unit-test names exist exactly once; attrs and bodies match except the enumerated source-path/item-boundary and exact-child-path plumbing.
 3. Public/crate declarations, method signatures, fields, enum variants, cfg/target gates, docs, derives, timeout values, strings, match arms, diagnostic arrays, and call bodies match bidirectionally.
 4. Root named exports equal the five-name baseline façade set exactly, with `SyntheticVerificationTerminal` retaining its test cfg.
 5. Non-`AccountActor` impls match whole-token form; split AccountActor methods match individually.
 6. Moved production bodies match after normalization limited to required `super`/sibling qualification and `pub(super)` scope restoration.
 7. Root contains no production/test body or behavioral constant; no glob, wrapper, duplicate helper, compatibility alias, TODO, or newly introduced dead code exists.
-8. The sibling dependency/visibility report matches the appendix's 147 AccountActor method and 62 top-level/type/helper cross-owner names exactly; every promoted name has a concrete edge and no unlisted visibility broadening exists.
+8. The sibling dependency/visibility report matches the appendix's 147 AccountActor method and 63 top-level/type/helper/macro cross-owner names exactly; every promoted name has a concrete edge and no unlisted visibility broadening exists.
 9. All 32 inline and one external source guard match the appendix's explicit source sets; no concatenation exists and only the approved test plumbing differs.
 
 Pre-existing warnings are baseline artifacts, not permission to add or suppress warnings.
@@ -282,5 +282,5 @@ Stop and amend/re-review the design before proceeding if:
 - any production/test body, order, cfg, public path, command/event/DTO/wire shape, timeout, retry, cleanup, privacy, or diagnostic token changes beyond approved qualification/visibility/test-source plumbing;
 - any session, task, observer, subscription, timer, continuation, child actor, teardown, secure-backup, residency, or reliable-settlement owner changes;
 - a worker needs to edit the parent or another worker's destination;
-- exactness cannot prove all 390 production keys, 200 actor methods, 150 tests, five façade names, 33 source sites, 147 sibling methods, and 62 shared top-level/type/helper names;
+- exactness cannot prove all 391 production keys, 200 actor methods, 150 tests, five façade names, 33 source sites, 147 sibling methods, and 63 shared top-level/type/helper/macro names;
 - a test exposes a behavior defect.
