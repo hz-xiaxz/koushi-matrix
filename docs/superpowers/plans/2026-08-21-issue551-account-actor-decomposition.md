@@ -2,7 +2,7 @@
 
 ## Status
 
-- Design: `reviewer-flash` approved the base design and named-edge amendments as `Correct-to-implement`. Warning/test-cfg audit narrowed the shared-struct rule from every field to the seventeen concretely cross-read or cross-constructed fields recorded in the appendix; bounded re-review is pending before visibility cleanup resumes.
+- Design: `reviewer-flash` approved the base design and all bounded visibility amendments as `Correct-to-implement`, including the final seventeen-field scope through `ef46184`; non-listed fields are narrowed and verified owner-private. Compile work may resume.
 - Implementation: blocked until the design reviewer records `Correct-to-implement`.
 - Full-diff review, final repository gates, PR CI, and merge: pending.
 
