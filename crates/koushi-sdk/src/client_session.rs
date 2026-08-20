@@ -1,9 +1,27 @@
-use super::{
-    desktop_room_key_recipient_strategy, install_room_key_diagnostic_observer,
-    map_sdk_recovery_state, ClientId, ClientMetadata, ClientRegistrationData,
-    DeviceCleanupAuthMode, E2eeRecoveryStateStream, EncryptionSettings, MatrixSyncError,
-    PasswordLoginError, SessionInfo, UserSession,
+use crate::e2ee::{
+    DESKTOP_SQLITE_STORE_POOL_MAX_SIZE, desktop_room_key_recipient_strategy,
+    install_room_key_diagnostic_observer,
 };
+use crate::{Homeserver, MatrixSearchIndexStoreConfig, PasswordLoginError};
+use koushi_state::{DeviceCleanupAuthMode, SessionInfo};
+use matrix_sdk::{
+    authentication::{
+        matrix::MatrixSession,
+        oauth::{
+            ClientId, ClientRegistrationData, OAuthSession, UserSession,
+            registration::{ApplicationType, ClientMetadata, Localized, OAuthGrantType},
+        },
+    },
+    encryption::{BackupDownloadStrategy, EncryptionSettings},
+    ruma::serde::Raw,
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
+use url::Url;
+use zeroize::Zeroizing;
 
 #[derive(Clone)]
 pub struct MatrixClientStoreConfig {
@@ -103,11 +121,69 @@ impl fmt::Debug for MatrixClientStoreKey {
 
 #[derive(Clone)]
 pub struct MatrixClientSession {
-    client: matrix_sdk::Client,
+    pub(super) client: matrix_sdk::Client,
     pub info: SessionInfo,
 }
 
 /// Coarse result of the authenticated MSC4186 invite-list contract probe.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixSlidingSyncInviteListSupport {
+    Supported,
+    KnownIncomplete,
+    Unknown,
+}
+
+impl MatrixClientSession {
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[doc(hidden)]
+    pub fn from_client_for_testing(client: matrix_sdk::Client, info: SessionInfo) -> Self {
+        Self { client, info }
+    }
+    pub fn client(&self) -> matrix_sdk::Client {
+        self.client.clone()
+    }
+    pub fn device_cleanup_auth_mode(&self) -> DeviceCleanupAuthMode {
+        if self.client.oauth().full_session().is_some() {
+            DeviceCleanupAuthMode::OAuth
+        } else {
+            DeviceCleanupAuthMode::Legacy
+        }
+    }
+    pub fn persistable_session(&self) -> Result<PersistableMatrixSession, PasswordLoginError> {
+        if let Some(oauth_session) = self.client.oauth().full_session() {
+            return Ok(PersistableMatrixSession {
+                info: self.info.clone(),
+                session: PersistableSessionKind::OAuth {
+                    user_session: oauth_session.user,
+                    client_id: oauth_session.client_id,
+                },
+                sliding_sync_positive_evidence: None,
+            });
+        }
+
+        let session = self
+            .client
+            .matrix_auth()
+            .session()
+            .ok_or(PasswordLoginError::MissingSession)?;
+        Ok(PersistableMatrixSession {
+            info: self.info.clone(),
+            session: PersistableSessionKind::Matrix(session),
+            sliding_sync_positive_evidence: None,
+        })
+    }
+}
+
+impl std::fmt::Debug for MatrixClientSession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MatrixClientSession")
+            .field("info", &self.info)
+            .field("client", &"MatrixClient(..)")
+            .finish()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MatrixEventCacheStatus {
     AlreadyEnabled,
@@ -315,13 +391,14 @@ pub fn restore_session_blocking(
 
     runtime.block_on(restore_session(session))
 }
+
 pub async fn restore_session(
     session: &PersistableMatrixSession,
 ) -> Result<MatrixClientSession, PasswordLoginError> {
     restore_session_with_store(session, None).await
 }
 
-fn oidc_client_registration_data(redirect_uri: Url) -> ClientRegistrationData {
+pub(super) fn oidc_client_registration_data(redirect_uri: Url) -> ClientRegistrationData {
     let client_uri = Localized::new(
         Url::parse("https://github.com/shinaoka/koushi-matrix")
             .expect("static client URI should parse"),
@@ -389,7 +466,7 @@ pub async fn enable_event_cache(
     Ok(MatrixEventCacheStatus::Enabled)
 }
 
-async fn build_client(
+pub(super) async fn build_client(
     homeserver: &Homeserver,
     store_config: Option<&MatrixClientStoreConfig>,
 ) -> Result<matrix_sdk::Client, PasswordLoginError> {
@@ -405,7 +482,7 @@ async fn build_client(
         .map_err(|error| PasswordLoginError::Sdk(error.to_string()))
 }
 
-fn desktop_client_builder_defaults(
+pub(super) fn desktop_client_builder_defaults(
     builder: matrix_sdk::ClientBuilder,
 ) -> matrix_sdk::ClientBuilder {
     builder
@@ -420,6 +497,7 @@ fn desktop_client_builder_defaults(
             with_subscriptions: true,
         })
 }
+
 pub async fn logout(session: &MatrixClientSession) -> Result<(), PasswordLoginError> {
     let client = session.client();
     if client.oauth().full_session().is_some() {
@@ -436,108 +514,67 @@ pub async fn logout(session: &MatrixClientSession) -> Result<(), PasswordLoginEr
         .map_err(|error| PasswordLoginError::Sdk(error.to_string()))
 }
 
-pub async fn close_session_stores(session: &MatrixClientSession) -> Result<(), MatrixSyncError> {
-    session
-        .client()
-        .pause()
-        .await
-        .map_err(|_| MatrixSyncError::Sdk)
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("provisional encryption sync failed")]
+pub enum ProvisionalEncryptionSyncError {
+    Sdk,
 }
 
-impl MatrixClientSession {
-    pub fn from_client_for_testing(client: matrix_sdk::Client, info: SessionInfo) -> Self {
-        Self { client, info }
-    }
+#[cfg(test)]
+mod tests {
+    use super::MatrixEventCacheError;
 
-    pub fn client(&self) -> matrix_sdk::Client {
-        self.client.clone()
-    }
+    #[test]
+    fn matrix_client_store_config_uses_the_required_key_for_sqlite_builder() {
+        let source = include_str!("client_session.rs");
+        let config_impl = crate::test_source::item_body(source, "impl MatrixClientStoreConfig");
+        let impl_body = crate::test_source::item_body(source, "fn apply_to_builder");
+        let apply_marker = "fn apply_to_builder";
 
-    pub fn device_cleanup_auth_mode(&self) -> DeviceCleanupAuthMode {
-        if self.client.oauth().full_session().is_some() {
-            DeviceCleanupAuthMode::OAuth
-        } else {
-            DeviceCleanupAuthMode::Legacy
-        }
-    }
-
-    pub fn persistable_session(&self) -> Result<PersistableMatrixSession, PasswordLoginError> {
-        if let Some(oauth_session) = self.client.oauth().full_session() {
-            return Ok(PersistableMatrixSession {
-                info: self.info.clone(),
-                session: PersistableSessionKind::OAuth {
-                    user_session: oauth_session.user,
-                    client_id: oauth_session.client_id,
-                },
-                sliding_sync_positive_evidence: None,
-            });
-        }
-
-        let session = self
-            .client
-            .matrix_auth()
-            .session()
-            .ok_or(PasswordLoginError::MissingSession)?;
-        Ok(PersistableMatrixSession {
-            info: self.info.clone(),
-            session: PersistableSessionKind::Matrix(session),
-            sliding_sync_positive_evidence: None,
-        })
-    }
-}
-
-impl std::fmt::Debug for MatrixClientSession {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("MatrixClientSession")
-            .field("info", &self.info)
-            .field("client", &"MatrixClient(..)")
-            .finish()
-    }
-}
-
-#[test]
-fn matrix_client_store_config_uses_the_required_key_for_sqlite_builder() {
-    let source = include_str!("client_session.rs");
-    let config_impl = crate::test_source::item_body(source, "MatrixClientStoreConfig");
-    let impl_body = crate::test_source::item_body(source, "apply_to_builder");
-
-    assert!(
-        config_impl.contains(apply_marker),
-        "MatrixClientStoreConfig must keep apply_to_builder"
-    );
-    assert!(
-        impl_body.contains(".key(Some(self.key.expose_key()))"),
-        "apply_to_builder must pass the required MatrixClientStoreKey into sqlite_store"
-    );
-    assert!(
+        assert!(
+            config_impl.contains(apply_marker),
+            "MatrixClientStoreConfig must keep apply_to_builder"
+        );
+        assert!(
+            impl_body.contains(".key(Some(self.key.expose_key()))"),
+            "apply_to_builder must pass the required MatrixClientStoreKey into sqlite_store"
+        );
+        assert!(
             impl_body.contains(".pool_max_size(DESKTOP_SQLITE_STORE_POOL_MAX_SIZE)"),
             "apply_to_builder must cap SDK SQLite pools so packaged macOS apps do not exhaust the default 256 file descriptor soft limit"
         );
 
-    let config = crate::MatrixClientStoreConfig::new(
-        "/tmp/example-store",
-        crate::MatrixClientStoreKey::new([7; 32]),
-    );
-    assert!(config.encrypted_at_rest_configured());
-}
+        let config = crate::MatrixClientStoreConfig::new(
+            "/tmp/example-store",
+            crate::MatrixClientStoreKey::new([7; 32]),
+        );
+        assert!(config.encrypted_at_rest_configured());
+    }
+    #[test]
+    fn desktop_client_builder_defaults_enable_thread_subscriptions_and_share_history() {
+        let source = include_str!("client_session.rs");
+        let defaults_body =
+            crate::test_source::item_body(source, "fn desktop_client_builder_defaults");
 
-#[test]
-fn desktop_client_builder_defaults_enable_thread_subscriptions_and_share_history() {
-    let source = include_str!("client_session.rs");
-    let defaults_body = crate::test_source::item_body(source, "desktop_client_builder_defaults");
+        assert!(defaults_body.contains("with_threading_support"));
+        assert!(defaults_body.contains("ThreadingSupport::Enabled"));
+        assert!(defaults_body.contains("with_subscriptions: true"));
+        assert!(defaults_body.contains("with_enable_share_history_on_invite(true)"));
+    }
+    #[test]
+    fn client_builder_defaults_download_backup_keys_after_decryption_failures() {
+        let source = include_str!("client_session.rs");
+        let defaults_body =
+            crate::test_source::item_body(source, "fn desktop_client_builder_defaults");
 
-    assert!(defaults_body.contains("with_threading_support"));
-    assert!(defaults_body.contains("ThreadingSupport::Enabled"));
-    assert!(defaults_body.contains("with_subscriptions: true"));
-    assert!(defaults_body.contains("with_enable_share_history_on_invite(true)"));
-}
+        assert!(defaults_body.contains("with_encryption_settings"));
+        assert!(defaults_body.contains("BackupDownloadStrategy::AfterDecryptionFailure"));
+    }
+    #[test]
+    fn event_cache_error_is_private_data_free() {
+        let error = MatrixEventCacheError::SubscribeFailed;
 
-#[test]
-fn client_builder_defaults_download_backup_keys_after_decryption_failures() {
-    let source = include_str!("client_session.rs");
-    let defaults_body = crate::test_source::item_body(source, "desktop_client_builder_defaults");
-
-    assert!(defaults_body.contains("with_encryption_settings"));
-    assert!(defaults_body.contains("BackupDownloadStrategy::AfterDecryptionFailure"));
+        assert_eq!(error.to_string(), "Matrix event cache subscription failed");
+        assert_eq!(format!("{error:?}"), "SubscribeFailed");
+    }
 }

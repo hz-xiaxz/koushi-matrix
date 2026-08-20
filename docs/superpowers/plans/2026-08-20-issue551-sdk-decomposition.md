@@ -2,7 +2,9 @@
 
 ## Status
 
-Design only. Implementation must not begin until the read-only cross-model reviewer records `Correct-to-implement` (or all findings are fixed and re-reviewed).
+- Design review: `reviewer-flash` (read-only, cross-model), final verdict `Correct-to-implement` after ownership/API exactness amendments.
+- Implementation: integrated from the immutable baseline; focused SDK gates and bidirectional AST/token exactness audit are green.
+- Delivery gate: awaiting the formal read-only full-diff verdict and final repository gates.
 
 ## Objective
 

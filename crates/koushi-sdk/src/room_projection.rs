@@ -1,4 +1,36 @@
-use super::*;
+use crate::auth::MATRIX_ROOM_LIST_SNAPSHOT_LIMIT;
+#[cfg(test)]
+use crate::room_operations::get_room_settings_snapshot;
+use crate::{
+    MatrixClientSession, MatrixPublicRoomDirectoryRoom, MatrixRoomHistoryVisibility,
+    MatrixRoomJoinRule, MatrixRoomMemberRole, MatrixRoomOperationError,
+    MatrixRoomOperationFailureKind, MatrixRoomPermissionFacts, MatrixRoomSettingChange,
+    MatrixRoomSettingsSnapshot, MatrixTimelineError, MatrixTimelineItem, MatrixTimelineUpdate,
+    MatrixUserTrustState,
+};
+use futures_util::StreamExt;
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+#[cfg(test)]
+use koushi_state::SessionInfo;
+use koushi_state::{RoomAttentionSummary, room_attention_summary};
+use matrix_sdk::{
+    deserialized_responses::SyncOrStrippedState,
+    room::ParentSpace,
+    ruma::events::{
+        SyncStateEvent,
+        direct::DirectEventContent,
+        fully_read::FullyReadEventContent,
+        receipt::{ReceiptThread, ReceiptType},
+        space::child::SpaceChildEventContent,
+    },
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    sync::Arc,
+};
+use thiserror::Error;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MatrixRoomListSnapshot {
@@ -6,74 +38,6 @@ pub struct MatrixRoomListSnapshot {
     pub rooms: Vec<MatrixRoomListRoom>,
     pub invites: Vec<MatrixInvitePreview>,
     pub user_profiles: Vec<MatrixUserProfile>,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct RoomListSmokeReport {
-    pub rooms: usize,
-    pub spaces: usize,
-    pub dms: usize,
-    pub unread_rooms: usize,
-}
-
-impl std::fmt::Display for RoomListSmokeReport {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "rooms={} spaces={} dms={} unread_rooms={}",
-            self.rooms, self.spaces, self.dms, self.unread_rooms
-        )
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TimelineSmokeReport {
-    pub selected_room_present: bool,
-    pub timeline_items: usize,
-}
-
-impl std::fmt::Display for TimelineSmokeReport {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "selected_room_present={} timeline_items={}",
-            self.selected_room_present, self.timeline_items
-        )
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SearchSmokeReport {
-    pub invoked: bool,
-    pub candidates: usize,
-}
-
-impl std::fmt::Display for SearchSmokeReport {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "search_invoked={} search_candidates={}",
-            self.invoked, self.candidates
-        )
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct RealAccountQaReport {
-    pub room_list: RoomListSmokeReport,
-    pub timeline: TimelineSmokeReport,
-    pub session_restored: bool,
-    pub search: SearchSmokeReport,
-}
-
-impl std::fmt::Display for RealAccountQaReport {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "{} {} session_restored={} {}",
-            self.room_list, self.timeline, self.session_restored, self.search
-        )
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,7 +109,7 @@ pub struct MatrixRoomLatestEventSummary {
     pub has_reactions: bool,
 }
 
-struct SdkUnreadTrace<'a> {
+pub(super) struct SdkUnreadTrace<'a> {
     unread_messages: u64,
     unread_count: u64,
     notification_count: u64,
@@ -158,7 +122,7 @@ struct SdkUnreadTrace<'a> {
     conversation_activity: Option<MatrixConversationActivity>,
 }
 
-fn trace_sdk_unread_snapshot(trace: SdkUnreadTrace<'_>) {
+pub(super) fn trace_sdk_unread_snapshot(trace: SdkUnreadTrace<'_>) {
     let latest_event = trace.latest_event.as_ref();
     record(
         DiagnosticEvent::new(DiagnosticLevel::Debug, "sdk.unread", "sdk_room_snapshot")
@@ -271,27 +235,6 @@ pub enum MatrixRoomListError {
     Sdk,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MatrixOwnProfile {
-    pub display_name: Option<String>,
-    pub avatar_mxc_uri: Option<String>,
-}
-
-#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct MatrixLocalUserAliases {
-    #[serde(default)]
-    pub aliases: BTreeMap<String, String>,
-}
-
-impl fmt::Debug for MatrixLocalUserAliases {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("MatrixLocalUserAliases")
-            .field("alias_count", &self.aliases.len())
-            .finish()
-    }
-}
-
 #[derive(Clone, Eq, PartialEq)]
 pub struct MatrixUserProfile {
     pub user_id: String,
@@ -311,72 +254,6 @@ impl fmt::Debug for MatrixUserProfile {
             .field("has_avatar", &self.avatar_mxc_uri.is_some())
             .finish()
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MatrixPublicRoomDirectoryQuery {
-    pub term: Option<String>,
-    pub server_name: Option<String>,
-    pub limit: Option<u32>,
-    pub since: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MatrixPublicRoomDirectoryResult {
-    pub rooms: Vec<MatrixPublicRoomDirectoryRoom>,
-    pub next_batch: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MatrixPublicRoomDirectoryRoom {
-    pub room_id: String,
-    pub canonical_alias: Option<String>,
-    /// Matrix `room_type`, e.g. `m.space`. Absent for an ordinary room.
-    pub room_type: Option<String>,
-    /// Empty when the directory entry has no name; the caller decides how to
-    /// label it, because a room and a space need different fallbacks.
-    pub name: String,
-    pub topic: Option<String>,
-    pub avatar_url: Option<String>,
-    pub joined_members: u64,
-    pub world_readable: bool,
-    pub guest_can_join: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MatrixCreateRoomOptions {
-    pub name: String,
-    pub topic: Option<String>,
-    pub alias_localpart: Option<String>,
-    pub encrypted: bool,
-    pub visibility: MatrixCreateRoomVisibility,
-    pub parent_space: Option<MatrixCreateRoomParentSpace>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MatrixCreateRoomVisibility {
-    Private,
-    Public,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MatrixCreateRoomParentSpace {
-    pub space_id: String,
-    pub via_server: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MatrixRoomSettingsSnapshot {
-    pub room_id: String,
-    pub name: Option<String>,
-    pub topic: Option<String>,
-    pub avatar_url: Option<String>,
-    pub canonical_alias: Option<String>,
-    pub alternate_aliases: Vec<String>,
-    pub join_rule: MatrixRoomJoinRule,
-    pub history_visibility: MatrixRoomHistoryVisibility,
-    pub permissions: MatrixRoomPermissionFacts,
-    pub members: Vec<MatrixRoomMemberSummary>,
 }
 
 /// Local-only membership facts for a Space and all of its current child rooms.
@@ -563,12 +440,6 @@ impl MatrixClientSession {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MatrixSyncLoopControl {
-    Continue,
-    Stop,
-}
-
 pub fn room_list_snapshot_blocking(
     session: &MatrixClientSession,
 ) -> Result<MatrixRoomListSnapshot, MatrixRoomListError> {
@@ -578,6 +449,476 @@ pub fn room_list_snapshot_blocking(
         .map_err(|_| MatrixRoomListError::Sdk)?;
 
     runtime.block_on(room_list_snapshot(session))
+}
+
+#[cfg(test)]
+mod joined_member_snapshot_tests {
+    use matrix_sdk::{
+        ruma::events::room::member::MembershipState, test_utils::mocks::MatrixMockServer,
+    };
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    use super::{MatrixClientSession, SessionInfo};
+
+    async fn session_for(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        let info = SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client
+                .user_id()
+                .expect("mock client has a user id")
+                .to_string(),
+            device_id: client
+                .device_id()
+                .expect("mock client has a device id")
+                .to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        };
+        MatrixClientSession { client, info }
+    }
+
+    #[tokio::test]
+    async fn joined_member_snapshot_no_sync_is_fail_closed_and_does_not_request_members() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let room_id = matrix_sdk::ruma::room_id!("!mention-room:example.org");
+        let joined = matrix_sdk::ruma::user_id!("@joined:example.org");
+        let invited = matrix_sdk::ruma::user_id!("@invited:example.org");
+        let left = matrix_sdk::ruma::user_id!("@left:example.org");
+
+        server
+            .mock_sync()
+            .ok_and_run(&session.client(), |builder| {
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(room_id)
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(room_id)
+                                .member(joined)
+                                .display_name("Joined Member")
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(room_id)
+                                .member(invited)
+                                .membership(MembershipState::Invite)
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(room_id)
+                                .member(left)
+                                .membership(MembershipState::Leave)
+                                .into_raw_sync_state(),
+                        ),
+                );
+            })
+            .await;
+
+        // No /members mock is mounted. A network request would fail this call.
+        let snapshot = session
+            .joined_member_snapshot_no_sync(room_id.as_str())
+            .await
+            .expect("cached joined member snapshot");
+        assert!(!snapshot.complete);
+        assert_eq!(snapshot.members.len(), 1);
+        assert_eq!(snapshot.members[0].user_id, joined.as_str());
+        assert_eq!(
+            snapshot.members[0].display_name.as_deref(),
+            Some("Joined Member")
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_joined_member_snapshot_fetches_once_and_marks_the_snapshot_complete() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let room_id = matrix_sdk::ruma::room_id!("!mention-refresh:example.org");
+        let joined = matrix_sdk::ruma::user_id!("@refreshed:example.org");
+
+        server
+            .mock_sync()
+            .ok_and_run(&session.client(), |builder| {
+                builder.add_joined_room(JoinedRoomBuilder::new(room_id));
+            })
+            .await;
+        server
+            .mock_get_members()
+            .ok(vec![
+                EventFactory::new()
+                    .room(room_id)
+                    .member(joined)
+                    .display_name("Refreshed Member")
+                    .into_raw(),
+            ])
+            .mock_once()
+            .mount()
+            .await;
+
+        let refreshed = session
+            .refresh_joined_member_snapshot(room_id.as_str())
+            .await
+            .expect("member refresh");
+        assert!(refreshed.complete);
+        assert_eq!(refreshed.members.len(), 1);
+        assert_eq!(refreshed.members[0].user_id, joined.as_str());
+
+        let cached = session
+            .refresh_joined_member_snapshot(room_id.as_str())
+            .await
+            .expect("already complete refresh should use the cache");
+        assert!(cached.complete);
+        assert_eq!(cached.members, refreshed.members);
+    }
+}
+
+#[cfg(test)]
+mod room_permission_tests {
+    use matrix_sdk::{ruma::RoomVersionId, test_utils::mocks::MatrixMockServer};
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+    use serde_json::json;
+
+    use super::{MatrixClientSession, SessionInfo, get_room_settings_snapshot};
+
+    async fn session_for(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        let info = SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client
+                .user_id()
+                .expect("mock client has a user id")
+                .to_string(),
+            device_id: client
+                .device_id()
+                .expect("mock client has a device id")
+                .to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        };
+        MatrixClientSession { client, info }
+    }
+
+    #[tokio::test]
+    async fn room_settings_snapshot_uses_invite_power_level_not_role_editability() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let room_id = matrix_sdk::ruma::room_id!("!permission-room:example.org");
+        let client = session.client();
+        let own_user_id = client.user_id().expect("mock user");
+        let power_level_content: matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent = serde_json::from_value(json!({
+            "ban": 50,
+            "events": {},
+            "events_default": 50,
+            "invite": 150,
+            "kick": 50,
+            "redact": 50,
+            "state_default": 50,
+            "users": {},
+            "users_default": 100
+        }))
+        .expect("power levels event");
+        let power_levels = EventFactory::new()
+            .room(room_id)
+            .sender(own_user_id)
+            .event(power_level_content)
+            .state_key("")
+            .into_raw_sync_state();
+
+        server
+            .mock_sync()
+            .ok_and_run(&client, |builder| {
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(room_id)
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(room_id)
+                                .create(own_user_id, RoomVersionId::V1)
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(power_levels),
+                );
+            })
+            .await;
+
+        let room = client.get_room(&room_id).expect("joined permission room");
+        let power_levels = room.power_levels_or_default().await;
+        assert_eq!(power_levels.invite, matrix_sdk::ruma::Int::from(150));
+        assert_eq!(power_levels.users_default, matrix_sdk::ruma::Int::from(100));
+
+        let snapshot = get_room_settings_snapshot(&session, room_id.as_str())
+            .await
+            .expect("room settings snapshot");
+
+        assert!(snapshot.permissions.can_edit_roles);
+        assert!(!snapshot.permissions.can_invite);
+    }
+}
+
+#[cfg(test)]
+mod space_member_projection_tests {
+    use matrix_sdk::{
+        ruma::{RoomVersionId, events::room::member::MembershipState},
+        test_utils::mocks::MatrixMockServer,
+    };
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    use super::{MatrixClientSession, SessionInfo};
+
+    async fn session_for(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        let info = SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client
+                .user_id()
+                .expect("mock client has a user id")
+                .to_string(),
+            device_id: client
+                .device_id()
+                .expect("mock client has a device id")
+                .to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        };
+        MatrixClientSession { client, info }
+    }
+
+    #[tokio::test]
+    async fn projection_uses_local_join_and_invite_filters_and_unions_child_joins() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let client = session.client();
+        let own_user = client.user_id().expect("mock user");
+        let space_id = matrix_sdk::ruma::room_id!("!space-facts:example.org");
+        let child_a = matrix_sdk::ruma::room_id!("!child-a:example.org");
+        let child_b = matrix_sdk::ruma::room_id!("!child-b:example.org");
+        let joined = matrix_sdk::ruma::user_id!("@joined:example.org");
+        let invited = matrix_sdk::ruma::user_id!("@invited:example.org");
+        let both = matrix_sdk::ruma::user_id!("@both:example.org");
+        let child_only = matrix_sdk::ruma::user_id!("@child-only:example.org");
+        let second_only = matrix_sdk::ruma::user_id!("@second-only:example.org");
+        let left = matrix_sdk::ruma::user_id!("@left:example.org");
+        let banned = matrix_sdk::ruma::user_id!("@banned:example.org");
+        let knocked = matrix_sdk::ruma::user_id!("@knocked:example.org");
+
+        server
+            .mock_sync()
+            .ok_and_run(&session.client(), |builder| {
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(space_id)
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(space_id)
+                                .create(own_user, RoomVersionId::V1)
+                                .with_space_type()
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .sender(own_user)
+                                .space_child(space_id.to_owned(), child_a.to_owned())
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .sender(own_user)
+                                .space_child(space_id.to_owned(), child_b.to_owned())
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(space_id)
+                                .member(joined)
+                                .display_name("Joined")
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(space_id)
+                                .member(invited)
+                                .membership(MembershipState::Invite)
+                                .display_name("Invited")
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(space_id)
+                                .member(both)
+                                .display_name("Both")
+                                .into_raw_sync_state(),
+                        ),
+                );
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(child_a)
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(child_a)
+                                .member(child_only)
+                                .display_name("Child only")
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(child_a)
+                                .member(both)
+                                .display_name("Both in child")
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(child_a)
+                                .member(left)
+                                .membership(MembershipState::Leave)
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(child_a)
+                                .member(banned)
+                                .membership(MembershipState::Ban)
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(child_a)
+                                .member(knocked)
+                                .membership(MembershipState::Knock)
+                                .into_raw_sync_state(),
+                        ),
+                );
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(child_b)
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(child_b)
+                                .member(child_only)
+                                .display_name("Child only again")
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(child_b)
+                                .member(second_only)
+                                .display_name("Second only")
+                                .into_raw_sync_state(),
+                        )
+                        .add_state_event(
+                            EventFactory::new()
+                                .room(child_b)
+                                .member(invited)
+                                .membership(MembershipState::Invite)
+                                .into_raw_sync_state(),
+                        ),
+                );
+            })
+            .await;
+
+        let projection = super::matrix_space_members_projection(&session, space_id.as_str())
+            .await
+            .expect("local Space projection");
+
+        let ids = |entries: &[super::MatrixSpaceMemberEntry]| {
+            entries
+                .iter()
+                .map(|entry| entry.user_id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(&projection.space_joined),
+            vec![both.to_string(), joined.to_string()]
+        );
+        assert_eq!(ids(&projection.space_invited), vec![invited.to_string()]);
+        assert_eq!(
+            ids(&projection.child_room_only),
+            vec![child_only.to_string(), second_only.to_string()]
+        );
+        assert!(
+            projection
+                .child_room_profiles
+                .iter()
+                .any(|entry| entry.user_id == both.to_string())
+        );
+        assert_eq!(
+            projection.child_room_only[0].child_room_ids,
+            vec![child_a.to_string(), child_b.to_string()]
+        );
+        assert_eq!(
+            projection.child_room_ids,
+            vec![child_a.to_string(), child_b.to_string()]
+        );
+        assert_eq!(projection.child_room_count, 2);
+        assert_eq!(projection.incomplete_child_room_count, 2);
+        assert_eq!(projection.space_joined_input_count, 2);
+        assert_eq!(projection.space_invited_input_count, 1);
+        assert_eq!(projection.child_join_input_count, 4);
+        assert_eq!(projection.child_join_union_count, 3);
+        assert_eq!(projection.duplicate_child_membership_count, 1);
+    }
+
+    #[test]
+    fn space_member_projection_debug_redacts_identifiers_and_profiles() {
+        let entry = super::MatrixSpaceMemberEntry {
+            user_id: "@private:example.invalid".to_owned(),
+            display_name: Some("Private name".to_owned()),
+            avatar_url: Some("mxc://example.invalid/avatar".to_owned()),
+            power_level: Some(100),
+            role: super::MatrixRoomMemberRole::Administrator,
+            child_room_ids: vec!["!child:example.invalid".to_owned()],
+        };
+        let projection = super::MatrixSpaceMembersProjection {
+            space_id: "!space:example.invalid".to_owned(),
+            child_room_ids: vec!["!child:example.invalid".to_owned()],
+            space_joined: vec![entry.clone()],
+            space_invited: Vec::new(),
+            child_room_only: Vec::new(),
+            child_room_profiles: vec![entry.clone()],
+            space_joined_input_count: 1,
+            space_invited_input_count: 0,
+            child_join_input_count: 0,
+            child_join_union_count: 0,
+            duplicate_child_membership_count: 0,
+            child_room_count: 1,
+            complete_child_room_count: 1,
+            incomplete_child_room_count: 0,
+        };
+
+        for debug in [format!("{entry:?}"), format!("{projection:?}")] {
+            assert!(debug.contains("space_joined_count") || debug.contains("child_room_count"));
+            assert!(!debug.contains("@private:example.invalid"));
+            assert!(!debug.contains("Private name"));
+            assert!(!debug.contains("mxc://example.invalid/avatar"));
+            assert!(!debug.contains("!child:example.invalid"));
+        }
+    }
+
+    #[test]
+    fn local_member_profile_debug_redacts_identifiers_names_and_mxc_uris() {
+        let summary = super::MatrixRoomMemberSummary {
+            user_id: "@private:example.invalid".to_owned(),
+            display_name: Some("Private member".to_owned()),
+            avatar_url: Some("mxc://example.invalid/member-avatar".to_owned()),
+            power_level: Some(50),
+            role: super::MatrixRoomMemberRole::Moderator,
+            user_trust: Some(super::MatrixUserTrustState::Verified),
+        };
+        let snapshot = super::MatrixJoinedMemberSnapshot {
+            members: vec![summary],
+            complete: true,
+            room_mention_allowed: Some(true),
+        };
+        let profile = super::MatrixUserProfile {
+            user_id: "@private:example.invalid".to_owned(),
+            display_name: Some("Private member".to_owned()),
+            avatar_mxc_uri: Some("mxc://example.invalid/member-avatar".to_owned()),
+        };
+
+        for debug in [format!("{snapshot:?}"), format!("{profile:?}")] {
+            assert!(!debug.contains("@private:example.invalid"), "{debug}");
+            assert!(!debug.contains("Private member"), "{debug}");
+            assert!(
+                !debug.contains("mxc://example.invalid/member-avatar"),
+                "{debug}"
+            );
+        }
+    }
 }
 
 pub type MatrixDirectTargetsByRoom = BTreeMap<String, Vec<String>>;
@@ -729,19 +1070,6 @@ pub async fn room_list_snapshot(
     Ok(snapshot)
 }
 
-pub fn room_list_smoke_report(snapshot: &MatrixRoomListSnapshot) -> RoomListSmokeReport {
-    RoomListSmokeReport {
-        rooms: snapshot.rooms.len(),
-        spaces: snapshot.spaces.len(),
-        dms: snapshot.rooms.iter().filter(|room| room.is_dm).count(),
-        unread_rooms: snapshot
-            .rooms
-            .iter()
-            .filter(|room| room.unread_count > 0)
-            .count(),
-    }
-}
-
 pub fn room_attention_summary_from_counts(
     room_display_name: Option<String>,
     is_dm: bool,
@@ -763,7 +1091,7 @@ pub fn room_attention_summary_from_counts(
     )
 }
 
-fn matrix_room(
+pub(super) fn matrix_room(
     session: &MatrixClientSession,
     room_id: &str,
 ) -> Result<matrix_sdk::Room, MatrixRoomOperationError> {
@@ -925,7 +1253,7 @@ fn merge_local_child_member_profile(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SpaceMemberLookupStatus {
+pub(super) enum SpaceMemberLookupStatus {
     Observed(usize),
     Failed,
     NotAttempted,
@@ -955,7 +1283,7 @@ impl SpaceMemberLookupStatus {
     }
 }
 
-fn space_members_scope_diagnostic_event(
+pub(super) fn space_members_scope_diagnostic_event(
     space_room_lookup_outcome: &'static str,
     space_joined_lookup: SpaceMemberLookupStatus,
     space_invited_lookup: SpaceMemberLookupStatus,
@@ -1350,7 +1678,7 @@ pub async fn matrix_space_members_projection(
     })
 }
 
-fn matrix_public_room_from_chunk(
+pub(super) fn matrix_public_room_from_chunk(
     chunk: matrix_sdk::ruma::directory::PublicRoomsChunk,
 ) -> MatrixPublicRoomDirectoryRoom {
     MatrixPublicRoomDirectoryRoom {
@@ -1368,7 +1696,9 @@ fn matrix_public_room_from_chunk(
     }
 }
 
-async fn matrix_room_settings_snapshot(room: &matrix_sdk::Room) -> MatrixRoomSettingsSnapshot {
+pub(super) async fn matrix_room_settings_snapshot(
+    room: &matrix_sdk::Room,
+) -> MatrixRoomSettingsSnapshot {
     let power_levels = room.power_levels_or_default().await;
     let own_user_id = room.own_user_id();
     let members = matrix_room_member_summaries(room).await;
@@ -1432,7 +1762,7 @@ async fn matrix_room_settings_snapshot(room: &matrix_sdk::Room) -> MatrixRoomSet
     }
 }
 
-fn people_scope_diagnostic_event(
+pub(super) fn people_scope_diagnostic_event(
     is_space: bool,
     direct_member_count: usize,
     child_room_count: usize,
@@ -1508,7 +1838,7 @@ fn matrix_user_trust_state_from_sdk_identity(
     }
 }
 
-fn room_settings_snapshot_with_member_power_level(
+pub(super) fn room_settings_snapshot_with_member_power_level(
     mut snapshot: MatrixRoomSettingsSnapshot,
     target_user_id: &str,
     power_level: i64,
@@ -1536,7 +1866,7 @@ fn matrix_room_member_power_level(
     }
 }
 
-fn matrix_room_member_role(power_level: Option<i64>) -> MatrixRoomMemberRole {
+pub(super) fn matrix_room_member_role(power_level: Option<i64>) -> MatrixRoomMemberRole {
     match power_level {
         None => MatrixRoomMemberRole::Creator,
         Some(level) if level >= 100 => MatrixRoomMemberRole::Administrator,
@@ -1545,7 +1875,7 @@ fn matrix_room_member_role(power_level: Option<i64>) -> MatrixRoomMemberRole {
     }
 }
 
-fn room_settings_snapshot_with_change(
+pub(super) fn room_settings_snapshot_with_change(
     mut snapshot: MatrixRoomSettingsSnapshot,
     change: &MatrixRoomSettingChange,
 ) -> MatrixRoomSettingsSnapshot {
@@ -1583,7 +1913,7 @@ fn matrix_room_join_rule(
     }
 }
 
-fn sdk_join_rule_for_update(
+pub(super) fn sdk_join_rule_for_update(
     join_rule: MatrixRoomJoinRule,
 ) -> Result<matrix_sdk::ruma::events::room::join_rules::JoinRule, MatrixRoomOperationError> {
     use matrix_sdk::ruma::events::room::join_rules::JoinRule;
@@ -1609,7 +1939,7 @@ fn matrix_room_history_visibility(
     }
 }
 
-fn sdk_history_visibility(
+pub(super) fn sdk_history_visibility(
     history_visibility: MatrixRoomHistoryVisibility,
 ) -> matrix_sdk::ruma::events::room::history_visibility::HistoryVisibility {
     use matrix_sdk::ruma::events::room::history_visibility::HistoryVisibility;
@@ -1621,12 +1951,135 @@ fn sdk_history_visibility(
     }
 }
 
-fn non_empty_name(name: &str) -> Option<String> {
+pub(super) fn non_empty_name(name: &str) -> Option<String> {
     let name = name.trim();
     if name.is_empty() {
         None
     } else {
         Some(name.to_owned())
+    }
+}
+
+pub(super) fn matrix_room_operation_failure_kind(
+    error: &matrix_sdk::Error,
+) -> MatrixRoomOperationFailureKind {
+    match error {
+        matrix_sdk::Error::AuthenticationRequired => {
+            MatrixRoomOperationFailureKind::AuthenticationRequired
+        }
+        matrix_sdk::Error::WrongRoomState(_) => MatrixRoomOperationFailureKind::WrongRoomState,
+        matrix_sdk::Error::Http(error) => {
+            if error
+                .as_client_api_error()
+                .is_some_and(|error| error.status_code.as_u16() == 403)
+                || matches!(
+                    error.client_api_error_kind(),
+                    Some(matrix_sdk::ruma::api::error::ErrorKind::Forbidden)
+                )
+            {
+                MatrixRoomOperationFailureKind::Forbidden
+            } else {
+                MatrixRoomOperationFailureKind::Http
+            }
+        }
+        matrix_sdk::Error::BadCryptoStoreState
+        | matrix_sdk::Error::NoOlmMachine
+        | matrix_sdk::Error::CryptoStoreError(_)
+        | matrix_sdk::Error::OlmError(_)
+        | matrix_sdk::Error::MegolmError(_)
+        | matrix_sdk::Error::DecryptorError(_) => MatrixRoomOperationFailureKind::Encryption,
+        matrix_sdk::Error::StateStore(_)
+        | matrix_sdk::Error::EventCacheStore(_)
+        | matrix_sdk::Error::MediaStore(_) => MatrixRoomOperationFailureKind::Store,
+        matrix_sdk::Error::SecureBackupRequired => {
+            MatrixRoomOperationFailureKind::SecureBackupRequired
+        }
+        matrix_sdk::Error::SerdeJson(_)
+        | matrix_sdk::Error::Io(_)
+        | matrix_sdk::Error::CrossProcessLockError(_)
+        | matrix_sdk::Error::Identifier(_)
+        | matrix_sdk::Error::Url(_)
+        | matrix_sdk::Error::SlidingSync(_)
+        | matrix_sdk::Error::MultipleSessionCallbacks
+        | matrix_sdk::Error::OAuth(_)
+        | matrix_sdk::Error::ConcurrentRequestFailed
+        | matrix_sdk::Error::UnknownError(_)
+        | matrix_sdk::Error::EventCache(_)
+        | matrix_sdk::Error::SendQueueWedgeError(_)
+        | matrix_sdk::Error::BackupNotEnabled
+        | matrix_sdk::Error::CantIgnoreLoggedInUser
+        | matrix_sdk::Error::Media(_)
+        | matrix_sdk::Error::ReplyError(_)
+        | matrix_sdk::Error::PowerLevels(_)
+        | matrix_sdk::Error::Timeout
+        | matrix_sdk::Error::InsufficientData => MatrixRoomOperationFailureKind::Sdk,
+        _ => MatrixRoomOperationFailureKind::Sdk,
+    }
+}
+
+pub(super) fn timeline_room(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<matrix_sdk::Room, MatrixTimelineError> {
+    let room_id =
+        matrix_sdk::ruma::RoomId::parse(room_id).map_err(|_| MatrixTimelineError::InvalidRoomId)?;
+    session
+        .client()
+        .get_room(&room_id)
+        .ok_or(MatrixTimelineError::RoomUnavailable)
+}
+
+pub(super) fn matrix_timeline_updates_from_diffs(
+    room_id: &str,
+    diffs: Vec<eyeball_im::VectorDiff<Arc<matrix_sdk_ui::timeline::TimelineItem>>>,
+) -> Vec<MatrixTimelineUpdate> {
+    let mut updates = Vec::new();
+    for diff in diffs {
+        match diff {
+            eyeball_im::VectorDiff::Append { values }
+            | eyeball_im::VectorDiff::Reset { values } => {
+                updates.extend(
+                    values
+                        .iter()
+                        .filter_map(|item| matrix_timeline_update_from_ui(room_id, item)),
+                );
+            }
+            eyeball_im::VectorDiff::PushFront { value }
+            | eyeball_im::VectorDiff::PushBack { value }
+            | eyeball_im::VectorDiff::Insert { value, .. }
+            | eyeball_im::VectorDiff::Set { value, .. } => {
+                if let Some(update) = matrix_timeline_update_from_ui(room_id, &value) {
+                    updates.push(update);
+                }
+            }
+            eyeball_im::VectorDiff::Clear
+            | eyeball_im::VectorDiff::PopFront
+            | eyeball_im::VectorDiff::PopBack
+            | eyeball_im::VectorDiff::Remove { .. }
+            | eyeball_im::VectorDiff::Truncate { .. } => {}
+        }
+    }
+    updates
+}
+
+pub(super) fn matrix_timeline_update_from_ui(
+    room_id: &str,
+    item: &matrix_sdk_ui::timeline::TimelineItem,
+) -> Option<MatrixTimelineUpdate> {
+    let event = item.as_event()?;
+    let event_id = event.event_id()?.to_string();
+    match event.content().as_message() {
+        Some(content) => Some(MatrixTimelineUpdate::Upsert(MatrixTimelineItem {
+            room_id: room_id.to_owned(),
+            event_id,
+            sender: event.sender().to_string(),
+            timestamp_ms: event.timestamp().0.into(),
+            body: content.body().to_owned(),
+        })),
+        None => Some(MatrixTimelineUpdate::Remove {
+            room_id: room_id.to_owned(),
+            event_id,
+        }),
     }
 }
 
@@ -1945,7 +2398,7 @@ fn room_attention_unread_count(
     }
 }
 
-fn matrix_room_list_room_from_counts(
+pub(super) fn matrix_room_list_room_from_counts(
     room_id: String,
     display_name: String,
     avatar_mxc_uri: Option<String>,
@@ -2258,7 +2711,7 @@ fn matrix_conversation_activity_from_timeline_event(
     })
 }
 
-fn newest_conversation_activity(
+pub(super) fn newest_conversation_activity(
     left: Option<MatrixConversationActivity>,
     right: Option<MatrixConversationActivity>,
 ) -> Option<MatrixConversationActivity> {
@@ -2269,7 +2722,7 @@ fn newest_conversation_activity(
     }
 }
 
-fn matrix_conversation_activity_source(
+pub(super) fn matrix_conversation_activity_source(
     event_type: &str,
     relation_type: Option<&str>,
 ) -> Option<MatrixConversationActivitySource> {
@@ -2429,4 +2882,693 @@ async fn matrix_space_child_room_ids(room: &matrix_sdk::Room) -> Vec<String> {
     child_room_ids.sort();
     child_room_ids.dedup();
     child_room_ids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MatrixConversationActivity, MatrixConversationActivitySource, MatrixRoomTagInfo,
+        MatrixRoomTags, SdkUnreadTrace, SpaceMemberLookupStatus, classify_space_member_ids,
+        matrix_conversation_activity_source, matrix_room_list_room_from_counts,
+        newest_conversation_activity, people_scope_diagnostic_event,
+        space_members_scope_diagnostic_event, trace_sdk_unread_snapshot,
+    };
+
+    use koushi_diagnostics::DiagnosticValue;
+    use std::collections::BTreeMap;
+    #[test]
+    fn people_scope_diagnostic_distinguishes_direct_space_members_from_child_room_aggregate() {
+        let event = people_scope_diagnostic_event(true, 7, 3);
+
+        assert_eq!(event.source, "sdk.people_scope");
+        assert_eq!(event.stage, "member_snapshot");
+        let field = |key| {
+            event
+                .fields
+                .iter()
+                .find(|field| field.key == key)
+                .map(|field| &field.value)
+        };
+        assert_eq!(
+            field("source"),
+            Some(&koushi_diagnostics::DiagnosticValue::Token(
+                "direct_space_members"
+            ))
+        );
+        assert_eq!(
+            field("direct_member_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(7))
+        );
+        assert_eq!(
+            field("child_room_count"),
+            Some(&koushi_diagnostics::DiagnosticValue::Count(3))
+        );
+        assert_eq!(
+            field("child_room_members_included"),
+            Some(&koushi_diagnostics::DiagnosticValue::Boolean(false))
+        );
+    }
+    #[test]
+    fn conversation_activity_classifies_messages_encryption_and_threads_only() {
+        use MatrixConversationActivitySource::{EncryptedMessage, Message, ThreadReply};
+
+        let cases = [
+            ("m.room.message", None, Some(Message)),
+            ("m.room.message", Some("m.in_reply_to"), Some(Message)),
+            ("m.room.message", Some("m.thread"), Some(ThreadReply)),
+            ("m.room.encrypted", None, Some(EncryptedMessage)),
+            ("m.room.encrypted", Some("m.thread"), Some(ThreadReply)),
+            ("m.room.message", Some("m.replace"), None),
+            ("m.room.message", Some("m.annotation"), None),
+            ("m.room.redaction", None, None),
+            ("m.room.member", None, None),
+            ("m.room.name", None, None),
+            ("m.reaction", Some("m.annotation"), None),
+            ("m.receipt", None, None),
+            ("m.typing", None, None),
+            ("m.presence", None, None),
+        ];
+
+        for (event_type, relation_type, expected) in cases {
+            assert_eq!(
+                matrix_conversation_activity_source(event_type, relation_type),
+                expected,
+                "unexpected classification for {event_type} / {relation_type:?}"
+            );
+        }
+    }
+    #[test]
+    fn conversation_activity_keeps_the_newest_cache_or_local_candidate() {
+        let cached = super::MatrixConversationActivity {
+            timestamp_ms: 41,
+            source: MatrixConversationActivitySource::EncryptedMessage,
+        };
+        let local = super::MatrixConversationActivity {
+            timestamp_ms: 42,
+            source: MatrixConversationActivitySource::Message,
+        };
+
+        assert_eq!(
+            newest_conversation_activity(Some(cached), Some(local)),
+            Some(local)
+        );
+        assert_eq!(
+            newest_conversation_activity(Some(cached), None),
+            Some(cached)
+        );
+        assert_eq!(newest_conversation_activity(None, None), None);
+    }
+    #[test]
+    fn conversation_activity_debug_hides_raw_timestamp() {
+        let activity = MatrixConversationActivity {
+            timestamp_ms: 42,
+            source: MatrixConversationActivitySource::ThreadReply,
+        };
+
+        let debug = format!("{activity:?}");
+
+        assert!(debug.contains("ThreadReply"), "{debug}");
+        assert!(!debug.contains("42"), "{debug}");
+    }
+    #[test]
+    fn joined_room_list_prefers_async_direct_dm_detection() {
+        let source = include_str!("room_projection.rs");
+        let projection_body =
+            crate::test_source::item_body(source, "async fn matrix_room_list_snapshot_from_rooms");
+
+        assert!(
+            projection_body.contains("room.is_direct().await"),
+            "joined room projection should read m.direct via async Room::is_direct"
+        );
+        assert!(
+            projection_body.contains("unwrap_or_else(|_| room.is_dm())"),
+            "joined room projection should fall back to cached is_dm when direct lookup fails"
+        );
+    }
+    #[test]
+    fn joined_room_list_snapshot_avoids_full_member_scans() {
+        let source = include_str!("room_projection.rs");
+        let projection_body =
+            crate::test_source::item_body(source, "async fn matrix_room_list_snapshot_from_rooms");
+
+        assert!(projection_body.contains("room.joined_members_count()"));
+        assert!(projection_body.contains("matrix_space_member_user_ids_no_sync(&room).await"));
+        assert!(!projection_body.contains("collect_active_member_profiles"));
+        assert!(
+            !projection_body.contains("room.members(matrix_sdk::RoomMemberships::ACTIVE)"),
+            "room-list projection must not load the full active member list"
+        );
+        assert!(
+            !projection_body.contains("joined_user_ids"),
+            "room-list projection should not derive joined members from joined_user_ids"
+        );
+    }
+    #[test]
+    fn joined_room_list_dm_resolution_uses_account_data_cached_and_heroes_candidates() {
+        let source = include_str!("room_projection.rs");
+        let helper_body =
+            crate::test_source::item_body(source, "async fn matrix_room_list_dm_user_ids");
+
+        assert!(
+            helper_body.contains("direct_targets_by_room.get(&room_id)"),
+            "DM resolution should prefer direct account-data targets first"
+        );
+        assert!(
+            helper_body.contains(".direct_targets()"),
+            "DM resolution should fall back to cached SDK direct targets"
+        );
+        assert!(
+            helper_body.contains("room.heroes()"),
+            "DM resolution should use heroes when the room is already considered a DM"
+        );
+        assert!(
+            helper_body.contains("get_member_no_sync"),
+            "DM resolution should only probe candidate members without syncing the full list"
+        );
+        assert!(
+            helper_body.contains("dm_user_ids.push(candidate_user_id_string.clone())"),
+            "DM resolution should preserve valid direct/cached/hero IDs even when a local member profile is absent"
+        );
+        assert!(
+            !helper_body.contains("room.members(matrix_sdk::RoomMemberships::ACTIVE)"),
+            "DM resolution helper must not hide a full active-member scan behind the hot path"
+        );
+        assert!(
+            !helper_body.contains("room.members_no_sync(matrix_sdk::RoomMemberships::ACTIVE)"),
+            "DM resolution helper must not enumerate every active member even without syncing"
+        );
+    }
+    #[test]
+    fn space_member_ids_are_no_sync_and_space_only() {
+        let source = include_str!("room_projection.rs");
+        let helper_body =
+            crate::test_source::item_body(source, "async fn matrix_space_member_user_ids_no_sync");
+
+        assert!(
+            helper_body.contains("members_no_sync(matrix_sdk::RoomMemberships::JOIN)"),
+            "space membership may read only already-synced local state"
+        );
+        assert!(
+            !helper_body.contains("RoomMemberships::ACTIVE"),
+            "space membership helper must not flatten joined and invited users"
+        );
+        assert!(
+            !helper_body.contains("room.members(matrix_sdk::RoomMemberships::JOIN)"),
+            "space membership helper must not sync/fetch the full member list"
+        );
+    }
+    #[test]
+    fn space_member_facts_separate_join_invite_and_child_only() {
+        let facts = classify_space_member_ids(
+            ["joined", "both"],
+            ["invited"],
+            [
+                ("child-a", ["child-only", "both"]),
+                ("child-b", ["child-only", "second-only"]),
+            ],
+        );
+
+        assert_eq!(facts.space_joined_ids, vec!["both", "joined"]);
+        assert_eq!(facts.space_invited_ids, vec!["invited"]);
+        assert_eq!(facts.child_room_only_ids, vec!["child-only", "second-only"]);
+        assert_eq!(facts.child_join_union_count, 3);
+        assert_eq!(facts.duplicate_child_membership_count, 1);
+        assert_eq!(
+            facts.child_room_ids.get("child-only"),
+            Some(&vec!["child-a".to_owned(), "child-b".to_owned()])
+        );
+    }
+    #[test]
+    fn joined_only_helpers_do_not_use_active_membership() {
+        let source = include_str!("room_projection.rs");
+        let body =
+            crate::test_source::item_body(source, "async fn matrix_space_members_projection");
+        assert!(!body.contains("RoomMemberships::ACTIVE"));
+        assert!(body.contains("members_no_sync(matrix_sdk::RoomMemberships::JOIN)"));
+        assert!(body.contains("members_no_sync(matrix_sdk::RoomMemberships::INVITE)"));
+    }
+    #[test]
+    fn space_lookup_failures_are_not_coerced_to_empty_observations() {
+        let source = include_str!("room_projection.rs");
+        let body =
+            crate::test_source::item_body(source, "pub async fn matrix_space_members_projection");
+        let joined_lookup = body
+            .split("let space_joined_members = match")
+            .nth(1)
+            .expect("Space JOIN lookup exists")
+            .split("let space_invited_members")
+            .next()
+            .expect("Space INVITE lookup follows JOIN lookup");
+        let invited_lookup = body
+            .split("let space_invited_members = match")
+            .nth(1)
+            .expect("Space INVITE lookup exists")
+            .split("let mut space_joined_by_user")
+            .next()
+            .expect("Space member classification follows Space lookups");
+
+        for lookup in [joined_lookup, invited_lookup] {
+            assert!(
+                lookup.contains("Err(error)"),
+                "Space lookup errors must retain their structured error"
+            );
+            assert!(
+                lookup.contains("return Err(MatrixRoomOperationError::from_sdk_error(error))"),
+                "Space lookup errors must abort the projection instead of becoming empty input"
+            );
+        }
+    }
+    #[test]
+    fn failed_space_member_counts_are_reported_as_unavailable() {
+        let source = include_str!("room_projection.rs");
+        let body = crate::test_source::item_body(source, "fn space_members_scope_diagnostic_event");
+
+        assert!(body.contains("space_join_lookup_outcome"));
+        assert!(body.contains("space_invite_lookup_outcome"));
+        assert!(body.contains("counts_unavailable"));
+        assert!(body.contains("space_joined_lookup.observed_count()"));
+        assert!(body.contains("space_invited_lookup.observed_count()"));
+        assert!(body.contains("if let Some(count)"));
+    }
+    #[test]
+    fn space_members_scope_diagnostic_is_private_data_free() {
+        let event = space_members_scope_diagnostic_event(
+            "observed",
+            SpaceMemberLookupStatus::Observed(2),
+            SpaceMemberLookupStatus::Observed(1),
+            Some(3),
+            Some(2),
+            Some(1),
+            Some(2),
+            Some(1),
+            Some(4),
+            Some(4),
+            Some(1),
+            Some(2),
+            1,
+            0,
+        );
+
+        assert_eq!(event.source, "sdk.space_members_scope");
+        let rendered = format!("{event:?}");
+        for forbidden in [
+            "!space:example.invalid",
+            "!child:example.invalid",
+            "@alice:example.invalid",
+            "Alice",
+            "mxc://example.invalid/avatar",
+            "raw sdk error",
+        ] {
+            assert!(
+                !rendered.contains(forbidden),
+                "diagnostic leaked private data: {forbidden}"
+            );
+        }
+    }
+    #[test]
+    fn failed_space_member_lookup_does_not_report_zero_counts() {
+        let event = space_members_scope_diagnostic_event(
+            "observed",
+            SpaceMemberLookupStatus::Failed,
+            SpaceMemberLookupStatus::NotAttempted,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            1,
+        );
+
+        assert!(event.fields.iter().any(|field| {
+            field.key == "space_join_lookup_outcome"
+                && field.value == DiagnosticValue::Token("lookup_failed")
+        }));
+        assert!(event.fields.iter().any(|field| {
+            field.key == "space_join_count_availability"
+                && field.value == DiagnosticValue::Token("counts_unavailable")
+        }));
+        assert!(event.fields.iter().any(|field| {
+            field.key == "space_invite_lookup_outcome"
+                && field.value == DiagnosticValue::Token("not_attempted")
+        }));
+        for field in &event.fields {
+            if matches!(
+                field.key,
+                "space_joined_count"
+                    | "space_invited_count"
+                    | "child_room_count"
+                    | "child_room_only_count"
+                    | "input_count"
+                    | "output_count"
+            ) {
+                assert_ne!(
+                    field.value,
+                    DiagnosticValue::Count(0),
+                    "unobserved Space counts must not be fabricated as zero"
+                );
+            }
+        }
+    }
+    #[test]
+    fn matrix_room_member_summaries_still_scans_full_members() {
+        let source = include_str!("room_projection.rs");
+        let helper_body =
+            crate::test_source::item_body(source, "async fn matrix_room_member_summaries");
+
+        assert!(
+            helper_body.contains("room.members(matrix_sdk::RoomMemberships::ACTIVE)"),
+            "member summaries should still be allowed to load the full active member list"
+        );
+    }
+    #[test]
+    fn direct_account_data_targets_are_indexed_by_room() {
+        use matrix_sdk::ruma::{
+            OwnedRoomId, OwnedUserId,
+            events::direct::{DirectEventContent, OwnedDirectUserIdentifier},
+        };
+
+        let alice: OwnedUserId = "@alice:example.invalid".try_into().unwrap();
+        let bob: OwnedUserId = "@bob:example.invalid".try_into().unwrap();
+        let dm_room: OwnedRoomId = "!dm:example.invalid".try_into().unwrap();
+        let other_room: OwnedRoomId = "!other:example.invalid".try_into().unwrap();
+        let mut content = DirectEventContent::default();
+        content.insert(
+            OwnedDirectUserIdentifier::from(alice),
+            vec![dm_room.clone(), other_room.clone()],
+        );
+        content.insert(OwnedDirectUserIdentifier::from(bob), vec![dm_room.clone()]);
+
+        let by_room = super::direct_account_data_targets_by_room(&content);
+
+        assert_eq!(
+            by_room.get(dm_room.as_str()),
+            Some(&vec![
+                "@alice:example.invalid".to_owned(),
+                "@bob:example.invalid".to_owned()
+            ])
+        );
+        assert_eq!(
+            by_room.get(other_room.as_str()),
+            Some(&vec!["@alice:example.invalid".to_owned()])
+        );
+    }
+    #[test]
+    fn direct_account_data_targets_are_sorted_deduplicated_and_indexed_by_room() {
+        use matrix_sdk::ruma::{
+            OwnedRoomId, OwnedUserId,
+            events::direct::{DirectEventContent, OwnedDirectUserIdentifier},
+        };
+
+        let alice: OwnedUserId = "@alice:example.invalid".try_into().unwrap();
+        let bob: OwnedUserId = "@bob:example.invalid".try_into().unwrap();
+        let room: OwnedRoomId = "!dm:example.invalid".try_into().unwrap();
+        let mut content = DirectEventContent::default();
+        content.insert(OwnedDirectUserIdentifier::from(bob), vec![room.clone()]);
+        content.insert(OwnedDirectUserIdentifier::from(alice), vec![room.clone()]);
+
+        assert_eq!(
+            super::direct_account_data_targets_by_room(&content),
+            BTreeMap::from([(
+                room.to_string(),
+                vec![
+                    "@alice:example.invalid".to_owned(),
+                    "@bob:example.invalid".to_owned(),
+                ],
+            )]),
+        );
+    }
+    #[test]
+    fn live_direct_account_data_loader_is_local_only() {
+        let source = include_str!("room_projection.rs");
+        let body = crate::test_source::item_body(
+            source,
+            "pub async fn cached_direct_account_data_targets_by_room",
+        );
+        assert!(body.contains("account_data::<DirectEventContent>()"));
+        assert!(!body.contains("fetch_account_data_static"));
+    }
+    #[tokio::test]
+    async fn explicit_empty_direct_map_overrides_cached_room_direct_targets() {
+        use matrix_sdk::test_utils::mocks::MatrixMockServer;
+        use matrix_sdk_test::JoinedRoomBuilder;
+        use serde_json::json;
+
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let target = matrix_sdk::ruma::user_id!("@dm-target:example.org");
+        let room_id = matrix_sdk::ruma::room_id!("!stale-dm:example.org");
+
+        server
+            .mock_sync()
+            .ok_and_run(&client, |builder| {
+                builder.add_custom_global_account_data(json!({
+                    "type": "m.direct",
+                    "content": { target: [room_id] }
+                }));
+                builder.add_joined_room(JoinedRoomBuilder::new(room_id));
+            })
+            .await;
+
+        let room = client.get_room(&room_id).expect("joined test room");
+        assert!(
+            !room.direct_targets().is_empty(),
+            "test room must have cached direct targets"
+        );
+
+        let direct_targets_by_room = BTreeMap::new();
+        let snapshot = super::room_list_snapshot_from_sdk_rooms_with_direct_targets(
+            std::iter::once(room),
+            Some(&direct_targets_by_room),
+        )
+        .await;
+
+        assert_eq!(snapshot.rooms.len(), 1);
+        assert!(!snapshot.rooms[0].is_dm);
+    }
+    #[test]
+    fn direct_account_data_dm_detection_fetches_server_when_store_misses() {
+        let source = include_str!("room_projection.rs");
+        let helper_body = crate::test_source::item_body(
+            source,
+            "async fn matrix_direct_account_data_targets_by_room",
+        );
+
+        assert!(helper_body.contains("account_data::<DirectEventContent>()"));
+        assert!(helper_body.contains("fetch_account_data_static::<DirectEventContent>()"));
+    }
+    #[test]
+    fn room_list_room_from_counts_carries_notification_metadata() {
+        let room = matrix_room_list_room_from_counts(
+            "!room:example.invalid".to_owned(),
+            "Room".to_owned(),
+            None,
+            true,
+            vec!["@alice:example.invalid".to_owned()],
+            MatrixRoomTags::default(),
+            4,
+            2,
+            2,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            vec!["!space:example.invalid".to_owned()],
+            false,
+            2,
+        );
+
+        assert_eq!(room.notification_count, 4);
+        assert_eq!(room.highlight_count, 2);
+        assert_eq!(room.unread_count, 2);
+        assert_eq!(room.joined_members, 2);
+        assert!(room.is_dm);
+    }
+    #[test]
+    fn room_list_room_from_counts_does_not_turn_manual_unread_into_messages() {
+        let room = matrix_room_list_room_from_counts(
+            "!room:example.invalid".to_owned(),
+            "Room".to_owned(),
+            None,
+            false,
+            Vec::new(),
+            MatrixRoomTags::default(),
+            0,
+            0,
+            0,
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+            vec![],
+            false,
+            0,
+        );
+
+        assert_eq!(room.unread_count, 0);
+        assert!(room.marked_unread);
+    }
+    #[test]
+    fn room_list_room_from_counts_carries_room_tags() {
+        let tags = MatrixRoomTags {
+            favourite: Some(MatrixRoomTagInfo {
+                order: Some("0.25".to_owned()),
+            }),
+            low_priority: None,
+        };
+
+        let room = matrix_room_list_room_from_counts(
+            "!room:example.invalid".to_owned(),
+            "Room".to_owned(),
+            None,
+            false,
+            Vec::new(),
+            tags.clone(),
+            0,
+            0,
+            0,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            vec![],
+            false,
+            0,
+        );
+
+        assert_eq!(room.tags, tags);
+    }
+    #[test]
+    fn unread_diagnostic_snapshot_rejects_private_synthetic_inputs() {
+        let latest_event = Some(crate::MatrixRoomLatestEventSummary {
+            event_id: "$event:example.invalid".to_owned(),
+            sender_id: Some("@user:example.invalid".to_owned()),
+            sender_label: None,
+            sender_avatar_mxc_uri: None,
+            preview: Some("secret message".to_owned()),
+            timestamp_ms: 42,
+            event_type: Some("m.room.message".to_owned()),
+            relation_type: None,
+            relation_event_id: None,
+            content_converted: true,
+            is_threaded: false,
+            is_reply: false,
+            has_thread_summary: false,
+            has_reactions: false,
+        });
+        trace_sdk_unread_snapshot(SdkUnreadTrace {
+            unread_messages: 2,
+            unread_count: 2,
+            notification_count: 1,
+            highlight_count: 1,
+            marked_unread: true,
+            latest_event: &latest_event,
+            fully_read_event_id: Some("$event:example.invalid"),
+            private_read_receipt_event_id: None,
+            recency_stamp_present: true,
+            conversation_activity: Some(MatrixConversationActivity {
+                timestamp_ms: 3,
+                source: MatrixConversationActivitySource::Message,
+            }),
+        });
+        let serialized = serde_json::to_string(&koushi_diagnostics::snapshot()).unwrap();
+        assert!(serialized.contains("conversation_activity_source"));
+        for forbidden in [
+            "!room:example.invalid",
+            "@user:example.invalid",
+            "$event:example.invalid",
+            "/Users/alice/private",
+            "secret message",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "serialized diagnostics leaked {forbidden}"
+            );
+        }
+        assert!(serialized.contains("unread_messages"));
+        assert!(serialized.contains("latest_event_present"));
+    }
+    fn test_latest_event(event_id: &str) -> crate::MatrixRoomLatestEventSummary {
+        crate::MatrixRoomLatestEventSummary {
+            event_id: event_id.to_owned(),
+            sender_id: None,
+            sender_label: None,
+            sender_avatar_mxc_uri: None,
+            preview: None,
+            timestamp_ms: 42,
+            event_type: Some("m.room.message".to_owned()),
+            relation_type: None,
+            relation_event_id: None,
+            content_converted: true,
+            is_threaded: false,
+            is_reply: false,
+            has_thread_summary: false,
+            has_reactions: false,
+        }
+    }
+    #[test]
+    fn room_list_room_from_counts_suppresses_stale_unread_when_fully_read_matches_latest_event() {
+        let room = matrix_room_list_room_from_counts(
+            "!room:example.invalid".to_owned(),
+            "Room".to_owned(),
+            None,
+            false,
+            Vec::new(),
+            MatrixRoomTags::default(),
+            2,
+            1,
+            2,
+            false,
+            Some(42),
+            None,
+            Some(test_latest_event("$latest:example.invalid")),
+            Some("$latest:example.invalid".to_owned()),
+            None,
+            vec![],
+            false,
+            2,
+        );
+
+        assert_eq!(room.unread_count, 0);
+        assert_eq!(room.notification_count, 0);
+        assert_eq!(room.highlight_count, 0);
+        assert!(!room.marked_unread);
+    }
+    #[test]
+    fn room_list_room_from_counts_preserves_unread_when_read_marker_differs_from_latest_event() {
+        let room = matrix_room_list_room_from_counts(
+            "!room:example.invalid".to_owned(),
+            "Room".to_owned(),
+            None,
+            false,
+            Vec::new(),
+            MatrixRoomTags::default(),
+            2,
+            1,
+            2,
+            false,
+            Some(42),
+            None,
+            Some(test_latest_event("$latest:example.invalid")),
+            Some("$older:example.invalid".to_owned()),
+            None,
+            vec![],
+            false,
+            2,
+        );
+
+        assert_eq!(room.unread_count, 2);
+        assert_eq!(room.notification_count, 2);
+        assert_eq!(room.highlight_count, 1);
+    }
 }

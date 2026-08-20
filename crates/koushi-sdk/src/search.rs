@@ -1,4 +1,12 @@
-use super::{IndexError, MatrixClientSession, SearchError};
+use crate::MatrixClientSession;
+use matrix_sdk::message_search::SearchError;
+use matrix_sdk_search::error::IndexError;
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
+use thiserror::Error;
+use zeroize::Zeroizing;
 
 #[derive(Clone)]
 pub struct MatrixSearchIndexStoreConfig {
@@ -18,7 +26,7 @@ impl MatrixSearchIndexStoreConfig {
         self.path.as_path()
     }
 
-    fn as_sdk_store_kind(&self) -> matrix_sdk::search_index::SearchIndexStoreKind {
+    pub(super) fn as_sdk_store_kind(&self) -> matrix_sdk::search_index::SearchIndexStoreKind {
         matrix_sdk::search_index::SearchIndexStoreKind::encrypted_directory_ngram(
             self.path.clone(),
             self.key.expose_key().to_owned(),
@@ -195,17 +203,23 @@ fn matrix_search_error_from_index(error: &IndexError) -> MatrixSearchError {
     }
 }
 
-#[test]
-fn search_index_store_config_uses_encrypted_ngram_index() {
-    let config = MatrixSearchIndexStoreConfig::new(
-        PathBuf::from("search-index"),
-        MatrixSearchIndexKey::new("synthetic-search-key"),
-    );
+#[cfg(test)]
+mod tests {
+    use super::{MatrixSearchIndexKey, MatrixSearchIndexStoreConfig};
 
-    let kind = config.as_sdk_store_kind();
+    use std::path::PathBuf;
+    #[test]
+    fn search_index_store_config_uses_encrypted_ngram_index() {
+        let config = MatrixSearchIndexStoreConfig::new(
+            PathBuf::from("search-index"),
+            MatrixSearchIndexKey::new("synthetic-search-key"),
+        );
 
-    assert!(matches!(
-        kind,
-        matrix_sdk::search_index::SearchIndexStoreKind::EncryptedDirectoryWithConfig(_, _, _)
-    ));
+        let kind = config.as_sdk_store_kind();
+
+        assert!(matches!(
+            kind,
+            matrix_sdk::search_index::SearchIndexStoreKind::EncryptedDirectoryWithConfig(_, _, _)
+        ));
+    }
 }

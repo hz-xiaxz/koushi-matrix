@@ -1,3 +1,5 @@
+use crate::{MatrixRoomListSnapshot, MatrixSearchCandidate, MatrixTimelineItem};
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RoomListSmokeReport {
     pub rooms: usize,
@@ -66,7 +68,7 @@ impl std::fmt::Display for RealAccountQaReport {
     }
 }
 
-pub fn room_list_smoke_report(snapshot: &super::MatrixRoomListSnapshot) -> RoomListSmokeReport {
+pub fn room_list_smoke_report(snapshot: &MatrixRoomListSnapshot) -> RoomListSmokeReport {
     RoomListSmokeReport {
         rooms: snapshot.rooms.len(),
         spaces: snapshot.spaces.len(),
@@ -81,7 +83,7 @@ pub fn room_list_smoke_report(snapshot: &super::MatrixRoomListSnapshot) -> RoomL
 
 pub fn timeline_smoke_report(
     selected_room_present: bool,
-    initial_items: &[super::MatrixTimelineItem],
+    initial_items: &[MatrixTimelineItem],
 ) -> TimelineSmokeReport {
     TimelineSmokeReport {
         selected_room_present,
@@ -90,27 +92,27 @@ pub fn timeline_smoke_report(
 }
 
 pub fn real_account_qa_report(
-    snapshot: &super::MatrixRoomListSnapshot,
+    snapshot: &MatrixRoomListSnapshot,
     selected_room_present: bool,
-    initial_items: &[super::MatrixTimelineItem],
+    initial_items: &[MatrixTimelineItem],
 ) -> RealAccountQaReport {
     real_account_qa_report_with_restore_state(snapshot, selected_room_present, initial_items, false)
 }
 
 pub fn restored_real_account_qa_report(
-    snapshot: &super::MatrixRoomListSnapshot,
+    snapshot: &MatrixRoomListSnapshot,
     selected_room_present: bool,
-    initial_items: &[super::MatrixTimelineItem],
+    initial_items: &[MatrixTimelineItem],
 ) -> RealAccountQaReport {
     real_account_qa_report_with_restore_state(snapshot, selected_room_present, initial_items, true)
 }
 
 pub fn real_account_qa_report_with_search(
-    snapshot: &super::MatrixRoomListSnapshot,
+    snapshot: &MatrixRoomListSnapshot,
     selected_room_present: bool,
-    initial_items: &[super::MatrixTimelineItem],
+    initial_items: &[MatrixTimelineItem],
     session_restored: bool,
-    search_candidates: &[super::MatrixSearchCandidate],
+    search_candidates: &[MatrixSearchCandidate],
 ) -> RealAccountQaReport {
     let mut report = real_account_qa_report_with_restore_state(
         snapshot,
@@ -124,7 +126,7 @@ pub fn real_account_qa_report_with_search(
 
 pub fn search_smoke_report(
     invoked: bool,
-    candidates: &[super::MatrixSearchCandidate],
+    candidates: &[MatrixSearchCandidate],
 ) -> SearchSmokeReport {
     SearchSmokeReport {
         invoked,
@@ -133,9 +135,9 @@ pub fn search_smoke_report(
 }
 
 fn real_account_qa_report_with_restore_state(
-    snapshot: &super::MatrixRoomListSnapshot,
+    snapshot: &MatrixRoomListSnapshot,
     selected_room_present: bool,
-    initial_items: &[super::MatrixTimelineItem],
+    initial_items: &[MatrixTimelineItem],
     session_restored: bool,
 ) -> RealAccountQaReport {
     RealAccountQaReport {

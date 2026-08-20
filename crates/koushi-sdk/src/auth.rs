@@ -1,10 +1,34 @@
-use crate::{MatrixClientSession, MatrixRoomOperationError};
-use koushi_state::{DelegatedAuthLinks, LoginFlow, LoginFlowKind};
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
-use std::{fmt, net::IpAddr};
+use crate::client_session::{build_client, oidc_client_registration_data};
+use crate::e2ee::install_room_key_diagnostic_observer;
+use crate::{MatrixClientSession, MatrixClientStoreConfig, logout};
+use koushi_state::{
+    AuthSecret, DelegatedAuthLinks, LoginFlow, LoginFlowKind, LoginRequest, SessionInfo,
+};
+use matrix_sdk::utils::UrlOrQuery;
+use serde::Deserialize;
+use std::{fmt, net::IpAddr, time::Duration};
 use thiserror::Error;
 use url::Url;
+
+const LOGIN_DISCOVERY_PATH: &str = "_matrix/client/v3/login";
+
+const WELL_KNOWN_CLIENT_PATH: &str = ".well-known/matrix/client";
+
+/// The well-known document is a nicety (account-management links); it must
+/// never delay login, so it gets a much shorter budget than flow discovery.
+const WELL_KNOWN_CLIENT_TIMEOUT: Duration = Duration::from_secs(3);
+
+const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub(super) const SYNC_INVITE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+pub(super) const SYNC_INVITE_PROBE_CONNECTION_ID: &str = "koushi-invite";
+
+pub(super) const SYNC_INVITE_PROBE_LIST_KEY: &str = "koushi_invites";
+
+pub(super) const MATRIX_ROOM_LIST_SNAPSHOT_LIMIT: usize = 4096;
+
+pub const LOCAL_USER_ALIASES_ACCOUNT_DATA_TYPE: &str = "app.koushi.local_aliases";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LoginDiscovery {
@@ -83,6 +107,31 @@ pub enum MatrixLoginFlowKind {
     Oidc,
     Token,
     Unknown(String),
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct MatrixDeviceSessionSummary {
+    pub raw_device_id: String,
+    pub display_name: Option<String>,
+    pub current: bool,
+    pub verified: bool,
+    pub inactive: bool,
+}
+
+impl fmt::Debug for MatrixDeviceSessionSummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatrixDeviceSessionSummary")
+            .field("raw_device_id", &"DeviceId(..)")
+            .field(
+                "display_name",
+                &self.display_name.as_ref().map(|_| "DeviceDisplayName(..)"),
+            )
+            .field("current", &self.current)
+            .field("verified", &self.verified)
+            .field("inactive", &self.inactive)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -184,6 +233,38 @@ pub enum LoginDiscoveryError {
 }
 
 #[derive(Debug, Error)]
+pub enum PasswordLoginError {
+    #[error(transparent)]
+    InvalidHomeserver(#[from] LoginDiscoveryError),
+    #[error("password login runtime failed: {0}")]
+    Runtime(String),
+    #[error("password login failed: {0}")]
+    Sdk(String),
+    #[error("SDK session is not available")]
+    MissingSession,
+    #[error("session serialization failed: {0}")]
+    Serialization(String),
+}
+
+#[derive(Deserialize)]
+struct LoginDiscoveryResponse {
+    flows: Vec<RawLoginFlow>,
+}
+
+#[derive(Deserialize)]
+struct RawLoginFlow {
+    #[serde(rename = "type")]
+    flow_type: String,
+    #[serde(default, rename = "org.matrix.msc3824.delegated_oidc_compatibility")]
+    delegated_oidc_compatibility: bool,
+    #[serde(default)]
+    display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MatrixErrorResponse {
+    error: Option<String>,
+}
 
 pub fn discover_login_flows(homeserver: &str) -> Result<LoginDiscovery, LoginDiscoveryError> {
     let homeserver = Homeserver::parse(homeserver)?;
@@ -258,8 +339,6 @@ pub fn logout_blocking(session: &MatrixClientSession) -> Result<(), PasswordLogi
 
     runtime.block_on(logout(session))
 }
-
-#[cfg(any(test, feature = "test-hooks", feature = "smoke"))]
 
 pub async fn login_with_password(
     request: &LoginRequest,

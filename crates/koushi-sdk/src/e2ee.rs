@@ -1,5 +1,27 @@
-// Extracted verbatim from the approved immutable lib.rs baseline.
-use super::*;
+#[cfg(test)]
+use crate::client_session::{
+    PersistableMatrixSession, desktop_client_builder_defaults, restore_session,
+};
+use crate::room_projection::matrix_room;
+use crate::{MatrixClientSession, MatrixDeviceSessionSummary, MatrixRoomOperationError};
+use futures_util::{Stream, StreamExt, stream};
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+#[cfg(test)]
+use koushi_state::SessionInfo;
+use koushi_state::{
+    AuthSecret, CrossSigningStatus, CurrentDeviceTrustState, CurrentSessionBackupState,
+    DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupRemoteOutcome, E2eeRecoveryState,
+    IdentityResetAuthRequest, IdentityResetAuthType, KeyBackupStatus, OwnIdentityVerification,
+    PendingKeyCountBucket, RecoveryRequest, SasEmoji, SecureBackupGateFailureKind,
+    SecureBackupGateState, VerificationAccountKind, VerificationGateState,
+    VerificationMethodCapability, VerificationTarget,
+};
+use matrix_sdk::ruma::{events::AnySyncTimelineEvent, serde::Raw};
+use matrix_sdk_base::crypto::CollectStrategy;
+use serde::{Deserialize, Serialize};
+use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::SystemTime};
+use thiserror::Error;
+use zeroize::Zeroizing;
 
 pub type CurrentDeviceTrustStream = Pin<Box<dyn Stream<Item = CurrentDeviceTrustState> + Send>>;
 
@@ -10,8 +32,6 @@ pub struct CurrentDeviceTrustObservation {
 
 pub type SecureBackupStateStream = Pin<Box<dyn Stream<Item = MatrixSecureBackupState> + Send>>;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct MatrixSecureBackupState {
@@ -26,15 +46,11 @@ pub struct MatrixSecureBackupStateObservation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("current-device trust recheck failed")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("current-device trust recheck failed")]
 pub enum CurrentDeviceTrustRecheckError {
     Sdk,
 }
 
-#[derive(
-    Clone, Eq, PartialEq, Serialize, Deserialize, Clone, Eq, PartialEq, Serialize, Deserialize,
-)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixCurrentSessionInspection {
     pub device_display_name: Option<String>,
     pub is_cross_signed_by_owner: bool,
@@ -60,9 +76,6 @@ impl std::fmt::Debug for MatrixCurrentSessionInspection {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case")]
 #[error("current-session inspection failed")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, thiserror::Error)]
-#[serde(rename_all = "snake_case")]
-#[error("current-session inspection failed")]
 pub enum MatrixCurrentSessionInspectionError {
     Unavailable,
     DeviceRequest,
@@ -72,16 +85,12 @@ pub enum MatrixCurrentSessionInspectionError {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum MatrixSecureBackupServerState {
     Unknown,
     Absent,
     Present,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MatrixSecureBackupLocalState {
@@ -97,8 +106,6 @@ pub enum MatrixSecureBackupLocalState {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum MatrixSecureBackupRecoveryState {
     Unknown,
     Disabled,
@@ -106,8 +113,6 @@ pub enum MatrixSecureBackupRecoveryState {
     Enabled,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MatrixSecureBackupUploadState {
@@ -119,30 +124,13 @@ pub enum MatrixSecureBackupUploadState {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum MatrixSecureBackupTrustState {
     Unknown,
     Mismatch,
     Trusted,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixSecureBackupInspection {
     pub server: MatrixSecureBackupServerState,
     pub local: MatrixSecureBackupLocalState,
@@ -219,8 +207,6 @@ impl MatrixSecureBackupInspection {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MatrixDeviceNameOutcome {
@@ -326,21 +312,21 @@ enum SecureBackupStateUpdate {
     Recovery(MatrixSecureBackupRecoveryState),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum IdentityFact {
     Existing,
     Missing,
     Unknown,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RecoveryFact {
     Available,
     Unavailable,
     Unknown,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct VerificationMethodFacts {
     identity: IdentityFact,
     verified_other_device_count: u64,
@@ -420,7 +406,7 @@ fn is_own_user_verification_recipient(
     candidate_device_id != current_device_id && cross_signed_by_owner
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct OwnUserSasDeviceFact {
     is_current: bool,
     cross_signed_by_owner: bool,
@@ -430,9 +416,7 @@ struct OwnUserSasDeviceFact {
     ed25519_key_present: bool,
 }
 
-#[derive(
-    Clone, Copy, Debug, Default, Eq, PartialEq, Clone, Copy, Debug, Default, Eq, PartialEq,
-)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct OwnUserSasRecipientDiagnostics {
     other_device_count: u64,
     recipient_count: u64,
@@ -535,7 +519,7 @@ fn record_recovery_verification_event(event: DiagnosticEvent) {
     koushi_diagnostics::record_and_stderr(event);
 }
 
-fn has_stale_authoritative_device_signature(
+pub(super) fn has_stale_authoritative_device_signature(
     inspection: &matrix_sdk::encryption::recovery::RecoveryDeviceSignatureInspection,
 ) -> bool {
     inspection.authoritative_self_signing_signature_present
@@ -579,7 +563,7 @@ fn secret_storage_error_kind(
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SignatureUploadFailureDiagnostics {
     signed_target_count: usize,
     signed_key_count: usize,
@@ -675,16 +659,41 @@ fn with_signature_upload_failure_diagnostics(
         ))
 }
 
+async fn record_recovery_cross_signing_status(
+    encryption: &matrix_sdk::encryption::Encryption,
+    stage: &'static str,
+) {
+    match encryption.cross_signing_status().await {
+        Some(status) => record_recovery_verification_event(
+            recovery_verification_event(stage)
+                .field(DiagnosticField::token("outcome", "found"))
+                .field(DiagnosticField::boolean("has_master", status.has_master))
+                .field(DiagnosticField::boolean(
+                    "has_self_signing",
+                    status.has_self_signing,
+                ))
+                .field(DiagnosticField::boolean(
+                    "has_user_signing",
+                    status.has_user_signing,
+                ))
+                .field(DiagnosticField::boolean("complete", status.is_complete())),
+        ),
+        None => record_recovery_verification_event(
+            recovery_verification_event(stage).field(DiagnosticField::token("outcome", "missing")),
+        ),
+    }
+}
+
 pub type E2eeRecoveryStateStream = Pin<Box<dyn Stream<Item = E2eeRecoveryState> + Send>>;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MatrixCrossSigningStatus {
     pub has_master: bool,
     pub has_self_signing: bool,
     pub has_user_signing: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MatrixIdentityResetAuthType {
     Uiaa,
     OAuth,
@@ -771,7 +780,7 @@ impl fmt::Debug for IdentityResetOutcome {
     }
 }
 
-#[derive(Clone, Clone)]
+#[derive(Clone)]
 pub struct MatrixVerificationRequestHandle {
     inner: matrix_sdk::encryption::verification::VerificationRequest,
 }
@@ -799,7 +808,7 @@ impl MatrixVerificationRequestHandle {
     }
 }
 
-#[derive(Clone, Clone)]
+#[derive(Clone)]
 pub struct MatrixOwnUserVerificationHandle {
     request: MatrixVerificationRequestHandle,
     eligible_device_count: u64,
@@ -828,7 +837,7 @@ impl MatrixOwnUserVerificationHandle {
     }
 }
 
-#[derive(Clone, Clone)]
+#[derive(Clone)]
 pub struct MatrixIncomingVerificationRequest {
     target: VerificationTarget,
     handle: MatrixVerificationRequestHandle,
@@ -911,7 +920,7 @@ impl Drop for MatrixIncomingVerificationRequestObserver {
     }
 }
 
-#[derive(Clone, Clone)]
+#[derive(Clone)]
 pub struct MatrixSasVerificationHandle {
     inner: matrix_sdk::encryption::verification::SasVerification,
 }
@@ -944,7 +953,7 @@ pub type MatrixVerificationRequestStateStream =
 
 pub type MatrixSasStateStream = Pin<Box<dyn Stream<Item = MatrixSasState> + Send>>;
 
-#[derive(Clone, Debug, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum MatrixVerificationRequestState {
     Created,
     Requested,
@@ -970,7 +979,7 @@ fn verification_request_state_token(state: &MatrixVerificationRequestState) -> &
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MatrixVerificationCancelKind {
     UnknownMethod,
     KeyMismatch,
@@ -991,7 +1000,7 @@ fn map_verification_cancel_kind(code: &str) -> MatrixVerificationCancelKind {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MatrixSasState {
     Created,
     Started,
@@ -1008,12 +1017,12 @@ pub enum MatrixSasState {
     UnsupportedShortAuth,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KeyBackupRestoreScope {
     JoinedRooms,
 }
 
-#[derive(Clone, Eq, PartialEq, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct KeyBackupRestoreSummary {
     pub scope: KeyBackupRestoreScope,
     pub version: Option<String>,
@@ -1036,23 +1045,23 @@ impl fmt::Debug for KeyBackupRestoreSummary {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RoomKeyExportSummary {
     pub exported_sessions: Option<u64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RoomKeyImportSummary {
     pub imported_count: u64,
     pub total_count: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SecureBackupSetupSummary {
     pub recovery_key_written: bool,
 }
 
-#[derive(Clone, Eq, Error, PartialEq, Clone, Eq, Error, PartialEq)]
+#[derive(Clone, Eq, Error, PartialEq)]
 pub enum E2eeTrustError {
     #[error("Matrix encryption is not initialized")]
     NoOlmMachine,
@@ -1072,7 +1081,7 @@ pub enum E2eeTrustError {
     Sdk(String),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum E2eeTrustFailureKind {
     Network,
     Forbidden,
@@ -1081,7 +1090,7 @@ pub enum E2eeTrustFailureKind {
     Sdk,
 }
 
-#[derive(thiserror::Error, thiserror::Error)]
+#[derive(thiserror::Error)]
 pub enum DeleteDevicesError {
     #[error("interactive authentication required")]
     UiaaChallenge { session: Option<String> },
@@ -1089,7 +1098,7 @@ pub enum DeleteDevicesError {
     Sdk(String),
 }
 
-#[derive(Clone, Eq, PartialEq, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum MatrixDeviceCleanupOutcome {
     Settled(DeviceCleanupRemoteOutcome),
     UiaaRequired { session: Option<String> },
@@ -1409,7 +1418,7 @@ pub async fn download_joined_room_keys_from_backup(
 
 /// Closed token for an `m.room_key.withheld` code observed for a session
 /// (issue #460). Only the codes retained by the SDK store are correlatable.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MatrixRoomKeyWithheldCode {
     Blacklisted,
     Unverified,
@@ -1434,7 +1443,6 @@ impl MatrixRoomKeyWithheldCode {
 /// app-owned tokens. Never exposes raw SDK content. The broadcast
 /// subscription is established eagerly (before the caller reads the stored
 /// snapshot) so observations cannot fall into a snapshot/subscription gap.
-
 pub async fn room_key_withheld_stream(
     session: &MatrixClientSession,
 ) -> impl futures_util::Stream<Item = Vec<(String, String, MatrixRoomKeyWithheldCode)>> + use<> {
@@ -1483,7 +1491,6 @@ fn withheld_code_from_sdk(
 
 /// Stored `m.room_key.withheld` codes for a room (issue #460), mapped to
 /// closed tokens keyed by session id.
-
 pub async fn room_key_withheld_codes(
     session: &MatrixClientSession,
     room_id: &str,
@@ -1513,7 +1520,6 @@ pub async fn room_key_withheld_codes(
 
 /// Whether the local crypto store already holds an inbound group session for
 /// the given room + Megolm session (issue #478 local recovery source).
-
 pub async fn has_inbound_group_session(
     session: &MatrixClientSession,
     room_id: &str,
@@ -1546,7 +1552,6 @@ pub async fn download_room_key_from_backup(
 }
 
 #[cfg(not(target_family = "wasm"))]
-#[cfg(not(target_family = "wasm"))]
 pub async fn export_room_keys_to_file(
     session: &MatrixClientSession,
     path: PathBuf,
@@ -1562,7 +1567,6 @@ pub async fn export_room_keys_to_file(
     })
 }
 
-#[cfg(not(target_family = "wasm"))]
 #[cfg(not(target_family = "wasm"))]
 pub async fn import_room_keys_from_file(
     session: &MatrixClientSession,
@@ -1699,7 +1703,6 @@ pub async fn complete_identity_reset(
 }
 
 /// Threshold after which a device is considered inactive (90 days).
-
 const INACTIVE_DEVICE_THRESHOLD_DAYS: u64 = 90;
 
 pub async fn list_devices(
@@ -1881,20 +1884,43 @@ fn device_cleanup_auth_data(
     ))
 }
 
+fn delete_devices_auth_data(
+    session: &MatrixClientSession,
+    auth: Option<&IdentityResetAuthRequest>,
+    uiaa_session: Option<&str>,
+) -> Option<matrix_sdk::ruma::api::client::uiaa::AuthData> {
+    let IdentityResetAuthRequest::UiaaPassword { password } = auth? else {
+        return None;
+    };
+    let identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::Matrix(
+        matrix_sdk::ruma::api::client::uiaa::MatrixUserIdentifier::new(
+            session.info.user_id.clone(),
+        ),
+    );
+    let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(
+        identifier,
+        password.expose_secret().to_owned(),
+    );
+    password_auth.session = uiaa_session.map(str::to_owned);
+    Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(
+        password_auth,
+    ))
+}
+
 #[cfg(test)]
 mod device_cleanup_tests {
     use matrix_sdk::ruma::api::error::{ErrorKind, UnknownTokenErrorData};
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
     use serde_json::json;
     use wiremock::{
-        matchers::{body_json, method, path_regex},
         Mock, ResponseTemplate,
+        matchers::{body_json, method, path_regex},
     };
 
     use super::{
-        classify_device_cleanup_http_fact, cleanup_current_device, cleanup_oauth_session,
         DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupRemoteOutcome,
         MatrixClientSession, MatrixDeviceCleanupOutcome, SessionInfo,
+        classify_device_cleanup_http_fact, cleanup_current_device, cleanup_oauth_session,
     };
 
     async fn session_for(server: &MatrixMockServer) -> MatrixClientSession {
@@ -2119,6 +2145,117 @@ mod device_cleanup_tests {
 }
 
 #[derive(thiserror::Error)]
+pub enum AccountManagementError {
+    #[error("interactive authentication required")]
+    UiaaChallenge { session: Option<String> },
+    #[error("Matrix SDK account management failed")]
+    Sdk(String),
+}
+
+impl fmt::Debug for AccountManagementError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UiaaChallenge { session } => formatter
+                .debug_struct("UiaaChallenge")
+                .field("session", &session.as_ref().map(|_| "SessionId(..)"))
+                .finish(),
+            Self::Sdk(_) => formatter.write_str("Sdk(..)"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AccountManagementCapabilities {
+    pub change_password: bool,
+}
+
+pub async fn account_management_capabilities(
+    session: &MatrixClientSession,
+) -> AccountManagementCapabilities {
+    let change_password = session
+        .client()
+        .homeserver_capabilities()
+        .can_change_password()
+        .await
+        .ok()
+        .unwrap_or(true);
+    AccountManagementCapabilities { change_password }
+}
+
+pub async fn change_password(
+    session: &MatrixClientSession,
+    new_password: &AuthSecret,
+    auth: Option<&IdentityResetAuthRequest>,
+    uiaa_session: Option<&str>,
+) -> Result<(), AccountManagementError> {
+    let auth_data = account_management_auth_data(session, auth, uiaa_session);
+    match session
+        .client()
+        .account()
+        .change_password(new_password.expose_secret(), auth_data)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            if let Some(uiaa) = error.as_uiaa_response() {
+                Err(AccountManagementError::UiaaChallenge {
+                    session: uiaa.session.clone(),
+                })
+            } else {
+                Err(AccountManagementError::Sdk(error.to_string()))
+            }
+        }
+    }
+}
+
+pub async fn deactivate_account(
+    session: &MatrixClientSession,
+    erase_data: bool,
+    auth: Option<&IdentityResetAuthRequest>,
+    uiaa_session: Option<&str>,
+) -> Result<(), AccountManagementError> {
+    let auth_data = account_management_auth_data(session, auth, uiaa_session);
+    match session
+        .client()
+        .account()
+        .deactivate(None, auth_data, erase_data)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            if let Some(uiaa) = error.as_uiaa_response() {
+                Err(AccountManagementError::UiaaChallenge {
+                    session: uiaa.session.clone(),
+                })
+            } else {
+                Err(AccountManagementError::Sdk(error.to_string()))
+            }
+        }
+    }
+}
+
+fn account_management_auth_data(
+    session: &MatrixClientSession,
+    auth: Option<&IdentityResetAuthRequest>,
+    uiaa_session: Option<&str>,
+) -> Option<matrix_sdk::ruma::api::client::uiaa::AuthData> {
+    let IdentityResetAuthRequest::UiaaPassword { password } = auth? else {
+        return None;
+    };
+    let identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::Matrix(
+        matrix_sdk::ruma::api::client::uiaa::MatrixUserIdentifier::new(
+            session.info.user_id.clone(),
+        ),
+    );
+    let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(
+        identifier,
+        password.expose_secret().to_owned(),
+    );
+    password_auth.session = uiaa_session.map(str::to_owned);
+    Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(
+        password_auth,
+    ))
+}
 
 pub async fn request_device_verification(
     session: &MatrixClientSession,
@@ -2536,7 +2673,6 @@ pub fn map_backup_state_to_desktop(
 }
 
 #[cfg(test)]
-#[cfg(test)]
 mod secure_backup_inspection_tests {
     use koushi_state::{PendingKeyCountBucket, SecureBackupGateFailureKind, SecureBackupGateState};
 
@@ -2783,14 +2919,24 @@ mod secure_backup_inspection_tests {
 }
 
 #[cfg(test)]
-#[cfg(test)]
 mod e2ee_trust_tests {
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+    use super::{
+        E2eeTrustError, IdentityFact, KeyBackupRestoreScope, KeyBackupRestoreSummary,
+        MatrixCrossSigningStatus, MatrixDeviceSessionSummary, MatrixIdentityResetAuthType,
+        MatrixIncomingVerificationRequest, MatrixIncomingVerificationRequestObserver,
+        PersistableMatrixSession, RecoveryFact, RoomKeyExportSummary, RoomKeyImportSummary,
+        SecureBackupSetupSummary, VerificationMethodFacts, accept_sas_verification,
+        accept_verification_request, bootstrap_cross_signing, bootstrap_secure_backup,
+        cancel_sas_verification, cancel_verification_request, change_secure_backup_passphrase,
+        complete_identity_reset, confirm_sas_verification, cross_signing_status, delete_devices,
+        enable_key_backup, export_room_keys_to_file, forward_incoming_verification_deliveries,
+        import_room_keys_from_file, list_devices, map_backup_state_to_desktop,
+        map_cross_signing_status_to_desktop, map_identity_reset_auth_type_to_desktop,
+        map_sdk_sas_emojis_to_desktop, map_sdk_verification_state, map_verification_method_facts,
+        mismatch_sas_verification, observe_incoming_verification_requests, rename_device,
+        request_device_verification, reset_identity, restore_key_backup, restore_session,
+        start_sas_verification, write_recovery_key_if_requested,
     };
-    use std::time::Duration;
-
     use futures_util::stream;
     use koushi_state::{
         AuthSecret, CrossSigningStatus, CurrentDeviceTrustState, IdentityResetAuthType,
@@ -2803,29 +2949,13 @@ mod e2ee_trust_tests {
         test_utils::mocks::MatrixMockServer,
     };
     use serde_json::json;
-
-    use super::{
-        accept_sas_verification, accept_verification_request, bootstrap_cross_signing,
-        bootstrap_secure_backup, cancel_sas_verification, cancel_verification_request,
-        change_secure_backup_passphrase, complete_identity_reset, confirm_sas_verification,
-        cross_signing_status, delete_devices, enable_key_backup, export_room_keys_to_file,
-        forward_incoming_verification_deliveries, import_room_keys_from_file, list_devices,
-        map_backup_state_to_desktop, map_cross_signing_status_to_desktop,
-        map_identity_reset_auth_type_to_desktop, map_sdk_sas_emojis_to_desktop,
-        map_sdk_verification_state, map_verification_method_facts, mismatch_sas_verification,
-        observe_incoming_verification_requests, rename_device, request_device_verification,
-        reset_identity, restore_key_backup, restore_session, start_sas_verification,
-        write_recovery_key_if_requested, E2eeTrustError, IdentityFact, KeyBackupRestoreScope,
-        KeyBackupRestoreSummary, MatrixCrossSigningStatus, MatrixDeviceSessionSummary,
-        MatrixIdentityResetAuthType, MatrixIncomingVerificationRequest,
-        MatrixIncomingVerificationRequestObserver, PersistableMatrixSession, RecoveryFact,
-        RoomKeyExportSummary, RoomKeyImportSummary, SecureBackupSetupSummary,
-        VerificationMethodFacts,
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     };
-
+    use std::time::Duration;
     const MATRIX_KEY_EXPORT_HEADER: &str = "-----BEGIN MEGOLM SESSION DATA-----";
     const MATRIX_KEY_EXPORT_FOOTER: &str = "-----END MEGOLM SESSION DATA-----";
-
     struct FakeIncomingDelivery {
         id: u8,
         product: Option<u8>,
@@ -2833,7 +2963,6 @@ mod e2ee_trust_tests {
         commits: Arc<Mutex<Vec<u8>>>,
         uncommitted_drops: Arc<Mutex<Vec<u8>>>,
     }
-
     impl Drop for FakeIncomingDelivery {
         fn drop(&mut self) {
             if !self.committed {
@@ -2856,7 +2985,6 @@ SwfvzBS6CjfAG+FOugpV48o7+XetaUUPZ6/tZSPhCdeV8eP9q5r0QwWeXFogzoNzWt4HYx9\n\
 MdXxzD+f0mtg5gzehrrEEARwI2bCvPpHxlt/Na9oW/GBpkjwR1LSKgg4CtpRyWngPjdEKpZ\n\
 GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
 -----END MEGOLM SESSION DATA-----";
-
     #[tokio::test]
     async fn incoming_verification_observer_shutdown_joins_typed_delivery_task() {
         let persistable = PersistableMatrixSession::from_json(
@@ -2877,7 +3005,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
 
         assert!(abort_handle.is_finished());
     }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancelled_incoming_observer_shutdown_retains_inner_task_ownership() {
         struct TaskAlive(Arc<AtomicBool>);
@@ -2934,7 +3061,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         observer.shutdown().await;
         assert!(!alive.load(Ordering::SeqCst));
     }
-
     #[tokio::test]
     async fn terminal_incoming_head_is_committed_before_actionable_tail() {
         let commits = Arc::new(Mutex::new(Vec::new()));
@@ -2963,7 +3089,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert_eq!(*commits.lock().unwrap(), vec![1, 2]);
         assert!(uncommitted_drops.lock().unwrap().is_empty());
     }
-
     #[tokio::test]
     async fn actionable_incoming_delivery_commits_only_after_product_send_success() {
         let commits = Arc::new(Mutex::new(Vec::new()));
@@ -2992,7 +3117,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert!(commits.lock().unwrap().is_empty());
         assert_eq!(*uncommitted_drops.lock().unwrap(), vec![1]);
     }
-
     #[tokio::test]
     async fn verification_raw_redelivery_reuses_the_same_product_flow_identity() {
         let server = MatrixMockServer::new().await;
@@ -3061,7 +3185,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             .expect("raw redelivery should remain observable");
         assert_eq!(repeated.handle().flow_id(), first.handle().flow_id());
     }
-
     #[test]
     fn cross_signing_status_maps_to_private_data_free_desktop_status() {
         assert_eq!(
@@ -3085,7 +3208,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             CrossSigningStatus::NotTrusted
         );
     }
-
     #[test]
     fn current_device_trust_maps_all_sdk_verification_states() {
         use matrix_sdk::encryption::VerificationState;
@@ -3103,7 +3225,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             CurrentDeviceTrustState::Unverified
         );
     }
-
     #[test]
     fn verification_method_discovery_distinguishes_identity_facts() {
         let existing_with_sas = map_verification_method_facts(VerificationMethodFacts {
@@ -3187,7 +3308,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             VerificationAccountKind::Unknown
         );
     }
-
     #[test]
     fn own_user_proof_eligibility_requires_distinct_owner_signed_unblocked_device() {
         assert!(super::is_eligible_own_user_proof_device(
@@ -3203,7 +3323,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             "CURRENT", "OTHER", true, true
         ));
     }
-
     #[test]
     fn own_user_request_recipient_requires_a_distinct_owner_signed_device() {
         assert!(super::is_own_user_verification_recipient(
@@ -3216,7 +3335,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             "CURRENT", "OTHER", false
         ));
     }
-
     #[test]
     fn own_user_sas_recipient_diagnostics_distinguish_sender_and_interactive_targets() {
         use super::OwnUserSasDeviceFact as Fact;
@@ -3273,7 +3391,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert_eq!(diagnostics.interactive_recipient_count, 1);
         assert_eq!(diagnostics.dehydrated_recipient_count, 1);
     }
-
     #[test]
     fn sas_delivery_event_contains_only_closed_private_safe_fields() {
         let event = super::sas_delivery_event("recipients_resolved", 41)
@@ -3291,7 +3408,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             "stage=recipients_resolved flow_id=41 other_device_count=3 recipient_count=1"
         );
     }
-
     #[test]
     fn sas_delivery_waiting_event_identifies_private_safe_wait_state() {
         let event = super::sas_delivery_waiting_event(43, "to_device_delivery");
@@ -3301,7 +3417,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             "stage=waiting flow_id=43 waiting_for=to_device_delivery"
         );
     }
-
     #[test]
     fn sas_recipients_resolved_event_includes_sender_readiness_without_identifiers() {
         let event = super::sas_recipients_resolved_event(
@@ -3323,7 +3438,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             "stage=recipients_resolved flow_id=42 other_device_count=9 recipient_count=6 eligible_device_count=6 sender_device_query_visible=true sender_curve_key_present=true sender_ed25519_key_present=true interactive_recipient_count=5 dehydrated_recipient_count=1"
         );
     }
-
     #[test]
     fn verification_cancel_codes_map_to_closed_private_safe_categories() {
         use super::MatrixVerificationCancelKind as Kind;
@@ -3350,7 +3464,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             Kind::Other
         );
     }
-
     #[test]
     fn sas_cancellation_maps_to_closed_private_safe_projection() {
         use super::{MatrixSasState as SasState, MatrixVerificationCancelKind as CancelKind};
@@ -3378,14 +3491,12 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         );
         assert!(!format!("{unknown:?}").contains("future_private_code"));
     }
-
     #[test]
     fn own_user_sas_api_returns_only_an_opaque_adapter_handle() {
         let _ = super::request_own_user_sas_verification;
         let _opaque: Option<super::MatrixOwnUserVerificationHandle> = None;
         assert!(!std::any::type_name::<super::MatrixOwnUserVerificationHandle>().contains('@'));
     }
-
     #[test]
     fn key_backup_state_maps_to_private_data_free_desktop_status() {
         assert_eq!(
@@ -3408,7 +3519,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             }
         );
     }
-
     #[test]
     fn e2ee_trust_error_debug_redacts_sdk_details() {
         let error = E2eeTrustError::Sdk("raw matrix sdk error with @alice:example.test".to_owned());
@@ -3418,7 +3528,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert!(!debug.contains("raw matrix sdk error"));
         assert!(debug.contains("Sdk"));
     }
-
     #[test]
     fn key_backup_restore_summary_declares_joined_room_scope() {
         let summary = KeyBackupRestoreSummary {
@@ -3433,7 +3542,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert!(!debug.contains("BackupWide"));
         assert!(!debug.contains("AllRooms"));
     }
-
     #[test]
     fn device_session_summary_is_private_data_free() {
         let summary = MatrixDeviceSessionSummary {
@@ -3452,7 +3560,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert!(debug.contains("verified"));
         assert!(debug.contains("inactive"));
     }
-
     #[test]
     fn room_key_file_transfer_summaries_are_private_data_free() {
         let export_summary = RoomKeyExportSummary {
@@ -3469,7 +3576,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert!(!format!("{export_summary:?}").contains("MEGOLM"));
         assert!(!format!("{import_summary:?}").contains("MEGOLM"));
     }
-
     #[test]
     fn secure_backup_setup_summary_is_private_data_free() {
         let summary = SecureBackupSetupSummary {
@@ -3480,7 +3586,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         assert!(debug.contains("recovery_key_written"));
         assert!(!debug.contains("RecoveryKey("));
     }
-
     #[test]
     fn recovery_key_delivery_writes_native_artifact_without_debugging_material() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3508,7 +3613,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             );
         }
     }
-
     #[test]
     fn recovery_key_delivery_refuses_to_overwrite_an_existing_artifact() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3527,7 +3631,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             "keep-me"
         );
     }
-
     #[tokio::test]
     async fn room_key_import_accepts_element_compatible_key_export_envelope() {
         assert!(ELEMENT_COMPATIBLE_KEY_EXPORT.starts_with(MATRIX_KEY_EXPORT_HEADER));
@@ -3550,7 +3653,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
 
         assert_eq!(summary.total_count, 1);
     }
-
     #[test]
     fn e2ee_trust_public_async_api_is_exposed() {
         let _ = cross_signing_status;
@@ -3578,7 +3680,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         let _: Option<MatrixIncomingVerificationRequest> = None;
         let _: Option<MatrixIncomingVerificationRequestObserver> = None;
     }
-
     #[test]
     fn sas_emojis_map_to_desktop_dto_without_sdk_types() {
         let emojis = [
@@ -3646,7 +3747,6 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             ]
         );
     }
-
     #[test]
     fn identity_reset_auth_type_maps_to_private_data_free_desktop_status() {
         assert_eq!(
@@ -3658,49 +3758,317 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
             IdentityResetAuthType::OAuth
         );
     }
+}
 
-    #[test]
-    fn matrix_client_store_config_uses_the_required_key_for_sqlite_builder() {
-        let source = include_str!("lib.rs");
-        let impl_marker = concat!("impl ", "MatrixClientStoreConfig");
-        let debug_impl_marker = concat!("impl fmt::Debug for ", "MatrixClientStoreConfig");
-        let apply_marker = concat!(
-            "fn ",
-            "apply_to_builder(&self, builder: matrix_sdk::ClientBuilder)"
-        );
-        let config_impl = source
-            .split(impl_marker)
-            .nth(1)
-            .expect("MatrixClientStoreConfig impl");
-        let impl_body = source
-            .split(impl_marker)
-            .nth(1)
-            .expect("MatrixClientStoreConfig impl")
-            .split(debug_impl_marker)
-            .next()
-            .expect("MatrixClientStoreConfig impl body")
-            .split(apply_marker)
-            .nth(1)
-            .expect("apply_to_builder body");
+pub(super) const DESKTOP_SQLITE_STORE_POOL_MAX_SIZE: usize = 4;
 
-        assert!(
-            config_impl.contains(apply_marker),
-            "MatrixClientStoreConfig must keep apply_to_builder"
-        );
-        assert!(
-            impl_body.contains(".key(Some(self.key.expose_key()))"),
-            "apply_to_builder must pass the required MatrixClientStoreKey into sqlite_store"
-        );
-        assert!(
-            impl_body.contains(".pool_max_size(DESKTOP_SQLITE_STORE_POOL_MAX_SIZE)"),
-            "apply_to_builder must cap SDK SQLite pools so packaged macOS apps do not exhaust the default 256 file descriptor soft limit"
+impl MatrixClientSession {
+    pub fn e2ee_recovery_state(&self) -> E2eeRecoveryState {
+        map_sdk_recovery_state(self.client().encryption().recovery().state())
+    }
+    pub fn e2ee_recovery_state_stream(&self) -> E2eeRecoveryStateStream {
+        Box::pin(
+            self.client()
+                .encryption()
+                .recovery()
+                .state_stream()
+                .map(map_sdk_recovery_state),
+        )
+    }
+    /// Update the SDK send-queue admission latch for encrypted events. The
+    /// durability fence remains enabled independently for the whole session.
+    pub fn set_secure_backup_send_admitted(&self, admitted: bool) {
+        self.client()
+            .send_queue()
+            .set_secure_backup_send_admitted(admitted);
+    }
+    pub fn observe_secure_backup_state(&self) -> MatrixSecureBackupStateObservation {
+        let encryption = self.client().encryption();
+        let backups = encryption.backups();
+        let recovery = encryption.recovery();
+        let current = MatrixSecureBackupState {
+            backup: map_secure_backup_local_state(backups.state()),
+            recovery: map_secure_backup_recovery_state(recovery.state()),
+        };
+
+        let backup_updates = backups.state_stream().map(|state| {
+            SecureBackupStateUpdate::Backup(
+                state
+                    .map(map_secure_backup_local_state)
+                    .unwrap_or(MatrixSecureBackupLocalState::Unknown),
+            )
+        });
+        let recovery_updates = recovery.state_stream().map(|state| {
+            SecureBackupStateUpdate::Recovery(map_secure_backup_recovery_state(state))
+        });
+        let updates = stream::select(backup_updates, recovery_updates).scan(
+            (current.backup, current.recovery),
+            |state, update| {
+                match update {
+                    SecureBackupStateUpdate::Backup(backup) => state.0 = backup,
+                    SecureBackupStateUpdate::Recovery(recovery) => state.1 = recovery,
+                }
+                futures_util::future::ready(Some(MatrixSecureBackupState {
+                    backup: state.0,
+                    recovery: state.1,
+                }))
+            },
         );
 
-        let config = crate::MatrixClientStoreConfig::new(
-            "/tmp/example-store",
-            crate::MatrixClientStoreKey::new([7; 32]),
+        MatrixSecureBackupStateObservation {
+            current,
+            updates: Box::pin(updates),
+        }
+    }
+    pub fn current_device_trust(&self) -> CurrentDeviceTrustState {
+        let subscriber = self.client().encryption().verification_state();
+        map_sdk_verification_state(subscriber.get())
+    }
+    pub async fn recheck_current_device_trust(
+        &self,
+    ) -> Result<CurrentDeviceTrustState, CurrentDeviceTrustRecheckError> {
+        // Subscribe before the request so the returned value belongs to the
+        // same observation that sees the own-user keys-query settlement.
+        let subscriber = self.client().encryption().verification_state();
+        let client = self.client();
+        let user_id = client
+            .user_id()
+            .ok_or(CurrentDeviceTrustRecheckError::Sdk)?;
+        client
+            .encryption()
+            .request_user_identity(user_id)
+            .await
+            .map_err(|_| CurrentDeviceTrustRecheckError::Sdk)?;
+        Ok(map_sdk_verification_state(subscriber.get()))
+    }
+    pub async fn inspect_current_session(
+        &self,
+    ) -> Result<MatrixCurrentSessionInspection, MatrixCurrentSessionInspectionError> {
+        let client = self.client();
+        let user_id = client
+            .user_id()
+            .ok_or(MatrixCurrentSessionInspectionError::Unavailable)?;
+        let device_id = client
+            .device_id()
+            .ok_or(MatrixCurrentSessionInspectionError::Unavailable)?;
+
+        let devices = client
+            .devices()
+            .await
+            .map_err(|_| MatrixCurrentSessionInspectionError::DeviceRequest)?;
+        let current_device = devices
+            .devices
+            .into_iter()
+            .find(|device| device.device_id == device_id)
+            .ok_or(MatrixCurrentSessionInspectionError::CurrentDeviceMissing)?;
+
+        let encryption = client.encryption();
+        let own_identity = encryption
+            .request_user_identity(user_id)
+            .await
+            .map_err(|_| MatrixCurrentSessionInspectionError::IdentityRequest)?;
+        let current_crypto_device = encryption
+            .get_device(user_id, device_id)
+            .await
+            .map_err(|_| MatrixCurrentSessionInspectionError::IdentityRequest)?;
+        let is_cross_signed_by_owner = current_crypto_device
+            .as_ref()
+            .is_some_and(|device| device.is_cross_signed_by_owner());
+        let own_identity_verification = classify_own_identity_verification(
+            own_identity.is_some(),
+            own_identity
+                .as_ref()
+                .is_some_and(|identity| identity.is_verified()),
         );
-        assert!(config.encrypted_at_rest_configured());
+
+        let backups = encryption.backups();
+        let local_backup_state = backups.state();
+        let server_probe =
+            if local_backup_state == matrix_sdk::encryption::backups::BackupState::Enabled {
+                Ok(true)
+            } else {
+                backups.fetch_exists_on_server().await.map_err(|_| ())
+            };
+
+        Ok(MatrixCurrentSessionInspection {
+            device_display_name: current_device.display_name,
+            is_cross_signed_by_owner,
+            own_identity_verification,
+            key_backup: classify_current_session_backup(local_backup_state, server_probe),
+        })
+    }
+    pub async fn inspect_secure_backup(
+        &self,
+    ) -> Result<MatrixSecureBackupInspection, E2eeTrustError> {
+        let encryption = self.client().encryption();
+        let backups = encryption.backups();
+        let (server, trust) = match backups.inspect_server_trust().await {
+            Ok(matrix_sdk::encryption::backups::ServerBackupTrust::Absent) => (
+                MatrixSecureBackupServerState::Absent,
+                MatrixSecureBackupTrustState::Unknown,
+            ),
+            Ok(matrix_sdk::encryption::backups::ServerBackupTrust::Trusted) => (
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupTrustState::Trusted,
+            ),
+            Ok(matrix_sdk::encryption::backups::ServerBackupTrust::Mismatch) => (
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupTrustState::Mismatch,
+            ),
+            Ok(
+                matrix_sdk::encryption::backups::ServerBackupTrust::MissingLocalKey
+                | matrix_sdk::encryption::backups::ServerBackupTrust::Untrusted,
+            ) => (
+                MatrixSecureBackupServerState::Present,
+                MatrixSecureBackupTrustState::Unknown,
+            ),
+            Err(_) => (
+                MatrixSecureBackupServerState::Unknown,
+                MatrixSecureBackupTrustState::Unknown,
+            ),
+        };
+        let local_sdk_state = backups.state();
+        let local = map_secure_backup_local_state(local_sdk_state);
+        let recovery_api = encryption.recovery();
+        let recovery = match map_secure_backup_recovery_state(recovery_api.state()) {
+            MatrixSecureBackupRecoveryState::Disabled => {
+                match recovery_api.is_explicitly_disabled().await {
+                    Ok(true) => MatrixSecureBackupRecoveryState::Disabled,
+                    Ok(false) | Err(_) => MatrixSecureBackupRecoveryState::Unknown,
+                }
+            }
+            state => state,
+        };
+        let upload = if local_sdk_state == matrix_sdk::encryption::backups::BackupState::Enabled
+            && trust == MatrixSecureBackupTrustState::Trusted
+        {
+            match backups.wait_for_steady_state().await {
+                Ok(()) => MatrixSecureBackupUploadState::Settled,
+                Err(_) => MatrixSecureBackupUploadState::Failed,
+            }
+        } else {
+            MatrixSecureBackupUploadState::Unknown
+        };
+        Ok(MatrixSecureBackupInspection {
+            server,
+            local,
+            recovery,
+            upload,
+            trust,
+            recovery_key_delivery_pending: self.recovery_key_delivery_pending().await?,
+        })
+    }
+    pub async fn recover_secure_backup(
+        &self,
+        request: &RecoveryRequest,
+    ) -> Result<(), E2eeTrustError> {
+        self.client()
+            .encryption()
+            .recovery()
+            .recover(request.secret.expose_secret())
+            .await?;
+        self.wait_for_secure_backup_steady_state().await
+    }
+    pub async fn setup_secure_backup(
+        &self,
+        passphrase: Option<&AuthSecret>,
+        recovery_key_destination_path: Option<PathBuf>,
+    ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+        self.setup_secure_backup_with_confirmation(passphrase, recovery_key_destination_path, false)
+            .await
+    }
+    pub async fn reenable_secure_backup(
+        &self,
+        passphrase: Option<&AuthSecret>,
+        recovery_key_destination_path: Option<PathBuf>,
+    ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+        self.setup_secure_backup_with_confirmation(passphrase, recovery_key_destination_path, true)
+            .await
+    }
+    async fn setup_secure_backup_with_confirmation(
+        &self,
+        passphrase: Option<&AuthSecret>,
+        recovery_key_destination_path: Option<PathBuf>,
+        explicit_reenable_confirmed: bool,
+    ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+        let inspection = self.inspect_secure_backup().await?;
+        if inspection.recommended_gate_state()
+            == SecureBackupGateState::ExplicitlyDisabledRequiresSetup
+            && !explicit_reenable_confirmed
+        {
+            return Err(E2eeTrustError::SecureBackupReenableConfirmationRequired);
+        }
+        match inspection.server {
+            MatrixSecureBackupServerState::Absent => {}
+            MatrixSecureBackupServerState::Present => {
+                if inspection.local == MatrixSecureBackupLocalState::Enabled
+                    && inspection.trust == MatrixSecureBackupTrustState::Trusted
+                {
+                    let recovery_key = self
+                        .client()
+                        .encryption()
+                        .backups()
+                        .local_recovery_key()
+                        .await?
+                        .ok_or(E2eeTrustError::SecureBackupInspectionInconclusive)?;
+                    let summary = SecureBackupSetupSummary {
+                        recovery_key_written: write_recovery_key_material(
+                            &recovery_key,
+                            recovery_key_destination_path,
+                        )?,
+                    };
+                    self.set_recovery_key_delivery_pending(false).await?;
+                    return Ok(summary);
+                }
+                return Err(E2eeTrustError::SecureBackupAlreadyExists);
+            }
+            MatrixSecureBackupServerState::Unknown => {
+                return Err(E2eeTrustError::SecureBackupInspectionInconclusive);
+            }
+        }
+
+        self.set_recovery_key_delivery_pending(true).await?;
+        let summary =
+            bootstrap_secure_backup(self, passphrase, recovery_key_destination_path).await?;
+        self.set_recovery_key_delivery_pending(false).await?;
+        self.wait_for_secure_backup_steady_state().await?;
+        Ok(summary)
+    }
+    async fn recovery_key_delivery_pending(&self) -> Result<bool, E2eeTrustError> {
+        const KEY: &[u8] = b"koushi.secure_backup.recovery_key_delivery_pending.v1";
+        self.client()
+            .state_store()
+            .get_custom_value(KEY)
+            .await
+            .map(|value| value.as_deref() == Some(b"1"))
+            .map_err(|_| E2eeTrustError::SecureBackupInspectionInconclusive)
+    }
+    async fn set_recovery_key_delivery_pending(&self, pending: bool) -> Result<(), E2eeTrustError> {
+        const KEY: &[u8] = b"koushi.secure_backup.recovery_key_delivery_pending.v1";
+        let client = self.client();
+        let store = client.state_store();
+        if pending {
+            store.set_custom_value(KEY, b"1".to_vec()).await.map(|_| ())
+        } else {
+            store.remove_custom_value(KEY).await.map(|_| ())
+        }
+        .map_err(|_| E2eeTrustError::SecureBackupInspectionInconclusive)
+    }
+    pub async fn wait_for_secure_backup_steady_state(&self) -> Result<(), E2eeTrustError> {
+        self.client()
+            .encryption()
+            .backups()
+            .wait_for_steady_state()
+            .await
+            .map_err(|_| E2eeTrustError::SecureBackupUploadFailed)
+    }
+    pub fn observe_current_device_trust(&self) -> CurrentDeviceTrustObservation {
+        // Subscribe first, then read from the same subscriber so an update
+        // cannot be lost between the current-value probe and stream creation.
+        let subscriber = self.client().encryption().verification_state();
+        let current = map_sdk_verification_state(subscriber.get());
+        let updates = Box::pin(subscriber.map(map_sdk_verification_state));
+        CurrentDeviceTrustObservation { current, updates }
     }
 }
 
@@ -3745,6 +4113,324 @@ mod current_device_trust_recheck_tests {
 }
 
 #[cfg(test)]
+mod current_session_status_tests {
+    use matrix_sdk::{
+        encryption::backups::BackupState,
+        ruma::{CanonicalJsonValue, owned_user_id},
+        test_utils::mocks::MatrixMockServer,
+    };
+    use matrix_sdk_test::{
+        ruma_response_to_json, test_json::keys_query_sets::KeyQueryResponseTemplate,
+    };
+    use serde_json::json;
+    use vodozemac::Ed25519SecretKey;
+    use wiremock::{
+        Mock, ResponseTemplate,
+        matchers::{body_json, method, path},
+    };
+
+    use super::{
+        CurrentSessionBackupState, MatrixClientSession, MatrixCurrentSessionInspectionError,
+        MatrixDeviceNameOutcome, OwnIdentityVerification, SessionInfo,
+        classify_current_session_backup, classify_own_identity_verification,
+        ensure_device_display_name,
+    };
+
+    async fn session(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        let info = SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client.user_id().expect("mock user id").to_string(),
+            device_id: client.device_id().expect("mock device id").to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::OAuth,
+        };
+        MatrixClientSession::from_client_for_testing(client, info)
+    }
+
+    async fn mount_device(
+        server: &MatrixMockServer,
+        display_name: Option<&str>,
+    ) -> wiremock::MockGuard {
+        server
+            .mock_devices()
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "devices": [{
+                    "device_id": "DEVICEID",
+                    "display_name": display_name,
+                    "last_seen_ip": "private.invalid",
+                    "last_seen_ts": 1_u64,
+                    "user_id": "@example:localhost"
+                }]
+            })))
+            .expect(1)
+            .mount_as_scoped()
+            .await
+    }
+
+    fn sign_json_for_test(
+        value: &mut serde_json::Value,
+        signing_key: &Ed25519SecretKey,
+        user_id: &str,
+        key_identifier: &str,
+    ) {
+        let mut unsigned = value.clone();
+        let object = unsigned.as_object_mut().expect("device JSON object");
+        object.remove("signatures");
+        object.remove("unsigned");
+        let canonical: CanonicalJsonValue = unsigned.try_into().expect("canonical device JSON");
+        let signature = signing_key.sign(canonical.to_string().as_bytes());
+        value["signatures"][user_id][format!("ed25519:{key_identifier}")] =
+            signature.to_base64().into();
+    }
+
+    #[tokio::test]
+    async fn current_session_status_finds_current_device_display_name() {
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _devices = mount_device(&server, Some("Koushi Workstation")).await;
+        let _identity = server
+            .mock_query_keys()
+            .ok()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        let _backup = server
+            .mock_room_keys_version()
+            .none()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+
+        let status = session
+            .inspect_current_session()
+            .await
+            .expect("authoritative inspection");
+
+        assert_eq!(
+            status.device_display_name.as_deref(),
+            Some("Koushi Workstation")
+        );
+        assert!(!status.is_cross_signed_by_owner);
+        assert_eq!(
+            status.own_identity_verification,
+            OwnIdentityVerification::Missing
+        );
+        assert_eq!(status.key_backup, CurrentSessionBackupState::Disabled);
+        assert!(!format!("{status:?}").contains("Koushi Workstation"));
+        let serialized = serde_json::to_string(&status).expect("serialize coarse status");
+        assert!(!serialized.contains("1234"));
+        assert!(!serialized.contains("private.invalid"));
+    }
+
+    #[tokio::test]
+    async fn current_session_status_rejects_an_absent_current_device() {
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _devices = server
+            .mock_devices()
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "devices": [] })))
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+
+        assert_eq!(
+            session.inspect_current_session().await,
+            Err(MatrixCurrentSessionInspectionError::CurrentDeviceMissing)
+        );
+    }
+
+    #[tokio::test]
+    async fn current_session_status_maps_device_and_identity_failures_coarsely() {
+        let device_server = MatrixMockServer::new().await;
+        let device_session = session(&device_server).await;
+        let _devices = device_server
+            .mock_devices()
+            .error500()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        assert_eq!(
+            device_session.inspect_current_session().await,
+            Err(MatrixCurrentSessionInspectionError::DeviceRequest)
+        );
+
+        let identity_server = MatrixMockServer::new().await;
+        let identity_session = session(&identity_server).await;
+        let _devices = mount_device(&identity_server, None).await;
+        let _identity = identity_server
+            .mock_query_keys()
+            .error500()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        assert_eq!(
+            identity_session.inspect_current_session().await,
+            Err(MatrixCurrentSessionInspectionError::IdentityRequest)
+        );
+    }
+
+    #[tokio::test]
+    async fn current_session_status_reads_owner_cross_signing_and_unverified_own_identity() {
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _devices = mount_device(&server, Some("Signed device")).await;
+        let client = session.client();
+        let user_id = client.user_id().expect("mock user id");
+        let device_id = client.device_id().expect("mock device id");
+        let current_device = client
+            .encryption()
+            .get_device(user_id, device_id)
+            .await
+            .expect("read current device")
+            .expect("mock client stores its own device");
+        let self_signing_key = Ed25519SecretKey::from_slice(b"self1234self1234self1234self1234");
+        let response = KeyQueryResponseTemplate::new(owned_user_id!("@example:localhost"))
+            .with_cross_signing_keys(
+                Ed25519SecretKey::from_slice(b"master12master12master12master12"),
+                Ed25519SecretKey::from_slice(b"self1234self1234self1234self1234"),
+                Ed25519SecretKey::from_slice(b"user1234user1234user1234user1234"),
+            )
+            .build_response();
+        let mut response_json = ruma_response_to_json(response);
+        let device_keys = current_device
+            .keys()
+            .iter()
+            .map(|(key_id, key)| (key_id.to_string(), key.to_base64()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut current_device_json = json!({
+            "user_id": user_id,
+            "device_id": device_id,
+            "algorithms": current_device.algorithms(),
+            "keys": device_keys,
+            "signatures": current_device.signatures(),
+        });
+        sign_json_for_test(
+            &mut current_device_json,
+            &self_signing_key,
+            user_id.as_str(),
+            &self_signing_key.public_key().to_base64(),
+        );
+        response_json["device_keys"][user_id.as_str()][device_id.as_str()] = current_device_json;
+        let _identity = server
+            .mock_query_keys()
+            .respond_with(ResponseTemplate::new(200).set_body_json(response_json))
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        let _backup = server
+            .mock_room_keys_version()
+            .error500()
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+
+        let status = session
+            .inspect_current_session()
+            .await
+            .expect("authoritative inspection");
+
+        assert!(status.is_cross_signed_by_owner);
+        assert_eq!(
+            status.own_identity_verification,
+            OwnIdentityVerification::Unverified
+        );
+        assert_eq!(status.key_backup, CurrentSessionBackupState::Unknown);
+    }
+
+    #[tokio::test]
+    async fn oauth_device_name_renames_only_an_empty_authoritative_name() {
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _devices = mount_device(&server, Some("   ")).await;
+        let _rename = Mock::given(method("PUT"))
+            .and(path("/_matrix/client/v3/devices/DEVICEID"))
+            .and(body_json(json!({ "display_name": "Koushi on Linux" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(1)
+            .mount_as_scoped(server.server())
+            .await;
+
+        assert_eq!(
+            ensure_device_display_name(&session, "Koushi on Linux").await,
+            MatrixDeviceNameOutcome::Renamed
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_device_name_preserves_existing_name_and_maps_failures_coarsely() {
+        let named_server = MatrixMockServer::new().await;
+        let named_session = session(&named_server).await;
+        let _devices = mount_device(&named_server, Some("Custom device")).await;
+        assert_eq!(
+            ensure_device_display_name(&named_session, "Koushi on Linux").await,
+            MatrixDeviceNameOutcome::Present
+        );
+        assert!(
+            named_server
+                .received_requests()
+                .await
+                .expect("request history")
+                .iter()
+                .all(|request| request.method.as_str() != "PUT")
+        );
+
+        let failed_server = MatrixMockServer::new().await;
+        let failed_session = session(&failed_server).await;
+        let _devices = mount_device(&failed_server, None).await;
+        let _rename = Mock::given(method("PUT"))
+            .and(path("/_matrix/client/v3/devices/DEVICEID"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("private raw failure"))
+            .expect(1)
+            .mount_as_scoped(failed_server.server())
+            .await;
+        let outcome = ensure_device_display_name(&failed_session, "Koushi on Linux").await;
+        assert_eq!(outcome, MatrixDeviceNameOutcome::RenameFailed);
+        assert!(!format!("{outcome:?}").contains("private raw failure"));
+    }
+
+    #[test]
+    fn current_session_status_classifies_identity_and_backup_without_secrets() {
+        assert_eq!(
+            classify_own_identity_verification(false, true),
+            OwnIdentityVerification::Missing
+        );
+        assert_eq!(
+            classify_own_identity_verification(true, false),
+            OwnIdentityVerification::Unverified
+        );
+        assert_eq!(
+            classify_own_identity_verification(true, true),
+            OwnIdentityVerification::Verified
+        );
+        assert_eq!(
+            classify_current_session_backup(BackupState::Enabled, Ok(true)),
+            CurrentSessionBackupState::Ready
+        );
+        assert_eq!(
+            classify_current_session_backup(BackupState::Unknown, Ok(false)),
+            CurrentSessionBackupState::Disabled
+        );
+        assert_eq!(
+            classify_current_session_backup(BackupState::Unknown, Err(())),
+            CurrentSessionBackupState::Unknown
+        );
+
+        let error = MatrixCurrentSessionInspectionError::IdentityRequest;
+        assert_eq!(
+            serde_json::to_string(&error).expect("serialize coarse error"),
+            "\"identity_request\""
+        );
+        assert!(!format!("{error:?}").contains("private"));
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum E2eeRecoveryError {
+    #[error("E2EE recovery runtime failed: {0}")]
+    Runtime(String),
+    #[error("E2EE recovery failed: {0}")]
+    Sdk(String),
+}
 
 pub fn recover_e2ee_blocking(
     session: &MatrixClientSession,
@@ -3758,7 +4444,7 @@ pub fn recover_e2ee_blocking(
     runtime.block_on(recover_e2ee(session, request))
 }
 
-async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
+pub(super) async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
     for counter in [
         "received_requests",
         "cancellations",
@@ -4679,13 +5365,13 @@ mod megolm_send_parity_tests {
         encryption::{RoomKeyDiagnosticEvent, RoomKeyDiagnosticObserver},
         test_utils::mocks::MatrixMockServer,
     };
-    use matrix_sdk_test::{event_factory::EventFactory, test_json, JoinedRoomBuilder};
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory, test_json};
     use ruma::{
-        device_id, events::room::message::RoomMessageEventContent, room_id, user_id, RoomVersionId,
+        RoomVersionId, device_id, events::room::message::RoomMessageEventContent, room_id, user_id,
     };
     use wiremock::{
-        matchers::{method, path_regex},
         Mock, ResponseTemplate,
+        matchers::{method, path_regex},
     };
 
     const TO_DEVICE_PATH: &str = r"^/_matrix/client/.*/sendToDevice/m.room.encrypted/.*";
@@ -4785,16 +5471,20 @@ mod megolm_send_parity_tests {
                     if record.first_event_message_index == 0
             )
         }));
-        assert!(!events
-            .iter()
-            .any(|event| matches!(event, RoomKeyDiagnosticEvent::Index0Reshare(_))));
-        assert!(!events
-            .iter()
-            .any(|event| matches!(event, RoomKeyDiagnosticEvent::InitialShareRepair(_))));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, RoomKeyDiagnosticEvent::Index0Reshare(_)))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, RoomKeyDiagnosticEvent::InitialShareRepair(_)))
+        );
     }
 }
 
-fn desktop_room_key_recipient_strategy() -> CollectStrategy {
+pub(super) fn desktop_room_key_recipient_strategy() -> CollectStrategy {
     CollectStrategy::AllDevices
 }
 
@@ -5035,7 +5725,7 @@ pub async fn reshare_room_key(
     .await
 }
 
-#[derive(Clone, Eq, Hash, PartialEq, Clone, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct MatrixOutboundGroupSessionToken(matrix_sdk::room::OutboundGroupSessionToken);
 
 impl fmt::Debug for MatrixOutboundGroupSessionToken {
@@ -5044,7 +5734,7 @@ impl fmt::Debug for MatrixOutboundGroupSessionToken {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MatrixRoomKeyReshareTarget {
     OwnOtherDevices,
     PeerDevices,
@@ -5061,7 +5751,7 @@ impl From<MatrixRoomKeyReshareTarget> for matrix_sdk::room::RoomKeyReshareTarget
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MatrixRoomKeyReshareOutcome {
     Sent {
         request_count: usize,
@@ -5125,8 +5815,6 @@ pub async fn force_reshare_room_key(
 /// Closed outcome of a manual index-0 room-key share (issue #538).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum MatrixIndex0ShareOutcome {
     Completed,
     RefusedNotEncrypted,
@@ -5143,8 +5831,6 @@ pub enum MatrixIndex0ShareOutcome {
 /// (issue #538).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum MatrixIndex0ClaimOutcome {
     NotNeeded,
     Succeeded,
@@ -5154,22 +5840,7 @@ pub enum MatrixIndex0ClaimOutcome {
 
 /// Closed aggregate summary of a manual index-0 share (issue #538). Counts
 /// are buckets only; no identifiers or key material cross the boundary.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixIndex0ShareSummary {
     pub outcome: MatrixIndex0ShareOutcome,
     pub message_index_before: Option<u32>,
@@ -5190,8 +5861,6 @@ pub struct MatrixIndex0ShareSummary {
 /// Closed outcome of a manual current-session index-0 recovery resend (issue #541).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum MatrixIndex0ResendOutcome {
     Completed,
     RefusedNotEncrypted,
@@ -5208,22 +5877,7 @@ pub enum MatrixIndex0ResendOutcome {
 }
 
 /// Closed aggregate summary of a manual current-session index-0 resend.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixIndex0ResendSummary {
     pub outcome: MatrixIndex0ResendOutcome,
     pub message_index_before: Option<u32>,
@@ -5244,8 +5898,6 @@ pub struct MatrixIndex0ResendSummary {
 /// Closed outcome of a manual force-new-outbound-session (issue #538).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum MatrixForceNewSessionOutcome {
     Completed,
     RefusedNotEncrypted,
@@ -5255,22 +5907,7 @@ pub enum MatrixForceNewSessionOutcome {
 }
 
 /// Closed summary of a manual force-new-outbound-session (issue #538).
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixForceNewSessionSummary {
     pub outcome: MatrixForceNewSessionOutcome,
     pub previous_session_exists: bool,
@@ -5280,7 +5917,6 @@ pub struct MatrixForceNewSessionSummary {
 }
 
 /// Discard the current outbound Megolm session for a room (issue #538).
-
 pub async fn discard_outbound_group_session(
     session: &MatrixClientSession,
     room_id: &str,
@@ -5294,7 +5930,6 @@ pub async fn discard_outbound_group_session(
 /// Create the outbound Megolm session if needed and pre-share it with all
 /// active members (issue #538). This is the normal preshare path, run with
 /// the per-room transport lock held.
-
 pub async fn preshare_outbound_group_session(
     session: &MatrixClientSession,
     room_id: &str,
@@ -5307,7 +5942,6 @@ pub async fn preshare_outbound_group_session(
 
 /// Return the current outbound session's message index, if a session exists
 /// (issue #538).
-
 pub async fn current_outbound_group_session_index(
     session: &MatrixClientSession,
     room_id: &str,
@@ -5321,7 +5955,6 @@ pub async fn current_outbound_group_session_index(
 /// Manually share the current outbound session's index-0 room key to every
 /// eligible recipient device (issue #538 diagnostic control). `cancellation`
 /// and `validate` are checked before every HTTP effect.
-
 pub async fn share_index0_room_key(
     session: &MatrixClientSession,
     room_id: &str,
@@ -5392,7 +6025,6 @@ pub async fn share_index0_room_key(
 
 /// Manually resend index-0 recovery material for the current outbound session
 /// (issue #541 diagnostic control).
-
 pub async fn resend_index0_room_key(
     session: &MatrixClientSession,
     room_id: &str,
@@ -5472,7 +6104,6 @@ pub async fn resend_index0_room_key(
 
 /// Manually rotate the outbound Megolm session and confirm the fresh session
 /// is at message index 0 (issue #538 diagnostic control).
-
 pub async fn force_new_outbound_session(
     session: &MatrixClientSession,
     room_id: &str,
@@ -5526,7 +6157,7 @@ pub async fn request_room_key_for_event(
 /// Privacy-safe snapshot of the receive-side room-key handling state: the
 /// crypto-machine counters plus the event-cache late-decryption counters and
 /// health. Contains only counts, booleans, and closed tokens.
-#[derive(Clone, Debug, Eq, PartialEq, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MatrixRoomKeyReceiveDiagnostics {
     /// Crypto-machine receive counters (ingress, Olm, merge decisions).
     pub crypto: matrix_sdk::encryption::RoomKeyReceiveCounters,
@@ -5535,7 +6166,6 @@ pub struct MatrixRoomKeyReceiveDiagnostics {
 }
 
 /// Snapshot the privacy-safe receive-side room-key diagnostics for a session.
-
 pub async fn room_key_receive_diagnostics(
     session: &MatrixClientSession,
 ) -> MatrixRoomKeyReceiveDiagnostics {
@@ -5552,7 +6182,6 @@ pub async fn room_key_receive_diagnostics(
 /// IDs, using the SDK event-cache redecryptor. This requests no new keys and
 /// redistributes nothing; it only asks the redecryptor to re-attempt decryption
 /// of the events it already holds for those sessions.
-
 pub fn request_late_decryption(
     session: &MatrixClientSession,
     room_id: &str,
@@ -5574,7 +6203,6 @@ pub fn request_late_decryption(
 /// Subscribe to the SDK event-cache redecryptor reports (Lagging,
 /// BackupAvailable, ResolvedUtds). Used by the runtime to drive bounded local
 /// late-decryption retries.
-
 pub fn late_decryption_report_stream(
     session: &MatrixClientSession,
 ) -> impl futures_util::Stream<
@@ -5587,177 +6215,27 @@ pub fn late_decryption_report_stream(
     client.event_cache().subscribe_to_decryption_reports()
 }
 
+fn map_sdk_recovery_state(
+    state: matrix_sdk::encryption::recovery::RecoveryState,
+) -> E2eeRecoveryState {
+    match state {
+        matrix_sdk::encryption::recovery::RecoveryState::Unknown => E2eeRecoveryState::Unknown,
+        matrix_sdk::encryption::recovery::RecoveryState::Enabled => E2eeRecoveryState::Enabled,
+        matrix_sdk::encryption::recovery::RecoveryState::Disabled => E2eeRecoveryState::Disabled,
+        matrix_sdk::encryption::recovery::RecoveryState::Incomplete => {
+            E2eeRecoveryState::Incomplete
+        }
+    }
+}
+
 #[cfg(test)]
-mod e2ee_extracted_tests {
-    use super::*;
+mod room_key_receive_diagnostics_tests {
+    use super::record_room_key_receive_diagnostic;
+    use matrix_sdk::encryption::{
+        ForwardedRoomKeyAuthOutcome, RoomKeyIngressKind, RoomKeyMergeDecision,
+        RoomKeyReceiveDiagnostic, RoomKeyReceiveDiagnosticKind,
+    };
 
-    #[test]
-    fn recovery_key_path_uses_sdk_signature_publication_only() {
-        let recovery_body = crate::test_source::item_body(include_str!("e2ee.rs"), "recover_e2ee");
-
-        assert!(
-            !recovery_body.contains("prepare_current_device_registration"),
-            "recovery must never republish identity keys for an existing device ID"
-        );
-        assert!(
-            !recovery_body.contains("force_upload_device_keys"),
-            "recovery must not replace device identity keys out of band"
-        );
-        assert!(recovery_body.contains("recover_and_fix_backup"));
-        assert!(!recovery_body.contains(".recover(request.secret.expose_secret())"));
-        assert!(
-            !recovery_body.contains("republish_current_device_keys_after_recovery"),
-            "SDK recovery already publishes the cross-signature through /keys/signatures/upload"
-        );
-        assert!(
-            !recovery_body.contains("post_recovery_device_republish"),
-            "recovery must not mutate device keys after SDK signature publication"
-        );
-        assert!(
-            recovery_body.contains("get_own_device"),
-            "recovery key proof must inspect current device signing state"
-        );
-        assert!(
-            recovery_body.contains("post_recovery_own_device_inspected"),
-            "recovery must diagnose the SDK-refreshed own-device projection"
-        );
-        assert!(
-            recovery_body.contains("inspect_current_device_signature_state"),
-            "recovery must compare authoritative device signatures with the local projection"
-        );
-        assert!(
-            recovery_body.contains("is_cross_signed_by_owner"),
-            "recovery must require the SDK-refreshed owner cross-signature"
-        );
-        assert!(
-            recovery_body.contains("record_recovery_verification_event"),
-            "recovery key proof must emit stderr diagnostics before UI diagnostics are available"
-        );
-    }
-    #[test]
-    fn recovery_detects_a_stale_authoritative_device_signature() {
-        use matrix_sdk::encryption::recovery::RecoveryDeviceSignatureInspection;
-
-        let stale = RecoveryDeviceSignatureInspection {
-            authoritative_self_signing_signature_present: true,
-            authoritative_self_signing_signature_parseable: true,
-            authoritative_self_signing_signature_valid: false,
-            cached_self_signing_key_matches_authoritative: true,
-            cached_signed_content_matches_authoritative: true,
-            ..Default::default()
-        };
-        assert!(has_stale_authoritative_device_signature(&stale));
-
-        let repaired = RecoveryDeviceSignatureInspection {
-            authoritative_self_signing_signature_valid: true,
-            ..stale
-        };
-        assert!(!has_stale_authoritative_device_signature(&repaired));
-    }
-    #[test]
-    fn recovery_sdk_records_standard_signature_round_trip_diagnostics() {
-        let devices_source = include_str!(
-                "../../../vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/identities/devices.rs"
-            );
-        let secret_store_source = include_str!(
-                "../../../vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/secret_storage/secret_store.rs"
-            );
-
-        assert!(
-            devices_source.contains("verify_with_diagnostics"),
-            "the exact signed device target must be retained across the standard upload"
-        );
-        assert!(
-            secret_store_source.contains("standard_signature_round_trip_finished"),
-            "the standard recovery path must compare its upload target with the refreshed device"
-        );
-        assert!(
-            secret_store_source.contains("preupload_self_signing_signature_valid"),
-            "diagnostics must distinguish invalid local signing from server-side mutation"
-        );
-        assert!(
-            secret_store_source.contains("signed_content_matches_refreshed"),
-            "diagnostics must compare the canonical signed content before and after upload"
-        );
-        assert!(
-            secret_store_source.contains("self_signing_key_id_matches_refreshed"),
-            "diagnostics must distinguish a stale self-signing key generation"
-        );
-        assert!(
-            secret_store_source.contains("preupload_signature_matches_refreshed"),
-            "diagnostics must distinguish server-side signature replacement"
-        );
-        assert!(
-            secret_store_source.contains("preupload_signature_valid_with_refreshed_key"),
-            "diagnostics must cross-check the upload with the authoritative key generation"
-        );
-        assert!(
-            !secret_store_source.contains("preupload_signature_value"),
-            "diagnostics must never expose raw signatures"
-        );
-    }
-    #[test]
-    fn recovery_diagnostics_classify_signature_upload_failures_inside_secret_storage() {
-        let error = matrix_sdk::encryption::recovery::RecoveryError::SecretStorage(
-            matrix_sdk::encryption::secret_storage::SecretStorageError::Verification(
-                matrix_sdk::encryption::identities::ManualVerifyError::SignatureUploadFailures {
-                    signed_target_count: 1,
-                    signed_key_count: 1,
-                    failure_user_count: 1,
-                    failure_key_count: 2,
-                    invalid_signature_count: 1,
-                    other_failure_count: 1,
-                    unknown_failure_count: 0,
-                },
-            ),
-        );
-
-        assert_eq!(
-            super::recovery_error_kind(&error),
-            "signature_upload_failures"
-        );
-        assert_eq!(
-            super::recovery_signature_upload_failure_diagnostics(&error),
-            Some(super::SignatureUploadFailureDiagnostics {
-                signed_target_count: 1,
-                signed_key_count: 1,
-                failure_user_count: 1,
-                failure_key_count: 2,
-                invalid_signature_count: 1,
-                other_failure_count: 1,
-                unknown_failure_count: 0,
-            })
-        );
-    }
-    #[test]
-    fn typed_peer_policy_is_all_devices_not_only_trusted() {
-        assert!(matches!(
-            super::desktop_room_key_recipient_strategy(),
-            matrix_sdk_base::crypto::CollectStrategy::AllDevices
-        ));
-    }
-    #[test]
-    fn send_wrapper_propagates_recipient_collection_failure() {
-        assert_eq!(
-            super::map_room_send_result(Err(matrix_sdk::Error::NoOlmMachine)),
-            Err(super::MatrixRoomOperationError::Sdk(
-                super::MatrixRoomOperationFailureKind::Encryption
-            ))
-        );
-    }
-    #[test]
-    fn send_wrapper_maps_secure_backup_required_to_a_typed_closed_failure() {
-        assert_eq!(
-            super::map_room_send_result(Err(matrix_sdk::Error::SecureBackupRequired)),
-            Err(super::MatrixRoomOperationError::Sdk(
-                super::MatrixRoomOperationFailureKind::SecureBackupRequired
-            ))
-        );
-        assert_eq!(
-            super::MatrixRoomOperationFailureKind::SecureBackupRequired.to_string(),
-            "secure_backup_required"
-        );
-    }
     #[test]
     fn receive_diagnostic_records_closed_tokens_only() {
         let cases = [
@@ -5833,6 +6311,18 @@ mod e2ee_extracted_tests {
             );
         }
     }
+}
+
+#[cfg(test)]
+mod room_key_member_reload_diagnostics_tests {
+    use super::{record_room_key_member_reload_diagnostic, record_room_key_rotation_diagnostic};
+    use koushi_diagnostics::{DiagnosticValue, test_support};
+    use matrix_sdk::encryption::{
+        RoomKeyCreationOutcome, RoomKeyDiagnosticAlias, RoomKeyFirstShareOutcome,
+        RoomKeyMemberReloadDiagnostic, RoomKeyMemberReloadDiscardOutcome,
+        RoomKeyRotationDiagnostic, RoomKeyRotationReason,
+    };
+
     #[test]
     fn member_reload_and_rotation_records_are_privacy_safe_and_correlated() {
         let _guard = test_support::lock();
@@ -5893,6 +6383,56 @@ mod e2ee_extracted_tests {
             field.key == "discard_elapsed_ms" && field.value == DiagnosticValue::Milliseconds(9)
         }));
     }
+}
+
+#[cfg(test)]
+mod initial_share_diagnostics_tests {
+    use super::{record_initial_share_diagnostic, record_initial_share_session_diagnostic};
+    use koushi_diagnostics::test_support;
+    use matrix_sdk::encryption::{
+        InitialShareDeviceClass as Class, InitialShareDeviceDiagnostic,
+        InitialShareSessionDiagnostic, InitialShareStage as Stage, RoomKeyDiagnosticAlias,
+    };
+
+    fn counter_value(name: &'static str) -> u64 {
+        let snapshot = koushi_diagnostics::snapshot();
+        snapshot
+            .records
+            .iter()
+            .find(|record| {
+                record.event.source == "core.room_key_summary"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "name"
+                            && field.value == koushi_diagnostics::DiagnosticValue::Token(name)
+                    })
+            })
+            .and_then(|record| {
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .find_map(|field| match field.value {
+                        koushi_diagnostics::DiagnosticValue::Count(count)
+                            if field.key == "count" =>
+                        {
+                            Some(count)
+                        }
+                        _ => None,
+                    })
+            })
+            .unwrap_or(0)
+    }
+
+    fn device_event(class: Class, stage: Stage) -> InitialShareDeviceDiagnostic {
+        InitialShareDeviceDiagnostic {
+            session: RoomKeyDiagnosticAlias::new(7),
+            device: RoomKeyDiagnosticAlias::new(3),
+            device_class: class,
+            stage,
+            elapsed_ms: 12,
+        }
+    }
+
     #[test]
     fn initial_share_diagnostic_records_closed_tokens_and_counters() {
         let _guard = test_support::lock();
@@ -6006,6 +6546,7 @@ mod e2ee_extracted_tests {
             assert!(stage_tokens.contains(&token), "missing stage token {token}");
         }
     }
+
     #[test]
     fn initial_share_diagnostics_never_expose_private_values() {
         let _guard = test_support::lock();
@@ -6041,6 +6582,7 @@ mod e2ee_extracted_tests {
             assert!(!text.contains("ciphertext"), "privacy leak: {text}");
         }
     }
+
     #[test]
     fn initial_share_counters_survive_detail_ring_eviction() {
         let _guard = test_support::lock();
@@ -6058,6 +6600,57 @@ mod e2ee_extracted_tests {
         assert_eq!(counter_value("initial_share_olm_encrypted"), 1);
         koushi_diagnostics::reset_counter("initial_share_olm_encrypted");
     }
+}
+
+#[cfg(test)]
+mod index0_reshare_diagnostics_tests {
+    use super::record_index0_reshare_diagnostic;
+    use koushi_diagnostics::test_support;
+    use matrix_sdk::encryption::{
+        Index0InitialShareState as Share, Index0ReshareDiagnostic, Index0ReshareOutcome as Outcome,
+        RoomKeyDiagnosticAlias,
+    };
+
+    fn counter_value(name: &'static str) -> u64 {
+        let snapshot = koushi_diagnostics::snapshot();
+        snapshot
+            .records
+            .iter()
+            .find(|record| {
+                record.event.source == "core.room_key_summary"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "name"
+                            && field.value == koushi_diagnostics::DiagnosticValue::Token(name)
+                    })
+            })
+            .and_then(|record| {
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .find_map(|field| match field.value {
+                        koushi_diagnostics::DiagnosticValue::Count(count)
+                            if field.key == "count" =>
+                        {
+                            Some(count)
+                        }
+                        _ => None,
+                    })
+            })
+            .unwrap_or(0)
+    }
+
+    fn record(outcome: Outcome, initial_share: Share) {
+        record_index0_reshare_diagnostic(Index0ReshareDiagnostic {
+            session: RoomKeyDiagnosticAlias::new(7),
+            initial_share,
+            reshare: outcome,
+            eligible_own_bucket: 0,
+            eligible_peer_bucket: 1,
+            elapsed_ms: 12,
+        });
+    }
+
     #[test]
     fn index0_reshare_diagnostic_records_closed_tokens_and_counters() {
         let _guard = test_support::lock();
@@ -6112,6 +6705,7 @@ mod e2ee_extracted_tests {
             );
         }
     }
+
     #[test]
     fn index0_reshare_counters_survive_detail_ring_eviction() {
         let _guard = test_support::lock();
@@ -6126,6 +6720,63 @@ mod e2ee_extracted_tests {
         assert_eq!(counter_value("index0_reshare_sent"), 1);
         koushi_diagnostics::reset_counter("index0_reshare_sent");
     }
+}
+
+#[cfg(test)]
+mod initial_share_repair_diagnostics_tests {
+    use super::record_initial_share_repair_diagnostic;
+    use koushi_diagnostics::test_support;
+    use matrix_sdk::encryption::{
+        InitialShareRepairClaimOutcome as Claim, InitialShareRepairDiagnostic,
+        InitialShareRepairOlmState as Olm, InitialShareRepairOutcome as Repair,
+        RoomKeyDiagnosticAlias,
+    };
+
+    fn counter_value(name: &'static str) -> u64 {
+        let snapshot = koushi_diagnostics::snapshot();
+        snapshot
+            .records
+            .iter()
+            .find(|record| {
+                record.event.source == "core.room_key_summary"
+                    && record.event.fields.iter().any(|field| {
+                        field.key == "name"
+                            && field.value == koushi_diagnostics::DiagnosticValue::Token(name)
+                    })
+            })
+            .and_then(|record| {
+                record
+                    .event
+                    .fields
+                    .iter()
+                    .find_map(|field| match field.value {
+                        koushi_diagnostics::DiagnosticValue::Count(count)
+                            if field.key == "count" =>
+                        {
+                            Some(count)
+                        }
+                        _ => None,
+                    })
+            })
+            .unwrap_or(0)
+    }
+
+    fn record(claim: Claim, repair: Repair) {
+        record_initial_share_repair_diagnostic(InitialShareRepairDiagnostic {
+            session: RoomKeyDiagnosticAlias::new(11),
+            initial_olm: Olm::Missing,
+            claim,
+            repair,
+            own_coverage_bucket: 1,
+            peer_users_covered_bucket: 1,
+            peer_users_zero_coverage_bucket: 1,
+            missing_devices_bucket: 1,
+            first_event_message_index: None,
+            same_session: true,
+            elapsed_ms: 9,
+        });
+    }
+
     #[test]
     fn issue_523_initial_share_repair_records_closed_tokens_without_identifiers() {
         let _guard = test_support::lock();
@@ -6186,6 +6837,32 @@ mod e2ee_extracted_tests {
             assert!(!text.contains('@') && !text.contains('!') && !text.contains("http"));
         }
     }
+}
+
+#[cfg(test)]
+mod encryption_debug_dto_privacy_tests {
+    use super::{
+        MatrixForceNewSessionOutcome, MatrixForceNewSessionSummary, MatrixIndex0ClaimOutcome,
+        MatrixIndex0ResendOutcome, MatrixIndex0ResendSummary, MatrixIndex0ShareOutcome,
+        MatrixIndex0ShareSummary,
+    };
+
+    fn banned_fragments() -> &'static [&'static str] {
+        &[
+            "room_id",
+            "user_id",
+            "device_id",
+            "session_id",
+            "sender_key",
+            "session_key",
+            "ciphertext",
+            "event_id",
+            "txn",
+            "identity_key",
+            "homeserver",
+        ]
+    }
+
     #[test]
     fn index0_share_summary_serializes_without_identifiers_or_key_material() {
         let summary = MatrixIndex0ShareSummary {
@@ -6216,6 +6893,7 @@ mod e2ee_extracted_tests {
             "identifier leak: {text}"
         );
     }
+
     #[test]
     fn force_new_summary_serializes_without_identifiers_or_key_material() {
         let summary = MatrixForceNewSessionSummary {
@@ -6237,6 +6915,7 @@ mod e2ee_extracted_tests {
             "identifier leak: {text}"
         );
     }
+
     #[test]
     fn index0_resend_summary_serializes_without_identifiers_or_key_material() {
         let summary = MatrixIndex0ResendSummary {
@@ -6270,6 +6949,7 @@ mod e2ee_extracted_tests {
             "identifier leak: {text}"
         );
     }
+
     #[test]
     fn index0_share_outcome_and_claim_tokens_are_closed() {
         for outcome in [
@@ -6293,5 +6973,157 @@ mod e2ee_extracted_tests {
                 "identifier leak: {text}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_stale_authoritative_device_signature;
+
+    #[test]
+    fn recovery_key_path_uses_sdk_signature_publication_only() {
+        let source = include_str!("e2ee.rs");
+        let recovery_body = crate::test_source::item_body(source, "pub async fn recover_e2ee");
+
+        assert!(
+            !recovery_body.contains("prepare_current_device_registration"),
+            "recovery must never republish identity keys for an existing device ID"
+        );
+        assert!(
+            !recovery_body.contains("force_upload_device_keys"),
+            "recovery must not replace device identity keys out of band"
+        );
+        assert!(recovery_body.contains("recover_and_fix_backup"));
+        assert!(!recovery_body.contains(".recover(request.secret.expose_secret())"));
+        assert!(
+            !recovery_body.contains("republish_current_device_keys_after_recovery"),
+            "SDK recovery already publishes the cross-signature through /keys/signatures/upload"
+        );
+        assert!(
+            !recovery_body.contains("post_recovery_device_republish"),
+            "recovery must not mutate device keys after SDK signature publication"
+        );
+        assert!(
+            recovery_body.contains("get_own_device"),
+            "recovery key proof must inspect current device signing state"
+        );
+        assert!(
+            recovery_body.contains("post_recovery_own_device_inspected"),
+            "recovery must diagnose the SDK-refreshed own-device projection"
+        );
+        assert!(
+            recovery_body.contains("inspect_current_device_signature_state"),
+            "recovery must compare authoritative device signatures with the local projection"
+        );
+        assert!(
+            recovery_body.contains("is_cross_signed_by_owner"),
+            "recovery must require the SDK-refreshed owner cross-signature"
+        );
+        assert!(
+            recovery_body.contains("record_recovery_verification_event"),
+            "recovery key proof must emit stderr diagnostics before UI diagnostics are available"
+        );
+    }
+    #[test]
+    fn recovery_detects_a_stale_authoritative_device_signature() {
+        use matrix_sdk::encryption::recovery::RecoveryDeviceSignatureInspection;
+
+        let stale = RecoveryDeviceSignatureInspection {
+            authoritative_self_signing_signature_present: true,
+            authoritative_self_signing_signature_parseable: true,
+            authoritative_self_signing_signature_valid: false,
+            cached_self_signing_key_matches_authoritative: true,
+            cached_signed_content_matches_authoritative: true,
+            ..Default::default()
+        };
+        assert!(has_stale_authoritative_device_signature(&stale));
+
+        let repaired = RecoveryDeviceSignatureInspection {
+            authoritative_self_signing_signature_valid: true,
+            ..stale
+        };
+        assert!(!has_stale_authoritative_device_signature(&repaired));
+    }
+    #[test]
+    fn recovery_sdk_records_standard_signature_round_trip_diagnostics() {
+        let devices_source = include_str!(
+            "../../../vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/identities/devices.rs"
+        );
+        let secret_store_source = include_str!(
+            "../../../vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/secret_storage/secret_store.rs"
+        );
+
+        assert!(
+            devices_source.contains("verify_with_diagnostics"),
+            "the exact signed device target must be retained across the standard upload"
+        );
+        assert!(
+            secret_store_source.contains("standard_signature_round_trip_finished"),
+            "the standard recovery path must compare its upload target with the refreshed device"
+        );
+        assert!(
+            secret_store_source.contains("preupload_self_signing_signature_valid"),
+            "diagnostics must distinguish invalid local signing from server-side mutation"
+        );
+        assert!(
+            secret_store_source.contains("signed_content_matches_refreshed"),
+            "diagnostics must compare the canonical signed content before and after upload"
+        );
+        assert!(
+            secret_store_source.contains("self_signing_key_id_matches_refreshed"),
+            "diagnostics must distinguish a stale self-signing key generation"
+        );
+        assert!(
+            secret_store_source.contains("preupload_signature_matches_refreshed"),
+            "diagnostics must distinguish server-side signature replacement"
+        );
+        assert!(
+            secret_store_source.contains("preupload_signature_valid_with_refreshed_key"),
+            "diagnostics must cross-check the upload with the authoritative key generation"
+        );
+        assert!(
+            !secret_store_source.contains("preupload_signature_value"),
+            "diagnostics must never expose raw signatures"
+        );
+    }
+    #[test]
+    fn recovery_diagnostics_classify_signature_upload_failures_inside_secret_storage() {
+        let error = matrix_sdk::encryption::recovery::RecoveryError::SecretStorage(
+            matrix_sdk::encryption::secret_storage::SecretStorageError::Verification(
+                matrix_sdk::encryption::identities::ManualVerifyError::SignatureUploadFailures {
+                    signed_target_count: 1,
+                    signed_key_count: 1,
+                    failure_user_count: 1,
+                    failure_key_count: 2,
+                    invalid_signature_count: 1,
+                    other_failure_count: 1,
+                    unknown_failure_count: 0,
+                },
+            ),
+        );
+
+        assert_eq!(
+            super::recovery_error_kind(&error),
+            "signature_upload_failures"
+        );
+        assert_eq!(
+            super::recovery_signature_upload_failure_diagnostics(&error),
+            Some(super::SignatureUploadFailureDiagnostics {
+                signed_target_count: 1,
+                signed_key_count: 1,
+                failure_user_count: 1,
+                failure_key_count: 2,
+                invalid_signature_count: 1,
+                other_failure_count: 1,
+                unknown_failure_count: 0,
+            })
+        );
+    }
+    #[test]
+    fn typed_peer_policy_is_all_devices_not_only_trusted() {
+        assert!(matches!(
+            super::desktop_room_key_recipient_strategy(),
+            matrix_sdk_base::crypto::CollectStrategy::AllDevices
+        ));
     }
 }

@@ -1,4 +1,10 @@
-use super::*;
+use crate::room_projection::{
+    matrix_room, matrix_timeline_update_from_ui, matrix_timeline_updates_from_diffs, timeline_room,
+};
+use crate::{MatrixClientSession, MatrixRoomOperationError, MatrixRoomOperationFailureKind};
+use futures_util::{Stream, StreamExt};
+use std::{fmt, pin::Pin, sync::Arc, time::Duration};
+use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MatrixTimelineContinuity {
@@ -139,7 +145,7 @@ impl std::fmt::Debug for MatrixCommittedRoomTimelineCheckpoint {
 
 #[cfg(test)]
 mod committed_room_timeline_checkpoint_tests {
-    use super::*;
+    use super::MatrixCommittedRoomTimelineCheckpoint;
 
     #[test]
     fn checkpoint_identity_is_engine_neutral_and_debug_is_private_safe() {
@@ -455,7 +461,10 @@ fn map_live_tail_refresh_result(
 
 #[cfg(test)]
 mod matrix_live_tail_refresh_mapping_tests {
-    use super::*;
+    use super::{
+        MatrixLiveTailRefreshDiagnostics, MatrixLiveTailRefreshOutcome,
+        MatrixLiveTailRefreshResult, map_live_tail_refresh_result,
+    };
     use matrix_sdk::event_cache::{
         EventCacheError, RoomLiveTailRefreshDiagnostics as SdkDiagnostics,
         RoomLiveTailRefreshOutcome as SdkOutcome, RoomLiveTailRefreshResult as SdkResult,
@@ -548,132 +557,133 @@ mod matrix_live_tail_refresh_mapping_tests {
     }
 }
 
-pub async fn inspect_room_timeline_gaps(
-    &self,
-    room_id: &str,
-) -> Result<MatrixTimelineGapInspection, MatrixTimelineGapError> {
-    use matrix_sdk::event_cache::RoomTimelineContinuity;
+impl MatrixClientSession {
+    pub async fn inspect_room_timeline_gaps(
+        &self,
+        room_id: &str,
+    ) -> Result<MatrixTimelineGapInspection, MatrixTimelineGapError> {
+        use matrix_sdk::event_cache::RoomTimelineContinuity;
 
-    let room_id = matrix_sdk::ruma::RoomId::parse(room_id)
-        .map_err(|_| MatrixTimelineGapError::InvalidRoom)?;
-    let room = self
-        .client
-        .get_room(&room_id)
-        .ok_or(MatrixTimelineGapError::RoomUnavailable)?;
-    let (cache, _drop_handles) = room
-        .event_cache()
-        .await
-        .map_err(|_| MatrixTimelineGapError::Sdk)?;
-    let inspection = cache
-        .inspect_timeline_gaps()
-        .await
-        .map_err(|_| MatrixTimelineGapError::Sdk)?;
-    let continuity = match inspection.continuity {
-        RoomTimelineContinuity::Unknown => MatrixTimelineContinuity::Unknown,
-        RoomTimelineContinuity::Gapped => MatrixTimelineContinuity::Gapped,
-        RoomTimelineContinuity::Complete => MatrixTimelineContinuity::Complete,
-    };
-    let gaps = inspection
-        .gaps
-        .into_iter()
-        .map(|descriptor| MatrixTimelineGapHandle {
-            room_id: room_id.clone(),
-            descriptor,
-        })
-        .collect();
-    Ok(MatrixTimelineGapInspection { continuity, gaps })
-}
+        let room_id = matrix_sdk::ruma::RoomId::parse(room_id)
+            .map_err(|_| MatrixTimelineGapError::InvalidRoom)?;
+        let room = self
+            .client
+            .get_room(&room_id)
+            .ok_or(MatrixTimelineGapError::RoomUnavailable)?;
+        let (cache, _drop_handles) = room
+            .event_cache()
+            .await
+            .map_err(|_| MatrixTimelineGapError::Sdk)?;
+        let inspection = cache
+            .inspect_timeline_gaps()
+            .await
+            .map_err(|_| MatrixTimelineGapError::Sdk)?;
+        let continuity = match inspection.continuity {
+            RoomTimelineContinuity::Unknown => MatrixTimelineContinuity::Unknown,
+            RoomTimelineContinuity::Gapped => MatrixTimelineContinuity::Gapped,
+            RoomTimelineContinuity::Complete => MatrixTimelineContinuity::Complete,
+        };
+        let gaps = inspection
+            .gaps
+            .into_iter()
+            .map(|descriptor| MatrixTimelineGapHandle {
+                room_id: room_id.clone(),
+                descriptor,
+            })
+            .collect();
+        Ok(MatrixTimelineGapInspection { continuity, gaps })
+    }
+    pub async fn repair_room_timeline_gap(
+        &self,
+        gap: &MatrixTimelineGapHandle,
+        budget: MatrixTimelineGapRepairBudget,
+        actor_generation: u64,
+        repair_generation: u64,
+    ) -> Result<MatrixTimelineGapRepairResult, MatrixTimelineGapError> {
+        use matrix_sdk::event_cache::{
+            RoomTimelineGapProjectionId, RoomTimelineGapRepairBudget, RoomTimelineGapRepairOutcome,
+        };
 
-pub async fn repair_room_timeline_gap(
-    &self,
-    gap: &MatrixTimelineGapHandle,
-    budget: MatrixTimelineGapRepairBudget,
-    actor_generation: u64,
-    repair_generation: u64,
-) -> Result<MatrixTimelineGapRepairResult, MatrixTimelineGapError> {
-    use matrix_sdk::event_cache::{
-        RoomTimelineGapProjectionId, RoomTimelineGapRepairBudget, RoomTimelineGapRepairOutcome,
-    };
-
-    let room = self
-        .client
-        .get_room(&gap.room_id)
-        .ok_or(MatrixTimelineGapError::RoomUnavailable)?;
-    let (cache, _drop_handles) = room
-        .event_cache()
-        .await
-        .map_err(|_| MatrixTimelineGapError::Sdk)?;
-    let result = cache
-        .pagination()
-        .repair_timeline_gap_with_projection(
-            &gap.descriptor,
-            RoomTimelineGapRepairBudget {
-                event_limit: budget.event_limit,
-                cached_chunk_limit: budget.cached_chunk_limit,
-            },
-            RoomTimelineGapProjectionId {
-                actor_generation,
-                repair_generation,
-            },
-        )
-        .await
-        .map_err(|_| MatrixTimelineGapError::Sdk)?;
-    let outcome = match result.outcome {
-        RoomTimelineGapRepairOutcome::Stale => MatrixTimelineGapRepairOutcome::Stale,
-        RoomTimelineGapRepairOutcome::Deferred {
-            cached_chunks_loaded,
-        } => MatrixTimelineGapRepairOutcome::Deferred {
-            cached_chunks_loaded,
-        },
-        RoomTimelineGapRepairOutcome::Failed => MatrixTimelineGapRepairOutcome::Failed,
-        RoomTimelineGapRepairOutcome::Progress { events } => {
-            MatrixTimelineGapRepairOutcome::Progress { events }
-        }
-        RoomTimelineGapRepairOutcome::BoundariesJoined { events } => {
-            MatrixTimelineGapRepairOutcome::BoundariesJoined { events }
-        }
-        RoomTimelineGapRepairOutcome::StartReached { events } => {
-            MatrixTimelineGapRepairOutcome::StartReached { events }
-        }
-    };
-    Ok(MatrixTimelineGapRepairResult {
-        outcome,
-        last_projection_batch: result.last_projection_batch,
-    })
-}
-
-pub async fn refresh_room_live_tail(
-    &self,
-    room_id: &str,
-    event_limit: u16,
-    actor_generation: u64,
-    operation_generation: u64,
-    cancellation: MatrixLiveTailRefreshCancellation,
-) -> MatrixLiveTailRefreshResult {
-    let Ok(room_id) = matrix_sdk::ruma::RoomId::parse(room_id) else {
-        return failed_live_tail_refresh_result();
-    };
-    let Some(room) = self.client.get_room(&room_id) else {
-        return failed_live_tail_refresh_result();
-    };
-    let Ok((cache, _drop_handles)) = room.event_cache().await else {
-        return failed_live_tail_refresh_result();
-    };
-    map_live_tail_refresh_result(
-        cache
+        let room = self
+            .client
+            .get_room(&gap.room_id)
+            .ok_or(MatrixTimelineGapError::RoomUnavailable)?;
+        let (cache, _drop_handles) = room
+            .event_cache()
+            .await
+            .map_err(|_| MatrixTimelineGapError::Sdk)?;
+        let result = cache
             .pagination()
-            .refresh_live_tail_with_projection(
-                event_limit,
-                matrix_sdk::event_cache::RoomTimelineGapProjectionId {
-                    actor_generation,
-                    repair_generation: operation_generation,
+            .repair_timeline_gap_with_projection(
+                &gap.descriptor,
+                RoomTimelineGapRepairBudget {
+                    event_limit: budget.event_limit,
+                    cached_chunk_limit: budget.cached_chunk_limit,
                 },
-                cancellation.inner,
+                RoomTimelineGapProjectionId {
+                    actor_generation,
+                    repair_generation,
+                },
             )
-            .await,
-    )
+            .await
+            .map_err(|_| MatrixTimelineGapError::Sdk)?;
+        let outcome = match result.outcome {
+            RoomTimelineGapRepairOutcome::Stale => MatrixTimelineGapRepairOutcome::Stale,
+            RoomTimelineGapRepairOutcome::Deferred {
+                cached_chunks_loaded,
+            } => MatrixTimelineGapRepairOutcome::Deferred {
+                cached_chunks_loaded,
+            },
+            RoomTimelineGapRepairOutcome::Failed => MatrixTimelineGapRepairOutcome::Failed,
+            RoomTimelineGapRepairOutcome::Progress { events } => {
+                MatrixTimelineGapRepairOutcome::Progress { events }
+            }
+            RoomTimelineGapRepairOutcome::BoundariesJoined { events } => {
+                MatrixTimelineGapRepairOutcome::BoundariesJoined { events }
+            }
+            RoomTimelineGapRepairOutcome::StartReached { events } => {
+                MatrixTimelineGapRepairOutcome::StartReached { events }
+            }
+        };
+        Ok(MatrixTimelineGapRepairResult {
+            outcome,
+            last_projection_batch: result.last_projection_batch,
+        })
+    }
+    pub async fn refresh_room_live_tail(
+        &self,
+        room_id: &str,
+        event_limit: u16,
+        actor_generation: u64,
+        operation_generation: u64,
+        cancellation: MatrixLiveTailRefreshCancellation,
+    ) -> MatrixLiveTailRefreshResult {
+        let Ok(room_id) = matrix_sdk::ruma::RoomId::parse(room_id) else {
+            return failed_live_tail_refresh_result();
+        };
+        let Some(room) = self.client.get_room(&room_id) else {
+            return failed_live_tail_refresh_result();
+        };
+        let Ok((cache, _drop_handles)) = room.event_cache().await else {
+            return failed_live_tail_refresh_result();
+        };
+        map_live_tail_refresh_result(
+            cache
+                .pagination()
+                .refresh_live_tail_with_projection(
+                    event_limit,
+                    matrix_sdk::event_cache::RoomTimelineGapProjectionId {
+                        actor_generation,
+                        repair_generation: operation_generation,
+                    },
+                    cancellation.inner,
+                )
+                .await,
+        )
+    }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MatrixTimelineItem {
     pub room_id: String,
     pub event_id: String,
@@ -952,74 +962,6 @@ pub async fn room_timeline_visible_items(
     Ok(items)
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "smoke"))]
-
-fn timeline_room(
-    session: &MatrixClientSession,
-    room_id: &str,
-) -> Result<matrix_sdk::Room, MatrixTimelineError> {
-    let room_id =
-        matrix_sdk::ruma::RoomId::parse(room_id).map_err(|_| MatrixTimelineError::InvalidRoomId)?;
-    session
-        .client()
-        .get_room(&room_id)
-        .ok_or(MatrixTimelineError::RoomUnavailable)
-}
-
-fn matrix_timeline_updates_from_diffs(
-    room_id: &str,
-    diffs: Vec<eyeball_im::VectorDiff<Arc<matrix_sdk_ui::timeline::TimelineItem>>>,
-) -> Vec<MatrixTimelineUpdate> {
-    let mut updates = Vec::new();
-    for diff in diffs {
-        match diff {
-            eyeball_im::VectorDiff::Append { values }
-            | eyeball_im::VectorDiff::Reset { values } => {
-                updates.extend(
-                    values
-                        .iter()
-                        .filter_map(|item| matrix_timeline_update_from_ui(room_id, item)),
-                );
-            }
-            eyeball_im::VectorDiff::PushFront { value }
-            | eyeball_im::VectorDiff::PushBack { value }
-            | eyeball_im::VectorDiff::Insert { value, .. }
-            | eyeball_im::VectorDiff::Set { value, .. } => {
-                if let Some(update) = matrix_timeline_update_from_ui(room_id, &value) {
-                    updates.push(update);
-                }
-            }
-            eyeball_im::VectorDiff::Clear
-            | eyeball_im::VectorDiff::PopFront
-            | eyeball_im::VectorDiff::PopBack
-            | eyeball_im::VectorDiff::Remove { .. }
-            | eyeball_im::VectorDiff::Truncate { .. } => {}
-        }
-    }
-    updates
-}
-
-fn matrix_timeline_update_from_ui(
-    room_id: &str,
-    item: &matrix_sdk_ui::timeline::TimelineItem,
-) -> Option<MatrixTimelineUpdate> {
-    let event = item.as_event()?;
-    let event_id = event.event_id()?.to_string();
-    match event.content().as_message() {
-        Some(content) => Some(MatrixTimelineUpdate::Upsert(MatrixTimelineItem {
-            room_id: room_id.to_owned(),
-            event_id,
-            sender: event.sender().to_string(),
-            timestamp_ms: event.timestamp().0.into(),
-            body: content.body().to_owned(),
-        })),
-        None => Some(MatrixTimelineUpdate::Remove {
-            room_id: room_id.to_owned(),
-            event_id,
-        }),
-    }
-}
-
 fn matrix_timeline_item_from_ui(
     room_id: &str,
     item: &matrix_sdk_ui::timeline::TimelineItem,
@@ -1027,5 +969,32 @@ fn matrix_timeline_item_from_ui(
     match matrix_timeline_update_from_ui(room_id, item)? {
         MatrixTimelineUpdate::Upsert(item) => Some(item),
         MatrixTimelineUpdate::Remove { .. } => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn send_wrapper_propagates_recipient_collection_failure() {
+        assert_eq!(
+            super::map_room_send_result(Err(matrix_sdk::Error::NoOlmMachine)),
+            Err(super::MatrixRoomOperationError::Sdk(
+                super::MatrixRoomOperationFailureKind::Encryption
+            ))
+        );
+    }
+    #[test]
+    fn send_wrapper_maps_secure_backup_required_to_a_typed_closed_failure() {
+        assert_eq!(
+            super::map_room_send_result(Err(matrix_sdk::Error::SecureBackupRequired)),
+            Err(super::MatrixRoomOperationError::Sdk(
+                super::MatrixRoomOperationFailureKind::SecureBackupRequired
+            ))
+        );
+        assert_eq!(
+            super::MatrixRoomOperationFailureKind::SecureBackupRequired.to_string(),
+            "secure_backup_required"
+        );
     }
 }
