@@ -24,10 +24,10 @@ The leaf imports only its six contract types from `domain/coreEvents` and `domai
 
 Production declaration and attached ownership header moved once:
 
-1. `// Transport interface (Tauri IPC, browser fake, or test mock)`
+1. the full three-line `// ---------------------------------------------------------------------------` / `// Transport interface (Tauri IPC, browser fake, or test mock)` / `// ---------------------------------------------------------------------------` banner
 2. `interface TimelineTransport`
 
-Approved leaf export: `TimelineTransport` only. Parent flat re-export: `TimelineTransport` only.
+Approved leaf export: `TimelineTransport` only. The only new parent flat re-export is `TimelineTransport`; every existing parent re-export remains unchanged.
 
 Expected production changes: five files only:
 
@@ -57,6 +57,6 @@ No other caller import changes are needed or permitted. No compatibility wrapper
 
 - Design round 1: `reviewer-flash` recorded `Changes-required` because `TimelineMessageBody` retained a reverse type edge and the dependency gate could not pass.
 - Amendment: redirect that erased edge to its sibling row owner, pin the attached header and exact baseline command, and expand the production scope to five files.
-- Design round 2: pending `reviewer-flash` read-only verdict.
-- Implementation: prohibited until `Correct-to-implement`.
+- Design round 2: `reviewer-flash` verified the amendment and recorded `Correct-to-implement`; its two non-blocking precision notes (full banner and new-re-export wording) are folded above.
+- Implementation: approved, not started.
 - Full diff and delivery: pending.
