@@ -1,6 +1,6 @@
 # Issue #551 App QA diagnostics projection extraction
 
-Status: implemented; full-diff review pending. Scope is one behavior-preserving stateless diagnostics seam.
+Status: full diff approved; delivery pending. Scope is one behavior-preserving stateless diagnostics seam.
 
 ## Baseline
 
@@ -103,4 +103,5 @@ The App umbrella remains open for verification/destructive UI, composer/attentio
 - Exactness: declarations6/6, parent0, exports5/private1, destination imports2, App direct import5, orphan import members2, retained top-level declarations/hooks/listeners/timers/render/public exports exact; source owners4 with per-owner assertions/no concatenation.
 - `App.tsx` 7,065 → 6,975 newline-delimited lines; `app/qaDiagnostics.ts` 98; one jsdom characterization test.
 - Focused diagnostics15, App80, typecheck/lint, full Vitest1,371, Playwright248, build and diff checks green.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently traced declarations/imports, DOM/security/equality/log behavior, jsdom coverage, source owners and retained App lifecycle and recorded `Correct-to-merge`.
+- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
