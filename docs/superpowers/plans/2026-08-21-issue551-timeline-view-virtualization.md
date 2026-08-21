@@ -88,4 +88,6 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change. No compati
 - Full-diff round 1: `reviewer-flash` recorded `Correct-to-merge` and noted that `TimelineHeightModel` was inferred internally rather than imported by the parent.
 - Minimal-visibility delta: make that type private, narrowing exports 19 → 18 and correcting fallback/measured-height wording.
 - Final delta review: `reviewer-flash` revalidated the complete tree and recorded `Correct-to-merge`; no blocker remains.
-- Delivery: final repository gates, PR CI and merge pending.
+- Final local evidence: focused 72/72; Vitest 1,367; Playwright 248 with polling; workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm, Tauri/domain boundaries, tracked-secret/release/IPC wire, SDK/docs, deny/machete/rustfmt/exactness/diff checks all green.
+- Rust gate triage: unchanged `account::verification::actor_sas_settlement...` ordering test failed under full-suite concurrency, while Rust diff was zero; focused passed 3/3, clean `origin/main` core baseline passed, current core rerun and final workspace rerun passed without expectation/code changes.
+- Delivery: PR CI and merge pending.
