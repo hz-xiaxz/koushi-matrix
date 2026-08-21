@@ -2,6 +2,10 @@ import type { TimelineItem, TimelineKey } from "../../domain/coreEvents";
 import type { TimelineScrollAnchor } from "../../domain/types";
 import { timelineStoreKeyId } from "../../domain/timelineStore";
 
+// ---------------------------------------------------------------------------
+// Scroll anchor
+// ---------------------------------------------------------------------------
+
 export interface ScrollAnchor {
   /** Stable item id of the anchor element. */
   itemId: string;

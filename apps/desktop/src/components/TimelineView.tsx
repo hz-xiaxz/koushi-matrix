@@ -236,10 +236,6 @@ export function invokeReturnToLiveSafely(handler: ReturnToLiveHandler): void {
     .catch(() => undefined);
 }
 
-// ---------------------------------------------------------------------------
-// Scroll anchor
-// ---------------------------------------------------------------------------
-
 type TimelineProjectionSnapshot = {
   timelineKeyHash: string;
   generation: number;
