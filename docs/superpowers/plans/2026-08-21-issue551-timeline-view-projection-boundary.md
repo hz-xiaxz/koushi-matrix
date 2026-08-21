@@ -28,9 +28,9 @@ Move exactly seven top-level AST statements in this order:
 6. `projectionStructureChanged`
 7. `stableProjectionAnchorRowIds`
 
-Leaf imports exactly:
+Leaf imports exactly three statements:
 
-- runtime `Component` and type-only `ReactNode` from `react`;
+- `import { Component, type ReactNode } from "react";`;
 - type-only `TimelineDisplayRow` from `../../domain/timelineDisplayProjection`;
 - type-only `ScrollAnchor` from `./TimelineViewportAnchors`.
 
@@ -53,11 +53,15 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 
 - AST exactness: 7/7 leaf, parent 0, exports 6/6, private 1/1.
 - Imports3 and orphan parent React imports2; no parent/external reverse edge.
-- Same seven-suite focused command before/after 173/173; typecheck, lint, diff check.
+- Same focused command before/after, 173/173:
+  `npm --prefix apps/desktop test -- --run src/components/TimelineView.interactions.test.tsx src/components/TimelineView.live-state.test.tsx src/components/TimelineView.media.test.tsx src/components/TimelineView.rendering.test.tsx src/components/TimelineView.scrollback.test.tsx src/components/TimelineView.threads.test.tsx src/components/TimelineView.viewport.test.tsx`.
+- Typecheck, lint and diff check.
 - After full-diff approval: complete frontend/Rust/policy matrix and CI.
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design round 1: `reviewer-flash` validated the seam and recorded conditional `Correct-to-implement` with two minor reproducibility clarifications.
+- Amendment: pin the combined React import statement and literal focused command.
+- Design round 2 pending `reviewer-flash` read-only verdict.
+- Implementation prohibited until unconditional `Correct-to-implement`.
 - Full diff and delivery pending.
