@@ -81,5 +81,7 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 - Design round 1: `reviewer-flash` verified the complete seam and recorded `Changes-required` because the exactness wording omitted four mandatory unused-import removals.
 - Amendment: explicitly permit only those four parent type-import removals and add them to exactness evidence.
 - Design round 2: `reviewer-flash` verified the exact orphan-import set and revalidated all inventory, dependency, ownership and coverage claims, then recorded `Correct-to-implement`.
-- Implementation approved, not started.
+- Implementation: integrated by `luna-implementer` and parent-audited; the worker reached its bounded turn limit after focused/inventory checks, before reporting typecheck/lint, which the parent then ran green.
+- Exactness: 16/16 statements, parent 0, exports 9/9, private 7/7, two type-only imports, four approved parent imports removed; `TimelineView.tsx` 4,869 → 4,664 newline-delimited lines and the leaf is 221.
+- Focused post-move 173/173; typecheck, lint and diff checks green; listener/unsubscribe/fallback timer and all state/resource owners remain in the parent.
 - Full diff and delivery pending.
