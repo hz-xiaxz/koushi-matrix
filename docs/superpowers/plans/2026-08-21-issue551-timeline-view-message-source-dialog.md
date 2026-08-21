@@ -44,12 +44,13 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 
 ## Verification
 
-- AST exactness: 3/3 leaf, parent 0, exports 1/private 2, imports 6, orphan imports 3/3.
-- Same focused command before/after 255/255.
+- AST exactness: 3/3 leaf, parent 0, exports 1/private 2, imports 5 statements / 7 bindings, orphan imports 3/3.
+- Same focused command before/after 255/255:
+  `npm --prefix apps/desktop test -- --run src/App.test.tsx src/components/TimelineView.interactions.test.tsx src/components/TimelineView.live-state.test.tsx src/components/TimelineView.media.test.tsx src/components/TimelineView.rendering.test.tsx src/components/TimelineView.scrollback.test.tsx src/components/TimelineView.threads.test.tsx src/components/TimelineView.viewport.test.tsx`.
 - Typecheck, lint, diff; then full matrix after diff approval.
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design: `reviewer-flash` verified the complete JSX/data/import/caller ownership graph and recorded `Correct-to-implement`; its two minor reproducibility notes are folded into the import counts and literal command above.
+- Implementation approved, not started.
 - Full diff and delivery pending.
