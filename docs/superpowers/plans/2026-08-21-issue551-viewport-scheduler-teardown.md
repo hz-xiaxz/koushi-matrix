@@ -65,4 +65,5 @@ No API/export/type/timing constant, callback ordering, timeout duration, fallbac
 - GREEN: focused regression 1/1, existing TimelineView suites 175/175, full Vitest 1,370/1,370 with zero unhandled errors; typecheck, lint and diff checks green.
 - Captured capabilities are the only production delta; the shared first-wins guard, timeout-first sibling cancellation and cancel idempotence are asserted. RAF-first behavior uses the same unchanged `run()` path.
 - Full diff: `reviewer-flash` verified the complete scheduler/test/caller graph and recorded `Correct-to-merge`; no blocker remains.
-- Delivery: final repository gates, PR CI and merge pending.
+- Final local evidence: focused 1/1, TimelineView 175/175, Vitest 1,370/1,370 with zero unhandled errors, Playwright 248 with polling, workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/diff gates green.
+- Delivery: PR CI and merge pending.
