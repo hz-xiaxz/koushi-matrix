@@ -102,4 +102,5 @@ After full-diff approval, integrate current `origin/main`, obtain delta approval
 - Full-diff round 1 found moved docs/`Clone` attrs left on `AbortOnDrop` and `ComposerDraftLoadStatus`; parent removed both, expanded exactness to all retained top-level types, and round 2 recorded `Correct-to-merge` with no blocker.
 - `runtime.rs` 9,643 → 9,003 newline-delimited lines; `runtime/connection.rs` is 665.
 - Focused post-move 1+1+1+4; core lib 1,021/8 ignored; session 8, device 2, E2EE 2, timeline 21, search 1 and intent 5; all-targets/all-features check, rustfmt, exactness and diff checks green.
-- Delivery: final repository gates, latest-main integration/delta review, PR CI and merge pending.
+- Final local evidence: focused 1+1+1+4, core lib 1,021/8 ignored, Vitest 1,370, Playwright 248 with polling, workspace all-targets, desktop 149/1 ignored and Headless Core QA 130; all-targets/all-features, typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
+- Delivery: latest-main integration/delta review if required, PR CI and merge pending.
