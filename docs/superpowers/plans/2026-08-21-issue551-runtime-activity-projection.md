@@ -1,6 +1,6 @@
 # Issue #551 runtime Activity projection extraction
 
-Status: design review pending. Scope is one behavior-preserving ownership seam.
+Status: design approved. Scope is one behavior-preserving ownership seam.
 
 ## Baseline
 
@@ -31,7 +31,7 @@ Create private direct child `crates/koushi-core/src/runtime/activity.rs`. Move e
 15. `normalize_activity_resolution_action`
 16. `cap_activity_resolution_requests`
 
-The leaf owns the bounded account-wide Activity row cache, latest-event reconciliation, unread/context projection, mark-read selection, resolution generation guards and the 16-room request cap. `AppActor` retains the Activity command arms, internal request IDs, AccountActor resolver start/cancel routing, state reduction/effect handling, event emission and central actor loop.
+The leaf owns the account-wide Activity row cache (bounded to 200 when `snapshot` reconciles it), latest-event reconciliation, unread/context projection, mark-read selection, resolution generation guards and the 16-room request cap. `AppActor` retains the Activity command arms, internal request IDs, AccountActor resolver start/cancel routing, state reduction/effect handling, event emission and central actor loop.
 
 ## Unit-test ownership
 
@@ -49,7 +49,7 @@ The two projection tests using `unread_diagnostic_room` import the existing shar
 - Parent declares `mod activity;` privately.
 - Parent explicitly `pub use activity::ACTIVITY_RECENT_MAX_ROWS;` to preserve `koushi_core::runtime::ACTIVITY_RECENT_MAX_ROWS`.
 - Parent privately imports the six directly used symbols: `ActivityProjection`, `activity_tab_token`, `record_activity_transition`, `guard_activity_resolution_completion`, `normalize_activity_resolution_action`, `cap_activity_resolution_requests`; `ActivityMarkReadResult` is inferred and not imported.
-- `ActivityProjection`, all seven parent-called methods, `ActivityMarkReadResult` and its two parent-read fields, and the five parent-called functions become `pub(super)` only.
+- `ActivityProjection`, all seven parent-called methods, `ActivityMarkReadResult` and its two parent-read fields, and the five parent-called functions become `pub(super)` only; the six parent imports are module-level so the retained parent test module inherits `ActivityProjection`.
 - `MAX_ACTIVITY_RESOLUTION_ROOMS` and all six leaf-only projection helpers remain private.
 - No crate-root export, public feature namespace, glob, compatibility alias or wrapper is added.
 
@@ -89,6 +89,6 @@ After `Correct-to-merge`, run the complete repository matrix recorded in the roa
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design: `reviewer-flash` independently verified the 16 identities, seven methods, 11+2 tests, visibility/public paths, focused counts and lifecycle boundaries and recorded `Correct-to-implement`.
+- Implementation must re-check the immutable SHA-256 before mutation and record the module-level import/public-path evidence.
 - Full diff and delivery pending.

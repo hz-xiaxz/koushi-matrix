@@ -1,6 +1,6 @@
 # Issue #551 runtime decomposition roadmap
 
-Status: design review pending. The split-later prerequisite (SDK/Room/Account/Timeline actors and TimelineView seams) is complete.
+Status: roadmap approved. The split-later prerequisite (SDK/Room/Account/Timeline actors and TimelineView seams) is complete.
 
 ## Immutable baseline
 
@@ -32,7 +32,7 @@ No PR may move timer polling out of the one select loop, detach a task, split Ap
 2. **Runtime transport/public façade** — command admission envelope, connection/runtime handles, lag projection and abort-on-drop task guards. Preserve all public paths through explicit re-exports; review public/crate visibility changes separately.
 3. **Profile/display diagnostics** — pure profile-resolution and display-label diagnostic projection; no actor state/task movement.
 4. **Composer draft lifecycle** — admission identities, forwarded permit lifecycle, encrypted load/persist/reconciliation and debounce helpers atomically; keep timer select arm in the actor loop.
-5. **Navigation support** — persistence, replacement cleanup and focused projection-ack helpers; keep exhaustive navigation command registry and latest-desired queue in the actor.
+5. **Navigation support** — persistence, replacement cleanup and focused projection-ack helpers; keep exhaustive navigation command registry and latest-desired queue in the actor, and preserve the tested ordering in which local `activity_projection` lookup precedes `AccountMessage::OpenTimelineAtTimestamp` fallback.
 6. **Scheduled sends** — local persistence/deadline/due-dispatch helpers atomically; keep schedule/cancel/reschedule command arms central.
 7. **Reducer/projection support** — reducer instrumentation and deferred persistence implementation; preserve one actor loop and both exhaustive effect dispatchers.
 8. **Final residual audit** — retain `AppActor`, `run`, `handle_command`, `handle_app_effects`, `handle_post_projection_effects`, consumer event projection, verification allowlist and account speculative projection registry if further movement requires wrapper APIs or duplicate ownership.
@@ -62,5 +62,5 @@ Focused commands are selected per seam. Every final PR also runs workspace all-t
 ## Review gate
 
 - Reconnaissance completed read-only against command/event/state/account/SDK boundaries and runtime integration suites.
-- Formal roadmap verdict pending `reviewer-flash`.
-- First implementation is prohibited until both this roadmap and the activity seam plan are `Correct-to-implement`.
+- Formal `reviewer-flash` review traced the lifecycle/registry/public/test graph and recorded `Correct-to-implement` for this roadmap and the first Activity seam.
+- The review's later-navigation ordering note is recorded above; implementation may proceed only under each seam's own reviewed plan.
