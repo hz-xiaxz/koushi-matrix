@@ -1,6 +1,6 @@
 # Issue #551 runtime scheduled-send extraction
 
-Status: design approved. Scope is one atomic behavior-preserving local scheduled-send lifecycle seam.
+Status: implemented; full-diff review pending. Scope is one atomic behavior-preserving local scheduled-send lifecycle seam.
 
 ## Baseline
 
@@ -95,3 +95,8 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 - Read-only reconnaissance traced timer, reducer/deferred persistence, origin-session fence, retry and shutdown/resource boundaries.
 - `reviewer-flash` independently traced all nine identities, visibility/import closure, timer/reducer/persistence/session-fence ordering and source-test boundaries and recorded `Correct-to-implement`.
 - Shell-confirmed baseline is 7,148 newline characters (`wc -l`) / 304,019 bytes; editor line numbering includes the final non-newline-delimited display line.
+- Implementation integrated by `luna-implementer` and parent-audited.
+- Exactness: global production9/9, top-level4/4, AppActor methods5/5, top-level `pub(super)`3, method edges4, parent imports3, orphan bindings3, all1,029 test identities/paths exact; public/wire/resource deltas0.
+- `runtime.rs` 7,148 → 7,035 newline-delimited lines; `runtime/scheduled_send.rs` 137.
+- Focused post-move runtime12, core filter16, state9, source contract1, core lib1,021/8 ignored and all-targets/all-features check green.
+- Full diff and delivery pending.
