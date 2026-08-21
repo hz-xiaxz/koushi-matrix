@@ -1,6 +1,6 @@
 # Issue #551 App session-verification gate extraction
 
-Status: design approved. Scope is one behavior-preserving verification/secure-backup/cleanup presentation-controller seam.
+Status: implemented; full-diff review pending. Scope is one behavior-preserving verification/secure-backup/cleanup presentation-controller seam.
 
 ## Baseline
 
@@ -125,3 +125,8 @@ The App umbrella remains open for composer/attention re-evaluation and final res
 
 - Read-only reconnaissance found the gate closure and rejected adding Tauri or a second API instance to the component.
 - `reviewer-flash` independently traced the API singleton/eager mock order, all declarations/imports, App compatibility, gate invariants, tests/counts and dependency graph and recorded `Correct-to-implement`.
+- Implementation integrated by `luna-implementer`; parent restored compact immutable declaration formatting after rejecting unrelated Prettier churn.
+- Exactness: backend2/2, gate12/12, App parent0, gate exports4/private8/import statements6, backend exports2/imports3, orphan members7, App direct imports3/re-export2 and one production API initializer; gate body/JSX exact after relative type-path normalization.
+- `App.tsx` 6,933 → 6,367 newline-delimited lines; gate leaf567 and backend runtime10.
+- Focused App78 + gate29 + dialogs14 =121, e2e gate12, typecheck/lint, full Vitest1,371 and boundary/security/diff checks green.
+- Full diff and delivery pending.
