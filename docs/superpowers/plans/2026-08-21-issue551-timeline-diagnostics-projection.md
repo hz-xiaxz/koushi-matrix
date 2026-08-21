@@ -53,4 +53,5 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 - Exactness: 3/3 statements, parent 0, exports 3/3, type-only imports 2/2, retained controller helpers 2/2 and one parent type re-export; `TimelineView.tsx` 4,104 → 4,048 newline-delimited lines and the leaf is 64.
 - Focused post-move 23/23; typecheck, lint and diff checks green; emission/dedupe/container/download/event owners remain parent-owned.
 - Full diff: `reviewer-flash` independently traced every moved body/type/caller and retained owner and recorded `Correct-to-merge`; parent `wc -l` confirms 4,048 newline-delimited lines.
-- Delivery: final repository gates, PR CI and merge pending.
+- Final local evidence: focused 23/23, Vitest 1,370, Playwright 248 with polling, workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
+- Delivery: PR CI and merge pending.
