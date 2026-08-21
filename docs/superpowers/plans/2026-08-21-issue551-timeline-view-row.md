@@ -3,7 +3,8 @@
 ## Status
 
 - Design: `reviewer-flash` found and verified the runtime-default dependency/import/order amendments, then recorded `Correct-to-implement`.
-- Implementation: approved but not started.
+- Implementation: integrated; 21/21 declaration exactness, 6/6 exports, focused tests, typecheck, lint and diff checks are green.
+- Full-diff review: pending.
 - Delivery: pending.
 
 ## Objective
@@ -100,6 +101,13 @@ One Luna/low worker edits only `TimelineView.tsx` and creates `timeline/Timeline
 ## Exactness
 
 Temporary TypeScript verification proves 21/21 bodies match immutable source after export/path normalization, parent zero, leaf exports exactly six approved names, parent imports six/re-exports three, only one erased reverse type edge, no outside direct leaf importer, and no test/CSS/domain/dependency/barrel/default/wrapper/duplicate/TODO change.
+
+## Integrated implementation evidence
+
+- `TimelineView.tsx`: 6,721 → 5,198 lines; row presentation moved to a 1,570-line direct leaf.
+- TypeScript AST exactness: 21/21 declarations moved once; parent retains zero; leaf exports exactly six approved names.
+- Parent imports six and flat-re-exports the three existing public names; reverse parent edge is only erased `TimelineTransport` type.
+- Focused baseline/post 200/200; typecheck, lint and diff check green. No test/CSS/i18n/domain/transport/row semantics/resource behavior changed.
 
 ## Verification
 
