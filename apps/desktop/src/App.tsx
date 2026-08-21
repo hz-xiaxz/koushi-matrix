@@ -132,15 +132,20 @@ import {
   qaDomDiagnosticTokens,
   qaTimelineDiagnosticTokens,
   qaWindowTitle,
-  type QaDomDiagnostics,
   type QaTimelineDiagnostics
 } from "./domain/qaTitle";
+import {
+  INITIAL_TIMELINE_DIAGNOSTICS,
+  qaRenderedDomDiagnostics,
+  qaSecurityDiagnostics,
+  timelineDiagnosticsEqual,
+  timelineDiagnosticsLogMessage
+} from "./app/qaDiagnostics";
 import {
   createDiagnosticLogBuffer,
   diagnosticReport,
   schemaMismatchDiagnosticEntry,
-  type DiagnosticLogSnapshot,
-  type SecurityDiagnostics
+  type DiagnosticLogSnapshot
 } from "./domain/diagnostics";
 import {
   createUiLatencySampler,
@@ -346,18 +351,6 @@ const DEFAULT_HOMESERVER = "https://matrix.org";
 const MENU_EVENT_NAME = "koushi-desktop://menu";
 const STATE_EVENT_NAME = "koushi-desktop://state";
 const STATE_EVENT_REFRESH_DEBOUNCE_MS = 250;
-const INITIAL_TIMELINE_DIAGNOSTICS: QaTimelineDiagnostics = {
-  visibleItems: 0,
-  downloadedItems: 0,
-  backfill: "unknown",
-  avatarMxcItems: 0,
-  avatarReadyItems: 0,
-  avatarPendingItems: 0,
-  avatarFailedItems: 0,
-  avatarMissingItems: 0,
-  avatarRenderedImages: 0,
-  avatarBrokenImages: 0
-};
 declare global {
   interface Window {
     __matrixDesktopQaErrorCaptureInstalled?: boolean;
@@ -620,56 +613,6 @@ function qaSendSmokeTargetUserId(): string | null {
   return qaSendSmokeTargetUserIdFromEnv(
     import.meta.env.VITE_KOUSHI_QA_SEND_SMOKE_USER_ID
   );
-}
-
-function qaRenderedDomDiagnostics(): QaDomDiagnostics {
-  const root = document.getElementById("root");
-  const screen = document.querySelector('[data-testid="boot-error"]')
-    ? "boot_error"
-    : document.querySelector('[data-testid="auth-screen"]')
-      ? "auth"
-      : document.querySelector('[data-testid="recovery-panel"]')
-        ? "recovery"
-        : document.querySelector('[data-testid="timeline-view"]')
-          ? "timeline"
-          : root?.childElementCount
-            ? "unknown"
-            : "empty";
-
-  return {
-    screen,
-    rootChildren: root?.childElementCount ?? 0,
-    bodyTextLength: (document.body.innerText ?? document.body.textContent ?? "").length
-  };
-}
-
-function qaSecurityDiagnostics(): SecurityDiagnostics {
-  const avatarImages = Array.from(
-    document.querySelectorAll<HTMLImageElement>(
-      ".avatar img, .room-avatar img, .space-avatar img, .receipt-reader-avatar img"
-    )
-  );
-  return {
-    secureContext: window.isSecureContext,
-    locationProtocol: window.location.protocol,
-    locationOrigin: window.location.origin,
-    avatarImageSchemes: avatarImages.reduce<Record<string, number>>((counts, image) => {
-      const scheme = imageSrcScheme(image.currentSrc || image.src);
-      counts[scheme] = (counts[scheme] ?? 0) + 1;
-      return counts;
-    }, {}),
-    avatarBrokenImages: avatarImages.filter((image) => !image.complete || image.naturalWidth === 0)
-      .length
-  };
-}
-
-function imageSrcScheme(src: string): string {
-  try {
-    const protocol = new URL(src, window.location.href).protocol;
-    return protocol.endsWith(":") ? protocol.slice(0, -1) : protocol;
-  } catch {
-    return "invalid";
-  }
 }
 
 function timelineStoreSessionKey(snapshot: DesktopSnapshot | null): string {
@@ -7023,39 +6966,6 @@ export function ResetLocalDataConfirmationDialog({
       </div>
     </div>
   );
-}
-
-function timelineDiagnosticsEqual(
-  left: QaTimelineDiagnostics,
-  right: QaTimelineDiagnostics
-): boolean {
-  return (
-    left.visibleItems === right.visibleItems &&
-    left.downloadedItems === right.downloadedItems &&
-    left.backfill === right.backfill &&
-    left.avatarMxcItems === right.avatarMxcItems &&
-    left.avatarReadyItems === right.avatarReadyItems &&
-    left.avatarPendingItems === right.avatarPendingItems &&
-    left.avatarFailedItems === right.avatarFailedItems &&
-    left.avatarMissingItems === right.avatarMissingItems &&
-    left.avatarRenderedImages === right.avatarRenderedImages &&
-    left.avatarBrokenImages === right.avatarBrokenImages
-  );
-}
-
-function timelineDiagnosticsLogMessage(diagnostics: QaTimelineDiagnostics): string {
-  return [
-    `items visible=${diagnostics.visibleItems}`,
-    `downloaded=${diagnostics.downloadedItems}`,
-    `backfill=${diagnostics.backfill}`,
-    `avatars mxc=${diagnostics.avatarMxcItems}`,
-    `ready=${diagnostics.avatarReadyItems}`,
-    `pending=${diagnostics.avatarPendingItems}`,
-    `failed=${diagnostics.avatarFailedItems}`,
-    `missing=${diagnostics.avatarMissingItems}`,
-    `rendered=${diagnostics.avatarRenderedImages}`,
-    `broken=${diagnostics.avatarBrokenImages}`
-  ].join(" ");
 }
 
 // Preserve App.tsx's original public export surface; these components now live in
