@@ -1,6 +1,6 @@
 # Issue #551 runtime navigation support extraction
 
-Status: implemented; full-diff review pending. Scope is one behavior-preserving navigation persistence/cleanup/projection seam.
+Status: full-diff finding fixed; delta review pending. Scope is one behavior-preserving navigation persistence/cleanup/projection seam.
 
 ## Baseline
 
@@ -59,7 +59,7 @@ Do not move thread wrappers/methods/commands. The generic `unsubscribe_replaced_
 
 ## Visibility and imports
 
-No public API exists or is added. Parent declares private `mod navigation;` with the other private modules and explicitly imports 12 `pub(super)` top-level identities: all moved top-level items except private `take_acknowledged_focused_navigation`. All four moved `AppActor` methods and `NavigationReplacementRoomForCleanup::room_id` become `pub(super)`.
+No public API exists or is added. Parent declares private `mod navigation;` with the other private modules and explicitly imports 11 `pub(super)` top-level identities: all moved top-level items except private `take_acknowledged_focused_navigation` and leaf-only `unsubscribe_replaced_focused_context_timeline_key`. All four moved `AppActor` methods and `NavigationReplacementRoomForCleanup::room_id` become `pub(super)`.
 
 `PendingFocusedNavigation` has five `pub(super)` fields because retained command/action orchestration constructs and reads all five. Other moved fields/variants require no separate widening. Remove only one parent production binding made orphaned by the move: unqualified `FocusedContextState`; retained parent code already uses its fully-qualified path. Keep `NavigationState`, `IntentNoOpReason`, `IntentOutcome`, `TimelineKey`, `TimelineKind`, diagnostics, `executor`, `StoreActor` and `session_key_id_from_info` for retained production/tests.
 
@@ -94,7 +94,7 @@ A temporary `syn` verifier compares immutable base with parent + leaf:
 - top-level types/functions 13/13, `NavigationReplacementRoomForCleanup::room_id` 1/1, `AppActor` methods 4/4 keyed by `(self type, item kind, name)`;
 - moved tests 6/6 and helpers 2/2, parent 0; relevant retained source tests 6/6 and behavior test 1/1;
 - all 1,029 lib test identities equal after normalizing only six owner paths;
-- top-level `pub(super)`12, method edges4, associated edge1, field edges5, parent explicit imports12, production orphan binding1;
+- top-level `pub(super)`11, method edges4, associated edge1, field edges5, parent explicit imports11, production orphan binding1;
 - parent fields/run/action transaction/timer/channels/maps/generations/reducer/deferred/command/effect registries and timestamp lookup order byte-exact;
 - source-test owner paths/boundaries are the only approved retained-test body delta;
 - duplicate/missing/excess items, public/wire/resource/dependency deltas 0.
@@ -110,7 +110,8 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 - Read-only reconnaissance traced persistence, action transaction, cleanup lane, focused acknowledgment and timestamp lookup boundaries.
 - `reviewer-flash` independently traced all 18 identities, six tests/two helpers, visibility/import closure, persistence source boundaries and parent ordering/ownership and recorded `Correct-to-implement`.
 - Implementation re-confirmed immutable hash/bytes, integrated by `luna-implementer`, and parent-audited.
-- Exactness: global production18/18, top-level13/13, AppActor methods4/4, associated method1/1, moved tests6/6, helpers2/2, all1,029 test identities, top-level `pub(super)`12, method edges4, associated edge1, field edges5, parent imports12 and orphan binding1; public/wire/resource deltas0.
+- Exactness: global production18/18, top-level13/13, AppActor methods4/4, associated method1/1, moved tests6/6, helpers2/2, all1,029 test identities, top-level `pub(super)`11, method edges4, associated edge1, field edges5, parent imports11 and orphan binding1; public/wire/resource deltas0.
+- Full-diff review found one leaf-only helper unnecessarily imported/widened. The parent import was removed and `unsubscribe_replaced_focused_context_timeline_key` restored to private; delta review pending.
 - `runtime.rs` 7,715 → 7,149 newline-delimited lines; `runtime/navigation.rs` 593.
 - Focused moved tests6, relevant retained source/order tests6, saturated-mailbox behavior1, runtime navigation1, state navigation55, core lib1,021/8 ignored and all-targets/all-features check green.
 - Full diff and delivery pending.

@@ -27,8 +27,7 @@ use navigation::{
     anchored_action_after_projection_ack, cancel_replaced_room_timeline_link_previews_key,
     cancel_replaced_room_timeline_pagination_key, effects_open_focused_timeline,
     focused_navigation_outcome_after_reduce, navigation_replacement_room_for_cleanup,
-    navigation_session_key, unsubscribe_replaced_focused_context_timeline_key,
-    unsubscribe_replaced_timeline_key,
+    navigation_session_key, unsubscribe_replaced_timeline_key,
 };
 
 pub use connection::{CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag};

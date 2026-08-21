@@ -212,7 +212,7 @@ impl AppActor {
     }
 }
 
-pub(super) fn unsubscribe_replaced_focused_context_timeline_key(
+fn unsubscribe_replaced_focused_context_timeline_key(
     current_key: Option<TimelineKey>,
     replacement_key: TimelineKey,
 ) -> Option<TimelineKey> {
