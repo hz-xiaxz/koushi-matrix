@@ -1,6 +1,6 @@
 # Issue #551 Timeline row transport-action extraction
 
-Status: design review pending. Scope is behavior-preserving adapter ownership extraction.
+Status: full diff approved; delivery pending. Scope is behavior-preserving adapter ownership extraction.
 
 ## Baseline
 
@@ -84,4 +84,5 @@ Only `TimelineView.tsx`, the new hook and this plan/index may change.
 - Implementation: integrated by `luna-implementer` and parent-audited.
 - Exactness: callbacks 14/14, parent 0, output keys 14/14, imports 6/6, exports 1/private type 1, parent spread 1/explicit moved props 0/duplicates 0, excluded owners 4/4 and orphan imports 2/2; `TimelineView.tsx` 4,048 → 3,944 newline-delimited lines and the hook is 145.
 - Focused post-move 53/53; typecheck, lint and diff checks green; bulk callback identity and all state/resource owners remain exact.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently traced every callback, prop key, dependency and retained owner and recorded `Correct-to-merge`; parent AST/git evidence closes its read-only raw-diff limitation.
+- Delivery: final repository gates, PR CI and merge pending.
