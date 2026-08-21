@@ -1,6 +1,6 @@
 # Issue #551 runtime connection transport extraction
 
-Status: design approved. Scope is one behavior-preserving ownership seam.
+Status: implemented; full-diff review pending. Scope is one behavior-preserving ownership seam.
 
 ## Baseline
 
@@ -97,5 +97,8 @@ After full-diff approval, integrate current `origin/main`, obtain delta approval
 
 - Design round 1: `reviewer-flash` recorded `Changes-required` because the consumer-projection test directly constructs private `CoreConnection` fields and the CoreRuntime-field invariant was overstated.
 - Both findings were corrected; round 2 verified the complete type/method/test/import/privacy/public/lifecycle graph and recorded `Correct-to-implement`.
-- Implementation exposed additional compiler-proven orphan imports from the completed Activity/connection moves; the exact production/test import closure is now recorded above and requires a read-only delta approval before integration continues.
+- Implementation exposed additional compiler-proven orphan imports from the completed Activity/connection moves; the exact production/test closure was amended and `reviewer-flash` recorded `Correct-to-continue-implementation`. The unapproved worker draft omitted three doc attrs and added one unused binding; parent restored the exact docs and removed the binding before integration.
+- Implementation exactness: types 4/4, handle methods 9/9, connection methods 13/13, attach 1/1, tests 3/3, leaf imports 7/7, public re-export 4/4, visibility deltas 0; all 1,029 lib test identities match after normalizing the three owner paths.
+- `runtime.rs` 9,643 → 9,013 newline-delimited lines; `runtime/connection.rs` is 665.
+- Focused post-move 1+1+1+4; core lib 1,021/8 ignored; session 8, device 2, E2EE 2, timeline 21, search 1 and intent 5; all-targets/all-features check, rustfmt, exactness and diff checks green.
 - Full diff and delivery pending.
