@@ -4,8 +4,8 @@
 
 - Design: `reviewer-flash` found and verified the runtime-default dependency/import/order amendments, then recorded `Correct-to-implement`.
 - Implementation: integrated; 21/21 declaration exactness, 6/6 exports, focused tests, typecheck, lint and diff checks are green.
-- Full-diff review: pending.
-- Delivery: pending.
+- Full-diff review: `reviewer-flash` inspected the complete row owner/resource graph and recorded `Correct-to-merge`; no blocking finding remains.
+- Delivery: final repository gates, PR CI and merge pending.
 
 ## Objective
 
