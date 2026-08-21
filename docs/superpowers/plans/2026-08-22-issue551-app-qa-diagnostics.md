@@ -44,7 +44,7 @@ Destination has exactly two type import paths:
 - `SecurityDiagnostics` from `../domain/diagnostics`;
 - `QaDomDiagnostics`, `QaTimelineDiagnostics` from `../domain/qaTitle`.
 
-Remove only `SecurityDiagnostics` from App imports. Retain `QaDomDiagnostics` and `QaTimelineDiagnostics` because App state/title/report composition still uses them.
+Remove only `SecurityDiagnostics` and `QaDomDiagnostics` from App imports. Retain `QaTimelineDiagnostics` because App state/ref and title/report composition still name it.
 
 Keep in App:
 
@@ -62,8 +62,8 @@ React remains the lifecycle owner. Rust-owned state/DTO/command/event semantics 
 Add one focused jsdom test `apps/desktop/src/app/qaDiagnostics.test.ts` that checks in one bounded case:
 
 - exact initial object;
-- DOM precedence/count output;
-- avatar scheme/broken-image output;
+- DOM precedence/count output, including deterministic `innerText` and empty-root fallback;
+- secure-context/protocol/origin plus valid/invalid avatar scheme and broken-image output;
 - all-field equality sensitivity;
 - exact log string.
 
@@ -82,7 +82,7 @@ A temporary TypeScript AST verifier compares immutable base with parent + leaf:
 - declarations6/6 in relative order, parent0;
 - bodies/types/comments exact modulo export modifiers;
 - exports5/private1, destination import paths2, App direct import5;
-- App orphan import1 and no other import deletion;
+- App orphan import members2 and no other import deletion;
 - retained App top-level declarations/hooks/listeners/timers/render/public exports exact;
 - source-contract forbidden tokens and owner set exact; no concatenated source;
 - public API/dependencies/reverse edges/product-state deltas0;
