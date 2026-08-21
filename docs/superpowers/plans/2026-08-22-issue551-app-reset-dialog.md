@@ -74,4 +74,5 @@ The App umbrella remains open for verification-gate extraction/re-evaluation, co
 - `App.tsx` 6,975 → 6,933 newline-delimited lines; existing dialogs owner grows by the moved presentation component.
 - Focused App79 + dialogs14 =93, gate coverage22 in `SessionVerificationGate.test.tsx` +6 in App =28, typecheck/lint, full Vitest1,371, build and diff checks green.
 - Full diff: `reviewer-flash` independently traced the component, calls, import/re-export compatibility, test assertions, CSS/i18n and state/resource boundaries and recorded `Correct-to-merge`.
-- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: focused App79 + dialogs14, gate coverage28, Vitest1,371, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
