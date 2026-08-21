@@ -1,6 +1,6 @@
 # Issue #551 runtime scheduled-send extraction
 
-Status: design review pending. Scope is one atomic behavior-preserving local scheduled-send lifecycle seam.
+Status: design approved. Scope is one atomic behavior-preserving local scheduled-send lifecycle seam.
 
 ## Baseline
 
@@ -40,7 +40,7 @@ Keep every `AppActor` field and these boundaries in `runtime.rs`:
 
 Preserve these orderings exactly:
 
-1. scheduled state loads before same-batch actor projections and only once per session marker;
+1. scheduled state loads once per session marker at the end of the action batch, after actor projection/effects and immediately before the one batch publication;
 2. lock/logout/account switch clears only the loaded marker and never persists transient empty session views;
 3. due dispatch requires `SessionState::Ready`, selects one non-server/non-dispatching due item, then recomputes the deadline on the next loop;
 4. reduce `ScheduledSendDispatchStarted` and complete deferred persistence before AccountActor forwarding;
@@ -93,4 +93,5 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 ## Review gate
 
 - Read-only reconnaissance traced timer, reducer/deferred persistence, origin-session fence, retry and shutdown/resource boundaries.
-- Formal `reviewer-flash` verdict pending; implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` independently traced all nine identities, visibility/import closure, timer/reducer/persistence/session-fence ordering and source-test boundaries and recorded `Correct-to-implement`.
+- Shell-confirmed baseline is 7,148 newline characters (`wc -l`) / 304,019 bytes; editor line numbering includes the final non-newline-delimited display line.
