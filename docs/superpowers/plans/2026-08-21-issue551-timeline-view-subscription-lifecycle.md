@@ -78,4 +78,5 @@ Only `TimelineView.tsx`, the new hook leaf and this plan/index may change.
 - Source/lifecycle exactness: callback body 1/1, dependencies 9/9, parent listener 0, hook listener 1, direct unsubscribe, fallback timer/cleanup 1/1, imports 3/3 and delay 120 once.
 - `TimelineView.tsx` is 4,273 newline-delimited lines; the 49-line hook is now the sole listener/fallback resource owner.
 - Focused post-move 175/175; typecheck, lint and diff checks green.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently verified callback identity/order, shared ref fences, direct unsubscribe, fallback timer cleanup and parent ownership and recorded `Correct-to-merge`; parent source verifier closes its read-only base-diff limitation.
+- Delivery: final repository gates, PR CI and merge pending.
