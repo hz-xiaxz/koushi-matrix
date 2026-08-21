@@ -1,6 +1,6 @@
 # Issue #551 runtime composer-draft lifecycle extraction
 
-Status: design approved. Scope is one atomic behavior-preserving lifecycle seam.
+Status: implemented; full-diff review pending. Scope is one atomic behavior-preserving lifecycle seam.
 
 ## Baseline
 
@@ -119,3 +119,9 @@ After full-diff approval, integrate latest `origin/main`, obtain delta approval 
 - `reviewer-flash` round 1 found the missing parent orphan `SubmissionId`; the plan corrected it, the moved-test count and exact source boundaries.
 - Round 2 independently re-traced identities, paths, visibility, imports, tests and lifecycle order and recorded `Correct-to-implement`.
 - `schedule_composer_draft_persist` requires `pub(super)` because retained parent `apply_deferred_reducer_side_effects` calls it; it is not leaf-only.
+- Implementation integrated by `luna-implementer`, then parent removed its production glob and established explicit owner imports.
+- Exactness: top-level16/16, AppActor methods9/9, permit methods4/4 + Drop1, moved tests3/3, all1,029 test identities, top-level `pub(super)`13, method `pub(super)`7, necessary `PendingComposerAcceptance::identity` field edge1, public re-exports2 and orphan bindings6; public/wire/resource deltas0.
+- `runtime.rs` 8,280 → 7,715 newline-delimited lines; `runtime/composer.rs` 641.
+- Focused post-move unit3, source1, lifecycle7, scheduled-send12 and send-queue13; core lib1,021/8 ignored and all-targets/all-features check green.
+- Initial parallel `runtime_timeline` run observed `lock_unlock_retries_repaired_composer_payload` expected2/got3; exact rerun and complete21-test rerun were green, matching the diagnosed shared diagnostic-observation timing/isolation class rather than a persistence behavior delta.
+- Full diff and delivery pending.
