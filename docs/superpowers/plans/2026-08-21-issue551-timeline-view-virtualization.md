@@ -81,6 +81,6 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change. No compati
 
 - Design round 1: `reviewer-flash` recorded `Changes-required` because the first draft documented stale constant values despite the source inventory being correct.
 - Amendment: pin base `47e1a525` values 600/60/72/36..480 and exact leaf import path; retain the deliberate `wc -l` newline-delimited baseline count.
-- Design round 2: pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design round 2: `reviewer-flash` revalidated all 25 declarations, exports, constants, dependencies and cancellation owners and recorded `Correct-to-implement`.
+- Implementation approved, not started.
 - Full diff and delivery pending.
