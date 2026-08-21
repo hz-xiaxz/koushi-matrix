@@ -93,6 +93,64 @@ fn trace_room_route_closed() {
     ));
 }
 
+struct EncryptedUserContentTarget<'a> {
+    request_id: RequestId,
+    room_id: &'a str,
+    submission: Option<(&'a TimelineKey, &'a koushi_state::SubmissionId)>,
+}
+
+fn encrypted_user_content_target(
+    command: &TimelineCommand,
+) -> Option<EncryptedUserContentTarget<'_>> {
+    match command {
+        TimelineCommand::SendText {
+            request_id, key, ..
+        }
+        | TimelineCommand::SendReply {
+            request_id, key, ..
+        }
+        | TimelineCommand::EditText {
+            request_id, key, ..
+        }
+        | TimelineCommand::RetrySend {
+            request_id, key, ..
+        }
+        | TimelineCommand::UploadAndSendMedia {
+            request_id, key, ..
+        } => Some(EncryptedUserContentTarget {
+            request_id: *request_id,
+            room_id: key.room_id(),
+            submission: None,
+        }),
+        TimelineCommand::SubmitText {
+            request_id,
+            key,
+            submission_id,
+            ..
+        }
+        | TimelineCommand::SubmitReply {
+            request_id,
+            key,
+            submission_id,
+            ..
+        } => Some(EncryptedUserContentTarget {
+            request_id: *request_id,
+            room_id: key.room_id(),
+            submission: Some((key, submission_id)),
+        }),
+        TimelineCommand::ForwardMessage {
+            request_id,
+            destination_room_id,
+            ..
+        } => Some(EncryptedUserContentTarget {
+            request_id: *request_id,
+            room_id: destination_room_id,
+            submission: None,
+        }),
+        _ => None,
+    }
+}
+
 impl AccountActor {
     /// Route a RoomCommand to the RoomActor. The RoomActor handles the
     /// SessionRequired check internally (it holds the session ref after
@@ -184,7 +242,7 @@ impl AccountActor {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         }
-        if let Some(target) = crate::runtime::encrypted_user_content_target(&command) {
+        if let Some(target) = encrypted_user_content_target(&command) {
             let Some(session) = self.session.as_deref().filter(|_| self.session_promoted) else {
                 self.emit_failure(target.request_id, CoreFailure::SessionRequired);
                 return;
