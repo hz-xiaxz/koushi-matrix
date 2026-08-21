@@ -29,7 +29,7 @@ No PR may move timer polling out of the one select loop, detach a task, split Ap
 ## Planned independently mergeable seams
 
 1. **Activity projection** — pure account-wide row cache, unread/context projection, resolution normalization/cap and its unit tests. Leave Activity command arms and resolver dispatch in the exhaustive façade.
-2. **Runtime transport/public façade** — command admission envelope, connection/runtime handles, lag projection and abort-on-drop task guards. Preserve all public paths through explicit re-exports; review public/crate visibility changes separately.
+2. **Connection transport/admission façade** — `CommandSubmitError`, connection/command handles, lag projection and `CoreRuntime::attach`; keep the inbox envelope, `CoreRuntime`, abort-on-drop task guards and shutdown owner in the parent. Preserve all public paths through explicit re-exports and add no visibility edge.
 3. **Profile/display diagnostics** — pure profile-resolution and display-label diagnostic projection; no actor state/task movement.
 4. **Composer draft lifecycle** — admission identities, forwarded permit lifecycle, encrypted load/persist/reconciliation and debounce helpers atomically; keep timer select arm in the actor loop.
 5. **Navigation support** — persistence, replacement cleanup and focused projection-ack helpers; keep exhaustive navigation command registry and latest-desired queue in the actor, and preserve the tested ordering in which local `activity_projection` lookup precedes `AccountMessage::OpenTimelineAtTimestamp` fallback.
