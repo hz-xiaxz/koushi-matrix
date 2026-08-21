@@ -60,5 +60,8 @@ No API/export/type/timing constant, callback ordering, timeout duration, fallbac
 - Amendment: pin jsdom, property-descriptor removal/restoration, exact RED error, bound capabilities and 1,370-test total.
 - Design round 2: `reviewer-flash` independently verified the exact installed Vitest/jsdom deletion semantics, test counts and capability bindings and recorded `Correct-to-implement`.
 - Implementation note: install all window spies before scheduling so the captured references are spies; schedule-time optional RAF/cancel-RAF capture is intentional and equivalent to the prior runtime guards.
-- Implementation approved, not started.
+- Implementation: integrated by `luna-implementer` at medium reasoning and parent-audited.
+- RED: the focused jsdom regression failed on unchanged production with `ReferenceError: window is not defined` at the deferred fallback.
+- GREEN: focused regression 1/1, existing TimelineView suites 175/175, full Vitest 1,370/1,370 with zero unhandled errors; typecheck, lint and diff checks green.
+- Captured capabilities are the only production delta; fallback/RAF first-wins and cancel idempotence are asserted.
 - Full diff and delivery pending.
