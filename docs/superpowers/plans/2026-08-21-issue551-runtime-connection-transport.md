@@ -43,7 +43,7 @@ Production leaf has exactly seven import statements:
 
 Parent declares private `mod connection;` and explicitly `pub use connection::{CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag};`. This preserves both `koushi_core::runtime::*` and existing crate-root re-exports in `lib.rs` without exposing `runtime::connection`.
 
-All four moved types and their existing fields/methods retain exact visibility. Parent removes only the now-orphaned `Ordering` atomic import while retaining `AtomicU64` for `CoreRuntime`. `CoreCommandEnvelope` stays parent-private and is accessible to the descendant module. `CoreRuntime` fields stay private: the moved descendant `attach` method accesses its six connection resources, while existing parent-owned shutdown/barrier tests continue reading `snapshot_rx` directly. No `pub(super)`, new constructor, wrapper, alias, trait, compatibility shim or public namespace is added.
+All four moved types and their existing fields/methods retain exact visibility. Parent removes exactly the eleven production bindings made orphaned by the completed Activity/connection moves: `BTreeMap`, `Ordering`, `ActivityTab`, `RoomSummary`, `ComposerDraftLeaseFailure`, `ComposerDraftLeaseId`, `ComposerDraftScope`, `ComposerRendererGeneration`, `AppStateSnapshot`, `project_room_event_display_labels`, and `project_timeline_event_display_labels`. Parent retains `AtomicU64`, `BTreeSet`/`HashMap`, and all other runtime owners. `CoreCommandEnvelope` stays parent-private and is accessible to the descendant module. `CoreRuntime` fields stay private: the moved descendant `attach` method accesses its six connection resources, while existing parent-owned shutdown/barrier tests continue reading `snapshot_rx` directly. No `pub(super)`, new constructor, wrapper, alias, trait, compatibility shim or public namespace is added.
 
 ## Test ownership
 
@@ -55,7 +55,9 @@ Move exactly three tests in original relative order to the leaf's `#[cfg(test)] 
 
 The first directly constructs the private command handle and pins lease-permit retention. The second is a source-characterization test for this owner. Change only its source input from `include_str!("runtime.rs")` to `include_str!("connection.rs")`; continue reading the owner file individually and do not concatenate source. The third directly constructs private `CoreConnection` fields and pins consumer-side label projection, so it must move with that owner rather than widening fields or adding a test constructor.
 
-Leaf tests use existing test-only `use super::*` plus four explicit import statements: `BTreeMap/BTreeSet`; event timeline/diff/item/thread DTOs; state reducer/profile/session/alias/`ComposerTarget` types; and `AccountKey/TimelineKey/TimelineKind`. No parent helper moves or visibility changes. All other runtime unit tests remain parent-owned.
+Leaf tests use existing test-only `use super::*` plus four explicit import statements: `BTreeMap/BTreeSet`; event timeline/diff/item/thread DTOs; state reducer/profile/session/alias/`ComposerTarget` types; and `AccountKey/TimelineKey/TimelineKind`. Do not import the already fully qualified `CurrentDeviceTrustState`.
+
+Parent test imports remove exactly ten bindings now owned only by the moved projection test: `ThreadSummaryDto`, `TimelineDiff`, `TimelineItem`, `TimelineItemId`, `LocalUserAliasUpdateState`, `OwnProfile`, `ProfileState`, `RoomNotificationModeOperation`, `RoomNotificationSettings`, and `reduce`; add one direct test-only `BTreeMap` import for the two retained alias-map tests. No parent helper moves or visibility changes. All other runtime unit tests remain parent-owned.
 
 ## Invariants
 
@@ -76,7 +78,7 @@ A temporary `syn` verifier compares immutable base with parent + leaf:
 - methods keyed by `(self type, method, name)`: handle 9/9, connection 13/13, runtime attach 1/1 and retained parent CoreRuntime methods unchanged;
 - tests 3/3, parent 0, bodies/attrs exact except the one approved `include_str!` path;
 - all 1,029 lib test identities bidirectionally equal after normalizing only the three owner paths;
-- public re-export 4/4, imports 7/7, zero visibility deltas, zero duplicate/missing/excess item;
+- public re-export 4/4, leaf production imports 7/7, parent production orphan bindings 11/11, parent test orphan bindings 10/10 plus direct `BTreeMap` 1, child test extra bindings 0, zero visibility deltas and zero duplicate/missing/excess item;
 - exhaustive event match order and public/crate paths exact;
 - no path attribute, production glob, wrapper, alias, TODO or source concatenation.
 
@@ -95,5 +97,5 @@ After full-diff approval, integrate current `origin/main`, obtain delta approval
 
 - Design round 1: `reviewer-flash` recorded `Changes-required` because the consumer-projection test directly constructs private `CoreConnection` fields and the CoreRuntime-field invariant was overstated.
 - Both findings were corrected; round 2 verified the complete type/method/test/import/privacy/public/lifecycle graph and recorded `Correct-to-implement`.
-- Implementation must remove exactly the parent orphan `Ordering` import identified by round 2; no other parent import cleanup is approved.
+- Implementation exposed additional compiler-proven orphan imports from the completed Activity/connection moves; the exact production/test import closure is now recorded above and requires a read-only delta approval before integration continues.
 - Full diff and delivery pending.
