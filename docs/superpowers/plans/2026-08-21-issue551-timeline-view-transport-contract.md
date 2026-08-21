@@ -62,4 +62,5 @@ No other caller import changes are needed or permitted. No compatibility wrapper
 - Exactness: interface 1/1, parent 0, banner 1, reverse edges 0; `TimelineView.tsx` 5,198 → 5,100 lines and the transport leaf is 105 newline-delimited lines.
 - Focused post-move: 179/179; typecheck, lint and diff checks green.
 - Full diff: `reviewer-flash` independently verified every member, caller and dependency edge and recorded `Correct-to-merge`; its editor reports an EOF line number one greater than `wc -l`, while the evidence deliberately records newline-delimited counts.
-- Delivery: final repository gates, PR CI and merge pending.
+- Final local evidence: focused 179/179; Vitest 1,367; Playwright 248 with polling; workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm, Tauri/domain boundaries, tracked-secret/release/IPC wire, SDK/docs, deny/machete/rustfmt/exactness/diff checks all green.
+- Delivery: PR CI and merge pending.
