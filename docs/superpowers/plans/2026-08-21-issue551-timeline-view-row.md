@@ -109,6 +109,12 @@ Temporary TypeScript verification proves 21/21 bodies match immutable source aft
 - Parent imports six and flat-re-exports the three existing public names; reverse parent edge is only erased `TimelineTransport` type.
 - Focused baseline/post 200/200; typecheck, lint and diff check green. No test/CSS/i18n/domain/transport/row semantics/resource behavior changed.
 
+### Final local evidence
+
+- Frontend: typecheck/lint green; Vitest 1,367; UI-headless timeline store + Playwright 248 with polling; production build green.
+- Rust unchanged-contract proof: workspace 2,393/13 ignored across 97 suites; desktop 149/1 ignored; Headless Core QA 129.
+- Boundary/policy: Tauri adapter, domain dependencies, tracked secret scan, release gates, IPC wire contract, SDK submodule, agents docs, wasm, `cargo deny`, `cargo machete`, rustfmt, AST exactness and diff checks green.
+
 ## Verification
 
 ```bash
