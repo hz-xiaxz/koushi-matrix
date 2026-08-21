@@ -156,6 +156,12 @@ A temporary non-repository TypeScript verifier must prove:
 - Focused baseline/post: `TimelineView.rendering.test.tsx` plus `App.test.tsx`, 99/99 green. Typecheck, lint and `git diff --check` are green.
 - No test, CSS, i18n, domain, transport, dependency, state, hook, timer, listener, DOM, Matrix or Rust-owned behavior changed.
 
+### Final local evidence
+
+- Frontend: typecheck/lint green; Vitest 1,367 passed; UI-headless timeline store plus Playwright 248 passed with polling; production build green.
+- Rust unchanged-contract proof: workspace 2,393 passed/13 ignored across 97 suites; desktop lib 149/1 ignored; Headless Core QA binary 129.
+- Boundary/policy: Tauri adapter, domain dependencies, tracked secret scan, release gates, IPC generated-wire contract, SDK submodule, agents docs, wasm domain check, `cargo deny`, `cargo machete`, rustfmt, TypeScript exactness and diff checks green.
+
 ## Verification
 
 Baseline and identical post-move focused gate:
