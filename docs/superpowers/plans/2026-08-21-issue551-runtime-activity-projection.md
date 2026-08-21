@@ -96,5 +96,6 @@ After `Correct-to-merge`, run the complete repository matrix recorded in the roa
 - `runtime.rs` 10,909 → 9,643 newline-delimited lines; `runtime/activity.rs` is 1,303.
 - Focused post-move 26/26 + 9/9; core lib 1,021/8 ignored, navigation 1, intent-lifecycle 5 and room-selection 4; all-targets/all-features check, rustfmt, exactness and diff checks green.
 - Full diff: `reviewer-flash` independently traced all identities/methods/tests, visibility/public paths, parent calls, cache/routing/lifecycle/registry ownership and recorded `Correct-to-merge`; parent syn/git evidence closes its read-only base-diff limitation.
-- Final local evidence: focused 26/26 + 9/9, core lib 1,021/8 ignored, Vitest 1,370, Playwright 248 with polling, workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; all-targets/all-features, typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
-- Delivery: PR CI and merge pending.
+- Final local evidence after integrating latest `origin/main` #616: focused 26/26 + 9/9, core lib 1,021/8 ignored, Vitest 1,370, Playwright 248 with polling, workspace all-targets, desktop 149/1 ignored and Headless Core QA 130; all-targets/all-features, typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
+- Integration delta: `reviewer-flash` verified the #616 `qa-bin` credential-start cfg and QA/store/docs changes are orthogonal, preserved exactness and recorded `Correct-to-merge-after-integration`.
+- Delivery: refreshed PR CI and merge pending.
