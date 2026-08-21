@@ -82,5 +82,7 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change. No compati
 - Design round 1: `reviewer-flash` recorded `Changes-required` because the first draft documented stale constant values despite the source inventory being correct.
 - Amendment: pin base `47e1a525` values 600/60/72/36..480 and exact leaf import path; retain the deliberate `wc -l` newline-delimited baseline count.
 - Design round 2: `reviewer-flash` revalidated all 25 declarations, exports, constants, dependencies and cancellation owners and recorded `Correct-to-implement`.
-- Implementation approved, not started.
+- Implementation: integrated by `luna-implementer` and parent-audited.
+- Exactness: 25/25 statements, parent 0, exports 19/19, private 6/6; `TimelineView.tsx` 5,100 → 4,869 newline-delimited lines and the leaf is 241.
+- Focused post-move 72/72; typecheck, lint and diff checks green; all scheduler handle refs and cancellation sites remain in the parent.
 - Full diff and delivery pending.
