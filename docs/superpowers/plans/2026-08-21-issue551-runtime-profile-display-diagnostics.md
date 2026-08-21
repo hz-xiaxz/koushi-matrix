@@ -1,6 +1,6 @@
 # Issue #551 runtime profile/display diagnostics extraction
 
-Status: design approved. Scope is one behavior-preserving diagnostic projection seam.
+Status: implemented; full-diff review pending. Scope is one behavior-preserving diagnostic projection seam.
 
 ## Baseline
 
@@ -110,4 +110,9 @@ After full-diff approval, integrate latest `origin/main`, obtain delta approval 
 
 - Read-only reconnaissance completed against state/display/unread/diagnostic boundaries.
 - `reviewer-flash` independently traced all 12 identities, two methods, three parent calls, imports/visibility/tests/privacy and reducer/resource boundaries and recorded `Correct-to-implement`.
-- Implementation must re-confirm the immutable SHA-256 and 1,029-test identity count before mutation/delivery.
+- Implementation re-confirmed the immutable SHA-256, then integrated by `luna-implementer` and parent-audited.
+- Exactness: production 12/12, methods 2/2, moved tests 2/2, retained wrapper tests 4/4, all 1,029 test identities, parent calls/`pub(super)` 3, leaf imports 2, production orphans 6 and test orphans 2; public/resource deltas 0.
+- `runtime.rs` 9,002 → 8,280 newline-delimited lines; `runtime/profile_display_diagnostics.rs` is 737.
+- Focused post-move 1 + 1 + (1/1 ignored) + (1/1 ignored); core lib 1,021/8 ignored, Activity 9, settings 5, notification settings 4 and timeline 21; all-targets/all-features check, rustfmt, exactness and diff checks green.
+- Initial full `runtime_timeline` run observed `corrupt_load_attempts_once_per_session` expected 2/got 3; unchanged persistence code, exact-test rerun and complete 21-test rerun were green, recording it as a recurrent timing/isolation failure rather than waiving it.
+- Full diff and delivery pending.
