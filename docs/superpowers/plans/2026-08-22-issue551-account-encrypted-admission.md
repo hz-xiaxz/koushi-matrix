@@ -1,6 +1,6 @@
 # Issue #551 account encrypted-content admission ownership
 
-Status: design approved. Scope is the final behavior-preserving runtime residual ownership move.
+Status: implemented; full-diff review pending. Scope is the final behavior-preserving runtime residual ownership move.
 
 ## Baseline
 
@@ -64,3 +64,8 @@ After full-diff approval, integrate latest `origin/main` if required, run the co
 
 - Read-only residual audit found this sole cross-owner edge and rejected all other prospective runtime splits.
 - `reviewer-flash` independently traced the sole caller, all eight matched command variants, visibility/import closure, six ordering invariants and source guards and recorded `Correct-to-implement`.
+- Implementation integrated by `luna-implementer`; parent repositioned the exact block immediately before `impl AccountActor` as designed.
+- Exactness: identities2/2, runtime parent0, variants8, route method exact after one qualification removal, all1,029 tests exact; imports/public/wire/resource/dependency deltas0.
+- `runtime.rs` 6,532 → 6,474 newline-delimited lines; `account/routing.rs` 875 → 933.
+- Focused source/admission tests3, core lib1,021/8 ignored, all-targets/all-features check, rustfmt and diff checks green.
+- Full diff and delivery pending.
