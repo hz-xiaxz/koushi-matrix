@@ -3,7 +3,8 @@
 ## Status
 
 - Design: `reviewer-flash` verified the 14-declaration/resource-owner boundary and recorded `Correct-to-implement`; its import-source/baseline notes are incorporated below.
-- Implementation: approved but not started.
+- Implementation: integrated; 14/14 declaration exactness, 4/4 exports, focused tests, typecheck, lint and diff checks are green.
+- Full-diff review: pending.
 - Delivery: pending.
 
 ## Objective
@@ -83,6 +84,13 @@ One Luna/low worker edits only `TimelineView.tsx` and creates `timeline/Timeline
 ## Exactness
 
 Temporary TypeScript verification proves 14/14 bodies match immutable source, parent zero, leaf exports exactly four approved names, parent imports three/re-exports one, only one type-only reverse edge, no outside leaf importer, and no barrel/default/wrapper/hook abstraction/duplicate/TODO/dependency/test change.
+
+## Integrated implementation evidence
+
+- `TimelineView.tsx`: 7,446 → 6,721 lines; media presentation moved to a 749-line direct leaf.
+- TypeScript AST exactness: 14/14 declarations moved once; parent retains zero; leaf exports exactly four approved names.
+- Parent imports the two components and viewer-item type and flat-re-exports only the existing test helper; the reverse edge is type-only.
+- Focused baseline/post 103/103; typecheck, lint and diff check green. No test/CSS/i18n/domain/transport/media semantics/resource behavior changed.
 
 ## Verification
 
