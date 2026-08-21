@@ -3775,64 +3775,6 @@ impl AppActor {
     }
 }
 
-pub(crate) struct EncryptedUserContentTarget<'a> {
-    pub(crate) request_id: RequestId,
-    pub(crate) room_id: &'a str,
-    pub(crate) submission: Option<(&'a TimelineKey, &'a koushi_state::SubmissionId)>,
-}
-
-pub(crate) fn encrypted_user_content_target(
-    command: &TimelineCommand,
-) -> Option<EncryptedUserContentTarget<'_>> {
-    match command {
-        TimelineCommand::SendText {
-            request_id, key, ..
-        }
-        | TimelineCommand::SendReply {
-            request_id, key, ..
-        }
-        | TimelineCommand::EditText {
-            request_id, key, ..
-        }
-        | TimelineCommand::RetrySend {
-            request_id, key, ..
-        }
-        | TimelineCommand::UploadAndSendMedia {
-            request_id, key, ..
-        } => Some(EncryptedUserContentTarget {
-            request_id: *request_id,
-            room_id: key.room_id(),
-            submission: None,
-        }),
-        TimelineCommand::SubmitText {
-            request_id,
-            key,
-            submission_id,
-            ..
-        }
-        | TimelineCommand::SubmitReply {
-            request_id,
-            key,
-            submission_id,
-            ..
-        } => Some(EncryptedUserContentTarget {
-            request_id: *request_id,
-            room_id: key.room_id(),
-            submission: Some((key, submission_id)),
-        }),
-        TimelineCommand::ForwardMessage {
-            request_id,
-            destination_room_id,
-            ..
-        } => Some(EncryptedUserContentTarget {
-            request_id: *request_id,
-            room_id: destination_room_id,
-            submission: None,
-        }),
-        _ => None,
-    }
-}
-
 fn unsubscribe_replaced_thread_timeline_key(
     current_key: Option<TimelineKey>,
     replacement_key: TimelineKey,
