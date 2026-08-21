@@ -62,7 +62,7 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 
 ## Invariants
 
-- Every declaration body/comment/type/token remains exact apart from `export` modifiers and relative import paths.
+- Every moved declaration body/comment/type/token remains exact apart from `export` modifiers and relative import paths. `TimelineView.tsx` additionally removes the four imports made orphaned by the move: `TimelineDiff`, `TimelineEvent`, `PaginationState`, and `TimelineAnchorRestoreStatus`.
 - Diff variant coverage/order, reset classification, outgoing sender/send-state check, pure-prepend predicate, newest Event scan, diagnostic source/message fields, link-preview counters, pagination completion strings and privacy-safe key labels remain exact.
 - Existing `TimelineView` test import path remains compatible; no new public production API is exposed from the parent.
 - Listener registration/unsubscribe and delayed ensure-subscribe timer remain together in `TimelineView`; no lifecycle owner changes.
@@ -71,13 +71,15 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 
 ## Verification
 
-- AST exactness: 16/16 leaf, parent 0, exports 9/9, private 7/7.
+- AST exactness: 16/16 leaf, parent 0, exports 9/9, private 7/7; parent coreEvents type imports remove exactly the four approved orphaned names.
 - Dependency checks: two type-only imports and no runtime import; listener/effects/resource cleanup remain parent-owned.
 - Same seven-suite focused command before/after: 173/173; typecheck, lint, diff check.
 - After full-diff approval: complete frontend/Rust/policy matrix and CI.
 
 ## Review gate
 
-- Design: pending `reviewer-flash` read-only verdict.
+- Design round 1: `reviewer-flash` verified the complete seam and recorded `Changes-required` because the exactness wording omitted four mandatory unused-import removals.
+- Amendment: explicitly permit only those four parent type-import removals and add them to exactness evidence.
+- Design round 2: pending `reviewer-flash` read-only verdict.
 - Implementation prohibited until `Correct-to-implement`.
 - Full diff and delivery pending.
