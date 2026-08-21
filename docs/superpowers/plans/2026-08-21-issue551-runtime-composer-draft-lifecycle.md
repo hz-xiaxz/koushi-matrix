@@ -6,7 +6,7 @@ Status: design review pending. Scope is one atomic behavior-preserving lifecycle
 
 - Base: `ab280a388186933ab0bf192f2957173a6c1fc7e9` after profile/display PR #619.
 - `runtime.rs`: 8,280 newline-delimited lines / 342,193 bytes / SHA-256 `5ed28b8067b05e10aab2404ef03d3fa29961e9834e349d02e1c0791ff00f3654`.
-- Baseline focused: moved unit tests 1 + 2, source contract 1, `composer_draft_lifecycle` 7, `runtime_timeline` 21, `runtime_scheduled_send` 12 and `send_queue_fast` 13.
+- Baseline focused: moved unit tests 3, source contract 1, `composer_draft_lifecycle` 7, `runtime_timeline` 21, `runtime_scheduled_send` 12 and `send_queue_fast` 13.
 
 ## Ownership decision
 
@@ -67,11 +67,11 @@ Preserve both existing paths with explicit flat re-exports:
 - `koushi_core::runtime::COMPOSER_DRAFT_PERSIST_DEBOUNCE`;
 - `crate::runtime::ForwardedComposerDraftPermit` for AccountActor/TimelineActor internals.
 
-Use `pub use composer::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, ForwardedComposerDraftPermit};`; no glob or crate-root API expansion.
+Place private `mod composer;` with the existing private-module declarations before the explicit re-exports. Use `pub use composer::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, ForwardedComposerDraftPermit};`; no glob or crate-root API expansion.
 
 Exactly 13 other top-level identities become `pub(super)` because retained parent orchestration uses them: all moved items except the two explicit public re-exports and private `composer_draft_revision_for_target`. Exactly seven moved `AppActor` methods become `pub(super)`: `reconcile_composer_draft_lifecycle_after_permit_change`, `reconcile_composer_draft_lifecycle_with_active`, `forward_composer_draft_permit`, `load_composer_drafts_for_current_session`, `schedule_composer_draft_persist`, `composer_draft_persist_delay`, `flush_pending_composer_drafts`. The other two methods stay private to the leaf.
 
-The parent explicitly imports the 13 `pub(super)` identities. Remove only five production bindings made orphaned by the move: `ComposerDraftProtection`, `ComposerDraftRevision`, `ComposerDraftPersistencePermit`, `PersistedComposerDraftStoreV3`, and `persisted_projection as persisted_composer_draft_projection`. Retain `BTreeSet`, `Instant`, `ComposerDraftStore`, `ComposerTarget`, `ThreadPaneState`, `session_key_id_from_info`, diagnostics, `mpsc` and `oneshot` because parent production/tests still use them.
+The parent explicitly imports the 13 `pub(super)` identities. Remove only six production bindings made orphaned by the move: `ComposerDraftProtection`, `ComposerDraftRevision`, `SubmissionId`, `ComposerDraftPersistencePermit`, `PersistedComposerDraftStoreV3`, and `persisted_projection as persisted_composer_draft_projection`. Retain `BTreeSet`, `Instant`, `ComposerDraftStore`, `ComposerTarget`, `ThreadPaneState`, `session_key_id_from_info`, diagnostics, `mpsc` and `oneshot` because parent production/tests still use them.
 
 ## Tests and source contract
 
@@ -85,7 +85,7 @@ Leaf tests use `super::*`, one explicit `crate::ids::{AccountKey, RuntimeConnect
 
 Keep `app_actor_persistence_uses_blocking_store_port` parent-owned. It must read owner files separately, never concatenate source strings:
 
-- `runtime.rs` sections continue checking navigation/scheduled-send/room-preference/settings blocking persistence, with boundaries updated only where moved composer methods used to delimit them;
+- `runtime.rs` sections continue checking navigation/scheduled-send/room-preference/settings blocking persistence: replace the moved composer-loader delimiter with `async fn load_scheduled_sends_for_current_session` and the moved composer-schedule delimiter with `fn scheduled_send_delay`;
 - `runtime/composer.rs` independently checks `flush_pending_composer_drafts` through the following `composer_draft_session_key` boundary for `executor::spawn_blocking`.
 
 No assertion is weakened or removed. Keep all forwarded-permit/account/timeline tests in their current owners; the compatibility path is unchanged.
@@ -99,7 +99,7 @@ A temporary `syn` verifier compares immutable base with parent + leaf:
 - `AppActor` methods 9/9 exact modulo seven approved `pub(super)` changes, parent 0;
 - moved tests 3/3, parent 0; source-contract test retained with only approved owner-path/boundary edits;
 - all 1,029 lib test identities equal after normalizing only three owner paths;
-- explicit public re-exports 2, parent imports 13, top-level `pub(super)` 13, method `pub(super)` 7, production orphan bindings 5;
+- explicit public re-exports 2, parent imports 13, top-level `pub(super)` 13, method `pub(super)` 7, production orphan bindings 6;
 - parent actor fields/run/select/timer/shutdown, reducer/deferred/effect/command registries and call order byte-exact;
 - duplicate/missing/excess identities, public-path, wire/resource/dependency deltas 0.
 
