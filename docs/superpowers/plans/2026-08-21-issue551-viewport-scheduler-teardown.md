@@ -1,6 +1,6 @@
 # Issue #551 viewport scheduler teardown hardening
 
-Status: design review pending. This is an independently mergeable blocker repair for TimelineView subscription PR #606.
+Status: implemented, locally verified and approved for merge. This is an independently mergeable blocker repair for TimelineView subscription PR #606.
 
 ## Failure evidence
 
@@ -63,5 +63,6 @@ No API/export/type/timing constant, callback ordering, timeout duration, fallbac
 - Implementation: integrated by `luna-implementer` at medium reasoning and parent-audited.
 - RED: the focused jsdom regression failed on unchanged production with `ReferenceError: window is not defined` at the deferred fallback.
 - GREEN: focused regression 1/1, existing TimelineView suites 175/175, full Vitest 1,370/1,370 with zero unhandled errors; typecheck, lint and diff checks green.
-- Captured capabilities are the only production delta; fallback/RAF first-wins and cancel idempotence are asserted.
-- Full diff and delivery pending.
+- Captured capabilities are the only production delta; the shared first-wins guard, timeout-first sibling cancellation and cancel idempotence are asserted. RAF-first behavior uses the same unchanged `run()` path.
+- Full diff: `reviewer-flash` verified the complete scheduler/test/caller graph and recorded `Correct-to-merge`; no blocker remains.
+- Delivery: final repository gates, PR CI and merge pending.
