@@ -1,6 +1,6 @@
 # Issue #551 runtime profile/display diagnostics extraction
 
-Status: implemented; full-diff review pending. Scope is one behavior-preserving diagnostic projection seam.
+Status: full diff approved; delivery pending. Scope is one behavior-preserving diagnostic projection seam.
 
 ## Baseline
 
@@ -115,4 +115,5 @@ After full-diff approval, integrate latest `origin/main`, obtain delta approval 
 - `runtime.rs` 9,002 → 8,280 newline-delimited lines; `runtime/profile_display_diagnostics.rs` is 737.
 - Focused post-move 1 + 1 + (1/1 ignored) + (1/1 ignored); core lib 1,021/8 ignored, Activity 9, settings 5, notification settings 4 and timeline 21; all-targets/all-features check, rustfmt, exactness and diff checks green.
 - Initial full `runtime_timeline` run observed `corrupt_load_attempts_once_per_session` expected 2/got 3; unchanged persistence code, exact-test rerun and complete 21-test rerun were green, recording it as a recurrent timing/isolation failure rather than waiving it.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently byte-compared all 12 identities, two methods, two moved tests and the retained reducer wrapper, verified privacy/lifecycle boundaries and recorded `Correct-to-merge`.
+- Delivery: final repository gates, latest-main integration/delta review if required, PR CI and merge pending.
