@@ -69,4 +69,5 @@ After full-diff approval, integrate latest `origin/main` if required, run the co
 - `runtime.rs` 6,532 → 6,474 newline-delimited lines; `account/routing.rs` 875 → 933.
 - Focused source/admission tests3, core lib1,021/8 ignored, all-targets/all-features check, rustfmt and diff checks green.
 - Full diff: `reviewer-flash` independently traced both identities, all eight variants, visibility/import closure, route ordering and test/source contracts and recorded `Correct-to-merge`.
-- Delivery: final repository gates, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: focused admission/source tests green, core lib1,021/8 ignored, Vitest1,370, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
