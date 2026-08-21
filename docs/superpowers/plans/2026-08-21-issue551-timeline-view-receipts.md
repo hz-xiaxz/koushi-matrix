@@ -3,7 +3,8 @@
 ## Status
 
 - Design: `reviewer-flash` verified the closed 13-declaration dependency set and recorded `Correct-to-implement`; two non-blocking baseline/import wording notes are incorporated below.
-- Implementation: approved but not started.
+- Implementation: integrated; 13/13 declaration exactness, 3/3 exports, focused tests, typecheck, lint and diff checks are green.
+- Full-diff review: pending.
 - Delivery: pending.
 
 ## Objective
@@ -86,6 +87,13 @@ One Luna/low worker may edit only `TimelineView.tsx` and create `timeline/Receip
 ## Exactness
 
 Temporary TypeScript verification proves 13/13 declaration bodies match immutable source after export/path normalization, parent retains zero, leaf exports exactly three approved names, parent imports three/re-exports one, no other file imports the leaf, and no barrel/default/hook abstraction/duplicate/TODO/dependency/test change exists.
+
+## Integrated implementation evidence
+
+- `TimelineView.tsx`: 7,590 → 7,446 lines; receipt surface moved to a 156-line direct leaf.
+- TypeScript AST exactness: 13/13 declarations moved once; parent retains zero; leaf exports exactly the approved three names.
+- Parent imports all three and flat-re-exports only existing public `receiptDisplayName`; no reverse import/cycle.
+- Focused baseline/post 103/103; typecheck, lint and diff check green. No test/CSS/i18n/domain/transport/receipt semantics/resource behavior changed.
 
 ## Verification
 
