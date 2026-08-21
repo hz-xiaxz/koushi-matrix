@@ -6,6 +6,23 @@ Earlier rounds required fixes for retry bypass, two-proof restart publication,
 registry bounds, restored index-0 handling, and the impossible synthetic
 late-recovery claim; those findings are reflected below.
 
+Implementation review round 1 (`reviewer-gpt`) required cancellation-aware
+steady restart, a post-termination room-response baseline, behavioral race
+tests, and truthful in-flight query diagnostics. The follow-up root fix and
+vendored `4852d98` fixed those findings. Focused final re-review by
+`reviewer-flash-opencode-go` returned `Correct-to-merge` on 2026-08-21.
+
+Fresh final evidence: root workspace 2,408 passed / 13 ignored; Headless Core QA
+129 passed; vendored `matrix-sdk` 601 passed with one unchanged baseline test
+excluded, `matrix-sdk-ui` 362 passed, `matrix-sdk-crypto` 583 passed / 1 ignored,
+and #577 integration 7 passed. Tauri 149 passed / 1 ignored; Vitest 1,370 and
+Playwright 248 passed; typecheck, lint, build, cargo-deny, formatting, docs,
+privacy, and submodule checks passed. Disposable SDK interoperability passed on
+Tuwunel and Synapse. The core `e2ee_trust` lane remains blocked at the existing
+A2 verification gate on both this branch and an isolated `origin/main` baseline;
+it reaches the same post-backup stage before timing out and is not attributed to
+this diff.
+
 ## Objective
 
 Prevent an eligible device already visible in an authoritative homeserver key
