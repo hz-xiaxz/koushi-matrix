@@ -4597,6 +4597,14 @@ pub(super) async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Cl
         "initial_repair_cancelled",
         "initial_repair_no_recipients",
         "initial_repair_failed",
+        // First-event encryption readiness counters (issue #577).
+        "encryption_readiness_ready",
+        "encryption_readiness_sync",
+        "encryption_readiness_key_query",
+        "encryption_readiness_second_share",
+        "encryption_readiness_session_changed",
+        "encryption_readiness_deadline",
+        "encryption_readiness_cancelled",
     ] {
         koushi_diagnostics::reset_counter(counter);
     }
@@ -4627,7 +4635,100 @@ fn record_room_key_diagnostic(event: matrix_sdk::encryption::RoomKeyDiagnosticEv
         RoomKeyDiagnosticEvent::InitialShareRepair(event) => {
             record_initial_share_repair_diagnostic(event)
         }
+        RoomKeyDiagnosticEvent::EncryptionReadiness(event) => {
+            record_encryption_readiness_diagnostic(event)
+        }
     }
+}
+
+fn record_encryption_readiness_diagnostic(
+    event: matrix_sdk::encryption::EncryptionReadinessDiagnostic,
+) {
+    use matrix_sdk::encryption::{
+        EncryptionReadinessOutcome as Outcome, EncryptionReadinessQueryState as Query,
+        EncryptionReadinessSyncState as Sync,
+    };
+
+    let sync = match event.sync {
+        Sync::NotStarted => "not_started",
+        Sync::Pending => "pending",
+        Sync::Received => "received",
+        Sync::Failed => "failed",
+        Sync::Cancelled => "cancelled",
+    };
+    let query = match event.query {
+        Query::NotStarted => "not_started",
+        Query::InProgress => "in_progress",
+        Query::Accepted => "accepted",
+        Query::Failed => "failed",
+    };
+    let outcome = match event.outcome {
+        Outcome::Ready => "ready",
+        Outcome::Sync => "sync",
+        Outcome::KeyQuery => "key_query",
+        Outcome::SecondShare => "second_share",
+        Outcome::SessionChanged => "session_changed",
+        Outcome::Deadline => "deadline",
+        Outcome::Cancelled => "cancelled",
+    };
+    koushi_diagnostics::increment_counter(match event.outcome {
+        Outcome::Ready => "encryption_readiness_ready",
+        Outcome::Sync => "encryption_readiness_sync",
+        Outcome::KeyQuery => "encryption_readiness_key_query",
+        Outcome::SecondShare => "encryption_readiness_second_share",
+        Outcome::SessionChanged => "encryption_readiness_session_changed",
+        Outcome::Deadline => "encryption_readiness_deadline",
+        Outcome::Cancelled => "encryption_readiness_cancelled",
+    });
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(
+            if event.outcome == Outcome::Ready {
+                DiagnosticLevel::Info
+            } else {
+                DiagnosticLevel::Warn
+            },
+            "core.encryption_readiness",
+            outcome,
+        )
+        .field(DiagnosticField::ordinal_alias(
+            "room_alias",
+            "room",
+            event.room.ordinal(),
+        ))
+        .field(DiagnosticField::ordinal_alias(
+            "session_alias",
+            "session",
+            event.session.ordinal(),
+        ))
+        .field(DiagnosticField::count("generation", event.generation))
+        .field(DiagnosticField::token("sync", sync))
+        .field(DiagnosticField::token("query", query))
+        .field(DiagnosticField::count(
+            "active_members_bucket",
+            event.active_members_bucket.into(),
+        ))
+        .field(DiagnosticField::count(
+            "returned_devices_bucket",
+            event.returned_devices_bucket.into(),
+        ))
+        .field(DiagnosticField::count(
+            "eligible_devices_bucket",
+            event.eligible_devices_bucket.into(),
+        ))
+        .field(DiagnosticField::count(
+            "accepted_devices_bucket",
+            event.accepted_devices_bucket.into(),
+        ))
+        .field(DiagnosticField::count(
+            "message_index_bucket",
+            event.message_index_bucket.into(),
+        ))
+        .field(DiagnosticField::count(
+            "registry_evictions",
+            event.registry_evictions,
+        ))
+        .field(DiagnosticField::boolean("retryable", event.retryable)),
+    );
 }
 
 fn record_olm_recovery_diagnostic(event: matrix_sdk::encryption::OlmRecoveryDiagnostic) {
@@ -5465,6 +5566,10 @@ mod megolm_send_parity_tests {
             .mount(server.server())
             .await;
 
+        let mut encryption_generation = alice
+            .begin_encryption_sync_generation()
+            .expect("desktop readiness enabled");
+        encryption_generation.mark_received();
         let room = alice.get_room(&room_id).unwrap();
         matrix_sdk::room::futures::ensure_room_encryption_ready_with_index0_duplicate_share_for_testing(
             &room,
@@ -7250,5 +7355,63 @@ mod tests {
             super::desktop_room_key_recipient_strategy(),
             matrix_sdk_base::crypto::CollectStrategy::AllDevices
         ));
+    }
+}
+
+#[cfg(test)]
+mod encryption_readiness_diagnostics_tests {
+    use super::record_encryption_readiness_diagnostic;
+    use koushi_diagnostics::test_support;
+    use matrix_sdk::encryption::{
+        EncryptionReadinessDiagnostic, EncryptionReadinessOutcome, EncryptionReadinessQueryState,
+        EncryptionReadinessSyncState, RoomKeyDiagnosticAlias,
+    };
+
+    #[test]
+    fn readiness_diagnostic_contains_only_closed_aliases_counts_and_tokens() {
+        let _guard = test_support::lock();
+        let start = test_support::detail_snapshot().records.len();
+        record_encryption_readiness_diagnostic(EncryptionReadinessDiagnostic {
+            room: RoomKeyDiagnosticAlias::new(4),
+            session: RoomKeyDiagnosticAlias::new(9),
+            generation: 3,
+            sync: EncryptionReadinessSyncState::Received,
+            query: EncryptionReadinessQueryState::Accepted,
+            outcome: EncryptionReadinessOutcome::Ready,
+            active_members_bucket: 2,
+            returned_devices_bucket: 2,
+            eligible_devices_bucket: 1,
+            accepted_devices_bucket: 1,
+            message_index_bucket: 0,
+            registry_evictions: 0,
+            retryable: false,
+        });
+
+        let snapshot = test_support::detail_snapshot();
+        let record = snapshot.records[start..]
+            .iter()
+            .find(|record| record.event.source == "core.encryption_readiness")
+            .expect("readiness record");
+        let text = format!("{:?}", record.event);
+        for forbidden in [
+            "@alice:example.org",
+            "DEVICE",
+            "!room:example.org",
+            "$event",
+            "session-secret",
+            "https://example.org",
+            "curve25519",
+            "sync-position",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "privacy leak: {forbidden}: {text}"
+            );
+        }
+        assert!(text.contains("kind: \"room\""));
+        assert!(text.contains("kind: \"session\""));
+        assert!(text.contains("received"));
+        assert!(text.contains("accepted"));
+        assert!(text.contains("ready"));
     }
 }

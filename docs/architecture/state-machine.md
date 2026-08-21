@@ -308,13 +308,25 @@ stateDiagram-v2
     [*] --> Stopped
     Stopped --> Starting: Restore/Login success
     Starting --> Running: SyncStarted
-    Running --> Failed: SyncFailed
-    Failed --> Reconnecting: SyncReconnecting
+    Starting --> Reconnecting: owner reconnecting before first response
+    Running --> Reconnecting: unexpected sync-owner termination
+    Running --> Failed: non-recoverable SyncFailed
+    Failed --> Reconnecting: explicit SyncReconnecting
     Reconnecting --> Running: SyncStarted/SyncRecovered
     Running --> Stopped: LogoutRequested
     Failed --> Stopped: LogoutRequested
     Reconnecting --> Stopped: LogoutRequested
 ```
+
+An unexpectedly terminated steady Simplified Sliding Sync child is recoverable
+owner loss, not an authoritative account failure. The retained SyncActor projects
+`Reconnecting`, starts one replacement SDK generation after bounded backoff, and
+returns to `Running` only after both a committed room-list response and
+`Received` for that exact replacement encryption-sync generation. The SDK's
+immediate `Running` publication is not connection proof. A second termination,
+replacement generation, or actor cancellation clears any partial proof pair.
+Explicit stop reaches `Stopped` and never auto-restarts. Stale generation
+success/failure/drop observations are inert.
 
 Logout, lock, and account switch clear navigation, room lists, the main
 timeline, thread pane, search state, search crawler status, invite workflow,

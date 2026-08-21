@@ -17,7 +17,7 @@ use std::{
     collections::BTreeSet,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -132,6 +132,7 @@ fn accepts_control(
 
 #[derive(Debug)]
 enum SyncTaskOutcome {
+    Stopped,
     Failed {
         kind: SyncFailureKind,
         ever_connected: bool,
@@ -241,6 +242,31 @@ fn committed_response_is_handoff_evidence(
     pos_present && response_sequence > last_committed_sequence
 }
 
+#[derive(Debug, Default)]
+struct SyncObserverStop {
+    requested: AtomicBool,
+    notify: tokio::sync::Notify,
+}
+
+impl SyncObserverStop {
+    fn request(&self) {
+        self.requested.store(true, Ordering::Release);
+        self.notify.notify_one();
+    }
+
+    fn is_requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
+    }
+}
+
+async fn replacement_restart_backoff(observer_stop: &SyncObserverStop, duration: Duration) -> bool {
+    tokio::select! {
+        biased;
+        _ = observer_stop.notify.notified() => false,
+        _ = executor::sleep(duration) => !observer_stop.is_requested(),
+    }
+}
+
 pub struct SyncActor {
     session: Arc<MatrixClientSession>,
     action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -256,6 +282,7 @@ pub struct SyncActor {
     run_generation: u64,
     sync_task: Option<executor::JoinHandle<SyncTaskOutcome>>,
     sync_service: Option<Arc<matrix_sdk_ui::sync_service::SyncService>>,
+    sync_observer_stop: Option<Arc<SyncObserverStop>>,
     active_start_request_id: Option<RequestId>,
     ignored_user_list_handler: Option<matrix_sdk::event_handler::EventHandlerHandle>,
     diagnostics: SlidingSyncDiagnostics,
@@ -289,6 +316,7 @@ impl SyncActor {
             run_generation: 0,
             sync_task: None,
             sync_service: None,
+            sync_observer_stop: None,
             active_start_request_id: None,
             ignored_user_list_handler: None,
             diagnostics,
@@ -382,6 +410,7 @@ impl SyncActor {
         notify_room_runtime_stopped(self.room_tx.clone(), run_generation).await;
         self.cleanup_runtime().await;
         match outcome {
+            SyncTaskOutcome::Stopped => {}
             SyncTaskOutcome::Failed {
                 kind,
                 ever_connected,
@@ -505,9 +534,13 @@ impl SyncActor {
         let room_list_service = service.room_list_service();
         let state_sub = service.state();
         let committed_all_rooms_response = room_list_service.committed_all_rooms_response();
+        let observer_stop = Arc::new(SyncObserverStop::default());
         let task = executor::spawn(observe_sync_service(
+            service.clone(),
+            observer_stop.clone(),
             state_sub,
             committed_all_rooms_response,
+            client.subscribe_to_encryption_sync_readiness(),
             self.event_tx.clone(),
             self.action_tx.clone(),
             self.sync_generation.clone(),
@@ -523,11 +556,15 @@ impl SyncActor {
         self.diagnostics.sync_started(run_generation);
         service.start().await;
         self.sync_service = Some(service);
+        self.sync_observer_stop = Some(observer_stop);
         self.sync_task = Some(task);
         Ok(())
     }
 
     async fn cleanup_runtime(&mut self) {
+        if let Some(stop) = self.sync_observer_stop.take() {
+            stop.request();
+        }
         if let Some(service) = self.sync_service.take() {
             let _ = executor::timeout(SYNC_SERVICE_STOP_TIMEOUT, service.stop()).await;
         }
@@ -539,12 +576,13 @@ impl SyncActor {
 
     async fn do_stop(&mut self, request_id: Option<RequestId>) {
         let run_generation = self.run_generation;
-        if let Some(service) = self.sync_service.take() {
-            let _ = executor::timeout(SYNC_SERVICE_STOP_TIMEOUT, service.stop()).await;
+        let service = self.sync_service.take();
+        if let Some(stop) = self.sync_observer_stop.take() {
+            stop.request();
         }
-        if let Some(handle) = self.ignored_user_list_handler.take() {
-            self.session.client().remove_event_handler(handle);
-        }
+        // Join the observer before the final SDK stop. If a recoverable
+        // Terminated observation was already in its backoff/start path, this
+        // barrier lets that path finish first and the final stop still wins.
         if let Some(mut task) = self.sync_task.take() {
             if executor::timeout(SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut task)
                 .await
@@ -553,6 +591,12 @@ impl SyncActor {
                 task.abort();
                 let _ = task.await;
             }
+        }
+        if let Some(service) = service {
+            let _ = executor::timeout(SYNC_SERVICE_STOP_TIMEOUT, service.stop()).await;
+        }
+        if let Some(handle) = self.ignored_user_list_handler.take() {
+            self.session.client().remove_event_handler(handle);
         }
         stop_room_observation(self.room_tx.clone(), run_generation).await;
         self.active_start_request_id = None;
@@ -905,10 +949,74 @@ async fn notify_room_runtime_stopped(room_tx: mpsc::Sender<RoomMessage>, run_gen
         .await;
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReplacementRecoveryProof {
+    started: std::time::Instant,
+    lost_encryption_generation: u64,
+    replacement_encryption_generation: Option<u64>,
+    room_response_baseline: u64,
+    latest_room_response_sequence: u64,
+    room_response_committed: bool,
+    encryption_response_committed: bool,
+}
+
+impl ReplacementRecoveryProof {
+    fn new(lost_encryption_generation: u64, room_response_baseline: u64) -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            lost_encryption_generation,
+            replacement_encryption_generation: None,
+            room_response_baseline,
+            latest_room_response_sequence: room_response_baseline,
+            room_response_committed: false,
+            encryption_response_committed: false,
+        }
+    }
+
+    fn observe_encryption(
+        &mut self,
+        snapshot: matrix_sdk::encryption::EncryptionSyncReadinessSnapshot,
+    ) -> bool {
+        if snapshot.generation <= self.lost_encryption_generation {
+            return false;
+        }
+        match self.replacement_encryption_generation {
+            None => self.replacement_encryption_generation = Some(snapshot.generation),
+            Some(current) if current != snapshot.generation => {
+                self.replacement_encryption_generation = Some(snapshot.generation);
+                self.room_response_baseline = self.latest_room_response_sequence;
+                self.room_response_committed = false;
+                self.encryption_response_committed = false;
+            }
+            Some(_) => {}
+        }
+        self.encryption_response_committed =
+            snapshot.state == matrix_sdk::encryption::EncryptionSyncReadinessState::Received;
+        self.ready()
+    }
+
+    fn observe_room_response(&mut self, sequence: u64) -> bool {
+        self.latest_room_response_sequence = self.latest_room_response_sequence.max(sequence);
+        self.room_response_committed = sequence > self.room_response_baseline;
+        self.ready()
+    }
+
+    fn ready(self) -> bool {
+        self.replacement_encryption_generation.is_some()
+            && self.room_response_committed
+            && self.encryption_response_committed
+    }
+}
+
 async fn observe_sync_service(
+    sync_service: Arc<matrix_sdk_ui::sync_service::SyncService>,
+    observer_stop: Arc<SyncObserverStop>,
     mut state_sub: eyeball::Subscriber<matrix_sdk_ui::sync_service::State>,
     mut committed_all_rooms_response: eyeball::Subscriber<
         matrix_sdk_ui::room_list_service::CommittedAllRoomsResponse,
+    >,
+    mut encryption_readiness: tokio::sync::watch::Receiver<
+        matrix_sdk::encryption::EncryptionSyncReadinessSnapshot,
     >,
     event_tx: broadcast::Sender<CoreEvent>,
     action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -924,22 +1032,31 @@ async fn observe_sync_service(
     let mut connected = false;
     let mut room_observation_started = false;
     let mut reconnecting = false;
+    let mut replacement_recovery: Option<ReplacementRecoveryProof> = None;
     let mut last_committed_sequence = 0;
     let mut pending_state = Some(state_sub.get());
     let mut pending_commit = Some(committed_all_rooms_response.get());
+    let mut pending_encryption = Some(*encryption_readiness.borrow_and_update());
+    let mut last_encryption_started_generation = 0;
+    let mut last_encryption_response_generation = 0;
 
     loop {
         enum Signal {
             State(matrix_sdk_ui::sync_service::State),
             Committed(matrix_sdk_ui::room_list_service::CommittedAllRoomsResponse),
+            Encryption(matrix_sdk::encryption::EncryptionSyncReadinessSnapshot),
         }
 
         let signal = if let Some(state) = pending_state.take() {
             Signal::State(state)
         } else if let Some(committed) = pending_commit.take() {
             Signal::Committed(committed)
+        } else if let Some(encryption) = pending_encryption.take() {
+            Signal::Encryption(encryption)
         } else {
             tokio::select! {
+                biased;
+                _ = observer_stop.notify.notified() => return SyncTaskOutcome::Stopped,
                 state = state_sub.next() => match state {
                     Some(state) => Signal::State(state),
                     None => return internal_observer_failure_at("state_subscription_closed", connected),
@@ -947,6 +1064,13 @@ async fn observe_sync_service(
                 committed = committed_all_rooms_response.next() => match committed {
                     Some(committed) => Signal::Committed(committed),
                     None => return internal_observer_failure_at("response_subscription_closed", connected),
+                },
+                changed = encryption_readiness.changed() => match changed {
+                    Ok(()) => Signal::Encryption(*encryption_readiness.borrow_and_update()),
+                    Err(_) => return internal_observer_failure_at(
+                        "encryption_readiness_subscription_closed",
+                        connected,
+                    ),
                 },
             }
         };
@@ -1057,14 +1181,24 @@ async fn observe_sync_service(
                             );
                         }
                     }
-                    connected = true;
-                    reconnecting = false;
-                    let _ = control_tx
-                        .send(SyncActorControl::FirstResponseCommitted { run_generation })
+                    let replacement_ready = replacement_recovery
+                        .as_mut()
+                        .is_none_or(|proof| proof.observe_room_response(committed.sequence()));
+                    if replacement_ready {
+                        connected = true;
+                        reconnecting = false;
+                        replacement_recovery = None;
+                        let _ = control_tx
+                            .send(SyncActorControl::FirstResponseCommitted { run_generation })
+                            .await;
+                        let _ = event_tx.send(CoreEvent::Sync(SyncEvent::Running));
+                        send_sync_status(
+                            &action_tx,
+                            &sync_generation,
+                            SyncLifecycleStatus::Running,
+                        )
                         .await;
-                    let _ = event_tx.send(CoreEvent::Sync(SyncEvent::Running));
-                    send_sync_status(&action_tx, &sync_generation, SyncLifecycleStatus::Running)
-                        .await;
+                    }
                 } else if reconnecting {
                     match reconcile_committed_room_list(
                         &room_tx,
@@ -1094,14 +1228,106 @@ async fn observe_sync_service(
                             );
                         }
                     }
-                    reconnecting = false;
-                    let _ = control_tx
-                        .send(SyncActorControl::Recovered { run_generation })
-                        .await;
+                    let replacement_ready = replacement_recovery
+                        .as_mut()
+                        .is_some_and(|proof| proof.observe_room_response(committed.sequence()));
+                    let replacement_elapsed = replacement_recovery
+                        .as_ref()
+                        .map(|proof| proof.started.elapsed())
+                        .unwrap_or_default();
+                    if replacement_recovery.is_none() || replacement_ready {
+                        reconnecting = false;
+                        if replacement_ready {
+                            koushi_sdk::record_encryption_sync_lifecycle(
+                                koushi_sdk::EncryptionSyncLifecycleOwner::Steady,
+                                *encryption_readiness.borrow(),
+                                koushi_sdk::EncryptionSyncLifecycleStage::Handoff,
+                                replacement_elapsed,
+                            );
+                            replacement_recovery = None;
+                        }
+                        let _ = control_tx
+                            .send(SyncActorControl::Recovered { run_generation })
+                            .await;
+                    }
                 }
                 diagnostics.response_committed(run_generation, committed.pos_present());
             }
             Signal::Committed(_) => {}
+            Signal::Encryption(snapshot) => {
+                let lifecycle_elapsed = replacement_recovery
+                    .as_ref()
+                    .map(|proof| proof.started.elapsed())
+                    .unwrap_or_default();
+                if snapshot.state == matrix_sdk::encryption::EncryptionSyncReadinessState::Pending
+                    && snapshot.generation != last_encryption_started_generation
+                {
+                    last_encryption_started_generation = snapshot.generation;
+                    koushi_sdk::record_encryption_sync_lifecycle(
+                        koushi_sdk::EncryptionSyncLifecycleOwner::Steady,
+                        snapshot,
+                        koushi_sdk::EncryptionSyncLifecycleStage::Created,
+                        lifecycle_elapsed,
+                    );
+                    koushi_sdk::record_encryption_sync_lifecycle(
+                        koushi_sdk::EncryptionSyncLifecycleOwner::Steady,
+                        snapshot,
+                        koushi_sdk::EncryptionSyncLifecycleStage::FirstRequest,
+                        lifecycle_elapsed,
+                    );
+                }
+                if snapshot.state == matrix_sdk::encryption::EncryptionSyncReadinessState::Received
+                    && snapshot.generation != last_encryption_response_generation
+                {
+                    last_encryption_response_generation = snapshot.generation;
+                    koushi_sdk::record_encryption_sync_lifecycle(
+                        koushi_sdk::EncryptionSyncLifecycleOwner::Steady,
+                        snapshot,
+                        koushi_sdk::EncryptionSyncLifecycleStage::FirstResponse,
+                        lifecycle_elapsed,
+                    );
+                }
+                if let Some(proof) = replacement_recovery.as_mut() {
+                    let elapsed = proof.started.elapsed();
+                    let previous_generation = proof.replacement_encryption_generation;
+                    let replacement_ready = proof.observe_encryption(snapshot);
+                    if proof.replacement_encryption_generation != previous_generation {
+                        koushi_sdk::record_encryption_sync_lifecycle(
+                            koushi_sdk::EncryptionSyncLifecycleOwner::Steady,
+                            snapshot,
+                            koushi_sdk::EncryptionSyncLifecycleStage::Replaced,
+                            elapsed,
+                        );
+                    }
+                    if replacement_ready {
+                        reconnecting = false;
+                        replacement_recovery = None;
+                        koushi_sdk::record_encryption_sync_lifecycle(
+                            koushi_sdk::EncryptionSyncLifecycleOwner::Steady,
+                            snapshot,
+                            koushi_sdk::EncryptionSyncLifecycleStage::Handoff,
+                            elapsed,
+                        );
+                        if connected {
+                            let _ = control_tx
+                                .send(SyncActorControl::Recovered { run_generation })
+                                .await;
+                        } else {
+                            connected = true;
+                            let _ = control_tx
+                                .send(SyncActorControl::FirstResponseCommitted { run_generation })
+                                .await;
+                            let _ = event_tx.send(CoreEvent::Sync(SyncEvent::Running));
+                            send_sync_status(
+                                &action_tx,
+                                &sync_generation,
+                                SyncLifecycleStatus::Running,
+                            )
+                            .await;
+                        }
+                    }
+                }
+            }
             Signal::State(state) => {
                 let state_label = sync_service_state_trace_label(&state);
                 trace_sync!(
@@ -1138,16 +1364,35 @@ async fn observe_sync_service(
                             .await;
                     }
                     matrix_sdk_ui::sync_service::State::Terminated => {
-                        diagnostics.failed(SlidingSyncFailureDiagnostic {
-                            origin: SlidingSyncFailureOrigin::Supervisor,
-                            kind: SlidingSyncFailureKind::Internal,
-                            stage: SlidingSyncFailureStage::Supervisor,
-                            ..SlidingSyncFailureDiagnostic::default()
-                        });
-                        return SyncTaskOutcome::Failed {
-                            kind: SyncFailureKind::Http,
-                            ever_connected: connected,
-                        };
+                        if observer_stop.is_requested() {
+                            return SyncTaskOutcome::Stopped;
+                        }
+                        let lost = *encryption_readiness.borrow();
+                        koushi_sdk::record_encryption_sync_lifecycle(
+                            koushi_sdk::EncryptionSyncLifecycleOwner::Steady,
+                            lost,
+                            koushi_sdk::EncryptionSyncLifecycleStage::Terminated,
+                            Duration::ZERO,
+                        );
+                        reconnecting = true;
+                        let room_response_baseline = last_committed_sequence
+                            .max(committed_all_rooms_response.get().sequence());
+                        replacement_recovery = Some(ReplacementRecoveryProof::new(
+                            lost.generation,
+                            room_response_baseline,
+                        ));
+                        let _ = control_tx
+                            .send(SyncActorControl::Reconnecting {
+                                run_generation,
+                                reason: "sync_owner_terminated",
+                            })
+                            .await;
+                        if !replacement_restart_backoff(&observer_stop, Duration::from_millis(250))
+                            .await
+                        {
+                            return SyncTaskOutcome::Stopped;
+                        }
+                        sync_service.start().await;
                     }
                     _ => {}
                 }
@@ -1539,6 +1784,109 @@ pub mod tests {
             7,
             &[SyncLifecycle::Starting],
         ));
+    }
+
+    #[test]
+    fn replacement_recovery_requires_matching_encryption_and_room_proofs() {
+        use matrix_sdk::encryption::{
+            EncryptionSyncReadinessSnapshot as Snapshot, EncryptionSyncReadinessState as State,
+        };
+
+        let mut room_first = ReplacementRecoveryProof::new(4, 10);
+        assert!(!room_first.observe_room_response(11));
+        assert!(!room_first.observe_encryption(Snapshot {
+            generation: 4,
+            state: State::Received,
+        }));
+        assert!(room_first.observe_encryption(Snapshot {
+            generation: 5,
+            state: State::Received,
+        }));
+
+        let mut encryption_first = ReplacementRecoveryProof::new(9, 20);
+        assert!(!encryption_first.observe_encryption(Snapshot {
+            generation: 10,
+            state: State::Pending,
+        }));
+        assert!(!encryption_first.observe_encryption(Snapshot {
+            generation: 10,
+            state: State::Received,
+        }));
+        assert!(encryption_first.observe_room_response(21));
+    }
+
+    #[test]
+    fn newer_replacement_generation_clears_partial_proofs() {
+        use matrix_sdk::encryption::{
+            EncryptionSyncReadinessSnapshot as Snapshot, EncryptionSyncReadinessState as State,
+        };
+
+        let mut proof = ReplacementRecoveryProof::new(1, 30);
+        assert!(!proof.observe_room_response(31));
+        assert!(proof.observe_encryption(Snapshot {
+            generation: 2,
+            state: State::Received,
+        }));
+        assert!(!proof.observe_encryption(Snapshot {
+            generation: 3,
+            state: State::Pending,
+        }));
+        assert!(!proof.room_response_committed);
+        assert!(!proof.observe_encryption(Snapshot {
+            generation: 3,
+            state: State::Received,
+        }));
+        assert!(proof.observe_room_response(32));
+    }
+
+    #[test]
+    fn queued_pre_termination_room_commit_cannot_satisfy_replacement() {
+        use matrix_sdk::encryption::{
+            EncryptionSyncReadinessSnapshot as Snapshot, EncryptionSyncReadinessState as State,
+        };
+
+        let mut proof = ReplacementRecoveryProof::new(7, 41);
+        assert!(!proof.observe_room_response(41));
+        assert!(!proof.observe_encryption(Snapshot {
+            generation: 8,
+            state: State::Received,
+        }));
+        assert!(!proof.observe_room_response(41));
+        assert!(proof.observe_room_response(42));
+    }
+
+    #[tokio::test]
+    async fn explicit_stop_cancels_replacement_backoff_before_restart() {
+        let stop = Arc::new(SyncObserverStop::default());
+        let task_stop = stop.clone();
+        let task = tokio::spawn(async move {
+            replacement_restart_backoff(&task_stop, Duration::from_secs(30)).await
+        });
+        tokio::task::yield_now().await;
+        stop.request();
+        assert!(!task.await.expect("backoff task"));
+    }
+
+    #[test]
+    fn terminated_sync_owner_is_restarted_instead_of_settled_failed() {
+        let source = include_str!("sync.rs");
+        let observer = source
+            .split("async fn observe_sync_service")
+            .nth(1)
+            .expect("observer body")
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("observer production body");
+        let terminated = observer
+            .split("State::Terminated =>")
+            .nth(1)
+            .expect("terminated branch")
+            .split("_ => {}")
+            .next()
+            .expect("terminated branch body");
+        assert!(terminated.contains("ReplacementRecoveryProof::new"));
+        assert!(terminated.contains("sync_service.start().await"));
+        assert!(!terminated.contains("SyncTaskOutcome::Failed"));
     }
 
     #[test]

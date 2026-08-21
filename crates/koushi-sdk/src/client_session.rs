@@ -493,6 +493,7 @@ pub(super) fn desktop_client_builder_defaults(
             ..Default::default()
         })
         .with_enable_share_history_on_invite(true)
+        .with_encryption_sync_readiness(true)
         .with_threading_support(matrix_sdk::ThreadingSupport::Enabled {
             with_subscriptions: true,
         })
@@ -551,7 +552,7 @@ mod tests {
         assert!(config.encrypted_at_rest_configured());
     }
     #[test]
-    fn desktop_client_builder_defaults_enable_thread_subscriptions_and_share_history() {
+    fn desktop_client_builder_defaults_enable_threads_share_history_and_readiness() {
         let source = include_str!("client_session.rs");
         let defaults_body =
             crate::test_source::item_body(source, "fn desktop_client_builder_defaults");
@@ -560,6 +561,7 @@ mod tests {
         assert!(defaults_body.contains("ThreadingSupport::Enabled"));
         assert!(defaults_body.contains("with_subscriptions: true"));
         assert!(defaults_body.contains("with_enable_share_history_on_invite(true)"));
+        assert!(defaults_body.contains("with_encryption_sync_readiness(true)"));
     }
     #[test]
     fn client_builder_defaults_download_backup_keys_after_decryption_failures() {

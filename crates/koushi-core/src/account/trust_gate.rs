@@ -808,26 +808,40 @@ impl AccountActor {
                         }
                     },
                 );
-                let result = if first_response_seen.load(Ordering::Acquire) {
-                    sync.await
+                let (result, timed_out) = if first_response_seen.load(Ordering::Acquire) {
+                    (sync.await, false)
                 } else {
                     match executor::timeout(Duration::from_secs(15), sync).await {
-                        Ok(result) => result,
-                        Err(_) => Err(koushi_sdk::ProvisionalEncryptionSyncError::Sdk),
+                        Ok(result) => (result, false),
+                        Err(_) => (Err(koushi_sdk::ProvisionalEncryptionSyncError::Sdk), true),
                     }
                 };
+                if timed_out {
+                    koushi_sdk::record_encryption_sync_lifecycle(
+                        koushi_sdk::EncryptionSyncLifecycleOwner::Provisional,
+                        session.client().encryption_sync_readiness_snapshot(),
+                        koushi_sdk::EncryptionSyncLifecycleStage::Failed,
+                        Duration::from_secs(15),
+                    );
+                }
 
                 if result.is_ok() {
                     break;
                 }
                 if !first_response_seen.load(Ordering::Acquire) {
-                    let _ = tx
-                        .send(AccountMessage::FirstProvisionalEncryptionSyncFinished {
-                            generation,
-                            succeeded: false,
-                        })
-                        .await;
-                    break;
+                    if !failure_reported.swap(true, Ordering::AcqRel)
+                        && tx
+                            .send(AccountMessage::FirstProvisionalEncryptionSyncFinished {
+                                generation,
+                                succeeded: false,
+                            })
+                            .await
+                            .is_err()
+                    {
+                        break;
+                    }
+                    executor::sleep(Duration::from_millis(250)).await;
+                    continue;
                 }
                 if !failure_reported.swap(true, Ordering::AcqRel)
                     && tx
@@ -1437,6 +1451,36 @@ mod tests {
     fn provisional_encryption_sync_attempt_starts_only_without_an_active_owner() {
         assert!(begin_provisional_encryption_sync_cursor_attempt(false));
         assert!(!begin_provisional_encryption_sync_cursor_attempt(true));
+    }
+
+    #[test]
+    fn provisional_pre_first_response_failure_retries_under_the_same_owner() {
+        let source = include_str!("trust_gate.rs");
+        let owner = source
+            .split("fn start_provisional_encryption_sync")
+            .nth(1)
+            .expect("provisional owner")
+            .split("pub(super) async fn stop_provisional_encryption_sync")
+            .next()
+            .expect("provisional owner body");
+        let branch_start = owner
+            .find("if !first_response_seen.load(Ordering::Acquire)")
+            .expect("pre-first-response failure branch");
+        let retry_sleep = owner[branch_start..]
+            .find("executor::sleep(Duration::from_millis(250)).await;")
+            .map(|offset| branch_start + offset)
+            .expect("bounded retry backoff");
+        let retry_continue = owner[retry_sleep..]
+            .find("continue;")
+            .map(|offset| retry_sleep + offset)
+            .expect("retry continues under the same owner");
+        let post_first_failure = owner[retry_continue..]
+            .find("AccountMessage::ProvisionalEncryptionSyncFailed")
+            .map(|offset| retry_continue + offset)
+            .expect("post-first-response failure branch");
+        assert!(branch_start < retry_sleep);
+        assert!(retry_sleep < retry_continue);
+        assert!(retry_continue < post_first_failure);
     }
 
     #[test]

@@ -1994,6 +1994,9 @@ pub(super) fn matrix_room_operation_failure_kind(
         matrix_sdk::Error::SecureBackupRequired => {
             MatrixRoomOperationFailureKind::SecureBackupRequired
         }
+        matrix_sdk::Error::EncryptionReadiness(_) => {
+            MatrixRoomOperationFailureKind::EncryptionReadiness
+        }
         matrix_sdk::Error::SerdeJson(_)
         | matrix_sdk::Error::Io(_)
         | matrix_sdk::Error::CrossProcessLockError(_)
