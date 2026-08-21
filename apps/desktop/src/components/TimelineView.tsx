@@ -7,6 +7,7 @@ type TimelineRowActionHandlers,
 type TimelineThreadAttention
 } from "./timeline/TimelineItemRow";
 import type { TimelineTransport } from "./timeline/TimelineTransport";
+import { useTimelineEventSubscription } from "./timeline/useTimelineEventSubscription";
 import {
   ProjectionSnapshotBoundary,
   projectionStructureChanged,
@@ -131,6 +132,7 @@ import { t } from "../i18n/messages";
 import type {
 AvatarThumbnailState,
 MediaTransferProgress,
+CoreEventPayload,
 TimelineItem,
 TimelineKey,
 TimelineMegolmSessionReason,
@@ -286,8 +288,6 @@ const TIMELINE_AVATAR_THUMBNAIL_OVERSCAN_ITEMS = 8;
 const TIMELINE_LINK_PREVIEW_OVERSCAN_ITEMS = 8;
 const TIMELINE_SCROLL_IDLE_FLUSH_MS = 100;
 const TIMELINE_SCROLL_MAX_DEFER_MS = 500;
-const TIMELINE_SUBSCRIBE_FALLBACK_DELAY_MS = 120;
-
 const ignoreComposerKeyAction: ResolveComposerKeyAction = async () => "noop";
 
 const ROOT_EVENT_THREAD_ORDER: TimelineThreadRootOrder = { kind: "rootEvent" };
@@ -1182,8 +1182,7 @@ export const TimelineView = memo(function TimelineView({
   });
 
   // --- Event subscription: local stores apply reducers; App stores keep view effects here. ---
-  useEffect(() => {
-    const unsubscribe = transport.listenCoreEvents((payload) => {
+  const handleTimelineCoreEvent = useCallback((payload: CoreEventPayload) => {
       if (payload.kind === "ResyncMarker") {
         // EventStreamLag: the core event broadcast overflowed and dropped
         // events for this consumer (likely including this room's InitialItems).
@@ -1515,8 +1514,6 @@ export const TimelineView = memo(function TimelineView({
           return next;
         });
       }
-    });
-    return unsubscribe;
   }, [
     currentUserId,
     cancelScrollFollowUpFrames,
@@ -1529,27 +1526,15 @@ export const TimelineView = memo(function TimelineView({
     transport
   ]);
 
-  useEffect(() => {
-    if (!transport.ensureSubscribed) {
-      return;
-    }
-    if (items.length > 0) {
-      return;
-    }
-    const timelineKeyHashAtSchedule = timelineKeyHash;
-    const timeoutId = window.setTimeout(() => {
-      if (timelineKeyHashRef.current !== timelineKeyHashAtSchedule) {
-        return;
-      }
-      if (initialItemsSeenForTimelineKeyRef.current === timelineKeyHashAtSchedule) {
-        return;
-      }
-      void transport.ensureSubscribed?.(timelineKeyRef.current).catch(() => undefined);
-    }, TIMELINE_SUBSCRIBE_FALLBACK_DELAY_MS);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [items.length, timelineKeyHash, transport]);
+  useTimelineEventSubscription({
+    transport,
+    onEvent: handleTimelineCoreEvent,
+    itemCount: items.length,
+    timelineKeyHash,
+    timelineKeyHashRef,
+    timelineKeyRef,
+    initialItemsSeenForTimelineKeyRef
+  });
 
   useEffect(
     () => () => {
