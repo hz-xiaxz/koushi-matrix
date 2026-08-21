@@ -74,5 +74,8 @@ Only `TimelineView.tsx`, the new hook leaf and this plan/index may change.
 
 - Design: `reviewer-flash` verified ref types, effect/dependency order, shared fences, cleanup semantics, imports and existing coverage and recorded `Correct-to-implement`.
 - The executed baseline above confirms 175/175; `timelineKeyHash` remains deliberately in the exact nine-dependency list even though the callback reads its ref, because it forces room-change re-registration.
-- Implementation approved, not started.
+- Implementation: integrated by `luna-implementer` at medium reasoning and parent-audited.
+- Source/lifecycle exactness: callback body 1/1, dependencies 9/9, parent listener 0, hook listener 1, direct unsubscribe, fallback timer/cleanup 1/1, imports 3/3 and delay 120 once.
+- `TimelineView.tsx` is 4,273 newline-delimited lines; the 49-line hook is now the sole listener/fallback resource owner.
+- Focused post-move 175/175; typecheck, lint and diff checks green.
 - Full diff and delivery pending.
