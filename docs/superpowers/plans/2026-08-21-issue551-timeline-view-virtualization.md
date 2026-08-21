@@ -47,7 +47,7 @@ Move exactly 25 top-level AST statements, preserving declaration order within th
 24. `calculateTimelineVirtualRange`
 25. `timelineItemHeightAtIndex`
 
-The leaf imports only `TimelineDisplayRow` from `domain/timelineDisplayProjection`.
+The leaf imports only `TimelineDisplayRow` through exact type-only path `../../domain/timelineDisplayProjection`.
 
 Explicit leaf exports are exactly 19 names needed by the parent:
 
@@ -63,7 +63,7 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change. No compati
 ## Invariants
 
 - Every moved body/comment/token is exact apart from `export` modifiers and the relative type-import path.
-- Threshold 200, overscan 20, estimated height 80, clamp 24..1600, fallback 16ms, 600px empty-client fallback, rounding and binary-search bounds remain exact.
+- Base `47e1a525` values remain exact: virtualization threshold 600, overscan 60, estimated height 72, measured-height clamp 36..480, frame fallback 16ms and empty-client viewport fallback 600px; rounding and binary-search bounds also remain exact.
 - Scheduler still starts RAF and timeout together; the first callback cancels the other, invokes once, and `cancel()` remains idempotent.
 - Existing component refs/effects remain the sole owners that cancel returned handles on supersession, timeline-key change and unmount.
 - Empty sentinel object identity is preserved; no fresh-object replacement or extra state commit.
@@ -79,6 +79,8 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change. No compati
 
 ## Review gate
 
-- Design: pending `reviewer-flash` read-only verdict.
+- Design round 1: `reviewer-flash` recorded `Changes-required` because the first draft documented stale constant values despite the source inventory being correct.
+- Amendment: pin base `47e1a525` values 600/60/72/36..480 and exact leaf import path; retain the deliberate `wc -l` newline-delimited baseline count.
+- Design round 2: pending `reviewer-flash` read-only verdict.
 - Implementation prohibited until `Correct-to-implement`.
 - Full diff and delivery pending.
