@@ -12,6 +12,7 @@ mod composer;
 mod connection;
 mod navigation;
 mod profile_display_diagnostics;
+mod scheduled_send;
 
 pub use composer::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, ForwardedComposerDraftPermit};
 use composer::{
@@ -29,6 +30,7 @@ use navigation::{
     focused_navigation_outcome_after_reduce, navigation_replacement_room_for_cleanup,
     navigation_session_key, unsubscribe_replaced_timeline_key,
 };
+use scheduled_send::{DeferredScheduledSendPersist, scheduled_send_id, scheduled_send_session_key};
 
 pub use connection::{CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag};
 use profile_display_diagnostics::{
@@ -40,16 +42,16 @@ use std::collections::{BTreeSet, HashMap};
 use std::future;
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicU64};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     AccountManagementOperation, ActivityRowKind, ActivityState, AppAction, AppEffect, AppState,
     ComposerDraftStore, ComposerTarget, LoginAttemptId, NavigationState, OperationFailureKind,
     ProfileUpdateRequest, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem,
-    ScheduledSendStore, SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection,
-    ThreadPaneState, UiEvent, admit_space_member_cancellation, admit_space_member_invite,
-    admit_space_members_load, reduce,
+    SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection, ThreadPaneState,
+    UiEvent, admit_space_member_cancellation, admit_space_member_invite, admit_space_members_load,
+    reduce,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -777,31 +779,12 @@ struct ComposerDraftTestMutation {
     completion: oneshot::Sender<AppState>,
 }
 
-enum DeferredScheduledSendPersist {
-    ClearLoadedMarker,
-    Persist {
-        key_id: koushi_key::SessionKeyId,
-        scheduled_sends: ScheduledSendStore,
-    },
-}
-
 #[derive(Default)]
 struct DeferredReducerSideEffects {
     cancel_activity_resolution: bool,
     navigation: Option<(koushi_key::SessionKeyId, NavigationState, bool)>,
     composer_drafts: Option<(koushi_key::SessionKeyId, ComposerDraftStore)>,
     scheduled_sends: Option<DeferredScheduledSendPersist>,
-}
-
-fn current_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or_default()
-}
-
-fn scheduled_send_id() -> String {
-    format!("scheduled-{}", matrix_sdk::ruma::TransactionId::new())
 }
 
 impl AppActor {
@@ -1453,30 +1436,6 @@ impl AppActor {
         }
     }
 
-    async fn load_scheduled_sends_for_current_session(&mut self) {
-        let Some(key_id) = scheduled_send_session_key(&self.state) else {
-            self.scheduled_sends_loaded_for = None;
-            return;
-        };
-        if self.scheduled_sends_loaded_for.as_ref() == Some(&key_id) {
-            return;
-        }
-
-        let store = self.composer_draft_store_actor.clone();
-        let load_key_id = key_id.clone();
-        let scheduled_sends = executor::spawn_blocking(move || {
-            store.load_scheduled_sends(&load_key_id).unwrap_or_default()
-        })
-        .await
-        .unwrap_or_default();
-        let effects = reduce(
-            &mut self.state,
-            AppAction::ScheduledSendsLoaded { scheduled_sends },
-        );
-        self.scheduled_sends_loaded_for = Some(key_id);
-        self.handle_ui_event_effects(&effects).await;
-    }
-
     async fn load_room_preferences_for_current_session(&mut self) {
         let Some(key_id) = room_preferences_session_key(&self.state) else {
             self.room_preferences_loaded_for = None;
@@ -1503,17 +1462,6 @@ impl AppActor {
         self.handle_ui_event_effects(&effects).await;
     }
 
-    async fn persist_scheduled_sends(
-        &mut self,
-        key_id: koushi_key::SessionKeyId,
-        scheduled_sends: ScheduledSendStore,
-    ) {
-        let store = self.composer_draft_store_actor.clone();
-        let _ =
-            executor::spawn_blocking(move || store.save_scheduled_sends(&key_id, &scheduled_sends))
-                .await;
-    }
-
     async fn persist_room_preferences(&mut self, preferences: &koushi_state::RoomPreferencesState) {
         let Some(key_id) = room_preferences_session_key(&self.state) else {
             return;
@@ -1523,71 +1471,6 @@ impl AppActor {
         let _ =
             executor::spawn_blocking(move || store.save_room_preferences(&key_id, &preferences))
                 .await;
-    }
-
-    fn scheduled_send_delay(&self) -> Option<Duration> {
-        if !matches!(self.state.session, SessionState::Ready(_)) {
-            return None;
-        }
-        let next_send_at_ms = self.state.scheduled_sends.next_local_send_at_ms()?;
-        let now_ms = current_epoch_ms();
-        Some(Duration::from_millis(
-            next_send_at_ms.saturating_sub(now_ms),
-        ))
-    }
-
-    async fn dispatch_due_scheduled_send(&mut self) -> bool {
-        if !matches!(self.state.session, SessionState::Ready(_)) {
-            return false;
-        }
-        let Some(item) = self
-            .state
-            .scheduled_sends
-            .next_local_due(current_epoch_ms())
-        else {
-            return false;
-        };
-        self.dispatch_scheduled_send(item).await
-    }
-
-    async fn dispatch_scheduled_send(&mut self, item: ScheduledSendItem) -> bool {
-        let Some(origin_session_key) = scheduled_send_session_key(&self.state) else {
-            return false;
-        };
-        let scheduled_id = item.scheduled_id.clone();
-        let effects = self
-            .reduce_app_action(AppAction::ScheduledSendDispatchStarted {
-                scheduled_id: scheduled_id.clone(),
-            })
-            .await;
-        self.handle_ui_event_effects(&effects).await;
-
-        let request_id = self.next_internal_request_id();
-        if !self
-            .account_actor
-            .send(AccountMessage::DispatchLocalScheduledSend {
-                request_id,
-                origin_session_key,
-                scheduled_id: scheduled_id.clone(),
-                room_id: item.room_id,
-                thread_root_event_id: item.thread_root_event_id,
-                body: item.body,
-            })
-            .await
-        {
-            self.emit(CoreEvent::OperationFailed {
-                request_id,
-                failure: CoreFailure::ShutdownFailed,
-            });
-            let retry_effects = self
-                .reduce_app_action(AppAction::ScheduledSendDispatchFailed {
-                    scheduled_id,
-                    retry_at_ms: crate::scheduled_send::local_scheduled_send_retry_at_ms(),
-                })
-                .await;
-            self.handle_ui_event_effects(&retry_effects).await;
-        }
-        true
     }
 
     fn next_internal_request_id(&mut self) -> RequestId {
@@ -4253,10 +4136,6 @@ fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -
     )
 }
 
-fn scheduled_send_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {
-    composer_draft_session_key(state)
-}
-
 fn room_preferences_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {
     composer_draft_session_key(state)
 }
@@ -5862,13 +5741,21 @@ mod tests {
     #[test]
     fn app_actor_persistence_uses_blocking_store_port() {
         let source = include_str!("runtime.rs");
-        let save_scheduled = source
+        let scheduled_source = include_str!("runtime/scheduled_send.rs");
+        let load_scheduled = scheduled_source
+            .split("async fn load_scheduled_sends_for_current_session")
+            .nth(1)
+            .expect("scheduled loader should exist")
+            .split("async fn persist_scheduled_sends")
+            .next()
+            .expect("scheduled persist helper should follow scheduled loader");
+        let save_scheduled = scheduled_source
             .split("async fn persist_scheduled_sends")
             .nth(1)
             .expect("scheduled persist helper should exist")
-            .split("async fn persist_room_preferences")
+            .split("fn scheduled_send_delay")
             .next()
-            .expect("room preference persist should follow scheduled persist");
+            .expect("scheduled delay should follow scheduled persist");
         let navigation_source = include_str!("runtime/navigation.rs");
         let navigation_load = navigation_source
             .split("async fn load_navigation_for_current_session")
@@ -5888,9 +5775,9 @@ mod tests {
             .split("async fn persist_room_preferences")
             .nth(1)
             .expect("room preference persist helper should exist")
-            .split("fn scheduled_send_delay")
+            .split("fn next_internal_request_id")
             .next()
-            .expect("scheduled-send delay should follow room preference persist");
+            .expect("internal request ID should follow room preference persist");
         let composer_source = include_str!("runtime/composer.rs");
         let flush_drafts = composer_source
             .split("async fn flush_pending_composer_drafts")
@@ -5907,7 +5794,7 @@ mod tests {
             .next()
             .expect("room preference effect should follow settings effect");
 
-        for section in [save_scheduled, save_preferences] {
+        for section in [load_scheduled, save_scheduled, save_preferences] {
             assert!(
                 section.contains("executor::spawn_blocking"),
                 "AppActor store persistence must be offloaded from the reducer loop"
