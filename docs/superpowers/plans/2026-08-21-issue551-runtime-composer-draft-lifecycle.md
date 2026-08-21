@@ -1,6 +1,6 @@
 # Issue #551 runtime composer-draft lifecycle extraction
 
-Status: design review pending. Scope is one atomic behavior-preserving lifecycle seam.
+Status: design approved. Scope is one atomic behavior-preserving lifecycle seam.
 
 ## Baseline
 
@@ -31,7 +31,7 @@ Create private `crates/koushi-core/src/runtime/composer.rs`. Move these 16 top-l
 
 Move the complete `ForwardedComposerDraftPermit` implementation with four methods (`new`, cfg-test `new_with_acceptance_probe`, `acceptance_projection_reached`, `acceptance_enqueued`) and its `Drop::drop` implementation. Preserve `#[doc(hidden)]`, every cfg and all method visibility exactly.
 
-Move these nine `AppActor` methods in original relative order:
+Preserve global immutable-source order in the leaf: top-level identities 1–11, these nine `AppActor` methods, then top-level identities 12–16. Move the methods in their original relative order:
 
 1. `reconcile_composer_draft_lifecycle`
 2. `reconcile_composer_draft_lifecycle_after_permit_change`
@@ -116,4 +116,6 @@ After full-diff approval, integrate latest `origin/main`, obtain delta approval 
 ## Review gate
 
 - Read-only reconnaissance traced admission, permit drop, reducer/deferred ordering, store blocking, timer/select and shutdown boundaries.
-- Formal `reviewer-flash` verdict pending; implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` round 1 found the missing parent orphan `SubmissionId`; the plan corrected it, the moved-test count and exact source boundaries.
+- Round 2 independently re-traced identities, paths, visibility, imports, tests and lifecycle order and recorded `Correct-to-implement`.
+- `schedule_composer_draft_persist` requires `pub(super)` because retained parent `apply_deferred_reducer_side_effects` calls it; it is not leaf-only.
