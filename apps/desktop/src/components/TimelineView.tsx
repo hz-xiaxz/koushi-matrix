@@ -187,7 +187,6 @@ recordTimelineKeyMismatch,
 recordTimelineResync
 } from "../domain/timelineTransportStats";
 import type {
-ComposerDocument,
 LiveSignalsState,
 ResolveComposerKeyAction,
 RoomLatestEventSummary,
@@ -218,10 +217,10 @@ export { receiptDisplayName };
 
 import {
 renderTimelineMessageText,
-writeClipboardText,
 type OpenMatrixTargetHandler
 } from "./timeline/TimelineMessageBody";
 import { MessageSourceDialog } from "./timeline/MessageSourceDialog";
+import { useTimelineRowTransportActions } from "./timeline/useTimelineRowTransportActions";
 export { MessageSourceDialog };
 export { renderTimelineMessageText };
 export type { OpenMatrixTargetHandler };
@@ -2195,24 +2194,13 @@ export const TimelineView = memo(function TimelineView({
   const initialLiveEdgeScrollKey = timelineInitialized
     ? `${timelineKeyHash}:${generation}`
     : null;
-  const onSendReaction = useCallback(
-    (targetRoomId: string, eventId: string, reactionKey: string) => {
-      void transport.sendReaction(targetRoomId, eventId, reactionKey).catch(() => undefined);
-    },
-    [transport]
+  const timelineDiagnosticKind = timelineKindDiagnosticLabel(timelineKey);
+  const rowTransportActions = useTimelineRowTransportActions(
+    transport,
+    timelineDiagnosticKind,
+    onDiagnosticLogEntry
   );
-  const onRetrySend = useCallback(
-    (targetRoomId: string, transactionId: string) => {
-      void transport.retrySend(targetRoomId, transactionId).catch(() => undefined);
-    },
-    [transport]
-  );
-  const onCancelSend = useCallback(
-    (targetRoomId: string, transactionId: string) => {
-      void transport.cancelSend(targetRoomId, transactionId).catch(() => undefined);
-    },
-    [transport]
-  );
+  const { onRetrySend, onCancelSend } = rowTransportActions;
   const onRetryAllNotSent = useCallback(() => {
     for (const transactionId of notSentTransactionIds) {
       onRetrySend(roomId, transactionId);
@@ -2223,50 +2211,6 @@ export const TimelineView = memo(function TimelineView({
       onCancelSend(roomId, transactionId);
     }
   }, [notSentTransactionIds, onCancelSend, roomId]);
-  const onRedactReaction = useCallback(
-    (targetRoomId: string, eventId: string, reactionKey: string, reactionEventId: string) => {
-      void transport
-        .redactReaction(targetRoomId, eventId, reactionKey, reactionEventId)
-        .catch(() => undefined);
-    },
-    [transport]
-  );
-  const onEdit = useCallback(
-    (targetRoomId: string, eventId: string, document: ComposerDocument) => {
-      void transport.editMessage(targetRoomId, eventId, document).catch(() => undefined);
-    },
-    [transport]
-  );
-  const onRedact = useCallback(
-    (targetRoomId: string, eventId: string) => {
-      void transport.redactMessage(targetRoomId, eventId).catch(() => undefined);
-    },
-    [transport]
-  );
-  const onPin = useCallback(
-    (targetRoomId: string, eventId: string) => {
-      void transport.pinEvent(targetRoomId, eventId).catch(() => undefined);
-    },
-    [transport]
-  );
-  const onUnpin = useCallback(
-    (targetRoomId: string, eventId: string) => {
-      void transport.unpinEvent(targetRoomId, eventId).catch(() => undefined);
-    },
-    [transport]
-  );
-  const onDownloadMedia = useCallback(
-    (targetRoomId: string, eventId: string) => {
-      void transport.downloadMedia(targetRoomId, eventId).catch(() => undefined);
-    },
-    [transport]
-  );
-  const onLoadMessageSource = useCallback(
-    (targetRoomId: string, eventId: string) => {
-      void transport.loadMessageSource(targetRoomId, eventId).catch(() => undefined);
-    },
-    [transport]
-  );
   const onRequestRoomKey = useCallback(
     (targetRoomId: string, eventId: string) => {
       // User-triggered "Request keys and retry" action: immediate visible
@@ -2311,41 +2255,6 @@ export const TimelineView = memo(function TimelineView({
     },
     [pendingKeyRequests, roomId, t, timelineKey, transport]
   );
-  const onForwardMessage = useCallback(
-    (targetRoomId: string, sourceEventId: string, destinationRoomId: string) => {
-      void transport
-        .forwardMessage(targetRoomId, sourceEventId, destinationRoomId)
-        .catch(() => undefined);
-    },
-    [transport]
-  );
-  const timelineDiagnosticKind = timelineKindDiagnosticLabel(timelineKey);
-  const onLoadLinkPreviews = useCallback(
-    (targetRoomId: string, eventId: string, pendingCount = 0) => {
-      onDiagnosticLogEntry?.({
-        timestampMs: Date.now(),
-        source: "timeline.preview",
-        message: `kind=${timelineDiagnosticKind} stage=request trigger=viewport_pending pending=${pendingCount}`
-      });
-      void transport.loadLinkPreviews?.(targetRoomId, eventId)?.catch(() => {
-        onDiagnosticLogEntry?.({
-          timestampMs: Date.now(),
-          source: "timeline.preview",
-          message: `kind=${timelineDiagnosticKind} stage=failed trigger=viewport_pending`
-        });
-      });
-    },
-    [onDiagnosticLogEntry, timelineDiagnosticKind, transport]
-  );
-  const onHideLinkPreview = useCallback(
-    (targetRoomId: string, eventId: string) => {
-      void transport.hideLinkPreview?.(targetRoomId, eventId)?.catch(() => undefined);
-    },
-    [transport]
-  );
-  const onCopyText = useCallback((value: string) => {
-    void writeClipboardText(value).catch(() => undefined);
-  }, []);
   const openAliasDialog = useCallback((target: TimelineAliasTarget) => {
     setAliasTarget(target);
     setAliasDraft(aliasTargetIsActive(target) ? target.displayLabel : "");
@@ -3868,35 +3777,22 @@ export const TimelineView = memo(function TimelineView({
                 onOpenThread={onOpenThread}
                 resolveComposerKeyAction={resolveComposerKeyAction}
                 mediaUploadProgress={mediaUploadProgressForItem(store, timelineKey, item)}
-                onSendReaction={onSendReaction}
-                onRedactReaction={onRedactReaction}
-                onEdit={onEdit}
-                onRedact={onRedact}
+                {...rowTransportActions}
                 isPinned={contentEventId ? pinnedEventIds.includes(contentEventId) : false}
                 isTarget={
                   presentationContext === "thread" &&
                   initialTargetEventId !== null &&
                   (contentEventId === initialTargetEventId || activityEventId === initialTargetEventId)
                 }
-                onPin={onPin}
-                onUnpin={onUnpin}
-                onDownloadMedia={onDownloadMedia}
-                onLoadMessageSource={onLoadMessageSource}
                 onRequestRoomKey={onRequestRoomKey}
-                onForwardMessage={onForwardMessage}
                 autoLoadLinkPreviews={timelineItemIndexInRange(
                   visibleIndex,
                   linkPreviewRequestRange
                 )}
-                onLoadLinkPreviews={onLoadLinkPreviews}
-                onHideLinkPreview={onHideLinkPreview}
-                onCopyText={onCopyText}
                 onOpenAliasDialog={onSetLocalUserAlias ? openAliasDialog : undefined}
                 onOpenMediaViewer={openMediaViewer}
                 onSaveMediaFile={transport.saveMediaFile}
                 forwardDestinations={effectiveForwardDestinations}
-                onRetrySend={onRetrySend}
-                onCancelSend={onCancelSend}
                 onOpenMatrixTarget={onOpenMatrixTarget}
                 presence={item.sender ? liveSignals?.presence[item.sender] : undefined}
                 profile={item.sender ? profileUsers[item.sender] : undefined}
