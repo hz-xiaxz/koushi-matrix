@@ -1,6 +1,6 @@
 # Issue #551 account encrypted-content admission ownership
 
-Status: design review pending. Scope is the final behavior-preserving runtime residual ownership move.
+Status: design approved. Scope is the final behavior-preserving runtime residual ownership move.
 
 ## Baseline
 
@@ -63,4 +63,4 @@ After full-diff approval, integrate latest `origin/main` if required, run the co
 ## Review gate
 
 - Read-only residual audit found this sole cross-owner edge and rejected all other prospective runtime splits.
-- Formal `reviewer-flash` verdict pending; implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` independently traced the sole caller, all eight matched command variants, visibility/import closure, six ordering invariants and source guards and recorded `Correct-to-implement`.
