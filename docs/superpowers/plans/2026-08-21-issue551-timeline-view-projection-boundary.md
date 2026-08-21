@@ -62,6 +62,6 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 
 - Design round 1: `reviewer-flash` validated the seam and recorded conditional `Correct-to-implement` with two minor reproducibility clarifications.
 - Amendment: pin the combined React import statement and literal focused command.
-- Design round 2 pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until unconditional `Correct-to-implement`.
+- Design round 2: `reviewer-flash` revalidated the complete seam and recorded unconditional `Correct-to-implement`.
+- Implementation approved, not started.
 - Full diff and delivery pending.
