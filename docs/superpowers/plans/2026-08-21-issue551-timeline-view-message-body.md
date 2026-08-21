@@ -4,8 +4,8 @@
 
 - Design: `reviewer-flash` required the missing type dependencies/import-reexport shape, verified the amended 35-item inventory against the immutable source, and recorded `Correct-to-implement`.
 - Implementation: integrated; 35/35 declaration exactness, 5/5 leaf exports, focused tests, typecheck, lint and diff checks are green.
-- Full-diff review: pending.
-- Delivery: pending.
+- Full-diff review: `reviewer-flash` independently compared all 35 declarations against the immutable source and recorded `Correct-to-merge`; no code finding remains.
+- Delivery: final repository gates, PR CI and merge pending.
 
 ## Objective
 
