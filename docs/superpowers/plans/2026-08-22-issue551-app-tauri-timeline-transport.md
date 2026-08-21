@@ -108,4 +108,5 @@ The App split-later checkbox remains open for diagnostics, verification/destruct
 - `App.tsx` 7,245 → 7,065 newline-delimited lines; `backend/tauriTimelineTransport.ts` 194.
 - Focused App80, typecheck/lint, full Vitest1,370, Playwright248, build/boundary/security and diff checks green.
 - Full diff: `reviewer-flash` independently traced declarations/imports, all methods/commands, listener/media lifecycle, residual App resources, source assertions, QA regexes and edge direction and recorded `Correct-to-merge`.
-- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: App80, Vitest1,370, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
