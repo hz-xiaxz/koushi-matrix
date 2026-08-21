@@ -80,4 +80,5 @@ Only `TimelineView.tsx`, the new hook leaf and this plan/index may change.
 - Focused post-move 175/175; typecheck, lint and diff checks green.
 - Full diff: `reviewer-flash` independently verified callback identity/order, shared ref fences, direct unsubscribe, fallback timer cleanup and parent ownership and recorded `Correct-to-merge`; parent source verifier closes its read-only base-diff limitation.
 - Final local evidence: focused 175/175; Vitest 1,369; Playwright 248 with polling; workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm, Tauri/domain boundaries, tracked-secret/release/IPC wire, SDK/docs, deny/machete/rustfmt/source-lifecycle/diff checks all green.
-- Delivery: PR CI and merge pending.
+- After scheduler fix #607 merged, `origin/main` was integrated while preserving both plan-index entries; combined focused 176/176 and full Vitest 1,370/1,370 complete with zero unhandled errors, typecheck/lint/source-lifecycle/diff checks green.
+- Delivery: PR CI rerun and merge pending.
