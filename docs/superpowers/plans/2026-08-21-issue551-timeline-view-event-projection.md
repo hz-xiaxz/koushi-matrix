@@ -85,4 +85,6 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 - Exactness: 16/16 statements, parent 0, exports 9/9, private 7/7, two type-only imports, four approved parent imports removed; `TimelineView.tsx` 4,869 → 4,664 newline-delimited lines and the leaf is 221.
 - Focused post-move 173/173; typecheck, lint and diff checks green; listener/unsubscribe/fallback timer and all state/resource owners remain in the parent.
 - Full diff: `reviewer-flash` independently verified inventory, import/caller graph, diagnostic/privacy strings and lifecycle owners and recorded `Correct-to-merge`; parent AST comparison supplies the reviewer's read-only base-diff limitation.
-- Delivery: final repository gates, PR CI and merge pending.
+- Final local evidence: focused 173/173; Vitest 1,367; Playwright 248 with polling; workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm, Tauri/domain boundaries, tracked-secret/release/IPC wire, SDK/docs, deny/machete/rustfmt/exactness/diff checks all green.
+- Vitest triage: the first full run passed every test but observed the unchanged virtualization fallback timer after jsdom teardown (`window is not defined`); scheduler diff against `origin/main` was zero and the complete rerun was clean without expectation/product changes.
+- Delivery: PR CI and merge pending.
