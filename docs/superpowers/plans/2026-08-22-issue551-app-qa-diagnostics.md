@@ -104,4 +104,5 @@ The App umbrella remains open for verification/destructive UI, composer/attentio
 - `App.tsx` 7,065 → 6,975 newline-delimited lines; `app/qaDiagnostics.ts` 98; one jsdom characterization test.
 - Focused diagnostics15, App80, typecheck/lint, full Vitest1,371, Playwright248, build and diff checks green.
 - Full diff: `reviewer-flash` independently traced declarations/imports, DOM/security/equality/log behavior, jsdom coverage, source owners and retained App lifecycle and recorded `Correct-to-merge`.
-- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: focused diagnostics15, App80, Vitest1,371, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
