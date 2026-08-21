@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 
+import { renderToStaticMarkup } from "react-dom/server";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StagedUploadItem } from "../domain/types";
 import { t } from "../i18n/messages";
-import { CreateEntityDialog, InviteTargetsDialog, UploadStagingDialog } from "./dialogs";
+import {
+  CreateEntityDialog,
+  InviteTargetsDialog,
+  ResetLocalDataConfirmationDialog,
+  UploadStagingDialog
+} from "./dialogs";
 import type { InviteWorkflowState } from "../domain/types";
 
 afterEach(() => {
@@ -53,6 +59,28 @@ function dialog(items: StagedUploadItem[], onUpdateCaption = vi.fn()) {
     />
   );
 }
+
+describe("ResetLocalDataConfirmationDialog", () => {
+  it("renders an explicit destructive confirmation", () => {
+    const markup = renderToStaticMarkup(
+      <ResetLocalDataConfirmationDialog
+        isBusy={false}
+        onCancel={() => undefined}
+        onConfirm={() => undefined}
+      />
+    );
+
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain('aria-label="Reset local data"');
+    expect(markup).toContain(
+      "Reset local data for this session? This removes the local Matrix store, cached history, and saved credentials on this device. This cannot be undone."
+    );
+    expect(markup).toContain(">Cancel</button>");
+    expect(markup).toContain('class="dialog-button danger"');
+    expect(markup).toContain(">Reset local data</button>");
+  });
+});
 
 describe("UploadStagingDialog", () => {
   it("preserves active Japanese composition across stale preparation snapshots", () => {
