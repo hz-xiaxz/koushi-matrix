@@ -4,8 +4,8 @@
 
 - Design: `reviewer-flash` verified the closed 13-declaration dependency set and recorded `Correct-to-implement`; two non-blocking baseline/import wording notes are incorporated below.
 - Implementation: integrated; 13/13 declaration exactness, 3/3 exports, focused tests, typecheck, lint and diff checks are green.
-- Full-diff review: pending.
-- Delivery: pending.
+- Full-diff review: `reviewer-flash` independently compared all 13 statements and recorded `Correct-to-merge`; no code finding remains.
+- Delivery: final repository gates, PR CI and merge pending.
 
 ## Objective
 
