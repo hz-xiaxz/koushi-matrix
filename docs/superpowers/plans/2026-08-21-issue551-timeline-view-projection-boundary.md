@@ -67,4 +67,6 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 - Exactness: 7/7 statements, parent 0, exports 6/6, private 1/1 and imports 3/3; `TimelineView.tsx` 4,440 → 4,353 newline-delimited lines and the leaf is 98.
 - Focused post-move 173/173; typecheck, lint and diff checks green; every parent projection ref/frame/ack timer/effect/cleanup remains in place.
 - Full diff: `reviewer-flash` independently verified the final class/model/import/resource graph and recorded `Correct-to-merge`; parent `wc -l` is confirmed at 4,353 while editor display count includes the unterminated final line.
-- Delivery: final repository gates, PR CI and merge pending.
+- Final local evidence: focused 173/173; Vitest 1,367; Playwright 248 with polling; workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm, Tauri/domain boundaries, tracked-secret/release/IPC wire, SDK/docs, deny/machete/rustfmt/exactness/diff checks all green.
+- Playwright triage: an active unrelated `.worktrees/issue-591` run held port 5183; it was allowed to finish, its orphaned Vite process group was then removed, and this branch's unchanged 248-test gate passed without code/expectation changes.
+- Delivery: PR CI and merge pending.
