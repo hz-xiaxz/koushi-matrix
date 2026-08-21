@@ -4658,6 +4658,7 @@ fn record_encryption_readiness_diagnostic(
     };
     let query = match event.query {
         Query::NotStarted => "not_started",
+        Query::InProgress => "in_progress",
         Query::Accepted => "accepted",
         Query::Failed => "failed",
     };

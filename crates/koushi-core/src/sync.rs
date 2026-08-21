@@ -259,6 +259,14 @@ impl SyncObserverStop {
     }
 }
 
+async fn replacement_restart_backoff(observer_stop: &SyncObserverStop, duration: Duration) -> bool {
+    tokio::select! {
+        biased;
+        _ = observer_stop.notify.notified() => false,
+        _ = executor::sleep(duration) => !observer_stop.is_requested(),
+    }
+}
+
 pub struct SyncActor {
     session: Arc<MatrixClientSession>,
     action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -568,15 +576,13 @@ impl SyncActor {
 
     async fn do_stop(&mut self, request_id: Option<RequestId>) {
         let run_generation = self.run_generation;
+        let service = self.sync_service.take();
         if let Some(stop) = self.sync_observer_stop.take() {
             stop.request();
         }
-        if let Some(service) = self.sync_service.take() {
-            let _ = executor::timeout(SYNC_SERVICE_STOP_TIMEOUT, service.stop()).await;
-        }
-        if let Some(handle) = self.ignored_user_list_handler.take() {
-            self.session.client().remove_event_handler(handle);
-        }
+        // Join the observer before the final SDK stop. If a recoverable
+        // Terminated observation was already in its backoff/start path, this
+        // barrier lets that path finish first and the final stop still wins.
         if let Some(mut task) = self.sync_task.take() {
             if executor::timeout(SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut task)
                 .await
@@ -585,6 +591,12 @@ impl SyncActor {
                 task.abort();
                 let _ = task.await;
             }
+        }
+        if let Some(service) = service {
+            let _ = executor::timeout(SYNC_SERVICE_STOP_TIMEOUT, service.stop()).await;
+        }
+        if let Some(handle) = self.ignored_user_list_handler.take() {
+            self.session.client().remove_event_handler(handle);
         }
         stop_room_observation(self.room_tx.clone(), run_generation).await;
         self.active_start_request_id = None;
@@ -942,16 +954,20 @@ struct ReplacementRecoveryProof {
     started: std::time::Instant,
     lost_encryption_generation: u64,
     replacement_encryption_generation: Option<u64>,
+    room_response_baseline: u64,
+    latest_room_response_sequence: u64,
     room_response_committed: bool,
     encryption_response_committed: bool,
 }
 
 impl ReplacementRecoveryProof {
-    fn new(lost_encryption_generation: u64) -> Self {
+    fn new(lost_encryption_generation: u64, room_response_baseline: u64) -> Self {
         Self {
             started: std::time::Instant::now(),
             lost_encryption_generation,
             replacement_encryption_generation: None,
+            room_response_baseline,
+            latest_room_response_sequence: room_response_baseline,
             room_response_committed: false,
             encryption_response_committed: false,
         }
@@ -968,6 +984,7 @@ impl ReplacementRecoveryProof {
             None => self.replacement_encryption_generation = Some(snapshot.generation),
             Some(current) if current != snapshot.generation => {
                 self.replacement_encryption_generation = Some(snapshot.generation);
+                self.room_response_baseline = self.latest_room_response_sequence;
                 self.room_response_committed = false;
                 self.encryption_response_committed = false;
             }
@@ -978,8 +995,9 @@ impl ReplacementRecoveryProof {
         self.ready()
     }
 
-    fn observe_room_response(&mut self) -> bool {
-        self.room_response_committed = true;
+    fn observe_room_response(&mut self, sequence: u64) -> bool {
+        self.latest_room_response_sequence = self.latest_room_response_sequence.max(sequence);
+        self.room_response_committed = sequence > self.room_response_baseline;
         self.ready()
     }
 
@@ -1014,7 +1032,7 @@ async fn observe_sync_service(
     let mut connected = false;
     let mut room_observation_started = false;
     let mut reconnecting = false;
-    let mut replacement_recovery = None;
+    let mut replacement_recovery: Option<ReplacementRecoveryProof> = None;
     let mut last_committed_sequence = 0;
     let mut pending_state = Some(state_sub.get());
     let mut pending_commit = Some(committed_all_rooms_response.get());
@@ -1165,7 +1183,7 @@ async fn observe_sync_service(
                     }
                     let replacement_ready = replacement_recovery
                         .as_mut()
-                        .is_none_or(ReplacementRecoveryProof::observe_room_response);
+                        .is_none_or(|proof| proof.observe_room_response(committed.sequence()));
                     if replacement_ready {
                         connected = true;
                         reconnecting = false;
@@ -1212,7 +1230,7 @@ async fn observe_sync_service(
                     }
                     let replacement_ready = replacement_recovery
                         .as_mut()
-                        .is_some_and(ReplacementRecoveryProof::observe_room_response);
+                        .is_some_and(|proof| proof.observe_room_response(committed.sequence()));
                     let replacement_elapsed = replacement_recovery
                         .as_ref()
                         .map(|proof| proof.started.elapsed())
@@ -1357,14 +1375,23 @@ async fn observe_sync_service(
                             Duration::ZERO,
                         );
                         reconnecting = true;
-                        replacement_recovery = Some(ReplacementRecoveryProof::new(lost.generation));
+                        let room_response_baseline = last_committed_sequence
+                            .max(committed_all_rooms_response.get().sequence());
+                        replacement_recovery = Some(ReplacementRecoveryProof::new(
+                            lost.generation,
+                            room_response_baseline,
+                        ));
                         let _ = control_tx
                             .send(SyncActorControl::Reconnecting {
                                 run_generation,
                                 reason: "sync_owner_terminated",
                             })
                             .await;
-                        executor::sleep(Duration::from_millis(250)).await;
+                        if !replacement_restart_backoff(&observer_stop, Duration::from_millis(250))
+                            .await
+                        {
+                            return SyncTaskOutcome::Stopped;
+                        }
                         sync_service.start().await;
                     }
                     _ => {}
@@ -1765,8 +1792,8 @@ pub mod tests {
             EncryptionSyncReadinessSnapshot as Snapshot, EncryptionSyncReadinessState as State,
         };
 
-        let mut room_first = ReplacementRecoveryProof::new(4);
-        assert!(!room_first.observe_room_response());
+        let mut room_first = ReplacementRecoveryProof::new(4, 10);
+        assert!(!room_first.observe_room_response(11));
         assert!(!room_first.observe_encryption(Snapshot {
             generation: 4,
             state: State::Received,
@@ -1776,7 +1803,7 @@ pub mod tests {
             state: State::Received,
         }));
 
-        let mut encryption_first = ReplacementRecoveryProof::new(9);
+        let mut encryption_first = ReplacementRecoveryProof::new(9, 20);
         assert!(!encryption_first.observe_encryption(Snapshot {
             generation: 10,
             state: State::Pending,
@@ -1785,7 +1812,7 @@ pub mod tests {
             generation: 10,
             state: State::Received,
         }));
-        assert!(encryption_first.observe_room_response());
+        assert!(encryption_first.observe_room_response(21));
     }
 
     #[test]
@@ -1794,8 +1821,8 @@ pub mod tests {
             EncryptionSyncReadinessSnapshot as Snapshot, EncryptionSyncReadinessState as State,
         };
 
-        let mut proof = ReplacementRecoveryProof::new(1);
-        assert!(!proof.observe_room_response());
+        let mut proof = ReplacementRecoveryProof::new(1, 30);
+        assert!(!proof.observe_room_response(31));
         assert!(proof.observe_encryption(Snapshot {
             generation: 2,
             state: State::Received,
@@ -1809,7 +1836,35 @@ pub mod tests {
             generation: 3,
             state: State::Received,
         }));
-        assert!(proof.observe_room_response());
+        assert!(proof.observe_room_response(32));
+    }
+
+    #[test]
+    fn queued_pre_termination_room_commit_cannot_satisfy_replacement() {
+        use matrix_sdk::encryption::{
+            EncryptionSyncReadinessSnapshot as Snapshot, EncryptionSyncReadinessState as State,
+        };
+
+        let mut proof = ReplacementRecoveryProof::new(7, 41);
+        assert!(!proof.observe_room_response(41));
+        assert!(!proof.observe_encryption(Snapshot {
+            generation: 8,
+            state: State::Received,
+        }));
+        assert!(!proof.observe_room_response(41));
+        assert!(proof.observe_room_response(42));
+    }
+
+    #[tokio::test]
+    async fn explicit_stop_cancels_replacement_backoff_before_restart() {
+        let stop = Arc::new(SyncObserverStop::default());
+        let task_stop = stop.clone();
+        let task = tokio::spawn(async move {
+            replacement_restart_backoff(&task_stop, Duration::from_secs(30)).await
+        });
+        tokio::task::yield_now().await;
+        stop.request();
+        assert!(!task.await.expect("backoff task"));
     }
 
     #[test]
