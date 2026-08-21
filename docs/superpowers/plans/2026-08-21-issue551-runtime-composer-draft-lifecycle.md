@@ -126,4 +126,5 @@ After full-diff approval, integrate latest `origin/main`, obtain delta approval 
 - Initial parallel `runtime_timeline` run observed `lock_unlock_retries_repaired_composer_payload` expected2/got3; exact rerun and complete21-test rerun were green, matching the diagnosed shared diagnostic-observation timing/isolation class rather than a persistence behavior delta.
 - Full diff: `reviewer-flash` independently traced all identities, permit/reducer/store/timer/shutdown order, tests, visibility and public paths and recorded `Correct-to-merge`.
 - The reviewer classified the initial diagnostic-count failure as non-blocking process-global observation isolation; harden the test only if CI reproduces it, never alter the lifecycle leaf to mask it.
-- Delivery: final repository gates, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: focused owner suites green, core lib1,021/8 ignored, Vitest1,370, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
