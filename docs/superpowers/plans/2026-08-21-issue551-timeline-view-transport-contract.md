@@ -6,8 +6,9 @@ Status: design review pending. Scope is move-only and behavior-preserving.
 
 - Base: `9d664e0e10ecb5f69fc4a60bacf766f592338827` (merged PR #598).
 - `apps/desktop/src/components/TimelineView.tsx`: 5,198 newline-delimited lines, 188,642 bytes.
-- Focused immutable baseline: App, TimelinePane render isolation, TimelineView rendering/interactions/threads/media = 179/179.
-- Existing contract callers import `TimelineTransport` through `./TimelineView`; the row and media leaves create erased reverse type edges to that composition root.
+- Focused immutable baseline: App, TimelinePane render isolation, TimelineView rendering/interactions/threads/media = 179/179:
+  `npm --prefix apps/desktop test -- --run src/App.test.tsx src/components/TimelinePane.renderIsolation.test.tsx src/components/TimelineView.rendering.test.tsx src/components/TimelineView.interactions.test.tsx src/components/TimelineView.threads.test.tsx src/components/TimelineView.media.test.tsx`.
+- Existing contract callers import `TimelineTransport` through `./TimelineView`; the row and media leaves create erased reverse type edges to that composition root. `TimelineMessageBody` retains a separate erased `TimelineRowActionHandlers` reverse edge.
 
 ## Ownership decision
 
@@ -15,23 +16,25 @@ Move exactly the `TimelineTransport` interface, unchanged, to the direct private
 
 The leaf imports only its six contract types from `domain/coreEvents` and `domain/types`. It owns no implementation, state, callback, subscription, timer, retry, cleanup, React hook, or product semantics.
 
-`TimelineView.tsx` imports the type from the leaf and explicitly type-re-exports it, preserving every existing public import path. `TimelineItemRow.tsx` and `TimelineMedia.tsx` switch their erased imports directly to the leaf, removing the last source dependency from `components/timeline/` back to `TimelineView.tsx`.
+`TimelineView.tsx` imports the type from the leaf and explicitly type-re-exports it, preserving every existing public import path. `TimelineItemRow.tsx` and `TimelineMedia.tsx` switch their erased `TimelineTransport` imports directly to the leaf. `TimelineMessageBody.tsx` switches its erased `TimelineRowActionHandlers` import directly to sibling owner `TimelineItemRow.tsx`. Together these remove every production source dependency from `components/timeline/` back to the composition root; both sibling reverse edges remain type-only and are erased at runtime.
 
 `ReturnToLiveHandler` and `invokeReturnToLiveSafely` stay in `TimelineView.tsx`: they are viewport/navigation presentation contracts, not the core transport port, and belong to the later viewport seam.
 
 ## Exact inventory
 
-Production declaration moved once:
+Production declaration and attached ownership header moved once:
 
-1. `interface TimelineTransport`
+1. `// Transport interface (Tauri IPC, browser fake, or test mock)`
+2. `interface TimelineTransport`
 
 Approved leaf export: `TimelineTransport` only. Parent flat re-export: `TimelineTransport` only.
 
-Expected production changes: four files only:
+Expected production changes: five files only:
 
 - create `components/timeline/TimelineTransport.ts`;
-- remove the interface and row-only type imports from `TimelineView.tsx`, then import/re-export the leaf type;
-- redirect erased `TimelineTransport` imports in `TimelineItemRow.tsx` and `TimelineMedia.tsx`.
+- move the header/interface from `TimelineView.tsx`, then import/re-export the leaf type;
+- redirect erased `TimelineTransport` imports in `TimelineItemRow.tsx` and `TimelineMedia.tsx`;
+- redirect the erased `TimelineRowActionHandlers` import in `TimelineMessageBody.tsx` to sibling owner `TimelineItemRow.tsx`.
 
 No other caller import changes are needed or permitted. No compatibility wrapper, barrel, alias, runtime module edge, second interface, dependency, test-only export, or formatting churn.
 
@@ -52,6 +55,8 @@ No other caller import changes are needed or permitted. No compatibility wrapper
 
 ## Review gate
 
-- Design: pending `reviewer-flash` read-only verdict.
+- Design round 1: `reviewer-flash` recorded `Changes-required` because `TimelineMessageBody` retained a reverse type edge and the dependency gate could not pass.
+- Amendment: redirect that erased edge to its sibling row owner, pin the attached header and exact baseline command, and expand the production scope to five files.
+- Design round 2: pending `reviewer-flash` read-only verdict.
 - Implementation: prohibited until `Correct-to-implement`.
 - Full diff and delivery: pending.
