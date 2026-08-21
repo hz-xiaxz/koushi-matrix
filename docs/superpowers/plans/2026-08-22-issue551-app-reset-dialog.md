@@ -1,6 +1,6 @@
 # Issue #551 App destructive confirmation dialog extraction
 
-Status: design review pending. Scope is one move-only presentation seam and prerequisite for verification-gate re-evaluation.
+Status: design approved. Scope is one move-only presentation seam and prerequisite for verification-gate re-evaluation.
 
 ## Baseline
 
@@ -38,6 +38,7 @@ No CSS/i18n/domain/backend changes. Shared global dialog classes and default mes
 Move the focused destructive-confirmation rendering test from `App.test.tsx` to `components/dialogs.test.tsx`:
 
 - add `ResetLocalDataConfirmationDialog` to the direct dialogs import;
+- remove the obsolete `vi.stubGlobal("window", …)` setup so no global stub can leak in the dialogs suite;
 - render it without importing the App composition root;
 - preserve assertions for role, modal, default localized title/copy, cancel label, danger class and confirm label.
 
@@ -66,4 +67,5 @@ The App umbrella remains open for verification-gate extraction/re-evaluation, co
 ## Review gate
 
 - Read-only reconnaissance confirmed one component, four presentation call sites and one focused test with no state/resource ownership.
-- Formal `reviewer-flash` verdict pending; implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` independently traced the component closure, four call sites, import/re-export compatibility, assertion set, focused counts and state/resource exclusions and recorded `Correct-to-implement`.
+- Branch was documentation-only before implementation.
