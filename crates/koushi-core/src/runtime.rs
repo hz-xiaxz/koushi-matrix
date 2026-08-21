@@ -8,8 +8,19 @@
 //!   `StateDelta` per processed command batch
 
 mod activity;
+mod composer;
 mod connection;
 mod profile_display_diagnostics;
+
+pub use composer::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, ForwardedComposerDraftPermit};
+use composer::{
+    ComposerAcceptanceIdentity, ComposerDraftLoadStatus, ComposerDraftTransitionPolicy,
+    PendingComposerAcceptance, PendingComposerDraftPersist, active_composer_targets,
+    composer_acceptance_identity_for_action, composer_acceptance_identity_for_timeline_command,
+    composer_draft_acceptance_would_exhaust, composer_draft_account_matches,
+    composer_draft_session_key, composer_draft_transition_policy,
+    timeline_submission_revision_exhaustion,
+};
 
 pub use connection::{CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag};
 use profile_display_diagnostics::{
@@ -26,11 +37,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     AccountManagementOperation, ActivityRowKind, ActivityState, AppAction, AppEffect, AppState,
-    ComposerDraftProtection, ComposerDraftRevision, ComposerDraftStore, ComposerTarget,
-    FocusedContextState, LoginAttemptId, NavigationState, OperationFailureKind,
-    ProfileUpdateRequest, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem,
-    ScheduledSendStore, SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection,
-    SubmissionId, ThreadPaneState, UiEvent, admit_space_member_cancellation,
+    ComposerDraftStore, ComposerTarget, FocusedContextState, LoginAttemptId, NavigationState,
+    OperationFailureKind, ProfileUpdateRequest, ScheduledSendCapability, ScheduledSendHandle,
+    ScheduledSendItem, ScheduledSendStore, SearchScope as AppSearchScope, SessionState,
+    SpaceMembersCommandRejection, ThreadPaneState, UiEvent, admit_space_member_cancellation,
     admit_space_member_invite, admit_space_members_load, reduce,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -41,9 +51,7 @@ use crate::command::{
     AccountCommand, AppCommand, CoreCommand, SearchCommand, SearchScope, SyncCommand,
     TimelineCommand,
 };
-use crate::composer_draft_lifecycle::{
-    ComposerDraftCommandPermit, ComposerDraftLeaseRegistry, ComposerDraftPersistencePermit,
-};
+use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftLeaseRegistry};
 use crate::event::{
     ActivityEvent, CoreEvent, IntentNoOpReason, IntentOutcome, NativeAttentionEvent, TimelineEvent,
     VersionedAppStateSnapshot,
@@ -60,13 +68,7 @@ use crate::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
 use crate::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 use crate::settings::SettingsStore;
 use crate::state_delta::build_state_delta;
-use crate::store::{
-    StoreActor,
-    composer_drafts::{
-        PersistedComposerDraftStoreV3, persisted_projection as persisted_composer_draft_projection,
-    },
-    session_key_id_from_info,
-};
+use crate::store::{StoreActor, session_key_id_from_info};
 use crate::unread_trace;
 
 pub const COMMAND_INBOX_CAPACITY: usize = 256;
@@ -103,7 +105,6 @@ pub const ACTION_QUEUE_CAPACITY: usize = 16384;
 /// Room/Timeline actors). Sized so that forwarding a command under heavy sync
 /// does not block the forwarding actor's loop.
 pub const ACTOR_MESSAGE_QUEUE_CAPACITY: usize = 1024;
-pub const COMPOSER_DRAFT_PERSIST_DEBOUNCE: Duration = Duration::from_millis(150);
 const INTERNAL_RUNTIME_CONNECTION_ID: RuntimeConnectionId = RuntimeConnectionId(0);
 macro_rules! trace_runtime_sync {
     ($stage:expr, [$($field:expr),* $(,)?], $($arg:tt)*) => {{
@@ -262,186 +263,9 @@ fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Ve
     effects
 }
 
-fn composer_draft_account_matches(
-    state: &AppState,
-    expected_account: &koushi_key::SessionKeyId,
-) -> bool {
-    matches!(
-        &state.session,
-        SessionState::Ready(info) if session_key_id_from_info(info) == *expected_account
-    )
-}
-
-fn composer_draft_revision_for_target(
-    state: &AppState,
-    target: &ComposerTarget,
-) -> ComposerDraftRevision {
-    match target {
-        ComposerTarget::Main { room_id } => state.composer_drafts.room_revision(room_id),
-        ComposerTarget::Thread {
-            room_id,
-            root_event_id,
-        } => state
-            .composer_drafts
-            .thread_revision(room_id, root_event_id),
-    }
-}
-
-fn active_composer_targets(state: &AppState) -> BTreeSet<ComposerTarget> {
-    let mut active = BTreeSet::new();
-    if let Some(room_id) = &state.timeline.room_id {
-        active.insert(ComposerTarget::Main {
-            room_id: room_id.clone(),
-        });
-    }
-    match &state.thread {
-        ThreadPaneState::Opening {
-            room_id,
-            root_event_id,
-            ..
-        }
-        | ThreadPaneState::Open {
-            room_id,
-            root_event_id,
-            ..
-        } => {
-            active.insert(ComposerTarget::Thread {
-                room_id: room_id.clone(),
-                root_event_id: root_event_id.clone(),
-            });
-        }
-        ThreadPaneState::Closed => {}
-    }
-    active
-}
-
-fn composer_draft_acceptance_would_exhaust(
-    state: &AppState,
-    target: &ComposerTarget,
-    submitted_revision: ComposerDraftRevision,
-) -> bool {
-    ComposerDraftRevision::checked_successor(
-        composer_draft_revision_for_target(state, target),
-        submitted_revision,
-    )
-    .is_err()
-}
-
-fn timeline_submission_revision_exhaustion(
-    state: &AppState,
-    command: &TimelineCommand,
-) -> Option<(RequestId, TimelineKey, SubmissionId)> {
-    let (request_id, submission_id, key, submitted_revision) = match command {
-        TimelineCommand::SubmitText {
-            request_id,
-            submission_id,
-            key,
-            draft_revision,
-            ..
-        }
-        | TimelineCommand::SubmitReply {
-            request_id,
-            submission_id,
-            key,
-            draft_revision,
-            ..
-        } => (*request_id, submission_id, key, *draft_revision),
-        _ => return None,
-    };
-    let target = match &key.kind {
-        TimelineKind::Room { room_id } => ComposerTarget::Main {
-            room_id: room_id.clone(),
-        },
-        TimelineKind::Thread {
-            room_id,
-            root_event_id,
-        } => ComposerTarget::Thread {
-            room_id: room_id.clone(),
-            root_event_id: root_event_id.clone(),
-        },
-        TimelineKind::Focused { .. } => return None,
-    };
-    composer_draft_acceptance_would_exhaust(state, &target, submitted_revision)
-        .then(|| (request_id, key.clone(), submission_id.clone()))
-}
-
 struct CoreCommandEnvelope {
     command: CoreCommand,
     composer_permit: Option<ComposerDraftCommandPermit>,
-}
-
-#[derive(Clone, Eq, Hash, PartialEq)]
-enum ComposerAcceptanceIdentity {
-    Submission(SubmissionId),
-    ScheduledSend(String),
-}
-
-struct PendingComposerAcceptance {
-    identity: ComposerAcceptanceIdentity,
-    _permit: ComposerDraftCommandPermit,
-}
-
-#[doc(hidden)]
-pub struct ForwardedComposerDraftPermit {
-    request_id: RequestId,
-    permit: Option<ComposerDraftCommandPermit>,
-    rejected_tx: mpsc::UnboundedSender<RequestId>,
-    acceptance_enqueued: bool,
-    #[cfg(test)]
-    acceptance_probe: Option<oneshot::Sender<()>>,
-}
-
-impl ForwardedComposerDraftPermit {
-    pub(crate) fn new(
-        request_id: RequestId,
-        permit: ComposerDraftCommandPermit,
-        rejected_tx: mpsc::UnboundedSender<RequestId>,
-    ) -> Self {
-        Self {
-            request_id,
-            permit: Some(permit),
-            rejected_tx,
-            acceptance_enqueued: false,
-            #[cfg(test)]
-            acceptance_probe: None,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new_with_acceptance_probe(
-        request_id: RequestId,
-        permit: ComposerDraftCommandPermit,
-        rejected_tx: mpsc::UnboundedSender<RequestId>,
-        acceptance_probe: oneshot::Sender<()>,
-    ) -> Self {
-        Self {
-            request_id,
-            permit: Some(permit),
-            rejected_tx,
-            acceptance_enqueued: false,
-            acceptance_probe: Some(acceptance_probe),
-        }
-    }
-
-    pub(crate) fn acceptance_projection_reached(&mut self) {
-        #[cfg(test)]
-        if let Some(probe) = self.acceptance_probe.take() {
-            let _ = probe.send(());
-        }
-    }
-
-    pub(crate) fn acceptance_enqueued(mut self) {
-        self.acceptance_enqueued = true;
-    }
-}
-
-impl Drop for ForwardedComposerDraftPermit {
-    fn drop(&mut self) {
-        self.permit.take();
-        if !self.acceptance_enqueued {
-            let _ = self.rejected_tx.send(self.request_id);
-        }
-    }
 }
 
 /// A task handle that is aborted if its owner is dropped without an orderly
@@ -898,12 +722,6 @@ impl CoreRuntime {
     }
 }
 
-enum ComposerDraftLoadStatus {
-    Unloaded,
-    Loaded(koushi_key::SessionKeyId),
-    Failed(koushi_key::SessionKeyId),
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum NavigationPersistenceStatus {
     Unloaded,
@@ -1030,13 +848,6 @@ fn focused_navigation_outcome_after_reduce(
     } else {
         IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
     }
-}
-
-struct PendingComposerDraftPersist {
-    key_id: koushi_key::SessionKeyId,
-    drafts: PersistedComposerDraftStoreV3,
-    permits: Vec<ComposerDraftPersistencePermit>,
-    deadline: Instant,
 }
 
 #[cfg(any(test, feature = "test-hooks"))]
@@ -1670,82 +1481,6 @@ impl AppActor {
         (effects, deferred)
     }
 
-    fn reconcile_composer_draft_lifecycle(&mut self) {
-        self.reconcile_composer_draft_lifecycle_with_active(active_composer_targets(&self.state));
-    }
-
-    async fn reconcile_composer_draft_lifecycle_after_permit_change(&mut self) -> bool {
-        self.composer_draft_lease_changes.borrow_and_update();
-        let previous_drafts = self.state.composer_drafts.clone();
-        self.reconcile_composer_draft_lifecycle();
-        if previous_drafts == self.state.composer_drafts {
-            return false;
-        }
-        if let Some(key_id) = composer_draft_session_key(&self.state) {
-            self.schedule_composer_draft_persist(key_id, self.state.composer_drafts.clone())
-                .await;
-        }
-        true
-    }
-
-    fn reconcile_composer_draft_lifecycle_with_active(&mut self, active: BTreeSet<ComposerTarget>) {
-        let protection = if let Some(account) = composer_draft_session_key(&self.state) {
-            ComposerDraftProtection {
-                active,
-                leased: self.composer_draft_leases.touch_protected_targets(&account),
-                store_pending: self
-                    .composer_draft_leases
-                    .persistence_held_targets_excluding(&account, &[]),
-            }
-        } else {
-            ComposerDraftProtection {
-                active,
-                ..ComposerDraftProtection::default()
-            }
-        };
-        self.state.composer_drafts.reconcile_lifecycle(&protection);
-    }
-
-    fn composer_draft_persistence_protection(
-        &self,
-        key_id: &koushi_key::SessionKeyId,
-        active: BTreeSet<ComposerTarget>,
-    ) -> ComposerDraftProtection {
-        let excluded_permits = self
-            .pending_composer_draft_persist
-            .as_ref()
-            .filter(|pending| pending.key_id == *key_id)
-            .map(|pending| pending.permits.as_slice())
-            .unwrap_or_default();
-        ComposerDraftProtection {
-            active,
-            leased: self.composer_draft_leases.touch_protected_targets(key_id),
-            store_pending: self
-                .composer_draft_leases
-                .persistence_held_targets_excluding(key_id, excluded_permits),
-        }
-    }
-
-    fn forward_composer_draft_permit(
-        &mut self,
-        request_id: RequestId,
-        identity: ComposerAcceptanceIdentity,
-        permit: ComposerDraftCommandPermit,
-    ) -> ForwardedComposerDraftPermit {
-        self.pending_composer_acceptances.insert(
-            request_id,
-            PendingComposerAcceptance {
-                identity,
-                _permit: permit.clone(),
-            },
-        );
-        ForwardedComposerDraftPermit::new(
-            request_id,
-            permit,
-            self.composer_draft_rejected_tx.clone(),
-        )
-    }
-
     async fn apply_deferred_reducer_side_effects(&mut self, deferred: DeferredReducerSideEffects) {
         if deferred.cancel_activity_resolution {
             let _ = self
@@ -1837,44 +1572,6 @@ impl AppActor {
         };
         let effects = reduce(&mut self.state, AppAction::NavigationLoaded { navigation });
         self.navigation_loaded_for = Some(key_id);
-        self.handle_ui_event_effects(&effects).await;
-    }
-
-    async fn load_composer_drafts_for_current_session(&mut self) {
-        let Some(key_id) = composer_draft_session_key(&self.state) else {
-            self.composer_draft_load_status = ComposerDraftLoadStatus::Unloaded;
-            return;
-        };
-        if matches!(
-            &self.composer_draft_load_status,
-            ComposerDraftLoadStatus::Loaded(settled_key)
-                | ComposerDraftLoadStatus::Failed(settled_key)
-                if settled_key == &key_id
-        ) {
-            return;
-        }
-        self.flush_pending_composer_drafts().await;
-
-        let store = self.composer_draft_store_actor.clone();
-        let load_key_id = key_id.clone();
-        let drafts = match executor::spawn_blocking(move || {
-            store.load_composer_drafts(&load_key_id)
-        })
-        .await
-        {
-            Ok(Ok(drafts)) => drafts,
-            Ok(Err(_)) | Err(_) => {
-                self.composer_draft_load_status = ComposerDraftLoadStatus::Failed(key_id);
-                record(DiagnosticEvent::new(
-                    DiagnosticLevel::Error,
-                    "core.composer_draft",
-                    "load_failed",
-                ));
-                return;
-            }
-        };
-        let effects = reduce(&mut self.state, AppAction::ComposerDraftsLoaded { drafts });
-        self.composer_draft_load_status = ComposerDraftLoadStatus::Loaded(key_id);
         self.handle_ui_event_effects(&effects).await;
     }
 
@@ -1984,76 +1681,6 @@ impl AppActor {
         let _ =
             executor::spawn_blocking(move || store.save_room_preferences(&key_id, &preferences))
                 .await;
-    }
-
-    async fn schedule_composer_draft_persist(
-        &mut self,
-        key_id: koushi_key::SessionKeyId,
-        drafts: ComposerDraftStore,
-    ) {
-        if !matches!(
-            &self.composer_draft_load_status,
-            ComposerDraftLoadStatus::Loaded(loaded_key) if loaded_key == &key_id
-        ) {
-            return;
-        }
-        if self
-            .pending_composer_draft_persist
-            .as_ref()
-            .is_some_and(|pending| pending.key_id != key_id)
-        {
-            self.flush_pending_composer_drafts().await;
-        }
-        let protection = self.composer_draft_persistence_protection(
-            &key_id,
-            if composer_draft_session_key(&self.state).as_ref() == Some(&key_id) {
-                active_composer_targets(&self.state)
-            } else {
-                BTreeSet::new()
-            },
-        );
-        let drafts = persisted_composer_draft_projection(&drafts, &protection);
-        let Ok(permits) = self
-            .composer_draft_leases
-            .persistence_permits(&key_id, drafts.targets())
-        else {
-            record(DiagnosticEvent::new(
-                DiagnosticLevel::Error,
-                "core.composer_draft",
-                "persistence_permit_exhausted",
-            ));
-            return;
-        };
-        self.pending_composer_draft_persist = Some(PendingComposerDraftPersist {
-            key_id,
-            drafts,
-            permits,
-            deadline: Instant::now() + COMPOSER_DRAFT_PERSIST_DEBOUNCE,
-        });
-    }
-
-    fn composer_draft_persist_delay(&self) -> Option<Duration> {
-        self.pending_composer_draft_persist
-            .as_ref()
-            .map(|pending| pending.deadline.saturating_duration_since(Instant::now()))
-    }
-
-    async fn flush_pending_composer_drafts(&mut self) {
-        let Some(pending) = self.pending_composer_draft_persist.take() else {
-            return;
-        };
-        let store = self.composer_draft_store_actor.clone();
-        let PendingComposerDraftPersist {
-            key_id,
-            drafts,
-            permits,
-            deadline: _,
-        } = pending;
-        let _ = executor::spawn_blocking(move || {
-            let _permits = permits;
-            store.save_composer_drafts(&key_id, &drafts)
-        })
-        .await;
     }
 
     fn scheduled_send_delay(&self) -> Option<Duration> {
@@ -4892,71 +4519,6 @@ fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -
     )
 }
 
-fn composer_draft_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {
-    match &state.session {
-        SessionState::Ready(info) => Some(session_key_id_from_info(info)),
-        SessionState::SignedOut
-        | SessionState::Restoring
-        | SessionState::SwitchingAccount { .. }
-        | SessionState::Authenticating { .. }
-        | SessionState::Provisional { .. }
-        | SessionState::AwaitingVerification { .. }
-        | SessionState::Verifying { .. }
-        | SessionState::AwaitingBootstrapConfirmation { .. }
-        | SessionState::Rejecting { .. }
-        | SessionState::LoggingOut
-        | SessionState::CapabilityBlocked { .. }
-        | SessionState::Locked(_) => None,
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ComposerDraftTransitionPolicy {
-    Normal,
-    PreservePrevious,
-    Discard,
-}
-
-fn composer_draft_transition_policy(action: &AppAction) -> ComposerDraftTransitionPolicy {
-    match action {
-        AppAction::SessionLocked | AppAction::SwitchAccountRequested { .. } => {
-            ComposerDraftTransitionPolicy::PreservePrevious
-        }
-        AppAction::LogoutRequested
-        | AppAction::LogoutFinished
-        | AppAction::ResetLocalDataRequested { .. }
-        | AppAction::ResetLocalDataCompleted { .. } => ComposerDraftTransitionPolicy::Discard,
-        _ => ComposerDraftTransitionPolicy::Normal,
-    }
-}
-
-fn composer_acceptance_identity_for_timeline_command(
-    command: &TimelineCommand,
-) -> Option<ComposerAcceptanceIdentity> {
-    match command {
-        TimelineCommand::SubmitText { submission_id, .. }
-        | TimelineCommand::SubmitReply { submission_id, .. } => Some(
-            ComposerAcceptanceIdentity::Submission(submission_id.clone()),
-        ),
-        _ => None,
-    }
-}
-
-fn composer_acceptance_identity_for_action(
-    action: &AppAction,
-) -> Option<ComposerAcceptanceIdentity> {
-    match action {
-        AppAction::ComposerSubmissionAcceptedAtRevision { submission_id, .. }
-        | AppAction::ThreadSubmissionAcceptedAtRevision { submission_id, .. } => Some(
-            ComposerAcceptanceIdentity::Submission(submission_id.clone()),
-        ),
-        AppAction::ScheduledSendCreatedAtRevision { item, .. } => Some(
-            ComposerAcceptanceIdentity::ScheduledSend(item.scheduled_id.clone()),
-        ),
-        _ => None,
-    }
-}
-
 fn navigation_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {
     composer_draft_session_key(state)
 }
@@ -5581,41 +5143,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn destructive_composer_draft_clear_does_not_schedule_resurrection() {
-        assert_eq!(
-            composer_draft_transition_policy(&AppAction::LogoutRequested),
-            ComposerDraftTransitionPolicy::Discard
-        );
-        assert_eq!(
-            composer_draft_transition_policy(&AppAction::LogoutFinished),
-            ComposerDraftTransitionPolicy::Discard
-        );
-        assert_eq!(
-            composer_draft_transition_policy(&AppAction::ResetLocalDataRequested { request_id: 1 }),
-            ComposerDraftTransitionPolicy::Discard
-        );
-        assert_eq!(
-            composer_draft_transition_policy(&AppAction::ResetLocalDataCompleted { request_id: 1 }),
-            ComposerDraftTransitionPolicy::Discard
-        );
-        assert_eq!(
-            composer_draft_transition_policy(&AppAction::SessionLocked),
-            ComposerDraftTransitionPolicy::PreservePrevious
-        );
-        assert_eq!(
-            composer_draft_transition_policy(&AppAction::SwitchAccountRequested {
-                info: SessionInfo {
-                    homeserver: "https://example.invalid".to_owned(),
-                    user_id: "@other:example.invalid".to_owned(),
-                    device_id: "OTHER".to_owned(),
-                    authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
-                },
-            }),
-            ComposerDraftTransitionPolicy::PreservePrevious
-        );
-    }
-
     fn focused_projection_fixture(sequence: u64) -> PendingFocusedNavigation {
         PendingFocusedNavigation {
             projection_request_id: RequestId {
@@ -5633,99 +5160,6 @@ mod tests {
             event_id: "$target".to_owned(),
             allow_live_fallback: true,
         }
-    }
-
-    #[test]
-    fn composer_revision_exhaustion_is_detected_for_room_and_thread_submissions() {
-        let request_id = RequestId {
-            connection_id: RuntimeConnectionId(3),
-            sequence: 7,
-        };
-        let account_key = AccountKey("@qa:example.invalid".to_owned());
-        let room_id = "!room:example.invalid".to_owned();
-        let root_event_id = "$root:example.invalid".to_owned();
-        let mut state = AppState::default();
-        state
-            .composer_drafts
-            .room_revisions
-            .insert(room_id.clone(), ComposerDraftRevision::MAX);
-        state
-            .composer_drafts
-            .thread_revisions
-            .entry(room_id.clone())
-            .or_default()
-            .insert(root_event_id.clone(), ComposerDraftRevision::MAX);
-        let expected_account = koushi_key::SessionKeyId {
-            homeserver: "https://example.invalid".to_owned(),
-            user_id: "@qa:example.invalid".to_owned(),
-            device_id: "DEVICE".to_owned(),
-        };
-
-        let room = TimelineCommand::SubmitText {
-            request_id,
-            expected_account: expected_account.clone(),
-            submission_id: SubmissionId::new("room-submission"),
-            key: TimelineKey::room(account_key.clone(), room_id.clone()),
-            transaction_id: "room-transaction".to_owned(),
-            document: koushi_state::ComposerDocument::from_plain_text("body"),
-            draft_revision: ComposerDraftRevision::MAX,
-        };
-        let thread = TimelineCommand::SubmitReply {
-            request_id,
-            expected_account,
-            submission_id: SubmissionId::new("thread-submission"),
-            key: TimelineKey {
-                account_key,
-                kind: TimelineKind::Thread {
-                    room_id,
-                    root_event_id: root_event_id.clone(),
-                },
-            },
-            transaction_id: "thread-transaction".to_owned(),
-            in_reply_to_event_id: root_event_id,
-            document: koushi_state::ComposerDocument::from_plain_text("reply"),
-            draft_revision: ComposerDraftRevision::MAX,
-        };
-
-        assert!(timeline_submission_revision_exhaustion(&state, &room).is_some());
-        assert!(timeline_submission_revision_exhaustion(&state, &thread).is_some());
-    }
-
-    #[test]
-    fn composer_revision_exhaustion_preflight_preserves_authoritative_draft() {
-        let target = ComposerTarget::Main {
-            room_id: "!room:example.invalid".to_owned(),
-        };
-        let mut state = AppState::default();
-        state
-            .composer_drafts
-            .rooms
-            .insert("!room:example.invalid".to_owned(), "keep me".into());
-        state.composer_drafts.room_revisions.insert(
-            "!room:example.invalid".to_owned(),
-            ComposerDraftRevision::MAX,
-        );
-
-        assert!(composer_draft_acceptance_would_exhaust(
-            &state,
-            &target,
-            ComposerDraftRevision::MAX
-        ));
-        assert_eq!(
-            state
-                .composer_drafts
-                .rooms
-                .get("!room:example.invalid")
-                .map(koushi_state::ComposerDocument::plain_body),
-            Some("keep me".to_owned())
-        );
-        assert_eq!(
-            state
-                .composer_drafts
-                .room_last_accepted_clear_revisions
-                .get("!room:example.invalid"),
-            None
-        );
     }
 
     #[test]
@@ -6907,9 +6341,9 @@ mod tests {
             .split("async fn load_navigation_for_current_session")
             .nth(1)
             .expect("navigation loader should exist")
-            .split("async fn load_composer_drafts_for_current_session")
+            .split("async fn load_scheduled_sends_for_current_session")
             .next()
-            .expect("composer loader should follow navigation loader");
+            .expect("scheduled-send loader should follow navigation loader");
         let save_scheduled = source
             .split("async fn persist_scheduled_sends")
             .nth(1)
@@ -6928,16 +6362,17 @@ mod tests {
             .split("async fn persist_room_preferences")
             .nth(1)
             .expect("room preference persist helper should exist")
-            .split("async fn schedule_composer_draft_persist")
+            .split("fn scheduled_send_delay")
             .next()
-            .expect("composer schedule should follow room preference persist");
-        let flush_drafts = source
+            .expect("scheduled-send delay should follow room preference persist");
+        let composer_source = include_str!("runtime/composer.rs");
+        let flush_drafts = composer_source
             .split("async fn flush_pending_composer_drafts")
             .nth(1)
             .expect("composer draft flush should exist")
-            .split("fn scheduled_send_delay")
+            .split("fn composer_draft_session_key")
             .next()
-            .expect("scheduled send delay should follow composer draft flush");
+            .expect("composer draft session key should follow composer draft flush");
         let settings_effect = source
             .split("AppEffect::PersistSettings")
             .nth(1)
