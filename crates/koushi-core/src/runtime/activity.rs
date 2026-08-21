@@ -7,7 +7,9 @@ use koushi_state::{
     RoomNotificationMode, RoomSummary, SpaceSummary,
 };
 
-use super::{ActivityResolutionRequest, RequestId, unread_trace};
+use super::{ActivityResolutionRequest, RequestId};
+
+use crate::unread_trace;
 
 const MAX_ACTIVITY_RESOLUTION_ROOMS: usize = 16;
 
