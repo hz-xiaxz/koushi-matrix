@@ -1,6 +1,6 @@
 # Issue #551 runtime connection transport extraction
 
-Status: design review pending. Scope is one behavior-preserving ownership seam.
+Status: design approved. Scope is one behavior-preserving ownership seam.
 
 ## Baseline
 
@@ -43,7 +43,7 @@ Production leaf has exactly seven import statements:
 
 Parent declares private `mod connection;` and explicitly `pub use connection::{CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag};`. This preserves both `koushi_core::runtime::*` and existing crate-root re-exports in `lib.rs` without exposing `runtime::connection`.
 
-All four moved types and their existing fields/methods retain exact visibility. `CoreCommandEnvelope` stays parent-private and is accessible to the descendant module. `CoreRuntime` fields stay private: the moved descendant `attach` method accesses its six connection resources, while existing parent-owned shutdown/barrier tests continue reading `snapshot_rx` directly. No `pub(super)`, new constructor, wrapper, alias, trait, compatibility shim or public namespace is added.
+All four moved types and their existing fields/methods retain exact visibility. Parent removes only the now-orphaned `Ordering` atomic import while retaining `AtomicU64` for `CoreRuntime`. `CoreCommandEnvelope` stays parent-private and is accessible to the descendant module. `CoreRuntime` fields stay private: the moved descendant `attach` method accesses its six connection resources, while existing parent-owned shutdown/barrier tests continue reading `snapshot_rx` directly. No `pub(super)`, new constructor, wrapper, alias, trait, compatibility shim or public namespace is added.
 
 ## Test ownership
 
@@ -94,5 +94,6 @@ After full-diff approval, integrate current `origin/main`, obtain delta approval
 ## Review gate
 
 - Design round 1: `reviewer-flash` recorded `Changes-required` because the consumer-projection test directly constructs private `CoreConnection` fields and the CoreRuntime-field invariant was overstated.
-- Both findings are corrected above; implementation remains prohibited pending fresh `Correct-to-implement` review.
+- Both findings were corrected; round 2 verified the complete type/method/test/import/privacy/public/lifecycle graph and recorded `Correct-to-implement`.
+- Implementation must remove exactly the parent orphan `Ordering` import identified by round 2; no other parent import cleanup is approved.
 - Full diff and delivery pending.
