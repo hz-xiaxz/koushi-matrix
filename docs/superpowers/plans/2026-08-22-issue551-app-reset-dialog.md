@@ -1,6 +1,6 @@
 # Issue #551 App destructive confirmation dialog extraction
 
-Status: design approved. Scope is one move-only presentation seam and prerequisite for verification-gate re-evaluation.
+Status: implemented; full-diff review pending. Scope is one move-only presentation seam and prerequisite for verification-gate re-evaluation.
 
 ## Baseline
 
@@ -69,3 +69,8 @@ The App umbrella remains open for verification-gate extraction/re-evaluation, co
 - Read-only reconnaissance confirmed one component, four presentation call sites and one focused test with no state/resource ownership.
 - `reviewer-flash` independently traced the component closure, four call sites, import/re-export compatibility, assertion set, focused counts and state/resource exclusions and recorded `Correct-to-implement`.
 - Branch was documentation-only before implementation.
+- Implementation integrated by `luna-implementer` and parent-audited.
+- Exactness: component1/1, App parent0, call sites4/4, direct import1, compatibility re-export1 and focused assertions7/7; all other App/dialog declarations and lifecycle/public surface exact.
+- `App.tsx` 6,975 → 6,933 newline-delimited lines; existing dialogs owner grows by the moved presentation component.
+- Focused App79 + dialogs14 =93, SessionVerificationGate28, typecheck/lint, full Vitest1,371, build and diff checks green.
+- Full diff and delivery pending.
