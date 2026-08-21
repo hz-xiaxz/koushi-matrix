@@ -85,6 +85,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Room-key rotation correlation diagnostics | [2026-08-14-room-key-rotation-correlation-diagnostics.md](../superpowers/plans/2026-08-14-room-key-rotation-correlation-diagnostics.md) | — |
 | Eviction-resistant Megolm rotation attribution (#591) | [2026-08-21-issue591-rotation-ledger.md](../superpowers/plans/2026-08-21-issue591-rotation-ledger.md) | [2026-08-21-issue591-rotation-ledger.md](../superpowers/plans/2026-08-21-issue591-rotation-ledger.md) |
 | New-session Megolm readiness — phase 1 (#577) | [2026-08-21-issue577-megolm-readiness.md](../superpowers/plans/2026-08-21-issue577-megolm-readiness.md) | — |
+| Same-user secondary-device QA credential isolation (#577 follow-up) | [2026-08-21-issue577-secondary-device-qa-credentials.md](../superpowers/plans/2026-08-21-issue577-secondary-device-qa-credentials.md) | — |
 | Formatted-body newline preservation (#522) | [2026-08-14-formatted-body-newlines.md](../superpowers/plans/2026-08-14-formatted-body-newlines.md) | — |
 | Active prepend anchor preservation (#520) | [2026-08-14-active-prepend-anchor.md](../superpowers/plans/2026-08-14-active-prepend-anchor.md) | — |
 

@@ -154,9 +154,10 @@ impl StoreActor {
         &self.credential_store
     }
 
-    /// Test-only constructor with an explicit backend (avoids the env-global
-    /// `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` race between unit tests).
-    #[cfg(any(test, feature = "test-hooks"))]
+    /// QA/test constructor with an explicit credential backend. This avoids the
+    /// env-global `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` race between unit tests
+    /// and lets the headless QA binary isolate same-user device fixtures.
+    #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
     pub(crate) fn with_backend(
         credential_store: CredentialStoreBackend,
         data_dir: impl Into<PathBuf>,
@@ -164,6 +165,7 @@ impl StoreActor {
         Self {
             credential_store,
             data_dir: data_dir.into(),
+            #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_io_probe: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             composer_draft_replace_fault: Arc::new(std::sync::atomic::AtomicBool::new(false)),

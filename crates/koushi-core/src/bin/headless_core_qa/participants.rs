@@ -1003,6 +1003,19 @@ pub(super) fn qa_data_dir(suffix: &str) -> std::path::PathBuf {
         .join(format!("{}_{}", std::process::id(), suffix))
 }
 
+/// Start a same-user secondary-device fixture without restoring the primary
+/// device's saved session from the process-wide QA credential store.
+pub(super) fn start_isolated_qa_runtime(suffix: &str) -> Result<CoreRuntime, String> {
+    let credential_root = std::env::var_os(super::registry::ENV_FILE_CREDENTIAL_STORE_DIR)
+        .ok_or_else(|| "QA file credential store directory is not configured".to_owned())?;
+    Ok(CoreRuntime::start_with_data_dir_and_file_credentials(
+        qa_data_dir(suffix),
+        std::path::PathBuf::from(credential_root)
+            .join("isolated-devices")
+            .join(suffix),
+    ))
+}
+
 #[cfg(test)]
 #[path = "participants_tests.rs"]
 mod tests;
