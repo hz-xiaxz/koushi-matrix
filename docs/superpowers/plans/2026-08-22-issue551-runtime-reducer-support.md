@@ -116,4 +116,5 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 - `runtime.rs` 7,035 → 6,532 newline-delimited lines; `runtime/reducer_support.rs` 529.
 - Focused diagnostics 1/1 ignored pairs, intent5, scheduled-send12, navigation1, Activity9, core lib1,021/8 ignored and all-targets/all-features check green.
 - Full diff: `reviewer-flash` independently traced all five identities, test moves, reducer/diagnostic/deferred order, sibling visibility and parent residual ownership and recorded `Correct-to-merge`.
-- Delivery: final repository gates, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: focused reducer/diagnostic/integration suites green, core lib1,021/8 ignored, Vitest1,370, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
