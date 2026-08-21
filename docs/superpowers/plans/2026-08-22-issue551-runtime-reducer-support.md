@@ -1,6 +1,6 @@
 # Issue #551 runtime reducer/deferred support extraction
 
-Status: design approved. Scope is the final planned behavior-preserving runtime seam before residual audit.
+Status: implemented; full-diff review pending. Scope is the final planned behavior-preserving runtime seam before residual audit.
 
 ## Baseline
 
@@ -111,3 +111,8 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 - Read-only reconnaissance traced reducer, diagnostics, cross-domain persistence and central-registry boundaries.
 - `reviewer-flash` round 1 found the private-type-in-`pub(super)` interface defect; the struct visibility/verifier contract was corrected.
 - Round 2 traced the opaque pass-through, sibling edges, imports, tests and ordering and recorded `Correct-to-implement`.
+- Implementation integrated by `luna-implementer` and parent-audited; compiler closure changed `runtime/activity.rs` from the removed parent `unread_trace` alias to the same direct `crate::unread_trace` owner path, with no body or behavior delta.
+- Exactness: production5/5, top-level2/2, AppActor methods3/3, moved tests4/4, all1,029 test identities after four owner-path normalizations, top-level `pub(super)`1, method edges3, parent production orphans10 and test orphan1; public/wire/resource deltas0.
+- `runtime.rs` 7,035 → 6,532 newline-delimited lines; `runtime/reducer_support.rs` 529.
+- Focused diagnostics 1/1 ignored pairs, intent5, scheduled-send12, navigation1, Activity9, core lib1,021/8 ignored and all-targets/all-features check green.
+- Full diff and delivery pending.
