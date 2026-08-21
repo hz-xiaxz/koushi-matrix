@@ -3,7 +3,8 @@
 ## Status
 
 - Design: `reviewer-flash` required the missing type dependencies/import-reexport shape, verified the amended 35-item inventory against the immutable source, and recorded `Correct-to-implement`.
-- Implementation: approved but not started.
+- Implementation: integrated; 35/35 declaration exactness, 5/5 leaf exports, focused tests, typecheck, lint and diff checks are green.
+- Full-diff review: pending.
 - Delivery: pending.
 
 ## Objective
@@ -146,6 +147,14 @@ A temporary non-repository TypeScript verifier must prove:
 6. the leaf has exactly one parent type-only import (`TimelineRowActionHandlers`), the parent has the five-name local import plus two-name compatibility re-export, and no runtime cycle exists;
 7. no caller outside `TimelineView.tsx` imports the private leaf;
 8. no glob/barrel/default export, duplicate, wrapper, hook, state, TODO, new dependency or test change exists.
+
+## Integrated implementation evidence
+
+- `TimelineView.tsx`: 8,789 baseline content lines → 7,684 newline-terminated lines; message rendering implementation moved to a 1,118-line direct leaf.
+- TypeScript AST exactness: 35/35 declarations moved exactly once; parent retains zero; leaf exports exactly the approved five names and keeps `TimelineMentionToken` private.
+- Existing parent paths remain explicit five-name local import plus two-name compatibility re-export. The only reverse edge is the approved erased type-only `TimelineRowActionHandlers` import.
+- Focused baseline/post: `TimelineView.rendering.test.tsx` plus `App.test.tsx`, 99/99 green. Typecheck, lint and `git diff --check` are green.
+- No test, CSS, i18n, domain, transport, dependency, state, hook, timer, listener, DOM, Matrix or Rust-owned behavior changed.
 
 ## Verification
 
