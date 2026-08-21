@@ -81,4 +81,5 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 - Exactness: 13/13 statements, parent 0, exports 7/7, private 6/6, imports 3/3 and orphan imports 2/2; `TimelineView.tsx` 4,353 → 4,248 newline-delimited lines and the leaf is 116.
 - Focused post-move 173/173; typecheck, lint and diff checks green; every parent trigger/state/fence/resource owner remains in place.
 - Full diff: `reviewer-flash` independently verified exact bodies, all numeric/DOM/input semantics, import/caller graph and parent lifecycle owners and recorded `Correct-to-merge`; parent git/AST evidence closes its read-only diff limitation.
-- Delivery: final repository gates, PR CI and merge pending.
+- Final local evidence: focused 173/173; Vitest 1,367; Playwright 248 with polling; workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm, Tauri/domain boundaries, tracked-secret/release/IPC wire, SDK/docs, deny/machete/rustfmt/exactness/diff checks all green.
+- Delivery: PR CI and merge pending.
