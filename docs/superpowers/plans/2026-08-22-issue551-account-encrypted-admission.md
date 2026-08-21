@@ -1,6 +1,6 @@
 # Issue #551 account encrypted-content admission ownership
 
-Status: implemented; full-diff review pending. Scope is the final behavior-preserving runtime residual ownership move.
+Status: full diff approved; delivery pending. Scope is the final behavior-preserving runtime residual ownership move.
 
 ## Baseline
 
@@ -68,4 +68,5 @@ After full-diff approval, integrate latest `origin/main` if required, run the co
 - Exactness: identities2/2, runtime parent0, variants8, route method exact after one qualification removal, all1,029 tests exact; imports/public/wire/resource/dependency deltas0.
 - `runtime.rs` 6,532 → 6,474 newline-delimited lines; `account/routing.rs` 875 → 933.
 - Focused source/admission tests3, core lib1,021/8 ignored, all-targets/all-features check, rustfmt and diff checks green.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently traced both identities, all eight variants, visibility/import closure, route ordering and test/source contracts and recorded `Correct-to-merge`.
+- Delivery: final repository gates, latest-main integration if required, PR CI and merge pending.
