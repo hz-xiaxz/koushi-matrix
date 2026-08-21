@@ -56,7 +56,7 @@ The parent action transaction remains byte-exact: capture facts → moved reduce
 
 ## Visibility, sibling edges and imports
 
-No public API/re-export is added. Parent declares private `mod reducer_support;` and imports no moved top-level identity. `reduce_with_unread_diagnostics` and `DeferredReducerSideEffects` remain private to the leaf.
+No public API/re-export is added. Parent declares private `mod reducer_support;` and imports no moved top-level identity. `reduce_with_unread_diagnostics` remains private to the leaf. `DeferredReducerSideEffects` is `pub(super)` because two parent-called method signatures carry it opaquely; its fields remain private and the parent neither constructs nor destructures it.
 
 All three moved `AppActor` methods become `pub(super)`: parent `run` calls state reduction/deferred application and parent commands plus sibling scheduled-send dispatch call `reduce_app_action`. No AppActor field visibility changes.
 
@@ -92,7 +92,7 @@ Existing persistence and effect-dispatch source tests remain parent-owned and re
 A temporary `syn` verifier compares immutable base with parent + leaf:
 
 - production identities 5/5 in global order, parent 0;
-- top-level items 2/2 private, AppActor methods 3/3 keyed by `(AppActor, method, name)` with exactly three approved `pub(super)` changes;
+- top-level items 2/2 with one private function and one `pub(super)` struct, AppActor methods 3/3 keyed by `(AppActor, method, name)` with exactly three approved `pub(super)` changes;
 - moved tests 4/4 with attrs/bodies exact except two approved subprocess path strings; parent 0;
 - all 1,029 lib test identities equal after four owner-path normalizations;
 - parent production orphan bindings10, parent test orphan binding1, public/resource/wire/dependency deltas0;
