@@ -49,21 +49,21 @@ Move exactly 25 top-level AST statements, preserving declaration order within th
 
 The leaf imports only `TimelineDisplayRow` through exact type-only path `../../domain/timelineDisplayProjection`.
 
-Explicit leaf exports are exactly 19 names needed by the parent:
+Explicit leaf exports are exactly 18 names needed by the parent:
 
 - constants: `TIMELINE_VIRTUALIZATION_THRESHOLD`, `TIMELINE_ESTIMATED_ITEM_HEIGHT_PX`;
-- types: `TimelineViewportMetrics`, `TimelineVirtualRangeState`, `TimelineItemIndexRange`, `TimelineVirtualWindow`, `TimelineHeightModel`, `TimelineScheduledFrame`;
+- types: `TimelineViewportMetrics`, `TimelineVirtualRangeState`, `TimelineItemIndexRange`, `TimelineVirtualWindow`, `TimelineScheduledFrame`;
 - sentinels: `EMPTY_TIMELINE_RANGE`, `EMPTY_TIMELINE_ITEM_INDEX_RANGE`;
 - functions: `measuredItemHeight`, `scheduleTimelineFrame`, `buildTimelineHeightModel`, `virtualRangeEquals`, `timelineItemIndexRangeEquals`, `timelineItemIndexInRange`, `calculateTimelineItemIndexRange`, `calculateTimelineVirtualRange`, `timelineItemHeightAtIndex`.
 
-The six remaining declarations are private implementation details: virtual overscan, min/max height, frame fallback, `estimatedItemHeight`, and `timelineIndexAtOffset`.
+The seven remaining declarations are private implementation details: virtual overscan, min/max fallback height, frame fallback, `TimelineHeightModel`, `estimatedItemHeight`, and `timelineIndexAtOffset`.
 
 Only `TimelineView.tsx`, the new leaf and this plan/index may change. No compatibility re-export: no existing external caller imports these private declarations.
 
 ## Invariants
 
 - Every moved body/comment/token is exact apart from `export` modifiers and the relative type-import path.
-- Base `47e1a525` values remain exact: virtualization threshold 600, overscan 60, estimated height 72, measured-height clamp 36..480, frame fallback 16ms and empty-client viewport fallback 600px; rounding and binary-search bounds also remain exact.
+- Base `47e1a525` values remain exact: virtualization threshold 600, overscan 60, estimated fallback height 72, fallback-height clamp 36..480, measured-height floor 1, frame fallback 16ms and empty-client viewport fallback 600px; rounding and binary-search bounds also remain exact.
 - Scheduler still starts RAF and timeout together; the first callback cancels the other, invokes once, and `cancel()` remains idempotent.
 - Existing component refs/effects remain the sole owners that cancel returned handles on supersession, timeline-key change and unmount.
 - Empty sentinel object identity is preserved; no fresh-object replacement or extra state commit.
@@ -72,7 +72,7 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change. No compati
 
 ## Verification
 
-- AST exactness: 25/25 in leaf, parent 0, exports 19/19; private 6 remain unexported.
+- AST exactness: 25/25 in leaf, parent 0, exports 18/18; private 7 remain unexported.
 - Dependency/resource checks: leaf has one domain type import; no React/TimelineView/store/transport import; parent retains all scheduler handle refs and cancellation sites.
 - Focused baseline/post 72/72, typecheck, lint, diff check.
 - After full-diff approval: complete frontend/Rust/policy matrix and CI.
@@ -83,6 +83,8 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change. No compati
 - Amendment: pin base `47e1a525` values 600/60/72/36..480 and exact leaf import path; retain the deliberate `wc -l` newline-delimited baseline count.
 - Design round 2: `reviewer-flash` revalidated all 25 declarations, exports, constants, dependencies and cancellation owners and recorded `Correct-to-implement`.
 - Implementation: integrated by `luna-implementer` and parent-audited.
-- Exactness: 25/25 statements, parent 0, exports 19/19, private 6/6; `TimelineView.tsx` 5,100 → 4,869 newline-delimited lines and the leaf is 241.
+- Exactness: 25/25 statements, parent 0, exports 18/18, private 7/7; `TimelineView.tsx` 5,100 → 4,869 newline-delimited lines and the leaf is 241.
 - Focused post-move 72/72; typecheck, lint and diff checks green; all scheduler handle refs and cancellation sites remain in the parent.
-- Full diff and delivery pending.
+- Full-diff round 1: `reviewer-flash` recorded `Correct-to-merge` and noted that `TimelineHeightModel` was inferred internally rather than imported by the parent.
+- Minimal-visibility delta: make that type private, narrowing exports 19 → 18 and correcting fallback/measured-height wording; delta re-review pending.
+- Delivery pending.

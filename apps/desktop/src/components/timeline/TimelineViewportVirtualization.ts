@@ -42,7 +42,7 @@ export const EMPTY_TIMELINE_ITEM_INDEX_RANGE: TimelineItemIndexRange = {
   endIndex: 0
 };
 
-export type TimelineHeightModel = {
+type TimelineHeightModel = {
   fallbackHeight: number;
   offsets: number[];
   totalHeight: number;
