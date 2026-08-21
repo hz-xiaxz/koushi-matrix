@@ -1,6 +1,6 @@
 # Issue #551 runtime scheduled-send extraction
 
-Status: implemented; full-diff review pending. Scope is one atomic behavior-preserving local scheduled-send lifecycle seam.
+Status: full diff approved; delivery pending. Scope is one atomic behavior-preserving local scheduled-send lifecycle seam.
 
 ## Baseline
 
@@ -99,4 +99,5 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 - Exactness: global production9/9, top-level4/4, AppActor methods5/5, top-level `pub(super)`3, method edges4, parent imports3, orphan bindings3, all1,029 test identities/paths exact; public/wire/resource deltas0.
 - `runtime.rs` 7,148 → 7,035 newline-delimited lines; `runtime/scheduled_send.rs` 137.
 - Focused post-move runtime12, core filter16, state9, source contract1, core lib1,021/8 ignored and all-targets/all-features check green.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently traced all nine identities, lifecycle order, visibility/imports, source assertions and parent resource ownership and recorded `Correct-to-merge`.
+- Delivery: final repository gates, latest-main integration if required, PR CI and merge pending.
