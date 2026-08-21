@@ -1290,9 +1290,12 @@ describe("ContextualRightPanel", () => {
   });
 
   test("Tauri timeline transport routes thread pagination by TimelineKey", () => {
-    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const source = readFileSync(
+      new URL("./backend/tauriTimelineTransport.ts", import.meta.url),
+      "utf8"
+    );
     const transportStart = source.indexOf("const tauriTimelineTransport");
-    const transportEnd = source.indexOf("const tauriNotificationTransport", transportStart);
+    const transportEnd = source.indexOf("function safeDownloadFilename", transportStart);
     const transportBranch = source.slice(transportStart, transportEnd);
 
     expect(transportBranch).toContain("paginate_timeline_backwards");
@@ -1313,9 +1316,12 @@ describe("ContextualRightPanel", () => {
   });
 
   test("Tauri timeline ensure waits for the webview CoreEvent listener registration", () => {
-    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const source = readFileSync(
+      new URL("./backend/tauriTimelineTransport.ts", import.meta.url),
+      "utf8"
+    );
     const transportStart = source.indexOf("const tauriTimelineTransport");
-    const transportEnd = source.indexOf("const tauriNotificationTransport", transportStart);
+    const transportEnd = source.indexOf("function safeDownloadFilename", transportStart);
     const transportBranch = source.slice(transportStart, transportEnd);
 
     expect(source).toContain("let tauriCoreEventListenerReady");
