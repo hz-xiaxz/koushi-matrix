@@ -1,6 +1,6 @@
 # Issue #551 App Tauri timeline transport extraction
 
-Status: design review pending. Scope is the first behavior-preserving `App.tsx` ownership seam.
+Status: design approved. Scope is the first behavior-preserving `App.tsx` ownership seam.
 
 ## Baseline
 
@@ -19,7 +19,7 @@ Create private direct module `apps/desktop/src/backend/tauriTimelineTransport.ts
 5. `saveReadyMediaFile`
 6. `isTauriRuntime`
 
-`isTauriRuntime` moves because transport construction and media save call it while residual App listeners/QA/desktop flows also consume it; duplicating it or importing App would violate the no-duplicate/no-cycle contract.
+`isTauriRuntime` moves because transport construction and media save call it while residual App listeners/QA/desktop flows also consume it; duplicating App's copy or importing App would violate the no-new-duplicate/no-cycle contract. The pre-existing private copy in `backend/client.ts` remains out of scope, so this move creates no third implementation.
 
 Export exactly `CORE_EVENT_NAME`, `tauriTimelineTransport`, and `isTauriRuntime`. Keep listener readiness and media filename/save helpers private. Import the three exports directly in `App.tsx`; no barrel or App re-export.
 
@@ -90,7 +90,7 @@ A temporary TypeScript AST verifier compares immutable base with parent + leaf:
 - App orphan type imports2 and no other import deletion;
 - command string/method inventory and lifecycle statements exact;
 - source tests2 retain assertion sets with only approved owner path/boundary edits;
-- public App exports, hooks/listeners/timers/render tree, dependencies and reverse edges unchanged;
+- public App exports and App hooks/listeners/timers/render tree unchanged; App edge changes are the planned direct import and two orphan removals, while new leaf type/i18n edges are acyclic and no reverse edge is introduced;
 - duplicate/missing/excess declarations0.
 
 ## Verification
@@ -102,4 +102,4 @@ The App split-later checkbox remains open for diagnostics, verification/destruct
 ## Review gate
 
 - Read-only App reconnaissance measured hooks/resources/render branches and selected the transport as the cleanest existing ownership seam.
-- Formal `reviewer-flash` verdict pending; implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` independently traced declaration/import closure, all transport methods/commands, listener/media lifecycle, source assertions, QA regexes and edge direction and recorded `Correct-to-implement`.
