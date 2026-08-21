@@ -974,10 +974,6 @@ impl Drop for ForwardedComposerDraftPermit {
     }
 }
 
-/// Surfaced when a consumer fell behind the bounded event queue. The
-/// consumer must resync from the latest snapshot and (in later phases) the
-/// per-timeline resync events; intermediate discrete events were dropped
-/// for this consumer only.
 /// A task handle that is aborted if its owner is dropped without an orderly
 /// shutdown. Explicit shutdown takes the handle and awaits it; error paths in
 /// headless QA and embedding callers therefore cannot leave detached runtime
@@ -1431,13 +1427,6 @@ impl CoreRuntime {
         let _ = media_lifecycle.take().await;
     }
 }
-
-/// One attached consumer: allocates request ids, submits commands, and
-/// observes the shared event stream plus the latest snapshot.
-
-/// Lightweight command submitter that can be cloned without cloning event or
-/// snapshot receivers.
-#[derive(Clone)]
 
 enum ComposerDraftLoadStatus {
     Unloaded,
