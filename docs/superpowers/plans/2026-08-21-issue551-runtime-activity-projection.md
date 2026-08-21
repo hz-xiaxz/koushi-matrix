@@ -1,6 +1,6 @@
 # Issue #551 runtime Activity projection extraction
 
-Status: design approved. Scope is one behavior-preserving ownership seam.
+Status: implemented; full-diff review pending. Scope is one behavior-preserving ownership seam.
 
 ## Baseline
 
@@ -91,4 +91,8 @@ After `Correct-to-merge`, run the complete repository matrix recorded in the roa
 
 - Design: `reviewer-flash` independently verified the 16 identities, seven methods, 11+2 tests, visibility/public paths, focused counts and lifecycle boundaries and recorded `Correct-to-implement`.
 - Implementation must re-check the immutable SHA-256 before mutation and record the module-level import/public-path evidence.
+- Implementation: integrated by `luna-implementer`, then parent-audited; unnecessary `#[path]` glue was removed so the façade uses the standard private `mod activity;` form.
+- Exactness: production 16/16, `ActivityProjection` methods 7/7, moved tests 11/11, retained parent tests 2/2, shared helper 1, public path 1 and approved `pub(super)` sites 16; all 1,029 lib test identities match after normalizing only the 11 owner paths.
+- `runtime.rs` 10,909 → 9,643 newline-delimited lines; `runtime/activity.rs` is 1,303.
+- Focused post-move 26/26 + 9/9; core lib 1,021/8 ignored, navigation 1, intent-lifecycle 5 and room-selection 4; all-targets/all-features check, rustfmt, exactness and diff checks green.
 - Full diff and delivery pending.
