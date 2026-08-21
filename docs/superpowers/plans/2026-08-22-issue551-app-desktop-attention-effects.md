@@ -1,6 +1,6 @@
 # Issue #551 App desktop-attention effects extraction
 
-Status: design review pending. Scope is the final clean App lifecycle seam before residual audit.
+Status: design approved. Scope is the final clean App lifecycle seam before residual audit.
 
 ## Baseline
 
@@ -48,21 +48,21 @@ Preserve:
 - one module-lifetime badge-sound dispatcher and transport set;
 - private-data-free `native.attention` diagnostic entries.
 
-No Rust state, DTO, command, Tauri registration, title policy, notification policy or resource cleanup changes.
+No Rust state, DTO, command, Tauri registration, title policy, notification policy or resource cleanup changes. Extend the existing `no-restricted-imports` override narrowly to this one React-owned platform-lifecycle hook (not all `src/app/**`) so future direct Tauri imports still require an explicit comment.
 
 ## Imports and App residual
 
 Destination imports are explicit:
 
 - React `useEffect`, `useMemo`;
-- Tauri `invoke`, `getCurrentWindow`;
+- Tauri `invoke`, `getCurrentWindow`, each with the same explicit no-restricted-import acknowledgment used by the current App integration host;
 - `isTauriRuntime`;
 - desktop-attention functions/type;
 - desktop-notification functions;
 - `DesktopSnapshot`;
 - `TimelineDiagnosticLogEntry` as a type-only edge.
 
-App imports only `useDesktopAttentionEffects`. Remove only moved desktop-attention/notification import members; retain `desktopAttentionSummary` and `desktopAttentionWindowTitle` for App title/QA composition. App continues to own `attentionSummary`, `safeAttentionSummary`, `attentionWindowTitle` and the diagnostic log callback.
+App imports only `useDesktopAttentionEffects`. Remove the now-orphaned direct `invoke` import and only moved desktop-attention/notification import members; retain `desktopAttentionSummary` and `desktopAttentionWindowTitle` for App title/QA composition. App continues to own `attentionSummary`, `safeAttentionSummary`, `attentionWindowTitle` and the diagnostic log callback.
 
 Keep all QA-send listeners, timeline transport augmentation, avatar effects, composer lifecycle, search/space/room operations and render composition in App.
 
@@ -100,4 +100,5 @@ After merge, perform the final App residual audit; no App checkbox closes before
 ## Review gate
 
 - Read-only residual audit found this one lifecycle seam and rejected composer, QA, timeline/avatar/search/room and shell extraction as ownership-damaging.
-- Formal `reviewer-flash` verdict pending; implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` independently traced resource/hook/import closure, exact dependencies/order, source contracts and Rust/product ownership and recorded `Correct-to-implement`.
+- The review's `invoke` orphan and narrow direct-Tauri acknowledgment requirements are recorded above.
