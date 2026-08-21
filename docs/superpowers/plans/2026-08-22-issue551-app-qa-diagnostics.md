@@ -1,6 +1,6 @@
 # Issue #551 App QA diagnostics projection extraction
 
-Status: design review pending. Scope is one behavior-preserving stateless diagnostics seam.
+Status: design approved. Scope is one behavior-preserving stateless diagnostics seam.
 
 ## Baseline
 
@@ -97,4 +97,5 @@ The App umbrella remains open for verification/destructive UI, composer/attentio
 ## Review gate
 
 - Read-only diagnostics reconnaissance separated stateless collectors/projections from React-owned RAF/listener/state/async fencing.
-- Formal `reviewer-flash` verdict pending; implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` round 1 found the missing `QaDomDiagnostics` orphan import; the inventory and focused jsdom coverage were corrected.
+- Round 2 recorded `Correct-to-implement`. Shell baseline remains App diagnostics14 and focused App suite80 (source declaration grep is not the expanded Vitest count).
