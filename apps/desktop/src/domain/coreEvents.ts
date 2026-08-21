@@ -156,6 +156,22 @@ export interface TimelineMessageActions {
   editable_document?: ComposerDocument | null;
 }
 
+export type TimelineMegolmSessionReason =
+  | "initial"
+  | "expiredTime"
+  | "expiredMessageCount"
+  | "membershipOrDeviceChange"
+  | "encryptionSettingsChanged"
+  | "explicitDiscard"
+  | "fullMemberListReload"
+  | "roomSubscription"
+  | "limitedSyncResponse"
+  | "keyShareFailure"
+  | "storeMissing"
+  | "invalidated"
+  | "unknown"
+  | "notRetained";
+
 export interface TimelineMessageSource {
   event_id: string;
   sender: string | null;
@@ -167,6 +183,7 @@ export interface TimelineMessageSource {
   is_edited: boolean;
   has_media: boolean;
   megolm_session_fingerprint?: string | null;
+  megolm_session_rotation_reason?: TimelineMegolmSessionReason | null;
   original_json?: unknown | null;
 }
 

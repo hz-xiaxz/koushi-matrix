@@ -1057,6 +1057,21 @@ export type MessageId =
   | "timeline.encryptionDetails"
   | "timeline.megolmSessionFingerprint"
   | "timeline.copyMegolmSessionFingerprint"
+  | "timeline.megolmRotationReason"
+  | "timeline.megolmReasonInitial"
+  | "timeline.megolmReasonExpiredTime"
+  | "timeline.megolmReasonExpiredMessageCount"
+  | "timeline.megolmReasonMembershipOrDeviceChange"
+  | "timeline.megolmReasonEncryptionSettingsChanged"
+  | "timeline.megolmReasonExplicitDiscard"
+  | "timeline.megolmReasonFullMemberListReload"
+  | "timeline.megolmReasonRoomSubscription"
+  | "timeline.megolmReasonLimitedSyncResponse"
+  | "timeline.megolmReasonKeyShareFailure"
+  | "timeline.megolmReasonStoreMissing"
+  | "timeline.megolmReasonInvalidated"
+  | "timeline.megolmReasonUnknown"
+  | "timeline.megolmReasonNotRetained"
   | "timeline.originalEventSource"
   | "timeline.copyOriginalEventSource"
   | "timeline.sourceSender"
@@ -2380,6 +2395,21 @@ const en: Catalog = {
   "timeline.encryptionDetails": "Encryption details",
   "timeline.megolmSessionFingerprint": "Megolm session fingerprint",
   "timeline.copyMegolmSessionFingerprint": "Copy Megolm session fingerprint",
+  "timeline.megolmRotationReason": "Session change reason",
+  "timeline.megolmReasonInitial": "Initial session",
+  "timeline.megolmReasonExpiredTime": "Time limit reached",
+  "timeline.megolmReasonExpiredMessageCount": "Message limit reached",
+  "timeline.megolmReasonMembershipOrDeviceChange": "Membership or device change",
+  "timeline.megolmReasonEncryptionSettingsChanged": "Encryption settings changed",
+  "timeline.megolmReasonExplicitDiscard": "Manually discarded",
+  "timeline.megolmReasonFullMemberListReload": "Member list reloaded",
+  "timeline.megolmReasonRoomSubscription": "Room subscription changed",
+  "timeline.megolmReasonLimitedSyncResponse": "Limited sync response",
+  "timeline.megolmReasonKeyShareFailure": "Key sharing failed before retry",
+  "timeline.megolmReasonStoreMissing": "Session record unavailable",
+  "timeline.megolmReasonInvalidated": "Session invalidated",
+  "timeline.megolmReasonUnknown": "Unknown reason",
+  "timeline.megolmReasonNotRetained": "Reason unavailable",
   "timeline.originalEventSource": "Original event source",
   "timeline.copyOriginalEventSource": "Copy original event source",
   "timeline.sourceSender": "Sender",
@@ -3588,6 +3618,21 @@ const ja: Catalog = {
   "timeline.encryptionDetails": "暗号化情報",
   "timeline.megolmSessionFingerprint": "Megolmセッション識別子",
   "timeline.copyMegolmSessionFingerprint": "Megolmセッション識別子をコピー",
+  "timeline.megolmRotationReason": "セッション変更理由",
+  "timeline.megolmReasonInitial": "最初のセッション",
+  "timeline.megolmReasonExpiredTime": "有効時間の上限に到達",
+  "timeline.megolmReasonExpiredMessageCount": "メッセージ数の上限に到達",
+  "timeline.megolmReasonMembershipOrDeviceChange": "メンバーまたは端末の変更",
+  "timeline.megolmReasonEncryptionSettingsChanged": "暗号化設定の変更",
+  "timeline.megolmReasonExplicitDiscard": "手動で破棄",
+  "timeline.megolmReasonFullMemberListReload": "メンバー一覧の再読み込み",
+  "timeline.megolmReasonRoomSubscription": "ルーム購読の変更",
+  "timeline.megolmReasonLimitedSyncResponse": "制限付き同期応答",
+  "timeline.megolmReasonKeyShareFailure": "鍵共有失敗後の再試行",
+  "timeline.megolmReasonStoreMissing": "セッション記録を利用できません",
+  "timeline.megolmReasonInvalidated": "セッションが無効化されました",
+  "timeline.megolmReasonUnknown": "理由不明",
+  "timeline.megolmReasonNotRetained": "理由を利用できません",
   "timeline.originalEventSource": "元イベントソース",
   "timeline.copyOriginalEventSource": "元イベントソースをコピー",
   "timeline.sourceSender": "送信者",

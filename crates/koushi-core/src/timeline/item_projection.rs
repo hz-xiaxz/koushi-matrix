@@ -41,11 +41,11 @@ use crate::event::{
     CoreEvent, LinkPreview, LinkPreviewState, ReactionSender, RoomKeyRequestStage,
     RoomKeyRequestStateDto, RoomKeyRequestWithheldCode, ThreadSummaryDto, TimelineDiff,
     TimelineEvent, TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind,
-    TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageActions, TimelineMessageKind,
-    TimelineMessageSource, TimelineNoticeI18n, TimelineNoticeI18nKey, TimelineSendFailureReason,
-    TimelineSendState, TimelineSpoilerSpan, TimelineUnableToDecrypt, TimelineUnableToDecryptReason,
-    TimelineViewportObservation, message_actions_for_timeline_item,
-    message_source_for_timeline_item,
+    TimelineMediaSource, TimelineMediaThumbnail, TimelineMegolmSessionReason,
+    TimelineMessageActions, TimelineMessageKind, TimelineMessageSource, TimelineNoticeI18n,
+    TimelineNoticeI18nKey, TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan,
+    TimelineUnableToDecrypt, TimelineUnableToDecryptReason, TimelineViewportObservation,
+    message_actions_for_timeline_item, message_source_for_timeline_item,
 };
 use crate::executor;
 use crate::failure::{CoreFailure, TimelineFailureKind};
@@ -1212,11 +1212,30 @@ impl TimelineActor {
 
             let projected = sdk_item_to_timeline_item(&self.key, item, self.own_user_id.as_deref());
             let mut source = message_source_for_timeline_item(&projected)?;
-            source.megolm_session_fingerprint = event_item
-                .encryption_info()
+            let encryption_info = event_item.encryption_info();
+            let session_id = encryption_info
                 .and_then(|info| info.session_id())
                 .filter(|session_id| !session_id.is_empty())
-                .map(megolm_session_fingerprint);
+                .map(str::to_owned);
+            let sent_by_current_device = encryption_info
+                .and_then(|info| info.sender_device.as_deref())
+                .is_some_and(|device_id| device_id.as_str() == self.session.info.device_id);
+            source.megolm_session_fingerprint =
+                session_id.as_deref().map(megolm_session_fingerprint);
+            if let Some(session_id) = session_id.as_deref() {
+                let reason = if sent_by_current_device {
+                    koushi_sdk::room_key_rotation_reason(
+                        &self.session,
+                        self.key.room_id(),
+                        session_id,
+                    )
+                    .await
+                } else {
+                    None
+                };
+                source.megolm_session_rotation_reason =
+                    project_local_megolm_rotation_reason(sent_by_current_device, reason);
+            }
             source.original_json = original_json_for_event_item(event_item);
             return Some(source);
         }
@@ -1440,6 +1459,36 @@ fn original_json_for_event_item(event_item: &EventTimelineItem) -> Option<serde_
     event_item
         .original_json()
         .and_then(|raw| serde_json::from_str(raw.json().get()).ok())
+}
+
+fn project_local_megolm_rotation_reason(
+    sent_by_current_device: bool,
+    reason: Option<koushi_sdk::MatrixRoomKeyRotationReason>,
+) -> Option<TimelineMegolmSessionReason> {
+    use koushi_sdk::MatrixRoomKeyRotationReason as Reason;
+    if !sent_by_current_device {
+        return None;
+    }
+    Some(match reason {
+        Some(Reason::Initial) => TimelineMegolmSessionReason::Initial,
+        Some(Reason::ExpiredTime) => TimelineMegolmSessionReason::ExpiredTime,
+        Some(Reason::ExpiredMessageCount) => TimelineMegolmSessionReason::ExpiredMessageCount,
+        Some(Reason::MembershipOrDeviceChange) => {
+            TimelineMegolmSessionReason::MembershipOrDeviceChange
+        }
+        Some(Reason::EncryptionSettingsChanged) => {
+            TimelineMegolmSessionReason::EncryptionSettingsChanged
+        }
+        Some(Reason::ExplicitDiscard) => TimelineMegolmSessionReason::ExplicitDiscard,
+        Some(Reason::FullMemberListReload) => TimelineMegolmSessionReason::FullMemberListReload,
+        Some(Reason::RoomSubscription) => TimelineMegolmSessionReason::RoomSubscription,
+        Some(Reason::LimitedSyncResponse) => TimelineMegolmSessionReason::LimitedSyncResponse,
+        Some(Reason::KeyShareFailure) => TimelineMegolmSessionReason::KeyShareFailure,
+        Some(Reason::StoreMissing) => TimelineMegolmSessionReason::StoreMissing,
+        Some(Reason::Invalidated) => TimelineMegolmSessionReason::Invalidated,
+        Some(Reason::Unknown) => TimelineMegolmSessionReason::Unknown,
+        None => TimelineMegolmSessionReason::NotRetained,
+    })
 }
 
 pub(super) fn megolm_session_fingerprint(session_id: &str) -> String {
@@ -4001,15 +4050,57 @@ mod tests {
         edited_document_content_for_edit_target, has_user_visible_content,
         link_ranges_for_message_projection, membership_change_projection,
         message_edit_target_token, message_projection_from_msgtype,
-        msgtype_carries_editable_caption, reaction_groups_from_sdk,
-        reply_quote_from_message_projection, reset_loading_link_previews_to_pending,
-        room_name_notice_projection, state_event_notice_body, state_event_notice_projection,
-        timeline_item_can_edit, timeline_item_can_react, timeline_item_can_redact,
-        timeline_item_should_be_hidden, validate_cancel_send, validate_redact_reaction,
-        validate_retry_send, validate_send_reaction, visible_missing_reply_detail_event_ids,
+        msgtype_carries_editable_caption, project_local_megolm_rotation_reason,
+        reaction_groups_from_sdk, reply_quote_from_message_projection,
+        reset_loading_link_previews_to_pending, room_name_notice_projection,
+        state_event_notice_body, state_event_notice_projection, timeline_item_can_edit,
+        timeline_item_can_react, timeline_item_can_redact, timeline_item_should_be_hidden,
+        validate_cancel_send, validate_redact_reaction, validate_retry_send,
+        validate_send_reaction, visible_missing_reply_detail_event_ids,
     };
 
     use super::super::test_support::{fake_rid, room_key, timeline_item};
+
+    #[test]
+    fn local_megolm_reason_is_exact_and_missing_evidence_is_unavailable() {
+        use crate::event::TimelineMegolmSessionReason as Projected;
+        use koushi_sdk::MatrixRoomKeyRotationReason as Sdk;
+
+        assert_eq!(
+            project_local_megolm_rotation_reason(false, Some(Sdk::ExpiredTime)),
+            None
+        );
+        assert_eq!(
+            project_local_megolm_rotation_reason(true, None),
+            Some(Projected::NotRetained)
+        );
+        for (sdk, expected) in [
+            (Sdk::Initial, Projected::Initial),
+            (Sdk::ExpiredTime, Projected::ExpiredTime),
+            (Sdk::ExpiredMessageCount, Projected::ExpiredMessageCount),
+            (
+                Sdk::MembershipOrDeviceChange,
+                Projected::MembershipOrDeviceChange,
+            ),
+            (
+                Sdk::EncryptionSettingsChanged,
+                Projected::EncryptionSettingsChanged,
+            ),
+            (Sdk::ExplicitDiscard, Projected::ExplicitDiscard),
+            (Sdk::FullMemberListReload, Projected::FullMemberListReload),
+            (Sdk::RoomSubscription, Projected::RoomSubscription),
+            (Sdk::LimitedSyncResponse, Projected::LimitedSyncResponse),
+            (Sdk::KeyShareFailure, Projected::KeyShareFailure),
+            (Sdk::StoreMissing, Projected::StoreMissing),
+            (Sdk::Invalidated, Projected::Invalidated),
+            (Sdk::Unknown, Projected::Unknown),
+        ] {
+            assert_eq!(
+                project_local_megolm_rotation_reason(true, Some(sdk)),
+                Some(expected)
+            );
+        }
+    }
 
     #[test]
     fn visible_missing_reply_detail_event_ids_only_returns_visible_unrequested_missing_replies() {

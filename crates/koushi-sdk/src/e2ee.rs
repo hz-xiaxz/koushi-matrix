@@ -30,6 +30,23 @@ pub struct CurrentDeviceTrustObservation {
     pub updates: CurrentDeviceTrustStream,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixRoomKeyRotationReason {
+    Initial,
+    ExpiredTime,
+    ExpiredMessageCount,
+    MembershipOrDeviceChange,
+    EncryptionSettingsChanged,
+    ExplicitDiscard,
+    FullMemberListReload,
+    RoomSubscription,
+    LimitedSyncResponse,
+    KeyShareFailure,
+    StoreMissing,
+    Invalidated,
+    Unknown,
+}
+
 pub type SecureBackupStateStream = Pin<Box<dyn Stream<Item = MatrixSecureBackupState> + Send>>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -4444,7 +4461,43 @@ pub fn recover_e2ee_blocking(
     runtime.block_on(recover_e2ee(session, request))
 }
 
+pub async fn room_key_rotation_reason(
+    session: &MatrixClientSession,
+    room_id: &str,
+    session_id: &str,
+) -> Option<MatrixRoomKeyRotationReason> {
+    let room_id = matrix_sdk::ruma::RoomId::parse(room_id).ok()?;
+    session
+        .client
+        .encryption()
+        .room_key_rotation_reason(&room_id, session_id)
+        .await
+        .map(map_room_key_rotation_reason)
+}
+
+fn map_room_key_rotation_reason(
+    reason: matrix_sdk::encryption::RoomKeyRotationReason,
+) -> MatrixRoomKeyRotationReason {
+    use matrix_sdk::encryption::RoomKeyRotationReason as Reason;
+    match reason {
+        Reason::Initial => MatrixRoomKeyRotationReason::Initial,
+        Reason::ExpiredTime => MatrixRoomKeyRotationReason::ExpiredTime,
+        Reason::ExpiredMessageCount => MatrixRoomKeyRotationReason::ExpiredMessageCount,
+        Reason::MembershipOrDeviceChange => MatrixRoomKeyRotationReason::MembershipOrDeviceChange,
+        Reason::EncryptionSettingsChanged => MatrixRoomKeyRotationReason::EncryptionSettingsChanged,
+        Reason::ExplicitDiscard => MatrixRoomKeyRotationReason::ExplicitDiscard,
+        Reason::FullMemberListReload => MatrixRoomKeyRotationReason::FullMemberListReload,
+        Reason::RoomSubscription => MatrixRoomKeyRotationReason::RoomSubscription,
+        Reason::LimitedSyncResponse => MatrixRoomKeyRotationReason::LimitedSyncResponse,
+        Reason::KeyShareFailure => MatrixRoomKeyRotationReason::KeyShareFailure,
+        Reason::StoreMissing => MatrixRoomKeyRotationReason::StoreMissing,
+        Reason::Invalidated => MatrixRoomKeyRotationReason::Invalidated,
+        Reason::Unknown => MatrixRoomKeyRotationReason::Unknown,
+    }
+}
+
 pub(super) async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
+    koushi_diagnostics::reset_rotation_ledger();
     for counter in [
         "received_requests",
         "cancellations",
@@ -4781,6 +4834,7 @@ fn record_initial_share_diagnostic(event: matrix_sdk::encryption::InitialShareDe
 fn record_initial_share_session_diagnostic(
     event: matrix_sdk::encryption::InitialShareSessionDiagnostic,
 ) {
+    koushi_diagnostics::mark_rotation_first_send_correlation(event.session.ordinal());
     koushi_diagnostics::increment_counter(if event.all_initial_shares_settled_first {
         "initial_share_first_event_all_settled"
     } else {
@@ -5183,45 +5237,17 @@ fn record_room_key_rotation_diagnostic(event: matrix_sdk::encryption::RoomKeyRot
         Share::Failed => "failed",
         Share::Unknown => "unknown",
     };
-    let mut diagnostic =
-        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_rotation", "boundary")
-            .field(DiagnosticField::ordinal_alias(
-                "room_alias",
-                "room",
-                event.room.ordinal(),
-            ))
-            .field(DiagnosticField::token("reason", reason))
-            .field(DiagnosticField::token("creation_outcome", creation))
-            .field(DiagnosticField::token("first_share_outcome", share))
-            .field(DiagnosticField::boolean(
-                "first_send_correlation_present",
-                event.first_send_correlation_present,
-            ))
-            .field(DiagnosticField::milliseconds(
-                "elapsed_ms",
-                event.elapsed_ms.into(),
-            ));
-    if let Some(previous) = event.previous_session {
-        diagnostic = diagnostic.field(DiagnosticField::ordinal_alias(
-            "previous_session_alias",
-            "session",
-            previous.ordinal(),
-        ));
-    }
-    if let Some(new) = event.new_session {
-        diagnostic = diagnostic.field(DiagnosticField::ordinal_alias(
-            "new_session_alias",
-            "session",
-            new.ordinal(),
-        ));
-    }
-    if let Some(discard_elapsed_ms) = event.discard_elapsed_ms {
-        diagnostic = diagnostic.field(DiagnosticField::milliseconds(
-            "discard_elapsed_ms",
-            discard_elapsed_ms.into(),
-        ));
-    }
-    record(diagnostic);
+    koushi_diagnostics::record_rotation_boundary(koushi_diagnostics::RotationBoundaryDiagnostic {
+        room_alias: event.room.ordinal(),
+        previous_session_alias: event.previous_session.map(|alias| alias.ordinal()),
+        new_session_alias: event.new_session.map(|alias| alias.ordinal()),
+        reason,
+        creation_outcome: creation,
+        first_share_outcome: share,
+        first_send_correlation_present: event.first_send_correlation_present,
+        discard_elapsed_ms: event.discard_elapsed_ms,
+        elapsed_ms: event.elapsed_ms,
+    });
 
     match event.reason {
         Reason::Initial => koushi_diagnostics::increment_counter("initial_session_creations"),
@@ -6315,13 +6341,62 @@ mod room_key_receive_diagnostics_tests {
 
 #[cfg(test)]
 mod room_key_member_reload_diagnostics_tests {
-    use super::{record_room_key_member_reload_diagnostic, record_room_key_rotation_diagnostic};
+    use super::{
+        MatrixRoomKeyRotationReason, map_room_key_rotation_reason,
+        record_room_key_member_reload_diagnostic, record_room_key_rotation_diagnostic,
+    };
     use koushi_diagnostics::{DiagnosticValue, test_support};
     use matrix_sdk::encryption::{
         RoomKeyCreationOutcome, RoomKeyDiagnosticAlias, RoomKeyFirstShareOutcome,
         RoomKeyMemberReloadDiagnostic, RoomKeyMemberReloadDiscardOutcome,
         RoomKeyRotationDiagnostic, RoomKeyRotationReason,
     };
+
+    #[test]
+    fn every_sdk_rotation_reason_maps_to_the_closed_desktop_reason() {
+        use RoomKeyRotationReason as Sdk;
+        for (sdk, expected) in [
+            (Sdk::Initial, MatrixRoomKeyRotationReason::Initial),
+            (Sdk::ExpiredTime, MatrixRoomKeyRotationReason::ExpiredTime),
+            (
+                Sdk::ExpiredMessageCount,
+                MatrixRoomKeyRotationReason::ExpiredMessageCount,
+            ),
+            (
+                Sdk::MembershipOrDeviceChange,
+                MatrixRoomKeyRotationReason::MembershipOrDeviceChange,
+            ),
+            (
+                Sdk::EncryptionSettingsChanged,
+                MatrixRoomKeyRotationReason::EncryptionSettingsChanged,
+            ),
+            (
+                Sdk::ExplicitDiscard,
+                MatrixRoomKeyRotationReason::ExplicitDiscard,
+            ),
+            (
+                Sdk::FullMemberListReload,
+                MatrixRoomKeyRotationReason::FullMemberListReload,
+            ),
+            (
+                Sdk::RoomSubscription,
+                MatrixRoomKeyRotationReason::RoomSubscription,
+            ),
+            (
+                Sdk::LimitedSyncResponse,
+                MatrixRoomKeyRotationReason::LimitedSyncResponse,
+            ),
+            (
+                Sdk::KeyShareFailure,
+                MatrixRoomKeyRotationReason::KeyShareFailure,
+            ),
+            (Sdk::StoreMissing, MatrixRoomKeyRotationReason::StoreMissing),
+            (Sdk::Invalidated, MatrixRoomKeyRotationReason::Invalidated),
+            (Sdk::Unknown, MatrixRoomKeyRotationReason::Unknown),
+        ] {
+            assert_eq!(map_room_key_rotation_reason(sdk), expected);
+        }
+    }
 
     #[test]
     fn member_reload_and_rotation_records_are_privacy_safe_and_correlated() {
@@ -6332,6 +6407,7 @@ mod room_key_member_reload_diagnostics_tests {
         ] {
             koushi_diagnostics::reset_counter(counter);
         }
+        koushi_diagnostics::reset_rotation_ledger();
         let diagnostic_start = test_support::detail_snapshot().records.len();
 
         record_room_key_member_reload_diagnostic(RoomKeyMemberReloadDiagnostic {
@@ -6363,11 +6439,13 @@ mod room_key_member_reload_diagnostics_tests {
             .iter()
             .find(|record| record.event.source == "core.room_member_reload")
             .expect("member reload diagnostic");
-        let rotation = records
+        let rotation_snapshot = test_support::rotation_snapshot();
+        let rotation = rotation_snapshot
+            .records
             .iter()
             .find(|record| record.event.source == "core.room_key_rotation")
             .expect("rotation diagnostic");
-        for record in [reload, rotation] {
+        for record in [*reload, rotation] {
             assert!(record.event.fields.iter().any(|field| {
                 field.key == "room_alias"
                     && field.value
@@ -6387,12 +6465,59 @@ mod room_key_member_reload_diagnostics_tests {
 
 #[cfg(test)]
 mod initial_share_diagnostics_tests {
-    use super::{record_initial_share_diagnostic, record_initial_share_session_diagnostic};
+    use super::{
+        record_initial_share_diagnostic, record_initial_share_session_diagnostic,
+        record_room_key_rotation_diagnostic,
+    };
     use koushi_diagnostics::test_support;
     use matrix_sdk::encryption::{
         InitialShareDeviceClass as Class, InitialShareDeviceDiagnostic,
-        InitialShareSessionDiagnostic, InitialShareStage as Stage, RoomKeyDiagnosticAlias,
+        InitialShareSessionDiagnostic, InitialShareStage as Stage, RoomKeyCreationOutcome,
+        RoomKeyDiagnosticAlias, RoomKeyFirstShareOutcome, RoomKeyRotationDiagnostic,
+        RoomKeyRotationReason,
     };
+
+    #[test]
+    fn first_event_updates_only_the_matching_rotation_boundary() {
+        let _guard = test_support::lock();
+        koushi_diagnostics::reset_rotation_ledger();
+        for session in [8, 9] {
+            record_room_key_rotation_diagnostic(RoomKeyRotationDiagnostic {
+                room: RoomKeyDiagnosticAlias::new(session - 7),
+                previous_session: None,
+                new_session: Some(RoomKeyDiagnosticAlias::new(session)),
+                reason: RoomKeyRotationReason::Initial,
+                creation_outcome: RoomKeyCreationOutcome::Created,
+                first_share_outcome: RoomKeyFirstShareOutcome::Pending,
+                first_send_correlation_present: false,
+                discard_elapsed_ms: None,
+                elapsed_ms: 1,
+            });
+        }
+
+        record_initial_share_session_diagnostic(InitialShareSessionDiagnostic {
+            session: RoomKeyDiagnosticAlias::new(8),
+            first_event_message_index: 0,
+            all_initial_shares_settled_first: true,
+            pending_requests_bucket: 0,
+            eligible_own_devices: 1,
+            eligible_peer_devices: 1,
+            index0_shares_committed: 2,
+            after_index0_shares_committed: 0,
+            homeserver_accepted_devices: 2,
+            created_at_index0: true,
+            elapsed_ms: 2,
+        });
+
+        let snapshot = test_support::rotation_snapshot();
+        assert_eq!(snapshot.records.len(), 2);
+        for (record, expected) in snapshot.records.iter().zip([true, false]) {
+            assert!(record.event.fields.iter().any(|field| {
+                field.key == "first_send_correlation_present"
+                    && field.value == koushi_diagnostics::DiagnosticValue::Boolean(expected)
+            }));
+        }
+    }
 
     fn counter_value(name: &'static str) -> u64 {
         let snapshot = koushi_diagnostics::snapshot();

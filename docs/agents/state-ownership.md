@@ -527,6 +527,11 @@ carry tokens and counts only. The full prohibited list is in
   projection, not raw Matrix JSON. Forwarding sends the Rust-projected visible
   body only; media-only rows must remain non-forwardable until a dedicated
   media-forward contract exists.
+- Megolm session-change attribution in source details is Rust-owned and
+  current-device-only. Core compares the SDK encryption sender device with the
+  active session, queries the full room/session identity only inside the trusted
+  SDK boundary, and projects a closed reason or `notRetained`. React renders the
+  enum and never derives a reason from dates, fingerprints, counters, or timing.
 - Message-action menus render only `TimelineItem.actions` affordances. Copy uses
   the Rust-projected row body or Rust-built permalink only; view source
   dispatches `load_message_source` and waits for `MessageSourceLoaded` before
