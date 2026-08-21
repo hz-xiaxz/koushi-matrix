@@ -49,5 +49,7 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 ## Review gate
 
 - Design: `reviewer-flash` traced the complete declarations, dependency/caller graph and focused assertions and recorded `Correct-to-implement`; its two minor reproducibility notes are folded into the immutable hash/bytes and explicit external-user count above.
-- Implementation approved, not started.
+- Implementation: integrated by `luna-implementer` and parent-audited.
+- Exactness: 3/3 statements, parent 0, exports 3/3, type-only imports 2/2, retained controller helpers 2/2 and one parent type re-export; `TimelineView.tsx` 4,104 → 4,048 newline-delimited lines and the leaf is 64.
+- Focused post-move 23/23; typecheck, lint and diff checks green; emission/dedupe/container/download/event owners remain parent-owned.
 - Full diff and delivery pending.
