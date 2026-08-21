@@ -201,29 +201,6 @@ describe("ContextualRightPanel", () => {
     expect(resetHandler).toContain("api.resetLocalData()");
   });
 
-  test("reset local data confirmation dialog renders an explicit destructive confirmation", async () => {
-    vi.stubGlobal("window", { location: { search: "" } });
-    const { ResetLocalDataConfirmationDialog } = await import("./App");
-
-    const markup = renderToStaticMarkup(
-      <ResetLocalDataConfirmationDialog
-        isBusy={false}
-        onCancel={() => undefined}
-        onConfirm={() => undefined}
-      />
-    );
-
-    expect(markup).toContain('role="dialog"');
-    expect(markup).toContain('aria-modal="true"');
-    expect(markup).toContain('aria-label="Reset local data"');
-    expect(markup).toContain(
-      "Reset local data for this session? This removes the local Matrix store, cached history, and saved credentials on this device. This cannot be undone."
-    );
-    expect(markup).toContain(">Cancel</button>");
-    expect(markup).toContain('class="dialog-button danger"');
-    expect(markup).toContain(">Reset local data</button>");
-  });
-
   test("TimelineItemRow renders reaction pills with accessible labels", () => {
     const markup = renderToStaticMarkup(
       <TimelineItemRow

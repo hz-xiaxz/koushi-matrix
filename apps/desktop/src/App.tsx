@@ -243,6 +243,7 @@ import {
   DirectoryPreviewDialog,
   InviteTargetsDialog,
   ReportReasonDialog,
+  ResetLocalDataConfirmationDialog,
   uploadStagingItemsAreSendable,
   UserIdDialog
 } from "./components/dialogs";
@@ -6924,52 +6925,9 @@ export function App() {
   );
 }
 
-export function ResetLocalDataConfirmationDialog({
-  isBusy,
-  onCancel,
-  onConfirm,
-  title = t("settings.resetLocalData"),
-  copy = t("settings.resetLocalDataConfirm"),
-  confirmLabel = t("settings.resetLocalData")
-}: {
-  isBusy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-  title?: string;
-  copy?: string;
-  confirmLabel?: string;
-}) {
-  return (
-    <div
-      className="dialog-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !isBusy) {
-          event.preventDefault();
-          onCancel();
-        }
-      }}
-    >
-      <div className="dialog-box">
-        <div className="dialog-title">{title}</div>
-        <p>{copy}</p>
-        <div className="dialog-actions">
-          <button type="button" className="dialog-button" disabled={isBusy} onClick={onCancel}>
-            {t("action.cancel")}
-          </button>
-          <button type="button" className="dialog-button danger" disabled={isBusy} onClick={onConfirm}>
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Preserve App.tsx's original public export surface; these components now live in
 // dedicated modules under ./components.
 export { Composer } from "./components/composer";
 export { ContextualRightPanel } from "./components/rightPanel";
 export { TopBar, WorkspaceRail } from "./components/Shell";
+export { ResetLocalDataConfirmationDialog } from "./components/dialogs";
