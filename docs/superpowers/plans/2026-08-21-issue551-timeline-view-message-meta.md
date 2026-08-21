@@ -3,7 +3,8 @@
 ## Status
 
 - Design: `reviewer-flash` found the retained timestamp-helper caller, verified the amended two-export/one-re-export contract, and recorded `Correct-to-implement`.
-- Implementation: approved but not started.
+- Implementation: integrated; 3/3 declaration exactness, 2/2 leaf exports, focused tests, typecheck, lint and diff checks are green.
+- Full-diff review: pending.
 - Delivery: pending.
 
 ## Objective
@@ -92,6 +93,13 @@ A temporary TypeScript verifier proves:
 - no file outside the parent imports the leaf;
 - only the two production files and this plan record change;
 - no barrel/default export/hook/state/wrapper/alias/duplicate/TODO/dependency exists.
+
+## Integrated implementation evidence
+
+- `TimelineView.tsx`: 7,684 → 7,590 lines; metadata moved to a 102-line direct leaf.
+- TypeScript AST exactness: 3/3 declarations moved exactly once; parent retains zero; leaf exports exactly `MessageMeta` and parent-only `formatMessageTimestamp`.
+- Parent locally imports both names and flat-re-exports only the existing public `MessageMeta` path.
+- Focused baseline/post 99/99; typecheck, lint and diff check green. No test/CSS/i18n/domain/transport/state/resource/behavior change.
 
 ## Verification
 
