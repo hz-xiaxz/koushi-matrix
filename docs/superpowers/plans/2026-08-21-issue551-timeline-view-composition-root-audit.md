@@ -91,4 +91,5 @@ No remaining independently mergeable move-only seam reduces ownership collision 
 - Read-only residual reconnaissance completed on `d2e46a22` with concrete state/ref/effect/resource and candidate-API analysis.
 - Formal `reviewer-flash` review independently traced the delivered leaves, every residual resource cluster, teardown ordering and candidate API, challenged the avatar hook-order conclusion, found no missed independently mergeable seam and recorded `Correct-to-record-and-complete-TimelineView-checkbox`.
 - The reviewer-requested metric corrections are applied above and re-proved with a TypeScript AST walk plus `wc -l -c`.
+- Fresh delivery gates: Vitest 1,370, Playwright 248 with polling, workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/diff gates green.
 - After merge: mark the TimelineView Issue checkbox complete, record the line reduction and ownership/teardown/API/focused-test evidence, then proceed to the split-later candidates.
