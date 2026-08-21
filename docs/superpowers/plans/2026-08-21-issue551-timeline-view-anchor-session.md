@@ -87,8 +87,9 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 
 - Design: `reviewer-flash` verified all 26 declarations, 18/8 visibility split, map/test paths, DOM geometry, dependencies and parent lifecycle owners and recorded `Correct-to-implement`.
 - Implementation: integrated by `luna-implementer` and parent-audited; the worker reached its bounded turn limit after typecheck/focused/lint, before final exactness reporting.
-- Exactness: 26/26 statements, parent 0, exports 18/18, private 8/8, three imports, one map binding; `TimelineView.tsx` 4,664 → 4,444 newline-delimited lines and the leaf is 244.
+- Exactness: 26/26 statements, parent 0, exports 18/18, private 8/8, three imports, one map binding; after the banner delta `TimelineView.tsx` is 4,441 newline-delimited lines and the leaf is 248.
 - Focused post-move 173/173; typecheck, lint and diff checks green; parent retains every React/resource/persistence/projection owner.
 - Full-diff round 1: `reviewer-flash` verified the complete move and recorded `Correct-to-merge`; its only minor finding was the now-orphaned three-line `Scroll anchor` banner in the parent.
-- Banner delta: move that exact banner to the anchor owner leaf; final delta re-review pending.
-- Delivery pending.
+- Banner delta: move that exact banner to the anchor owner leaf.
+- Final delta review: `reviewer-flash` revalidated the final tree and recorded `Correct-to-merge`; no blocker remains.
+- Delivery: final repository gates, PR CI and merge pending.
