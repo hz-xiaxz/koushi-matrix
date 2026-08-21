@@ -375,6 +375,28 @@ fn e2ee_strict_qa_uses_typed_causal_checks_after_recipient_device_verification()
 }
 
 #[test]
+fn same_user_secondary_device_runtimes_isolate_saved_credentials() {
+    let production_source = production_source();
+
+    for label in [
+        "gate-negative-a2",
+        "gate-negative-a3",
+        "gate-negative-a4",
+        "gate-negative-a5",
+        "gate-negative-a6",
+        "a2",
+        "encryption-debug-a2",
+        "e2ee-b2",
+        "e2ee-b3-unverified",
+    ] {
+        assert!(
+            production_source.contains(&format!("start_isolated_qa_runtime(\"{label}\")")),
+            "secondary-device runtime {label} must not restore the primary device credential",
+        );
+    }
+}
+
+#[test]
 fn e2ee_device_verification_labels_distinguish_recipient_second_device() {
     let production_source = production_source();
 
