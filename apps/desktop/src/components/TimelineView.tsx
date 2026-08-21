@@ -206,6 +206,12 @@ TimelineMediaViewer,
 type TimelineMediaViewerItem
 } from "./timeline/TimelineMedia";
 import { useTimelineStoreContext } from "./timelineStoreContext";
+import {
+  timelineAvatarDiagnostics,
+  timelineRenderedAvatarDiagnostics,
+  type TimelineDiagnostics
+} from "./timeline/TimelineDiagnostics";
+export type { TimelineDiagnostics };
 export { MessageMeta } from "./timeline/MessageMeta";
 export { timelineMediaDisplayBoxForTests } from "./timeline/TimelineMedia";
 export { receiptDisplayName };
@@ -296,19 +302,6 @@ type ViewportIntent = { kind: "free-scroll" } | { kind: "live-edge" };
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-
-export interface TimelineDiagnostics {
-  visibleItems: number;
-  downloadedItems: number;
-  backfill: string;
-  avatarMxcItems: number;
-  avatarReadyItems: number;
-  avatarPendingItems: number;
-  avatarFailedItems: number;
-  avatarMissingItems: number;
-  avatarRenderedImages: number;
-  avatarBrokenImages: number;
-}
 
 export type TimelineDiagnosticLogEntry = DiagnosticLogEntry;
 
@@ -4021,55 +4014,6 @@ function timelineAvatarMxcsForItems(
     }
   }
   return mxcs;
-}
-
-function timelineAvatarDiagnostics(
-  items: readonly TimelineItem[],
-  profileUsers: Record<string, UserProfile>,
-  avatarThumbnails: Record<string, AvatarThumbnailState>
-): Omit<
-  TimelineDiagnostics,
-  "visibleItems" | "downloadedItems" | "backfill" | "avatarRenderedImages" | "avatarBrokenImages"
-> {
-  const diagnostics = {
-    avatarMxcItems: 0,
-    avatarReadyItems: 0,
-    avatarPendingItems: 0,
-    avatarFailedItems: 0,
-    avatarMissingItems: 0
-  };
-  for (const item of items) {
-    const profileAvatar = item.sender ? profileUsers[item.sender]?.avatar : null;
-    const avatar = item.sender_avatar ?? profileAvatar;
-    if (!avatar) {
-      diagnostics.avatarMissingItems += 1;
-      continue;
-    }
-    diagnostics.avatarMxcItems += 1;
-    const thumbnail = avatarThumbnails[avatar.mxc_uri] ?? avatar.thumbnail;
-    if (thumbnail.kind === "ready") {
-      diagnostics.avatarReadyItems += 1;
-    } else if (thumbnail.kind === "failed") {
-      diagnostics.avatarFailedItems += 1;
-    } else {
-      diagnostics.avatarPendingItems += 1;
-    }
-  }
-  return diagnostics;
-}
-
-function timelineRenderedAvatarDiagnostics(container: HTMLElement | null): {
-  avatarRenderedImages: number;
-  avatarBrokenImages: number;
-} {
-  if (!container) {
-    return { avatarRenderedImages: 0, avatarBrokenImages: 0 };
-  }
-  const images = Array.from(container.querySelectorAll<HTMLImageElement>(".avatar img"));
-  return {
-    avatarRenderedImages: images.length,
-    avatarBrokenImages: images.filter((image) => image.complete && image.naturalWidth === 0).length
-  };
 }
 
 function avatarThumbnailLogMessage(thumbnail: AvatarThumbnailState): string {
