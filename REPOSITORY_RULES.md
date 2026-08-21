@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-08-18.
+Last amended: 2026-08-21.
 
 ## Read Order And Authority
 
@@ -326,7 +326,16 @@ conflict is being resolved.
   key handling, per-device share state, encrypted `m.room_key`, and standard
   recipient recovery through key requests, verified-device gossip, and configured
   backup. Homeserver acceptance commits share state but is not proof of recipient
-  decryption. The retained Koushi-specific #510 index-0 duplicate helper has no
+  decryption. For every newly created or rotated outbound session, the Koushi
+  production client must fence the first event on the current encryption-sync
+  generation, one full active-member key query, and a repeated standard
+  pre-share under one absolute deadline. Failure preserves a typed retryable
+  pending send and must not consume index 0 or fall back to plaintext. A device
+  first visible after the authoritative fence response has no inferred
+  historical entitlement and remains on standard Matrix recovery policy; current
+  visibility, membership, timing, aliases, and counters are insufficient proof
+  for an index-0 share and never expand #541's original-recipient ledger. The
+  retained Koushi-specific #510 index-0 duplicate helper has no
   production caller, and #523 targeted initial-share repair is an independent
   default-off SDK builder option; both are disabled in Koushi. Re-enabling #510
   requires restoring a reviewed production caller, while re-enabling #523

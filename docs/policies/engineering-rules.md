@@ -7,7 +7,7 @@ build gates. AGENTS.md remains the operational how-to (permissions, install
 caveats, recovery steps); durable rules discovered there are promoted to
 REPOSITORY_RULES.md or this document.
 
-Last amended: 2026-08-18.
+Last amended: 2026-08-21.
 
 ## Design Simplicity
 
@@ -238,6 +238,18 @@ Rules:
    single-owner periodic health inspection while the verified session is
    active. Identifiers, backup versions, key material, message content,
    filesystem paths, and raw failures never cross its typed diagnostics.
+   The first user event of a newly created or rotated outbound session has a
+   separate encryption-readiness fence: current-generation encryption sync,
+   one full active-member key query, and repeated standard pre-share must settle
+   under one absolute deadline before index 0 is consumed. The fence is per
+   session, never per message, and its failure is typed/retryable with no
+   plaintext fallback. A device first visible after the authoritative response
+   has no inferred historical entitlement and remains on standard Matrix
+   recovery policy; timing, current membership, aggregate counters, aliases, or
+   device visibility after index 0 never establish entitlement. Diagnostics
+   expose only aliases, closed states, count/time
+   buckets, and unchanged-index facts—not identifiers, keys, sync positions,
+   request data, content, or raw errors.
    Authentication alone is not session admission. Until the SDK
    current-device verification state is authoritatively `Verified`, the SDK
    session is AccountActor-owned and quarantined: no normal sync children,

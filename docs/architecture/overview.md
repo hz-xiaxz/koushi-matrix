@@ -496,10 +496,14 @@ Supervision follows the same ownership tree:
   pagination failure, search failure) and redacted `OperationFailed` events.
 - A child task panic or unexpected join error tears down only that child when
   the SDK handle can be safely recreated (`TimelineActor`, `SearchActor`) and
-  emits a failure with a new generation marker. `SyncActor` crashes move the
-  account to `SyncFailed`; the SDK's normal reconnect loop handles network
-  churn, while an internal crash requires an explicit `SyncCommand::Restart`
-  or account restore path. Replacing a `TimelineActor` does not replace the
+  emits a failure with a new generation marker. `SyncActor` panics or join
+  failures move the account to `SyncFailed`; the SDK's normal reconnect loop
+  handles network churn, while an internal actor crash requires an explicit
+  `SyncCommand::Restart` or account restore path. An observed steady
+  `SyncService::Terminated` state with the actor still alive is recoverable owner
+  loss instead: the actor projects `Reconnecting`, starts one replacement, and
+  projects `Running` only after matching room-list and encryption-generation
+  response proofs. Replacing a `TimelineActor` does not replace the
   session-owned outbound-send workers, terminal observer, or correlation
   coordinator.
 - `AccountActor` failure is fatal to that account runtime: stop children,
@@ -1258,13 +1262,32 @@ Recent outbound Megolm creation/rotation attribution is diagnostic-only and
 runtime-local. A small dedicated ledger retains closed reasons and anonymous
 room/session ordinals outside the general diagnostic ring; it is count-bounded,
 reports its own eviction count, and resets with account/crypto-runtime
-replacement. Local Encryption details for an event sent by the current device may query the
-exact room/session only inside the trusted Rust/SDK boundary and receive a
-closed reason. React receives
-only that presentation enum. Missing or evicted evidence is reported as
+replacement. Local Encryption details for an event sent by the current device
+may query the exact room/session only inside the trusted Rust/SDK boundary and
+receive a closed reason. React receives only that presentation enum. Missing or
+evicted evidence is reported as
 unavailable and is never reconstructed from aggregate counters, visible event
 dates, fingerprints, or timing. The ledger does not change rotation, sharing,
 recipient, retry, or persistence behavior.
+
+Before the first event of every newly created or rotated outbound session,
+Koushi's production client requires a successful response from the current
+encryption-sync generation, performs one authoritative full `/keys/query` for
+the room's active members, and repeats the standard SDK pre-share while the
+session is still at index 0. One absolute deadline bounds the fence. Failure
+leaves the queued event retryable and unsent; it never consumes index 0 or falls
+back to plaintext. Only a matching registry entry already marked `Ready`
+bypasses the full query. A restored or otherwise unregistered session still at
+index 0 is fenced before its first event even when its token is unchanged.
+
+A bounded process-local exact-session registry distinguishes successfully
+fenced sessions from resident sessions whose first fence failed, so retry cannot
+bypass readiness merely because the token is now unchanged. A device first
+visible after the authoritative response has no inferred historical entitlement
+and remains on standard Matrix gossip/backup/request policy. Current visibility,
+membership, timing, aliases, and aggregate counters never justify a historical
+index-0 share or expand #541's immutable original-recipient ledger. No
+acknowledgement protocol or delivery claim is introduced.
 
 Koushi retains two experimental hardening implementations from #510 and #523.
 The #510 bounded index-0 duplicate helper has no production caller; its builder
@@ -1307,8 +1330,9 @@ gate. If backup was explicitly disabled, re-enabling requires a user action
 which states that the account-wide setting also affects other Matrix clients.
 
 Koushi encrypted user-content sends use the SDK's normal encryption setup and
-recipient-device key sharing without opting into the vendored SDK's narrow
-per-outbound-session durability fence. The SDK backup worker uploads new and
+recipient-device key sharing without opting into the separate disabled #523
+initial-share-repair fence. Koushi's required new-session readiness fence above
+uses only the standard pre-share path. The SDK backup worker uploads new and
 rotated Megolm sessions asynchronously. Core continuously observes backup state
 changes and runs a single-owner periodic inspection while the verified session
 is active; a degraded backup is visible and diagnosed but does not turn an
