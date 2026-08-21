@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { SessionVerificationGate } from "./App";
+import { SessionVerificationGate } from "./components/SessionVerificationGate";
 import { createBrowserFakeApi } from "./backend/browserFakeApi";
 import type {
   DesktopSnapshot,
@@ -764,5 +765,24 @@ describe("SessionVerificationGate interactions", () => {
 
     await vi.waitFor(() => expect(retrySecureBackupInspection).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(openSecureBackupDiagnostics).toHaveBeenCalledTimes(1));
+  });
+
+  test("renders verification admission phases and an actionable preparation failure", async () => {
+    const base = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const renderGate = (snapshot: DesktopSnapshot) => renderToStaticMarkup(
+      <SessionVerificationGate snapshot={snapshot} onSnapshot={() => undefined} onSignOut={() => undefined} />
+    );
+    expect(renderGate(base)).toContain("Verify this session");
+
+    const verifying = structuredClone(base);
+    verifying.state.domain.session = { ...base.state.domain.session, kind: "verifying", method: "recoveryKey", flow_id: 7 } as typeof base.state.domain.session;
+    expect(renderGate(verifying)).toContain("Verifying this session…");
+
+    const failed = structuredClone(base);
+    failed.state.domain.session = { ...base.state.domain.session, kind: "provisional", phase: { recheckingTrust: { failureKind: "sdk" } } } as typeof base.state.domain.session;
+    const failedMarkup = renderGate(failed);
+    expect(failedMarkup).toContain("Finishing sign-in…");
+    expect(failedMarkup).toContain('role="alert"');
+    expect(failedMarkup).not.toContain("Retry");
   });
 });

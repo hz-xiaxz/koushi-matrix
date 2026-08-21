@@ -2484,27 +2484,6 @@ describe("Timeline item row rendering", () => {
     );
   });
 
-  test("renders verification admission phases and an actionable preparation failure", async () => {
-    vi.stubGlobal("window", { location: { search: "" } });
-    const { SessionVerificationGate } = await import("./App");
-    const base = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
-    const renderGate = (snapshot: DesktopSnapshot) => renderToStaticMarkup(
-      <SessionVerificationGate snapshot={snapshot} onSnapshot={() => undefined} onSignOut={() => undefined} />
-    );
-    expect(renderGate(base)).toContain("Verify this session");
-
-    const verifying = structuredClone(base);
-    verifying.state.domain.session = { ...base.state.domain.session, kind: "verifying", method: "recoveryKey", flow_id: 7 } as typeof base.state.domain.session;
-    expect(renderGate(verifying)).toContain("Verifying this session…");
-
-    const failed = structuredClone(base);
-    failed.state.domain.session = { ...base.state.domain.session, kind: "provisional", phase: { recheckingTrust: { failureKind: "sdk" } } } as typeof base.state.domain.session;
-    const failedMarkup = renderGate(failed);
-    expect(failedMarkup).toContain("Finishing sign-in…");
-    expect(failedMarkup).toContain('role="alert"');
-    expect(failedMarkup).not.toContain("Retry");
-  });
-
   test("rejected login transport refreshes authoritative gate state without rejecting", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { settleLoginTransport } = await import("./App");
