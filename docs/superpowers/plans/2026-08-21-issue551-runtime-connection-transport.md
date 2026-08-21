@@ -1,0 +1,96 @@
+# Issue #551 runtime connection transport extraction
+
+Status: design review pending. Scope is one behavior-preserving ownership seam.
+
+## Baseline
+
+- Base: `71c6785b3080846714567d8c0844b3573db9c363` after Activity PR #617 and latest-main integration.
+- `runtime.rs`: 9,643 newline-delimited lines / 394,030 bytes / SHA-256 `51898f8e36e5d0bfd6a0e5538d79d795dbd94f2eb1bdd259614a2749255cccfc`.
+- Focused baseline:
+  - `standalone_composer_command_permit_outlives_activation_lease`: 1/1;
+  - `core_connection_command_handle_clones_submit_path`: 1/1;
+  - `runtime_core` integration: 4/4.
+
+## Ownership decision
+
+Create private direct child `crates/koushi-core/src/runtime/connection.rs`. Move exactly these four public types in original relative order:
+
+1. `CommandSubmitError`
+2. `EventStreamLag`
+3. `CoreConnection`
+4. `CoreCommandHandle`
+
+Move the complete associated-item ownership:
+
+- `CoreCommandHandle`: nine methods in exact order — `command`, `begin_composer_draft_renderer_generation`, `acquire_composer_draft_lease`, `release_composer_draft_lease`, `acquire_composer_draft_command_permit`, `command_with_composer_lease`, test-hook `command_with_composer_lease_after_admission`, private `validate_request_id`, private `admit_composer_command`.
+- `CoreConnection`: thirteen methods in exact order — `connection_id`, `command_handle`, `next_request_id`, `command`, `begin_composer_draft_renderer_generation`, `acquire_composer_draft_lease`, `release_composer_draft_lease`, `acquire_composer_draft_command_permit`, `command_with_composer_lease`, `recv_event`, private exhaustive `project_event_for_consumer`, `snapshot`, `versioned_snapshot`.
+- `CoreRuntime::attach` only, as a child-owned `impl CoreRuntime` block with one exact method. This lets the child construct private connection fields without a constructor wrapper or field visibility change.
+
+The leaf owns consumer identity/request allocation, bounded command submission/admission, composer lease calls, event-lag handling, exhaustive consumer-side display-label projection and latest snapshot access. The parent retains `CoreRuntime` startup/tasks/shutdown, bounded channel creation, `CoreCommandEnvelope`, AppActor inbox/dispatch and all task/channel/timer lifecycle ownership.
+
+## Imports and visibility
+
+Production leaf has exactly seven import statements:
+
+1. `std::sync::{Arc, atomic::{AtomicU64, Ordering}}`;
+2. `tokio::sync::{broadcast, mpsc, oneshot, watch}`;
+3. `super::{CoreCommandEnvelope, CoreRuntime}`;
+4. `crate::command::CoreCommand`;
+5. composer lease/permit types from `crate::composer_draft_lifecycle`;
+6. event/snapshot/projection types and functions from `crate::event`;
+7. IDs from `crate::ids`.
+
+Parent declares private `mod connection;` and explicitly `pub use connection::{CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag};`. This preserves both `koushi_core::runtime::*` and existing crate-root re-exports in `lib.rs` without exposing `runtime::connection`.
+
+All four moved types and their existing fields/methods retain exact visibility. `CoreCommandEnvelope` stays parent-private and is accessible to the descendant module; `CoreRuntime` fields stay private and are accessed only by the moved descendant `attach` method. No `pub(super)`, new constructor, wrapper, alias, trait, compatibility shim or public namespace is added.
+
+## Test ownership
+
+Move exactly two tests in original relative order to the leaf's `#[cfg(test)] mod tests`:
+
+1. `standalone_composer_command_permit_outlives_activation_lease`
+2. `core_connection_command_handle_clones_submit_path`
+
+The first directly constructs the private command handle and pins lease-permit retention. The second is a source-characterization test for this owner. Change only its source input from `include_str!("runtime.rs")` to `include_str!("connection.rs")`; continue reading the owner file individually and do not concatenate source.
+
+Leaf tests use existing test-only `use super::*` plus the minimum explicit `ComposerTarget` import. No parent helper moves or visibility changes. All other runtime unit tests remain parent-owned.
+
+## Invariants
+
+- Four type declarations, 9 handle methods, 13 connection methods and one attach method retain exact attrs/cfg/signatures/bodies/order apart from module imports and the approved source-test path.
+- `CommandSubmitError` variants/messages and composer lease fail-closed admission remain exact.
+- Request IDs remain connection-owned and use relaxed atomics; command submission still awaits the same bounded sender.
+- `recv_event` lag/closed behavior and skipped counts remain exact.
+- `project_event_for_consumer` remains exhaustive over every `CoreEvent`, with timeline/room label projection and snapshot reads unchanged.
+- `CoreRuntime::attach` clones the same sender/lease/watch receivers and subscribes to the same event broadcaster.
+- `CoreCommandEnvelope`, AppActor command routing, channel capacities, task guards, media reconciliation and ordered shutdown remain parent-owned.
+- No command/event/state/serde/wire/API path, privacy/logging, resource bound, test config or dependency changes.
+
+## Deterministic exactness
+
+A temporary `syn` verifier compares immutable base with parent + leaf:
+
+- types 4/4, parent 0;
+- methods keyed by `(self type, method, name)`: handle 9/9, connection 13/13, runtime attach 1/1 and retained parent CoreRuntime methods unchanged;
+- tests 2/2, parent 0, bodies/attrs exact except the one approved `include_str!` path;
+- all 1,029 lib test identities bidirectionally equal after normalizing only the two owner paths;
+- public re-export 4/4, imports 7/7, zero visibility deltas, zero duplicate/missing/excess item;
+- exhaustive event match order and public/crate paths exact;
+- no path attribute, production glob, wrapper, alias, TODO or source concatenation.
+
+## Verification
+
+Run the same focused 1 + 1 + 4 tests before and after, then:
+
+- `cargo test -p koushi-core --lib`;
+- runtime session/device/e2ee/timeline/search/intent integration suites;
+- `cargo check -p koushi-core --all-targets --all-features`;
+- source/exactness verifier, rustfmt and diff checks.
+
+After full-diff approval, integrate current `origin/main`, obtain delta approval if it moved, and run the full repository matrix before PR merge.
+
+## Review gate
+
+- Design pending `reviewer-flash` read-only verdict.
+- Implementation prohibited until `Correct-to-implement`.
+- Full diff and delivery pending.
