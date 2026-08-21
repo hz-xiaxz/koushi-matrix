@@ -1,6 +1,6 @@
 # Issue #551 SAS diagnostic test isolation
 
-Status: design review pending. Independent blocker repair for TimelineView subscription PR #606.
+Status: implemented, locally verified and approved for merge. Independent blocker repair for TimelineView subscription PR #606.
 
 ## Failure evidence
 
@@ -43,4 +43,5 @@ This preserves detection of missing, reordered or duplicate diagnostics for ever
 - Implementation: integrated by `luna-implementer` and parent-audited; exact production/test delta is one filter expression.
 - Focused test passed 5/5 sequentially; core lib passed twice under normal parallel execution; rustfmt and diff checks green.
 - First workspace run reached an unrelated `runtime_room_list_sync` timeout and remains to be rerun after full-diff approval.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` verified the one-line test-only delta and preservation of every attribution/action/runtime/duplicate invariant and recorded `Correct-to-merge`.
+- Delivery: final repository gates, PR CI and merge pending.
