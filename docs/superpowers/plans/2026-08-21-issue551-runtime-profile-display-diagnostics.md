@@ -1,6 +1,6 @@
 # Issue #551 runtime profile/display diagnostics extraction
 
-Status: design review pending. Scope is one behavior-preserving diagnostic projection seam.
+Status: design approved. Scope is one behavior-preserving diagnostic projection seam.
 
 ## Baseline
 
@@ -109,5 +109,5 @@ After full-diff approval, integrate latest `origin/main`, obtain delta approval 
 ## Review gate
 
 - Read-only reconnaissance completed against state/display/unread/diagnostic boundaries.
-- Formal `reviewer-flash` design verdict pending.
-- Implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` independently traced all 12 identities, two methods, three parent calls, imports/visibility/tests/privacy and reducer/resource boundaries and recorded `Correct-to-implement`.
+- Implementation must re-confirm the immutable SHA-256 and 1,029-test identity count before mutation/delivery.
