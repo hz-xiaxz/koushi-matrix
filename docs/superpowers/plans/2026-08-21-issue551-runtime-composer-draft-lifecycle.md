@@ -1,6 +1,6 @@
 # Issue #551 runtime composer-draft lifecycle extraction
 
-Status: implemented; full-diff review pending. Scope is one atomic behavior-preserving lifecycle seam.
+Status: full diff approved; delivery pending. Scope is one atomic behavior-preserving lifecycle seam.
 
 ## Baseline
 
@@ -124,4 +124,6 @@ After full-diff approval, integrate latest `origin/main`, obtain delta approval 
 - `runtime.rs` 8,280 → 7,715 newline-delimited lines; `runtime/composer.rs` 641.
 - Focused post-move unit3, source1, lifecycle7, scheduled-send12 and send-queue13; core lib1,021/8 ignored and all-targets/all-features check green.
 - Initial parallel `runtime_timeline` run observed `lock_unlock_retries_repaired_composer_payload` expected2/got3; exact rerun and complete21-test rerun were green, matching the diagnosed shared diagnostic-observation timing/isolation class rather than a persistence behavior delta.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently traced all identities, permit/reducer/store/timer/shutdown order, tests, visibility and public paths and recorded `Correct-to-merge`.
+- The reviewer classified the initial diagnostic-count failure as non-blocking process-global observation isolation; harden the test only if CI reproduces it, never alter the lifecycle leaf to mask it.
+- Delivery: final repository gates, latest-main integration if required, PR CI and merge pending.
