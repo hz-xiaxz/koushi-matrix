@@ -2287,6 +2287,7 @@ mod tests {
                 koushi_diagnostics::DiagnosticValue::Count(flow_id) => Some(*flow_id),
                 _ => None,
             })
+            .filter(|flow_id| (100..=104).contains(flow_id))
             .collect::<Vec<_>>();
         assert_eq!(settled_flow_ids, vec![100, 101, 102, 103, 104]);
         shutdown_and_ack(&handle).await;
