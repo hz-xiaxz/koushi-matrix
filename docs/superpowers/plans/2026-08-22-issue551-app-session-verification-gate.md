@@ -1,6 +1,6 @@
 # Issue #551 App session-verification gate extraction
 
-Status: implemented; full-diff review pending. Scope is one behavior-preserving verification/secure-backup/cleanup presentation-controller seam.
+Status: full diff approved; delivery pending. Scope is one behavior-preserving verification/secure-backup/cleanup presentation-controller seam.
 
 ## Baseline
 
@@ -130,4 +130,5 @@ The App umbrella remains open for composer/attention re-evaluation and final res
 - `App.tsx` 6,933 → 6,367 newline-delimited lines; gate leaf567 and backend runtime10.
 - Focused App78 + gate29 + dialogs14 =121, typecheck/lint, full Vitest1,371 and boundary/security/diff checks green.
 - Full-diff review found stale root Playwright artifacts from a worker invocation that skipped the committed config. They were removed; `CHOKIDAR_USEPOLLING=true npm --prefix apps/desktop run test:ui-headless -- e2e/session-verification-gate.spec.ts` then passed12/12 with the repository config.
-- Full-diff evidence re-review and delivery pending.
+- Evidence delta review recorded `Correct-to-merge-after-evidence-reconciliation`.
+- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
