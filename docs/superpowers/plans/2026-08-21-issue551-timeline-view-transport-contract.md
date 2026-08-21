@@ -61,4 +61,5 @@ No other caller import changes are needed or permitted. No compatibility wrapper
 - Implementation: integrated by `luna-implementer` and parent-audited; the worker hit its bounded tool-call limit only after the five-file move and focused/lint checks were green.
 - Exactness: interface 1/1, parent 0, banner 1, reverse edges 0; `TimelineView.tsx` 5,198 → 5,100 lines and the transport leaf is 105 newline-delimited lines.
 - Focused post-move: 179/179; typecheck, lint and diff checks green.
-- Full diff and delivery: pending.
+- Full diff: `reviewer-flash` independently verified every member, caller and dependency edge and recorded `Correct-to-merge`; its editor reports an EOF line number one greater than `wc -l`, while the evidence deliberately records newline-delimited counts.
+- Delivery: final repository gates, PR CI and merge pending.
