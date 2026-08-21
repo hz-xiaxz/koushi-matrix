@@ -113,7 +113,8 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 - Exactness: global production18/18, top-level13/13, AppActor methods4/4, associated method1/1, moved tests6/6, helpers2/2, all1,029 test identities, top-level `pub(super)`11, method edges4, associated edge1, field edges5, parent imports11 and orphan binding1; public/wire/resource deltas0.
 - Full-diff review found one leaf-only helper unnecessarily imported/widened. The parent import was removed and `unsubscribe_replaced_focused_context_timeline_key` restored to private.
 - Delta review independently verified the exact 11-edge closure and recorded `Correct-to-merge-after-finding-fix`.
-- Delivery: final repository gates, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: focused navigation/source/mailbox suites green, core lib1,021/8 ignored, Vitest1,370, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
 - `runtime.rs` 7,715 → 7,149 newline-delimited lines; `runtime/navigation.rs` 593.
 - Focused moved tests6, relevant retained source/order tests6, saturated-mailbox behavior1, runtime navigation1, state navigation55, core lib1,021/8 ignored and all-targets/all-features check green.
 - Full diff and delivery pending.
