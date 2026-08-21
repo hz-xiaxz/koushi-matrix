@@ -1,12 +1,12 @@
 # Issue #551 TimelineView residual composition-root audit
 
-Status: architecture review pending. This document decides whether the split-now `TimelineView.tsx` candidate is complete after its leaf/controller seams.
+Status: architecture approved; delivery pending. This document decides whether the split-now `TimelineView.tsx` candidate is complete after its leaf/controller seams.
 
 ## Audited baseline
 
 - Base: `d2e46a226d55de20aa791f4f6e806f5092691194` (row transport actions PR #614 merged).
-- `TimelineView.tsx`: 3,944 newline-delimited lines / 150,904 bytes, reduced from the Issue baseline of approximately 8,782 lines.
-- Current component inventory: 16 `useState`, 69 `useRef`, 14 `useEffect`, 10 `useLayoutEffect`, 34 `useCallback`, 10 `useMemo`.
+- `TimelineView.tsx`: 3,944 newline-delimited lines / 150,904 bytes, reduced from the immutable first-seam baseline of 8,788 newline-delimited / 8,789 content lines.
+- TypeScript-AST call inventory: 16 `useState`, 86 `useRef`, 17 `useEffect`, 14 `useLayoutEffect`, 43 `useCallback`, 10 `useMemo`.
 - Seven ownership-focused TimelineView suites remain the controller gate; latest full frontend evidence is Vitest 1,370 and Playwright 248.
 
 ## Delivered ownership seams
@@ -89,5 +89,6 @@ No remaining independently mergeable move-only seam reduces ownership collision 
 ## Review and evidence gate
 
 - Read-only residual reconnaissance completed on `d2e46a22` with concrete state/ref/effect/resource and candidate-API analysis.
-- Formal `reviewer-flash` architecture verdict pending.
-- After approval: merge this audit, mark the TimelineView Issue checkbox complete, record the line reduction and ownership/teardown/API/focused-test evidence, then proceed to the split-later candidates.
+- Formal `reviewer-flash` review independently traced the delivered leaves, every residual resource cluster, teardown ordering and candidate API, challenged the avatar hook-order conclusion, found no missed independently mergeable seam and recorded `Correct-to-record-and-complete-TimelineView-checkbox`.
+- The reviewer-requested metric corrections are applied above and re-proved with a TypeScript AST walk plus `wc -l -c`.
+- After merge: mark the TimelineView Issue checkbox complete, record the line reduction and ownership/teardown/API/focused-test evidence, then proceed to the split-later candidates.
