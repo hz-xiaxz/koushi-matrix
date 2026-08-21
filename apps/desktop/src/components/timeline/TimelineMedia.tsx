@@ -19,7 +19,7 @@ import type { MediaTransferProgress, TimelineItem } from "../../domain/coreEvent
 import type { TimelineMediaDownloadState } from "../../domain/types";
 import type { TimelineForwardDestination } from "../../domain/projectionTypes";
 import { mediaSourceUrl } from "../../domain/mediaUrl";
-import type { TimelineTransport } from "../TimelineView";
+import type { TimelineTransport } from "./TimelineTransport";
 
 export type TimelineMediaViewerItem = {
   sourceUrl: string;

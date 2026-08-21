@@ -8,7 +8,7 @@ import { openExternalHttpUrl, toExternalHttpUrl } from "../../domain/externalLin
 import { parseMatrixPermalink, type MatrixPermalinkTarget } from "../../domain/matrixPermalink";
 import type { TimelineItem, TimelineLinkRange } from "../../domain/coreEvents";
 import type { UserProfile } from "../../domain/types";
-import type { TimelineRowActionHandlers } from "../TimelineView";
+import type { TimelineRowActionHandlers } from "./TimelineItemRow";
 
 type TimelineMentionToken = {
   token: string;
