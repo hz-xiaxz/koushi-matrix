@@ -66,4 +66,5 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 - Implementation: integrated by `luna-implementer` and parent-audited.
 - Exactness: 7/7 statements, parent 0, exports 6/6, private 1/1 and imports 3/3; `TimelineView.tsx` 4,440 → 4,353 newline-delimited lines and the leaf is 98.
 - Focused post-move 173/173; typecheck, lint and diff checks green; every parent projection ref/frame/ack timer/effect/cleanup remains in place.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently verified the final class/model/import/resource graph and recorded `Correct-to-merge`; parent `wc -l` is confirmed at 4,353 while editor display count includes the unterminated final line.
+- Delivery: final repository gates, PR CI and merge pending.
