@@ -18,9 +18,9 @@ use super::participants::{
     QaE2eeRecipient, QaOwnedRuntimeParticipant, QaParticipantLoginGate, SasQaOutcome,
     authenticated_session_info, cleanup_owned_e2ee_participant_best_effort,
     finish_e2ee_recipient_stage_with_owned_cleanup, login_synced_participant_for_qa, qa_data_dir,
-    refresh_device_keys_and_assert_known_for_qa, verify_provisional_second_device_for_qa,
-    wait_for_existing_identity_gate, wait_for_locked_snapshot, wait_for_matching_recovery_flow,
-    wait_for_recovery_gate,
+    refresh_device_keys_and_assert_known_for_qa, start_isolated_qa_runtime,
+    verify_provisional_second_device_for_qa, wait_for_existing_identity_gate,
+    wait_for_locked_snapshot, wait_for_matching_recovery_flow, wait_for_recovery_gate,
 };
 use super::registry::{
     DEVICE_A, DEVICE_B, E2EE_EVENT_TIMEOUT, E2EE_KEY_BACKUP_SEED_BODY,
@@ -208,7 +208,7 @@ pub(super) async fn run_gate_negative_stage(
     recovery_secret: &AuthSecret,
 ) -> Result<(), String> {
     let session_a = authenticated_session_info(conn_a, "gate negative primary session")?;
-    let runtime_a2 = CoreRuntime::start_with_data_dir(qa_data_dir("gate-negative-a2"));
+    let runtime_a2 = start_isolated_qa_runtime("gate-negative-a2")?;
     let mut conn_a2 = runtime_a2.attach();
     let login_id = conn_a2.next_request_id();
     conn_a2
@@ -252,7 +252,7 @@ pub(super) async fn run_gate_negative_stage(
     drop(conn_a2);
     runtime_a2.shutdown().await;
 
-    let runtime_a3 = CoreRuntime::start_with_data_dir(qa_data_dir("gate-negative-a3"));
+    let runtime_a3 = start_isolated_qa_runtime("gate-negative-a3")?;
     let mut conn_a3 = runtime_a3.attach();
     let login_a3 = conn_a3.next_request_id();
     conn_a3
@@ -295,7 +295,7 @@ pub(super) async fn run_gate_negative_stage(
     drop(conn_a3);
     runtime_a3.shutdown().await;
 
-    let runtime_a4 = CoreRuntime::start_with_data_dir(qa_data_dir("gate-negative-a4"));
+    let runtime_a4 = start_isolated_qa_runtime("gate-negative-a4")?;
     let mut conn_a4 = runtime_a4.attach();
     let login_a4 = conn_a4.next_request_id();
     conn_a4
@@ -338,7 +338,7 @@ pub(super) async fn run_gate_negative_stage(
     drop(conn_a4);
     runtime_a4.shutdown().await;
 
-    let runtime_a5 = CoreRuntime::start_with_data_dir(qa_data_dir("gate-negative-a5"));
+    let runtime_a5 = start_isolated_qa_runtime("gate-negative-a5")?;
     let mut conn_a5 = runtime_a5.attach();
     let login_a5 = conn_a5.next_request_id();
     conn_a5
@@ -391,7 +391,7 @@ pub(super) async fn run_gate_negative_stage(
     drop(conn_a5);
     runtime_a5.shutdown().await;
 
-    let runtime_a6 = CoreRuntime::start_with_data_dir(qa_data_dir("gate-negative-a6"));
+    let runtime_a6 = start_isolated_qa_runtime("gate-negative-a6")?;
     let mut conn_a6 = runtime_a6.attach();
     let login_a6 = conn_a6.next_request_id();
     conn_a6
@@ -782,7 +782,7 @@ pub(super) async fn run_e2ee_trust_stage(
     .await?;
     println!("e2ee_key_backup_enable=ok");
 
-    let runtime_a2 = CoreRuntime::start_with_data_dir(qa_data_dir("a2"));
+    let runtime_a2 = start_isolated_qa_runtime("a2")?;
     let conn_a2 = runtime_a2.attach();
     let mut owned_a2 = QaOwnedRuntimeParticipant::new(runtime_a2, conn_a2);
     let a2_stage_result: Result<(), String> = async {
@@ -1175,7 +1175,7 @@ pub(super) async fn run_encryption_debug_stage(
     // eligible recipient (crypto excludes the current device; an empty
     // eligible set must refuse rather than report success).
     let session_a = authenticated_session_info(conn, "encryption-debug session A")?;
-    let runtime_a2 = CoreRuntime::start_with_data_dir(qa_data_dir("encryption-debug-a2"));
+    let runtime_a2 = start_isolated_qa_runtime("encryption-debug-a2")?;
     let mut conn_a2 = runtime_a2.attach();
     let mut account_key_a2_for_cleanup = None;
     // Guarded body: A2 is logged out and its runtime is stopped on BOTH the
@@ -2252,7 +2252,7 @@ pub(super) async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
 
         let mut recipient_second_device_key = None;
         if check_recipient_second_device {
-            let runtime_b2 = CoreRuntime::start_with_data_dir(qa_data_dir("e2ee-b2"));
+            let runtime_b2 = start_isolated_qa_runtime("e2ee-b2")?;
             let conn_b2 = runtime_b2.attach();
             owned_recipient_second_device =
                 Some(QaOwnedRuntimeParticipant::new(runtime_b2, conn_b2));
@@ -2310,7 +2310,7 @@ pub(super) async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
             recipient_second_device_key = Some(key_b2);
         }
 
-        let runtime_b3 = CoreRuntime::start_with_data_dir(qa_data_dir("e2ee-b3-unverified"));
+        let runtime_b3 = start_isolated_qa_runtime("e2ee-b3-unverified")?;
         let conn_b3 = runtime_b3.attach();
         owned_unverified_recipient_device =
             Some(QaOwnedRuntimeParticipant::new(runtime_b3, conn_b3));

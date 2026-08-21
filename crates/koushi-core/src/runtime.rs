@@ -1202,7 +1202,7 @@ impl CoreRuntime {
         )
     }
 
-    #[cfg(any(test, feature = "test-hooks"))]
+    #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
     pub fn start_with_data_dir_and_file_credentials(
         data_dir: PathBuf,
         credential_dir: PathBuf,

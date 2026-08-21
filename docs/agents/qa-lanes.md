@@ -49,7 +49,12 @@ PATH=/tmp/koushi-desktop-local-qa-bin:$PATH \
 
 The runner registers separate synthetic users for the SDK lane and the core
 lane. Keep E2EE trust proofs isolated so unrelated smoke-test devices do not
-become part of an account's device graph.
+become part of an account's device graph. Within one core lane, every fixture
+that represents another device of the same user must also use its own file
+credential-store subdirectory; sharing the process-wide saved session silently
+restores the primary device and invalidates all multi-device evidence. Restart
+fixtures deliberately keep the shared credential store because they prove
+restoration of that exact device.
 
 `--scenario=all` runs the aggregate lane. `--scenario=timeline_stress` requires
 `--core` and must be the only scenario in the run. The `send_queue` scenario
