@@ -548,11 +548,12 @@ describe("App diagnostics lifecycle", () => {
 describe("diagnostics runtime source contract", () => {
   test("contains no verbose diagnostics runtime gate or Vite variable", async () => {
     const { readFile } = await import("node:fs/promises");
-    const files = ["./App.tsx", "./domain/diagnostics.ts", "./vite-env.d.ts"];
-    const contents = await Promise.all(files.map((file) => readFile(new URL(file, import.meta.url), "utf8")));
-    const runtimeSource = contents.join("\n");
+    const files = ["./App.tsx", "./domain/diagnostics.ts", "./vite-env.d.ts", "./app/qaDiagnostics.ts"];
+    const contents = await Promise.all(files.map(async (file) => [file, await readFile(new URL(file, import.meta.url), "utf8")] as const));
 
-    expect(runtimeSource).not.toContain("VITE_KOUSHI_VERBOSE_DIAGNOSTICS");
-    expect(runtimeSource).not.toContain("verboseDiagnosticsEnabled");
+    for (const [file, source] of contents) {
+      expect(source, file).not.toContain("VITE_KOUSHI_VERBOSE_DIAGNOSTICS");
+      expect(source, file).not.toContain("verboseDiagnosticsEnabled");
+    }
   });
 });
