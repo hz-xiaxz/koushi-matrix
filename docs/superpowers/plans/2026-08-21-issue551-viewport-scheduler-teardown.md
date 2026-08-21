@@ -58,6 +58,7 @@ No API/export/type/timing constant, callback ordering, timeout duration, fallbac
 
 - Design round 1: `reviewer-flash` recorded `Changes-required` because the new test lacked explicit jsdom environment/removal mechanics and capability binding/counts were ambiguous.
 - Amendment: pin jsdom, property-descriptor removal/restoration, exact RED error, bound capabilities and 1,370-test total.
-- Design round 2 pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design round 2: `reviewer-flash` independently verified the exact installed Vitest/jsdom deletion semantics, test counts and capability bindings and recorded `Correct-to-implement`.
+- Implementation note: install all window spies before scheduling so the captured references are spies; schedule-time optional RAF/cancel-RAF capture is intentional and equivalent to the prior runtime guards.
+- Implementation approved, not started.
 - Full diff and delivery pending.
