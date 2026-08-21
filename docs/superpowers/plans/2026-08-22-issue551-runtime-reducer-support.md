@@ -1,6 +1,6 @@
 # Issue #551 runtime reducer/deferred support extraction
 
-Status: design review pending. Scope is the final planned behavior-preserving runtime seam before residual audit.
+Status: design approved. Scope is the final planned behavior-preserving runtime seam before residual audit.
 
 ## Baseline
 
@@ -81,7 +81,7 @@ Move exactly four owner tests in existing order:
 3. `native_attention_recomputed_diagnostic_records_private_safe_fields`
 4. `native_attention_recomputed_diagnostic_records_private_safe_fields_child`
 
-Preserve attrs/bodies except update the two subprocess `--exact` paths from `runtime::tests::…` to `runtime::reducer_support::tests::…`. Leaf tests use `super::*`, import `super::super::tests::unread_diagnostic_room`, and explicitly import `koushi_state::{RoomLatestEventSummary, SessionInfo}`. The shared fixture remains one parent-owned `pub(super)` copy because Activity/profile/navigation mailbox tests also consume it.
+Preserve attrs/bodies except update the two subprocess `--exact` paths from `runtime::tests::…` to `runtime::reducer_support::tests::…`. Leaf tests use `super::*`, import `super::super::tests::unread_diagnostic_room`, and explicitly import `koushi_state::{RoomLatestEventSummary, SessionInfo, SessionState}`; `SessionAuthenticationMethod` remains fully qualified. The shared fixture remains one parent-owned `pub(super)` copy because Activity/profile/navigation mailbox tests also consume it.
 
 Remove only `RoomLatestEventSummary` from the parent test imports; `SessionInfo` remains required. All 1,029 core lib test identities remain equal after normalizing only four owner paths.
 
@@ -109,4 +109,5 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 ## Review gate
 
 - Read-only reconnaissance traced reducer, diagnostics, cross-domain persistence and central-registry boundaries.
-- Formal `reviewer-flash` verdict pending; implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` round 1 found the private-type-in-`pub(super)` interface defect; the struct visibility/verifier contract was corrected.
+- Round 2 traced the opaque pass-through, sibling edges, imports, tests and ordering and recorded `Correct-to-implement`.
