@@ -1,6 +1,6 @@
 # Issue #591 — eviction-resistant Megolm rotation attribution
 
-Status: implementation complete; final diff review pending.
+Status: implementation and final review complete; ready to merge.
 
 Review record: `reviewer-flash` read-only review, 2026-08-21,
 `Correct-to-implement`. Five Minor clarifications were incorporated: migrate the
@@ -263,3 +263,11 @@ failure. A worktree-local `npm ci` plus a free port produced the fresh complete
 Canon amendment review: `reviewer-flash`, read-only, `Canon-approved`. The
 original design review verdict was `Correct-to-implement`; all five Minor
 clarifications were incorporated before implementation.
+
+Final full-diff review: `reviewer-gpt`, read-only, `Correct-to-merge`, no
+findings. The immutable review bundle contained the complete branch diff,
+vendored SDK commit, tests, and gate summaries (`sha256:
+84e71bae3442ecda3adcb528913dc7a1486bf46db830d7f3ee326fa86deadf81`).
+The reviewer explicitly passed bounded attribution, honest no-fallback
+semantics, current-device UI gating, strict privacy, reset/overflow, and no
+behavior change.
