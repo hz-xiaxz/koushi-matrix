@@ -128,5 +128,6 @@ The App umbrella remains open for composer/attention re-evaluation and final res
 - Implementation integrated by `luna-implementer`; parent restored compact immutable declaration formatting after rejecting unrelated Prettier churn.
 - Exactness: backend2/2, gate12/12, App parent0, gate exports4/private8/import statements6, backend exports2/imports3, orphan members7, App direct imports3/re-export2 and one production API initializer; gate body/JSX exact after relative type-path normalization.
 - `App.tsx` 6,933 → 6,367 newline-delimited lines; gate leaf567 and backend runtime10.
-- Focused App78 + gate29 + dialogs14 =121, e2e gate12, typecheck/lint, full Vitest1,371 and boundary/security/diff checks green.
-- Full diff and delivery pending.
+- Focused App78 + gate29 + dialogs14 =121, typecheck/lint, full Vitest1,371 and boundary/security/diff checks green.
+- Full-diff review found stale root Playwright artifacts from a worker invocation that skipped the committed config. They were removed; `CHOKIDAR_USEPOLLING=true npm --prefix apps/desktop run test:ui-headless -- e2e/session-verification-gate.spec.ts` then passed12/12 with the repository config.
+- Full-diff evidence re-review and delivery pending.
