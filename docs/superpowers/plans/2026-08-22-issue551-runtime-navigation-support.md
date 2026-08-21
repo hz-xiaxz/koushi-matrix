@@ -1,6 +1,6 @@
 # Issue #551 runtime navigation support extraction
 
-Status: design review pending. Scope is one behavior-preserving navigation persistence/cleanup/projection seam.
+Status: design approved. Scope is one behavior-preserving navigation persistence/cleanup/projection seam.
 
 ## Baseline
 
@@ -108,4 +108,5 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 ## Review gate
 
 - Read-only reconnaissance traced persistence, action transaction, cleanup lane, focused acknowledgment and timestamp lookup boundaries.
-- Formal `reviewer-flash` verdict pending; implementation prohibited until `Correct-to-implement`.
+- `reviewer-flash` independently traced all 18 identities, six tests/two helpers, visibility/import closure, persistence source boundaries and parent ordering/ownership and recorded `Correct-to-implement`.
+- Implementation must re-confirm immutable hash/bytes and all 1,029 test identities.
