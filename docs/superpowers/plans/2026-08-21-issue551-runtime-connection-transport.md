@@ -9,6 +9,7 @@ Status: design review pending. Scope is one behavior-preserving ownership seam.
 - Focused baseline:
   - `standalone_composer_command_permit_outlives_activation_lease`: 1/1;
   - `core_connection_command_handle_clones_submit_path`: 1/1;
+  - `timeline_sender_label_and_reaction_sender_preview_follow_people_facing_policy`: 1/1;
   - `runtime_core` integration: 4/4.
 
 ## Ownership decision
@@ -42,18 +43,19 @@ Production leaf has exactly seven import statements:
 
 Parent declares private `mod connection;` and explicitly `pub use connection::{CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag};`. This preserves both `koushi_core::runtime::*` and existing crate-root re-exports in `lib.rs` without exposing `runtime::connection`.
 
-All four moved types and their existing fields/methods retain exact visibility. `CoreCommandEnvelope` stays parent-private and is accessible to the descendant module; `CoreRuntime` fields stay private and are accessed only by the moved descendant `attach` method. No `pub(super)`, new constructor, wrapper, alias, trait, compatibility shim or public namespace is added.
+All four moved types and their existing fields/methods retain exact visibility. `CoreCommandEnvelope` stays parent-private and is accessible to the descendant module. `CoreRuntime` fields stay private: the moved descendant `attach` method accesses its six connection resources, while existing parent-owned shutdown/barrier tests continue reading `snapshot_rx` directly. No `pub(super)`, new constructor, wrapper, alias, trait, compatibility shim or public namespace is added.
 
 ## Test ownership
 
-Move exactly two tests in original relative order to the leaf's `#[cfg(test)] mod tests`:
+Move exactly three tests in original relative order to the leaf's `#[cfg(test)] mod tests`:
 
 1. `standalone_composer_command_permit_outlives_activation_lease`
 2. `core_connection_command_handle_clones_submit_path`
+3. `timeline_sender_label_and_reaction_sender_preview_follow_people_facing_policy`
 
-The first directly constructs the private command handle and pins lease-permit retention. The second is a source-characterization test for this owner. Change only its source input from `include_str!("runtime.rs")` to `include_str!("connection.rs")`; continue reading the owner file individually and do not concatenate source.
+The first directly constructs the private command handle and pins lease-permit retention. The second is a source-characterization test for this owner. Change only its source input from `include_str!("runtime.rs")` to `include_str!("connection.rs")`; continue reading the owner file individually and do not concatenate source. The third directly constructs private `CoreConnection` fields and pins consumer-side label projection, so it must move with that owner rather than widening fields or adding a test constructor.
 
-Leaf tests use existing test-only `use super::*` plus the minimum explicit `ComposerTarget` import. No parent helper moves or visibility changes. All other runtime unit tests remain parent-owned.
+Leaf tests use existing test-only `use super::*` plus four explicit import statements: `BTreeMap/BTreeSet`; event timeline/diff/item/thread DTOs; state reducer/profile/session/alias/`ComposerTarget` types; and `AccountKey/TimelineKey/TimelineKind`. No parent helper moves or visibility changes. All other runtime unit tests remain parent-owned.
 
 ## Invariants
 
@@ -72,15 +74,15 @@ A temporary `syn` verifier compares immutable base with parent + leaf:
 
 - types 4/4, parent 0;
 - methods keyed by `(self type, method, name)`: handle 9/9, connection 13/13, runtime attach 1/1 and retained parent CoreRuntime methods unchanged;
-- tests 2/2, parent 0, bodies/attrs exact except the one approved `include_str!` path;
-- all 1,029 lib test identities bidirectionally equal after normalizing only the two owner paths;
+- tests 3/3, parent 0, bodies/attrs exact except the one approved `include_str!` path;
+- all 1,029 lib test identities bidirectionally equal after normalizing only the three owner paths;
 - public re-export 4/4, imports 7/7, zero visibility deltas, zero duplicate/missing/excess item;
 - exhaustive event match order and public/crate paths exact;
 - no path attribute, production glob, wrapper, alias, TODO or source concatenation.
 
 ## Verification
 
-Run the same focused 1 + 1 + 4 tests before and after, then:
+Run the same focused 1 + 1 + 1 + 4 tests before and after, then:
 
 - `cargo test -p koushi-core --lib`;
 - runtime session/device/e2ee/timeline/search/intent integration suites;
@@ -91,6 +93,6 @@ After full-diff approval, integrate current `origin/main`, obtain delta approval
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design round 1: `reviewer-flash` recorded `Changes-required` because the consumer-projection test directly constructs private `CoreConnection` fields and the CoreRuntime-field invariant was overstated.
+- Both findings are corrected above; implementation remains prohibited pending fresh `Correct-to-implement` review.
 - Full diff and delivery pending.
