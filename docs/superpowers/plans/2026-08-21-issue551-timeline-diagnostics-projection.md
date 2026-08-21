@@ -5,7 +5,7 @@ Status: design review pending. Scope is move-only and behavior-preserving.
 ## Baseline
 
 - Base: `55fad7b2391c8bc24112a49f5ad36d40b30084de` (message-source dialog PR #611 merged).
-- `TimelineView.tsx`: 4,104 newline-delimited lines.
+- `TimelineView.tsx`: 4,104 newline-delimited lines / 156,370 bytes / SHA-256 `80fb3d755ae3f4b01d949d3da7b57404ddbe6ce5afb76b5d093a7a5ee45c0912`.
 - Focused baseline: `npm --prefix apps/desktop test -- --run src/components/TimelineView.media.test.tsx`, 23/23.
 
 ## Ownership decision
@@ -42,12 +42,12 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 ## Verification
 
 - AST exactness: 3/3 leaf, parent 0, exports 3, imports 2/2; parent one type re-export.
-- Parent import callers remain exactly three declaration uses plus the existing callback/ref annotations.
+- Existing external type users remain exactly `App.tsx` once and `panes.tsx` twice; parent callback/ref annotations remain local users.
 - Same focused command before/after 23/23.
 - Typecheck, lint and diff; then full matrix after diff approval.
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design: `reviewer-flash` traced the complete declarations, dependency/caller graph and focused assertions and recorded `Correct-to-implement`; its two minor reproducibility notes are folded into the immutable hash/bytes and explicit external-user count above.
+- Implementation approved, not started.
 - Full diff and delivery pending.
