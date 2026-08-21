@@ -5,9 +5,14 @@ use crate::{
     MatrixClientSession, MatrixSlidingSyncInviteListSupport, ProvisionalEncryptionSyncError,
 };
 use futures_util::StreamExt;
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
 #[cfg(test)]
 use koushi_state::SessionInfo;
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use thiserror::Error;
 
 #[cfg(test)]
@@ -216,6 +221,67 @@ pub fn new_encryption_sync_permit_owner() -> EncryptionSyncPermitOwner {
     ))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EncryptionSyncLifecycleOwner {
+    Provisional,
+    Steady,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EncryptionSyncLifecycleStage {
+    Created,
+    FirstRequest,
+    FirstResponse,
+    Failed,
+    Terminated,
+    Handoff,
+    Replaced,
+}
+
+pub fn record_encryption_sync_lifecycle(
+    owner: EncryptionSyncLifecycleOwner,
+    snapshot: matrix_sdk::encryption::EncryptionSyncReadinessSnapshot,
+    stage: EncryptionSyncLifecycleStage,
+    elapsed: Duration,
+) {
+    let owner = match owner {
+        EncryptionSyncLifecycleOwner::Provisional => "provisional",
+        EncryptionSyncLifecycleOwner::Steady => "steady",
+    };
+    let level = match stage {
+        EncryptionSyncLifecycleStage::Failed | EncryptionSyncLifecycleStage::Terminated => {
+            DiagnosticLevel::Warn
+        }
+        _ => DiagnosticLevel::Info,
+    };
+    let stage = match stage {
+        EncryptionSyncLifecycleStage::Created => "created",
+        EncryptionSyncLifecycleStage::FirstRequest => "first_request",
+        EncryptionSyncLifecycleStage::FirstResponse => "first_response",
+        EncryptionSyncLifecycleStage::Failed => "failed",
+        EncryptionSyncLifecycleStage::Terminated => "terminated",
+        EncryptionSyncLifecycleStage::Handoff => "handoff",
+        EncryptionSyncLifecycleStage::Replaced => "replaced",
+    };
+    let readiness = match snapshot.state {
+        matrix_sdk::encryption::EncryptionSyncReadinessState::NotStarted => "not_started",
+        matrix_sdk::encryption::EncryptionSyncReadinessState::Pending => "pending",
+        matrix_sdk::encryption::EncryptionSyncReadinessState::Received => "received",
+        matrix_sdk::encryption::EncryptionSyncReadinessState::Failed => "failed",
+        matrix_sdk::encryption::EncryptionSyncReadinessState::Cancelled => "cancelled",
+    };
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(level, "core.encryption_sync_lifecycle", stage)
+            .field(DiagnosticField::token("owner", owner))
+            .field(DiagnosticField::count("generation", snapshot.generation))
+            .field(DiagnosticField::token("readiness", readiness))
+            .field(DiagnosticField::milliseconds(
+                "elapsed_ms",
+                elapsed.as_millis(),
+            )),
+    );
+}
+
 /// Runs the encryption-only Simplified Sliding Sync owner used while a newly
 /// authenticated session is waiting for trust admission.
 ///
@@ -233,20 +299,63 @@ where
 {
     use matrix_sdk_ui::encryption_sync_service::EncryptionSyncService;
 
+    let started = Instant::now();
     let permit = permit.lock_owned().await;
     let service = EncryptionSyncService::new(session.client().clone(), None)
         .await
         .map_err(|_| ProvisionalEncryptionSyncError::Sdk)?;
     let stream = service.sync(permit);
+    record_encryption_sync_lifecycle(
+        EncryptionSyncLifecycleOwner::Provisional,
+        session.client().encryption_sync_readiness_snapshot(),
+        EncryptionSyncLifecycleStage::Created,
+        started.elapsed(),
+    );
+    record_encryption_sync_lifecycle(
+        EncryptionSyncLifecycleOwner::Provisional,
+        session.client().encryption_sync_readiness_snapshot(),
+        EncryptionSyncLifecycleStage::FirstRequest,
+        started.elapsed(),
+    );
     futures_util::pin_mut!(stream);
+    let mut first_response = true;
 
     while let Some(result) = stream.next().await {
-        result.map_err(|_| ProvisionalEncryptionSyncError::Sdk)?;
+        if result.is_err() {
+            record_encryption_sync_lifecycle(
+                EncryptionSyncLifecycleOwner::Provisional,
+                session.client().encryption_sync_readiness_snapshot(),
+                EncryptionSyncLifecycleStage::Failed,
+                started.elapsed(),
+            );
+            return Err(ProvisionalEncryptionSyncError::Sdk);
+        }
+        if first_response {
+            first_response = false;
+            record_encryption_sync_lifecycle(
+                EncryptionSyncLifecycleOwner::Provisional,
+                session.client().encryption_sync_readiness_snapshot(),
+                EncryptionSyncLifecycleStage::FirstResponse,
+                started.elapsed(),
+            );
+        }
         if on_successful_sync().await == MatrixSyncLoopControl::Stop {
+            record_encryption_sync_lifecycle(
+                EncryptionSyncLifecycleOwner::Provisional,
+                session.client().encryption_sync_readiness_snapshot(),
+                EncryptionSyncLifecycleStage::Handoff,
+                started.elapsed(),
+            );
             return Ok(());
         }
     }
 
+    record_encryption_sync_lifecycle(
+        EncryptionSyncLifecycleOwner::Provisional,
+        session.client().encryption_sync_readiness_snapshot(),
+        EncryptionSyncLifecycleStage::Terminated,
+        started.elapsed(),
+    );
     Err(ProvisionalEncryptionSyncError::Sdk)
 }
 
@@ -288,6 +397,34 @@ mod tests {
         thread,
         time::Duration,
     };
+    #[test]
+    fn encryption_sync_lifecycle_diagnostic_is_closed_and_private() {
+        let _guard = koushi_diagnostics::test_support::lock();
+        let start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
+        super::record_encryption_sync_lifecycle(
+            super::EncryptionSyncLifecycleOwner::Steady,
+            matrix_sdk::encryption::EncryptionSyncReadinessSnapshot {
+                generation: 7,
+                state: matrix_sdk::encryption::EncryptionSyncReadinessState::Received,
+            },
+            super::EncryptionSyncLifecycleStage::FirstResponse,
+            Duration::from_millis(123),
+        );
+        let snapshot = koushi_diagnostics::test_support::detail_snapshot();
+        let record = snapshot.records[start..]
+            .iter()
+            .find(|record| record.event.source == "core.encryption_sync_lifecycle")
+            .expect("lifecycle diagnostic");
+        let text = format!("{:?}", record.event);
+        assert!(text.contains("steady"));
+        assert!(text.contains("received"));
+        for forbidden in ["@user", "DEVICE", "!room", "https://", "sync-position"] {
+            assert!(!text.contains(forbidden), "privacy leak: {text}");
+        }
+    }
+
     #[test]
     fn sliding_sync_invite_probe_contract_is_typed_bounded_and_discards_cursor() {
         let source = include_str!("sync.rs");

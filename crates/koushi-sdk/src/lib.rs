@@ -138,9 +138,10 @@ pub use search::{
 };
 
 pub use sync::{
-    EncryptionSyncPermitOwner, MatrixSyncError, MatrixSyncLoopControl, close_session_stores,
-    new_encryption_sync_permit_owner, probe_sliding_sync_invite_list_support,
-    provisional_encryption_sync_loop, sync_loop,
+    EncryptionSyncLifecycleOwner, EncryptionSyncLifecycleStage, EncryptionSyncPermitOwner,
+    MatrixSyncError, MatrixSyncLoopControl, close_session_stores, new_encryption_sync_permit_owner,
+    probe_sliding_sync_invite_list_support, provisional_encryption_sync_loop,
+    record_encryption_sync_lifecycle, sync_loop,
 };
 
 #[cfg(any(test, feature = "test-hooks", feature = "smoke"))]

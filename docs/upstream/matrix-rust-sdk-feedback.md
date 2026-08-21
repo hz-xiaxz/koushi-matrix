@@ -434,3 +434,36 @@ error and does not change rotation, sharing, recipient, retry, or persistence
 behavior. Upstreaming intent: propose this bounded diagnostic lookup alongside
 the typed rotation observer; remove the downstream accessor if upstream offers
 an equivalent closed correlation API.
+
+## 2026-08-21 (#577): generation-scoped encryption readiness
+
+A tracked, locally clean user can gain a new device before the sender processes
+`device_lists.changed`. Standard pre-share then sees the stale local device set.
+The downstream SDK patch adds an opt-in first-event readiness contract while
+leaving upstream defaults unchanged:
+
+- `EncryptionSyncService` publishes monotonic `Pending`, `Received`, `Failed`,
+  and `Cancelled` generations through a client-owned watch; stale guards cannot
+  settle a replacement generation;
+- a bounded 128-entry exact outbound-session registry retains
+  `Unfenced|Fencing|Ready`, so cancellation/failure and registry eviction cannot
+  turn a resident index-0 session into a false ready bypass;
+- an unfenced index-0 session waits under one 10-second deadline for the current
+  encryption generation, performs an out-of-band full active-member
+  `/keys/query`, commits it through the standard crypto path, and repeats normal
+  pre-share before event encryption;
+- the send queue treats the closed `EncryptionReadinessError` as recoverable and
+  leaves the local echo pending; and
+- the existing room-key diagnostic observer receives only anonymous aliases,
+  closed states/outcomes, count/index buckets, generation/eviction counts, and a
+  retryable flag.
+
+The option defaults off and does not enable #510 or #523, alter #541's original
+recipient ledger, introduce a new Matrix event, query before unchanged ready
+sessions, fall back to plaintext, or infer historical entitlement for a device
+first visible after the authoritative response. Underlying HTTP/crypto failures,
+identifiers, sync positions, key material, URLs, content, and raw errors do not
+cross the typed failure or diagnostic boundary. Upstreaming intent: propose the
+generation watch and retryable new-session fence as separate opt-in APIs; retain
+only the smallest downstream layer if upstream adopts equivalent lifecycle and
+full-query/pre-share primitives.

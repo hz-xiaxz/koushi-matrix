@@ -201,6 +201,7 @@ pub(crate) fn classify_room_error(error: &MatrixRoomOperationError) -> RoomFailu
             MatrixRoomOperationFailureKind::Http => RoomFailureKind::Network,
             MatrixRoomOperationFailureKind::Sdk
             | MatrixRoomOperationFailureKind::Encryption
+            | MatrixRoomOperationFailureKind::EncryptionReadiness
             | MatrixRoomOperationFailureKind::Store
             | MatrixRoomOperationFailureKind::SecureBackupRequired
             | MatrixRoomOperationFailureKind::WrongRoomState => RoomFailureKind::Sdk,
