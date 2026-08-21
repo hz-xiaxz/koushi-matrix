@@ -100,4 +100,6 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 - `runtime.rs` 7,148 → 7,035 newline-delimited lines; `runtime/scheduled_send.rs` 137.
 - Focused post-move runtime12, core filter16, state9, source contract1, core lib1,021/8 ignored and all-targets/all-features check green.
 - Full diff: `reviewer-flash` independently traced all nine identities, lifecycle order, visibility/imports, source assertions and parent resource ownership and recorded `Correct-to-merge`.
-- Delivery: final repository gates, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: focused scheduled-send/source suites green, core lib1,021/8 ignored, Vitest1,370, Playwright248 with polling, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
+- Initial workspace run reproduced the known process-global composer diagnostic observation in `corrupt_load_attempts_once_per_session`; exact test, complete runtime-timeline21 and complete workspace reruns were green. Scheduled-send persistence code has no edge to that diagnostic.
+- Delivery: latest-main integration if required, PR CI and merge pending.
