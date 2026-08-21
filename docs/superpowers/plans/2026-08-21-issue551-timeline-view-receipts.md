@@ -95,6 +95,12 @@ Temporary TypeScript verification proves 13/13 declaration bodies match immutabl
 - Parent imports all three and flat-re-exports only existing public `receiptDisplayName`; no reverse import/cycle.
 - Focused baseline/post 103/103; typecheck, lint and diff check green. No test/CSS/i18n/domain/transport/receipt semantics/resource behavior changed.
 
+### Final local evidence
+
+- Frontend: typecheck/lint green; Vitest 1,367; UI-headless timeline store + Playwright 248 with polling; production build green.
+- Rust unchanged-contract proof: workspace 2,393/13 ignored across 97 suites; desktop 149/1 ignored; Headless Core QA 129.
+- Boundary/policy: Tauri adapter, domain dependencies, tracked secret scan, release gates, IPC wire contract, SDK submodule, agents docs, wasm, `cargo deny`, `cargo machete`, rustfmt, AST exactness and diff checks green.
+
 ## Verification
 
 ```bash
