@@ -4,8 +4,8 @@
 
 - Design: `reviewer-flash` verified the 14-declaration/resource-owner boundary and recorded `Correct-to-implement`; its import-source/baseline notes are incorporated below.
 - Implementation: integrated; 14/14 declaration exactness, 4/4 exports, focused tests, typecheck, lint and diff checks are green.
-- Full-diff review: pending.
-- Delivery: pending.
+- Full-diff review: `reviewer-flash` inspected the complete media owner/resource graph and recorded `Correct-to-merge`; no finding remains.
+- Delivery: final repository gates, PR CI and merge pending.
 
 ## Objective
 
