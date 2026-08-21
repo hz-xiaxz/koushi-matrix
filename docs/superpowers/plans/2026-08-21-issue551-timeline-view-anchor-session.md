@@ -92,4 +92,5 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 - Full-diff round 1: `reviewer-flash` verified the complete move and recorded `Correct-to-merge`; its only minor finding was the now-orphaned three-line `Scroll anchor` banner in the parent.
 - Banner delta: move that exact banner to the anchor owner leaf.
 - Final delta review: `reviewer-flash` revalidated the final tree and recorded `Correct-to-merge`; no blocker remains.
-- Delivery: final repository gates, PR CI and merge pending.
+- Final local evidence: focused 173/173; Vitest 1,367; Playwright 248 with polling; workspace all-targets, desktop 149/1 ignored and Headless Core QA 129; typecheck/lint/build/wasm, Tauri/domain boundaries, tracked-secret/release/IPC wire, SDK/docs, deny/machete/rustfmt/exactness/diff checks all green.
+- Delivery: PR CI and merge pending.
