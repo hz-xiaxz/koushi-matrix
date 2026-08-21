@@ -92,6 +92,12 @@ Temporary TypeScript verification proves 14/14 bodies match immutable source, pa
 - Parent imports the two components and viewer-item type and flat-re-exports only the existing test helper; the reverse edge is type-only.
 - Focused baseline/post 103/103; typecheck, lint and diff check green. No test/CSS/i18n/domain/transport/media semantics/resource behavior changed.
 
+### Final local evidence
+
+- Frontend: typecheck/lint green; Vitest 1,367; UI-headless timeline store + Playwright 248 with polling; production build green.
+- Rust unchanged-contract proof: workspace 2,393/13 ignored across 97 suites; desktop 149/1 ignored; Headless Core QA 129.
+- Boundary/policy: Tauri adapter, domain dependencies, tracked secret scan, release gates, IPC wire contract, SDK submodule, agents docs, wasm, `cargo deny`, `cargo machete`, rustfmt, AST exactness and diff checks green.
+
 ## Verification
 
 ```bash
