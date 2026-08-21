@@ -84,4 +84,5 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 - Implementation: integrated by `luna-implementer` and parent-audited; the worker reached its bounded turn limit after focused/inventory checks, before reporting typecheck/lint, which the parent then ran green.
 - Exactness: 16/16 statements, parent 0, exports 9/9, private 7/7, two type-only imports, four approved parent imports removed; `TimelineView.tsx` 4,869 → 4,664 newline-delimited lines and the leaf is 221.
 - Focused post-move 173/173; typecheck, lint and diff checks green; listener/unsubscribe/fallback timer and all state/resource owners remain in the parent.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently verified inventory, import/caller graph, diagnostic/privacy strings and lifecycle owners and recorded `Correct-to-merge`; parent AST comparison supplies the reviewer's read-only base-diff limitation.
+- Delivery: final repository gates, PR CI and merge pending.
