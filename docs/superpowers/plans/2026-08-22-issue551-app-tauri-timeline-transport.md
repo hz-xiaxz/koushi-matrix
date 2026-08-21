@@ -1,6 +1,6 @@
 # Issue #551 App Tauri timeline transport extraction
 
-Status: design approved. Scope is the first behavior-preserving `App.tsx` ownership seam.
+Status: implemented; full-diff review pending. Scope is the first behavior-preserving `App.tsx` ownership seam.
 
 ## Baseline
 
@@ -103,3 +103,8 @@ The App split-later checkbox remains open for diagnostics, verification/destruct
 
 - Read-only App reconnaissance measured hooks/resources/render branches and selected the transport as the cleanest existing ownership seam.
 - `reviewer-flash` independently traced declaration/import closure, all transport methods/commands, listener/media lifecycle, source assertions, QA regexes and edge direction and recorded `Correct-to-implement`.
+- Implementation integrated by `luna-implementer` and parent-audited.
+- Exactness: declarations6/6, parent0, exports3/private3, destination imports7, command strings27, App orphan imports2, retained top-level declarations exact, source assertions2 unchanged; hook/listener/timer/render/public-export deltas0.
+- `App.tsx` 7,245 → 7,065 newline-delimited lines; `backend/tauriTimelineTransport.ts` 194.
+- Focused App80, typecheck/lint, full Vitest1,370, Playwright248, build/boundary/security and diff checks green.
+- Full diff and delivery pending.
