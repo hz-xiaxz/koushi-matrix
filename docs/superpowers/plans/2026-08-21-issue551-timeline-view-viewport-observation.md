@@ -76,6 +76,6 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change.
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design: `reviewer-flash` verified all 13 declarations, visibility/import graph, numeric/DOM semantics, parent ownership and coverage and recorded `Correct-to-implement`.
+- Implementation approved, not started.
 - Full diff and delivery pending.
