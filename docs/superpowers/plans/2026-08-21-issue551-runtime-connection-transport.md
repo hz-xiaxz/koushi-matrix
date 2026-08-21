@@ -1,6 +1,6 @@
 # Issue #551 runtime connection transport extraction
 
-Status: implemented; full-diff review pending. Scope is one behavior-preserving ownership seam.
+Status: full diff approved; delivery pending. Scope is one behavior-preserving ownership seam.
 
 ## Baseline
 
@@ -99,6 +99,7 @@ After full-diff approval, integrate current `origin/main`, obtain delta approval
 - Both findings were corrected; round 2 verified the complete type/method/test/import/privacy/public/lifecycle graph and recorded `Correct-to-implement`.
 - Implementation exposed additional compiler-proven orphan imports from the completed Activity/connection moves; the exact production/test closure was amended and `reviewer-flash` recorded `Correct-to-continue-implementation`. The unapproved worker draft omitted three doc attrs and added one unused binding; parent restored the exact docs and removed the binding before integration.
 - Implementation exactness: types 4/4, handle methods 9/9, connection methods 13/13, attach 1/1, tests 3/3, leaf imports 7/7, public re-export 4/4, visibility deltas 0; all 1,029 lib test identities match after normalizing the three owner paths.
-- `runtime.rs` 9,643 → 9,013 newline-delimited lines; `runtime/connection.rs` is 665.
+- Full-diff round 1 found moved docs/`Clone` attrs left on `AbortOnDrop` and `ComposerDraftLoadStatus`; parent removed both, expanded exactness to all retained top-level types, and round 2 recorded `Correct-to-merge` with no blocker.
+- `runtime.rs` 9,643 → 9,003 newline-delimited lines; `runtime/connection.rs` is 665.
 - Focused post-move 1+1+1+4; core lib 1,021/8 ignored; session 8, device 2, E2EE 2, timeline 21, search 1 and intent 5; all-targets/all-features check, rustfmt, exactness and diff checks green.
-- Full diff and delivery pending.
+- Delivery: final repository gates, latest-main integration/delta review, PR CI and merge pending.
