@@ -81,5 +81,7 @@ Only `TimelineView.tsx`, the new hook and this plan/index may change.
 ## Review gate
 
 - Design: `reviewer-flash` traced the exact callbacks, prop keys, dependencies, type/runtime graph and focused tests and recorded `Correct-to-implement`; its three placement/optionality notes are folded into the contract and verification above.
-- Implementation approved, not started.
+- Implementation: integrated by `luna-implementer` and parent-audited.
+- Exactness: callbacks 14/14, parent 0, output keys 14/14, imports 6/6, exports 1/private type 1, parent spread 1/explicit moved props 0/duplicates 0, excluded owners 4/4 and orphan imports 2/2; `TimelineView.tsx` 4,048 → 3,944 newline-delimited lines and the hook is 145.
+- Focused post-move 53/53; typecheck, lint and diff checks green; bulk callback identity and all state/resource owners remain exact.
 - Full diff and delivery pending.
