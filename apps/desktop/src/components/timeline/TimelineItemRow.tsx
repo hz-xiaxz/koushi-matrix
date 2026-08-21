@@ -66,7 +66,7 @@ import type {
 } from "../../domain/types";
 import { Composer } from "../composer";
 import { ImeSafeForm } from "../ImeTextControl";
-import type { TimelineTransport } from "../TimelineView";
+import type { TimelineTransport } from "./TimelineTransport";
 import { formatMessageTimestamp, MessageMeta } from "./MessageMeta";
 import { formatReceiptDetails, ReceiptReaders } from "./ReceiptReaders";
 import {
