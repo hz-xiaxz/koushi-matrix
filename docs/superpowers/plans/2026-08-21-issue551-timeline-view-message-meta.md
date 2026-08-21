@@ -4,8 +4,8 @@
 
 - Design: `reviewer-flash` found the retained timestamp-helper caller, verified the amended two-export/one-re-export contract, and recorded `Correct-to-implement`.
 - Implementation: integrated; 3/3 declaration exactness, 2/2 leaf exports, focused tests, typecheck, lint and diff checks are green.
-- Full-diff review: pending.
-- Delivery: pending.
+- Full-diff review: `reviewer-flash` independently compared the three moved declarations and recorded `Correct-to-merge`; no finding remains.
+- Delivery: final repository gates, PR CI and merge pending.
 
 ## Objective
 
