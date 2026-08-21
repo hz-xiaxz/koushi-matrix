@@ -11,17 +11,17 @@ The unchanged `scheduleTimelineFrame` fallback has now failed after otherwise-gr
 - originating suite: `TimelineView.viewport.test.tsx`;
 - PR #606 other six CI jobs passed.
 
-The scheduler was moved byte-exactly in PR #600. The race is pre-existing but now reproducible under CI teardown: a queued fallback closure dereferences the global `window` after jsdom has removed it.
+The base `bd128a2a` function retains the PR #600 scheduler implementation. The race is pre-existing but now reproducible under CI teardown: a queued fallback closure dereferences the global `window` after jsdom has removed it.
 
 ## Ownership decision
 
 Keep `scheduleTimelineFrame` as the sole owner of its RAF+timeout race. At schedule time, capture bound browser capabilities needed later:
 
-- optional `requestAnimationFrame`;
-- optional `cancelAnimationFrame`;
-- `setTimeout`;
-- `clearTimeout`;
-- `performance.now`.
+- optional `requestAnimationFrame.bind(window)`;
+- optional `cancelAnimationFrame.bind(window)`;
+- `setTimeout.bind(window)`;
+- `clearTimeout.bind(window)`;
+- `performance.now.bind(window.performance)`.
 
 `run()` and returned `cancel()` use only these captured functions, never the later global `window`. First-callback-wins, idempotent cancellation, callback timestamp-at-invocation and sibling-handle cancellation remain unchanged.
 
@@ -29,15 +29,15 @@ No component caller, ref, effect or cleanup contract changes.
 
 ## Verify-first regression
 
-Add one focused test file `apps/desktop/src/components/timeline/TimelineViewportVirtualization.test.ts`.
+Add one focused test file `apps/desktop/src/components/timeline/TimelineViewportVirtualization.test.ts` with first line `// @vitest-environment jsdom`.
 
-The test captures scheduled fallback handlers using spies, schedules a frame while `window` exists, temporarily removes global `window`, and proves:
+One test captures scheduled fallback handlers using spies, schedules a frame while `window` exists, saves its exact global property descriptor, removes it with `Reflect.deleteProperty(globalThis, "window")`, and proves:
 
 1. invoking the captured fallback does not throw and invokes the callback once with captured `performance.now()`;
 2. the fallback cancels the scheduled RAF and clears its timeout;
 3. a second returned handle can be cancelled after global `window` removal without throwing, and remains idempotent.
 
-Run the test against the pre-fix function first: it must fail at the existing global `window.performance.now` dereference. Restore globals/mocks in `finally` so the regression itself cannot contaminate other suites.
+Run the test against the pre-fix function first: invoking the captured fallback must throw `ReferenceError: window is not defined` at the existing global `window.performance.now` dereference. Restore the saved global descriptor and all mocks in `finally` so the regression itself cannot contaminate other suites.
 
 ## Change scope
 
@@ -49,12 +49,15 @@ No API/export/type/timing constant, callback ordering, timeout duration, fallbac
 
 - Red proof: focused regression fails on base `bd128a2a` with `window is not defined`.
 - Green proof: focused regression passes after capability capture.
-- Existing TimelineView seven suites 175/175.
-- Full Vitest must complete with 1,369/1,369 and zero unhandled errors.
+- New focused regression: 1/1 green after recording the RED proof.
+- Existing TimelineView seven suites remain 175/175; the new suite is additional.
+- Full Vitest must complete with 1,370/1,370 (1,369 existing plus the new regression) and zero unhandled errors.
 - Typecheck, lint, build, Playwright, workspace/policy gates and CI 7/7.
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
+- Design round 1: `reviewer-flash` recorded `Changes-required` because the new test lacked explicit jsdom environment/removal mechanics and capability binding/counts were ambiguous.
+- Amendment: pin jsdom, property-descriptor removal/restoration, exact RED error, bound capabilities and 1,370-test total.
+- Design round 2 pending `reviewer-flash` read-only verdict.
 - Implementation prohibited until `Correct-to-implement`.
 - Full diff and delivery pending.
