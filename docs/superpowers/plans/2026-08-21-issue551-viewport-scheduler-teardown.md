@@ -1,0 +1,60 @@
+# Issue #551 viewport scheduler teardown hardening
+
+Status: design review pending. This is an independently mergeable blocker repair for TimelineView subscription PR #606.
+
+## Failure evidence
+
+The unchanged `scheduleTimelineFrame` fallback has now failed after otherwise-green Vitest runs three times, including PR #606 CI:
+
+- all 1,369 tests passed, then two unhandled `ReferenceError: window is not defined` errors;
+- stack: `TimelineViewportVirtualization.ts:91`, fallback `() => run(window.performance.now())`;
+- originating suite: `TimelineView.viewport.test.tsx`;
+- PR #606 other six CI jobs passed.
+
+The scheduler was moved byte-exactly in PR #600. The race is pre-existing but now reproducible under CI teardown: a queued fallback closure dereferences the global `window` after jsdom has removed it.
+
+## Ownership decision
+
+Keep `scheduleTimelineFrame` as the sole owner of its RAF+timeout race. At schedule time, capture bound browser capabilities needed later:
+
+- optional `requestAnimationFrame`;
+- optional `cancelAnimationFrame`;
+- `setTimeout`;
+- `clearTimeout`;
+- `performance.now`.
+
+`run()` and returned `cancel()` use only these captured functions, never the later global `window`. First-callback-wins, idempotent cancellation, callback timestamp-at-invocation and sibling-handle cancellation remain unchanged.
+
+No component caller, ref, effect or cleanup contract changes.
+
+## Verify-first regression
+
+Add one focused test file `apps/desktop/src/components/timeline/TimelineViewportVirtualization.test.ts`.
+
+The test captures scheduled fallback handlers using spies, schedules a frame while `window` exists, temporarily removes global `window`, and proves:
+
+1. invoking the captured fallback does not throw and invokes the callback once with captured `performance.now()`;
+2. the fallback cancels the scheduled RAF and clears its timeout;
+3. a second returned handle can be cancelled after global `window` removal without throwing, and remains idempotent.
+
+Run the test against the pre-fix function first: it must fail at the existing global `window.performance.now` dereference. Restore globals/mocks in `finally` so the regression itself cannot contaminate other suites.
+
+## Change scope
+
+Production change is limited to `scheduleTimelineFrame` in `TimelineViewportVirtualization.ts`; tests add the one focused file. Plan/index may change.
+
+No API/export/type/timing constant, callback ordering, timeout duration, fallback-vs-RAF behavior, dependency, DOM/product/Matrix/DTO/wire/CSS/i18n change. No wrapper, new scheduler, compatibility shim or TODO.
+
+## Verification
+
+- Red proof: focused regression fails on base `bd128a2a` with `window is not defined`.
+- Green proof: focused regression passes after capability capture.
+- Existing TimelineView seven suites 175/175.
+- Full Vitest must complete with 1,369/1,369 and zero unhandled errors.
+- Typecheck, lint, build, Playwright, workspace/policy gates and CI 7/7.
+
+## Review gate
+
+- Design pending `reviewer-flash` read-only verdict.
+- Implementation prohibited until `Correct-to-implement`.
+- Full diff and delivery pending.
