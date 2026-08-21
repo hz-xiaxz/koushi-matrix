@@ -66,6 +66,17 @@ export type TimelineScheduledFrame = {
 };
 
 export function scheduleTimelineFrame(callback: FrameRequestCallback): TimelineScheduledFrame {
+  const requestAnimationFrame =
+    typeof window.requestAnimationFrame === "function"
+      ? window.requestAnimationFrame.bind(window)
+      : null;
+  const cancelAnimationFrame =
+    typeof window.cancelAnimationFrame === "function"
+      ? window.cancelAnimationFrame.bind(window)
+      : null;
+  const setTimeout = window.setTimeout.bind(window);
+  const clearTimeout = window.clearTimeout.bind(window);
+  const performanceNow = window.performance.now.bind(window.performance);
   let cancelled = false;
   let frameId: number | null = null;
   let timeoutId: number | null = null;
@@ -74,21 +85,21 @@ export function scheduleTimelineFrame(callback: FrameRequestCallback): TimelineS
       return;
     }
     cancelled = true;
-    if (frameId !== null && typeof window.cancelAnimationFrame === "function") {
-      window.cancelAnimationFrame(frameId);
+    if (frameId !== null && cancelAnimationFrame !== null) {
+      cancelAnimationFrame(frameId);
       frameId = null;
     }
     if (timeoutId !== null) {
-      window.clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
       timeoutId = null;
     }
     callback(timestamp);
   };
 
-  if (typeof window.requestAnimationFrame === "function") {
-    frameId = window.requestAnimationFrame(run);
+  if (requestAnimationFrame !== null) {
+    frameId = requestAnimationFrame(run);
   }
-  timeoutId = window.setTimeout(() => run(window.performance.now()), TIMELINE_FRAME_FALLBACK_MS);
+  timeoutId = setTimeout(() => run(performanceNow()), TIMELINE_FRAME_FALLBACK_MS);
 
   return {
     cancel() {
@@ -96,11 +107,11 @@ export function scheduleTimelineFrame(callback: FrameRequestCallback): TimelineS
         return;
       }
       cancelled = true;
-      if (frameId !== null && typeof window.cancelAnimationFrame === "function") {
-        window.cancelAnimationFrame(frameId);
+      if (frameId !== null && cancelAnimationFrame !== null) {
+        cancelAnimationFrame(frameId);
       }
       if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
       }
     }
   };
