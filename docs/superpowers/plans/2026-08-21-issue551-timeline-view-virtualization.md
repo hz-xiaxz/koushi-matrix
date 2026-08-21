@@ -86,5 +86,6 @@ Only `TimelineView.tsx`, the new leaf and this plan/index may change. No compati
 - Exactness: 25/25 statements, parent 0, exports 18/18, private 7/7; `TimelineView.tsx` 5,100 → 4,869 newline-delimited lines and the leaf is 241.
 - Focused post-move 72/72; typecheck, lint and diff checks green; all scheduler handle refs and cancellation sites remain in the parent.
 - Full-diff round 1: `reviewer-flash` recorded `Correct-to-merge` and noted that `TimelineHeightModel` was inferred internally rather than imported by the parent.
-- Minimal-visibility delta: make that type private, narrowing exports 19 → 18 and correcting fallback/measured-height wording; delta re-review pending.
-- Delivery pending.
+- Minimal-visibility delta: make that type private, narrowing exports 19 → 18 and correcting fallback/measured-height wording.
+- Final delta review: `reviewer-flash` revalidated the complete tree and recorded `Correct-to-merge`; no blocker remains.
+- Delivery: final repository gates, PR CI and merge pending.
