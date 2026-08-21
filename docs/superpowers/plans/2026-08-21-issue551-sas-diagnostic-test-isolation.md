@@ -40,5 +40,7 @@ This preserves detection of missing, reordered or duplicate diagnostics for ever
 ## Review gate
 
 - Design: `reviewer-flash` traced flow 83 to the unlocked sibling test, verified the exact insertion type and preservation of missing/order/duplicate detection, and recorded `Correct-to-implement`.
-- Implementation approved, not started.
+- Implementation: integrated by `luna-implementer` and parent-audited; exact production/test delta is one filter expression.
+- Focused test passed 5/5 sequentially; core lib passed twice under normal parallel execution; rustfmt and diff checks green.
+- First workspace run reached an unrelated `runtime_room_list_sync` timeout and remains to be rerun after full-diff approval.
 - Full diff and delivery pending.
