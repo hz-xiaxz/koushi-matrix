@@ -72,6 +72,7 @@ Only `TimelineView.tsx`, the new hook leaf and this plan/index may change.
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design: `reviewer-flash` verified ref types, effect/dependency order, shared fences, cleanup semantics, imports and existing coverage and recorded `Correct-to-implement`.
+- The executed baseline above confirms 175/175; `timelineKeyHash` remains deliberately in the exact nine-dependency list even though the callback reads its ref, because it forces room-change re-registration.
+- Implementation approved, not started.
 - Full diff and delivery pending.
