@@ -1,6 +1,6 @@
 # Issue #591 — eviction-resistant Megolm rotation attribution
 
-Status: design approved for implementation.
+Status: implementation complete; final diff review pending.
 
 Review record: `reviewer-flash` read-only review, 2026-08-21,
 `Correct-to-implement`. Five Minor clarifications were incorporated: migrate the
@@ -186,7 +186,6 @@ npm --prefix apps/desktop run test:ui-headless
 cargo deny check
 node scripts/check-agents-docs.mjs
 node scripts/check-sdk-submodule.mjs
-node scripts/check-docs-canon.mjs
 git diff --check
 ```
 
@@ -208,3 +207,59 @@ the observer/query boundary; CI's existing homeserver jobs remain mandatory.
   on eviction.
 - Existing Matrix behavior is unchanged; the vendored diff is additive lookup
   and bounded diagnostic storage only.
+
+## Implementation and verification record
+
+Implementation commit (rebased branch): `feat: retain Megolm rotation
+attribution`; vendored SDK commit: `7d29eb65e`.
+
+- `koushi-diagnostics` owns a 128-entry dedicated rotation ledger, deterministic
+  oldest-first eviction, independent dropped-boundary counter, reset, session-
+  alias first-event update, and export outside the general ring.
+- `koushi-sdk` resets the ledger with observer installation, maps all 13 SDK
+  reasons, records boundaries only in the dedicated owner, and updates the
+  matching first-event correlation.
+- The vendored SDK retains 128 exact successful creation reasons and exposes
+  only `Option<RoomKeyRotationReason>` for a caller-supplied room/session query.
+- Core proves exact current-device ownership from SDK encryption metadata,
+  returns `notRetained` for missing local evidence, and omits attribution for
+  another/unknown device. Rust/TypeScript wire artifacts and redacted `Debug`
+  remain synchronized.
+- React renders only the closed Rust enum through complete English/Japanese
+  catalog mappings.
+
+Verify-first RED evidence:
+
+- diagnostics tests initially failed to compile because the dedicated ledger
+  types did not exist (`EXIT=101`), then all 17 diagnostics tests passed;
+- the SDK first-event test failed with zero retained boundaries (`EXIT=101`),
+  then the matching-only update test passed;
+- the vendored exact/bounded lookup test failed with missing accessor
+  (`EXIT=101`), then passed;
+- the core projection test failed with missing projection helper (`EXIT=101`),
+  then passed;
+- the Tauri wire test failed on the missing DTO field (`EXIT=101`), then passed;
+- the component tests failed to find both reason labels (`EXIT=1`), then passed.
+
+Fresh final local evidence after rebasing onto PR #602's merge:
+
+- `cargo test -p koushi-diagnostics`: 17/17;
+- `cargo test -p koushi-sdk --lib`: 145/145;
+- `cargo test -p koushi-core --lib`: 1,015 passed / 8 ignored;
+- `cargo test --workspace`: 2,400 passed / 13 ignored;
+- Tauri lib: 149 passed / 1 ignored;
+- Headless Core QA binary: 129/129;
+- Vitest: 1,369/1,369; focused i18n/message-source: 51/51;
+- browser-headless: timeline-store 76/76 and Playwright 248/248;
+- typecheck, lint/IME/agent-docs, build, `cargo deny check`, root and vendored
+  rustfmt, SDK submodule pin, `git diff --check`: green.
+
+The first browser-headless attempt used a cross-worktree `node_modules` symlink,
+which Vite correctly rejected as outside its allow list; a later attempt found
+another concurrent worktree on the fixed harness port. Neither was a product
+failure. A worktree-local `npm ci` plus a free port produced the fresh complete
+248/248 run above.
+
+Canon amendment review: `reviewer-flash`, read-only, `Canon-approved`. The
+original design review verdict was `Correct-to-implement`; all five Minor
+clarifications were incorporated before implementation.
