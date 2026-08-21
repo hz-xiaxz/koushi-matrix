@@ -116,4 +116,5 @@ After full-diff approval, integrate latest `origin/main`, obtain delta approval 
 - Focused post-move 1 + 1 + (1/1 ignored) + (1/1 ignored); core lib 1,021/8 ignored, Activity 9, settings 5, notification settings 4 and timeline 21; all-targets/all-features check, rustfmt, exactness and diff checks green.
 - Initial full `runtime_timeline` run observed `corrupt_load_attempts_once_per_session` expected 2/got 3; unchanged persistence code, exact-test rerun and complete 21-test rerun were green, recording it as a recurrent timing/isolation failure rather than waiving it.
 - Full diff: `reviewer-flash` independently byte-compared all 12 identities, two methods, two moved tests and the retained reducer wrapper, verified privacy/lifecycle boundaries and recorded `Correct-to-merge`.
-- Delivery: final repository gates, latest-main integration/delta review if required, PR CI and merge pending.
+- Final local evidence: focused diagnostics filters green, core lib 1,021/8 ignored, Vitest 1,370, Playwright 248 with polling, workspace all-targets, desktop 149/1 ignored and Headless Core QA 130; all-targets/all-features, typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/format/exactness/diff gates green.
+- Delivery: latest-main integration/delta review if required, PR CI and merge pending.
