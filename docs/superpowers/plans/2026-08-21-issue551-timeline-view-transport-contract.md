@@ -58,5 +58,7 @@ No other caller import changes are needed or permitted. No compatibility wrapper
 - Design round 1: `reviewer-flash` recorded `Changes-required` because `TimelineMessageBody` retained a reverse type edge and the dependency gate could not pass.
 - Amendment: redirect that erased edge to its sibling row owner, pin the attached header and exact baseline command, and expand the production scope to five files.
 - Design round 2: `reviewer-flash` verified the amendment and recorded `Correct-to-implement`; its two non-blocking precision notes (full banner and new-re-export wording) are folded above.
-- Implementation: approved, not started.
+- Implementation: integrated by `luna-implementer` and parent-audited; the worker hit its bounded tool-call limit only after the five-file move and focused/lint checks were green.
+- Exactness: interface 1/1, parent 0, banner 1, reverse edges 0; `TimelineView.tsx` 5,198 → 5,100 lines and the transport leaf is 105 newline-delimited lines.
+- Focused post-move: 179/179; typecheck, lint and diff checks green.
 - Full diff and delivery: pending.
