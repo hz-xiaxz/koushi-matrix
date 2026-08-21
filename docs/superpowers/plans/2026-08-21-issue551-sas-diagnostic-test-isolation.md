@@ -10,7 +10,7 @@ Status: design review pending. Independent blocker repair for TimelineView subsc
 - PR #607 initial CI observed `[100,101,102,103,104,83]`;
 - PR #606 rerun observed `[100,101,83,102,103,104]`.
 
-The test holds `koushi_diagnostics::test_support::lock()` and slices the global ring from its starting length, but the lock only serializes cooperating test bodies. An asynchronous diagnostic producer admitted by an earlier test can complete after this test's snapshot and append its own `core.sas_verification/settled` record. The varying position of flow 83 proves cross-test tail completion, not a duplicate terminal from this actor.
+The test holds `koushi_diagnostics::test_support::lock()` and slices the global ring from its starting length, but the lock only serializes cooperating test bodies. Sibling test `own_user_sas_proof_success_enters_shared_authoritative_promotion_path` uses flow 83 without taking that lock and can append its own `core.sas_verification/settled` record concurrently. The varying position of flow 83 is therefore cross-test completion, not a duplicate terminal from this actor.
 
 ## Minimal fix
 
@@ -34,10 +34,11 @@ This preserves detection of missing, reordered or duplicate diagnostics for ever
 
 - One test-body expression only; no production item, helper, public API, dependency or fixture change.
 - Existing actor terminal action/runtime-clear/stale-duplicate checks remain exact.
+- The owned range remains reserved for this test; a future foreign settled diagnostic in 100..=104 must fail loudly rather than be hidden.
 - Global diagnostics privacy, capacity and lock semantics remain unchanged.
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design: `reviewer-flash` traced flow 83 to the unlocked sibling test, verified the exact insertion type and preservation of missing/order/duplicate detection, and recorded `Correct-to-implement`.
+- Implementation approved, not started.
 - Full diff and delivery pending.
