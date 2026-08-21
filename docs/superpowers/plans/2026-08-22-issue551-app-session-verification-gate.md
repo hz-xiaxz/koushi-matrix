@@ -131,4 +131,5 @@ The App umbrella remains open for composer/attention re-evaluation and final res
 - Focused App78 + gate29 + dialogs14 =121, typecheck/lint, full Vitest1,371 and boundary/security/diff checks green.
 - Full-diff review found stale root Playwright artifacts from a worker invocation that skipped the committed config. They were removed; `CHOKIDAR_USEPOLLING=true npm --prefix apps/desktop run test:ui-headless -- e2e/session-verification-gate.spec.ts` then passed12/12 with the repository config.
 - Evidence delta review recorded `Correct-to-merge-after-evidence-reconciliation`.
-- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: App78 + gate29 + dialogs14, focused e2e12, Vitest1,371, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
