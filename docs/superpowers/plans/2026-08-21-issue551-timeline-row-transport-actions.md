@@ -27,7 +27,7 @@ Create direct hook leaf `apps/desktop/src/components/timeline/useTimelineRowTran
 13. `onHideLinkPreview`
 14. `onCopyText`
 
-The hook receives only `transport`, `onDiagnosticLogEntry`, and the already-derived `timelineDiagnosticKind`; it returns a `Pick<TimelineRowActionHandlers, ...>` object containing exactly those 14 stable callbacks. The 14 callback declarations/bodies/dependency arrays move exactly. The only new glue is the private return type, hook parameter contract, and exact return object.
+The hook receives only `transport`, optional `onDiagnosticLogEntry?: (entry: DiagnosticLogEntry) => void`, and the already-derived `timelineDiagnosticKind`; it returns a `Pick<TimelineRowActionHandlers, ...>` object containing exactly those 14 stable callbacks. The 14 callback declarations/bodies/dependency arrays move exactly. The only new glue is the private return type, hook parameter contract, and exact return object.
 
 Parent obtains `rowTransportActions`, destructures only its stable retry/cancel callbacks for the existing bulk actions, and passes the full object directly to `TimelineItemRow` with one prop spread. No forwarding wrapper or callback registry is added.
 
@@ -71,7 +71,8 @@ Only `TimelineView.tsx`, the new hook and this plan/index may change.
 ## Verification
 
 - Exactness: callback declarations 14/14 in hook and parent 0; hook output keys 14/14 once each; parent spread 1, explicit moved props 0, duplicate keys 0.
-- Hook exports 1/private type 1/imports 6; excluded owners remain parent.
+- Move the pure `timelineDiagnosticKind` derivation ahead of the unconditional top-level hook call; place the hook before retained bulk retry/cancel callbacks and destructure its stable retry/cancel functions there.
+- Hook exports 1/private type 1/imports 6; optional diagnostic callback contract and excluded owners remain exact.
 - Parent orphan imports `ComposerDocument` and `writeClipboardText` are exactly removed.
 - Same focused command before/after 53/53:
   `npm --prefix apps/desktop test -- --run src/components/TimelineView.interactions.test.tsx src/components/TimelineView.media.test.tsx`.
@@ -79,6 +80,6 @@ Only `TimelineView.tsx`, the new hook and this plan/index may change.
 
 ## Review gate
 
-- Design pending `reviewer-flash` read-only verdict.
-- Implementation prohibited until `Correct-to-implement`.
+- Design: `reviewer-flash` traced the exact callbacks, prop keys, dependencies, type/runtime graph and focused tests and recorded `Correct-to-implement`; its three placement/optionality notes are folded into the contract and verification above.
+- Implementation approved, not started.
 - Full diff and delivery pending.
