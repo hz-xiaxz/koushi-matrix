@@ -1,6 +1,6 @@
 # Issue #551 runtime residual composition-root audit
 
-Status: audit review pending. This document decides whether the split-later `runtime.rs` ownership candidate is complete after PRs #617–#624.
+Status: audit approved; delivery pending. This document decides whether the split-later `runtime.rs` ownership candidate is complete after PRs #617–#624.
 
 ## Measured result
 
@@ -10,7 +10,7 @@ Status: audit review pending. This document decides whether the split-later `run
 - Residual reduction: 4,435 lines (40.7%).
 - Private runtime leaves: Activity1,303; connection665; profile/display737; composer641; navigation593; scheduled-send137; reducer/deferred529. Runtime tree total: 11,079 lines.
 - Residual inventory: 25 production top-level identities plus two cfg-only test types, 54 impl/trait methods, 53 inline tests (one qa-bin-gated).
-- Runtime tree inventory: 92 production identities, 113 methods and 82 all-feature / 81 default unit tests.
+- Runtime tree inventory: 92 production identities (residual25 + leaves67), 113 methods and 82 all-feature / 81 default unit tests.
 - Production definitions end before the inline test composition at approximately line 4,162; the parent AppActor implementation remains the dominant production composition root.
 
 ## Delivered ownership seams
@@ -85,7 +85,7 @@ This coupling is intentional for actor-loop/effect/order contracts. Moving resid
 - **Actor loop:** owns all fields, six select arms, timer polling, batching, permit cleanup, publication and shutdown.
 - **Command subdomains:** no pre-existing movable identities remain below `handle_command`; extraction needs wrappers and distributes exhaustive admission.
 - **Effect dispatchers:** two complete 43-variant origin-specific firewalls must remain visible and distinct.
-- **Room preferences:** the small load/save/session trio is bidirectionally coupled to the parent UI/effect registries; a file adds reverse calls for roughly 50 lines.
+- **Room preferences:** the small load/save/session trio is called from the parent action arm and both central effect registries. A leaf could technically call parent methods, but would only relocate roughly 50 lines without establishing a new owner and would add source-test plumbing.
 - **Activity resolver:** mutates authoritative state/generation, invokes reducer/UI effects and routes AccountActor work; it does not belong in the pure Activity leaf.
 - **Admission diagnostics/catalogs:** verification allowlist, account speculative projection, privacy suppression and space-member rollback belong beside exhaustive command ownership.
 - **Space-member rollback mapper:** deliberately shared by AppActor and AccountActor; relocation only moves a shared catalog or adds a façade.
@@ -116,4 +116,5 @@ All eight delivered PRs passed their focused checks and full repository matrix. 
 ## Review gate
 
 - Read-only post-#623 audit found one final cross-owner edge; #624 delivered it with exactness2/2 and CI7/7.
-- Formal `reviewer-flash` residual verdict pending.
+- `reviewer-flash` independently re-derived sizes, resources/select arms, command/effect/admission registries, method/test/source counts and every rejected seam, then recorded unconditional `Correct-to-record-and-complete-runtime-checkbox`.
+- Delivery and Issue #551 runtime-checkbox update pending.
