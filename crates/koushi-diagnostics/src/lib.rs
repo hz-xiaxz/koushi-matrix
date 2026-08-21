@@ -3,6 +3,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_DIAGNOSTIC_CAPACITY: usize = 10_000;
+const DEFAULT_ROTATION_DIAGNOSTIC_CAPACITY: usize = 128;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,6 +53,154 @@ pub struct DiagnosticSnapshot {
     pub records: Vec<DiagnosticRecord>,
     #[serde(rename = "droppedRecords")]
     pub dropped_records: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RotationBoundaryDiagnostic {
+    pub room_alias: u64,
+    pub previous_session_alias: Option<u64>,
+    pub new_session_alias: Option<u64>,
+    pub reason: &'static str,
+    pub creation_outcome: &'static str,
+    pub first_share_outcome: &'static str,
+    pub first_send_correlation_present: bool,
+    pub discard_elapsed_ms: Option<u64>,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotationDiagnosticSnapshot {
+    pub records: Vec<DiagnosticRecord>,
+    pub dropped_boundaries: u64,
+}
+
+struct RotationBoundaryRecord {
+    timestamp_ms: u64,
+    boundary: RotationBoundaryDiagnostic,
+}
+
+#[derive(Default)]
+struct RotationDiagnosticState {
+    records: VecDeque<RotationBoundaryRecord>,
+    dropped_boundaries: u64,
+}
+
+pub struct RotationDiagnosticLedger {
+    state: Mutex<RotationDiagnosticState>,
+    capacity: usize,
+}
+
+impl RotationDiagnosticLedger {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            state: Mutex::new(RotationDiagnosticState {
+                records: VecDeque::with_capacity(capacity),
+                dropped_boundaries: 0,
+            }),
+            capacity,
+        }
+    }
+
+    pub fn record(&self, boundary: RotationBoundaryDiagnostic) {
+        self.record_at(timestamp_millis_at(SystemTime::now()), boundary);
+    }
+
+    pub fn record_at(&self, timestamp_ms: u64, boundary: RotationBoundaryDiagnostic) {
+        let mut state = lock_best_effort(&self.state);
+        if self.capacity == 0 {
+            state.dropped_boundaries = state.dropped_boundaries.saturating_add(1);
+            return;
+        }
+        if state.records.len() == self.capacity {
+            state.records.pop_front();
+            state.dropped_boundaries = state.dropped_boundaries.saturating_add(1);
+        }
+        state.records.push_back(RotationBoundaryRecord {
+            timestamp_ms,
+            boundary,
+        });
+    }
+
+    pub fn mark_first_send_correlation(&self, session_alias: u64) -> bool {
+        let mut state = lock_best_effort(&self.state);
+        let Some(record) = state
+            .records
+            .iter_mut()
+            .rev()
+            .find(|record| record.boundary.new_session_alias == Some(session_alias))
+        else {
+            return false;
+        };
+        record.boundary.first_send_correlation_present = true;
+        true
+    }
+
+    pub fn reset(&self) {
+        *lock_best_effort(&self.state) = RotationDiagnosticState::default();
+    }
+
+    pub fn snapshot(&self) -> RotationDiagnosticSnapshot {
+        let state = lock_best_effort(&self.state);
+        RotationDiagnosticSnapshot {
+            records: state
+                .records
+                .iter()
+                .map(|record| DiagnosticRecord {
+                    timestamp_ms: record.timestamp_ms,
+                    event: rotation_boundary_event(record.boundary),
+                })
+                .collect(),
+            dropped_boundaries: state.dropped_boundaries,
+        }
+    }
+}
+
+fn rotation_boundary_event(boundary: RotationBoundaryDiagnostic) -> DiagnosticEvent {
+    let mut event =
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_rotation", "boundary")
+            .field(DiagnosticField::ordinal_alias(
+                "room_alias",
+                "room",
+                boundary.room_alias,
+            ))
+            .field(DiagnosticField::token("reason", boundary.reason))
+            .field(DiagnosticField::token(
+                "creation_outcome",
+                boundary.creation_outcome,
+            ))
+            .field(DiagnosticField::token(
+                "first_share_outcome",
+                boundary.first_share_outcome,
+            ))
+            .field(DiagnosticField::boolean(
+                "first_send_correlation_present",
+                boundary.first_send_correlation_present,
+            ))
+            .field(DiagnosticField::milliseconds(
+                "elapsed_ms",
+                boundary.elapsed_ms.into(),
+            ));
+    if let Some(previous) = boundary.previous_session_alias {
+        event = event.field(DiagnosticField::ordinal_alias(
+            "previous_session_alias",
+            "session",
+            previous,
+        ));
+    }
+    if let Some(new) = boundary.new_session_alias {
+        event = event.field(DiagnosticField::ordinal_alias(
+            "new_session_alias",
+            "session",
+            new,
+        ));
+    }
+    if let Some(discard_elapsed_ms) = boundary.discard_elapsed_ms {
+        event = event.field(DiagnosticField::milliseconds(
+            "discard_elapsed_ms",
+            discard_elapsed_ms.into(),
+        ));
+    }
+    event
 }
 
 impl DiagnosticEvent {
@@ -205,6 +354,7 @@ impl DiagnosticBuffer {
 }
 
 static GLOBAL_BUFFER: OnceLock<DiagnosticBuffer> = OnceLock::new();
+static GLOBAL_ROTATION_LEDGER: OnceLock<RotationDiagnosticLedger> = OnceLock::new();
 static GLOBAL_COUNTERS: OnceLock<Mutex<BTreeMap<&'static str, u64>>> = OnceLock::new();
 
 /// Test-only coordination for assertions against the process-wide diagnostic
@@ -215,7 +365,11 @@ static GLOBAL_COUNTERS: OnceLock<Mutex<BTreeMap<&'static str, u64>>> = OnceLock:
 pub mod test_support {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
-    use super::{DEFAULT_DIAGNOSTIC_CAPACITY, DiagnosticBuffer, DiagnosticSnapshot, GLOBAL_BUFFER};
+    use super::{
+        DEFAULT_DIAGNOSTIC_CAPACITY, DEFAULT_ROTATION_DIAGNOSTIC_CAPACITY, DiagnosticBuffer,
+        DiagnosticSnapshot, GLOBAL_BUFFER, GLOBAL_ROTATION_LEDGER, RotationDiagnosticLedger,
+        RotationDiagnosticSnapshot,
+    };
 
     static GLOBAL_DIAGNOSTIC_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -232,6 +386,12 @@ pub mod test_support {
     pub fn detail_snapshot() -> DiagnosticSnapshot {
         GLOBAL_BUFFER
             .get_or_init(|| DiagnosticBuffer::new(DEFAULT_DIAGNOSTIC_CAPACITY))
+            .snapshot()
+    }
+
+    pub fn rotation_snapshot() -> RotationDiagnosticSnapshot {
+        GLOBAL_ROTATION_LEDGER
+            .get_or_init(|| RotationDiagnosticLedger::new(DEFAULT_ROTATION_DIAGNOSTIC_CAPACITY))
             .snapshot()
     }
 }
@@ -253,6 +413,24 @@ pub fn record_batch(events: impl IntoIterator<Item = DiagnosticEvent>) {
     GLOBAL_BUFFER
         .get_or_init(|| DiagnosticBuffer::new(DEFAULT_DIAGNOSTIC_CAPACITY))
         .record_batch(events);
+}
+
+pub fn record_rotation_boundary(boundary: RotationBoundaryDiagnostic) {
+    GLOBAL_ROTATION_LEDGER
+        .get_or_init(|| RotationDiagnosticLedger::new(DEFAULT_ROTATION_DIAGNOSTIC_CAPACITY))
+        .record(boundary);
+}
+
+pub fn mark_rotation_first_send_correlation(session_alias: u64) -> bool {
+    GLOBAL_ROTATION_LEDGER
+        .get_or_init(|| RotationDiagnosticLedger::new(DEFAULT_ROTATION_DIAGNOSTIC_CAPACITY))
+        .mark_first_send_correlation(session_alias)
+}
+
+pub fn reset_rotation_ledger() {
+    GLOBAL_ROTATION_LEDGER
+        .get_or_init(|| RotationDiagnosticLedger::new(DEFAULT_ROTATION_DIAGNOSTIC_CAPACITY))
+        .reset();
 }
 
 /// Increment a closed, privacy-safe aggregate diagnostic counter. Counter
@@ -281,6 +459,10 @@ pub fn snapshot() -> DiagnosticSnapshot {
     let mut snapshot = GLOBAL_BUFFER
         .get_or_init(|| DiagnosticBuffer::new(DEFAULT_DIAGNOSTIC_CAPACITY))
         .snapshot();
+    let rotation_snapshot = GLOBAL_ROTATION_LEDGER
+        .get_or_init(|| RotationDiagnosticLedger::new(DEFAULT_ROTATION_DIAGNOSTIC_CAPACITY))
+        .snapshot();
+    snapshot.records.extend(rotation_snapshot.records);
     let timestamp_ms = timestamp_millis_at(SystemTime::now());
     let counters = lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new())));
     snapshot
@@ -297,6 +479,20 @@ pub fn snapshot() -> DiagnosticSnapshot {
                 .field(DiagnosticField::count("count", *count)),
             }
         }));
+    if rotation_snapshot.dropped_boundaries > 0 {
+        snapshot.records.push(DiagnosticRecord {
+            timestamp_ms,
+            event: DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_summary", "counter")
+                .field(DiagnosticField::token(
+                    "name",
+                    "rotation_boundaries_dropped",
+                ))
+                .field(DiagnosticField::count(
+                    "count",
+                    rotation_snapshot.dropped_boundaries,
+                )),
+        });
+    }
     snapshot
 }
 
@@ -579,5 +775,134 @@ mod tests {
             DiagnosticField::milliseconds("elapsed_ms", u128::MAX).value,
             DiagnosticValue::Milliseconds(u64::MAX)
         );
+    }
+
+    fn rotation_boundary(
+        room_alias: u64,
+        session_alias: u64,
+        reason: &'static str,
+    ) -> RotationBoundaryDiagnostic {
+        RotationBoundaryDiagnostic {
+            room_alias,
+            previous_session_alias: None,
+            new_session_alias: Some(session_alias),
+            reason,
+            creation_outcome: "created",
+            first_share_outcome: "pending",
+            first_send_correlation_present: false,
+            discard_elapsed_ms: None,
+            elapsed_ms: 3,
+        }
+    }
+
+    #[test]
+    fn rotation_ledger_survives_general_ring_overflow_and_updates_one_session() {
+        let detail = DiagnosticBuffer::new(1);
+        let ledger = RotationDiagnosticLedger::new(2);
+        ledger.record_at(10, rotation_boundary(1, 11, "expired_time"));
+        ledger.record_at(11, rotation_boundary(2, 12, "explicit_discard"));
+        for index in 0..10 {
+            detail.record_at(index, event("churn"));
+        }
+        assert_eq!(detail.snapshot().dropped_records, 9);
+
+        assert!(ledger.mark_first_send_correlation(11));
+        let snapshot = ledger.snapshot();
+        assert_eq!(snapshot.dropped_boundaries, 0);
+        assert_eq!(snapshot.records.len(), 2);
+        let first = &snapshot.records[0];
+        let second = &snapshot.records[1];
+        assert!(first.event.fields.iter().any(|field| {
+            field.key == "first_send_correlation_present"
+                && field.value == DiagnosticValue::Boolean(true)
+        }));
+        assert!(second.event.fields.iter().any(|field| {
+            field.key == "first_send_correlation_present"
+                && field.value == DiagnosticValue::Boolean(false)
+        }));
+    }
+
+    #[test]
+    fn rotation_ledger_evicts_oldest_and_reset_clears_drop_count() {
+        let ledger = RotationDiagnosticLedger::new(2);
+        ledger.record_at(1, rotation_boundary(1, 1, "initial"));
+        ledger.record_at(2, rotation_boundary(2, 2, "expired_message_count"));
+        ledger.record_at(3, rotation_boundary(3, 3, "invalidated"));
+
+        let snapshot = ledger.snapshot();
+        assert_eq!(snapshot.dropped_boundaries, 1);
+        assert_eq!(snapshot.records.len(), 2);
+        assert!(snapshot.records.iter().all(|record| {
+            !record.event.fields.iter().any(|field| {
+                field.key == "new_session_alias"
+                    && field.value
+                        == DiagnosticValue::OrdinalAlias {
+                            kind: "session",
+                            ordinal: 1,
+                        }
+            })
+        }));
+
+        ledger.reset();
+        let reset = ledger.snapshot();
+        assert!(reset.records.is_empty());
+        assert_eq!(reset.dropped_boundaries, 0);
+    }
+
+    #[test]
+    fn exported_snapshot_includes_rotation_ledger_and_its_drop_counter() {
+        let _guard = test_support::lock();
+        reset_rotation_ledger();
+        for session in 1..=129 {
+            record_rotation_boundary(rotation_boundary(session, session, "expired_time"));
+        }
+
+        let snapshot = super::snapshot();
+        assert!(snapshot.records.iter().any(|record| {
+            record.event.source == "core.room_key_rotation"
+                && record.event.fields.iter().any(|field| {
+                    field.key == "new_session_alias"
+                        && field.value
+                            == DiagnosticValue::OrdinalAlias {
+                                kind: "session",
+                                ordinal: 129,
+                            }
+                })
+        }));
+        assert!(snapshot.records.iter().any(|record| {
+            record.event.source == "core.room_key_summary"
+                && record.event.fields.iter().any(|field| {
+                    field.key == "name"
+                        && field.value == DiagnosticValue::Token("rotation_boundaries_dropped")
+                })
+                && record
+                    .event
+                    .fields
+                    .iter()
+                    .any(|field| field.key == "count" && field.value == DiagnosticValue::Count(1))
+        }));
+        reset_rotation_ledger();
+    }
+
+    #[test]
+    fn rotation_ledger_exports_only_closed_private_data_free_fields() {
+        let ledger = RotationDiagnosticLedger::new(1);
+        ledger.record_at(1, rotation_boundary(4, 5, "membership_or_device_change"));
+        let encoded = format!("{:?}", ledger.snapshot().records);
+        for forbidden in [
+            "room_id",
+            "event_id",
+            "session_id",
+            "device_id",
+            "user_id",
+            "fingerprint",
+            "ciphertext",
+            "sender_key",
+            "identity_key",
+            "raw_error",
+            "example.invalid",
+        ] {
+            assert!(!encoded.contains(forbidden), "privacy leak: {forbidden}");
+        }
     }
 }

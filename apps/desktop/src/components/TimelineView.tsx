@@ -126,6 +126,7 @@ MediaTransferProgress,
 TimelineGapId,
 TimelineItem,
 TimelineKey,
+TimelineMegolmSessionReason,
 TimelineMessageSource,
 TimelineNavigationSnapshot
 } from "../domain/coreEvents";
@@ -4269,6 +4270,12 @@ export function MessageSourceDialog({
               <span>{t("timeline.copyMegolmSessionFingerprint")}</span>
             </button>
           </div>
+          {source.megolm_session_rotation_reason ? (
+            <div className="message-source-encryption-row">
+              <span>{t("timeline.megolmRotationReason")}</span>
+              <span>{megolmSessionReasonLabel(source.megolm_session_rotation_reason)}</span>
+            </div>
+          ) : null}
         </section>
       ) : null}
       <div className="message-source-section-header">
@@ -4288,6 +4295,39 @@ export function MessageSourceDialog({
       </pre>
     </div>
   );
+}
+
+function megolmSessionReasonLabel(reason: TimelineMegolmSessionReason): string {
+  switch (reason) {
+    case "initial":
+      return t("timeline.megolmReasonInitial");
+    case "expiredTime":
+      return t("timeline.megolmReasonExpiredTime");
+    case "expiredMessageCount":
+      return t("timeline.megolmReasonExpiredMessageCount");
+    case "membershipOrDeviceChange":
+      return t("timeline.megolmReasonMembershipOrDeviceChange");
+    case "encryptionSettingsChanged":
+      return t("timeline.megolmReasonEncryptionSettingsChanged");
+    case "explicitDiscard":
+      return t("timeline.megolmReasonExplicitDiscard");
+    case "fullMemberListReload":
+      return t("timeline.megolmReasonFullMemberListReload");
+    case "roomSubscription":
+      return t("timeline.megolmReasonRoomSubscription");
+    case "limitedSyncResponse":
+      return t("timeline.megolmReasonLimitedSyncResponse");
+    case "keyShareFailure":
+      return t("timeline.megolmReasonKeyShareFailure");
+    case "storeMissing":
+      return t("timeline.megolmReasonStoreMissing");
+    case "invalidated":
+      return t("timeline.megolmReasonInvalidated");
+    case "unknown":
+      return t("timeline.megolmReasonUnknown");
+    case "notRetained":
+      return t("timeline.megolmReasonNotRetained");
+  }
 }
 
 function messageSourceJson(source: TimelineMessageSource): unknown {

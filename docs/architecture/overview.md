@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-08-18.
+Last amended: 2026-08-21.
 
 ## Product Scope
 
@@ -1253,6 +1253,18 @@ uses the normal `/keys/claim`, signed one-time/fallback-key handling, per-device
 share-state update, encrypted `m.room_key`, recipient key-request and verified
 device-gossip recovery, and configured backup recovery. Homeserver acceptance
 commits share state but never means recipient decryption acknowledgement.
+
+Recent outbound Megolm creation/rotation attribution is diagnostic-only and
+runtime-local. A small dedicated ledger retains closed reasons and anonymous
+room/session ordinals outside the general diagnostic ring; it is count-bounded,
+reports its own eviction count, and resets with account/crypto-runtime
+replacement. Local Encryption details for an event sent by the current device may query the
+exact room/session only inside the trusted Rust/SDK boundary and receive a
+closed reason. React receives
+only that presentation enum. Missing or evicted evidence is reported as
+unavailable and is never reconstructed from aggregate counters, visible event
+dates, fingerprints, or timing. The ledger does not change rotation, sharing,
+recipient, retry, or persistence behavior.
 
 Koushi retains two experimental hardening implementations from #510 and #523.
 The #510 bounded index-0 duplicate helper has no production caller; its builder

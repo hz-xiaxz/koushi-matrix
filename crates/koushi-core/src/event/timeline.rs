@@ -659,6 +659,25 @@ fn hex_digit(value: u8) -> char {
         _ => unreachable!("hex digit nibble"),
     }
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineMegolmSessionReason {
+    Initial,
+    ExpiredTime,
+    ExpiredMessageCount,
+    MembershipOrDeviceChange,
+    EncryptionSettingsChanged,
+    ExplicitDiscard,
+    FullMemberListReload,
+    RoomSubscription,
+    LimitedSyncResponse,
+    KeyShareFailure,
+    StoreMissing,
+    Invalidated,
+    Unknown,
+    NotRetained,
+}
+
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TimelineMessageSource {
     pub event_id: String,
@@ -672,6 +691,8 @@ pub struct TimelineMessageSource {
     pub has_media: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub megolm_session_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub megolm_session_rotation_reason: Option<TimelineMegolmSessionReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_json: Option<JsonValue>,
 }
@@ -702,6 +723,10 @@ impl fmt::Debug for TimelineMessageSource {
                     .map(|_| "MegolmSessionFingerprint(..)"),
             )
             .field(
+                "megolm_session_rotation_reason",
+                &self.megolm_session_rotation_reason,
+            )
+            .field(
                 "original_json",
                 &self.original_json.as_ref().map(|_| "OriginalEventJson(..)"),
             )
@@ -724,6 +749,7 @@ pub fn message_source_for_timeline_item(item: &TimelineItem) -> Option<TimelineM
         is_edited: item.is_edited,
         has_media: item.media.is_some(),
         megolm_session_fingerprint: None,
+        megolm_session_rotation_reason: None,
         original_json: None,
     })
 }
@@ -1858,6 +1884,7 @@ mod tests {
             is_edited: true,
             has_media: false,
             megolm_session_fingerprint: Some("AbCdEfGhIjKl".to_owned()),
+            megolm_session_rotation_reason: Some(TimelineMegolmSessionReason::ExpiredTime),
             original_json: Some(json!({
                 "event_id": "$event:test",
                 "sender": "@alice:test",
@@ -1903,6 +1930,7 @@ mod tests {
                         "is_edited": true,
                         "has_media": false,
                         "megolm_session_fingerprint": "AbCdEfGhIjKl",
+                        "megolm_session_rotation_reason": "expiredTime",
                         "original_json": {
                             "content": {
                                 "body": "private source body",

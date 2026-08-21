@@ -412,3 +412,25 @@ change when member lists are fetched or when outbound Megolm sessions are
 discarded. Upstreaming intent: propose the typed observer as an optional debug
 contract if other SDK consumers need to diagnose unexpected rotation churn;
 otherwise keep it as a narrow downstream patch.
+
+## 2026-08-21 (#591): exact retained rotation-reason lookup
+
+Local Encryption details need to correlate an event's full Megolm session
+identity with the already-classified rotation reason without exposing that
+identity through exported diagnostics. The vendored SDK therefore retains the
+128 most recent successfully created `(room, session) -> closed reason`
+boundaries inside the owning `RoomKeyDiagnosticHub` and adds one additive query
+through `OlmMachine` / `Encryption`:
+
+- callers provide the full room/session only inside the existing trusted Rust
+  crypto boundary;
+- the result is only `Option<RoomKeyRotationReason>`;
+- failed creation adds no attribution, exact duplicate keys update in place,
+  and oldest entries are evicted deterministically; and
+- storage is process-local and resets with the crypto machine.
+
+The accessor returns no room/session value, alias, key material, content, or raw
+error and does not change rotation, sharing, recipient, retry, or persistence
+behavior. Upstreaming intent: propose this bounded diagnostic lookup alongside
+the typed rotation observer; remove the downstream accessor if upstream offers
+an equivalent closed correlation API.

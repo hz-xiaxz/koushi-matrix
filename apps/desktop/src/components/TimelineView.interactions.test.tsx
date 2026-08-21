@@ -1250,6 +1250,7 @@ describe("TimelineView", () => {
       is_edited: false,
       has_media: false,
       megolm_session_fingerprint: "AbCdEfGhIjKl",
+      megolm_session_rotation_reason: "expiredTime",
       original_json: {
         type: "m.room.message",
         content: { body: "source body", msgtype: "m.text" }
@@ -1267,6 +1268,46 @@ describe("TimelineView", () => {
     expect(
       screen.getByRole("button", { name: "Copy Megolm session fingerprint" }).textContent
     ).toContain("Copy");
+    expect(screen.getByText("Time limit reached")).toBeTruthy();
+  });
+
+  it("omits Megolm rotation attribution when Rust supplies no local reason", () => {
+    const source: TimelineMessageSource = {
+      event_id: "$source-peer:example.invalid",
+      sender: "@bob:example.invalid",
+      timestamp_ms: 1_800_000_000_000,
+      body: "source body",
+      in_reply_to_event_id: null,
+      thread_root: null,
+      is_redacted: false,
+      is_edited: false,
+      has_media: false,
+      megolm_session_fingerprint: "AbCdEfGhIjKl"
+    };
+
+    render(<MessageSourceDialog source={source} onClose={vi.fn()} />);
+
+    expect(screen.queryByText("Session change reason")).toBeNull();
+  });
+
+  it("shows an honest unavailable Megolm rotation reason", () => {
+    const source: TimelineMessageSource = {
+      event_id: "$source-unavailable:example.invalid",
+      sender: "@alice:example.invalid",
+      timestamp_ms: 1_800_000_000_000,
+      body: "source body",
+      in_reply_to_event_id: null,
+      thread_root: null,
+      is_redacted: false,
+      is_edited: false,
+      has_media: false,
+      megolm_session_fingerprint: "AbCdEfGhIjKl",
+      megolm_session_rotation_reason: "notRetained"
+    };
+
+    render(<MessageSourceDialog source={source} onClose={vi.fn()} />);
+
+    expect(screen.getByText("Reason unavailable")).toBeTruthy();
   });
 
   it("renders plain-text URLs as anchors from Rust-projected link ranges", async () => {
