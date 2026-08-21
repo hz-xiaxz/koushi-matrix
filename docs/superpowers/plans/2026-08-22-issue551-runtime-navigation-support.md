@@ -1,6 +1,6 @@
 # Issue #551 runtime navigation support extraction
 
-Status: full-diff finding fixed; delta review pending. Scope is one behavior-preserving navigation persistence/cleanup/projection seam.
+Status: full diff approved; delivery pending. Scope is one behavior-preserving navigation persistence/cleanup/projection seam.
 
 ## Baseline
 
@@ -111,7 +111,9 @@ After full-diff approval, integrate latest `origin/main` if required, obtain del
 - `reviewer-flash` independently traced all 18 identities, six tests/two helpers, visibility/import closure, persistence source boundaries and parent ordering/ownership and recorded `Correct-to-implement`.
 - Implementation re-confirmed immutable hash/bytes, integrated by `luna-implementer`, and parent-audited.
 - Exactness: global production18/18, top-level13/13, AppActor methods4/4, associated method1/1, moved tests6/6, helpers2/2, all1,029 test identities, top-level `pub(super)`11, method edges4, associated edge1, field edges5, parent imports11 and orphan binding1; public/wire/resource deltas0.
-- Full-diff review found one leaf-only helper unnecessarily imported/widened. The parent import was removed and `unsubscribe_replaced_focused_context_timeline_key` restored to private; delta review pending.
+- Full-diff review found one leaf-only helper unnecessarily imported/widened. The parent import was removed and `unsubscribe_replaced_focused_context_timeline_key` restored to private.
+- Delta review independently verified the exact 11-edge closure and recorded `Correct-to-merge-after-finding-fix`.
+- Delivery: final repository gates, latest-main integration if required, PR CI and merge pending.
 - `runtime.rs` 7,715 → 7,149 newline-delimited lines; `runtime/navigation.rs` 593.
 - Focused moved tests6, relevant retained source/order tests6, saturated-mailbox behavior1, runtime navigation1, state navigation55, core lib1,021/8 ignored and all-targets/all-features check green.
 - Full diff and delivery pending.
