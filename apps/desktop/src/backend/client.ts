@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   createBrowserFakeApi,
   type ComposerDraftAccountOwner,
-  type DesktopApi
+  type DesktopApi,
+  type ViewportSyncObservation,
+  type ViewportSyncReceipt
 } from "./browserFakeApi";
 import { COMPOSER_DRAFT_REVISION_ZERO } from "../domain/composerDraftRevision";
 import type {
@@ -69,6 +71,12 @@ class TauriDesktopApi implements DesktopApi {
 
   async getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot> {
     return invoke<DiagnosticLogSnapshot>("get_diagnostic_snapshot");
+  }
+
+  async observeViewportSync(
+    observation: ViewportSyncObservation
+  ): Promise<ViewportSyncReceipt> {
+    return invoke<ViewportSyncReceipt>("observe_viewport_sync", { observation });
   }
 
   async discoverLoginMethods(homeserver: string): Promise<DesktopSnapshot> {

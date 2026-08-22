@@ -779,6 +779,23 @@ subscriptions, QA title ownership, persisted geometry, and shutdown behavior.
 Secondary OS dialogs or system prompts do not change this product-window
 contract.
 
+### Desktop Viewport Synchronization
+
+Live desktop viewport synchronization is Rust-owned at the Tauri adapter
+boundary. On macOS, the WKWebView parent NSView bounds are the native authority;
+the WKWebView frame is measured and, when needed, repaired to those bounds in one
+main-thread measure/decide/apply block. The adapter never resizes the native
+window in response to display density or panel presentation, and React never
+stores expected geometry or owns a retry/timer state machine.
+
+React may submit one finite, typed observation after a committed density render
+or browser resize. The Rust receipt carries an in-memory monotonic generation,
+the repair decision, final post-repair native origin/size alignment, and
+separate JavaScript-viewport and root/body alignment booleans. Other platforms
+report unsupported without speculative native repair. The receipt is the only
+source for the optional private-data-free QA viewport title tokens; QA mode is
+off for normal title semantics.
+
 ### Desktop Attention Surfaces
 
 Desktop notifications, dock/taskbar badges, and unread window-title hints are

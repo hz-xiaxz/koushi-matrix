@@ -1,7 +1,13 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
-use crate::CoreRuntimeState;
+use crate::{
+    CoreRuntimeState,
+    viewport_sync::{
+        ViewportSyncObservation, ViewportSyncReceipt, record_diagnostic, synchronize_now,
+        validate_observation,
+    },
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,12 +65,30 @@ pub async fn get_diagnostic_snapshot(
     ))
 }
 
+#[tauri::command]
+pub async fn observe_viewport_sync(
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+    observation: ViewportSyncObservation,
+) -> Result<ViewportSyncReceipt, String> {
+    validate_observation(&observation).map_err(|error| error.to_string())?;
+    let Some(window) = app.get_webview_window("main") else {
+        return Err("main webview is unavailable".to_owned());
+    };
+    let receipt =
+        synchronize_now(window, &state.viewport_sync_generation, observation.trigger).await?;
+    let receipt = receipt.with_dom_observation(&observation);
+    record_diagnostic(&receipt, Some(&observation));
+    super::update_qa_window_title_from_viewport_receipt(&app, state.inner(), &receipt).await;
+    Ok(receipt)
+}
+
 #[cfg(any(debug_assertions, test))]
 use koushi_state::{AuthSecret, DisplayPlatform, LoginRequest};
 #[cfg(any(debug_assertions, test))]
 use std::path::PathBuf;
 #[cfg(any(debug_assertions, test))]
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::Emitter;
 
 // ---- QA login pipe (debug/test only) ----
 
@@ -433,6 +457,41 @@ mod qa_tests {
         assert!(title.contains("rooms=2"));
         assert!(title.contains("timeline_items=42"));
     }
+
+    #[test]
+    fn viewport_qa_title_tokens_follow_the_rust_receipt() {
+        let snapshot = AppState::default();
+        let receipt = crate::viewport_sync::ViewportSyncReceipt {
+            generation: 17,
+            trigger: crate::viewport_sync::ViewportSyncTrigger::Resized,
+            density: Some(crate::viewport_sync::ViewportDensity::Comfortable),
+            native_support: crate::viewport_sync::NativeViewportSupport::Supported,
+            decision: crate::viewport_sync::ViewportSyncDecision::RepairToParentBounds,
+            native_aligned: true,
+            native_origin_aligned: true,
+            native_size_aligned: true,
+            dom_aligned: true,
+            dom_js_aligned: true,
+            dom_root_aligned: true,
+            parent: Some(crate::viewport_sync::ViewportRect {
+                top: 0.0,
+                left: 0.0,
+                width: 1200.0,
+                height: 800.0,
+            }),
+            webview: None,
+        };
+
+        let title = crate::commands::qa_window_title_with_viewport_receipt(&snapshot, 0, &receipt);
+
+        assert!(title.contains("viewport=aligned"));
+        assert!(title.contains("viewport_generation=17"));
+        assert!(title.contains("viewport_parent=true"));
+        assert!(title.contains("viewport_webview=true"));
+        assert!(title.contains("viewport_js=true"));
+        assert!(title.contains("viewport_root=true"));
+        assert!(title.contains("viewport_decision=repair_to_parent_bounds"));
+    }
 }
 
 #[cfg(test)]
@@ -523,6 +582,12 @@ mod snapshot_tests {
     fn diagnostic_snapshot_command_is_registered_in_generate_handler() {
         let source = include_str!("../lib.rs");
         assert!(source.contains("commands::diagnostics::get_diagnostic_snapshot"));
+    }
+
+    #[test]
+    fn viewport_sync_command_is_registered_in_generate_handler() {
+        let source = include_str!("../lib.rs");
+        assert!(source.contains("commands::diagnostics::observe_viewport_sync"));
     }
 
     #[test]

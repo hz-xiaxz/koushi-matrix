@@ -228,6 +228,17 @@ slots on a real homeserver.
 - `npm --prefix apps/desktop run qa:mac-gui` — macOS GUI smoke driven through
   `System Events`.
 
+The macOS smoke opens User Settings, selects Display, and activates the
+semantic `Compact`, `Default`, and `Comfortable` buttons. It then resizes
+`window 1` through System Events' native `set size` command and restores the
+original size best-effort. After each transition it polls the private-data-free
+Rust receipt title token:
+`viewport=aligned viewport_generation=N viewport_parent=true
+viewport_webview=true viewport_js=true viewport_root=true`. The generation and
+alignment values come from the Rust receipt after native repair; the harness
+never computes expected geometry or uses fixed window coordinates. The
+`viewport_decision` token records whether that receipt repaired the frame.
+
 Safety rules:
 
 - Pass credentials through `KOUSHI_QA_LOGIN_PIPE`, which contains only a FIFO

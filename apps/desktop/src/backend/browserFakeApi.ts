@@ -138,9 +138,60 @@ import type {
   ComposerDraftScope
 } from "../domain/composerDraftLifecycle";
 
+export type ViewportSyncTrigger =
+  | "page_load"
+  | "resized"
+  | "scale_factor_changed"
+  | "density_commit"
+  | "browser_resize";
+export type ViewportSyncDensity = "compact" | "default" | "comfortable";
+
+export interface ViewportSyncSize {
+  width: number;
+  height: number;
+}
+
+export interface ViewportSyncRect extends ViewportSyncSize {
+  top: number;
+  left: number;
+}
+
+export interface ViewportSyncObservation {
+  trigger: ViewportSyncTrigger;
+  density: ViewportSyncDensity;
+  window: ViewportSyncSize;
+  document: ViewportSyncSize;
+  visualViewport: {
+    present: boolean;
+    width: number;
+    height: number;
+    offsetLeft: number;
+    offsetTop: number;
+  };
+  body: ViewportSyncRect;
+  root: ViewportSyncRect;
+}
+
+export interface ViewportSyncReceipt {
+  generation: number;
+  trigger: ViewportSyncTrigger;
+  density: ViewportSyncDensity | null;
+  nativeSupport: "supported" | "unsupported";
+  decision: "in_sync" | "repair_to_parent_bounds" | "unsupported";
+  nativeAligned: boolean;
+  nativeOriginAligned: boolean;
+  nativeSizeAligned: boolean;
+  domAligned: boolean;
+  domJsAligned: boolean;
+  domRootAligned: boolean;
+  parent: ViewportSyncRect | null;
+  webview: ViewportSyncRect | null;
+}
+
 export interface DesktopApi {
   getSnapshot(): Promise<DesktopSnapshot>;
   getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot>;
+  observeViewportSync(observation: ViewportSyncObservation): Promise<ViewportSyncReceipt>;
   discoverLoginMethods(homeserver: string): Promise<DesktopSnapshot>;
   startOidcLogin(homeserver: string): Promise<OidcAuthorization>;
   completeOidcLogin(homeserver: string, callbackUrl: string): Promise<DesktopSnapshot>;
@@ -543,6 +594,7 @@ class BrowserFakeApi implements DesktopApi {
   private threadComposerDraftRevisions = new Map<string, ComposerDraftRevision>();
   private preparedUploadBytes = new Map<string, number[]>();
   private submissionLedger = new Map<string, string>();
+  private viewportSyncGeneration = 0;
 
   private clearPreparedUploadBytes(target: ComposerTarget): void {
     const prefix =
@@ -759,6 +811,27 @@ class BrowserFakeApi implements DesktopApi {
       entries: [],
       droppedEntries: 0,
       slidingSync: { ...DEFAULT_SLIDING_SYNC_DIAGNOSTICS }
+    };
+  }
+
+  async observeViewportSync(
+    observation: ViewportSyncObservation
+  ): Promise<ViewportSyncReceipt> {
+    this.viewportSyncGeneration += 1;
+    return {
+      generation: this.viewportSyncGeneration,
+      trigger: observation.trigger,
+      density: observation.density,
+      nativeSupport: "unsupported",
+      decision: "unsupported",
+      nativeAligned: false,
+      nativeOriginAligned: false,
+      nativeSizeAligned: false,
+      domAligned: true,
+      domJsAligned: true,
+      domRootAligned: true,
+      parent: null,
+      webview: null
     };
   }
 

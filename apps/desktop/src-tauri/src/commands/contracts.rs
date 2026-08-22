@@ -2616,6 +2616,7 @@ fn env_unset_real_search_and_select_producers_child() {
             timeline_items_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             _forwarder_task: None,
             native_window_focus_generation: std::sync::atomic::AtomicU64::new(0),
+            viewport_sync_generation: crate::viewport_sync::ViewportSyncGeneration::default(),
         };
         super::search::submit_search_production_path(
             SYNTHETIC_QUERY.to_owned(),

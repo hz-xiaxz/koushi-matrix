@@ -685,4 +685,44 @@ describe("desktop release scripts", () => {
     expect(output).toContain("10,20,300,400");
     expect(output).not.toContain("fullscreen");
   });
+
+  test("mac GUI smoke drives density and native resize through private viewport evidence", () => {
+    const source = readFileSync(
+      new URL("../../../../scripts/desktop-mac-gui-smoke.mjs", import.meta.url),
+      "utf8"
+    );
+
+    expect(source).toContain("waitForViewportRootLayout");
+    expect(source).toContain("set size of window 1");
+    expect(source).toContain("entire contents of window 1");
+    expect(source).toContain('role of candidate is "AXButton"');
+    expect(source).toContain('perform action "AXPress" of candidate');
+    for (const density of ["Compact", "Default", "Comfortable"]) {
+      expect(source).toContain(`\"${density}\"`);
+    }
+    expect(source).toContain("viewport=aligned");
+    expect(source).toContain("viewport_parent=true");
+    expect(source).toContain("viewport_webview=true");
+    expect(source).toContain("viewport_js=true");
+    expect(source).toContain("viewport_root=true");
+    expect(source).not.toContain("click at");
+  });
+
+  test("mac GUI smoke parser accepts only a complete newer Rust viewport receipt", () => {
+    const aligned = runScript("scripts/desktop-mac-gui-smoke.mjs", [
+      "--qa-title-viewport=koushi-desktop qa viewport=aligned viewport_generation=12 viewport_parent=true viewport_webview=true viewport_js=true viewport_root=true viewport_decision=repair_to_parent_bounds",
+      "--minimum-viewport-generation=11"
+    ]);
+    const stale = runScript("scripts/desktop-mac-gui-smoke.mjs", [
+      "--qa-title-viewport=koushi-desktop qa viewport=aligned viewport_generation=12 viewport_parent=true viewport_webview=true viewport_js=true viewport_root=true viewport_decision=in_sync",
+      "--minimum-viewport-generation=12"
+    ]);
+    const incomplete = runScript("scripts/desktop-mac-gui-smoke.mjs", [
+      "--qa-title-viewport=koushi-desktop qa viewport=aligned viewport_generation=13 viewport_parent=true viewport_webview=true viewport_js=false viewport_root=true viewport_decision=in_sync"
+    ]);
+
+    expect(aligned.trim()).toBe("ready");
+    expect(stale.trim()).toBe("not-ready");
+    expect(incomplete.trim()).toBe("not-ready");
+  });
 });

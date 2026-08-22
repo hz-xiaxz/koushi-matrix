@@ -20,6 +20,7 @@ const checks = [
   "verify QA title panel token after shortcuts",
   "open Keyboard settings shortcut",
   "open User settings shortcut",
+  "verify viewport density and native resize receipt",
   "capture private-data-free screenshots",
   "stop app process group"
 ];
@@ -122,6 +123,17 @@ const qaRecoveredTitleReadySample = optionValue("--qa-title-ready-require-recove
 if (qaRecoveredTitleReadySample !== undefined) {
   console.log(
     qaStatusIsReady(parseQaTitle(qaRecoveredTitleReadySample), true, allowEmptyTimeline)
+      ? "ready"
+      : "not-ready"
+  );
+  process.exit(0);
+}
+
+const qaTitleViewportSample = optionValue("--qa-title-viewport");
+if (qaTitleViewportSample !== undefined) {
+  const minimumGeneration = Number(optionValue("--minimum-viewport-generation") ?? "0");
+  console.log(
+    qaStatusHasViewportRootLayout(parseQaTitle(qaTitleViewportSample), minimumGeneration)
       ? "ready"
       : "not-ready"
   );
@@ -232,6 +244,8 @@ async function run() {
       await captureAppWindowScreenshot(userSettingsScreenshot);
       requireNonEmptyFile(userSettingsScreenshot, "user settings screenshot");
     }
+
+    await runViewportRootLayoutSmoke(timeoutMs, windowInfo, diagnostics);
 
     console.log(`mac GUI smoke passed: ${runDir}`);
     if (verbose) {
@@ -589,6 +603,116 @@ async function waitForQaPanel(timeout, requiredPanel, diagnostics = null) {
   throw new Error(`real login QA did not report panel=${requiredPanel}. Last title: ${lastTitle}`);
 }
 
+async function clickNamedSystemEventsButton(name) {
+  await appleScript(`
+tell application "System Events"
+  tell process "${activeProcessName}"
+    set frontmost to true
+    set targetName to ${JSON.stringify(name)}
+    repeat with candidate in (entire contents of window 1)
+      try
+        if role of candidate is "AXButton" and name of candidate is targetName then
+          perform action "AXPress" of candidate
+          return "clicked"
+        end if
+      end try
+    end repeat
+    error "Named AXButton was not found"
+  end tell
+end tell
+`);
+}
+
+async function clickDensityButton(density) {
+  await clickNamedSystemEventsButton(density);
+}
+
+async function setNativeWindowSize(width, height) {
+  await appleScript(`
+tell application "System Events"
+  tell process "${activeProcessName}"
+    set size of window 1 to {${Math.round(width)}, ${Math.round(height)}}
+  end tell
+end tell
+`);
+}
+
+function smallerNativeWindowSize(windowInfo) {
+  const width = Math.max(640, Math.round(windowInfo.width * 0.85));
+  const height = Math.max(480, Math.round(windowInfo.height * 0.85));
+  return width === windowInfo.width && height === windowInfo.height
+    ? { width: Math.round(windowInfo.width) + 80, height: Math.round(windowInfo.height) + 60 }
+    : { width, height };
+}
+
+function viewportGenerationFromTitle(title) {
+  const generation = parseQaTitle(title).viewport_generation;
+  return Number.isSafeInteger(generation) && generation >= 0 ? generation : 0;
+}
+
+async function waitForViewportRootLayout(timeout, minimumGeneration = 0, diagnostics = null) {
+  const startedAt = Date.now();
+  let lastTitle = "";
+  while (Date.now() - startedAt < timeout) {
+    try {
+      const windowInfo = await currentWindowInfo();
+      lastTitle = windowInfo.windowName;
+      recordQaPoll(diagnostics, "viewport", lastTitle);
+      const status = parseQaTitle(lastTitle);
+      if (qaStatusHasBlockingError(status)) {
+        throw new Error(`QA reported an error during viewport layout. Last title: ${lastTitle}`);
+      }
+      if (status.viewport_generation > minimumGeneration && status.viewport !== "aligned") {
+        throw new Error(`QA reported misaligned viewport layout. Last title: ${lastTitle}`);
+      }
+      if (qaStatusHasViewportRootLayout(status, minimumGeneration)) {
+        return summarizeQaStatus(status);
+      }
+    } catch (error) {
+      lastTitle = error.message;
+      recordQaPoll(diagnostics, "viewport", lastTitle);
+      if (lastTitle.includes("viewport layout")) {
+        throw error;
+      }
+    }
+    await sleep(1000);
+  }
+  throw new Error(`viewport root layout did not become aligned. Last title: ${lastTitle}`);
+}
+
+async function runViewportRootLayoutSmoke(timeout, originalWindow, diagnostics = null) {
+  await clickNamedSystemEventsButton("Display");
+  for (const density of ["Compact", "Default", "Comfortable"]) {
+    const before = await currentWindowInfo();
+    await clickDensityButton(density);
+    const result = await waitForViewportRootLayout(
+      timeout,
+      viewportGenerationFromTitle(before.windowName),
+      diagnostics
+    );
+    console.log(`ok viewport density=${density.toLowerCase()} ${result}`);
+  }
+
+  const beforeResize = await currentWindowInfo();
+  const resized = smallerNativeWindowSize(beforeResize);
+  try {
+    await setNativeWindowSize(resized.width, resized.height);
+    const result = await waitForViewportRootLayout(
+      timeout,
+      viewportGenerationFromTitle(beforeResize.windowName),
+      diagnostics
+    );
+    console.log(`ok viewport native_resize ${result}`);
+  } finally {
+    try {
+      await setNativeWindowSize(originalWindow.width, originalWindow.height);
+      diagnostics?.record("viewport_restore", "ok");
+    } catch {
+      diagnostics?.record("viewport_restore", "failed");
+    }
+  }
+}
+
 async function waitForQaSend(timeout, diagnostics = null) {
   const startedAt = Date.now();
   let lastTitle = "";
@@ -651,12 +775,22 @@ function parseQaTitle(title) {
         "timeline_items",
         "errors",
         "dom_root_children",
-        "dom_text_len"
+        "dom_text_len",
+        "viewport_generation"
       ].includes(key)
     ) {
       status[key] = Number(value);
     } else if (
-      ["active_room", "timeline_room", "timeline_matches_active", "timeline_subscribed"].includes(key)
+      [
+        "active_room",
+        "timeline_room",
+        "timeline_matches_active",
+        "timeline_subscribed",
+        "viewport_parent",
+        "viewport_webview",
+        "viewport_js",
+        "viewport_root"
+      ].includes(key)
     ) {
       status[key] = value === "true";
     } else {
@@ -685,6 +819,18 @@ function qaStatusHasSendSuccess(status) {
 
 function qaStatusHasBlockingError(status) {
   return status.errors > 0 || status.send === "failed";
+}
+
+function qaStatusHasViewportRootLayout(status, minimumGeneration = 0) {
+  return (
+    `viewport=${status.viewport}` === "viewport=aligned" &&
+    Number.isSafeInteger(status.viewport_generation) &&
+    status.viewport_generation > minimumGeneration &&
+    `viewport_parent=${status.viewport_parent}` === "viewport_parent=true" &&
+    `viewport_webview=${status.viewport_webview}` === "viewport_webview=true" &&
+    `viewport_js=${status.viewport_js}` === "viewport_js=true" &&
+    `viewport_root=${status.viewport_root}` === "viewport_root=true"
+  );
 }
 
 function qaStatusIsSignedOut(status) {
@@ -743,7 +889,14 @@ function summarizeQaStatus(status) {
     "crawler_indexed",
     "dom_screen",
     "dom_root_children",
-    "dom_text_len"
+    "dom_text_len",
+    "viewport",
+    "viewport_generation",
+    "viewport_parent",
+    "viewport_webview",
+    "viewport_js",
+    "viewport_root",
+    "viewport_decision"
   ]) {
     if (status[key] !== undefined) {
       values.push(`${key}=${status[key]}`);
@@ -902,6 +1055,6 @@ function tail(value, lines) {
 
 function printUsage() {
   console.log(
-    "Usage: node scripts/desktop-mac-gui-smoke.mjs --list|--check-tools|--child-env|--child-env-keys|--print-window-query-script|--print-screenshot-args|--print-real-login-transport|--qa-title-panel=TITLE|--qa-title-panel-ready=TITLE [--required-panel=PANEL]|--qa-title-ready=TITLE|--qa-title-send-ready=TITLE|--qa-title-ready-require-recovered=TITLE|--run [--real-login-from-stdin] [--keep-session] [--qa-profile=NAME] [--send-smoke-message[=BODY]] [--send-smoke-user-id=USER_ID] [--allow-empty-timeline] [--allow-private-screenshots] [--verbose] [--artifact-dir=PATH] [--timeout-ms=MS] [--send-timeout-ms=MS]"
+    "Usage: node scripts/desktop-mac-gui-smoke.mjs --list|--check-tools|--child-env|--child-env-keys|--print-window-query-script|--print-screenshot-args|--print-real-login-transport|--qa-title-panel=TITLE|--qa-title-panel-ready=TITLE [--required-panel=PANEL]|--qa-title-ready=TITLE|--qa-title-send-ready=TITLE|--qa-title-ready-require-recovered=TITLE|--qa-title-viewport=TITLE [--minimum-viewport-generation=N]|--run [--real-login-from-stdin] [--keep-session] [--qa-profile=NAME] [--send-smoke-message[=BODY]] [--send-smoke-user-id=USER_ID] [--allow-empty-timeline] [--allow-private-screenshots] [--verbose] [--artifact-dir=PATH] [--timeout-ms=MS] [--send-timeout-ms=MS]"
   );
 }
