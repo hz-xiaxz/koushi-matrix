@@ -69,7 +69,8 @@ Review found the parallel prepared-byte lifecycle defect in `appHarnessMain.tsx`
 - Characterization pins successful send/clear cleanup and main/thread cross-kind isolation.
 - Production: exact-target and thread-room owner cleanup operations; lifecycle sites updated; session map clear1; invalid empty/>16/>128-MiB admission; cache writes remain variant creation only.
 - GREEN: prepared-upload group passed three consecutive runs; browser fake107 and client25 passed; typecheck and focused lint green.
-- Post-implementation full-diff review after total-overflow simplification: `reviewer-flash` `Correct-to-merge`; full matrix pending.
+- Post-implementation full-diff review after total-overflow simplification: `reviewer-flash` `Correct-to-merge`.
+- Final local matrix: browser fake107, client25, Vitest1,393, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green without reruns.
 
 ## Delivery
 
