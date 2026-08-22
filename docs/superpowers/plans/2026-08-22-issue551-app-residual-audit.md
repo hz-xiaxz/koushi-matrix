@@ -1,6 +1,6 @@
 # Issue #551 App residual composition-root audit
 
-Status: final audit review pending. This document decides whether the split-later `App.tsx` candidate is complete after PRs #626–#631.
+Status: final audit approved; delivery pending. This document decides whether the split-later `App.tsx` candidate is complete after PRs #626–#631.
 
 ## Measured result
 
@@ -79,7 +79,7 @@ Extracted owners add gate29, QA diagnostics1, dialogs14, desktop-attention28 and
 ## Rejected further seams
 
 - **Composer draft/submission controller:** refs, lease overlays, revision fences, upload settlement, typing, QA send and navigation drain are interleaved from early initialization through command handlers. A hook would return a large callback/state bag or split timer/lease ownership.
-- **QA listeners:** QA-send listeners depend on sendText, selection, snapshot refresh and QA refs. Module error listeners differ intentionally from boot capture fallback; consolidation requires verify-first behavior/privacy work, not movement.
+- **QA listeners:** QA-send listeners depend on sendText, selection, snapshot refresh and QA refs. The module error listeners are a defensive fallback superseded by `bootErrorCapture` in normal production import order; extraction would be cosmetic, while consolidation/removal requires verify-first behavior/privacy work, not movement.
 - **Timeline transport augmentation:** the small memo is exactly where backend transport methods become App snapshot/navigation presentation operations; extracting it creates an arbitrary setter adapter.
 - **Avatar effects:** refs precede effects/callbacks and share dedupe/retry state; extraction changes hook order or splits one resource owner.
 - **Search/space/room operations:** request fences and refs are shared with navigation, room settings, panels, diagnostics and dialogs; extraction requires controller-sized callbacks or duplicate stale guards.
@@ -100,4 +100,5 @@ PRs #626–#631 each passed focused and full repository gates. The audit branch 
 
 - Read-only post-#629 audit found the attention lifecycle seam; #630 delivered it with exactness and CI7/7.
 - First residual review then found the self-contained UI-latency RAF/state seam; #631 delivered it with exactness, cleanup proof and CI7/7.
-- Formal `reviewer-flash` final residual verdict pending.
+- `reviewer-flash` re-derived all measurements/rejections, verified #631 closed the sole prior finding, and recorded unconditional `Correct-to-record-and-complete-App-checkbox-after-latency-fix`.
+- Delivery and Issue #551 checkbox update pending.
