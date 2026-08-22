@@ -33,6 +33,6 @@ Delete the first-unread-only render predicate/button and now-unused `jumpToEvent
 
 - `reviewer-flash-opencode-go` design verdict: `Correct-to-merge`; no blocking findings. Review verified marker/bottom independence, root-keyed DTO projection, divergent notification/live-marker RED cases, and catalog gates.
 - `luna-implementer` at max thinking for verify-first implementation.
-- Focused Vitest/browser-headless, typecheck, lint, and catalog checks.
-- `reviewer-flash-opencode-go` exact full-diff verdict after implementation.
+- RED: focused tests failed on the still-rendered first-unread control, live-marker badge source, and missing catalog key. GREEN: focused Vitest 74/74, typecheck, lint/catalog gates, and focused browser-headless 2/2 all exited 0.
+- `reviewer-flash-opencode-go` reviewed the exact 759-line full patch and returned `Correct-to-merge` with no blocking findings.
 - Integrated full local matrix, CI, merge, issue evidence, and build-artifact cleanup in the shared PR.
