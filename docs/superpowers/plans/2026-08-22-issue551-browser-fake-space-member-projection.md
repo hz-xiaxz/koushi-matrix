@@ -36,7 +36,9 @@ Export only the three parent-used functions: comparator, empty state, and fixtur
 - Exact AST slices4/4/order, parent0, exports3/private1; `isCompleteSpaceOrder` exact with one call.
 - Parent/leaf occurrences exact; two leaf types, one direct import, no parent type removal; API/class/state/generation/request/resource delta0.
 - Parent 5,942→5,869 lines; private leaf79; combined5,948.
-- Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green; post-implementation review/full matrix pending.
+- Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`.
+- Final local matrix: exactness green; browser fake114, client25, Vitest1,400, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green. Initial workspace again hit the pre-existing `corrupt_load_attempts_once_per_session` 3-vs-2 race; exact×3, runtime-timeline file, and full workspace rerun were green. The repeated flake is tracked in #645 rather than waived or mixed into this move-only seam.
 
 ## Verification
 
