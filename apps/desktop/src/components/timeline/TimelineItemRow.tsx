@@ -199,6 +199,7 @@ export function TimelineItemRow({
   onEdit,
   onRedact,
   isPinned = false,
+  isContinuation = false,
   isTarget = false,
   onPin = () => undefined,
   onUnpin = () => undefined,
@@ -259,6 +260,7 @@ export function TimelineItemRow({
   onEdit: TimelineRowActionHandlers["onEdit"];
   onRedact: TimelineRowActionHandlers["onRedact"];
   isPinned?: boolean;
+  isContinuation?: boolean;
   isTarget?: boolean;
   onPin?: TimelineRowActionHandlers["onPin"];
   onUnpin?: TimelineRowActionHandlers["onUnpin"];
@@ -808,7 +810,9 @@ export function TimelineItemRow({
 
   return (
     <article
-      className={`message${isTarget ? " pinned-target" : ""}`}
+      className={`message${isTarget ? " pinned-target" : ""}${
+        isContinuation ? " is-continuation" : ""
+      }`}
       data-item-id={domId}
       data-row-id={domId}
       data-content-event-id={eventId ?? undefined}

@@ -3725,6 +3725,21 @@ export const TimelineView = memo(function TimelineView({
               readMarkerDisplayEventId === activityEventId &&
               !unreadMarkerEventId
           );
+          const previousRow = visibleRows[visibleIndex - 1];
+          const previousIsReadMarker = Boolean(
+            previousRow?.activity_event_id &&
+              readMarkerDisplayEventId === previousRow.activity_event_id &&
+              !unreadMarkerEventId
+          );
+          const isContinuation = Boolean(
+            (row.kind === "event" || row.kind === "threadRoot") &&
+              (previousRow?.kind === "event" || previousRow?.kind === "threadRoot") &&
+              item.sender &&
+              previousRow?.item.sender &&
+              item.sender === previousRow?.item.sender &&
+              !isUnreadMarker &&
+              !previousIsReadMarker
+          );
           return (
             <div
               className="timeline-item-frame"
@@ -3779,6 +3794,7 @@ export const TimelineView = memo(function TimelineView({
                 mediaUploadProgress={mediaUploadProgressForItem(store, timelineKey, item)}
                 {...rowTransportActions}
                 isPinned={contentEventId ? pinnedEventIds.includes(contentEventId) : false}
+                isContinuation={isContinuation}
                 isTarget={
                   presentationContext === "thread" &&
                   initialTargetEventId !== null &&

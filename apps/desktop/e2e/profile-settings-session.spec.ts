@@ -736,6 +736,43 @@ test("timeline auto-load setting dispatches a Rust-owned update_settings patch",
   await expect(autoLoad).toHaveAttribute("aria-checked", "false");
 });
 
+test("Compact density visually groups consecutive messages from the same sender", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("koushi.displayDensity.v1", "compact");
+  });
+  await gotoReadyShell(page);
+  await seedTimelineItems(
+    page,
+    ["first", "second"].map((suffix, index) => ({
+      id: { Event: { event_id: `$compact-${suffix}:example.invalid` } },
+      sender: "@harness-user:example.invalid",
+      body: `Compact ${suffix}`,
+      timestamp_ms: 1_800_000_000_000 + index,
+      in_reply_to_event_id: null,
+      thread_root: null,
+      thread_summary: null,
+      reactions: [],
+      can_react: false,
+      is_redacted: false,
+      is_hidden: false,
+      can_redact: false,
+      is_edited: false,
+      can_edit: false
+    }))
+  );
+
+  const first = page.locator('[data-event-id="$compact-first:example.invalid"]');
+  const second = page.locator('[data-event-id="$compact-second:example.invalid"]');
+  await expect(page.locator('.desktop[data-density="compact"]')).toBeVisible();
+  await expect(first.locator(".avatar")).toBeVisible();
+  await expect(second).toHaveClass(/is-continuation/);
+  await expect(second.locator(".avatar")).toBeHidden();
+  await expect(second.locator(".sender")).toHaveCount(1);
+  await expect
+    .poll(() => second.locator(".sender").evaluate((element) => getComputedStyle(element).position))
+    .toBe("absolute");
+});
+
 test("rich formatted timeline rows render Rust-owned DTOs and code-wrap setting", async ({
   page
 }) => {
