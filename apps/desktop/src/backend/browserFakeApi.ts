@@ -4539,10 +4539,29 @@ class BrowserFakeApi implements DesktopApi {
     this.threadComposerDrafts.clear();
     this.threadComposerDraftRevisions.clear();
     this.preparedUploadBytes.clear();
+    this.snapshot.state.domain.secure_backup_gate = { kind: "inactive" };
+    this.snapshot.state.domain.current_session_status = { status: "idle" };
+    this.snapshot.state.domain.device_cleanup = { kind: "idle" };
+    this.snapshot.state.domain.link_preview_settings = { room_overrides: {} };
+    this.snapshot.state.domain.room_preferences = { rooms: {} };
+    this.snapshot.state.domain.space_members = emptyBrowserFakeSpaceMembersState();
+    this.snapshot.state.domain.invite_workflow = defaultInviteWorkflowState();
+    this.snapshot.state.domain.room_notification_settings = {};
+    this.snapshot.state.domain.room_interactions = {};
+    this.snapshot.state.domain.mention_candidates = { targets: [] };
+    this.snapshot.state.domain.thread_attention = { kind: "closed" };
+    this.snapshot.state.domain.search_crawler = { rooms: {}, last_active: null };
+    this.snapshot.state.domain.live_signals = defaultLiveSignalsState();
+    this.snapshot.state.domain.local_encryption = { kind: "unknown" };
+    this.snapshot.state.domain.native_attention = defaultNativeAttentionState();
+    this.snapshot.state.domain.account_management_capabilities = {
+      change_password: { kind: "unknown" }
+    };
     this.snapshot.state.domain.sync = "stopped";
     this.snapshot.state.ui.navigation = {
       active_space_id: null,
       active_room_id: null,
+      space_order: [],
       last_room_by_space_id: {}
     };
     this.snapshot.state.domain.spaces = [];
@@ -4576,6 +4595,8 @@ class BrowserFakeApi implements DesktopApi {
       continuity: { kind: "unknown" }
     };
     this.snapshot.state.ui.thread = { kind: "closed" };
+    this.snapshot.state.ui.threads_list = { kind: "closed" };
+    this.snapshot.state.ui.files_view = { kind: "closed" };
     this.snapshot.state.ui.focused_context = { kind: "closed" };
     this.snapshot.state.domain.search = { kind: "closed" };
     this.snapshot.state.domain.directory = defaultDirectoryState();
@@ -5080,16 +5101,12 @@ function createNeedsRecoverySnapshot(
 function createLockedSnapshot(
   secureBackupGate: SecureBackupGateState | undefined
 ): DesktopSnapshot {
-  const snapshot = createReadySnapshot(savedSessions[0], secureBackupGate);
+  const snapshot = createSignedOutSnapshot(secureBackupGate);
+  snapshot.state_generation = 0;
   snapshot.state.domain.session = {
     ...savedSessions[0],
     kind: "locked"
   };
-  snapshot.state.domain.sync = "stopped";
-  snapshot.state.ui.navigation.active_room_id = null;
-  snapshot.state.ui.timeline.room_id = null;
-  snapshot.state.ui.timeline.is_subscribed = false;
-  snapshot.timeline = [];
   return snapshot;
 }
 

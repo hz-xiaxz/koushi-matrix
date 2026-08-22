@@ -58,6 +58,174 @@ function receipt(
   };
 }
 
+function resetSessionViewProjection(snapshot: DesktopSnapshot) {
+  const { domain, ui } = snapshot.state;
+  return {
+    secure_backup_gate: domain.secure_backup_gate,
+    current_session_status: domain.current_session_status,
+    device_cleanup: domain.device_cleanup,
+    account_management_capabilities: domain.account_management_capabilities,
+    link_preview_settings: domain.link_preview_settings,
+    room_preferences: domain.room_preferences,
+    space_members: domain.space_members,
+    invite_workflow: domain.invite_workflow,
+    room_notification_settings: domain.room_notification_settings,
+    room_interactions: domain.room_interactions,
+    mention_candidates: domain.mention_candidates,
+    thread_attention: domain.thread_attention,
+    search_crawler: domain.search_crawler,
+    live_signals: domain.live_signals,
+    local_encryption: domain.local_encryption,
+    native_attention: domain.native_attention,
+    navigation: ui.navigation,
+    threads_list: ui.threads_list,
+    files_view: ui.files_view
+  };
+}
+
+function sessionViewProjection(snapshot: DesktopSnapshot) {
+  const { domain, ui } = snapshot.state;
+  return {
+    secure_backup_gate: domain.secure_backup_gate,
+    current_session_status: domain.current_session_status,
+    device_cleanup: domain.device_cleanup,
+    account_management_capabilities: domain.account_management_capabilities,
+    link_preview_settings: domain.link_preview_settings,
+    room_preferences: domain.room_preferences,
+    space_members: domain.space_members,
+    invite_workflow: domain.invite_workflow,
+    room_notification_settings: domain.room_notification_settings,
+    room_interactions: domain.room_interactions,
+    mention_candidates: domain.mention_candidates,
+    thread_attention: domain.thread_attention,
+    search_crawler: domain.search_crawler,
+    live_signals: domain.live_signals,
+    local_encryption: domain.local_encryption,
+    native_attention: domain.native_attention,
+    sync: domain.sync,
+    spaces: domain.spaces,
+    rooms: domain.rooms,
+    invites: domain.invites,
+    room_list: ui.room_list,
+    navigation: ui.navigation,
+    timeline_state: ui.timeline,
+    thread_state: ui.thread,
+    threads_list: ui.threads_list,
+    focused_context: ui.focused_context,
+    files_view: ui.files_view,
+    search: domain.search,
+    directory: domain.directory,
+    room_management: domain.room_management,
+    activity: domain.activity,
+    device_sessions: domain.device_sessions,
+    account_management: domain.account_management,
+    soft_logout_reauth: domain.soft_logout_reauth,
+    qr_login: domain.qr_login,
+    basic_operation: ui.basic_operation,
+    profile: domain.profile,
+    e2ee_trust: domain.e2ee_trust,
+    sidebar: snapshot.sidebar,
+    timeline: snapshot.timeline,
+    thread: snapshot.thread
+  };
+}
+
+async function dirtyBrowserFakeSessionViews(api: ReturnType<typeof createBrowserFakeApi>) {
+  const roomId = "!room-alpha:example.invalid";
+  await api.refreshCurrentSessionStatus("manual");
+  await api.loadAccountManagementCapabilities();
+  await api.setRoomUrlPreviewOverride(roomId, false);
+  await api.selectSpace("!space-alpha:example.invalid");
+  await api.loadSpaceMembers("!space-alpha:example.invalid", 1);
+  await api.setRoomNotificationMode(roomId, { kind: "mute" });
+  await api.pinEvent(roomId, "$session-reset-pin");
+  await api.queryMentionCandidates(roomId, "main", "ali");
+  await api.openInviteWorkflow(roomId);
+  await api.startRoomCrawl(roomId);
+  await api.setPresence("online");
+  await api.probeLocalEncryptionHealth();
+  await api.openActivityEvent(roomId, "$alpha-update");
+  await api.openThreadsList({ kind: "room", room_id: roomId });
+  await api.openFilesView(
+    { kind: "room", room_id: roomId },
+    { kinds: ["image", "video", "audio", "file", "sticker"], filename_query: null },
+    "newestFirst"
+  );
+}
+
+describe("BrowserFakeApi session-view reset", () => {
+  test("locked construction exposes only the locked session boundary", async () => {
+    const api = createBrowserFakeApi({ session: "locked" });
+    const locked = await api.getSnapshot();
+    const signedOut = await createBrowserFakeApi({ session: "signedOut" }).getSnapshot();
+    const [savedSession] = await api.listSavedSessions();
+
+    expect(locked.state_generation).toBe(0);
+    expect(locked.state.domain.session).toEqual({ ...savedSession, kind: "locked" });
+    expect(sessionViewProjection(locked)).toEqual(sessionViewProjection(signedOut));
+  });
+
+  test.each(["logout", "changeHomeserver", "failedSubmitLogin", "resetLocalData"] as const)(
+    "%s clears every session-owned projection",
+    async (operation) => {
+      const api = createBrowserFakeApi();
+      const signedOut = await createBrowserFakeApi({ session: "signedOut" }).getSnapshot();
+      await dirtyBrowserFakeSessionViews(api);
+      const dirty = await api.getSnapshot();
+
+      expect(resetSessionViewProjection(dirty)).not.toEqual(
+        resetSessionViewProjection(signedOut)
+      );
+      expect(dirty.state.ui.navigation.main_timeline_anchor).toEqual({
+        event_id: "$alpha-update"
+      });
+      expect(dirty.state.domain.local_encryption.kind).toBe("healthy");
+      expect(dirty.state.ui.threads_list.kind).toBe("open");
+      expect(dirty.state.ui.files_view.kind).toBe("open");
+
+      const snapshot =
+        operation === "logout"
+          ? await api.logout()
+          : operation === "changeHomeserver"
+            ? await api.changeHomeserver()
+            : operation === "failedSubmitLogin"
+              ? await api.submitLogin("https://example.invalid", "user", "password", "device", "linux")
+              : await api.resetLocalData();
+
+      expect(resetSessionViewProjection(snapshot)).toEqual(
+        resetSessionViewProjection(signedOut)
+      );
+      expect(snapshot.state.domain.secure_backup_gate).toEqual({ kind: "inactive" });
+      expect(snapshot.state.ui.navigation).toEqual({
+        active_space_id: null,
+        active_room_id: null,
+        space_order: [],
+        last_room_by_space_id: {}
+      });
+      expect(snapshot.state.ui.errors.filter((error) => error.code === "login_failed")).toHaveLength(
+        operation === "failedSubmitLogin" ? 1 : 0
+      );
+    }
+  );
+
+  test.each(["completeOidcLogin", "switchAccount"] as const)(
+    "%s replacement returns canonical ready projections",
+    async (operation) => {
+      const api = createBrowserFakeApi();
+      const ready = await createBrowserFakeApi().getSnapshot();
+      await dirtyBrowserFakeSessionViews(api);
+
+      const snapshot =
+        operation === "completeOidcLogin"
+          ? await api.completeOidcLogin("https://example.invalid", "http://localhost/callback")
+          : await api.switchAccount((await api.listSavedSessions())[1]);
+
+      expect(snapshot.state.domain.session.kind).toBe("ready");
+      expect(sessionViewProjection(snapshot)).toEqual(sessionViewProjection(ready));
+    }
+  );
+});
+
 describe("BrowserFakeApi Space member audit", () => {
   const spaceId = "!space-alpha:example.invalid";
   const childOnlyUserId = "@child-only:example.invalid";
