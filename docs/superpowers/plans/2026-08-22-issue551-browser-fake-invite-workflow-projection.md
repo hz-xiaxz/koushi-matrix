@@ -40,6 +40,14 @@ No barrel, wrapper, callback registry, class, fixture, state, cache, timer, or d
 - Leaf-only references: candidate4, text-match11, Matrix-ID validator1; `defaultInviteWorkflowState` also has one leaf-internal call.
 - BrowserFakeApi public methods, request IDs, snapshot mutation ordering, invite operation state, room/profile fixtures, and all resource owners stay in the parent.
 
+## Implementation evidence
+
+- Exact AST declaration slices10/10 in original order, parent0, exports7/private3; all parent/leaf occurrence counts exact.
+- One direct parent import, six leaf types, only four approved parent type removals; API/class/state/resource delta0.
+- Parent 6,172→5,942 lines; private leaf243; combined6,185.
+- Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; full matrix pending.
+
 ## Verification
 
 Use TypeScript AST statement ranges against immutable `dd921589`; verify body/token/order, parent0, export/private/import/type surfaces, occurrence counts, public API/class/resource inventory and clean extraction holes. Baseline/post focused browser fake114 + client25, especially invite candidate/scope/history/already-member tests. Then full frontend/Rust/Tauri/Headless/wasm/policy matrix, full-diff review, latest-main check, CI7/7, merge and #551 evidence.
