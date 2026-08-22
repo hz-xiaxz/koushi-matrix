@@ -612,6 +612,44 @@ describe("BrowserFakeApi settings preview", () => {
     expect(replay.snapshot.state.ui.timeline.composer.accepted_submission_ids).toContain("submission-same");
   });
 
+  test("reuses a submission id after an account switch with a fresh composer lease", async () => {
+    const api = createBrowserFakeApi();
+    const roomId = "!room-alpha:example.invalid";
+    await api.selectRoom(roomId);
+    const sessions = await api.listSavedSessions();
+    const accountA = await readyAccount(api);
+    const firstLease = await beginComposerLease(api, accountA, {
+      kind: "main",
+      room_id: roomId
+    });
+    await api.sendText(
+      accountA,
+      firstLease.lease.leaseId,
+      firstLease.generation,
+      "session-reuse",
+      roomId,
+      documentFromText("old body")
+    );
+    await api.switchAccount(sessions[1]!);
+    await api.switchAccount(sessions[0]!);
+    await api.selectRoom(roomId);
+    const freshLease = await beginComposerLease(api, accountA, {
+      kind: "main",
+      room_id: roomId
+    });
+    const before = (await api.getSnapshot()).timeline.length;
+    const response = await api.sendText(
+      accountA,
+      freshLease.lease.leaseId,
+      freshLease.generation,
+      "session-reuse",
+      roomId,
+      documentFromText("new body")
+    );
+    expect(response.snapshot.timeline).toHaveLength(before + 1);
+    expect(response.snapshot.timeline.at(-1)?.body).toBe("new body");
+  });
+
   test("draft snapshots retain structured mention identity instead of inferring display text", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
@@ -1081,6 +1119,8 @@ describe("BrowserFakeApi settings preview", () => {
     expect(bounded.state.ui.timeline.submission_registry.accepted_submission_ids).toHaveLength(0);
     expect(bounded.state.ui.timeline.submission_registry.settled_submission_ids).toHaveLength(128);
     expect(bounded.state.ui.timeline.submission_registry.settled_submission_ids).not.toContain("bounded-0");
+    expect(bounded.state.ui.timeline.composer.accepted_submission_ids).toHaveLength(128);
+    expect(bounded.state.ui.timeline.composer.accepted_submission_ids).not.toContain("bounded-0");
     await api.sendText(
       account,
       lease.leaseId,
@@ -1099,6 +1139,37 @@ describe("BrowserFakeApi settings preview", () => {
       documentFromText("evicted")
     );
     expect((await api.getSnapshot()).timeline).toHaveLength(before + 1);
+  });
+
+  test("bounds thread submission tombstones to 128 entries", async () => {
+    const api = createBrowserFakeApi();
+    const roomId = "!room-alpha:example.invalid";
+    await api.selectRoom(roomId);
+    const account = await readyAccount(api);
+    const rootId = (await api.getSnapshot()).timeline[0]!.event_id;
+    await api.openThread(roomId, rootId, "existingThread");
+    const { generation, lease } = await beginComposerLease(api, account, {
+      kind: "thread",
+      room_id: roomId,
+      root_event_id: rootId
+    });
+    for (let index = 0; index < 129; index += 1) {
+      await api.sendThreadReply(
+        account,
+        lease.leaseId,
+        generation,
+        `thread-bounded-${index}`,
+        roomId,
+        rootId,
+        documentFromText(`body-${index}`)
+      );
+    }
+    const thread = (await api.getSnapshot()).state.ui.thread;
+    expect(thread.kind).toBe("open");
+    if (thread.kind === "open") {
+      expect(thread.composer?.accepted_submission_ids).toHaveLength(128);
+      expect(thread.composer?.accepted_submission_ids).not.toContain("thread-bounded-0");
+    }
   });
 
   test("returns an empty diagnostic snapshot in the browser fake", async () => {
