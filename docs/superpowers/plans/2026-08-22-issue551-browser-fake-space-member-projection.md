@@ -31,6 +31,13 @@ Export only the three parent-used functions: comparator, empty state, and fixtur
 - `isCompleteSpaceOrder` body exact, one declaration+one call.
 - BrowserFakeApi member mutation ordering, pending/completed operations, generation fences, options, snapshot constructors, spaces/rooms/profile fixtures and all public surfaces remain unchanged.
 
+## Implementation evidence
+
+- Exact AST slices4/4/order, parent0, exports3/private1; `isCompleteSpaceOrder` exact with one call.
+- Parent/leaf occurrences exact; two leaf types, one direct import, no parent type removal; API/class/state/generation/request/resource delta0.
+- Parent 5,942→5,869 lines; private leaf79; combined5,948.
+- Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green; post-implementation review/full matrix pending.
+
 ## Verification
 
 Use TypeScript AST statement ranges against immutable `40860529`; verify exact bodies/order, parent0, surfaces/counts, retained ordering helper, API/class/resource inventory and clean holes. Baseline/post browser fake114 + client25, especially Space member audit and invite cancellation/generation cases. Then full frontend/Rust/Tauri/Headless/wasm/policy matrix, full-diff review, latest-main check, CI7/7, merge and #551 evidence.
