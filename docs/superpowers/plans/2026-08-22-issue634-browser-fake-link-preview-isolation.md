@@ -60,7 +60,9 @@ Record before/after:
 - Production fix: one in-place snapshot traversal plus two module-fixture traversals became one copy-on-write snapshot `map`; no fixture writes remain.
 - GREEN: exact test passed three consecutive runs; full focused file reports 87/87.
 - The first post-implementation review was invalidated after Prettier introduced whole-file churn. Both code files were reset to the immutable baseline and the same semantic change was minimally reapplied; the RED assertion was only line-wrapped, not changed.
-- Fresh post-reset full-diff re-review: `reviewer-flash` `Correct-to-merge`; full local matrix remains pending.
+- Fresh post-reset full-diff re-review: `reviewer-flash` `Correct-to-merge`.
+- Final local matrix: browser fake87, client25, Vitest1,310, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green.
+- The first workspace run hit unrelated `runtime_room_list_sync::normal_runtime_waits_for_full_all_rooms_reconciliation_and_reuses_one_sync_engine` deadline with a zero Rust diff. Its exact test passed three consecutive runs, its six-test file passed, and the complete workspace all-targets rerun passed; no failure was waived.
 
 ## Delivery
 
