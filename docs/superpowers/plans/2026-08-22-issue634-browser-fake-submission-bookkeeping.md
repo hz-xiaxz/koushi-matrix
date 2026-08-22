@@ -58,7 +58,8 @@ No new helper, wrapper, owner object, map, cap, API, DTO, transaction format, le
 - RED: stale submission ID replayed after A→B→A; main history retained129 IDs; thread history retained129 IDs.
 - Production: raw composer-history assignment replaced by the existing bounded remember helper; `clearSessionViews` adds exactly one ledger clear.
 - GREEN: all three focused tests passed three consecutive runs; browser fake90 and client25 passed.
-- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; full matrix pending.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`.
+- Final local matrix: browser fake90, client25, Vitest1,376, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green without reruns.
 
 ## Delivery
 
