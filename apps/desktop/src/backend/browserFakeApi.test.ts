@@ -2457,3 +2457,159 @@ describe("BrowserFakeApi settings preview", () => {
     }
   });
 });
+
+describe("BrowserFakeApi prepared upload lifecycle", () => {
+  const roomId = "!room-alpha:example.invalid";
+  const otherRoomId = "!room-planning:example.invalid";
+  const error = "attachment batch is empty or exceeds the supported limit";
+
+  function item(stagedId: string, bytes: number[]): {
+    stagedId: string;
+    position: number;
+    filename: string;
+    mimeType: string;
+    bytes: number[];
+  } {
+    return { stagedId, position: 0, filename: `${stagedId}.txt`, mimeType: "text/plain", bytes };
+  }
+
+  async function rootId(api: ReturnType<typeof createBrowserFakeApi>): Promise<string> {
+    return (await api.getSnapshot()).timeline[0]!.event_id;
+  }
+
+  async function stageMain(api: ReturnType<typeof createBrowserFakeApi>, stagedId: string, bytes = [1, 2, 3]) {
+    await api.selectRoom(roomId);
+    await api.stageUploadBytes({ kind: "main", room_id: roomId }, [item(stagedId, bytes)]);
+  }
+
+  async function stageThread(
+    api: ReturnType<typeof createBrowserFakeApi>,
+    root: string,
+    stagedId: string,
+    bytes = [4, 5, 6]
+  ) {
+    await api.openThread(roomId, root, "existingThread");
+    await api.stageUploadBytes(
+      { kind: "thread", room_id: roomId, root_event_id: root },
+      [item(stagedId, bytes)]
+    );
+  }
+
+  test("replacing main staging removes disjoint prepared bytes", async () => {
+    const api = createBrowserFakeApi();
+    const target = { kind: "main" as const, room_id: roomId };
+    await stageMain(api, "old", [1]);
+    await api.stageUploadBytes(target, [item("new", [2])]);
+
+    await expect(api.preparedUploadPreview(target, "old", "original-keep")).resolves.toEqual([]);
+    await expect(api.preparedUploadPreview(target, "new", "original-keep")).resolves.toEqual([2]);
+  });
+
+  test.each([
+    ["empty", []],
+    ["17 items", Array.from({ length: 17 }, (_, index) => item(`item-${index}`, [index]))],
+    ["over 128 MiB", [item("sparse", Object.assign([], { length: 128 * 1024 * 1024 + 1 }))]]
+  ])("rejects %s batches before the active guard without mutation", async (_name, items) => {
+    const api = createBrowserFakeApi();
+    const active = { kind: "main" as const, room_id: roomId };
+    await stageMain(api, "retained", [9]);
+    const before = await api.getSnapshot();
+
+    await expect(
+      api.stageUploadBytes({ kind: "main", room_id: otherRoomId }, items)
+    ).rejects.toThrow(error);
+    expect(await api.getSnapshot()).toEqual(before);
+    await expect(api.preparedUploadPreview(active, "retained", "original-keep")).resolves.toEqual([9]);
+  });
+
+  test("explicit close clears thread prepared bytes", async () => {
+    const api = createBrowserFakeApi();
+    const root = await rootId(api);
+    await stageThread(api, root, "thread-upload");
+    await api.closeThread();
+
+    await expect(
+      api.preparedUploadPreview({ kind: "thread", room_id: roomId, root_event_id: root }, "thread-upload", "original-keep")
+    ).resolves.toEqual([]);
+  });
+
+  test("opening root B clears root A prepared bytes", async () => {
+    const api = createBrowserFakeApi();
+    const rootA = await rootId(api);
+    const rootB = (await api.getSnapshot()).timeline[1]!.event_id;
+    await stageThread(api, rootA, "root-a");
+    await api.openThread(roomId, rootB, "existingThread");
+
+    await expect(api.preparedUploadPreview({ kind: "thread", room_id: roomId, root_event_id: rootA }, "root-a", "original-keep")).resolves.toEqual([]);
+  });
+
+  test.each(["select room", "select home"]) ("%s implicitly closes the thread", async (operation) => {
+    const api = createBrowserFakeApi();
+    const root = await rootId(api);
+    await stageThread(api, root, "navigation-upload");
+    if (operation === "select room") {
+      await api.selectRoom(otherRoomId);
+    } else {
+      await api.selectSpace(null);
+    }
+
+    await expect(api.preparedUploadPreview({ kind: "thread", room_id: roomId, root_event_id: root }, "navigation-upload", "original-keep")).resolves.toEqual([]);
+  });
+
+  test("room removal clears main prepared bytes", async () => {
+    const api = createBrowserFakeApi();
+    const target = { kind: "main" as const, room_id: roomId };
+    await stageMain(api, "removed");
+    await api.leaveRoom(roomId);
+
+    await expect(api.preparedUploadPreview(target, "removed", "original-keep")).resolves.toEqual([]);
+  });
+
+  test.each([
+    "completeOidcLogin",
+    "submitLogin",
+    "switchAccount",
+    "changeHomeserver",
+    "logout",
+    "resetLocalData"
+  ])("%s clears the prepared byte cache", async (operation) => {
+    const api = createBrowserFakeApi();
+    const target = { kind: "main" as const, room_id: roomId };
+    await stageMain(api, operation);
+    if (operation === "completeOidcLogin") await api.completeOidcLogin("https://example.invalid", "callback");
+    if (operation === "submitLogin") await api.submitLogin("https://example.invalid", "user", "password", "device", "linux");
+    if (operation === "switchAccount") await api.switchAccount((await api.listSavedSessions())[1]!);
+    if (operation === "changeHomeserver") await api.changeHomeserver();
+    if (operation === "logout") await api.logout();
+    if (operation === "resetLocalData") await api.resetLocalData();
+
+    await expect(api.preparedUploadPreview(target, operation, "original-keep")).resolves.toEqual([]);
+  });
+
+  test("clear and send clean only their target and preserve the other kind", async () => {
+    const api = createBrowserFakeApi();
+    const main = { kind: "main" as const, room_id: roomId };
+    const root = await rootId(api);
+    const thread = { kind: "thread" as const, room_id: roomId, root_event_id: root };
+    await stageMain(api, "main");
+    await stageThread(api, root, "thread");
+    await api.clearUploadStaging(thread);
+    await expect(
+      api.preparedUploadPreview(thread, "thread", "original-keep")
+    ).resolves.toEqual([]);
+    await expect(api.preparedUploadPreview(main, "main", "original-keep")).resolves.toEqual([
+      1, 2, 3
+    ]);
+
+    await api.stageUploadBytes(thread, [item("thread-again", [7])]);
+    const account = await readyAccount(api);
+    const { generation, lease } = await beginComposerLease(api, account, thread);
+    await api.sendPreparedUploads(account, lease.leaseId, generation, thread, revision("0"));
+    await expect(
+      api.preparedUploadPreview(thread, "thread-again", "original-keep")
+    ).resolves.toEqual([]);
+    await expect(api.preparedUploadPreview(main, "main", "original-keep")).resolves.toEqual([
+      1, 2, 3
+    ]);
+  });
+});

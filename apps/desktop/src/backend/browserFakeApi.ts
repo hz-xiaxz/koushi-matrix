@@ -477,6 +477,10 @@ export type BrowserFakeApiContract = DesktopApi &
     >
   >;
 
+const MAX_PREPARATION_BATCH_SIZE = 16;
+const MAX_PREPARATION_BATCH_BYTES = 128 * 1024 * 1024;
+const ATTACHMENT_BATCH_ERROR = "attachment batch is empty or exceeds the supported limit";
+
 export function createBrowserFakeApi(options: BrowserFakeApiOptions = {}): BrowserFakeApiContract {
   return new BrowserFakeApi(options);
 }
@@ -506,6 +510,23 @@ class BrowserFakeApi implements DesktopApi {
   private threadComposerDraftRevisions = new Map<string, ComposerDraftRevision>();
   private preparedUploadBytes = new Map<string, number[]>();
   private submissionLedger = new Map<string, string>();
+
+  private clearPreparedUploadBytes(target: ComposerTarget): void {
+    const prefix =
+      target.kind === "main"
+        ? `main:${target.room_id}::`
+        : `thread:${target.room_id}:${target.root_event_id}:`;
+    for (const key of this.preparedUploadBytes.keys()) {
+      if (key.startsWith(prefix)) this.preparedUploadBytes.delete(key);
+    }
+  }
+
+  private clearPreparedThreadUploadBytesForRoom(roomId: string): void {
+    const prefix = `thread:${roomId}:`;
+    for (const key of this.preparedUploadBytes.keys()) {
+      if (key.startsWith(prefix)) this.preparedUploadBytes.delete(key);
+    }
+  }
 
   private requireComposerLease(
     account: ComposerDraftAccountOwner,
@@ -1637,6 +1658,9 @@ class BrowserFakeApi implements DesktopApi {
         this.refreshSidebar();
       }
     }
+    const openThreadRoomId =
+      this.snapshot.state.ui.thread.kind === "open" ? this.snapshot.state.ui.thread.room_id : null;
+    if (openThreadRoomId) this.clearPreparedThreadUploadBytesForRoom(openThreadRoomId);
     this.snapshot.state.ui.navigation.active_room_id = roomId;
     this.snapshot.state.ui.navigation.main_timeline_anchor = null;
     this.snapshot.state.ui.timeline.room_id = roomId;
@@ -1833,6 +1857,7 @@ class BrowserFakeApi implements DesktopApi {
     if (!this.canUseSyncedViews() || this.snapshot.state.ui.timeline.room_id !== roomId) {
       return this.getSnapshot();
     }
+    this.clearPreparedUploadBytes({ kind: "main", room_id: roomId });
     this.snapshot.state.ui.timeline.staged_uploads = items.map((item, index) => ({
       staged_id: item.stagedId,
       room_id: roomId,
@@ -1852,9 +1877,17 @@ class BrowserFakeApi implements DesktopApi {
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
   ): Promise<DesktopSnapshot> {
+    if (items.length === 0 || items.length > MAX_PREPARATION_BATCH_SIZE) {
+      throw new Error(ATTACHMENT_BATCH_ERROR);
+    }
+    const totalBytes = items.reduce((total, item) => total + item.bytes.length, 0);
+    if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_PREPARATION_BATCH_BYTES) {
+      throw new Error(ATTACHMENT_BATCH_ERROR);
+    }
     if (!this.canUseSyncedViews() || !browserComposerTargetIsActive(this.snapshot, target)) {
       return this.getSnapshot();
     }
+    this.clearPreparedUploadBytes(target);
     const staged = items.map((item, index) => {
       const prepared = browserPreparedUploadItem(target, item, index);
       if (prepared.preparation.kind === "ready") {
@@ -1987,11 +2020,7 @@ class BrowserFakeApi implements DesktopApi {
     }
     this.preflightComposerDraftAcceptance(target, draftRevision);
     setBrowserStagedUploadsForTarget(this.snapshot, target, []);
-    for (const key of this.preparedUploadBytes.keys()) {
-      if (key.startsWith(`${target.kind}:${target.room_id}:`)) {
-        this.preparedUploadBytes.delete(key);
-      }
-    }
+    this.clearPreparedUploadBytes(target);
     const acceptedRevision = this.acceptComposerDraftTarget(target, draftRevision);
     return { acceptedRevision, snapshot: await this.getSnapshot() };
   }
@@ -2040,11 +2069,7 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
     setBrowserStagedUploadsForTarget(this.snapshot, target, []);
-    for (const key of this.preparedUploadBytes.keys()) {
-      if (key.startsWith(`${target.kind}:${target.room_id}:`)) {
-        this.preparedUploadBytes.delete(key);
-      }
-    }
+    this.clearPreparedUploadBytes(target);
     return this.getSnapshot();
   }
 
@@ -2397,6 +2422,7 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
+    this.clearPreparedThreadUploadBytesForRoom(roomId);
     this.snapshot.state.ui.thread = {
       kind: "open",
       room_id: roomId,
@@ -2451,6 +2477,9 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
+    const openThreadRoomId =
+      this.snapshot.state.ui.thread.kind === "open" ? this.snapshot.state.ui.thread.room_id : null;
+    if (openThreadRoomId) this.clearPreparedThreadUploadBytesForRoom(openThreadRoomId);
     this.snapshot.state.ui.thread = { kind: "closed" };
     this.snapshot.thread = null;
     return this.getSnapshot();
@@ -4422,6 +4451,9 @@ class BrowserFakeApi implements DesktopApi {
 
 
   private clearActiveRoomSelection(): void {
+    const openThreadRoomId =
+      this.snapshot.state.ui.thread.kind === "open" ? this.snapshot.state.ui.thread.room_id : null;
+    if (openThreadRoomId) this.clearPreparedThreadUploadBytesForRoom(openThreadRoomId);
     this.snapshot.state.ui.navigation.active_room_id = null;
     this.snapshot.state.ui.timeline = {
       room_id: null,
@@ -4499,6 +4531,7 @@ class BrowserFakeApi implements DesktopApi {
     this.composerDraftRevisions.clear();
     this.threadComposerDrafts.clear();
     this.threadComposerDraftRevisions.clear();
+    this.preparedUploadBytes.clear();
     this.snapshot.state.domain.sync = "stopped";
     this.snapshot.state.ui.navigation = {
       active_space_id: null,
@@ -4579,6 +4612,8 @@ class BrowserFakeApi implements DesktopApi {
 
     this.composerDrafts.delete(roomId);
     this.composerDraftRevisions.delete(roomId);
+    this.clearPreparedUploadBytes({ kind: "main", room_id: roomId });
+    this.clearPreparedThreadUploadBytesForRoom(roomId);
     for (const key of this.threadComposerDrafts.keys()) {
       if (key.startsWith(`thread\u0000${roomId}\u0000`)) {
         this.threadComposerDrafts.delete(key);
