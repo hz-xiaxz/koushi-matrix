@@ -84,7 +84,8 @@ A TypeScript-AST verifier compares immutable parent against parent+leaf and requ
 - Parent drops only `LocaleSettings`/`LocaleDisplayProfile`; bodies/comments/calls are unchanged.
 - `browserFakeApi.ts` 6,482→6,306 lines; private leaf192 lines; combined6,498 lines.
 - Browser fake107 + client25 and typecheck green.
-- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; full matrix pending.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`.
+- Final local matrix: exactness green; browser fake107, client25, Vitest1,393, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green without reruns.
 
 ## Delivery
 
