@@ -107,4 +107,5 @@ After merge, perform the final App residual audit; no App checkbox closes before
 - `App.tsx` 6,367 → 6,242 newline-delimited lines; hook leaf159.
 - Focused App78 + attention28 =106, typecheck/lint and source/exactness/diff checks green.
 - Full diff: `reviewer-flash` independently traced resources/hook order/dependencies, exact-file Tauri acknowledgment, source assertions and Rust/product ownership and recorded `Correct-to-merge`.
-- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: App78 + attention28, Vitest1,371, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
