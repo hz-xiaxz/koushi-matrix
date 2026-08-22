@@ -43,6 +43,6 @@ Use the existing `visibleRows`, `visibleIndex`, row kinds, and marker IDs in `Ti
 
 - `reviewer-flash-opencode-go` design verdict: `Correct-to-merge`; no blocking findings. The review verified full-list virtualization adjacency, both marker directions, accessible sender retention, Compact-only CSS, and Rust ownership.
 - `luna-implementer` at max thinking for verify-first implementation.
-- Focused Vitest/style-contract/browser-headless RED/GREEN, typecheck, and lint.
-- `reviewer-flash-opencode-go` exact full-diff verdict after implementation.
+- RED: rendering tests failed on missing continuation behavior and style contract failed on missing Compact selectors. GREEN: rendering 24/24, styles 30/30, typecheck, lint, and focused Playwright 1/1 all exited 0; Playwright used polling because the host inotify watch limit was exhausted.
+- `reviewer-flash-opencode-go` reviewed the exact 436-line full patch and returned `Correct-to-merge` with no blocking findings.
 - Integrated full local matrix, CI, merge, issue evidence, and build-artifact cleanup in the shared PR.
