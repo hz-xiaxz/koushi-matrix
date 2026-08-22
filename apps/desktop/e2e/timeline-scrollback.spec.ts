@@ -705,7 +705,7 @@ test("variable-height initial load starts at the live edge", async ({ page }) =>
   await expectTimelineScrolledToBottom(container);
 });
 
-test("virtualized jump remains stable after variable-height rows are measured", async ({
+test("virtualized navigation hides the first-unread control after variable-height rows are measured", async ({
   page
 }) => {
   await page.goto("/harness.html?variableHeights=true");
@@ -759,22 +759,7 @@ test("virtualized jump remains stable after variable-height rows are measured", 
     { key: timelineKey() }
   );
 
-  await page.getByRole("button", { name: "Jump to first unread, 1 unread" }).click();
-  await waitAnimationFrames(page, 4);
-
-  const targetOffset = await container.evaluate((node) => {
-    const target = node.querySelector<HTMLElement>('[data-item-id="$vh100"]');
-    if (!target) {
-      return null;
-    }
-    const containerRect = node.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    return Math.abs(
-      targetRect.top + targetRect.height / 2 - (containerRect.top + node.clientHeight / 2)
-    );
-  });
-  expect(targetOffset).not.toBeNull();
-  expect(targetOffset!).toBeLessThanOrEqual(96);
+  await expect(page.getByRole("button", { name: "Jump to first unread, 1 unread" })).toHaveCount(0);
 });
 
 test("scrollback prepend keeps the anchor item visually stable and gates auto-backfill", async ({
@@ -1654,7 +1639,7 @@ test("timeline keeps SDK diff order and ignores duplicate update batches", async
   await expect(page.locator("[data-item-id]").nth(1)).toHaveAttribute("data-item-id", "$c");
 });
 
-test("timeline navigation renders Rust-owned unread controls and sends viewport facts", async ({
+test("timeline navigation keeps the unread marker and bottom control independent", async ({
   page
 }) => {
   await page.goto("/harness.html?autoLoadOlderMessages=true");
@@ -1709,8 +1694,7 @@ test("timeline navigation renders Rust-owned unread controls and sends viewport 
 
   await expect(page.getByRole("separator", { name: "Unread messages" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Jump to first unread, 3 unread" }).click();
-  await expect(page.locator('[data-item-id="$m25"]')).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Jump to first unread, 3 unread" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Jump to bottom, 5 new messages" }).click();
   await expect

@@ -3470,65 +3470,6 @@ export const TimelineView = memo(function TimelineView({
     },
     [markUserScrollInput]
   );
-  const jumpToEvent = useCallback(
-    (eventId: string) => {
-      releaseViewportIntent();
-      jumpViewportControlRef.current = true;
-      viewportIntentRevisionRef.current += 1;
-      const container = containerRef.current;
-      const scrollMountedRowIntoView = () => {
-        const row = container ? findTimelineEventNode(container, "activity", eventId) : null;
-        row?.scrollIntoView({ block: "center", inline: "nearest" });
-      };
-      const row = container ? findTimelineEventNode(container, "activity", eventId) : null;
-      if (row) {
-        runWithScrollWriteReason("jumpToEvent", () => {
-          row.scrollIntoView({ block: "center", inline: "nearest" });
-        });
-        updateViewportMetrics();
-        reportViewportObservation();
-        return;
-      }
-      if (container && virtualWindow.virtualized) {
-        const itemIndex = visibleRows.findIndex(
-          (row) => row.activity_event_id === eventId
-        );
-        if (itemIndex >= 0) {
-          const itemTop = timelineHeightModel.offsets[itemIndex] ?? 0;
-          const itemHeight = timelineItemHeightAtIndex(timelineHeightModel, itemIndex);
-          runWithScrollWriteReason("jumpToEvent", () => {
-            container.scrollTop = Math.max(
-              0,
-              viewportMetricsRef.current.listOffsetTop +
-                itemTop +
-                itemHeight / 2 -
-                container.clientHeight / 2
-            );
-          });
-          updateViewportMetrics();
-          scheduleScrollFollowUpFrame(() => {
-            runWithScrollWriteReason("jumpToEvent", () => {
-              scrollMountedRowIntoView();
-            });
-            updateViewportMetrics();
-            reportViewportObservation();
-          });
-          return;
-        }
-      }
-      reportViewportObservation();
-    },
-    [
-      releaseViewportIntent,
-      runWithScrollWriteReason,
-      scheduleScrollFollowUpFrame,
-      reportViewportObservation,
-      timelineHeightModel,
-      updateViewportMetrics,
-      virtualWindow.virtualized,
-      visibleRows
-    ]
-  );
   const jumpToBottom = useCallback(() => {
     const container = containerRef.current;
     if (!container) {
@@ -3567,14 +3508,6 @@ export const TimelineView = memo(function TimelineView({
   }, [jumpToBottom, onRegisterJumpToLatest]);
   const canRenderRoomNavigation =
     roomTimelineRoomId === roomId;
-  const firstUnreadEventId = navigationSnapshot?.first_unread_event_id ?? null;
-  const firstUnreadCount = navigationSnapshot?.unread_event_count ?? 0;
-  const canJumpToFirstUnread = Boolean(
-    firstUnreadEventId &&
-      firstUnreadCount > 0 &&
-      navigationSnapshot?.unread_position !== "insideViewport" &&
-      navigationSnapshot?.unread_position !== "none"
-  );
   const canJumpToBottom = Boolean(
     navigationSnapshot?.can_jump_to_bottom &&
       (navigationSnapshot.newer_event_count > 0 || navigationSnapshot.unread_event_count > 0)
@@ -3616,22 +3549,11 @@ export const TimelineView = memo(function TimelineView({
         <div
           className="timeline-navigation-bar"
           style={{
-            visibility:
-              canJumpToFirstUnread || canJumpToBottom ? "visible" : "hidden"
+            visibility: canJumpToBottom ? "visible" : "hidden"
           }}
-          aria-hidden={!(canJumpToFirstUnread || canJumpToBottom)}
+          aria-hidden={!canJumpToBottom}
         >
           <div className="timeline-navigation-pills">
-            {canJumpToFirstUnread && firstUnreadEventId ? (
-              <button
-                className="timeline-navigation-pill"
-                type="button"
-                onClick={() => jumpToEvent(firstUnreadEventId)}
-              >
-                <ArrowDown size={14} aria-hidden="true" />
-                <span>{t("timeline.jumpToFirstUnread", { count: firstUnreadCount })}</span>
-              </button>
-            ) : null}
             {canJumpToBottom ? (
               <button
                 className="timeline-navigation-pill"

@@ -636,13 +636,13 @@ export function TimelineItemRow({
         item.thread_summary.latest_timestamp_ms
       )
     : "";
-  const newThreadReplyCount =
+  const threadNotificationCount =
     eventId && threadAttention?.rootEventId === eventId
-      ? threadAttention.liveEventMarkerCount
+      ? threadAttention.notificationCount
       : 0;
-  const newThreadRepliesText =
-    newThreadReplyCount > 0
-      ? t("timeline.viewReplies", { count: newThreadReplyCount })
+  const threadNotificationsText =
+    threadNotificationCount > 0
+      ? t("timeline.threadNotificationCount", { count: threadNotificationCount })
       : "";
   const receiptDetails = formatReceiptDetails(receipts, receiptOverflowCount);
   const receiptLabel = t("timeline.readBy", { count: receiptTotalCount });
@@ -983,15 +983,15 @@ export function TimelineItemRow({
             )}
           </p>
         ) : null}
-        {newThreadReplyCount > 0 ? (
+        {threadNotificationCount > 0 ? (
           <button
             className="thread-summary-chip thread-new-replies-chip"
             type="button"
-            aria-label={t("timeline.openThreadSummary", { summary: newThreadRepliesText })}
+            aria-label={t("timeline.openThreadSummary", { summary: threadNotificationsText })}
             onClick={submitOpenThread}
           >
             <MessageCircle size={13} />
-            <span>{newThreadRepliesText}</span>
+            <span>{threadNotificationsText}</span>
           </button>
         ) : null}
         {canShowThreadSummary ? (

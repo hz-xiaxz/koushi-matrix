@@ -451,84 +451,77 @@ describe("TimelineView", () => {
   });
 
 
-  it("jumps to an unread event outside the mounted virtual window", async () => {
-    const originalScrollIntoView = Element.prototype.scrollIntoView;
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    try {
-      let emit: (payload: CoreEventPayload) => void = () => undefined;
-      const transport = baseTransport({
-        listenCoreEvents(nextListener) {
-          emit = nextListener;
-          return () => undefined;
+  it("hides the first-unread pill while keeping the unread marker and bottom pill", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+    const items = Array.from({ length: 650 }, (_, index) =>
+      message(`$virtual-${index}:example.invalid`, `Virtual message ${index}`)
+    );
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+
+    const timeline = await screen.findByTestId("timeline-view");
+    Object.defineProperty(timeline, "clientHeight", { value: 500, configurable: true });
+    Object.defineProperty(timeline, "scrollHeight", { value: 650 * 72, configurable: true });
+    Object.defineProperty(timeline, "scrollTop", {
+      value: 0,
+      writable: true,
+      configurable: true
+    });
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items
+          }
         }
       });
-      const items = Array.from({ length: 650 }, (_, index) =>
-        message(`$virtual-${index}:example.invalid`, `Virtual message ${index}`)
-      );
-
-      render(
-        <TimelineView
-          timelineKey={KEY}
-          roomId="!room:example.invalid"
-          transport={transport}
-          onReply={vi.fn()}
-        />
-      );
-
-      const timeline = await screen.findByTestId("timeline-view");
-      Object.defineProperty(timeline, "clientHeight", { value: 500, configurable: true });
-      Object.defineProperty(timeline, "scrollHeight", { value: 650 * 72, configurable: true });
-      Object.defineProperty(timeline, "scrollTop", {
-        value: 0,
-        writable: true,
-        configurable: true
-      });
-
-      act(() => {
-        emit({
-          kind: "Timeline",
-          event: {
-            InitialItems: {
-              request_id: null,
-              key: KEY,
-              generation: 1,
-              items
+      emit({
+        kind: "Timeline",
+        event: {
+          NavigationUpdated: {
+            key: KEY,
+            snapshot: {
+              can_jump_to_bottom: true,
+              first_unread_event_id: "$virtual-5:example.invalid",
+              newer_event_count: 2,
+              read_marker_display_event_id: "$virtual-2:example.invalid",
+              read_marker_event_id: "$virtual-2:example.invalid",
+              unread_event_count: 3,
+              unread_position: "belowViewport"
             }
           }
-        });
-        emit({
-          kind: "Timeline",
-          event: {
-            NavigationUpdated: {
-              key: KEY,
-              snapshot: {
-                can_jump_to_bottom: false,
-                first_unread_event_id: "$virtual-500:example.invalid",
-                newer_event_count: 0,
-                read_marker_display_event_id: null,
-                read_marker_event_id: null,
-                unread_event_count: 3,
-                unread_position: "belowViewport"
-              }
-            }
-          }
-        });
+        }
       });
+    });
 
-      await waitFor(() => {
-        expect(timeline.getAttribute("data-virtualized")).toBe("true");
-        expect(screen.getByRole("button", { name: /Jump to first unread/ })).toBeTruthy();
-        expect(document.querySelector('[data-event-id="$virtual-500:example.invalid"]')).toBeNull();
-      });
+    timeline.scrollTop = 0;
+    fireEvent.wheel(timeline, { deltaY: -1 });
+    fireEvent.scroll(timeline);
 
-      fireEvent.click(screen.getByRole("button", { name: /Jump to first unread/ }));
-
-      expect(timeline.scrollTop).toBeGreaterThan(30_000);
-      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
-    } finally {
-      Element.prototype.scrollIntoView = originalScrollIntoView;
-    }
+    await waitFor(() => {
+      expect(timeline.getAttribute("data-virtualized")).toBe("true");
+      expect(screen.queryByRole("button", { name: /Jump to first unread/ })).toBeNull();
+      expect(screen.getByRole("button", { name: /Jump to bottom/ })).toBeTruthy();
+      expect(screen.getByRole("separator", { name: "Unread messages" })).toBeTruthy();
+    });
   });
 
 
