@@ -105,6 +105,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Rust-owned settings | [2026-06-14-rust-owned-settings-phase-a.md](../superpowers/plans/2026-06-14-rust-owned-settings-phase-a.md) | — |
 | i18n substrate | [2026-06-14-i18n-substrate-phase-a.md](../superpowers/plans/2026-06-14-i18n-substrate-phase-a.md) | [2026-06-14-i18n-substrate-phase-b.md](../superpowers/plans/2026-06-14-i18n-substrate-phase-b.md) |
 | Cross-platform font/emoji substrate | [2026-06-15-font-emoji-phase-a.md](../superpowers/plans/2026-06-15-font-emoji-phase-a.md) | [2026-06-15-font-emoji-phase-b-gui.md](../superpowers/plans/2026-06-15-font-emoji-phase-b-gui.md) |
+| Compact message density (#609) | — | [2026-08-22-issue609-compact-message-density.md](../superpowers/plans/2026-08-22-issue609-compact-message-density.md) |
 | Timeline navigation aids (#41) | [2026-06-16-timeline-navigation-phase-a.md](../superpowers/plans/2026-06-16-timeline-navigation-phase-a.md) | — |
 | Account work scheduler | [2026-07-25-account-work-scheduler-phase-a.md](../superpowers/plans/2026-07-25-account-work-scheduler-phase-a.md) | — |
 | Startup latency observability (#123) | [2026-06-23-startup-latency-observability-phase-a.md](../superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md) | — |
