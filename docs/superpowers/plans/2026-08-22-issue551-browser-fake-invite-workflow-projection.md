@@ -46,7 +46,8 @@ No barrel, wrapper, callback registry, class, fixture, state, cache, timer, or d
 - One direct parent import, six leaf types, only four approved parent type removals; API/class/state/resource delta0.
 - Parent 6,172→5,942 lines; private leaf243; combined6,185.
 - Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green.
-- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; full matrix pending.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`.
+- Final local matrix: exactness green; browser fake114, client25, Vitest1,400, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green. Initial workspace run hit the pre-existing `corrupt_load_attempts_once_per_session` 3-vs-2 race; exact×3, runtime-timeline file, and full workspace rerun were green before continuing.
 
 ## Verification
 
