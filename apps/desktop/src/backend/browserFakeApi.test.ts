@@ -2322,4 +2322,25 @@ describe("BrowserFakeApi settings preview", () => {
       )?.link_previews
     ).toBeUndefined();
   });
+
+  test("allocates distinct request IDs for searches in one millisecond", async () => {
+    const api = createBrowserFakeApi();
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+
+    try {
+      const first = await api.submitSearch("Alpha", "allRooms");
+      const second = await api.submitSearch("Beta", "allRooms");
+      const firstSearch = first.state.domain.search;
+      const secondSearch = second.state.domain.search;
+
+      expect(firstSearch.kind).toBe("results");
+      expect(secondSearch.kind).toBe("results");
+      if (firstSearch.kind !== "results" || secondSearch.kind !== "results") {
+        throw new Error("expected search results");
+      }
+      expect(secondSearch.request_id).toBeGreaterThan(firstSearch.request_id);
+    } finally {
+      now.mockRestore();
+    }
+  });
 });

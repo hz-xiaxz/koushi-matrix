@@ -2670,12 +2670,13 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
 
+    const requestId = this.nextRequestId();
     const trimmed = query.trim();
     const minChars = searchMinChars(trimmed);
     if (trimmed.length > 0 && [...trimmed].length < minChars) {
       this.snapshot.state.domain.search = {
         kind: "tooShort",
-        request_id: Date.now(),
+        request_id: requestId,
         query: trimmed,
         scope,
         min_chars: minChars
@@ -2686,7 +2687,7 @@ class BrowserFakeApi implements DesktopApi {
     const results = search(trimmed, scope, this.snapshot);
     this.snapshot.state.domain.search = {
       kind: "results",
-      request_id: Date.now(),
+      request_id: requestId,
       query: trimmed,
       scope,
       results
