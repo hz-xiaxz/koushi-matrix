@@ -36,6 +36,13 @@ No barrel, wrapper, aggregate default object, class, callback registry, state/ca
 - Leaf key-management total2 (declaration+one call); every other leaf declaration total1.
 - `createReadySnapshot`, `createSignedOutSnapshot`, `clearSessionViews`, auth discovery and their call ordering remain exact; all DTO shapes and Rust-owned state semantics unchanged.
 
+## Implementation evidence
+
+- Exact AST slices8/8/order, parent0, exports7/private1; parent/leaf counts exact.
+- One leaf type, one direct parent import, no parent type removal; snapshot factories/call order and API/class/resource surfaces unchanged.
+- Parent 5,869→5,777 lines; private leaf102; combined5,879.
+- Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green; post-implementation review/full matrix pending.
+
 ## Verification
 
 Use TypeScript AST statement ranges against immutable `910bb0c4`; verify exact bodies/order, parent0, export/private/import/counts, snapshot-factory and API/class/resource inventories, and clean holes. Baseline/post browser fake114 + client25, including #641 reset/locked/replacement tests. Then full frontend/Rust/Tauri/Headless/wasm/policy matrix, full-diff review, latest-main check, CI7/7, merge and #551 evidence.
