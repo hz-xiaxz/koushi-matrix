@@ -55,4 +55,5 @@ Run browser fake86, client25, typecheck/lint/build, full Vitest/Playwright, boun
 - `browserFakeApi.ts` 6,514 → 6,449 newline-delimited lines; leaf80.
 - Focused browser fake86, client25, typecheck/lint, full Vitest1,372, build and diff checks green.
 - Full diff: `reviewer-flash` independently traced declarations/imports/calls, DTO guards and retained contract/class/resources/public surface and recorded `Correct-to-merge`.
-- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: browser fake86, client25, Vitest1,372, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
