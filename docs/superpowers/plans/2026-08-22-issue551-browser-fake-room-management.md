@@ -1,6 +1,6 @@
 # Issue #551 browser fake room-management projection extraction
 
-Status: design approved. Scope is the first behavior-preserving `browserFakeApi.ts` ownership seam.
+Status: implemented; full-diff review pending. Scope is the first behavior-preserving `browserFakeApi.ts` ownership seam.
 
 ## Baseline
 
@@ -50,3 +50,8 @@ Run browser fake86, client25, typecheck/lint/build, full Vitest/Playwright, boun
 - Read-only reconnaissance measured the full fake and selected the contiguous resource-free room-management projection seam.
 - `reviewer-flash` independently traced the contiguous pure closure, all call sites, DTO/guard exactness, tests/counts and contract/resource exclusions and recorded `Correct-to-implement`.
 - Shell baseline is 6,514 newline characters (`wc -l`); editor display may include a final unterminated line.
+- Implementation integrated by `luna-implementer` and parent-audited.
+- Exactness: declarations6/6/order, parent0, exports6, destination import path1, direct source import6 and all eight call expressions preserved; contracts/resources/public paths delta0.
+- `browserFakeApi.ts` 6,514 → 6,449 newline-delimited lines; leaf80.
+- Focused browser fake86, client25, typecheck/lint, full Vitest1,372, build and diff checks green.
+- Full diff and delivery pending.
