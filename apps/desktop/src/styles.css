@@ -2912,6 +2912,29 @@ button:disabled {
   object-fit: cover;
 }
 
+.desktop[data-density="compact"] .message {
+  padding-block: 6px;
+}
+
+.desktop[data-density="compact"] .message.is-continuation {
+  padding-block-start: 2px;
+}
+
+.desktop[data-density="compact"] .message.is-continuation > .avatar {
+  visibility: hidden;
+}
+
+.desktop[data-density="compact"] .message.is-continuation .sender {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .avatar.bot {
   background: var(--danger);
 }

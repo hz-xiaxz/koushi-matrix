@@ -2280,81 +2280,74 @@ describe("TimelineView", () => {
   });
 
 
-  it("jumps to a moved root by its latest activity identity", async () => {
-    const originalScrollIntoView = Element.prototype.scrollIntoView;
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    try {
-      let emit: (payload: CoreEventPayload) => void = () => undefined;
-      const root = {
-        ...message("$thread-root:example.invalid", "Thread root"),
-        thread_summary: {
-          reply_count: 1,
-          latest_event_id: "$latest-thread-reply:example.invalid",
-          latest_sender: "@bob:example.invalid",
-          latest_sender_label: "Bob",
-          latest_body_preview: "Latest reply",
-          latest_timestamp_ms: 1_800_000_001_000
-        }
-      };
-      const latestReply = {
-        ...message("$latest-thread-reply:example.invalid", "Standalone reply"),
-        timestamp_ms: 1_800_000_001_000,
-        thread_root: "$thread-root:example.invalid"
-      };
-      const transport = baseTransport({
-        listenCoreEvents(nextListener) {
-          emit = nextListener;
-          return () => undefined;
+  it("renders an unread marker before a moved root by its latest activity identity", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const root = {
+      ...message("$thread-root:example.invalid", "Thread root"),
+      thread_summary: {
+        reply_count: 1,
+        latest_event_id: "$latest-thread-reply:example.invalid",
+        latest_sender: "@bob:example.invalid",
+        latest_sender_label: "Bob",
+        latest_body_preview: "Latest reply",
+        latest_timestamp_ms: 1_800_000_001_000
+      }
+    };
+    const latestReply = {
+      ...message("$latest-thread-reply:example.invalid", "Standalone reply"),
+      timestamp_ms: 1_800_000_001_000,
+      thread_root: "$thread-root:example.invalid"
+    };
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+        threadRootOrder={{ kind: "latestReply" }}
+      />
+    );
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          NavigationUpdated: {
+            key: KEY,
+            snapshot: navigationSnapshot({
+              first_unread_event_id: "$latest-thread-reply:example.invalid",
+              unread_event_count: 1,
+              unread_position: "belowViewport"
+            })
+          }
         }
       });
-
-      render(
-        <TimelineView
-          timelineKey={KEY}
-          roomId="!room:example.invalid"
-          transport={transport}
-          onReply={vi.fn()}
-          threadRootOrder={{ kind: "latestReply" }}
-        />
-      );
-
-      act(() => {
-        emit({
-          kind: "Timeline",
-          event: {
-            NavigationUpdated: {
-              key: KEY,
-              snapshot: navigationSnapshot({
-                first_unread_event_id: "$latest-thread-reply:example.invalid",
-                unread_event_count: 1,
-                unread_position: "belowViewport"
-              })
-            }
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [message("$before:example.invalid", "Before"), root, latestReply]
           }
-        });
-        emit({
-          kind: "Timeline",
-          event: {
-            InitialItems: {
-              request_id: null,
-              key: KEY,
-              generation: 1,
-              items: [message("$before:example.invalid", "Before"), root, latestReply]
-            }
-          }
-        });
+        }
       });
+    });
 
-      fireEvent.click(await screen.findByRole("button", { name: /Jump to first unread/ }));
-      expect(scrollIntoView).toHaveBeenCalledTimes(1);
-      const jumpedRow = scrollIntoView.mock.instances[0] as HTMLElement | undefined;
-      expect(jumpedRow?.getAttribute("data-content-event-id")).toBe(
-        "$thread-root:example.invalid"
-      );
-    } finally {
-      Element.prototype.scrollIntoView = originalScrollIntoView;
-    }
+    const marker = await screen.findByRole("separator", { name: "Unread messages" });
+    const rootRow = marker.nextElementSibling;
+    expect(rootRow?.getAttribute("data-content-event-id")).toBe("$thread-root:example.invalid");
+    expect(rootRow?.getAttribute("data-activity-event-id")).toBe(
+      "$latest-thread-reply:example.invalid"
+    );
   });
 
 
@@ -2731,7 +2724,7 @@ describe("TimelineView", () => {
   });
 
 
-  it("shows new thread replies on the matching root row without moving timeline rows", async () => {
+  it("shows notification count on the matching root row without moving timeline rows", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onOpenThread = vi.fn();
     const transport = baseTransport({
@@ -2761,9 +2754,9 @@ describe("TimelineView", () => {
         onOpenThread={onOpenThread}
         threadAttention={{
           rootEventId: "$thread-root:example.invalid",
-          notificationCount: 2,
+          notificationCount: 3,
           highlightCount: 0,
-          liveEventMarkerCount: 2
+          liveEventMarkerCount: 0
         }}
       />
     );
@@ -2786,8 +2779,10 @@ describe("TimelineView", () => {
       });
     });
 
-    const newReplies = await screen.findByRole("button", { name: /View new replies · 2/ });
-    expect(newReplies.closest("[data-event-id]")?.getAttribute("data-event-id")).toBe(
+    const notifications = await screen.findByRole("button", {
+      name: /Thread notifications · 3/
+    });
+    expect(notifications.closest("[data-event-id]")?.getAttribute("data-event-id")).toBe(
       "$thread-root:example.invalid"
     );
     const eventOrder = Array.from(document.querySelectorAll("article[data-event-id]")).map(
@@ -2799,12 +2794,168 @@ describe("TimelineView", () => {
       "$after:example.invalid"
     ]);
 
-    fireEvent.click(newReplies);
+    fireEvent.click(notifications);
     expect(onOpenThread).toHaveBeenCalledWith(
       "!room:example.invalid",
       "$thread-root:example.invalid",
       "existingThread"
     );
+  });
+
+
+  it("does not show a thread notification badge when notification count is zero", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const root = {
+      ...message("$quiet-thread-root:example.invalid", "Quiet thread root"),
+      thread_summary: {
+        reply_count: 4,
+        latest_event_id: "$quiet-thread-reply:example.invalid",
+        latest_sender: "@bob:example.invalid",
+        latest_sender_label: "Bob",
+        latest_body_preview: "latest reply",
+        latest_timestamp_ms: 1_800_000_000_500
+      }
+    };
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+        threadAttention={{
+          rootEventId: "$quiet-thread-root:example.invalid",
+          notificationCount: 0,
+          highlightCount: 4,
+          liveEventMarkerCount: 2
+        }}
+      />
+    );
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [root]
+          }
+        }
+      });
+    });
+
+    const row = await screen.findByText("Quiet thread root").then((node) =>
+      node.closest<HTMLElement>("article")
+    );
+    expect(row).not.toBeNull();
+    expect(
+      within(row!).queryByRole("button", { name: /Thread notifications|View new replies/ })
+    ).toBeNull();
+    expect(within(row!).getByRole("button", { name: /Open thread/ })).toBeTruthy();
+  });
+
+
+  it("keeps notification badges with their root when roots reorder", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const rootA = {
+      ...message("$thread-root-a:example.invalid", "Thread root A"),
+      timestamp_ms: 1_800_000_000_100,
+      thread_summary: {
+        reply_count: 1,
+        latest_event_id: "$thread-reply-a:example.invalid",
+        latest_sender: "@bob:example.invalid",
+        latest_sender_label: "Bob",
+        latest_body_preview: "Reply A",
+        latest_timestamp_ms: 1_800_000_002_100
+      }
+    };
+    const replyA = {
+      ...message("$thread-reply-a:example.invalid", "Thread reply A"),
+      timestamp_ms: 1_800_000_002_100,
+      thread_root: "$thread-root-a:example.invalid"
+    };
+    const rootB = {
+      ...message("$thread-root-b:example.invalid", "Thread root B"),
+      timestamp_ms: 1_800_000_001_100,
+      thread_summary: {
+        reply_count: 1,
+        latest_event_id: "$thread-reply-b:example.invalid",
+        latest_sender: "@carol:example.invalid",
+        latest_sender_label: "Carol",
+        latest_body_preview: "Reply B",
+        latest_timestamp_ms: 1_800_000_003_100
+      }
+    };
+    const replyB = {
+      ...message("$thread-reply-b:example.invalid", "Thread reply B"),
+      timestamp_ms: 1_800_000_003_100,
+      thread_root: "$thread-root-b:example.invalid"
+    };
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+    const view = (order: "rootEvent" | "latestReply") => (
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+        threadRootOrder={{ kind: order }}
+        threadAttention={{
+          rootEventId: "$thread-root-a:example.invalid",
+          notificationCount: 3,
+          highlightCount: 0,
+          liveEventMarkerCount: 0
+        }}
+      />
+    );
+
+    const { rerender } = render(view("rootEvent"));
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [rootA, replyA, rootB, replyB]
+          }
+        }
+      });
+    });
+
+    const badge = await screen.findByRole("button", { name: /Thread notifications · 3/ });
+    const rootRow = badge.closest<HTMLElement>("article");
+    expect(rootRow?.getAttribute("data-event-id")).toBe("$thread-root-a:example.invalid");
+    const rootOrder = Array.from(document.querySelectorAll("article[data-event-id]")).map((row) =>
+      row.getAttribute("data-event-id")
+    );
+
+    rerender(view("latestReply"));
+    await waitFor(() => {
+      const movedBadge = screen.getByRole("button", { name: /Thread notifications · 3/ });
+      expect(movedBadge.closest<HTMLElement>("article")).toBe(rootRow);
+      expect(
+        movedBadge.closest<HTMLElement>("article")?.getAttribute("data-content-event-id")
+      ).toBe("$thread-root-a:example.invalid");
+      expect(
+        Array.from(document.querySelectorAll("article[data-event-id]")).map((row) =>
+          row.getAttribute("data-event-id")
+        )
+      ).not.toEqual(rootOrder);
+    });
   });
 
 });

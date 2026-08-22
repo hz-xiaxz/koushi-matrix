@@ -79,6 +79,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | App session-verification gate (#551) | [2026-08-22-issue551-app-session-verification-gate.md](../superpowers/plans/2026-08-22-issue551-app-session-verification-gate.md) | [2026-08-22-issue551-app-session-verification-gate.md](../superpowers/plans/2026-08-22-issue551-app-session-verification-gate.md) |
 | App desktop-attention effects (#551) | [2026-08-22-issue551-app-desktop-attention-effects.md](../superpowers/plans/2026-08-22-issue551-app-desktop-attention-effects.md) | [2026-08-22-issue551-app-desktop-attention-effects.md](../superpowers/plans/2026-08-22-issue551-app-desktop-attention-effects.md) |
 | App residual composition-root audit (#551) | [2026-08-22-issue551-app-residual-audit.md](../superpowers/plans/2026-08-22-issue551-app-residual-audit.md) | [2026-08-22-issue551-app-residual-audit.md](../superpowers/plans/2026-08-22-issue551-app-residual-audit.md) |
+| Logical window-state restore (#544) | — | [2026-08-22-issue544-logical-window-state.md](../superpowers/plans/2026-08-22-issue544-logical-window-state.md) |
 | App UI-latency hook (#551) | [2026-08-22-issue551-app-ui-latency-hook.md](../superpowers/plans/2026-08-22-issue551-app-ui-latency-hook.md) | [2026-08-22-issue551-app-ui-latency-hook.md](../superpowers/plans/2026-08-22-issue551-app-ui-latency-hook.md) |
 | Browser fake room management (#551) | [2026-08-22-issue551-browser-fake-room-management.md](../superpowers/plans/2026-08-22-issue551-browser-fake-room-management.md) | [2026-08-22-issue551-browser-fake-room-management.md](../superpowers/plans/2026-08-22-issue551-browser-fake-room-management.md) |
 | Browser fake link-preview fixture isolation (#634) | [2026-08-22-issue634-browser-fake-link-preview-isolation.md](../superpowers/plans/2026-08-22-issue634-browser-fake-link-preview-isolation.md) | [2026-08-22-issue634-browser-fake-link-preview-isolation.md](../superpowers/plans/2026-08-22-issue634-browser-fake-link-preview-isolation.md) |
@@ -105,7 +106,9 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Rust-owned settings | [2026-06-14-rust-owned-settings-phase-a.md](../superpowers/plans/2026-06-14-rust-owned-settings-phase-a.md) | — |
 | i18n substrate | [2026-06-14-i18n-substrate-phase-a.md](../superpowers/plans/2026-06-14-i18n-substrate-phase-a.md) | [2026-06-14-i18n-substrate-phase-b.md](../superpowers/plans/2026-06-14-i18n-substrate-phase-b.md) |
 | Cross-platform font/emoji substrate | [2026-06-15-font-emoji-phase-a.md](../superpowers/plans/2026-06-15-font-emoji-phase-a.md) | [2026-06-15-font-emoji-phase-b-gui.md](../superpowers/plans/2026-06-15-font-emoji-phase-b-gui.md) |
+| Compact message density (#609) | — | [2026-08-22-issue609-compact-message-density.md](../superpowers/plans/2026-08-22-issue609-compact-message-density.md) |
 | Timeline navigation aids (#41) | [2026-06-16-timeline-navigation-phase-a.md](../superpowers/plans/2026-06-16-timeline-navigation-phase-a.md) | — |
+| Unread navigation and thread notifications (#569) | — | [2026-08-22-issue569-unread-navigation-thread-notifications.md](../superpowers/plans/2026-08-22-issue569-unread-navigation-thread-notifications.md) |
 | Account work scheduler | [2026-07-25-account-work-scheduler-phase-a.md](../superpowers/plans/2026-07-25-account-work-scheduler-phase-a.md) | — |
 | Startup latency observability (#123) | [2026-06-23-startup-latency-observability-phase-a.md](../superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md) | — |
 | Initial index-0 key-share diagnostics (#509) | [2026-08-13-index0-share-diagnostics.md](../superpowers/plans/2026-08-13-index0-share-diagnostics.md) | — |
@@ -119,6 +122,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | New-session Megolm readiness — phase 1 (#577) | [2026-08-21-issue577-megolm-readiness.md](../superpowers/plans/2026-08-21-issue577-megolm-readiness.md) | — |
 | Same-user secondary-device QA credential isolation (#577 follow-up) | [2026-08-21-issue577-secondary-device-qa-credentials.md](../superpowers/plans/2026-08-21-issue577-secondary-device-qa-credentials.md) | — |
 | Formatted-body newline preservation (#522) | [2026-08-14-formatted-body-newlines.md](../superpowers/plans/2026-08-14-formatted-body-newlines.md) | — |
+| Nested Markdown bullet lists (#648) | [2026-08-22-issue648-nested-markdown-lists.md](../superpowers/plans/2026-08-22-issue648-nested-markdown-lists.md) | — |
 | Active prepend anchor preservation (#520) | [2026-08-14-active-prepend-anchor.md](../superpowers/plans/2026-08-14-active-prepend-anchor.md) | — |
 
 Font asset loading and any bundled font package must update

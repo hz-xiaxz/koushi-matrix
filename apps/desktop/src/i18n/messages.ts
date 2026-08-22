@@ -1109,6 +1109,7 @@ export type MessageId =
   | "timeline.threadSummaryWithBody"
   | "timeline.threadSummaryWithPreview"
   | "timeline.threadSummaryWithSender"
+  | "timeline.threadNotificationCount"
   | "timeline.typingMany"
   | "timeline.typingOne"
   | "timeline.openThreadSummary"
@@ -2447,6 +2448,7 @@ const en: Catalog = {
   "timeline.threadSummaryWithBody": "{count} · {preview}",
   "timeline.threadSummaryWithPreview": "{count} · {sender}: {preview}",
   "timeline.threadSummaryWithSender": "{count} · {sender}",
+  "timeline.threadNotificationCount": "Thread notifications · {count}",
   "timeline.typingMany": "{count} people are typing",
   "timeline.typingOne": "{user} is typing",
   "timeline.openThreadSummary": "Open thread, {summary}",
@@ -3669,6 +3671,7 @@ const ja: Catalog = {
   "timeline.threadSummaryWithBody": "{count}件 · {preview}",
   "timeline.threadSummaryWithPreview": "{count}件 · {sender}: {preview}",
   "timeline.threadSummaryWithSender": "{count}件 · {sender}",
+  "timeline.threadNotificationCount": "スレッド通知 · {count}",
   "timeline.typingMany": "{count} 人が入力中",
   "timeline.typingOne": "{user} が入力中",
   "timeline.openThreadSummary": "スレッドを開く、{summary}",

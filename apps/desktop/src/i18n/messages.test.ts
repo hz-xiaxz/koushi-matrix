@@ -197,6 +197,15 @@ describe("i18n message catalog", () => {
     expect(t("timeline.replyInThread", {}, "ja")).toBe("スレッドで返信");
   });
 
+  test("localizes thread notification count copy", () => {
+    expect(t("timeline.threadNotificationCount", { count: 3 })).toBe(
+      "Thread notifications · 3"
+    );
+    expect(t("timeline.threadNotificationCount", { count: 3 }, "ja")).toBe(
+      "スレッド通知 · 3"
+    );
+  });
+
   test("pseudo locale expands labels while preserving interpolation placeholders", () => {
     const pseudo = pseudoLocalize("Message {roomName}");
 

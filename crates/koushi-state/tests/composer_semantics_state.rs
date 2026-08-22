@@ -114,6 +114,83 @@ fn composer_markdown_unordered_lists_are_rust_owned_formatted_body() {
 }
 
 #[test]
+fn composer_nested_list_two_space_indentation() {
+    let draft = build_formatted_message_draft("- A\n  - B", MentionIntent::default());
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<ul><li>A<ul><li>B</li></ul></li></ul>")
+    );
+}
+
+#[test]
+fn composer_nested_list_four_space_indentation() {
+    let draft = build_formatted_message_draft("- A\n    - B", MentionIntent::default());
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<ul><li>A<ul><li>B</li></ul></li></ul>")
+    );
+}
+
+#[test]
+fn composer_nested_list_siblings_then_root_sibling_close_in_order() {
+    let draft = build_formatted_message_draft("- A\n  - B\n  - C\n- D", MentionIntent::default());
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<ul><li>A<ul><li>B</li><li>C</li></ul></li><li>D</li></ul>")
+    );
+}
+
+#[test]
+fn composer_nested_list_three_levels_outdent_to_open_levels() {
+    let draft =
+        build_formatted_message_draft("- A\n  - B\n    - C\n  - D\n- E", MentionIntent::default());
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<ul><li>A<ul><li>B<ul><li>C</li></ul></li><li>D</li></ul></li><li>E</li></ul>")
+    );
+}
+
+#[test]
+fn composer_nested_list_unmatched_outdent_clamps_to_root() {
+    let draft = build_formatted_message_draft("- A\n    - B\n  - C", MentionIntent::default());
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<ul><li>A<ul><li>B</li></ul></li><li>C</li></ul>")
+    );
+}
+
+#[test]
+fn composer_nested_list_indented_root_seeds_siblings_and_nesting() {
+    let draft =
+        build_formatted_message_draft("  - A\n  - B\n    - C\n  - D", MentionIntent::default());
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some("<ul><li>A</li><li>B<ul><li>C</li></ul></li><li>D</li></ul>")
+    );
+}
+
+#[test]
+fn composer_nested_list_keeps_inline_formatting_and_escaping() {
+    let draft = build_formatted_message_draft(
+        "- **root** & <root>\n  - *nested* & <nested> `code`",
+        MentionIntent::default(),
+    );
+
+    assert_eq!(
+        draft.formatted_body.as_deref(),
+        Some(
+            "<ul><li><strong>root</strong> &amp; &lt;root&gt;<ul><li><em>nested</em> &amp; &lt;nested&gt; <code>code</code></li></ul></li></ul>"
+        )
+    );
+}
+
+#[test]
 fn composer_inline_markdown_uses_explicit_html_breaks() {
     let draft = build_formatted_message_draft("**first**\nsecond", MentionIntent::default());
 

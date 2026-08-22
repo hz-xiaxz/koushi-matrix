@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type CoreEventPayload, type TimelineItem } from "../domain/coreEvents";
@@ -17,7 +17,12 @@ import {
   roomLatestDisplayEventId,
   TimelineView
 } from "./TimelineView";
-import { KEY, baseTransport, message } from "./timelineViewTestSupport";
+import {
+  KEY,
+  baseTransport,
+  message,
+  navigationSnapshot
+} from "./timelineViewTestSupport";
 
 function latestEventSummary(
   overrides: Partial<RoomLatestEventSummary> = {}
@@ -70,6 +75,226 @@ describe("TimelineView", () => {
     ]
   ])("only maps an ordinary room summary to a display event for %s", (_label, summary, expected) => {
     expect(roomLatestDisplayEventId(summary)).toBe(expected);
+  });
+
+  it("marks only same-sender continuation rows", async () => {
+    const first = message("$first:example.invalid", "First");
+    const second = {
+      ...message("$second:example.invalid", "Second"),
+      thread_summary: {
+        reply_count: 1,
+        latest_event_id: "$reply:example.invalid",
+        latest_sender: "@bob:example.invalid",
+        latest_sender_label: "Bob",
+        latest_body_preview: "Reply",
+        latest_timestamp_ms: 1_800_000_000_100
+      }
+    };
+    const differentSender = {
+      ...message("$different:example.invalid", "Different sender"),
+      sender: "@carol:example.invalid"
+    };
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [first, second, differentSender]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const firstRow = await screen.findByText("First");
+    const secondRow = screen.getByText("Second");
+    const differentSenderRow = screen.getByText("Different sender");
+    expect(firstRow.closest("article")?.classList.contains("is-continuation")).toBe(false);
+    expect(secondRow.closest("article")?.classList.contains("is-continuation")).toBe(true);
+    expect(differentSenderRow.closest("article")?.classList.contains("is-continuation")).toBe(false);
+    expect(screen.getAllByRole("article")).toHaveLength(3);
+  });
+
+  it.each([
+    [
+      "an unread marker on the current row",
+      navigationSnapshot({
+        first_unread_event_id: "$second:example.invalid",
+        unread_event_count: 1,
+        unread_position: "insideViewport"
+      })
+    ],
+    [
+      "a read marker after the preceding row",
+      navigationSnapshot({
+        read_marker_event_id: "$first:example.invalid",
+        read_marker_display_event_id: "$first:example.invalid"
+      })
+    ]
+  ])("breaks continuation runs at %s", async (_label, snapshot) => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [
+              message("$first:example.invalid", "First"),
+              message("$second:example.invalid", "Second")
+            ]
+          }
+        }
+      });
+      emit({
+        kind: "Timeline",
+        event: {
+          NavigationUpdated: { key: KEY, snapshot }
+        }
+      });
+    });
+
+    const secondRow = await screen.findByText("Second");
+    expect(secondRow.closest("article")?.classList.contains("is-continuation")).toBe(false);
+  });
+
+  it("breaks continuation runs at a date divider and a timeline gap", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+    const dateDivider: TimelineItem = {
+      ...message("$date-divider-source:example.invalid", ""),
+      id: { Synthetic: { synthetic_id: "date-divider-1800000000000" } },
+      sender: null,
+      body: null
+    };
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [
+              message("$date-first:example.invalid", "Date first"),
+              dateDivider,
+              message("$date-second:example.invalid", "Date second")
+            ]
+          }
+        }
+      });
+    });
+
+    const dateSecond = await screen.findByText("Date second");
+    expect(dateSecond.closest("article")?.classList.contains("is-continuation")).toBe(false);
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          GapPositionsUpdated: {
+            key: KEY,
+            actor_generation: 0,
+            generation: 1,
+            positions: [{ id: { topology_revision: "1", ordinal: 0 }, before_item_index: 1 }]
+          }
+        }
+      });
+    });
+
+    await waitFor(() => {
+      const second = screen.getByText("Date second");
+      expect(second.closest("article")?.classList.contains("is-continuation")).toBe(false);
+    });
+    expect(screen.getByTestId("timeline-gap-row")).toBeTruthy();
+  });
+
+  it("uses the full visible row list across a virtual window boundary", async () => {
+    const items = Array.from({ length: 601 }, (_, index) =>
+      message(`$virtual-${index}:example.invalid`, `Virtual ${index}`)
+    );
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const timeline = await screen.findByTestId("timeline-view");
+    Object.defineProperty(timeline, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(timeline, "scrollHeight", { value: 601 * 72, configurable: true });
+    Object.defineProperty(timeline, "scrollTop", {
+      value: 5_000,
+      writable: true,
+      configurable: true
+    });
+    fireEvent.wheel(timeline, { deltaY: 1 });
+    fireEvent.scroll(timeline);
+
+    await waitFor(() => {
+      expect(timeline.getAttribute("data-virtualized")).toBe("true");
+      const row = document.querySelector<HTMLElement>(
+        '[data-event-id="$virtual-8:example.invalid"]'
+      );
+      expect(row).not.toBeNull();
+      expect(row?.classList.contains("is-continuation")).toBe(true);
+    });
+    expect(timeline.getAttribute("data-total-items")).toBe("601");
+    expect(screen.getByText("Virtual 8")).toBeTruthy();
   });
 
   it("preserves formatted Markdown structure inside a reply quote", () => {

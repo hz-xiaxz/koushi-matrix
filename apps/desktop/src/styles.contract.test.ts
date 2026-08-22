@@ -414,6 +414,31 @@ describe("styles.css token system", () => {
     expect(markerBlock).toContain("font-size: 11px;");
   });
 
+  test("compact continuation styling stays density-scoped and accessible", () => {
+    const compactMessageBlock = selectorBlock('.desktop[data-density="compact"] .message');
+    const continuationBlock = selectorBlock(
+      '.desktop[data-density="compact"] .message.is-continuation'
+    );
+    const avatarBlock = selectorBlock(
+      '.desktop[data-density="compact"] .message.is-continuation > .avatar'
+    );
+    const senderBlock = selectorBlock(
+      '.desktop[data-density="compact"] .message.is-continuation .sender'
+    );
+    const srOnlyBlock = selectorBlock(".sr-only");
+
+    expect(compactMessageBlock).toContain("padding-block: 6px;");
+    expect(continuationBlock).toContain("padding-block-start: 2px;");
+    expect(avatarBlock).toContain("visibility: hidden;");
+    expect(senderBlock.replace(/\\s+/g, " ").trim()).toBe(
+      srOnlyBlock.replace(/\\s+/g, " ").trim()
+    );
+    expect(css).not.toContain('.desktop[data-density="default"] .message.is-continuation');
+    expect(css).not.toContain(
+      '.desktop[data-density="comfortable"] .message.is-continuation'
+    );
+  });
+
   test("avatar and receipt fixed geometry use named tokens", () => {
     expectBlockUses(selectorBlock(".room-avatar"), ["--room-avatar-size", "--room-avatar-font-size"]);
     const activityAvatarImageBlock = selectorBlock(".activity-row-avatar img");
