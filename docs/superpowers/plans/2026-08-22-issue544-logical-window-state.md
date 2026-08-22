@@ -52,7 +52,7 @@ Keep code in `apps/desktop/src-tauri/src/lib.rs`. Extract only small pure conver
 
 ## Gates
 
-- `reviewer-flash-opencode-go` design verdict before implementation.
+- `reviewer-flash-opencode-go` design verdict: v1–v3 `Not correct-to-merge` for mixed-DPI global coordinates, event-ack liveness, and unmaximize persistence; v4 `Correct-to-merge` after physical-position/logical-size schema and independent finite geometry/maximized fences resolved all blockers.
 - `luna-implementer` at max thinking for verify-first implementation.
 - Focused Tauri lib tests, full Tauri lib, formatting, clippy if configured, and platform-independent schema/gate evidence; macOS native inspection is confirmation only.
 - `reviewer-flash-opencode-go` exact full-diff verdict after implementation.
