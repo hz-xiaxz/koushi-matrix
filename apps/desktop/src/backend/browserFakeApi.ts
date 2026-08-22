@@ -4492,6 +4492,8 @@ class BrowserFakeApi implements DesktopApi {
   }
 
   private clearSessionViews() {
+    this.composerRendererGeneration += 1n;
+    this.composerLeases.clear();
     this.submissionLedger.clear();
     this.composerDrafts.clear();
     this.composerDraftRevisions.clear();

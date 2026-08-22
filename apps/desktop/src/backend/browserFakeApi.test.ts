@@ -683,6 +683,48 @@ describe("BrowserFakeApi settings preview", () => {
     });
   });
 
+  test("revokes composer leases when returning to a logged-out saved account", async () => {
+    const api = createBrowserFakeApi();
+    const roomId = "!room-alpha:example.invalid";
+    await api.selectRoom(roomId);
+    const sessions = await api.listSavedSessions();
+    const account = await readyAccount(api);
+    const target = { kind: "main" as const, room_id: roomId };
+    const scope = {
+      account: {
+        homeserver: account.homeserver,
+        user_id: account.userId,
+        device_id: account.deviceId
+      },
+      target
+    };
+    const rendererGeneration = await api.beginComposerDraftRendererGeneration();
+    const lease = await api.acquireComposerDraftLease(scope, rendererGeneration);
+
+    await api.logout();
+    await api.switchAccount(sessions[0]!);
+    await api.selectRoom(roomId);
+
+    await expect(
+      api.setComposerDraft(
+        account,
+        lease.leaseId,
+        rendererGeneration,
+        roomId,
+        documentFromText("stale"),
+        revision("1")
+      )
+    ).rejects.toThrow();
+    await expect(api.releaseComposerDraftLease(lease.leaseId, rendererGeneration)).rejects.toThrow();
+    await expect(api.acquireComposerDraftLease(scope, rendererGeneration)).rejects.toThrow();
+
+    const freshGeneration = await api.beginComposerDraftRendererGeneration();
+    const freshLease = await api.acquireComposerDraftLease(scope, freshGeneration);
+    await expect(
+      api.releaseComposerDraftLease(freshLease.leaseId, freshGeneration)
+    ).resolves.toBeUndefined();
+  });
+
   test("leases preserve exact large revisions and expose the Rust-owned clear token", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
