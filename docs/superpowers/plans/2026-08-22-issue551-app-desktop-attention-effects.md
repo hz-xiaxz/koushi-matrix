@@ -1,6 +1,6 @@
 # Issue #551 App desktop-attention effects extraction
 
-Status: implemented; full-diff review pending. Scope is the final clean App lifecycle seam before residual audit.
+Status: full diff approved; delivery pending. Scope is the final clean App lifecycle seam before residual audit.
 
 ## Baseline
 
@@ -106,4 +106,5 @@ After merge, perform the final App residual audit; no App checkbox closes before
 - Exactness: resources4/4, hook statements4/4, parent0, call1/input4, assertion set28/28, one resource singleton set, dependency arrays and effect bodies exact; App orphan imports and narrow lint exception closed.
 - `App.tsx` 6,367 → 6,242 newline-delimited lines; hook leaf159.
 - Focused App78 + attention28 =106, typecheck/lint and source/exactness/diff checks green.
-- Full diff and delivery pending.
+- Full diff: `reviewer-flash` independently traced resources/hook order/dependencies, exact-file Tauri acknowledgment, source assertions and Rust/product ownership and recorded `Correct-to-merge`.
+- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
