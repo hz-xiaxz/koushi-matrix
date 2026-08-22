@@ -56,7 +56,8 @@ Correct `createLockedSnapshot` in the same lifecycle-owner change: base it on `c
 - Robust public-API RED on the immutable production baseline: 5 failed / 2 replacement tests passed. Failures covered the locked constructor plus all four non-replacement terminal paths.
 - GREEN exact reset suite7/7 x3; browser fake114 + client25; typecheck/lint/diff check green.
 - Production diff is limited to the existing teardown block and locked constructor: 19 reset additions, six call sites unchanged, no API/class field/timer/map/export delta. `browserFakeApi.ts` 6,306→6,323 lines; locked `state_generation: 0` is preserved.
-- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; reviewer minors for locked generation and literal oracle anchors were fixed and delta re-review returned `Correct-to-merge`. Full matrix pending.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; reviewer minors for locked generation and literal oracle anchors were fixed and delta re-review returned `Correct-to-merge`.
+- Final local matrix: exact reset7, browser fake114, client25, Vitest1,400, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, six-call-site and diff checks green without reruns.
 
 ## Deterministic checks
 
