@@ -50,7 +50,8 @@ No draft-map, submission-ledger, prepared-upload, API/DTO, lease shape, error te
 - RED: after logout and return to saved A, the old lease still wrote instead of rejecting.
 - Production: session clear increments renderer generation once and clears the lease map once; next lease ID remains untouched.
 - GREEN: exact test passed three consecutive runs; browser fake91 and client25 passed.
-- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`. A static-count minor suggested90, but the exact focused runner confirms the recorded browser fake91 and client25; full matrix pending.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`. A static-count minor suggested90, but the exact focused runner confirms the recorded browser fake91 and client25.
+- Final local matrix: Vitest1,377, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green without reruns.
 
 ## Delivery
 
