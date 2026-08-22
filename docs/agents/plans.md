@@ -119,6 +119,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | New-session Megolm readiness — phase 1 (#577) | [2026-08-21-issue577-megolm-readiness.md](../superpowers/plans/2026-08-21-issue577-megolm-readiness.md) | — |
 | Same-user secondary-device QA credential isolation (#577 follow-up) | [2026-08-21-issue577-secondary-device-qa-credentials.md](../superpowers/plans/2026-08-21-issue577-secondary-device-qa-credentials.md) | — |
 | Formatted-body newline preservation (#522) | [2026-08-14-formatted-body-newlines.md](../superpowers/plans/2026-08-14-formatted-body-newlines.md) | — |
+| Nested Markdown bullet lists (#648) | [2026-08-22-issue648-nested-markdown-lists.md](../superpowers/plans/2026-08-22-issue648-nested-markdown-lists.md) | — |
 | Active prepend anchor preservation (#520) | [2026-08-14-active-prepend-anchor.md](../superpowers/plans/2026-08-14-active-prepend-anchor.md) | — |
 
 Font asset loading and any bundled font package must update
