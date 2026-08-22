@@ -6,31 +6,42 @@ Replace ambiguous physical-pixel window persistence with a versioned logical-pix
 
 ## Persisted contract
 
-`PersistedWindowState` becomes schema version 2 with integer logical `x`, `y`, `width`, `height`, and `maximized`. Capture converts Tauri physical outer position/size through the window's current scale factor and rounds to logical integers. Restore uses `Position::Logical` and `Size::Logical`.
+`PersistedWindowState` becomes schema version 2 with an explicitly mixed but unit-consistent desktop contract:
 
-Records without version 2 are legacy physical-pixel records and fail closed to the configured logical default `1280 × 820`, centered. They are not guessed or reinterpreted. The next genuine user geometry change writes version 2, so invalid legacy state cannot become sticky.
+- `x_physical` / `y_physical` are global physical desktop coordinates, because mixed-DPI monitors do not share one coherent global logical origin;
+- `width_logical` / `height_logical` are integer logical dimensions, preserving user-visible size across 1×/2× monitors;
+- `capture_scale_factor` records the source monitor scale solely to reconstruct the saved physical rectangle for monitor intersection;
+- `maximized` is unchanged.
 
-Minimum `760 × 620`, restored geometry validation, monitor work areas, intersection selection, and clamping operate in logical units. Each monitor work area is converted using that monitor's scale factor before selection. Maximized state is restored after size/position.
+Capture keeps Tauri's physical outer position, converts outer size through the current window scale factor, and rounds only the logical size. Restore selects a monitor by intersecting the saved physical rectangle (`logical size × capture scale`) with physical monitor work areas. It then computes target physical bounds from the logical size and selected monitor scale, clamps the physical position in that work area, calls `Size::Logical` for size and `Position::Physical` for global placement, and maximizes last. No calculation mixes logical origins from different monitors.
+
+Records without version 2 are legacy physical-pixel records and fail closed to the configured logical default `1280 × 820`, physically centered in the selected primary work area by the same pure geometry function. They are not guessed or reinterpreted. The next genuine user geometry change writes version 2, so invalid legacy state cannot become sticky.
+
+Minimum `760 × 620` validates logical dimensions. Off-screen intersection/clamping stays physical and target-size-aware. Maximized state restores after normal geometry.
 
 ## Startup persistence gate
 
-A Tauri-managed `WindowStatePersistenceGate` is installed before restore and records the expected logical startup geometry (restored or default). Geometry events whose observed logical size/position equal that expected programmatic geometry are suppressed. The first differing geometry event is treated as user intent, retires the gate, and persists the complete current logical geometry. Closing/destroying while only startup geometry has been observed does not overwrite the last good state.
+`WindowStatePersistenceGate` has explicit `PreArm`, `Restoring`, and `Ready` phases. `on_window_event` fail-closes geometry persistence while the managed gate is absent or `PreArm`, covering window-creation events before `.setup()`. Setup manages the gate before restore. The restore path computes one exact `AppliedWindowGeometry` (logical size, physical position, maximized) with the same pure function used by setters, arms `Restoring` before any `set_size`/`set_position`/`maximize` call, then applies it.
 
-This is value/fence based, not time based: no sleep, debounce, page-load guess, or secure-backup-state coupling. The startup/verification/secure-backup gate may remain visible arbitrarily long without rewriting geometry; a real user resize/move during it is persisted because it differs from the expected programmatic geometry.
+`Restoring` tracks size and position independently by event kind. Resized/ScaleFactorChanged observations are suppressed until the observed logical size equals the expected size; Moved observations are suppressed until physical position equals expected. Intermediate creation/restore values, exact matches, and duplicate exact echoes never retire the gate. After both expected components have been observed, the first differing non-maximized resize/move is user intent: it moves to `Ready` and persists the complete current schema-v2 geometry. For a startup-maximized window, geometry events while `window.is_maximized()` are suppressed; unmaximize back to expected normal geometry remains suppressed, and the first subsequent differing event retires the gate. CloseRequested/Destroyed persist only in `Ready`.
+
+Default fallback does not call opaque `center()`: the pure geometry function computes the primary work-area center, so expected centering and applied centering use identical rounding. This is value/fence based, not time based: no sleep, debounce, page-load guess, or secure-backup-state coupling. A secure-backup gate may remain visible arbitrarily long without rewriting geometry; a genuine resize/move after startup echoes settle is persisted.
 
 ## Verify first
 
 Pure deterministic tests precede runtime changes:
 
-1. A legacy `1077 × 853` record is rejected; at 2× its physical geometry resolves below `760 × 620` logical.
-2. Capture at 1× and 2× produces the same logical size; restoring that logical state is scale-independent in both directions.
-3. Version-2 JSON round-trips; unversioned legacy JSON loads as no restorable state.
-4. Minimum validation is logical; invalid state selects default `1280 × 820` and centering.
-5. Off-screen/multi-monitor logical clamping and primary fallback remain deterministic.
-6. Programmatic Resized/Moved/ScaleFactorChanged observations matching expected geometry are suppressed.
-7. A differing user resize/move during startup retires the gate and persists; no backwards overwrite follows.
-8. Maximized state round-trips and restores after geometry.
-9. Existing atomic-path, focus, close, and event-classification tests remain green.
+1. A legacy `1077 × 853` record is rejected; captured at 2× that physical geometry resolves below `760 × 620` logical.
+2. Physical sizes representing the same logical size at 1× and 2× capture identically; restore on either scale computes the same logical size and correct target physical bounds.
+3. Mixed-DPI placement uses physical global coordinates: a 2× secondary capture restored with a 1× primary still selects/clamps to the correct physical work area.
+4. Version-2 JSON round-trips; unversioned legacy JSON loads as no restorable state.
+5. Minimum validation is logical; invalid state selects exact default `1280 × 820` and deterministic primary centering, including odd-pixel rounding.
+6. Off-screen/multi-monitor physical clamping and primary fallback remain deterministic.
+7. Pre-arm geometry events are suppressed; expected Resized/Moved/ScaleFactorChanged observations and duplicates are suppressed independently until both settle.
+8. A differing user resize/move after expected observations retires the gate and persists; no later expected duplicate overwrites it.
+9. Maximized restore events do not retire the gate; unmaximize-to-normal remains suppressed before subsequent user geometry persists.
+10. Close/Destroyed during PreArm/Restoring does not persist; Ready close behavior remains.
+11. Existing atomic-path, focus, close, and event-classification tests remain green.
 
 ## Implementation
 
