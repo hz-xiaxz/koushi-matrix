@@ -38,7 +38,9 @@ No extraction, helper, counter change, API/DTO/wire change, search semantics, re
 - RED: with `Date.now()` frozen to `1_700_000_000_000`, both public search calls returned that same ID.
 - GREEN: exact test passed three consecutive runs; full browser fake reports88/88.
 - Production: one local `nextRequestId()` allocation; both branches reuse it; `Date.now()` identity uses removed.
-- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; full matrix pending.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`.
+- Final local matrix: browser fake88, client25, Vitest1,374, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green.
+- The first workspace run hit the pre-existing `runtime_timeline::corrupt_load_attempts_once_per_session` expected2/got3 timing failure with zero Rust diff. Its exact test passed three consecutive runs, the full21-test target passed, and the complete workspace all-targets rerun passed; no failure was waived.
 
 ## Delivery
 
