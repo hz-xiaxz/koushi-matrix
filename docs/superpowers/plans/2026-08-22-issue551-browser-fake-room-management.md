@@ -1,12 +1,12 @@
 # Issue #551 browser fake room-management projection extraction
 
-Status: design review pending. Scope is the first behavior-preserving `browserFakeApi.ts` ownership seam.
+Status: design approved. Scope is the first behavior-preserving `browserFakeApi.ts` ownership seam.
 
 ## Baseline
 
 - Base: `893462aefda7f11fafb845089da3bb8802c106f2` after App audit PR #632.
 - `browserFakeApi.ts`: 6,514 newline-delimited lines / 214,982 bytes / SHA-256 `24dc97cb753f4e8f9d6aa602ba63ccb31582f10f45bf797fab0518f173c0c688`.
-- Contract: DesktopApi170 methods; BrowserFakeApi170 contract methods +33 private methods; 15 fields/7 persistent maps.
+- Contract counts: `DesktopApi`170 methods; `BrowserFakeApi`170 contract methods +33 private methods; 15 fields/7 persistent maps.
 - Focused baseline: browser fake86; Tauri client25.
 
 ## Ownership decision
@@ -20,7 +20,7 @@ Create private direct module `backend/browser-fake/roomManagement.ts`. Move exac
 5. `applyRoomSettingChange`
 6. `roomModerationAllowed`
 
-Add only export modifiers. Import them directly from `browserFakeApi.ts`; no barrel/re-export/helper object.
+Add only export modifiers. Import all six directly into `browserFakeApi.ts` from the new module; no barrel/re-export/helper object.
 
 Destination has one type import from `../../domain/types` for `DesktopSnapshot`, `RoomModerationAction`, `RoomPermissionFacts`, `RoomSettingChange`, and `RoomSettingsSnapshot`.
 
@@ -48,4 +48,5 @@ Run browser fake86, client25, typecheck/lint/build, full Vitest/Playwright, boun
 ## Review gate
 
 - Read-only reconnaissance measured the full fake and selected the contiguous resource-free room-management projection seam.
-- Formal `reviewer-flash` verdict pending.
+- `reviewer-flash` independently traced the contiguous pure closure, all call sites, DTO/guard exactness, tests/counts and contract/resource exclusions and recorded `Correct-to-implement`.
+- Shell baseline is 6,514 newline characters (`wc -l`); editor display may include a final unterminated line.
