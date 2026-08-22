@@ -53,4 +53,5 @@ Run App78 + latency domain2 + hook1, typecheck/lint, full Vitest/Playwright with
 - Focused App78 + domain2 + hook1 =81, typecheck/lint, full frontend/build and diff checks green.
 - Full diff recorded `Correct-to-merge` with one future-hardening note; the exact hook path was added to the existing direct-Tauri restricted-import file list so new platform imports cannot bypass the boundary.
 - Delta review recorded `Correct-to-merge-after-finding-fix`.
-- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
+- Final local evidence: App78 + domain2 + hook1, Vitest1,372, Playwright248 with polling, workspace all-targets, desktop149/1 ignored and Headless Core QA130; typecheck/lint/build/wasm and all boundary/security/release/wire/SDK/docs/audit/exactness/diff gates green.
+- Delivery: latest-main integration if required, PR CI and merge pending.
