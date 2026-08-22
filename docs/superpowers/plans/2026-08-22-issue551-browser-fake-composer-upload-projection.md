@@ -45,7 +45,8 @@ The parent adds one direct seven-name import. Remove only parent type imports pr
 - Parent call occurrences27 and leaf-internal calls9; only the approved direct import and two type removals.
 - Parent 6,323→6,172 lines; private leaf166; combined6,338. API/class/resource delta0.
 - Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green.
-- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; full matrix pending.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`.
+- Final local matrix: exactness green; browser fake114, client25, Vitest1,400, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green without reruns.
 
 ## Verification
 
