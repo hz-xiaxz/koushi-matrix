@@ -313,20 +313,45 @@ pub(crate) fn format_markdown_subset_html(
             continue;
         }
 
-        if unordered_list_item_body(lines[line_index]).is_some() {
+        if let Some((root_indent, item_body)) = unordered_list_item_body(lines[line_index]) {
             push_chunk_boundary(&mut html, previous_chunk, line_index, true);
             html.push_str("<ul>");
+            let mut indentation_stack = vec![root_indent];
+            html.push_str("<li>");
+            let _ = push_inline_markdown_subset(&mut html, item_body, options);
+            line_index += 1;
+
             while line_index < lines.len() {
-                let Some(item_body) = unordered_list_item_body(lines[line_index]) else {
+                let Some((indent, item_body)) = unordered_list_item_body(lines[line_index]) else {
                     break;
                 };
-                html.push_str("<li>");
+                let current_indent = *indentation_stack
+                    .last()
+                    .expect("list has a root indentation");
+                if indent > current_indent {
+                    html.push_str("<ul><li>");
+                    indentation_stack.push(indent);
+                } else if indent == current_indent {
+                    html.push_str("</li><li>");
+                } else {
+                    let target = indentation_stack
+                        .iter()
+                        .rposition(|&opened_indent| opened_indent <= indent)
+                        .unwrap_or(0);
+                    while indentation_stack.len() > target + 1 {
+                        html.push_str("</li></ul>");
+                        indentation_stack.pop();
+                    }
+                    html.push_str("</li><li>");
+                }
                 let _ = push_inline_markdown_subset(&mut html, item_body, options);
-                html.push_str("</li>");
-                changed = true;
                 line_index += 1;
             }
-            html.push_str("</ul>");
+
+            while indentation_stack.pop().is_some() {
+                html.push_str("</li></ul>");
+            }
+            changed = true;
             previous_chunk = Some((line_index - 1, true));
             continue;
         }
@@ -370,11 +395,13 @@ fn push_chunk_boundary(
     }
 }
 
-fn unordered_list_item_body(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start_matches(' ');
-    trimmed
+fn unordered_list_item_body(line: &str) -> Option<(usize, &str)> {
+    let leading_space_count = line.len() - line.trim_start_matches(' ').len();
+    let trimmed = &line[leading_space_count..];
+    let body = trimmed
         .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("* "))?;
+    Some((leading_space_count, body))
 }
 
 fn math_block_body(lines: &[&str], start_index: usize) -> Option<(String, usize)> {
