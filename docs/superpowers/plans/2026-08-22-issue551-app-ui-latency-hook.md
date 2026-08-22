@@ -1,6 +1,6 @@
 # Issue #551 App UI-latency hook extraction
 
-Status: design review pending. Scope is the final clean App lifecycle seam found by residual review.
+Status: design approved. Scope is the final clean App lifecycle seam found by residual review.
 
 ## Baseline
 
@@ -20,11 +20,11 @@ No Rust/product state, listener, timer, report composition, diagnostics log, QA 
 
 ## Test
 
-Add one bounded jsdom test `app/useUiLatencyDiagnostics.test.ts` using `renderHook`:
+Add one bounded test `app/useUiLatencyDiagnostics.test.ts` with `// @vitest-environment jsdom` using `renderHook`:
 
-- stub `requestAnimationFrame` and `cancelAnimationFrame`;
+- stub `requestAnimationFrame` to return a pinned frame id and stub `cancelAnimationFrame`;
 - assert the hook schedules the first frame;
-- unmount and assert the owned frame is cancelled;
+- unmount and assert `cancelAnimationFrame` receives that exact owned frame id;
 - restore globals/cleanup.
 
 Domain sampler tests2 remain unchanged and continue covering sampling, long-frame counting, rounding and invalid gaps.
@@ -45,4 +45,5 @@ Run App78 + latency domain2 + hook1, typecheck/lint, full Vitest/Playwright with
 ## Review gate
 
 - Formal App residual review identified this self-contained no-argument hook as the sole missing clean seam.
-- Formal `reviewer-flash` design verdict pending.
+- `reviewer-flash` independently traced hook closure/imports, call order, RAF/state/publication/cancel ownership and bounded test feasibility and recorded `Correct-to-implement`.
+- `App78` is evidence shorthand for the focused App suite, not a QA lane name.
