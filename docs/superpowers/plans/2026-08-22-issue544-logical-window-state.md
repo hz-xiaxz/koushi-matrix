@@ -23,7 +23,9 @@ Minimum `760 × 620` validates logical dimensions. Off-screen intersection/clamp
 
 `WindowStatePersistenceGate` has explicit `PreArm`, `Restoring`, and `Ready` phases. `on_window_event` fail-closes geometry persistence while the managed gate is absent or `PreArm`, covering window-creation events before `.setup()`. Setup manages the gate before restore. The restore path computes one exact `AppliedWindowGeometry` (logical size, physical position, maximized) with the same pure function used by setters, arms `Restoring` before any `set_size`/`set_position`/`maximize` call, then applies it.
 
-`Restoring` tracks size and position independently by event kind. Resized/ScaleFactorChanged observations are suppressed until the observed logical size equals the expected size; Moved observations are suppressed until physical position equals expected. Intermediate creation/restore values, exact matches, and duplicate exact echoes never retire the gate. After both expected components have been observed, the first differing non-maximized resize/move is user intent: it moves to `Ready` and persists the complete current schema-v2 geometry. For a startup-maximized window, geometry events while `window.is_maximized()` are suppressed; unmaximize back to expected normal geometry remains suppressed, and the first subsequent differing event retires the gate. CloseRequested/Destroyed persist only in `Ready`.
+Before arming, restore captures the current geometry as `initial` and computes `expected`. `Restoring` is a finite value fence, not an acknowledgement wait: for each event it captures the complete current geometry through the same `capture_window_geometry` helper and rounding used by persistence. A geometry echo is suppressed when its logical size is either the initial or expected size and its physical position is either the initial or expected position; this admits intermediate `(expected size, initial position)` / `(initial size, expected position)` setter ordering and duplicate echoes without requiring either event to occur. The first non-maximized observation outside that finite cross-product is user intent, immediately moves to `Ready`, and persists. There is no matching-event prerequisite, so an unchanged restore/default followed by a user move cannot remain pinned.
+
+The capture helper uses the live `window.scale_factor()` for both ordinary Resized/Moved observation and persistence; ScaleFactorChanged is evaluated only after querying the window's current outer geometry and live scale, so one conversion/rounding source owns fractional DPI. When expected maximized is true and `window.is_maximized()` is true, geometry events are suppressed regardless of bounds. User unmaximize makes `is_maximized()` false; its first resulting geometry outside the initial/expected fence persists immediately, including `maximized: false`. CloseRequested/Destroyed persist only in `Ready`.
 
 Default fallback does not call opaque `center()`: the pure geometry function computes the primary work-area center, so expected centering and applied centering use identical rounding. This is value/fence based, not time based: no sleep, debounce, page-load guess, or secure-backup-state coupling. A secure-backup gate may remain visible arbitrarily long without rewriting geometry; a genuine resize/move after startup echoes settle is persisted.
 
@@ -37,11 +39,12 @@ Pure deterministic tests precede runtime changes:
 4. Version-2 JSON round-trips; unversioned legacy JSON loads as no restorable state.
 5. Minimum validation is logical; invalid state selects exact default `1280 × 820` and deterministic primary centering, including odd-pixel rounding.
 6. Off-screen/multi-monitor physical clamping and primary fallback remain deterministic.
-7. Pre-arm geometry events are suppressed; expected Resized/Moved/ScaleFactorChanged observations and duplicates are suppressed independently until both settle.
-8. A differing user resize/move after expected observations retires the gate and persists; no later expected duplicate overwrites it.
-9. Maximized restore events do not retire the gate; unmaximize-to-normal remains suppressed before subsequent user geometry persists.
-10. Close/Destroyed during PreArm/Restoring does not persist; Ready close behavior remains.
-11. Existing atomic-path, focus, close, and event-classification tests remain green.
+7. Pre-arm events are suppressed; initial/expected values, duplicate echoes, and both intermediate setter-order combinations remain suppressed without waiting for an event acknowledgement.
+8. When initial equals expected and setters emit no event, the first differing user resize/move immediately retires the gate and persists.
+9. Fractional 1.25×/1.5× capture and ScaleFactorChanged observation use the same live-scale rounding and do not pin or falsely retire the fence.
+10. Maximized restore events are suppressed while maximized; user unmaximize outside the finite fence retires and persists `maximized: false`.
+11. Close/Destroyed during PreArm/Restoring does not persist; Ready close behavior remains.
+12. Existing atomic-path, focus, close, and event-classification tests remain green.
 
 ## Implementation
 
