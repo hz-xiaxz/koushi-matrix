@@ -51,6 +51,13 @@ Keep all six callers and their replacement ordering unchanged. `submitLogin` mus
 
 Correct `createLockedSnapshot` in the same lifecycle-owner change: base it on `createSignedOutSnapshot(secureBackupGate)`, then install the locked saved-session identity. Do not call class-private teardown from a constructor, duplicate the reset payload, or change `needsRecovery` behavior. Initial locked state has no submission history to preserve.
 
+## Implementation evidence
+
+- Robust public-API RED on the immutable production baseline: 5 failed / 2 replacement tests passed. Failures covered the locked constructor plus all four non-replacement terminal paths.
+- GREEN exact reset suite7/7 x3; browser fake114 + client25; typecheck/lint/diff check green.
+- Production diff is limited to the existing teardown block and locked constructor: 19 reset additions, six call sites unchanged, no API/class field/timer/map/export delta. `browserFakeApi.ts` 6,306→6,323 lines; locked `state_generation: 0` is preserved.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; reviewer minors for locked generation and literal oracle anchors were fixed and delta re-review returned `Correct-to-merge`. Full matrix pending.
+
 ## Deterministic checks
 
 - RED failure and same exact test GREEN x3.
