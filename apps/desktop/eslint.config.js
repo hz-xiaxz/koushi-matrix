@@ -10,10 +10,10 @@
 // 1. src/components/** AND src/App.tsx must not import @tauri-apps/* directly.
 //    The transport boundary is apps/desktop/src/backend/*. React components
 //    receive the API surface through props/context from App.tsx; they must not
-//    reach Tauri IPC themselves. App.tsx has three grandfathered import lines
-//    acknowledged with inline eslint-disable-next-line no-restricted-imports
-//    comments (tracked for Phase 2 migration). Any NEW direct @tauri-apps import
-//    in App.tsx without a disable comment will be caught by this rule.
+//    reach Tauri IPC themselves. App.tsx and the desktop-attention hook have
+//    grandfathered import lines acknowledged with inline eslint-disable-next-line
+//    no-restricted-imports comments. Any NEW direct @tauri-apps import without a
+//    disable comment will be caught by this rule.
 //    domain/** and test/** are intentionally excluded: convertFileSrc in
 //    domain/mediaUrl.ts, notification helpers in domain/desktopNotification.ts,
 //    and the @tauri-apps/api/mocks in test/** are correct at those layers.
@@ -68,6 +68,7 @@ export default tseslint.config(
       "src/components/**/*.ts",
       "src/components/**/*.tsx",
       "src/App.tsx",
+      "src/app/useDesktopAttentionEffects.ts",
     ],
     rules: {
       "no-restricted-imports": [

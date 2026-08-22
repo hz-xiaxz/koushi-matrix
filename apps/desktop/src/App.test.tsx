@@ -1814,54 +1814,58 @@ describe("desktop integration source guards", () => {
   });
 
   test("feeds Rust-owned native attention into window title and notification adapters", () => {
-    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const hookSource = readFileSync(
+      new URL("./app/useDesktopAttentionEffects.ts", import.meta.url),
+      "utf8"
+    );
 
-    const summaryStart = source.indexOf("const attentionSummary");
-    const summaryEnd = source.indexOf("function handleShortcutAction", summaryStart);
-    const summarySource = source.slice(summaryStart, summaryEnd);
+    const summaryStart = appSource.indexOf("const attentionSummary");
+    const summaryEnd = appSource.indexOf("function handleShortcutAction", summaryStart);
+    const summarySource = appSource.slice(summaryStart, summaryEnd);
     expect(summarySource).toContain("desktopAttentionSummary(snapshot.state.domain.native_attention)");
     expect(summarySource).not.toContain("snapshot.state.domain.rooms");
     expect(summarySource).not.toContain("navigation.active_room_id");
 
-    const notificationStart = source.indexOf("const candidate = desktopAttentionNotificationCandidate");
-    const notificationEnd = source.indexOf("void sendDesktopAttentionNotification", notificationStart);
-    const notificationSource = source.slice(notificationStart, notificationEnd);
+    const notificationStart = hookSource.indexOf("const candidate = desktopAttentionNotificationCandidate");
+    const notificationEnd = hookSource.indexOf("void sendDesktopAttentionNotification", notificationStart);
+    const notificationSource = hookSource.slice(notificationStart, notificationEnd);
     expect(notificationSource).toContain("snapshot.state.domain.native_attention");
     expect(notificationSource).not.toContain("previousAttentionInput");
     expect(notificationSource).not.toContain("snapshot.state.domain.rooms");
 
-    const notificationEffectEnd = source.indexOf("]);", notificationStart);
-    const notificationEffectSource = source.slice(notificationStart, notificationEffectEnd);
+    const notificationEffectEnd = hookSource.indexOf("]);", notificationStart);
+    const notificationEffectSource = hookSource.slice(notificationStart, notificationEffectEnd);
     expect(notificationEffectSource).toContain("void dispatchDesktopAttentionTransientEffects");
     expect(notificationEffectSource).toContain("{ sound: false }");
     expect(notificationEffectSource).toContain("snapshot.state.domain.native_attention.summary.capabilities");
     expect(notificationEffectSource).not.toContain("snapshot.state.domain.rooms");
 
-    const clearStart = source.indexOf("safeAttentionSummary.badgeCount !== 0");
-    const clearEnd = source.indexOf("const message = qaSendSmokeMessage", clearStart);
-    const clearSource = source.slice(clearStart, clearEnd);
+    const clearStart = hookSource.indexOf("safeAttentionSummary.badgeCount !== 0");
+    const clearEnd = hookSource.indexOf("  }, [safeAttentionSummary.badgeCount]);", clearStart);
+    const clearSource = hookSource.slice(clearStart, clearEnd);
     expect(clearSource).toContain("safeAttentionSummary.badgeCount !== 0");
     expect(clearSource).toContain("void clearDesktopAttentionNotifications");
     expect(clearSource).toContain("tauriNotificationTransport");
 
-    expect(source).toContain("desktopAttentionWindowTitle");
-    expect(source).toContain("sendDesktopAttentionNotification");
-    expect(source).toContain("createDesktopBadgeSoundDispatcher");
-    expect(source).toContain("desktopBadgeSoundDispatcher.observe");
-    expect(source).toContain("applyDesktopAttentionToWindow");
-    expect(source).toContain("qaWindowTitle(");
-    expect(source).toContain("effectiveRightPanelModeForSnapshot");
-    expect(source).toContain("rightPanelMode");
-    expect(source).toContain("qaSendStatus");
-    expect(source).toContain("getCurrentWindow()");
-    expect(source).toContain("snapshot?.state.domain.native_attention.summary.capabilities");
-    expect(source).toContain("document.title = attentionWindowTitle");
-    const windowEffectStart = source.indexOf("useEffect(() => {\n    document.title");
-    const windowEffectEnd = source.indexOf("]);", windowEffectStart);
-    const windowEffectSource = source.slice(windowEffectStart, windowEffectEnd);
+    expect(appSource).toContain("desktopAttentionWindowTitle");
+    expect(hookSource).toContain("sendDesktopAttentionNotification");
+    expect(hookSource).toContain("createDesktopBadgeSoundDispatcher");
+    expect(hookSource).toContain("desktopBadgeSoundDispatcher.observe");
+    expect(hookSource).toContain("applyDesktopAttentionToWindow");
+    expect(appSource).toContain("qaWindowTitle(");
+    expect(appSource).toContain("effectiveRightPanelModeForSnapshot");
+    expect(appSource).toContain("rightPanelMode");
+    expect(appSource).toContain("qaSendStatus");
+    expect(hookSource).toContain("getCurrentWindow()");
+    expect(hookSource).toContain("snapshot?.state.domain.native_attention.summary.capabilities");
+    expect(hookSource).toContain("document.title = attentionWindowTitle");
+    const windowEffectStart = hookSource.indexOf("useEffect(() => {\n    document.title");
+    const windowEffectEnd = hookSource.indexOf("]);", windowEffectStart);
+    const windowEffectSource = hookSource.slice(windowEffectStart, windowEffectEnd);
     expect(windowEffectSource).toContain("attentionWindowTitle");
     expect(windowEffectSource).not.toContain("\n    snapshot,");
-    expect(source).toContain("desktopAttentionWindowTitle");
+    expect(appSource).toContain("desktopAttentionWindowTitle");
   });
 
   test("room selection appends private-data-free transition diagnostics around the API call", () => {
