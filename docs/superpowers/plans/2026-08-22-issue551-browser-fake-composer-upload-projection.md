@@ -39,6 +39,14 @@ The parent adds one direct seven-name import. Remove only parent type imports pr
 - leaf-internal calls remain target-active3, synthetic-variant5, image-format1;
 - DesktopApi/BrowserFakeApi methods/fields/maps/timers/request IDs, prepared-byte ownership/bounds/teardown, composer lease/draft/submission lifecycle and snapshot mutation order remain unchanged.
 
+## Implementation evidence
+
+- Exact AST source slices9/9, parent0, original order, exports7/private2; `browserComposerAccountMatches` body/position and six calls unchanged.
+- Parent call occurrences27 and leaf-internal calls9; only the approved direct import and two type removals.
+- Parent 6,323→6,172 lines; private leaf166; combined6,338. API/class/resource delta0.
+- Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`; full matrix pending.
+
 ## Verification
 
 Use TypeScript AST statement ranges against the immutable baseline, not line-number slicing. Run body/token exactness, declaration order/count, parent0, export/private surface, import/type removals, 27 parent references, internal calls, API/class/resource inventory and `git diff --check`.
