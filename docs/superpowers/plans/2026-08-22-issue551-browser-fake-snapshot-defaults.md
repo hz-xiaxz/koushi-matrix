@@ -41,7 +41,9 @@ No barrel, wrapper, aggregate default object, class, callback registry, state/ca
 - Exact AST slices8/8/order, parent0, exports7/private1; parent/leaf counts exact.
 - One leaf type, one direct parent import, no parent type removal; snapshot factories/call order and API/class/resource surfaces unchanged.
 - Parent 5,869→5,777 lines; private leaf102; combined5,879.
-- Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green; post-implementation review/full matrix pending.
+- Browser fake114 + client25, typecheck/lint/diff and deterministic verifier green.
+- Post-implementation full-diff review: `reviewer-flash` `Correct-to-merge`.
+- Final local matrix: exactness green; browser fake114, client25, Vitest1,400, Playwright248, workspace all-targets, Tauri149/1 ignored plus keyring5, Headless Core QA130, wasm state/search, typecheck/lint/build, Tauri/domain/IPC boundaries, secret/release/version, SDK/docs, rustfmt, `cargo deny`, `cargo machete`, and diff checks green without reruns.
 
 ## Verification
 
