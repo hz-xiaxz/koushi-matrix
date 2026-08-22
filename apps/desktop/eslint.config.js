@@ -69,6 +69,7 @@ export default tseslint.config(
       "src/components/**/*.tsx",
       "src/App.tsx",
       "src/app/useDesktopAttentionEffects.ts",
+      "src/app/useUiLatencyDiagnostics.ts",
     ],
     rules: {
       "no-restricted-imports": [
