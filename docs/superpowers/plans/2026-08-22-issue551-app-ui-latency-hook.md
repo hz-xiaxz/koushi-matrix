@@ -1,6 +1,6 @@
 # Issue #551 App UI-latency hook extraction
 
-Status: design approved. Scope is the final clean App lifecycle seam found by residual review.
+Status: implemented; full-diff review pending. Scope is the final clean App lifecycle seam found by residual review.
 
 ## Baseline
 
@@ -47,3 +47,8 @@ Run App78 + latency domain2 + hook1, typecheck/lint, full Vitest/Playwright with
 - Formal App residual review identified this self-contained no-argument hook as the sole missing clean seam.
 - `reviewer-flash` independently traced hook closure/imports, call order, RAF/state/publication/cancel ownership and bounded test feasibility and recorded `Correct-to-implement`.
 - `App78` is evidence shorthand for the focused App suite, not a QA lane name.
+- Implementation integrated by `luna-implementer` and parent-audited.
+- Exactness: hook1/1, App parent0, imports2, call1 at the same position, orphan import members3; body/type and retained App structure exact.
+- `App.tsx` 6,242 → 6,183 newline-delimited lines; hook61; one pinned-RAF cleanup test.
+- Focused App78 + domain2 + hook1 =81, typecheck/lint, full frontend/build and diff checks green.
+- Full diff and delivery pending.
