@@ -708,6 +708,23 @@ carry tokens and counts only. The full prohibited list is in
   browsers expose file inputs with button semantics and the input label contains
   the button label as a prefix.
 
+## Desktop viewport synchronization
+
+Rust owns native viewport synchronization in the Tauri adapter. macOS parent
+NSView bounds are authoritative; the WKWebView frame is repaired only inside
+one main-thread native callback when the pure policy requires it. The receipt's
+monotonic generation, repair decision, and final native/DOM alignment booleans
+are the evidence boundary. `native_origin_aligned` and `native_size_aligned`
+are measured again after any repair, so they never describe the stale frame.
+
+React's viewport reporter owns only finite DOM measurement and one-shot
+observation dispatch after a committed density render or browser resize. It
+must not cache expected geometry, resize the native window, synthesize DOM
+resize events, or add retry/timer recovery. Panel transitions remain layout-only.
+The optional QA title extension is published once from the Rust receipt and
+contains only generation, decision, and alignment tokens; it is disabled with
+normal QA-title mode and cannot change product title semantics.
+
 ## Settings, composer, and scheduled send
 
 - Settings product state lives in `koushi-state::AppState.settings`. GUI work may

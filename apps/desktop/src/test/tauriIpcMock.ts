@@ -16,6 +16,7 @@
  */
 
 import type { CoreEventPayload } from "../domain/coreEvents";
+import type { ViewportSyncReceipt } from "../backend/browserFakeApi";
 
 // ---------------------------------------------------------------------------
 // Invocation record
@@ -75,6 +76,28 @@ export class TauriIpcMock {
       const resolved =
         typeof response === "function" ? response(args) : response;
       return Promise.resolve(resolved as T);
+    }
+
+    if (command === "observe_viewport_sync") {
+      const observation = args.observation as {
+        trigger?: ViewportSyncReceipt["trigger"];
+        density?: NonNullable<ViewportSyncReceipt["density"]>;
+      } | undefined;
+      return Promise.resolve({
+        generation: 1,
+        trigger: observation?.trigger ?? "browser_resize",
+        density: observation?.density ?? "default",
+        nativeSupport: "unsupported",
+        decision: "unsupported",
+        nativeAligned: false,
+        nativeOriginAligned: false,
+        nativeSizeAligned: false,
+        domAligned: true,
+        domJsAligned: true,
+        domRootAligned: true,
+        parent: null,
+        webview: null
+      } satisfies ViewportSyncReceipt as T);
     }
 
     // Default: return a minimal empty snapshot.

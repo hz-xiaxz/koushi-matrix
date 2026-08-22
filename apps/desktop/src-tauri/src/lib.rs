@@ -5,6 +5,7 @@ mod core_event_forwarder;
 mod desktop_menu;
 mod dto;
 pub mod keyring_backend;
+mod viewport_sync;
 mod window_state;
 
 use std::{
@@ -78,6 +79,7 @@ pub struct CoreRuntimeState {
     pub(crate) timeline_items_count: Arc<AtomicUsize>,
     _forwarder_task: Option<CoreEventForwarderTask>,
     pub(crate) native_window_focus_generation: AtomicU64,
+    pub(crate) viewport_sync_generation: viewport_sync::ViewportSyncGeneration,
 }
 
 #[derive(Default)]
@@ -374,6 +376,21 @@ fn ensure_main_window_visible_after_page_load<R: tauri::Runtime>(window: &tauri:
     let _ = window.set_focus();
 }
 
+fn schedule_native_viewport_sync<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    trigger: viewport_sync::ViewportSyncTrigger,
+) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<CoreRuntimeState>();
+        let _ =
+            viewport_sync::synchronize_and_record(window, &state.viewport_sync_generation, trigger)
+                .await;
+    });
+}
+
 #[cfg(target_os = "macos")]
 fn order_macos_ns_window_front(ns_window_addr: usize) {
     let ns_window = ns_window_addr as *mut objc2_app_kit::NSWindow;
@@ -553,6 +570,7 @@ pub fn run() {
                 timeline_items_count,
                 _forwarder_task: Some(forwarder_task),
                 native_window_focus_generation: AtomicU64::new(0),
+                viewport_sync_generation: viewport_sync::ViewportSyncGeneration::default(),
             };
             app.manage(core_state);
             install_oidc_deep_link_handler(app)?;
@@ -611,6 +629,10 @@ pub fn run() {
             if webview.label() == "main" {
                 let window = webview.window();
                 ensure_main_window_visible_after_page_load(&window);
+                schedule_native_viewport_sync(
+                    window.app_handle().clone(),
+                    viewport_sync::ViewportSyncTrigger::PageLoad,
+                );
             }
         })
         .on_window_event(|window, event| {
@@ -635,6 +657,18 @@ pub fn run() {
                             });
                         }
                     }
+                }
+                let viewport_trigger = match event {
+                    tauri::WindowEvent::Resized(_) => {
+                        Some(viewport_sync::ViewportSyncTrigger::Resized)
+                    }
+                    tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                        Some(viewport_sync::ViewportSyncTrigger::ScaleFactorChanged)
+                    }
+                    _ => None,
+                };
+                if let Some(trigger) = viewport_trigger {
+                    schedule_native_viewport_sync(window.app_handle().clone(), trigger);
                 }
                 #[cfg(target_os = "macos")]
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -684,6 +718,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::diagnostics::get_diagnostic_snapshot,
+            commands::diagnostics::observe_viewport_sync,
             commands::session::get_snapshot,
             commands::session::discover_login_methods,
             commands::session::start_oidc_login,

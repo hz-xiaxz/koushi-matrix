@@ -134,6 +134,60 @@ async fn update_qa_window_title_from_state(app: &AppHandle, state: &CoreRuntimeS
     }
 }
 
+/// Publish one private-data-free viewport result after the adapter has finished
+/// its native repair and DOM observation. This is a QA-only title extension;
+/// ordinary window-title semantics remain unchanged when QA title mode is off.
+pub(crate) async fn update_qa_window_title_from_viewport_receipt<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    state: &CoreRuntimeState,
+    receipt: &crate::viewport_sync::ViewportSyncReceipt,
+) {
+    if !qa_window_title_enabled() {
+        return;
+    }
+    let snapshot = state.connection.lock().await.snapshot();
+    let timeline_items = state.timeline_items_count.load(Ordering::Relaxed);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_title(&qa_window_title_with_viewport_receipt(
+            &snapshot,
+            timeline_items,
+            receipt,
+        ));
+    }
+}
+
+pub(crate) fn qa_window_title_with_viewport_receipt(
+    snapshot: &koushi_state::AppState,
+    timeline_items: usize,
+    receipt: &crate::viewport_sync::ViewportSyncReceipt,
+) -> String {
+    let parent_observed = matches!(
+        receipt.native_support,
+        crate::viewport_sync::NativeViewportSupport::Supported
+    ) && receipt.parent.is_some();
+    let aligned = parent_observed
+        && receipt.native_aligned
+        && receipt.dom_js_aligned
+        && receipt.dom_root_aligned;
+    let decision = match receipt.decision {
+        crate::viewport_sync::ViewportSyncDecision::InSync => "in_sync",
+        crate::viewport_sync::ViewportSyncDecision::RepairToParentBounds => {
+            "repair_to_parent_bounds"
+        }
+        crate::viewport_sync::ViewportSyncDecision::Unsupported => "unsupported",
+    };
+    format!(
+        "{} viewport={} viewport_generation={} viewport_parent={} viewport_webview={} viewport_js={} viewport_root={} viewport_decision={decision}",
+        qa_window_title_string(snapshot, timeline_items),
+        if aligned { "aligned" } else { "misaligned" },
+        receipt.generation,
+        parent_observed,
+        receipt.native_aligned,
+        receipt.dom_js_aligned,
+        receipt.dom_root_aligned,
+    )
+}
+
 pub(crate) fn qa_window_title_string(
     snapshot: &koushi_state::AppState,
     timeline_items: usize,

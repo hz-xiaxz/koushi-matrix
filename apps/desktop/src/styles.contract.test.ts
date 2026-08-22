@@ -579,6 +579,13 @@ describe("styles.css token system", () => {
     expect(appSource).toContain('aria-label={t("workspace.resizeRightPanel")}');
   });
 
+  test("application root inherits the containing block instead of using a viewport height", () => {
+    const root = selectorBlock(".desktop");
+    expect(root).toContain("block-size: 100%;");
+    expect(root).toContain("min-block-size: 0;");
+    expect(root).not.toMatch(/(?:height|min-height|block-size):\s*100(?:d)?vh/);
+  });
+
   test("the composer math switch never renders hover as the ON state", () => {
     // #453: hover, :focus-visible and the checked state all shared one brand-fill
     // rule, so pointing at an OFF switch made it look ON and the control read as

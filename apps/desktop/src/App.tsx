@@ -192,6 +192,7 @@ import {
   SPACE_OVERRIDES_CHANGED_EVENT,
   writeDisplayDensity
 } from "./app/localPresentation";
+import { createViewportSyncReporter } from "./app/viewportSyncReporter";
 import {
   applyAppStoreDeltas,
   getAppStoreDeltaStats,
@@ -1021,6 +1022,17 @@ export function App() {
     useState<DiagnosticLogSnapshot>({ entries: [], droppedEntries: 0 });
   const [displayDensity, setDisplayDensityState] =
     useState<DisplayDensity>(readDisplayDensity);
+  const viewportSyncReporter = useMemo(() => createViewportSyncReporter(api), []);
+  useEffect(() => {
+    void viewportSyncReporter("density_commit", displayDensity);
+  }, [displayDensity, viewportSyncReporter]);
+  useEffect(() => {
+    const reportBrowserResize = () => {
+      void viewportSyncReporter("browser_resize", displayDensity);
+    };
+    window.addEventListener("resize", reportBrowserResize);
+    return () => window.removeEventListener("resize", reportBrowserResize);
+  }, [displayDensity, viewportSyncReporter]);
   const [spaceLocalOverrides, setSpaceLocalOverrides] =
     useState<SpaceLocalOverrides>(readSpaceLocalOverrides);
   const [newDmDraftUserId, setNewDmDraftUserId] = useState("");
