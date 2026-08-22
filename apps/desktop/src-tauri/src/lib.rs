@@ -1870,11 +1870,6 @@ mod tests {
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     use super::{
-        CORE_EVENT_NAME, ForwarderLagDisposition, STATE_EVENT_NAME,
-        forwarded_webview_events_for_core_event, forwarded_webview_events_for_lag_resync,
-        forwarder_lag_disposition, serialize_core_event,
-    };
-    use super::{
         AppliedWindowGeometry, MacosCloseRequestedAction, PersistedWindowState, WindowCloseEvent,
         WindowStatePersistenceAction, WindowStatePersistenceGate, WindowStatePersistencePhase,
         WindowWorkArea, capture_window_geometry, default_window_geometry, desktop_menu_items,
@@ -1886,6 +1881,11 @@ mod tests {
         restored_window_geometry, saved_sessions_disabled_from_env_value,
         window_close_should_persist, window_event_should_persist,
         window_event_should_stop_background_tasks, window_state_path,
+    };
+    use super::{
+        CORE_EVENT_NAME, ForwarderLagDisposition, STATE_EVENT_NAME,
+        forwarded_webview_events_for_core_event, forwarded_webview_events_for_lag_resync,
+        forwarder_lag_disposition, serialize_core_event,
     };
     use crate::commands::diagnostics::parse_qa_login_pipe_payload;
 
