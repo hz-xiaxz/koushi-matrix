@@ -600,10 +600,7 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.ui.timeline.submission_registry.accepted_submission_ids,
       submissionId
     );
-    composer.accepted_submission_ids = [
-      ...(composer.accepted_submission_ids ?? []).filter((id) => id !== submissionId),
-      submissionId
-    ];
+    this.rememberSubmissionRegistryId(composer.accepted_submission_ids, submissionId);
     composer.pending_submission_id = submissionId;
     composer.pending_transaction_id = transactionId;
     return transactionId;
@@ -4495,6 +4492,7 @@ class BrowserFakeApi implements DesktopApi {
   }
 
   private clearSessionViews() {
+    this.submissionLedger.clear();
     this.composerDrafts.clear();
     this.composerDraftRevisions.clear();
     this.threadComposerDrafts.clear();
