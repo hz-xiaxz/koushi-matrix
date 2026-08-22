@@ -957,7 +957,7 @@ test("thread attention renders one Rust count in the root and header and clears 
     .locator(".channel-actions")
     .getByRole("button", { name: t("threads.title") });
   await expect(threadsButton).toHaveAttribute("data-count", "2");
-  await expect(page.getByRole("button", { name: /View new replies · 2/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Thread notifications · 2/ })).toBeVisible();
 
   // A successful threaded read receipt is projected by Rust as the next
   // snapshot. React must not keep or repair either count locally.
