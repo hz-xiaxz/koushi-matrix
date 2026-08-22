@@ -35,9 +35,11 @@ Add focused Rust integration cases before production changes:
 1. RED for two-space nesting.
 2. RED for four-space nesting.
 3. Nested siblings followed by a root sibling close tags in the correct order.
-4. Three-level nesting and outdent converge correctly.
-5. Inline formatting/escaping inside nested items remains safe.
-6. Existing flat-list and block-boundary cases remain byte-identical.
+4. Three-level nesting and outdent to a previously opened level converge correctly.
+5. Unmatched between-level outdent clamps to the nearest opened outer level: `- A\n    - B\n  - C` makes C a root sibling, not a newly invented nested level.
+6. An indented first item seeds the block root: equal-indented following items are siblings, while greater indentation nests relative to that root.
+7. Inline formatting/escaping inside nested items remains safe.
+8. Existing flat-list and block-boundary cases remain byte-identical.
 
 Run `cargo test -p koushi-state --test composer_semantics_state`, then the relevant crate tests and formatting check.
 
