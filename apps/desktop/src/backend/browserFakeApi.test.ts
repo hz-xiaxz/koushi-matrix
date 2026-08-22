@@ -2295,4 +2295,31 @@ describe("BrowserFakeApi settings preview", () => {
     const snapshot = await probing;
     expect(snapshot.state.domain.local_encryption).toEqual({ kind: "healthy" });
   });
+
+  test("isolates link-preview hiding between fake instances", async () => {
+    const roomId = "!room-alpha:example.invalid";
+    const eventId = "$alpha-update";
+    const fakeA = createBrowserFakeApi();
+    const initialA = await fakeA.getSnapshot();
+    expect(
+      initialA.timeline.find(
+        (message) => message.room_id === roomId && message.event_id === eventId
+      )?.link_previews
+    ).toBeUndefined();
+
+    const hiddenA = await fakeA.hideLinkPreview(roomId, eventId);
+    expect(
+      hiddenA.timeline.find(
+        (message) => message.room_id === roomId && message.event_id === eventId
+      )?.link_previews
+    ).toEqual([]);
+
+    const fakeB = createBrowserFakeApi();
+    const initialB = await fakeB.getSnapshot();
+    expect(
+      initialB.timeline.find(
+        (message) => message.room_id === roomId && message.event_id === eventId
+      )?.link_previews
+    ).toBeUndefined();
+  });
 });

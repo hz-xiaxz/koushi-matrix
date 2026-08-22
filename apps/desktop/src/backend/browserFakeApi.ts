@@ -4474,14 +4474,11 @@ class BrowserFakeApi implements DesktopApi {
     eventId: string,
     linkPreviews: LinkPreview[]
   ): void {
-    const update = (message: TimelineMessage) => {
-      if (message.room_id === roomId && message.event_id === eventId) {
-        message.link_previews = linkPreviews;
-      }
-    };
-    this.snapshot.timeline.forEach(update);
-    timelineMessages.forEach(update);
-    backwardTimelineMessages.forEach(update);
+    this.snapshot.timeline = this.snapshot.timeline.map((message) =>
+      message.room_id === roomId && message.event_id === eventId
+        ? { ...message, link_previews: linkPreviews }
+        : message
+    );
   }
 
   private completeIdentityReset() {
