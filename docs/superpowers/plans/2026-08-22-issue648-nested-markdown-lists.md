@@ -51,6 +51,6 @@ Replace `unordered_list_item_body` with the smallest parser returning `(leading_
 
 - `reviewer-flash-opencode-go` design verdict: v1 `Not correct-to-merge` for missing unmatched-outdent and indented-root RED cases; v2 `Correct-to-merge` after both were added, with no remaining blocking findings.
 - `luna-implementer` at max thinking for verify-first implementation.
-- Focused RED/GREEN and deterministic reruns.
-- `reviewer-flash-opencode-go` exact full-diff verdict after implementation.
+- RED: 22 passed / 7 failed before production changes. GREEN: focused `composer_semantics_state` 29 passed, `koushi-state --lib` 39 passed, and `cargo fmt --check` exited 0 under parent rerun.
+- `reviewer-flash-opencode-go` reviewed the exact 162-line implementation patch and returned `Correct-to-merge` with no blocking findings.
 - Integrated full local matrix, CI, merge, issue evidence, and build-artifact cleanup in the shared PR.
