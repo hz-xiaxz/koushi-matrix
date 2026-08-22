@@ -1,6 +1,6 @@
 # Issue #551 App UI-latency hook extraction
 
-Status: full-diff finding fixed; delta review pending. Scope is the final clean App lifecycle seam found by residual review.
+Status: full diff approved; delivery pending. Scope is the final clean App lifecycle seam found by residual review.
 
 ## Baseline
 
@@ -52,4 +52,5 @@ Run App78 + latency domain2 + hook1, typecheck/lint, full Vitest/Playwright with
 - `App.tsx` 6,242 → 6,183 newline-delimited lines; hook61; one pinned-RAF cleanup test.
 - Focused App78 + domain2 + hook1 =81, typecheck/lint, full frontend/build and diff checks green.
 - Full diff recorded `Correct-to-merge` with one future-hardening note; the exact hook path was added to the existing direct-Tauri restricted-import file list so new platform imports cannot bypass the boundary.
-- Delta review and delivery pending.
+- Delta review recorded `Correct-to-merge-after-finding-fix`.
+- Delivery: final repository matrix, latest-main integration if required, PR CI and merge pending.
