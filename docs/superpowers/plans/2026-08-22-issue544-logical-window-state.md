@@ -54,6 +54,6 @@ Keep code in `apps/desktop/src-tauri/src/lib.rs`. Extract only small pure conver
 
 - `reviewer-flash-opencode-go` design verdict: v1–v3 `Not correct-to-merge` for mixed-DPI global coordinates, event-ack liveness, and unmaximize persistence; v4 `Correct-to-merge` after physical-position/logical-size schema and independent finite geometry/maximized fences resolved all blockers.
 - `luna-implementer` at max thinking for verify-first implementation.
-- Focused Tauri lib tests, full Tauri lib, formatting, clippy if configured, and platform-independent schema/gate evidence; macOS native inspection is confirmation only.
-- `reviewer-flash-opencode-go` exact full-diff verdict after implementation.
+- RED exposed stale schema initializers/type mismatches; first GREEN review then found a maximized-echo overwrite defect. After the regression fix, full Tauri lib passed 158 tests / 1 ignored and `cargo fmt --check` exited 0.
+- `reviewer-flash-opencode-go` full-diff v1 was `Not correct-to-merge` for fullscreen echo persistence; v2 reviewed the exact 1221-line patch and returned `Correct-to-merge` after the maximize-echo/unmaximize test and fence fix.
 - Integrated full local matrix, CI, merge, issue evidence, and build-artifact cleanup in the shared PR.
