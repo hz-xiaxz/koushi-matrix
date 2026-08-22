@@ -31,7 +31,7 @@ Delete the first-unread-only render predicate/button and now-unused `jumpToEvent
 
 ## Gates
 
-- `reviewer-flash-opencode-go` design verdict before implementation.
+- `reviewer-flash-opencode-go` design verdict: `Correct-to-merge`; no blocking findings. Review verified marker/bottom independence, root-keyed DTO projection, divergent notification/live-marker RED cases, and catalog gates.
 - `luna-implementer` at max thinking for verify-first implementation.
 - Focused Vitest/browser-headless, typecheck, lint, and catalog checks.
 - `reviewer-flash-opencode-go` exact full-diff verdict after implementation.
