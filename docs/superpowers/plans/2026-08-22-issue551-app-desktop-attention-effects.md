@@ -1,12 +1,12 @@
 # Issue #551 App desktop-attention effects extraction
 
-Status: design approved. Scope is the final clean App lifecycle seam before residual audit.
+Status: implemented; full-diff review pending. Scope is the final clean App lifecycle seam before residual audit.
 
 ## Baseline
 
 - Base: `4a4f50ca488bf88b333633cf08e4fb656a11ef8f` after verification-gate PR #629.
 - `App.tsx`: 6,367 newline-delimited lines / 221,792 bytes / SHA-256 `e8e09fc419d41358482972a58bf0dad342afbd915ac16ca545e5a1925673ee96`.
-- Focused baseline: App78; desktop-attention domain26.
+- Focused baseline: App78; desktop-attention domain28.
 
 ## Ownership decision and immutable order
 
@@ -76,7 +76,7 @@ Update only `feeds Rust-owned native attention into window title and notificatio
 - never concatenate source strings;
 - preserve every assertion and forbidden legacy token check.
 
-The 26 domain attention tests remain unchanged.
+The 28 domain attention tests remain unchanged.
 
 ## Deterministic exactness
 
@@ -93,7 +93,7 @@ A temporary TypeScript AST verifier compares immutable base with parent + leaf:
 
 ## Verification
 
-Run App78, desktop-attention26, typecheck/lint, full Vitest/Playwright with polling, build/source/boundary/security and exactness/diff checks. After full-diff approval, integrate latest `origin/main` if required, run the full repository matrix and PR CI7/7.
+Run App78, desktop-attention28, typecheck/lint, full Vitest/Playwright with polling, build/source/boundary/security and exactness/diff checks. After full-diff approval, integrate latest `origin/main` if required, run the full repository matrix and PR CI7/7.
 
 After merge, perform the final App residual audit; no App checkbox closes before its reviewer verdict.
 
@@ -102,3 +102,8 @@ After merge, perform the final App residual audit; no App checkbox closes before
 - Read-only residual audit found this one lifecycle seam and rejected composer, QA, timeline/avatar/search/room and shell extraction as ownership-damaging.
 - `reviewer-flash` independently traced resource/hook/import closure, exact dependencies/order, source contracts and Rust/product ownership and recorded `Correct-to-implement`.
 - The review's `invoke` orphan and narrow direct-Tauri acknowledgment requirements are recorded above.
+- Implementation integrated by `luna-implementer` and parent-audited; shell baseline corrected the domain suite from the stale reconnaissance count26 to28.
+- Exactness: resources4/4, hook statements4/4, parent0, call1/input4, assertion set28/28, one resource singleton set, dependency arrays and effect bodies exact; App orphan imports and narrow lint exception closed.
+- `App.tsx` 6,367 → 6,242 newline-delimited lines; hook leaf159.
+- Focused App78 + attention28 =106, typecheck/lint and source/exactness/diff checks green.
+- Full diff and delivery pending.
