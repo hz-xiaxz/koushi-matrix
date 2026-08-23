@@ -759,7 +759,9 @@ impl Drop for SubscriptionTasks {
 fn classify_thread_list_error(error: &ThreadListServiceError) -> OperationFailureKind {
     match error {
         ThreadListServiceError::Sdk(matrix_sdk::Error::Http(_)) => OperationFailureKind::Network,
-        ThreadListServiceError::Sdk(_) => OperationFailureKind::Sdk,
+        ThreadListServiceError::Sdk(_) | ThreadListServiceError::EventCache(_) => {
+            OperationFailureKind::Sdk
+        }
     }
 }
 
