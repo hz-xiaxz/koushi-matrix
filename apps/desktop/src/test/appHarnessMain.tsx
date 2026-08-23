@@ -762,7 +762,97 @@ function preparedHarnessItem(
   };
 }
 
+type ReadyComposerAccount = {
+  homeserver: string;
+  userId: string;
+  deviceId: string;
+};
+
+function readyComposerAccount(snapshot: DesktopSnapshot): ReadyComposerAccount | null {
+  const session = snapshot.state.domain.session;
+  return session.kind === "ready"
+    ? {
+        homeserver: session.homeserver,
+        userId: session.user_id,
+        deviceId: session.device_id
+      }
+    : null;
+}
+
+function activeComposerTargets(snapshot: DesktopSnapshot): ComposerTarget[] {
+  const targets: ComposerTarget[] = [];
+  const roomId = snapshot.state.ui.timeline.room_id;
+  if (roomId) {
+    targets.push({ kind: "main", room_id: roomId });
+  }
+  const thread = snapshot.state.ui.thread;
+  if (thread.kind === "open" && thread.room_id && thread.root_event_id) {
+    targets.push({
+      kind: "thread",
+      room_id: thread.room_id,
+      root_event_id: thread.root_event_id
+    });
+  }
+  return targets;
+}
+
+function reconcilePreparedUploadBytes(
+  previousSnapshot: DesktopSnapshot,
+  nextSnapshot: DesktopSnapshot
+): void {
+  const previousAccount = readyComposerAccount(previousSnapshot);
+  const nextAccount = readyComposerAccount(nextSnapshot);
+  if (
+    nextAccount === null ||
+    previousAccount === null ||
+    previousAccount.homeserver !== nextAccount.homeserver ||
+    previousAccount.userId !== nextAccount.userId ||
+    previousAccount.deviceId !== nextAccount.deviceId
+  ) {
+    preparedUploadBytes.clear();
+    return;
+  }
+
+  const retainedKeys = new Set<string>();
+  for (const target of activeComposerTargets(nextSnapshot)) {
+    for (const item of stagedUploadsForTarget(nextSnapshot, target) ?? []) {
+      if (item.preparation.kind !== "ready") {
+        continue;
+      }
+      for (const variant of item.preparation.variants) {
+        retainedKeys.add(preparedUploadKey(target, item.staged_id, variant.variant_id));
+      }
+    }
+  }
+  for (const key of preparedUploadBytes.keys()) {
+    if (!retainedKeys.has(key)) {
+      preparedUploadBytes.delete(key);
+    }
+  }
+}
+
+function reconcileComposerLeases(snapshot: DesktopSnapshot): void {
+  const account = readyComposerAccount(snapshot);
+  const activeTargetKeys = new Set(
+    activeComposerTargets(snapshot).map((target) => composerTargetKey(target))
+  );
+  const generation = composerRendererGeneration.toString();
+  for (const [leaseId, lease] of composerLeases) {
+    if (
+      account === null ||
+      lease.rendererGeneration !== generation ||
+      lease.accountHomeserver !== account.homeserver ||
+      lease.accountUserId !== account.userId ||
+      lease.accountDeviceId !== account.deviceId ||
+      !activeTargetKeys.has(composerTargetKey(lease.target))
+    ) {
+      composerLeases.delete(leaseId);
+    }
+  }
+}
+
 function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
+  const previousSnapshot = currentSnapshot;
   const rooms = next.state.domain.rooms.map(normalizeHarnessRoomSummary);
   const spaces = next.state.domain.spaces.map((space) => ({
     ...space,
@@ -797,6 +887,8 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
       },
     }
   };
+  reconcilePreparedUploadBytes(previousSnapshot, currentSnapshot);
+  reconcileComposerLeases(currentSnapshot);
   return currentSnapshot;
 }
 
@@ -3111,11 +3203,19 @@ mockWindows("main");
 // same JS task, so check-then-emit cannot interleave with a spec push.
 let externalCoreEventPushSeen = false;
 
+let resolveBootSettlement: () => void = () => {};
+const bootSettlement = new Promise<void>((resolve) => {
+  resolveBootSettlement = resolve;
+});
+
 const harnessControl: AppHarnessControl = {
   invocations: () => mock.recordedInvocations(),
   invocationsOf: (command) => mock.invocationsOf(command),
   clearInvocations: () => mock.clearInvocations(),
-  invoke: (command, args = {}) => mock.invoke(command, args),
+  invoke: async (command, args = {}) => {
+    await bootSettlement;
+    return mock.invoke(command, args);
+  },
   setCommandResponse: (command, response) =>
     mock.setCommandResponse(command, (args: Record<string, any>) => {
       const value = typeof response === "function" ? response(args) : response;
@@ -3230,4 +3330,7 @@ async function boot() {
   }
 }
 
-void boot();
+void boot().finally(() => {
+  mock.clearInvocations();
+  resolveBootSettlement();
+});
