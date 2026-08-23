@@ -50,8 +50,12 @@ Actor-delivered projections and request-correlated settles use a wider
 `SwitchingAccount` for normal session-scoped projections/terminals. Verification
 gate rendering and recovery/SAS/trust settles use their separate gate predicate.
 Neither predicate may be reused as normal command admission. Fresh room-list,
-invite-list, and room-tag projections remain Ready-only. Logout, rejection,
-trust loss, and session-clear transitions explicitly reset session-scoped state.
+invite-list, and room-tag projections remain Ready-only. In particular, fresh
+whole-state `RoomListUpdated` and provisional/authoritative room-list snapshot
+signals reject every non-Ready session—including `SignedOut`, `Locked`, and
+`SwitchingAccount`—before readiness, invites, rooms, spaces, navigation, or
+other state can mutate. Logout, rejection, trust loss, and session-clear
+transitions explicitly reset session-scoped state.
 
 ## Maintenance Contract
 
@@ -436,7 +440,10 @@ stateDiagram-v2
   back to legacy sync or starts a replacement backend.
 - `RoomListUpdated` remains the compatibility path for already-authoritative
   room operations and tests; backend bootstrap projection uses the guarded
-  readiness actions above.
+  readiness actions above. Both entry and snapshot paths reject all non-Ready
+  sessions before mutation, explicitly covering `SignedOut`, `Locked`, and
+  `SwitchingAccount`; whole-state regression tests require unchanged state and
+  empty effects.
 - Search-crawler admission is guarded by `RoomListReadiness::Ready`; sync
   running alone must not enqueue a room crawl.
 

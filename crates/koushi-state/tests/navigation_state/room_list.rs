@@ -439,6 +439,7 @@ fn room_list_update_is_ignored_while_session_is_locked() {
 fn transient_room_list_update_is_whole_state_inert_before_readiness_bump() {
     for session in [
         SessionState::Locked(session_info()),
+        SessionState::SignedOut,
         SessionState::SwitchingAccount {
             info: session_info(),
         },
@@ -478,6 +479,7 @@ fn transient_room_list_snapshots_are_whole_state_inert_before_invites_write() {
 
     for session in [
         SessionState::Locked(session_info()),
+        SessionState::SignedOut,
         SessionState::SwitchingAccount {
             info: session_info(),
         },
