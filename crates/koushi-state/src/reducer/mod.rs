@@ -976,6 +976,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             excluded_room_ids,
         ),
         AppAction::ActivityRowsObserved { .. } => activity::handle_activity_rows_observed(state),
+        AppAction::CanonicalActivityWindowReconciled { .. } => {
+            activity::handle_canonical_activity_window_reconciled(state)
+        }
         AppAction::ActivityResolutionRowsObserved { .. } => {
             activity::handle_activity_rows_observed(state)
         }
@@ -1656,6 +1659,10 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             activity_timestamp_ms,
             failure_kind,
         ),
+        AppAction::ThreadRootProjectionCleared {
+            room_id,
+            root_event_id,
+        } => thread::handle_thread_root_projection_cleared(state, room_id, root_event_id),
         AppAction::ThreadRootProjectionsReconciled {
             room_id,
             activities,

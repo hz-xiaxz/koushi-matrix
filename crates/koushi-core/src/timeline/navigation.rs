@@ -36,8 +36,8 @@ use super::display_projection::{
 };
 use super::gap_repair::{LIVE_TAIL_CANCELLATION_DEADLINE, RestoreCausalProjectionBuffer};
 use super::item_projection::{
-    has_user_visible_content, is_unread_navigation_item, item_index_for_event_id,
-    timeline_item_event_id,
+    eligible_activity_preview, has_user_visible_content, is_attention_eligible_event,
+    is_unread_navigation_item, item_index_for_event_id, timeline_item_event_id,
 };
 use super::manager::TimelineManagerActor;
 use super::thread_projection::{
@@ -2342,45 +2342,14 @@ pub(super) fn activity_rows_from_timeline_items(
         .collect()
 }
 
-pub(super) fn activity_rows_from_timeline_diffs(
-    key: &TimelineKey,
-    diffs: &[TimelineDiff],
-) -> Vec<ActivityRow> {
-    let TimelineKind::Room { room_id } = &key.kind else {
-        return Vec::new();
-    };
-    let mut rows = Vec::new();
-    for diff in diffs {
-        match diff {
-            TimelineDiff::PushFront { item }
-            | TimelineDiff::PushBack { item }
-            | TimelineDiff::Insert { item, .. }
-            | TimelineDiff::Set { item, .. } => {
-                if let Some(row) = activity_row_from_timeline_item(room_id, item) {
-                    rows.push(row);
-                }
-            }
-            TimelineDiff::Reset { items } => {
-                rows.extend(
-                    items
-                        .iter()
-                        .filter_map(|item| activity_row_from_timeline_item(room_id, item)),
-                );
-            }
-            TimelineDiff::Remove { .. } | TimelineDiff::Truncate { .. } | TimelineDiff::Clear => {}
-        }
-    }
-    rows
-}
-
 fn activity_row_from_timeline_item(room_id: &str, item: &TimelineItem) -> Option<ActivityRow> {
+    if !is_attention_eligible_event(item) {
+        return None;
+    }
     let TimelineItemId::Event { event_id } = &item.id else {
         return None;
     };
-    let preview = item
-        .body
-        .clone()
-        .or_else(|| item.media.as_ref().map(|media| media.filename.clone()))?;
+    let preview = eligible_activity_preview(item)?;
     let mut row = ActivityRow::event(
         room_id.to_owned(),
         event_id.clone(),
@@ -2757,7 +2726,7 @@ mod tests {
     use crate::command::TimelineCommand;
     use crate::event::{
         CoreEvent, PaginationDirection, PaginationState, ThreadSummaryDto, TimelineEvent,
-        TimelineItemId, TimelineUnreadPosition, TimelineViewportObservation,
+        TimelineFormattedBody, TimelineItemId, TimelineUnreadPosition, TimelineViewportObservation,
     };
     use crate::executor;
     use crate::failure::{CoreFailure, TimelineFailureKind};
@@ -2814,6 +2783,48 @@ mod tests {
         replay_initial_items_window, should_hydrate_empty_initial_room_timeline,
         timeline_unread_consistency_diagnostic_event,
     };
+
+    #[test]
+    fn eligibility_skips_redacted_and_own_rows_for_first_unread_and_newer_count() {
+        let marker = timeline_item("$marker:test", Some("marker"), "@alice:test", false);
+        let mut redacted = timeline_item("$redacted:test", Some("redacted"), "@alice:test", false);
+        redacted.is_redacted = true;
+        let valid = timeline_item("$valid:test", Some("valid"), "@bob:test", false);
+        let own = timeline_item("$own:test", Some("own"), "@me:test", false);
+        let items = vec![marker, redacted, valid, own];
+        let observation = TimelineViewportObservation {
+            first_visible_event_id: Some("$marker:test".to_owned()),
+            last_visible_event_id: Some("$marker:test".to_owned()),
+            at_bottom: false,
+            ..TimelineViewportObservation::default()
+        };
+
+        let snapshot = derive_timeline_navigation_snapshot(
+            &items,
+            Some("$marker:test"),
+            &observation,
+            Some("@me:test"),
+        );
+
+        assert_eq!(
+            snapshot.first_unread_event_id.as_deref(),
+            Some("$valid:test")
+        );
+        assert_eq!(snapshot.unread_event_count, 1);
+        assert_eq!(snapshot.newer_event_count, 1);
+    }
+
+    #[test]
+    fn formatted_only_activity_rows_remain_eligible() {
+        let mut item = timeline_item("$formatted:test", None, "@alice:test", false);
+        item.formatted = Some(TimelineFormattedBody {
+            html: "<b>formatted</b>".to_owned(),
+            plain_text: "formatted".to_owned(),
+            code_blocks: Vec::new(),
+        });
+
+        assert!(activity_row_from_timeline_item("!room:test", &item).is_some());
+    }
 
     #[test]
     fn backward_pagination_detects_only_a_changed_oldest_edge_as_prepend() {

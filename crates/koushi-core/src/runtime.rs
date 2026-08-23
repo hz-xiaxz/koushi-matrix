@@ -943,8 +943,27 @@ impl AppActor {
                             }
                             _ => None,
                         };
-                        if let AppAction::ActivityRowsObserved { rows } = &action {
-                            self.activity_projection.ingest(rows.clone());
+                        match &action {
+                            AppAction::ActivityRowsObserved { rows } => {
+                                self.activity_projection.ingest(rows.clone());
+                            }
+                            AppAction::CanonicalActivityWindowReconciled {
+                                room_id,
+                                rows,
+                                redacted_event_ids,
+                                hidden_event_ids,
+                            } => {
+                                self.activity_projection.reconcile_canonical_window(
+                                    room_id.clone(),
+                                    rows.clone(),
+                                    redacted_event_ids.clone(),
+                                    hidden_event_ids.clone(),
+                                );
+                            }
+                            AppAction::ActivityResolutionRowsObserved { rows, .. } => {
+                                self.activity_projection.ingest_resolution_rows(rows.clone());
+                            }
+                            _ => {}
                         }
                         if let (
                             Some(projection_request_id),

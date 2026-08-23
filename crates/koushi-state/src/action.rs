@@ -860,6 +860,13 @@ pub enum AppAction {
     ActivityRowsObserved {
         rows: Vec<ActivityRow>,
     },
+    /// Internal canonical replacement; never crosses the serialized app-state wire.
+    CanonicalActivityWindowReconciled {
+        room_id: String,
+        rows: Vec<ActivityRow>,
+        redacted_event_ids: Vec<String>,
+        hidden_event_ids: Vec<String>,
+    },
     ActivityResolutionRowsObserved {
         generation: u64,
         rows: Vec<ActivityRow>,
@@ -1382,6 +1389,10 @@ pub enum AppAction {
         activity_timestamp_ms: Option<u64>,
         failure_kind: crate::OperationFailureKind,
     },
+    ThreadRootProjectionCleared {
+        room_id: String,
+        root_event_id: String,
+    },
     /// Bounded Room-window lifecycle for out-of-band root projections. This
     /// carries no canonical timeline items and cannot trigger pagination.
     ThreadRootProjectionsReconciled {
@@ -1698,6 +1709,23 @@ impl fmt::Debug for AppAction {
             Self::ActivityRowsObserved { rows } => formatter
                 .debug_struct("ActivityRowsObserved")
                 .field("rows", &format_args!("{} row(s)", rows.len()))
+                .finish(),
+            Self::CanonicalActivityWindowReconciled {
+                rows,
+                redacted_event_ids,
+                hidden_event_ids,
+                ..
+            } => formatter
+                .debug_struct("CanonicalActivityWindowReconciled")
+                .field("rows", &format_args!("{} row(s)", rows.len()))
+                .field(
+                    "redacted_event_ids",
+                    &format_args!("{} event id(s)", redacted_event_ids.len()),
+                )
+                .field(
+                    "hidden_event_ids",
+                    &format_args!("{} event id(s)", hidden_event_ids.len()),
+                )
                 .finish(),
             Self::ActivityResolutionRowsObserved { generation, rows } => formatter
                 .debug_struct("ActivityResolutionRowsObserved")

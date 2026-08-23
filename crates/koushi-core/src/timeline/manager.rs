@@ -28,7 +28,10 @@ use crate::read_state::{ReadPersistenceSnapshot, ReadStateKey};
 use crate::runtime::ForwardedComposerDraftPermit;
 use crate::search::SearchIndexMessage;
 use crate::startup_trace::{self, StartupPhase};
-use crate::threads_list::{ThreadRootProjectionActivity, ThreadRootProjectionService};
+use crate::threads_list::{
+    AggregateRefresh, ThreadRootProjectionActivity, ThreadRootProjectionRefreshResult,
+    ThreadRootProjectionService,
+};
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::actor::{
@@ -158,6 +161,7 @@ pub(crate) enum TimelineMessage {
     /// A Room actor observed an absent thread root and has already committed
     /// its pending state transition. The manager owns the resulting worker so
     /// unsubscribe/shutdown can cancel it deterministically.
+    #[cfg(test)]
     StartThreadRootProjectionFetch {
         key: TimelineKey,
         actor_generation: u64,
@@ -172,6 +176,22 @@ pub(crate) enum TimelineMessage {
         actor_generation: u64,
         activity: ThreadRootProjectionActivity,
         result: Result<TimelineItem, OperationFailureKind>,
+    },
+    /// Start aggregate refreshes after an accepted Room-window commit. A
+    /// refresh whose root item is still pending starts the existing bounded
+    /// root hydration first; its aggregate worker starts from that terminal.
+    StartAggregateRefresh {
+        key: TimelineKey,
+        actor_generation: u64,
+        own_user_id: Option<matrix_sdk::ruma::OwnedUserId>,
+        refreshes: Vec<AggregateRefresh>,
+    },
+    /// Terminal result of one manager-owned exact aggregate refresh.
+    AggregateRefreshFinished {
+        key: TimelineKey,
+        actor_generation: u64,
+        refresh: AggregateRefresh,
+        result: Result<ThreadRootProjectionRefreshResult, OperationFailureKind>,
     },
     AuthoritativeReadStateObserved {
         key: TimelineKey,
@@ -687,6 +707,7 @@ impl TimelineManagerActor {
                 TimelineMessage::IgnoredUsersUpdated { user_ids } => {
                     self.handle_ignored_users_updated(user_ids).await;
                 }
+                #[cfg(test)]
                 TimelineMessage::StartThreadRootProjectionFetch {
                     key,
                     actor_generation,
@@ -714,6 +735,29 @@ impl TimelineManagerActor {
                         result,
                     )
                     .await;
+                }
+                TimelineMessage::StartAggregateRefresh {
+                    key,
+                    actor_generation,
+                    own_user_id,
+                    refreshes,
+                } => {
+                    self.handle_aggregate_refresh_start(
+                        key,
+                        actor_generation,
+                        own_user_id,
+                        refreshes,
+                    )
+                    .await;
+                }
+                TimelineMessage::AggregateRefreshFinished {
+                    key,
+                    actor_generation,
+                    refresh,
+                    result,
+                } => {
+                    self.handle_aggregate_refresh_finished(key, actor_generation, refresh, result)
+                        .await;
                 }
                 TimelineMessage::AuthoritativeReadStateObserved {
                     key,

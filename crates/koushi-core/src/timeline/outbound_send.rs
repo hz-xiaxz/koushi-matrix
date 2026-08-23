@@ -46,9 +46,10 @@ use super::diagnostics::{
 use super::display_projection::DisplayProjectionState;
 use super::item_projection::{
     apply_ignored_sender_suppression, apply_link_previews_to_item, attachment_info_for_upload,
-    attachment_reply_for_key, remember_local_echo, reply_enforce_thread_for_key,
-    sdk_item_to_timeline_item_with_send_states, send_failure_reason, thumbnail_for_upload,
-    timeline_media_source_from_sdk, timeline_room_id, validate_cancel_send, validate_retry_send,
+    attachment_reply_for_key, is_attention_eligible_event, remember_local_echo,
+    reply_enforce_thread_for_key, sdk_item_to_timeline_item_with_send_states, send_failure_reason,
+    thumbnail_for_upload, timeline_media_source_from_sdk, timeline_room_id, validate_cancel_send,
+    validate_retry_send,
 };
 use super::manager::TimelineManagerActor;
 use super::navigation::{
@@ -1344,10 +1345,10 @@ pub(super) fn matching_remote_thread_reply_event_id<'a>(
     root_event_id: &str,
     own_user_id: Option<&str>,
 ) -> Option<&'a str> {
-    let event_id = matching_thread_reply_event_id(item, root_event_id)?;
-    if item.body.is_none() && item.media.is_none() {
+    if !is_attention_eligible_event(item) {
         return None;
     }
+    let event_id = matching_thread_reply_event_id(item, root_event_id)?;
     if let (Some(sender), Some(own_user_id)) = (item.sender.as_deref(), own_user_id) {
         if sender == own_user_id {
             return None;

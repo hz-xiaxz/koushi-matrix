@@ -12,6 +12,12 @@ use super::{ActivityResolutionRequest, RequestId};
 use crate::unread_trace;
 
 const MAX_ACTIVITY_RESOLUTION_ROOMS: usize = 16;
+const MAX_CANONICAL_ROOM_SLOTS: usize = 512;
+// Keep this aligned with the reviewed ROOM_REPLAY_INITIAL_ITEMS_MAX window.
+const MAX_CANONICAL_ROWS_PER_ROOM: usize = 120;
+const MAX_CANONICAL_ROWS_GLOBAL: usize = 2_048;
+const MAX_ACTIVITY_REDACTION_TOMBSTONES: usize = 2_048;
+const MAX_ACTIVITY_CLEARED_EVENTS: usize = 2_048;
 
 pub const ACTIVITY_RECENT_MAX_ROWS: usize = 200;
 
@@ -50,12 +56,18 @@ pub(super) fn record_activity_transition(
 
 #[derive(Default)]
 pub(super) struct ActivityProjection {
-    rows_by_event_id: BTreeMap<String, ActivityRow>,
+    canonical_rows_by_room: BTreeMap<String, BTreeMap<String, ActivityRow>>,
+    resolution_rows_by_event_id: BTreeMap<String, ActivityRow>,
+    redacted_event_ids: BTreeSet<String>,
+    hidden_event_ids_by_room: BTreeMap<String, BTreeSet<String>>,
+    invalidated_placeholder_room_ids: BTreeSet<String>,
     cleared_event_ids: BTreeSet<String>,
-    /// Rooms whose placeholder unread row has just been cleared by a local
-    /// mark-read. Suppresses re-synthesizing the placeholder until the reducer
-    /// has had a chance to zero out the room's unread counts.
-    cleared_placeholder_room_ids: BTreeSet<String>,
+    room_ordinals: BTreeMap<String, u64>,
+    canonical_row_ordinals: BTreeMap<(String, String), u64>,
+    resolution_row_ordinals: BTreeMap<String, u64>,
+    redaction_ordinals: BTreeMap<String, u64>,
+    cleared_event_ordinals: BTreeMap<String, u64>,
+    next_ordinal: u64,
 }
 
 #[derive(Default)]
@@ -76,25 +88,347 @@ fn activity_latest_display_event_id(latest: &RoomLatestEventSummary) -> Option<&
 }
 
 impl ActivityProjection {
+    /// Compatibility path for older tests/injectors. Production timelines use
+    /// `CanonicalActivityWindowReconciled`; this path replaces each observed
+    /// room too, spilling only its over-bound detail into resolver provenance.
     pub(super) fn ingest(&mut self, rows: Vec<ActivityRow>) {
-        for mut row in rows {
-            if row.kind != ActivityRowKind::Event
-                || row
-                    .event_id
-                    .as_deref()
-                    .map(str::trim)
-                    .unwrap_or("")
-                    .is_empty()
-                || row.room_id.trim().is_empty()
-            {
-                continue;
-            }
-            row.room_label.clear();
-            row.unread = false;
-            if let Some(event_id) = row.event_id.clone() {
-                self.rows_by_event_id.insert(event_id, row);
+        if rows.is_empty() {
+            self.canonical_rows_by_room.clear();
+            self.hidden_event_ids_by_room.clear();
+            self.room_ordinals.clear();
+            self.canonical_row_ordinals.clear();
+            self.resolution_rows_by_event_id.clear();
+            self.resolution_row_ordinals.clear();
+            return;
+        }
+
+        let mut rows_by_room = BTreeMap::<String, Vec<ActivityRow>>::new();
+        for row in rows {
+            if let Some(row) = Self::sanitize_row(row) {
+                rows_by_room
+                    .entry(row.room_id.clone())
+                    .or_default()
+                    .push(row);
             }
         }
+        for (room_id, rows) in rows_by_room {
+            self.remove_resolution_rows_for_room(&room_id);
+            let mut canonical_rows = rows;
+            canonical_rows.sort_by(activity_row_newest_first);
+            let overflow =
+                canonical_rows.split_off(MAX_CANONICAL_ROWS_PER_ROOM.min(canonical_rows.len()));
+            self.reconcile_canonical_window(room_id, canonical_rows, Vec::new(), Vec::new());
+            for row in overflow {
+                self.insert_resolution_row(row);
+            }
+        }
+        self.enforce_resolution_bound();
+    }
+
+    pub(super) fn ingest_resolution_rows(&mut self, rows: Vec<ActivityRow>) {
+        for row in rows {
+            let Some(row) = Self::sanitize_row(row) else {
+                continue;
+            };
+            self.insert_resolution_row(row);
+        }
+        self.enforce_resolution_bound();
+    }
+
+    pub(super) fn reconcile_canonical_window(
+        &mut self,
+        room_id: String,
+        rows: Vec<ActivityRow>,
+        redacted_event_ids: Vec<String>,
+        hidden_event_ids: Vec<String>,
+    ) {
+        if room_id.trim().is_empty() {
+            return;
+        }
+
+        self.remove_canonical_room(&room_id);
+        self.hidden_event_ids_by_room.remove(&room_id);
+
+        let hidden_event_ids = bounded_event_ids(hidden_event_ids);
+        if !hidden_event_ids.is_empty() {
+            self.hidden_event_ids_by_room
+                .insert(room_id.clone(), hidden_event_ids);
+        }
+
+        for event_id in redacted_event_ids {
+            if event_id.trim().is_empty() {
+                continue;
+            }
+            self.invalidate_event(&room_id, &event_id);
+        }
+
+        let hidden = self
+            .hidden_event_ids_by_room
+            .get(&room_id)
+            .cloned()
+            .unwrap_or_default();
+        let mut deduplicated = BTreeMap::new();
+        for row in rows {
+            let Some(row) = Self::sanitize_row(row) else {
+                continue;
+            };
+            let Some(event_id) = row.event_id.as_ref() else {
+                continue;
+            };
+            if self.redacted_event_ids.contains(event_id) || hidden.contains(event_id) {
+                continue;
+            }
+            // BTreeMap::insert gives the last row in the accepted window
+            // ownership of a duplicate stable identity.
+            deduplicated.insert(event_id.clone(), row);
+        }
+
+        let mut canonical_rows = deduplicated.into_values().collect::<Vec<_>>();
+        canonical_rows.sort_by(activity_row_newest_first);
+        canonical_rows.truncate(MAX_CANONICAL_ROWS_PER_ROOM);
+        let ordinal = self.next_ordinal();
+        let mut stored_rows = BTreeMap::new();
+        for row in canonical_rows {
+            let event_id = row
+                .event_id
+                .as_ref()
+                .expect("sanitized activity rows have an event id")
+                .clone();
+            self.canonical_row_ordinals
+                .insert((room_id.clone(), event_id.clone()), ordinal);
+            stored_rows.insert(event_id, row);
+        }
+        if !stored_rows.is_empty() {
+            self.canonical_rows_by_room
+                .insert(room_id.clone(), stored_rows);
+        }
+
+        if self
+            .canonical_rows_by_room
+            .get(&room_id)
+            .is_some_and(|rows| !rows.is_empty())
+            || self
+                .hidden_event_ids_by_room
+                .get(&room_id)
+                .is_some_and(|ids| !ids.is_empty())
+        {
+            self.room_ordinals.insert(room_id.clone(), ordinal);
+        } else {
+            self.hidden_event_ids_by_room.remove(&room_id);
+            self.room_ordinals.remove(&room_id);
+        }
+
+        self.enforce_room_slot_bound();
+        self.enforce_canonical_global_bound();
+        self.enforce_redaction_bound();
+        self.enforce_cleared_event_bound();
+    }
+
+    fn sanitize_row(mut row: ActivityRow) -> Option<ActivityRow> {
+        if row.kind != ActivityRowKind::Event
+            || row
+                .event_id
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+            || row.room_id.trim().is_empty()
+            || row.preview.is_none()
+        {
+            return None;
+        }
+        row.room_label.clear();
+        row.unread = false;
+        Some(row)
+    }
+
+    fn next_ordinal(&mut self) -> u64 {
+        let ordinal = self.next_ordinal;
+        self.next_ordinal = self.next_ordinal.saturating_add(1);
+        ordinal
+    }
+
+    fn remove_canonical_room(&mut self, room_id: &str) {
+        self.canonical_rows_by_room.remove(room_id);
+        self.canonical_row_ordinals
+            .retain(|(stored_room_id, _), _| stored_room_id != room_id);
+        self.room_ordinals.remove(room_id);
+    }
+
+    fn remove_resolution_rows_for_room(&mut self, room_id: &str) {
+        let event_ids = self
+            .resolution_rows_by_event_id
+            .iter()
+            .filter(|(_, row)| row.room_id == room_id)
+            .map(|(event_id, _)| event_id.clone())
+            .collect::<Vec<_>>();
+        for event_id in event_ids {
+            self.resolution_rows_by_event_id.remove(&event_id);
+            self.resolution_row_ordinals.remove(&event_id);
+        }
+    }
+
+    fn insert_resolution_row(&mut self, row: ActivityRow) {
+        let Some(event_id) = row.event_id.as_ref() else {
+            return;
+        };
+        if self.redacted_event_ids.contains(event_id)
+            || self
+                .hidden_event_ids_by_room
+                .get(&row.room_id)
+                .is_some_and(|ids| ids.contains(event_id))
+        {
+            return;
+        }
+        let event_id = event_id.clone();
+        self.resolution_rows_by_event_id
+            .insert(event_id.clone(), row);
+        let ordinal = self.next_ordinal();
+        self.resolution_row_ordinals.insert(event_id, ordinal);
+    }
+
+    fn invalidate_event(&mut self, room_id: &str, event_id: &str) {
+        self.canonical_rows_by_room.values_mut().for_each(|rows| {
+            rows.remove(event_id);
+        });
+        self.canonical_rows_by_room
+            .retain(|_, rows| !rows.is_empty());
+        self.canonical_row_ordinals
+            .retain(|(_, stored_event_id), _| stored_event_id != event_id);
+        self.resolution_rows_by_event_id.remove(event_id);
+        self.resolution_row_ordinals.remove(event_id);
+        self.cleared_event_ids.remove(event_id);
+        self.cleared_event_ordinals.remove(event_id);
+        self.invalidated_placeholder_room_ids.remove(room_id);
+        self.redacted_event_ids.insert(event_id.to_owned());
+        let ordinal = self.next_ordinal();
+        self.redaction_ordinals.insert(event_id.to_owned(), ordinal);
+    }
+
+    fn active_event(&self, event_id: &str) -> bool {
+        self.canonical_rows_by_room
+            .values()
+            .any(|rows| rows.contains_key(event_id))
+            || self.resolution_rows_by_event_id.contains_key(event_id)
+    }
+
+    fn enforce_room_slot_bound(&mut self) {
+        while self.room_ordinals.len() > MAX_CANONICAL_ROOM_SLOTS {
+            let Some((room_id, _)) = self
+                .room_ordinals
+                .iter()
+                .min_by_key(|(room_id, ordinal)| (**ordinal, (*room_id).clone()))
+                .map(|(room_id, ordinal)| (room_id.clone(), *ordinal))
+            else {
+                break;
+            };
+            self.remove_canonical_room(&room_id);
+            self.hidden_event_ids_by_room.remove(&room_id);
+        }
+    }
+
+    fn enforce_canonical_global_bound(&mut self) {
+        while self.canonical_row_ordinals.len() > MAX_CANONICAL_ROWS_GLOBAL {
+            let Some((room_id, event_id)) = self
+                .canonical_row_ordinals
+                .iter()
+                .min_by_key(|((room_id, event_id), ordinal)| {
+                    (**ordinal, room_id.clone(), event_id.clone())
+                })
+                .map(|((room_id, event_id), _)| (room_id.clone(), event_id.clone()))
+            else {
+                break;
+            };
+            self.canonical_row_ordinals
+                .remove(&(room_id.clone(), event_id.clone()));
+            if let Some(rows) = self.canonical_rows_by_room.get_mut(&room_id) {
+                rows.remove(&event_id);
+                if rows.is_empty() {
+                    self.canonical_rows_by_room.remove(&room_id);
+                }
+            }
+            if !self.canonical_rows_by_room.contains_key(&room_id)
+                && !self.hidden_event_ids_by_room.contains_key(&room_id)
+            {
+                self.room_ordinals.remove(&room_id);
+            }
+        }
+    }
+
+    fn enforce_resolution_bound(&mut self) {
+        while self.resolution_rows_by_event_id.len() > ACTIVITY_RECENT_MAX_ROWS {
+            let Some(event_id) = self
+                .resolution_row_ordinals
+                .iter()
+                .min_by_key(|(event_id, ordinal)| (**ordinal, (*event_id).clone()))
+                .map(|(event_id, _)| event_id.clone())
+            else {
+                break;
+            };
+            self.resolution_row_ordinals.remove(&event_id);
+            self.resolution_rows_by_event_id.remove(&event_id);
+        }
+    }
+
+    fn enforce_redaction_bound(&mut self) {
+        while self.redacted_event_ids.len() > MAX_ACTIVITY_REDACTION_TOMBSTONES {
+            let Some(event_id) = self
+                .redaction_ordinals
+                .iter()
+                .filter(|(event_id, _)| !self.active_event(event_id))
+                .min_by_key(|(event_id, ordinal)| (**ordinal, (*event_id).clone()))
+                .map(|(event_id, _)| event_id.clone())
+            else {
+                break;
+            };
+            self.redacted_event_ids.remove(&event_id);
+            self.redaction_ordinals.remove(&event_id);
+        }
+    }
+
+    fn enforce_cleared_event_bound(&mut self) {
+        while self.cleared_event_ids.len() > MAX_ACTIVITY_CLEARED_EVENTS {
+            let Some(event_id) = self
+                .cleared_event_ordinals
+                .iter()
+                .min_by_key(|(event_id, ordinal)| (**ordinal, (*event_id).clone()))
+                .map(|(event_id, _)| event_id.clone())
+            else {
+                break;
+            };
+            self.cleared_event_ids.remove(&event_id);
+            self.cleared_event_ordinals.remove(&event_id);
+        }
+    }
+
+    fn effective_rows(&self) -> BTreeMap<String, ActivityRow> {
+        let mut rows = self
+            .resolution_rows_by_event_id
+            .iter()
+            .filter(|(event_id, row)| {
+                !self.redacted_event_ids.contains(*event_id)
+                    && !self
+                        .hidden_event_ids_by_room
+                        .get(&row.room_id)
+                        .is_some_and(|ids| ids.contains(*event_id))
+            })
+            .map(|(event_id, row)| (event_id.clone(), row.clone()))
+            .collect::<BTreeMap<_, _>>();
+        for (room_id, room_rows) in &self.canonical_rows_by_room {
+            let hidden = self
+                .hidden_event_ids_by_room
+                .get(room_id)
+                .cloned()
+                .unwrap_or_default();
+            for (event_id, row) in room_rows {
+                if self.redacted_event_ids.contains(event_id) || hidden.contains(event_id) {
+                    continue;
+                }
+                // Canonical content owns duplicate stable identities.
+                rows.insert(event_id.clone(), row.clone());
+            }
+        }
+        rows
     }
 
     pub(super) fn mark_read(
@@ -160,15 +494,20 @@ impl ActivityProjection {
         }
         for event_id in &cleared_event_ids {
             self.cleared_event_ids.insert(event_id.clone());
+            let ordinal = self.next_ordinal();
+            self.cleared_event_ordinals
+                .insert(event_id.clone(), ordinal);
         }
         for room_id in &cleared_placeholder_room_ids {
-            self.cleared_placeholder_room_ids.insert(room_id.clone());
+            self.invalidated_placeholder_room_ids
+                .insert(room_id.clone());
         }
         // Suppress placeholder synthesis for rooms whose event rows are being
         // cleared, until the reducer has zeroed out the room's unread counts.
         for room_id in cleared_event_row_room_ids {
-            self.cleared_placeholder_room_ids.insert(room_id);
+            self.invalidated_placeholder_room_ids.insert(room_id);
         }
+        self.enforce_cleared_event_bound();
         ActivityMarkReadResult {
             cleared_event_ids,
             cleared_placeholder_room_ids,
@@ -223,8 +562,8 @@ impl ActivityProjection {
 
     pub(super) fn event_at_or_after(&self, room_id: &str, timestamp_ms: u64) -> Option<String> {
         let mut rows = self
-            .rows_by_event_id
-            .values()
+            .effective_rows()
+            .into_values()
             .filter(|row| row.room_id == room_id)
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| {
@@ -268,8 +607,11 @@ impl ActivityProjection {
     ) -> Vec<String> {
         let affected_room_ids = cleared_event_ids
             .iter()
-            .filter_map(|event_id| self.rows_by_event_id.get(event_id))
-            .map(|row| row.room_id.clone())
+            .filter_map(|event_id| {
+                self.effective_rows()
+                    .get(event_id)
+                    .map(|row| row.room_id.clone())
+            })
             .collect::<BTreeSet<_>>();
         if affected_room_ids.is_empty() {
             return Vec::new();
@@ -313,9 +655,9 @@ impl ActivityProjection {
         let mut recent = Vec::new();
         let mut unread = Vec::new();
         let mut recent_event_ids = BTreeSet::new();
-        let mut unread_event_ids = BTreeSet::new();
         let mut unread_event_room_ids = BTreeSet::new();
-        for row in self.rows_by_event_id.values() {
+        let effective_rows = self.effective_rows();
+        for row in effective_rows.values() {
             if excluded.contains(row.room_id.as_str()) {
                 continue;
             }
@@ -336,8 +678,7 @@ impl ActivityProjection {
                 && match fully_read_event_id {
                     Some(event_id) => match row.event_id.as_deref() {
                         Some(row_event_id) if row_event_id == event_id => false,
-                        Some(_) => self
-                            .rows_by_event_id
+                        Some(_) => effective_rows
                             .get(event_id)
                             .map(|fully_read_row| row.timestamp_ms > fully_read_row.timestamp_ms)
                             .unwrap_or(room_activity_unread),
@@ -349,11 +690,6 @@ impl ActivityProjection {
                 && !self
                     .cleared_event_ids
                     .contains(row.event_id.as_deref().unwrap_or(""));
-            if unread_by_marker {
-                if let Some(event_id) = row.event_id.clone() {
-                    unread_event_ids.insert(event_id);
-                }
-            }
             if !activity_recent_row_visible(mode, row.highlight, room_activity_unread) {
                 continue;
             }
@@ -495,7 +831,10 @@ impl ActivityProjection {
                 );
                 continue;
             }
-            if self.cleared_placeholder_room_ids.contains(&room.room_id) {
+            if self
+                .invalidated_placeholder_room_ids
+                .contains(&room.room_id)
+            {
                 unread_trace::trace_activity_room(
                     "activity_placeholder",
                     room,
@@ -539,7 +878,7 @@ impl ActivityProjection {
             unread.push(placeholder);
         }
 
-        self.cleared_placeholder_room_ids.retain(|room_id| {
+        self.invalidated_placeholder_room_ids.retain(|room_id| {
             rooms_by_id
                 .get(room_id.as_str())
                 .map(|room| {
@@ -555,45 +894,25 @@ impl ActivityProjection {
         sort_activity_rows(&mut recent);
         sort_activity_rows(&mut unread);
 
-        let recent_retained_event_ids = recent
-            .iter()
-            .take(ACTIVITY_RECENT_MAX_ROWS)
-            .filter_map(|row| row.event_id.clone())
-            .collect::<BTreeSet<_>>();
         let marker_event_ids = state
             .live_signals
             .rooms
             .values()
             .filter_map(|signals| signals.fully_read_event_id.as_deref())
-            .filter(|event_id| self.rows_by_event_id.contains_key(*event_id))
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>();
-        let reconciliation_event_ids = self
-            .cleared_event_ids
-            .intersection(&unread_event_ids)
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let stored_before = self.rows_by_event_id.len();
-        let mut retained_event_ids = recent_retained_event_ids.clone();
-        retained_event_ids.extend(unread_event_ids.iter().cloned());
-        retained_event_ids.extend(marker_event_ids.iter().cloned());
-        retained_event_ids.extend(reconciliation_event_ids.iter().cloned());
-        self.rows_by_event_id
-            .retain(|event_id, _| retained_event_ids.contains(event_id));
-        self.cleared_event_ids
-            .retain(|event_id| reconciliation_event_ids.contains(event_id));
-        let evicted = stored_before.saturating_sub(self.rows_by_event_id.len());
-        if evicted > 0 || stored_before > ACTIVITY_RECENT_MAX_ROWS {
+            .filter(|event_id| effective_rows.contains_key(*event_id))
+            .count();
+        let canonical_rows = self.canonical_row_ordinals.len();
+        let resolver_rows = self.resolution_rows_by_event_id.len();
+        if canonical_rows > MAX_CANONICAL_ROWS_GLOBAL || resolver_rows > ACTIVITY_RECENT_MAX_ROWS {
             record(
                 DiagnosticEvent::new(DiagnosticLevel::Debug, "core.activity", "projection_pruned")
-                    .field(DiagnosticField::count("observed", stored_before as u64))
                     .field(DiagnosticField::count(
-                        "stored_before",
-                        stored_before as u64,
+                        "canonical_rows",
+                        canonical_rows as u64,
                     ))
                     .field(DiagnosticField::count(
-                        "stored_after",
-                        self.rows_by_event_id.len() as u64,
+                        "resolver_rows",
+                        resolver_rows as u64,
                     ))
                     .field(DiagnosticField::count(
                         "recent_returned",
@@ -605,13 +924,8 @@ impl ActivityProjection {
                     ))
                     .field(DiagnosticField::count(
                         "marker_retained",
-                        marker_event_ids.intersection(&retained_event_ids).count() as u64,
-                    ))
-                    .field(DiagnosticField::count(
-                        "reconciliation_retained",
-                        reconciliation_event_ids.len() as u64,
-                    ))
-                    .field(DiagnosticField::count("evicted", evicted as u64)),
+                        marker_event_ids as u64,
+                    )),
             );
         }
         recent.truncate(ACTIVITY_RECENT_MAX_ROWS);
@@ -630,6 +944,27 @@ impl ActivityProjection {
             excluded_room_ids,
         )
     }
+}
+
+fn activity_row_newest_first(left: &ActivityRow, right: &ActivityRow) -> std::cmp::Ordering {
+    right
+        .timestamp_ms
+        .cmp(&left.timestamp_ms)
+        .then_with(|| left.event_id.cmp(&right.event_id))
+}
+
+fn bounded_event_ids(ids: Vec<String>) -> BTreeSet<String> {
+    let mut bounded = Vec::new();
+    for id in ids {
+        if id.trim().is_empty() || bounded.iter().any(|existing| existing == &id) {
+            continue;
+        }
+        bounded.push(id);
+    }
+    if bounded.len() > MAX_CANONICAL_ROWS_PER_ROOM {
+        bounded.drain(..bounded.len() - MAX_CANONICAL_ROWS_PER_ROOM);
+    }
+    bounded.into_iter().collect()
 }
 
 fn room_has_activity_unread(room: &RoomSummary, mode: Option<RoomNotificationMode>) -> bool {
@@ -752,7 +1087,7 @@ pub(super) fn normalize_activity_resolution_action(
     ) {
         return None;
     }
-    Some(AppAction::ActivityRowsObserved { rows })
+    Some(AppAction::ActivityResolutionRowsObserved { generation, rows })
 }
 
 pub(super) fn cap_activity_resolution_requests(
@@ -861,7 +1196,10 @@ mod tests {
                     rows: vec![row.clone()],
                 },
             ),
-            Some(AppAction::ActivityRowsObserved { rows: vec![row] })
+            Some(AppAction::ActivityResolutionRowsObserved {
+                generation,
+                rows: vec![row],
+            })
         );
     }
 
@@ -935,6 +1273,170 @@ mod tests {
     }
 
     #[test]
+    fn canonical_activity_authority_hidden_reversal_and_redaction_tombstone_converge() {
+        let room_id = "!room:example.invalid";
+        let event_id = "$event:example.invalid";
+        let row = |preview: &str, timestamp_ms| {
+            ActivityRow::event(
+                room_id.to_owned(),
+                event_id.to_owned(),
+                Some("@sender:example.invalid".to_owned()),
+                "Room".to_owned(),
+                Some("Sender".to_owned()),
+                Some(preview.to_owned()),
+                timestamp_ms,
+                false,
+                false,
+            )
+        };
+        let mut projection = ActivityProjection::default();
+        projection.ingest_resolution_rows(vec![row("resolver", 1)]);
+        projection.reconcile_canonical_window(
+            room_id.to_owned(),
+            vec![row("canonical", 2)],
+            Vec::new(),
+            Vec::new(),
+        );
+        assert_eq!(
+            projection
+                .effective_rows()
+                .values()
+                .next()
+                .and_then(|row| row.preview.as_deref()),
+            Some("canonical")
+        );
+
+        projection.reconcile_canonical_window(
+            room_id.to_owned(),
+            vec![row("canonical", 2)],
+            Vec::new(),
+            vec![event_id.to_owned()],
+        );
+        assert!(projection.effective_rows().is_empty());
+        projection.reconcile_canonical_window(
+            room_id.to_owned(),
+            vec![row("restored", 3)],
+            Vec::new(),
+            Vec::new(),
+        );
+        assert_eq!(
+            projection
+                .effective_rows()
+                .values()
+                .next()
+                .and_then(|row| row.preview.as_deref()),
+            Some("restored")
+        );
+
+        projection.reconcile_canonical_window(
+            room_id.to_owned(),
+            vec![row("redacted", 4)],
+            vec![event_id.to_owned()],
+            Vec::new(),
+        );
+        assert!(projection.effective_rows().is_empty());
+        projection.reconcile_canonical_window(
+            room_id.to_owned(),
+            vec![row("must not resurrect", 5)],
+            Vec::new(),
+            Vec::new(),
+        );
+        assert!(projection.effective_rows().is_empty());
+    }
+
+    #[test]
+    fn canonical_activity_provenance_enforces_every_reviewed_bound() {
+        let row = |room_index: usize, event_index: usize| {
+            ActivityRow::event(
+                format!("!room-{room_index}:example.invalid"),
+                format!("$event-{room_index}-{event_index}:example.invalid"),
+                None,
+                String::new(),
+                None,
+                Some("body".to_owned()),
+                event_index as u64,
+                false,
+                false,
+            )
+        };
+
+        let mut room_bound = ActivityProjection::default();
+        for room_index in 0..=MAX_CANONICAL_ROOM_SLOTS {
+            room_bound.reconcile_canonical_window(
+                format!("!room-{room_index}:example.invalid"),
+                vec![row(room_index, 0)],
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        assert_eq!(
+            room_bound.canonical_rows_by_room.len(),
+            MAX_CANONICAL_ROOM_SLOTS
+        );
+
+        let mut row_bound = ActivityProjection::default();
+        row_bound.reconcile_canonical_window(
+            "!room-0:example.invalid".to_owned(),
+            (0..=MAX_CANONICAL_ROWS_PER_ROOM)
+                .map(|event_index| row(0, event_index))
+                .collect(),
+            Vec::new(),
+            (0..=MAX_CANONICAL_ROWS_PER_ROOM)
+                .map(|index| format!("$hidden-{index}:example.invalid"))
+                .collect(),
+        );
+        assert_eq!(
+            row_bound.canonical_rows_by_room["!room-0:example.invalid"].len(),
+            MAX_CANONICAL_ROWS_PER_ROOM
+        );
+        assert_eq!(
+            row_bound.hidden_event_ids_by_room["!room-0:example.invalid"].len(),
+            MAX_CANONICAL_ROWS_PER_ROOM
+        );
+
+        let mut global_bound = ActivityProjection::default();
+        for room_index in 0..MAX_CANONICAL_ROOM_SLOTS {
+            global_bound.reconcile_canonical_window(
+                format!("!room-{room_index}:example.invalid"),
+                (0..5)
+                    .map(|event_index| row(room_index, event_index))
+                    .collect(),
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        assert_eq!(
+            global_bound.canonical_row_ordinals.len(),
+            MAX_CANONICAL_ROWS_GLOBAL
+        );
+
+        let mut resolver_bound = ActivityProjection::default();
+        resolver_bound.ingest_resolution_rows(
+            (0..=ACTIVITY_RECENT_MAX_ROWS)
+                .map(|event_index| row(0, event_index))
+                .collect(),
+        );
+        assert_eq!(
+            resolver_bound.resolution_rows_by_event_id.len(),
+            ACTIVITY_RECENT_MAX_ROWS
+        );
+
+        let mut tombstone_bound = ActivityProjection::default();
+        tombstone_bound.reconcile_canonical_window(
+            "!room-0:example.invalid".to_owned(),
+            Vec::new(),
+            (0..=MAX_ACTIVITY_REDACTION_TOMBSTONES)
+                .map(|index| format!("$redacted-{index}:example.invalid"))
+                .collect(),
+            Vec::new(),
+        );
+        assert_eq!(
+            tombstone_bound.redacted_event_ids.len(),
+            MAX_ACTIVITY_REDACTION_TOMBSTONES
+        );
+    }
+
+    #[test]
     fn activity_projection_bounds_recent_history_to_newest_observed_rows() {
         let mut state = AppState::default();
         let mut room = unread_diagnostic_room("!room:example.invalid");
@@ -974,7 +1476,15 @@ mod tests {
             recent.rows.last().and_then(|row| row.event_id.as_deref()),
             Some("$event-1:example.invalid")
         );
-        assert_eq!(projection.rows_by_event_id.len(), ACTIVITY_RECENT_MAX_ROWS);
+        assert_eq!(
+            projection
+                .canonical_rows_by_room
+                .values()
+                .map(BTreeMap::len)
+                .sum::<usize>(),
+            MAX_CANONICAL_ROWS_PER_ROOM
+        );
+        assert_eq!(projection.resolution_rows_by_event_id.len(), 81);
     }
 
     #[test]
@@ -1011,7 +1521,7 @@ mod tests {
                 .any(|row| { row.event_id.as_deref() == Some("$event-0:example.invalid") })
         );
         assert_eq!(
-            projection.rows_by_event_id.len(),
+            projection.effective_rows().len(),
             ACTIVITY_RECENT_MAX_ROWS + 1
         );
     }

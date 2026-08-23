@@ -22,7 +22,10 @@ use crate::search::SearchIndexMessage;
 use crate::threads_list::ThreadRootProjectionService;
 
 // BEGIN GENERATED SIBLING IMPORTS
-use super::actor::{TimelineActor, TimelinePositionIndex};
+use super::actor::{
+    TimelineActor, TimelinePositionIndex, canonical_activity_window_action,
+    reserve_canonical_activity_action,
+};
 use super::diagnostics::{
     record_thread_projection, record_timeline_gap_projection_boundary, trace_timeline_diffs,
     trace_timeline_items,
@@ -46,9 +49,8 @@ use super::item_projection::{
 use super::media::{PrivateMediaEntry, authoritative_media_gallery_replacement};
 use super::navigation::{
     InitialItemsRequestIdentity, PreparedInitialWindow, TimelineActorGenerationGate,
-    activity_rows_from_timeline_diffs, commit_prepared_initial_window_with_lease,
-    derive_timeline_navigation_snapshot, emit_items_updated_and_reconcile_replay_known_with_lease,
-    record_timeline_unread_consistency,
+    commit_prepared_initial_window_with_lease, derive_timeline_navigation_snapshot,
+    emit_items_updated_and_reconcile_replay_known_with_lease, record_timeline_unread_consistency,
 };
 use super::outbound_send::thread_activity_observed_action_for_batch;
 use super::room_key_recovery::{decrypt_retry_diff_settlement, decrypt_retry_settlement_operation};
@@ -403,7 +405,6 @@ impl TimelineActor {
             }
         }
         trace_timeline_diffs("diff_batch", &self.key, &core_diffs);
-        let activity_rows = activity_rows_from_timeline_diffs(&self.key, &core_diffs);
         let receipts_action = Self::live_receipts_action_from_sdk_diffs(&self.key, &sdk_diffs);
         let search_messages = sdk_diffs
             .iter()
@@ -416,6 +417,21 @@ impl TimelineActor {
             &self.viewport_observation,
             restore_active,
         );
+        // Reserve the sole canonical Activity replacement before entering the
+        // generation commit. The permit and lease remain live through the
+        // timeline publication and the full-room replacement.
+        let activity_permit = reserve_canonical_activity_action(&self.action_tx, &self.key).await;
+        let activity_commit_lease = if activity_permit.is_some() {
+            self.timeline_actor_generations
+                .try_acquire(&self.key, self.actor_generation)
+        } else {
+            None
+        };
+        if matches!(self.key.kind, TimelineKind::Room { .. })
+            && (activity_permit.is_none() || activity_commit_lease.is_none())
+        {
+            return;
+        }
         let Some((emitted, emitted_batch_id)) = commit_sdk_batch_for_generation(
             &self.timeline_actor_generations,
             &self.key,
@@ -436,13 +452,6 @@ impl TimelineActor {
                 self.diff_batch_seq = self.diff_batch_seq.wrapping_add(1);
                 for diff in &sdk_diffs {
                     Self::apply_sdk_media_cache_diff(&mut self.media_sources, diff);
-                }
-                if !activity_rows.is_empty() {
-                    let _ = self
-                        .action_tx
-                        .try_send(vec![AppAction::ActivityRowsObserved {
-                            rows: activity_rows,
-                        }]);
                 }
 
                 let emitted_batch_id = self.next_batch_id;
@@ -479,8 +488,18 @@ impl TimelineActor {
                 (emitted, emitted_batch_id)
             },
         ) else {
+            drop(activity_commit_lease);
+            drop(activity_permit);
             return;
         };
+
+        if let Some(activity_permit) = activity_permit {
+            activity_permit.send(vec![
+                canonical_activity_window_action(&self.key, &self.navigation_items)
+                    .expect("room canonical Activity action"),
+            ]);
+        }
+        drop(activity_commit_lease);
 
         if let Some(AppAction::LiveRoomReceiptsUpdated {
             room_id,
@@ -850,6 +869,18 @@ impl TimelineActor {
             recovery_generation,
             &items,
         ));
+        let activity_permit = reserve_canonical_activity_action(&self.action_tx, &self.key).await;
+        let activity_commit_lease = if activity_permit.is_some() {
+            self.timeline_actor_generations
+                .try_acquire(&self.key, self.actor_generation)
+        } else {
+            None
+        };
+        if matches!(self.key.kind, TimelineKind::Room { .. })
+            && (activity_permit.is_none() || activity_commit_lease.is_none())
+        {
+            return;
+        }
         if !commit_authoritative_recovery_window(
             &mut self.navigation_items,
             &mut self.display_projection,
@@ -874,8 +905,17 @@ impl TimelineActor {
                 replace_authoritative_cache(&mut self.media_sources, replacement_media_sources);
             },
         ) {
+            drop(activity_commit_lease);
+            drop(activity_permit);
             return;
         }
+        if let Some(activity_permit) = activity_permit {
+            activity_permit.send(vec![
+                canonical_activity_window_action(&self.key, &self.navigation_items)
+                    .expect("room recovery Activity action"),
+            ]);
+        }
+        drop(activity_commit_lease);
         if let Some(receipt_observation) = receipt_observation
             && !emit_receipt_observation_actions(
                 self.session.as_ref(),
