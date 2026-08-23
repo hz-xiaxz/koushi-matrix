@@ -25,8 +25,9 @@ Tauri, filesystem, keyring, or network APIs. Current production runtime work
 uses `CoreCommand` / `CoreEvent` in `docs/architecture/overview.md`.
 
 Actions that touch room, timeline, thread, search, or composer state are accepted
-only for a *Ready session* (defined below). Late backend signals after logout or
-lock are ignored.
+only for a *Ready session* (defined below), except the invite-workflow Open action
+which may project recovery disclosure in the four explicitly listed recovery
+states. Late backend signals after logout or lock are ignored.
 
 Reducer state remains Rust-owned even when the desktop WebView caches it for
 selector subscriptions. The frontend projection store may retain unchanged
@@ -731,6 +732,55 @@ stateDiagram-v2
   invite acceptance and DM start against a disposable local homeserver with the
   legacy sync backend forced for smoke determinism. SyncService invite
   projection remains covered by the Phase A core `invites_dm` local QA.
+
+### Invite Workflow Admission
+
+The invite-user workflow is a Rust-owned reducer projection. Its destination may
+be either a joined room or a known Space; `InviteWorkflowState.query.room_id`
+retains its historical wire name for both kinds of destination.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Editing: Open [disclosure context + known destination]
+    Idle --> Editing: First Query [Ready + known destination]
+    Editing --> Editing: Query/Scope/Select/Remove [Ready + active destination + not Pending]
+    Editing --> Pending: Batch [Ready + exact scope/targets]
+    Pending --> Completed: Completion [request + destination match]
+    Pending --> Failed: Failure [request + destination match]
+    Failed --> Failed: Query/Scope/Select/Remove [Ready + active destination]
+    Completed --> Completed: Query/Scope/Select/Remove [Ready + active destination]
+    Failed --> Pending: Retry [Ready + exact scope/targets]
+    Completed --> Pending: Resubmit [Ready + exact scope/targets]
+    Editing --> Idle: Close/session cleanup
+    Pending --> Idle: Close/session cleanup
+    Completed --> Idle: Close/session cleanup
+    Failed --> Idle: Close/session cleanup
+```
+
+| Action | Admission guard |
+| --- | --- |
+| `InviteWorkflowOpened { room_id }` | A Ready or recovery-disclosure session (`AwaitingVerification`, `Verifying`, `AwaitingBootstrapConfirmation`, or `Locked`), a known room-or-Space destination, and no Pending operation. After admission it may refresh only scope/history/query-room disclosure projection; recovery admission is read-only. |
+| `InviteWorkflowClosed` | Always admitted and resets the workflow, including SignedOut and every cleanup state. |
+| `InviteTargetQueryChanged { room_id, .. }` | Ready, known room-or-Space destination, no Pending operation, and the active destination is `None` (the Space-panel first-query path) or the same room/Space. A query for another active destination is stale and cannot rebuild the query. |
+| `InviteScopeSelected { room_id, scope }` | Ready, known active matching destination, no Pending operation, and a scope plan owned by that destination containing `scope`. |
+| `InviteTargetSelected { room_id, user_id }` | Ready, known active matching destination, no Pending operation, and a currently selectable query candidate. A mismatched destination is never rebuilt. |
+| `InviteTargetRemoved { user_id }` | Ready, known active destination, no Pending operation, and `user_id` is currently selected. |
+| `InviteBatchRequested { request_id, room_id, user_ids, scope }` | Ready, known active matching destination, no Pending operation, destination-owned plan containing `scope`, effective scope equal to the selected scope or (when absent) the plan default, and a nonempty `user_ids` vector exactly equal to selected target IDs in projected order. |
+| `InviteBatchCompleted` / `InviteBatchFailed` | Only a Pending operation with the exact request ID and destination settles. These are settlements, not Ready-gated commands. |
+
+Invalid invite actions are effect-free and leave every field unchanged. Open,
+query, scope, selection, and batch admission uses room-or-Space existence rather
+than `room_exists` alone. Ready-only editing remains blocked in all recovery
+states even when Open projects `InviteHistoryReadiness::RecoveryRequired`.
+Completion clears selected targets only after exact correlation; failure keeps
+them for retry. A Pending operation fences every edit and new batch. Failed and
+Completed operations therefore retain their edit self-edges and may retry or
+resubmit through the same exact-scope/ordered-target guard. `CapabilityBlocked`
+does not authorize new commands, but an intact Pending owner may settle by
+request-plus-destination correlation without a shared projection-context helper.
+Canonical lock, logout, and account-switch cleanup clears Pending before any late
+settlement, making those late completions/failures inert.
 
 ## Room-Subscription Residency
 
