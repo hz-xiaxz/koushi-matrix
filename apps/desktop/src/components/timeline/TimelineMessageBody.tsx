@@ -637,6 +637,15 @@ function renderSpoiler(
   );
 }
 
+const MAX_MATH_SOURCE_LENGTH = 1024;
+const KATEX_OPTIONS = {
+  strict: false,
+  throwOnError: false,
+  trust: false,
+  maxExpand: 1000,
+  maxSize: 20
+} as const;
+
 function renderMathFormula(
   key: string,
   latex: string | undefined,
@@ -645,7 +654,7 @@ function renderMathFormula(
 ): ReactNode {
   const source = latex?.trim() ?? "";
   const Tag = displayMode ? "div" : "span";
-  if (!source) {
+  if (!source || source.length > MAX_MATH_SOURCE_LENGTH) {
     return (
       <Tag key={key} className={`message-math${displayMode ? " is-block" : ""}`}>
         {children}
@@ -655,9 +664,7 @@ function renderMathFormula(
   try {
     const html = katex.renderToString(source, {
       displayMode,
-      strict: false,
-      throwOnError: false,
-      trust: false
+      ...KATEX_OPTIONS
     });
     return (
       <Tag
