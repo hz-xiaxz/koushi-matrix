@@ -167,6 +167,7 @@ function readySnapshot(
         schema_version: 4,
         domain: {
           session: { kind: "ready", homeserver: HOMESERVER, user_id: USER_ID, device_id: DEVICE_ID },
+          session_lock_reason: null,
           secure_backup_gate: { kind: "ready" },
           current_session_status: { status: "idle" },
           device_cleanup: { kind: "idle" },

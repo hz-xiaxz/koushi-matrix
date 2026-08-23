@@ -97,7 +97,7 @@ pub use state::{
     SearchCrawlerSpeed, SearchCrawlerState, SearchMatchField, SearchMatchKind, SearchResult,
     SearchRoomFilter, SearchScope, SearchState, SecureBackupGateFailureKind, SecureBackupGateState,
     SecureBackupPassphraseChangeState, SecureBackupSetupState, SessionAuthenticationMethod,
-    SessionInfo, SessionState, SessionStatusRefreshTrigger, SettingsPatch,
+    SessionInfo, SessionLockReason, SessionState, SessionStatusRefreshTrigger, SettingsPatch,
     SettingsPersistenceState, SettingsState, SettingsValues, SoftLogoutReauthState,
     SpaceConversationSurface, SpaceMemberEntry, SpaceMemberInviteOutcome, SpaceMemberMembership,
     SpaceMemberRoleFailureKind, SpaceMemberRoleOption, SpaceMemberRoleUpdateOutcome,

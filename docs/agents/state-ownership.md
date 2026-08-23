@@ -22,6 +22,18 @@ key change and unmount. Pending operations, retries/backoff, correlation,
 session cleanup, SDK subscriptions, and background task ownership remain Rust
 actor state.
 
+## Session authentication invalidation
+
+Rust distinguishes an authenticated E2EE trust lock from Matrix authentication
+invalidation. `SessionState::Locked` is paired with the Rust-owned
+`session_lock_reason`: `DeviceTrust` keeps verification/recovery copy, while
+`UnknownToken { soft_logout }` shows expired/revoked authentication copy and a
+Sign out action. React must not infer this reason from timing, a generic trust
+recheck failure, diagnostics, or sync state. The SDK classifies trust recheck
+errors from structured facts; only `SessionChange::UnknownToken` dispatches the
+authentication-invalidation action. The optional reason's state-delta mirror is
+nested (`Option<Option<_>>`) so an explicit null clears the frontend projection.
+
 ## Snapshot and wire-contract mirrors
 
 The Tauri snapshot is a **hand-maintained DTO**

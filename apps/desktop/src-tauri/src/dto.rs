@@ -22,12 +22,12 @@ use koushi_state::{
     NativeAttentionState, NavigationState, ProfileState, ProvisionalPhase, QrLoginState,
     RoomInteractionState, RoomListProjection, RoomManagementState, RoomNotificationSettings,
     RoomPreferencesState, RoomSummary, SearchCrawlerState, SearchMatchField, SearchMatchKind,
-    SearchResult, SearchScope, SearchState, SecureBackupGateState, SessionState, SettingsState,
-    SidebarModel, SoftLogoutReauthState, SpaceMembersState, SpaceSummary, StagedUploadItem,
-    SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
-    TypographyDisplayProfile, VerificationGateRejectReason, VerificationGateState,
-    VerificationMethod, native_attention_capabilities_for_platform, resolve_locale_display_profile,
-    resolve_typography_display_profile,
+    SearchResult, SearchScope, SearchState, SecureBackupGateState, SessionLockReason, SessionState,
+    SettingsState, SidebarModel, SoftLogoutReauthState, SpaceMembersState, SpaceSummary,
+    StagedUploadItem, SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState,
+    TimelinePaneState, TypographyDisplayProfile, VerificationGateRejectReason,
+    VerificationGateState, VerificationMethod, native_attention_capabilities_for_platform,
+    resolve_locale_display_profile, resolve_typography_display_profile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +112,8 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<FrontendSessionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_lock_reason: Option<Option<SessionLockReason>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub secure_backup_gate: Option<SecureBackupGateState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_session_status: Option<CurrentSessionStatusState>,
@@ -187,6 +189,7 @@ pub struct FrontendDomainStateChangedSlices {
 impl FrontendDomainStateChangedSlices {
     fn is_empty(&self) -> bool {
         self.session.is_none()
+            && self.session_lock_reason.is_none()
             && self.secure_backup_gate.is_none()
             && self.current_session_status.is_none()
             && self.device_cleanup.is_none()
@@ -269,6 +272,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         let mut ui = FrontendUiStateChangedSlices::default();
 
         domain.session = changed.session.map(Into::into);
+        domain.session_lock_reason = changed.session_lock_reason;
         domain.secure_backup_gate = changed.secure_backup_gate;
         domain.current_session_status = changed.current_session_status;
         domain.device_cleanup = changed.device_cleanup;
@@ -365,6 +369,7 @@ pub struct FrontendAppState {
 #[derive(Clone, Debug, Serialize)]
 pub struct FrontendDomainState {
     pub session: FrontendSessionState,
+    pub session_lock_reason: Option<SessionLockReason>,
     pub secure_backup_gate: SecureBackupGateState,
     pub current_session_status: CurrentSessionStatusState,
     pub device_cleanup: DeviceCleanupState,
@@ -435,6 +440,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         domain: FrontendDomainState {
             session: state.session.into(),
+            session_lock_reason: state.session_lock_reason,
             secure_backup_gate: state.secure_backup_gate,
             current_session_status: state.current_session_status,
             device_cleanup: state.device_cleanup,
@@ -944,8 +950,8 @@ mod tests {
     use koushi_state::{
         AppState, AvatarImage, AvatarThumbnailState, EmojiPreference, FontPreference,
         InvitePreview, LocaleSettings, OwnProfile, RoomSummary, RoomTags, SessionInfo,
-        SessionState, SpaceSummary, SyncState, TextDirectionPreference, TypographySettings,
-        UserProfile, native_attention_capabilities_for_platform,
+        SessionLockReason, SessionState, SpaceSummary, SyncState, TextDirectionPreference,
+        TypographySettings, UserProfile, native_attention_capabilities_for_platform,
     };
 
     fn booted_app_state() -> AppState {
@@ -1254,6 +1260,30 @@ mod tests {
             json!([])
         );
         assert_eq!(value["state"]["ui"]["timeline"]["media_gallery"], json!([]));
+    }
+
+    #[test]
+    fn session_lock_reason_state_delta_crosses_the_frontend_boundary_and_clears_explicitly() {
+        let previous = booted_app_state();
+        let mut locked = previous.clone();
+        locked.session_lock_reason = Some(SessionLockReason::UnknownToken { soft_logout: false });
+        let delta = koushi_core::build_state_delta(9, &previous, &locked)
+            .expect("session lock reason changes should produce a state delta");
+        let value = serde_json::to_value(FrontendDesktopSnapshotDelta::from(delta))
+            .expect("session lock reason delta should serialize");
+        assert_eq!(
+            value["changed"]["state"]["domain"]["session_lock_reason"],
+            json!({"kind": "unknownToken", "soft_logout": false})
+        );
+
+        let clear = koushi_core::build_state_delta(10, &locked, &previous)
+            .expect("clearing the lock reason should produce a state delta");
+        let clear_value = serde_json::to_value(FrontendDesktopSnapshotDelta::from(clear))
+            .expect("lock reason clear should serialize");
+        assert_eq!(
+            clear_value["changed"]["state"]["domain"]["session_lock_reason"],
+            json!(null)
+        );
     }
 
     #[test]

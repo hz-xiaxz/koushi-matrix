@@ -64,7 +64,78 @@ pub struct MatrixSecureBackupStateObservation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("current-device trust recheck failed")]
 pub enum CurrentDeviceTrustRecheckError {
+    Authentication,
+    Network,
+    Server,
     Sdk,
+}
+
+fn classify_current_device_trust_recheck_error(
+    error: &matrix_sdk::Error,
+) -> CurrentDeviceTrustRecheckError {
+    match error {
+        matrix_sdk::Error::AuthenticationRequired => CurrentDeviceTrustRecheckError::Authentication,
+        matrix_sdk::Error::Timeout => CurrentDeviceTrustRecheckError::Network,
+        matrix_sdk::Error::Http(http_error) => {
+            classify_current_device_trust_recheck_http_error(http_error)
+        }
+        _ => CurrentDeviceTrustRecheckError::Sdk,
+    }
+}
+
+fn classify_current_device_trust_recheck_http_error(
+    error: &matrix_sdk::HttpError,
+) -> CurrentDeviceTrustRecheckError {
+    use matrix_sdk::ruma::api::error::ErrorKind;
+
+    let authentication = matches!(
+        error.client_api_error_kind(),
+        Some(ErrorKind::UnknownToken(_)) | Some(ErrorKind::MissingToken)
+    ) || error
+        .as_client_api_error()
+        .is_some_and(|error| matches!(error.status_code.as_u16(), 401 | 403));
+    if authentication {
+        return CurrentDeviceTrustRecheckError::Authentication;
+    }
+
+    match error {
+        matrix_sdk::HttpError::Reqwest(_) => CurrentDeviceTrustRecheckError::Network,
+        matrix_sdk::HttpError::Api(_) => CurrentDeviceTrustRecheckError::Server,
+        matrix_sdk::HttpError::Cached(inner) => {
+            classify_current_device_trust_recheck_http_error(inner)
+        }
+        _ => CurrentDeviceTrustRecheckError::Sdk,
+    }
+}
+
+fn current_device_trust_recheck_failure_token(
+    error: CurrentDeviceTrustRecheckError,
+) -> &'static str {
+    match error {
+        CurrentDeviceTrustRecheckError::Authentication => "authentication",
+        CurrentDeviceTrustRecheckError::Network => "network",
+        CurrentDeviceTrustRecheckError::Server => "server",
+        CurrentDeviceTrustRecheckError::Sdk => "sdk",
+    }
+}
+
+fn record_current_device_trust_recheck_finished(
+    outcome: &'static str,
+    failure_kind: Option<CurrentDeviceTrustRecheckError>,
+) {
+    let mut event = DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "sdk.current_device_trust_recheck",
+        "finished",
+    )
+    .field(DiagnosticField::token("outcome", outcome));
+    if let Some(error) = failure_kind {
+        event = event.field(DiagnosticField::token(
+            "failure_kind",
+            current_device_trust_recheck_failure_token(error),
+        ));
+    }
+    record(event);
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -3848,15 +3919,22 @@ impl MatrixClientSession {
         // same observation that sees the own-user keys-query settlement.
         let subscriber = self.client().encryption().verification_state();
         let client = self.client();
-        let user_id = client
-            .user_id()
-            .ok_or(CurrentDeviceTrustRecheckError::Sdk)?;
-        client
-            .encryption()
-            .request_user_identity(user_id)
-            .await
-            .map_err(|_| CurrentDeviceTrustRecheckError::Sdk)?;
-        Ok(map_sdk_verification_state(subscriber.get()))
+        let Some(user_id) = client.user_id() else {
+            let error = CurrentDeviceTrustRecheckError::Sdk;
+            record_current_device_trust_recheck_finished("failed", Some(error));
+            return Err(error);
+        };
+        match client.encryption().request_user_identity(user_id).await {
+            Ok(_) => {
+                record_current_device_trust_recheck_finished("success", None);
+                Ok(map_sdk_verification_state(subscriber.get()))
+            }
+            Err(error) => {
+                let error = classify_current_device_trust_recheck_error(&error);
+                record_current_device_trust_recheck_finished("failed", Some(error));
+                Err(error)
+            }
+        }
     }
     pub async fn inspect_current_session(
         &self,
@@ -4097,6 +4175,10 @@ mod current_device_trust_recheck_tests {
 
     #[tokio::test]
     async fn recheck_current_device_trust_queries_own_identity() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
         let server = MatrixMockServer::new().await;
         let client = server.client_builder().build().await;
         let info = SessionInfo {
@@ -4126,6 +4208,16 @@ mod current_device_trust_recheck_tests {
             .expect("empty authoritative response still settles");
 
         assert_eq!(trust, CurrentDeviceTrustState::Unverified);
+        assert!(
+            koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+                .iter()
+                .any(|record| {
+                    koushi_diagnostics::format_event(&record.event)
+                        == "stage=finished outcome=success"
+                        && record.event.source == "sdk.current_device_trust_recheck"
+                }),
+            "successful trust rechecks must record a closed completion diagnostic"
+        );
     }
 }
 
@@ -7413,5 +7505,125 @@ mod encryption_readiness_diagnostics_tests {
         assert!(text.contains("received"));
         assert!(text.contains("accepted"));
         assert!(text.contains("ready"));
+    }
+}
+
+#[cfg(test)]
+mod current_device_trust_recheck_classifier_tests {
+    use super::{
+        CurrentDeviceTrustRecheckError, MatrixClientSession,
+        classify_current_device_trust_recheck_error,
+    };
+    use koushi_state::{SessionAuthenticationMethod, SessionInfo};
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use serde_json::json;
+    use wiremock::ResponseTemplate;
+
+    async fn session(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        MatrixClientSession::from_client_for_testing(
+            client.clone(),
+            SessionInfo {
+                homeserver: server.server().uri(),
+                user_id: client.user_id().expect("mock user id").to_string(),
+                device_id: client.device_id().expect("mock device id").to_string(),
+                authentication_method: SessionAuthenticationMethod::Unknown,
+            },
+        )
+    }
+
+    #[test]
+    fn structured_facts_classify_without_display_parsing() {
+        assert_eq!(
+            classify_current_device_trust_recheck_error(&matrix_sdk::Error::Timeout),
+            CurrentDeviceTrustRecheckError::Network
+        );
+        assert_eq!(
+            classify_current_device_trust_recheck_error(&matrix_sdk::Error::NoOlmMachine),
+            CurrentDeviceTrustRecheckError::Sdk
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_token_keys_query_is_authentication() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _guard = server
+            .mock_query_keys()
+            .error_unknown_token(false)
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        assert_eq!(
+            session.recheck_current_device_trust().await,
+            Err(CurrentDeviceTrustRecheckError::Authentication)
+        );
+        assert!(
+            koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+                .iter()
+                .any(|record| {
+                    record.event.source == "sdk.current_device_trust_recheck"
+                        && koushi_diagnostics::format_event(&record.event)
+                            == "stage=finished outcome=failed failure_kind=authentication"
+                }),
+            "authentication rechecks must record their closed failure kind"
+        );
+    }
+
+    #[tokio::test]
+    async fn structured_forbidden_status_is_authentication_diagnostic() {
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _guard = server
+            .mock_query_keys()
+            .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+                "errcode": "M_FORBIDDEN",
+                "error": "synthetic"
+            })))
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+
+        assert_eq!(
+            session.recheck_current_device_trust().await,
+            Err(CurrentDeviceTrustRecheckError::Authentication)
+        );
+    }
+
+    #[tokio::test]
+    async fn server_keys_query_failure_is_server() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
+        let server = MatrixMockServer::new().await;
+        let session = session(&server).await;
+        let _guard = server
+            .mock_query_keys()
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                "errcode": "M_UNKNOWN",
+                "error": "synthetic"
+            })))
+            .expect(1)
+            .mount_as_scoped()
+            .await;
+        assert_eq!(
+            session.recheck_current_device_trust().await,
+            Err(CurrentDeviceTrustRecheckError::Server)
+        );
+        assert!(
+            koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+                .iter()
+                .any(|record| {
+                    record.event.source == "sdk.current_device_trust_recheck"
+                        && koushi_diagnostics::format_event(&record.event)
+                            == "stage=finished outcome=failed failure_kind=server"
+                }),
+            "server rechecks must record their closed failure kind"
+        );
     }
 }

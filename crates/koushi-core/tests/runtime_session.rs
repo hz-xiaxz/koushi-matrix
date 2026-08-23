@@ -404,7 +404,17 @@ async fn ready_session_routes_past_appactor_session_gate() {
 }
 
 #[tokio::test]
-async fn actor_projected_session_lock_executes_stop_sync_effect() {
+async fn actor_projected_session_lock_actions_execute_stop_sync_effect() {
+    for action in [
+        AppAction::SessionLocked,
+        AppAction::SessionAuthenticationInvalidated { soft_logout: true },
+        AppAction::SessionAuthenticationInvalidated { soft_logout: false },
+    ] {
+        assert_projected_session_lock_stops_sync(action).await;
+    }
+}
+
+async fn assert_projected_session_lock_stops_sync(action: AppAction) {
     let runtime = CoreRuntime::start();
     let mut connection = runtime.attach();
 
@@ -416,7 +426,7 @@ async fn actor_projected_session_lock_executes_stop_sync_effect() {
 
     let start_failure = next_session_required_failure(&mut connection).await;
 
-    runtime.inject_actions(vec![AppAction::SessionLocked]).await;
+    runtime.inject_actions(vec![action]).await;
     wait_for_state(&mut connection, |state| {
         matches!(state.session, SessionState::Locked(_))
     })
@@ -426,11 +436,14 @@ async fn actor_projected_session_lock_executes_stop_sync_effect() {
         next_session_required_failure(&mut connection).await
     })
     .await
-    .expect("SessionLocked must execute AppEffect::StopSync through AccountActor");
+    .expect("session lock must execute AppEffect::StopSync through AccountActor");
     assert_ne!(
         start_failure, stop_failure,
         "lock should produce a distinct stop-sync routing attempt"
     );
+
+    drop(connection);
+    runtime.shutdown().await;
 }
 
 #[tokio::test]

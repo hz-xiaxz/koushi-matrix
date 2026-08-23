@@ -768,6 +768,8 @@ export type MessageId =
   | "trust.userVerified"
   | "trust.verification"
   | "gate.title"
+  | "gate.sessionExpired"
+  | "gate.sessionExpiredCopy"
   | "gate.verifying"
   | "gate.finishing"
   | "gate.preparing"
@@ -2110,6 +2112,8 @@ const en: Catalog = {
   "trust.userVerified": "Verified",
   "trust.verification": "Device verification",
   "gate.title": "Verify this session",
+  "gate.sessionExpired": "Session expired",
+  "gate.sessionExpiredCopy": "This session has expired or was revoked. Sign in again to continue.",
   "gate.verifying": "Verifying this session…",
   "gate.finishing": "Finishing sign-in…",
   "gate.preparing": "Preparing your rooms…",
@@ -3342,6 +3346,8 @@ const ja: Catalog = {
   "trust.userVerified": "検証済み",
   "trust.verification": "デバイス検証",
   "gate.title": "このセッションを検証",
+  "gate.sessionExpired": "セッションの有効期限が切れました",
+  "gate.sessionExpiredCopy": "このセッションは期限切れになったか、取り消されました。続行するには再度サインインしてください。",
   "gate.verifying": "このセッションを検証中…",
   "gate.finishing": "サインインを完了しています…",
   "gate.preparing": "ルームを準備しています…",

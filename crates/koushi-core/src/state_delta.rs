@@ -26,6 +26,7 @@ pub struct StateDelta {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StateDeltaChangedSlices {
     pub session: Option<SessionState>,
+    pub session_lock_reason: Option<Option<koushi_state::SessionLockReason>>,
     pub secure_backup_gate: Option<SecureBackupGateState>,
     pub device_cleanup: Option<DeviceCleanupState>,
     pub current_session_status: Option<CurrentSessionStatusState>,
@@ -96,6 +97,7 @@ pub fn build_state_delta(
     }
 
     changed_slice!(session);
+    changed_slice!(session_lock_reason);
     changed_slice!(secure_backup_gate);
     changed_slice!(device_cleanup);
     changed_slice!(current_session_status);
@@ -176,6 +178,7 @@ pub fn build_state_delta(
 fn audit_app_state_delta_slices(state: &AppState) {
     let AppState {
         session: _,
+        session_lock_reason: _,
         secure_backup_gate: _,
         sliding_sync_account_epoch: _,
         sliding_sync_capability: _,
@@ -258,6 +261,23 @@ mod tests {
     #[test]
     fn state_delta_omits_unchanged_state() {
         assert!(build_state_delta(1, &AppState::default(), &AppState::default()).is_none());
+    }
+
+    #[test]
+    fn session_lock_reason_delta_preserves_nested_some_and_explicit_none() {
+        let mut locked = AppState::default();
+        locked.session_lock_reason =
+            Some(koushi_state::SessionLockReason::UnknownToken { soft_logout: true });
+        let delta = build_state_delta(2, &AppState::default(), &locked).expect("reason changed");
+        assert_eq!(
+            delta.changed.session_lock_reason,
+            Some(Some(koushi_state::SessionLockReason::UnknownToken {
+                soft_logout: true,
+            }))
+        );
+
+        let clear = build_state_delta(3, &locked, &AppState::default()).expect("reason cleared");
+        assert_eq!(clear.changed.session_lock_reason, Some(None));
     }
 
     #[test]

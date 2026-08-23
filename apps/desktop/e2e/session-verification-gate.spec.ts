@@ -392,6 +392,37 @@ test("Ready to Locked replaces the shell with the gate", async ({ page }) => {
   expect(await page.evaluate(() => window.__harness.invocationsOf("play_native_attention_sound").length)).toBe(attentionCount);
 });
 
+test("UnknownToken lock shows authentication-expired sign-out-only copy", async ({ page }) => {
+  await page.goto("/appHarness.html");
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          session: {
+            kind: "locked",
+            homeserver: "https://example.invalid",
+            user_id: "@gate:example.invalid",
+            device_id: "DEVICE"
+          },
+          session_lock_reason: { kind: "unknownToken", soft_logout: false }
+        }
+      }
+    });
+    window.__harness.pushStateChanged();
+  });
+
+  const gate = page.getByRole("main", { name: "Session expired" });
+  await expect(gate).toBeVisible();
+  await expect(gate.getByText("This session has expired or was revoked. Sign in again to continue.")).toBeVisible();
+  await expect(gate.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(gate.getByText("This session must be verified again.")).toHaveCount(0);
+  await expect(gate.getByRole("button")).toHaveCount(1);
+});
+
 test("SAS actions stay flow-correlated through mismatch and cancellation", async ({ page }) => {
   await page.goto("/appHarness.html");
   await page.evaluate(() => {

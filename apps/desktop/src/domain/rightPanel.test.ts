@@ -157,6 +157,7 @@ function snapshotForPanelMode(
     state: {
       schema_version: 4,
       domain: {
+        session_lock_reason: null,
         session:
           sessionKind === "ready"
             ? {

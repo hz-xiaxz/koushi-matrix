@@ -424,7 +424,9 @@ pub(super) fn composer_draft_transition_policy(
     action: &AppAction,
 ) -> ComposerDraftTransitionPolicy {
     match action {
-        AppAction::SessionLocked | AppAction::SwitchAccountRequested { .. } => {
+        AppAction::SessionLocked
+        | AppAction::SessionAuthenticationInvalidated { .. }
+        | AppAction::SwitchAccountRequested { .. } => {
             ComposerDraftTransitionPolicy::PreservePrevious
         }
         AppAction::LogoutRequested
@@ -493,6 +495,13 @@ mod tests {
 
         assert_eq!(
             composer_draft_transition_policy(&AppAction::SessionLocked),
+            ComposerDraftTransitionPolicy::PreservePrevious
+        );
+
+        assert_eq!(
+            composer_draft_transition_policy(&AppAction::SessionAuthenticationInvalidated {
+                soft_logout: true,
+            }),
             ComposerDraftTransitionPolicy::PreservePrevious
         );
 

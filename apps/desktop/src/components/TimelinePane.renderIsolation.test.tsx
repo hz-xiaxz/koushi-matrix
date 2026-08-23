@@ -264,6 +264,7 @@ function makeSnapshot(): DesktopSnapshot {
     state: {
       schema_version: 4,
       domain: {
+        session_lock_reason: null,
         session: {
           kind: "ready",
           homeserver: "https://example.invalid",

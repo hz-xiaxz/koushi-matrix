@@ -918,6 +918,7 @@ class BrowserFakeApi implements DesktopApi {
       homeserver: normalizeHomeserver(homeserver),
       attempt_id: { connection_id: 1, sequence: attempt_id }
     };
+    this.snapshot.state.domain.session_lock_reason = null;
     this.snapshot.state.ui.errors = this.snapshot.state.ui.errors.filter(
       (error) => error.code !== "login_failed"
     );
@@ -990,12 +991,14 @@ class BrowserFakeApi implements DesktopApi {
 
   async changeHomeserver(): Promise<DesktopSnapshot> {
     this.snapshot.state.domain.session = { kind: "signedOut" };
+    this.snapshot.state.domain.session_lock_reason = null;
     this.clearSessionViews();
     return this.getSnapshot();
   }
 
   async logout(): Promise<DesktopSnapshot> {
     this.snapshot.state.domain.session = { kind: "signedOut" };
+    this.snapshot.state.domain.session_lock_reason = null;
     this.clearSessionViews();
     return this.getSnapshot();
   }
@@ -1487,6 +1490,7 @@ class BrowserFakeApi implements DesktopApi {
       return this.getSnapshot();
     }
     this.snapshot.state.domain.session = { kind: "signedOut" };
+    this.snapshot.state.domain.session_lock_reason = null;
     this.snapshot.state.domain.sync = "stopped";
     this.snapshot.state.domain.local_encryption = { kind: "unknown" };
     this.clearSessionViews();
@@ -5199,6 +5203,7 @@ function createReadySnapshot(
           ...session,
           kind: "ready"
         },
+        session_lock_reason: null,
         secure_backup_gate: secureBackupGate,
         current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },
@@ -5323,6 +5328,7 @@ function createLockedSnapshot(
     ...savedSessions[0],
     kind: "locked"
   };
+  snapshot.state.domain.session_lock_reason = { kind: "deviceTrust" };
   return snapshot;
 }
 
@@ -5334,6 +5340,7 @@ function createSignedOutSnapshot(
       schema_version: 4,
       domain: {
         session: { kind: "signedOut" },
+        session_lock_reason: null,
         secure_backup_gate: secureBackupGate ?? { kind: "inactive" },
         current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },

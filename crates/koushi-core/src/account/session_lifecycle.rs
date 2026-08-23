@@ -114,6 +114,11 @@ pub(super) struct SessionChangeObservation {
     task: crate::executor::JoinHandle<()>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SessionInvalidationReason {
+    UnknownToken { soft_logout: bool },
+}
+
 pub(super) struct PendingSessionTeardown {
     generation: u64,
     attempt: u32,
@@ -197,6 +202,16 @@ async fn run_session_change_observation(
             change = changes.recv() => {
                 match change {
                     Ok(matrix_sdk::SessionChange::UnknownToken(data)) => {
+                        record(
+                            DiagnosticEvent::new(
+                                DiagnosticLevel::Info,
+                                "core.account",
+                                "session_change_received",
+                            )
+                            .field(DiagnosticField::token("source", "matrix_sdk"))
+                            .field(DiagnosticField::token("reason", "unknown_token"))
+                            .field(DiagnosticField::boolean("soft_logout", data.soft_logout)),
+                        );
                         #[cfg(test)]
                         if let Some(barrier) = delivery_barrier.as_ref() {
                             barrier.wait().await;
@@ -204,7 +219,9 @@ async fn run_session_change_observation(
                         if !send_observer_output_until_stopped(
                             &tx,
                             AccountMessage::SessionInvalidated {
-                                soft_logout: data.soft_logout,
+                                reason: SessionInvalidationReason::UnknownToken {
+                                    soft_logout: data.soft_logout,
+                                },
                             },
                             &mut stop_rx,
                         )
@@ -339,21 +356,28 @@ impl AccountActor {
         }
     }
 
-    pub(super) async fn handle_session_invalidated(&mut self, soft_logout: bool) {
+    pub(super) async fn handle_session_invalidated(&mut self, reason: SessionInvalidationReason) {
+        let SessionInvalidationReason::UnknownToken { soft_logout } = reason;
+        if self.session.is_none() || !self.session_promoted {
+            return;
+        }
         trace_restore!(
             "session_invalidated",
             [
+                DiagnosticField::token("reason", "unknown_token"),
                 DiagnosticField::boolean("soft_logout", soft_logout),
                 DiagnosticField::token("action", "lock"),
             ],
-            "soft_logout={} action=lock",
+            "reason=unknown_token soft_logout={} action=lock",
             bool_trace_label(soft_logout)
         );
-        if self.session.is_none() {
-            return;
-        }
 
-        self.send_actions(vec![AppAction::SessionLocked]).await;
+        self.send_actions(vec![AppAction::SessionAuthenticationInvalidated {
+            soft_logout,
+        }])
+        .await;
+        self.session_promoted = false;
+        self.stop_provisional_runtime().await;
         self.invalidate_account_hydration();
         self.stop_sync_actor().await;
     }
@@ -1729,13 +1753,13 @@ mod tests {
     use tokio::sync::{broadcast, mpsc, oneshot};
 
     use super::{
-        SESSION_NOT_FOUND_FAILURE, ServerLogoutOutcome, run_session_change_observation,
-        wait_for_server_logout_best_effort,
+        SESSION_NOT_FOUND_FAILURE, ServerLogoutOutcome, SessionInvalidationReason,
+        run_session_change_observation, wait_for_server_logout_best_effort,
     };
     use crate::account::actor::{AccountActor, AccountActorHandle, AccountMessage};
     use crate::account::test_support::{
         acknowledge_next_verified_projection, assert_no_logout_finished, configure_verified_trust,
-        inspect_session_runtime, inspect_sync_owners,
+        consume_initial_unknown_trust_projection, inspect_session_runtime, inspect_sync_owners,
         recv_account_action_with_sliding_sync_effects, recv_probe_with_sliding_sync_effects,
         shutdown_and_ack, spawn_actor_with_dirs, spawn_named_quarantine_password_server,
         spawn_named_quarantine_password_server_with_controls, spawn_quarantine_password_server,
@@ -3585,13 +3609,265 @@ mod tests {
             "only the private-data-free soft_logout bool may cross into AccountActor"
         );
         assert!(
-            handler_body.contains("AppAction::SessionLocked"),
-            "auth invalidation must lock the active session so the GUI can offer reauth"
+            handler_body.contains("AppAction::SessionAuthenticationInvalidated"),
+            "auth invalidation must preserve its distinct reason when locking the active session"
         );
         assert!(
             handler_body.contains("self.stop_sync_actor().await"),
             "auth invalidation must stop the old sync loop instead of leaving it reconnecting forever"
         );
+    }
+
+    #[tokio::test]
+    async fn session_change_observer_records_exact_unknown_token_diagnostics_for_both_soft_logout_values()
+     {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+
+        for soft_logout in [true, false] {
+            let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+                .records
+                .len();
+            let (tx, mut receiver) = mpsc::channel(1);
+            let (change_tx, change_rx) = broadcast::channel(1);
+            let (_stop_tx, stop_rx) = oneshot::channel();
+            let task =
+                executor::spawn(run_session_change_observation(change_rx, tx, stop_rx, None));
+            let mut unknown_token = matrix_sdk::ruma::api::error::UnknownTokenErrorData::new();
+            unknown_token.soft_logout = soft_logout;
+            change_tx
+                .send(matrix_sdk::SessionChange::UnknownToken(unknown_token))
+                .expect("publish synthetic session invalidation");
+
+            match receiver.recv().await.expect("observer message") {
+                AccountMessage::SessionInvalidated {
+                    reason:
+                        SessionInvalidationReason::UnknownToken {
+                            soft_logout: observed,
+                        },
+                } => assert_eq!(observed, soft_logout),
+                _ => panic!("expected UnknownToken invalidation"),
+            }
+            task.await.expect("session-change observer task");
+
+            let expected = format!(
+                "stage=session_change_received source=matrix_sdk reason=unknown_token soft_logout={soft_logout}"
+            );
+            assert!(
+                koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+                    .iter()
+                    .any(|record| koushi_diagnostics::format_event(&record.event) == expected),
+                "missing exact observer diagnostic: {expected}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn admitted_unknown_token_records_exact_lock_diagnostics_for_both_soft_logout_values() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+
+        for soft_logout in [true, false] {
+            let (handle, mut action_rx) = crate::account::test_support::login_gated_actor().await;
+            consume_initial_unknown_trust_projection(&mut action_rx).await;
+            handle
+                .send(AccountMessage::CurrentDeviceTrustChanged {
+                    generation: 2,
+                    trust: koushi_state::CurrentDeviceTrustState::Verified,
+                })
+                .await;
+            acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+            let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+                .records
+                .len();
+
+            assert!(
+                handle
+                    .send(AccountMessage::SessionInvalidated {
+                        reason: SessionInvalidationReason::UnknownToken { soft_logout },
+                    })
+                    .await
+            );
+            loop {
+                let actions = action_rx.recv().await.expect("account action");
+                if let [
+                    AppAction::SessionAuthenticationInvalidated {
+                        soft_logout: observed,
+                    },
+                ] = actions.as_slice()
+                {
+                    assert_eq!(*observed, soft_logout);
+                    break;
+                }
+            }
+
+            let expected = format!(
+                "stage=session_invalidated reason=unknown_token soft_logout={soft_logout} action=lock"
+            );
+            assert!(
+                koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+                    .iter()
+                    .any(|record| koushi_diagnostics::format_event(&record.event) == expected),
+                "missing exact admission diagnostic: {expected}"
+            );
+            shutdown_and_ack(&handle).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_token_before_session_promotion_is_inert_and_not_diagnosed() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let (handle, mut action_rx) = crate::account::test_support::login_gated_actor().await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+
+        let before = inspect_session_runtime(&handle).await;
+        assert!(before.0, "the provisional actor must still own a session");
+        assert!(!before.1, "the session must not be promoted yet");
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
+
+        assert!(
+            handle
+                .send(AccountMessage::SessionInvalidated {
+                    reason: SessionInvalidationReason::UnknownToken { soft_logout: true },
+                })
+                .await
+        );
+        let after = inspect_session_runtime(&handle).await;
+        assert!(
+            after.0,
+            "an unpromoted UnknownToken must retain the session"
+        );
+        assert!(
+            !after.1,
+            "an unpromoted UnknownToken must remain unpromoted"
+        );
+        while let Ok(actions) = action_rx.try_recv() {
+            assert!(
+                !matches!(
+                    actions.as_slice(),
+                    [AppAction::SessionAuthenticationInvalidated { .. }]
+                ),
+                "an unpromoted UnknownToken must not dispatch an authentication lock"
+            );
+        }
+        assert!(
+            !koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+                .iter()
+                .any(|record| {
+                    record.event.source == "core.account"
+                        && record.event.stage == "session_invalidated"
+                }),
+            "an unpromoted UnknownToken must not emit an admitted lock diagnostic"
+        );
+        shutdown_and_ack(&handle).await;
+    }
+
+    #[tokio::test]
+    async fn unknown_token_fences_an_in_flight_verified_trust_completion() {
+        let (handle, mut action_rx) = crate::account::test_support::login_gated_actor().await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await;
+        acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+
+        assert!(
+            handle
+                .send(AccountMessage::SessionInvalidated {
+                    reason: SessionInvalidationReason::UnknownToken { soft_logout: false },
+                })
+                .await
+        );
+        while !matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::SessionAuthenticationInvalidated { .. }])
+        ) {}
+        handle
+            .send(AccountMessage::CurrentDeviceTrustRecheckFinished {
+                generation: 2,
+                result: Ok(koushi_state::CurrentDeviceTrustState::Verified),
+            })
+            .await;
+        let _ = inspect_session_runtime(&handle).await;
+        while let Ok(actions) = action_rx.try_recv() {
+            assert!(
+                !matches!(
+                    actions.as_slice(),
+                    [AppAction::AuthoritativeDeviceTrustChanged {
+                        trust: koushi_state::CurrentDeviceTrustState::Verified,
+                        ..
+                    }]
+                ),
+                "stale trust completion must not unlock an invalid authentication session"
+            );
+        }
+        shutdown_and_ack(&handle).await;
+    }
+
+    #[tokio::test]
+    async fn post_teardown_unknown_token_message_is_inert_and_not_diagnosed() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let (handle, mut action_rx) = crate::account::test_support::login_gated_actor().await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await;
+        acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+
+        assert!(
+            handle
+                .send(AccountMessage::Command(AccountCommand::Logout {
+                    request_id: RequestId {
+                        connection_id: RuntimeConnectionId(1),
+                        sequence: 2,
+                    },
+                }))
+                .await
+        );
+        while !matches!(
+            action_rx.recv().await.as_deref(),
+            Some([AppAction::LogoutFinished])
+        ) {}
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
+
+        assert!(
+            handle
+                .send(AccountMessage::SessionInvalidated {
+                    reason: SessionInvalidationReason::UnknownToken { soft_logout: true },
+                })
+                .await
+        );
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (false, false, false, false)
+        );
+        while let Ok(actions) = action_rx.try_recv() {
+            assert!(
+                !matches!(
+                    actions.as_slice(),
+                    [AppAction::SessionAuthenticationInvalidated { .. }]
+                ),
+                "post-teardown invalidation must not dispatch a state action"
+            );
+        }
+        assert!(
+            !koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+                .iter()
+                .any(|record| {
+                    record.event.source == "core.account"
+                        && record.event.stage == "session_invalidated"
+                }),
+            "post-teardown invalidation must not emit an admission diagnostic"
+        );
+        shutdown_and_ack(&handle).await;
     }
 
     #[tokio::test]
@@ -3686,12 +3962,14 @@ mod tests {
 
         assert!(
             handle
-                .send(AccountMessage::SessionInvalidated { soft_logout: true })
+                .send(AccountMessage::SessionInvalidated {
+                    reason: SessionInvalidationReason::UnknownToken { soft_logout: true },
+                })
                 .await
         );
         while !matches!(
             action_rx.recv().await.as_deref(),
-            Some([AppAction::SessionLocked])
+            Some([AppAction::SessionAuthenticationInvalidated { soft_logout: true }])
         ) {}
 
         let request_id = RequestId {

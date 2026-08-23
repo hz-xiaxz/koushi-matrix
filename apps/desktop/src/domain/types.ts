@@ -54,6 +54,7 @@ export interface AppState {
 
 export interface AppDomainState {
   session: SessionState;
+  session_lock_reason: SessionLockReason | null;
   secure_backup_gate: SecureBackupGateState;
   current_session_status: CurrentSessionStatusState;
   device_cleanup: DeviceCleanupState;
@@ -560,6 +561,10 @@ type SessionAccountState<K extends string> = ExactSessionState<
   K,
   "homeserver" | "user_id" | "device_id"
 >;
+
+export type SessionLockReason =
+  | { kind: "deviceTrust" }
+  | { kind: "unknownToken"; soft_logout: boolean };
 
 export type SessionState =
   | ExactSessionState<"signedOut">

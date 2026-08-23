@@ -601,6 +601,9 @@ pub enum AppAction {
         message: String,
     },
     SessionLocked,
+    SessionAuthenticationInvalidated {
+        soft_logout: bool,
+    },
     LogoutRequested,
     LogoutFinished,
     SyncStarted,

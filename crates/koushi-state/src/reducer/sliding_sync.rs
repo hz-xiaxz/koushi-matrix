@@ -172,6 +172,7 @@ pub(crate) fn handle_completed(
             info: info.clone(),
             failure,
         };
+        state.session_lock_reason = None;
     }
     state.sliding_sync_capability = SlidingSyncCapabilityState::Blocked {
         account_epoch,
@@ -211,6 +212,7 @@ pub(crate) fn handle_retry(
     let positive_evidence = positive_evidence.clone();
     if matches!(admission, SlidingSyncAdmission::StoredSessionRestore { .. }) {
         state.session = SessionState::Restoring;
+        state.session_lock_reason = None;
     }
     state.sliding_sync_capability = SlidingSyncCapabilityState::Checking {
         account_epoch,
@@ -318,6 +320,7 @@ pub(crate) fn handle_revalidation_completed(
                 info: info.clone(),
                 failure: SlidingSyncCapabilityFailureKind::Unsupported,
             };
+            state.session_lock_reason = None;
             state.sync = SyncState::Stopped;
             state.sliding_sync_capability = SlidingSyncCapabilityState::Blocked {
                 account_epoch,
