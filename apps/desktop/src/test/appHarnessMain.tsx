@@ -3247,7 +3247,9 @@ const harnessControl: AppHarnessControl = {
 // ---------------------------------------------------------------------------
 
 async function boot() {
-  const { App } = await import("../App");
+  try {
+    document.body.style.visibility = "hidden";
+    const { App } = await import("../App");
 
   const root = document.getElementById("root");
   if (!root) {
@@ -3327,10 +3329,12 @@ async function boot() {
     ) {
       break;
     }
+    }
+  } finally {
+    mock.clearInvocations();
+    resolveBootSettlement();
+    document.body.style.removeProperty("visibility");
   }
 }
 
-void boot().finally(() => {
-  mock.clearInvocations();
-  resolveBootSettlement();
-});
+void boot();

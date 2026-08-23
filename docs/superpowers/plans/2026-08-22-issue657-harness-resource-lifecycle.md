@@ -67,13 +67,27 @@ spec-owned external event. The row can become visible during the loop's existing
 Playwright action.
 
 Create one page-local boot-settlement Promise before `harnessControl` is exposed.
-`harnessControl.invoke` awaits it before calling the recording mock. At the end
-of `boot()`, clear startup invocation history and then resolve settlement in the
-same JavaScript task. Thus an external command issued as soon as the seed row is
-visible waits, is recorded only after the clear, and cannot be erased. App-owned
-startup IPC continues through the `mockIPC` callback directly and is not gated,
-so startup cannot deadlock. Do not gate internal IPC, `setSnapshot`, or event
-push helpers.
+`harnessControl.invoke` awaits it before calling the recording mock. Before
+importing/rendering App, set `document.body.style.visibility = "hidden"`;
+unlike `display: none`, this preserves layout/effect execution. Body visibility
+covers both the React root and `FloatingLayer` portals rendered directly under
+`document.body`, preventing Playwright or a user action from observing any
+interactive shell surface before settlement.
+
+Wrap boot in an internal `try/finally`. The final task clears startup invocation
+history, resolves settlement, then removes the temporary body visibility style.
+Thus direct harness invokes wait, and UI/state actions cannot begin until after
+the clear. App-owned startup IPC continues through the `mockIPC` callback
+without waiting, so startup cannot deadlock. Its seed-row read-receipt and
+fully-read commands are startup history and are intentionally cleared. Tests
+that own read-signal evidence must clear after Ready settlement, inject a fresh
+readable timeline event through the public CoreEvent surface, and assert commands
+caused by that event instead of borrowing the boot seed's erased records.
+
+Import, root lookup, or render failure still reaches `finally`, restores
+visibility, and exposes the existing page error/fallback. Do not gate internal
+IPC, `setSnapshot`, or event push helpers individually; body visibility supplies
+the UI-side ordering boundary.
 
 Do **not** clear history in `setCurrentSnapshot` or
 `window.__harness.setSnapshot`: existing specs legitimately replace snapshots
@@ -115,11 +129,21 @@ private Matrix data, or direct module internals.
    once successfully and a second release fails, preserving the existing
    contract.
 7. **Invocation boot boundary**: navigate to the harness and wait for the seeded
-   reply row. Without first polling empty history or yielding, immediately invoke
-   `get_snapshot`; require it to be the sole invocation at index 0. Then perform
-   mid-test `setSnapshot`, invoke `get_snapshot` again, and require cumulative
-   indices `[0, 1]`. This proves startup cleanup, the immediate post-ready command
-   fence, and preservation across intentional snapshot replacement.
+   reply row. Without polling whole-history emptiness or yielding, require the
+   mount-time `get_snapshot` count to be 0, immediately invoke `get_snapshot`, and
+   require its command-scoped count to be 1. Then perform mid-test `setSnapshot`,
+   invoke `get_snapshot` again, require count 2, and require the two global indices
+   to be strictly increasing. Do not require global index 0: legitimate App
+   commands such as post-unhide `close_search` occur after the clear and must be
+   retained. In a separate public UI assertion, click the first visible Reply
+   action immediately after the Ready shell appears and require its typed command
+   to remain recorded. This proves startup cleanup, direct and UI-side post-ready
+   fences, and preservation across intentional snapshot replacement.
+8. **Read-signal ownership**: update the existing live-signals Playwright case to
+   clear history after Ready settlement, inject a new synthetic readable event
+   via the public timeline CoreEvent helper, project receipts and fully-read state
+   for that event, and require `send_read_receipt` plus `set_fully_read`. The test
+   must not rely on boot-seed commands that the new boundary intentionally erases.
 
 Drive all transitions through the public `AppHarnessControl`; tests must not
 export maps, counts, or cleanup helpers merely to inspect internals.
@@ -143,6 +167,8 @@ Change only:
   in the same task;
 - `apps/desktop/e2e/app-harness-resource-lifecycle.spec.ts` — behavioral RED/GREEN
   coverage;
+- `apps/desktop/e2e/message-actions-media-live-signals.spec.ts` — re-drive fresh
+  post-settlement read-signal evidence instead of borrowing boot history;
 - this plan and `docs/agents/plans.md` — review/worklog indexing.
 
 Prefer one pass over each existing `Map`; no new class, module, registry, timer,
@@ -165,12 +191,13 @@ limit, command, DTO, or product-state field.
 - Lease-rejection scenarios terminate after proving stale `release`/`acquire`;
   the complete Playwright gate must additionally prove no later App navigation
   attempts to drain a lease already retired by direct fixture replacement.
-- The post-seed clear is one fixed boot boundary. A page-local Promise gates only
-  public harness invokes until `clearInvocations` then settlement resolution in
-  one task. Resolve in `finally` as well so an exceptional boot fails visibly
-  instead of leaving external commands hung. The focused assertion deliberately issues the first command
-  immediately after the seed row, without an empty-history poll; the full
-  Playwright suite remains the regression gate for early setup flows.
+- The post-seed clear is one fixed boot boundary. A page-local Promise gates
+  public harness invokes, while temporary body `visibility: hidden` covers both
+  the root and portals without changing layout. Internal `finally` performs
+  clear, resolve, then visibility release; exceptional boot therefore
+  fails visibly instead of leaving external commands hung. Focused direct and UI
+  assertions deliberately act immediately after the seed row without an
+  empty-history poll; the full Playwright suite remains the regression gate.
 - The existing `query_mention_candidates` fixture assigns `currentSnapshot`
   directly but changes neither session nor composer target; it remains outside
   the reconciliation choke point in this change.
@@ -215,9 +242,14 @@ RED/GREEN evidence before opening the PR.
   The seed row can become visible during the retry loop's 25 ms yield, allowing a
   first external command to be recorded before the final clear.
 - Pre-rework design review, `reviewer-flash-opencode-go`: `Correct-to-merge`.
-  Gating only public harness invokes on clear-then-resolve settlement is
-  deadlock-free; internal startup IPC remains direct and exceptional boot resolves
-  through `finally`.
+  Gating public harness invokes on clear-then-resolve settlement is deadlock-free.
+- Post-rework full-suite evidence: `Not correct-to-merge`. The live-signals case
+  expected boot-seed read commands that the startup clear intentionally erased,
+  exposing an ownership conflict.
+- Final correction design review, `reviewer-flash-opencode-go`:
+  `Correct-to-merge`. Fresh post-settlement read-signal ownership, body visibility,
+  direct-invoke settlement, and command-scoped history assertions resolve the
+  conflicting contracts without weakening command evidence.
 
 ## Implementation evidence
 
@@ -226,6 +258,10 @@ RED/GREEN evidence before opening the PR.
   cases failed and the explicit-release preservation case passed.
 - GREEN: after restoring the same production patch, the unchanged focused spec
   passed 9/9. The focused lifecycle/regression set passed 40 tests.
-- Boot-race rework: the immediate first-command test and all lifecycle cases
-  passed 9/9, then 90/90 with `--repeat-each=10`; TypeScript typecheck and `git
-  diff --check` passed.
+- Boot-race rework: the Promise-only immediate command test passed 9/9 and 90/90
+  with `--repeat-each=10`. Full-suite evidence then exposed erased boot-seed read
+  signals; after adding the body/UI fence, legitimate post-clear `close_search`
+  proved global-index-0 was over-constrained.
+- Final correction GREEN: resource lifecycle passed 10/10; the exact fresh-event
+  live-signals case passed 1/1; both affected files passed 32/32; typecheck, lint,
+  and `git diff --check` passed.

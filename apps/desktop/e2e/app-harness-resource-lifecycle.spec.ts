@@ -15,6 +15,7 @@ const ACCOUNT = {
   accountUserId: "@harness-user:example.invalid",
   accountDeviceId: "HARNESSDEVICE"
 };
+const SEED_EVENT_ID = "$seed-event:example.invalid";
 
 async function gotoReadyShell(page: Page): Promise<void> {
   await page.goto("/appHarness.html");
@@ -247,15 +248,15 @@ test("an unchanged lease releases once and rejects a second release", async ({ p
 test("boot clears startup history but preserves command history across snapshots", async ({ page }) => {
   await gotoReadyShell(page);
 
+  expect(await page.evaluate(() => window.__harness.invocationsOf("get_snapshot"))).toEqual([]);
   await invoke(page, "get_snapshot");
-  expect(await page.evaluate(() => window.__harness.invocations())).toEqual([
-    { command: "get_snapshot", args: {} }
-  ]);
+  expect(await page.evaluate(() => window.__harness.invocationsOf("get_snapshot").length)).toBe(1);
 
   await page.evaluate(() => {
     window.__harness.setSnapshot(window.__harness.currentSnapshot());
   });
   await invoke(page, "get_snapshot");
+  expect(await page.evaluate(() => window.__harness.invocationsOf("get_snapshot").length)).toBe(2);
 
   const snapshotInvocationIndices = await page.evaluate(() =>
     window.__harness
@@ -263,5 +264,26 @@ test("boot clears startup history but preserves command history across snapshots
       .map((item, index) => (item.command === "get_snapshot" ? index : -1))
       .filter((index) => index >= 0)
   );
-  expect(snapshotInvocationIndices).toEqual([0, 1]);
+  expect(snapshotInvocationIndices).toHaveLength(2);
+  expect(snapshotInvocationIndices[0]).toBeLessThan(snapshotInvocationIndices[1]!);
+});
+
+test("immediate Reply action records its typed target after boot settlement", async ({ page }) => {
+  await gotoReadyShell(page);
+
+  await page.getByRole("button", { name: "Reply to message" }).first().click();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__harness.invocationsOf("set_composer_reply_target").length)
+    )
+    .toBe(1);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("set_composer_reply_target")[0]?.args)
+    )
+    .toEqual({
+      roomId: "!harness-room:example.invalid",
+      eventId: SEED_EVENT_ID
+    });
 });
