@@ -5,7 +5,12 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-08-21.
+Last amended: 2026-08-23.
+
+The evidence-based classification of remaining frontend-owned resources and
+semantic migration candidates is maintained in
+[frontend-ownership-inventory.md](frontend-ownership-inventory.md). It is an
+inventory, not authority over the normative layer rules in this document.
 
 ## Product Scope
 
