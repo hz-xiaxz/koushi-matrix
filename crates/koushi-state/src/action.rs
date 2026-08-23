@@ -23,12 +23,12 @@ use crate::state::{
     RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTagInfo,
     RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability, ScheduledSendHandle,
     ScheduledSendItem, SearchResult, SearchScope, SessionInfo, SessionStatusRefreshTrigger,
-    SettingsPatch, SettingsValues, SpaceMemberInviteOutcome, SpaceMembersProjection, SpaceSummary,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
-    SyncLifecycleStatus, TimelineContinuityInspection, TimelineGapRepairFailureKind,
-    TimelineMediaDownloadState, TimelineMediaGalleryItem, TimelineScrollAnchor,
-    TrustOperationFailureKind, UserProfile, VerificationCancelReason, VerificationGateFailureKind,
-    VerificationGateState, VerificationMethod, VerificationTarget,
+    SettingsPatch, SettingsValues, SpaceMemberInviteOutcome, SpaceMemberRoleUpdateOutcome,
+    SpaceMembersProjection, SpaceSummary, StagedUploadCompressionChoice, StagedUploadItem,
+    StagedUploadOutputSelection, SyncLifecycleStatus, TimelineContinuityInspection,
+    TimelineGapRepairFailureKind, TimelineMediaDownloadState, TimelineMediaGalleryItem,
+    TimelineScrollAnchor, TrustOperationFailureKind, UserProfile, VerificationCancelReason,
+    VerificationGateFailureKind, VerificationGateState, VerificationMethod, VerificationTarget,
 };
 use crate::state::{SlidingSyncAdmission, SlidingSyncCapabilityResult};
 
@@ -206,6 +206,27 @@ pub enum AppAction {
         generation: u64,
         projection: SpaceMembersProjection,
         profiles: Vec<UserProfile>,
+    },
+    SpaceMemberRoleUpdateRequested {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        #[allow(dead_code)]
+        expected_power_levels_revision: Option<String>,
+        expected_power_level: i64,
+        power_level: i64,
+        confirmed: bool,
+    },
+    SpaceMemberRoleUpdateSettled {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        outcome: SpaceMemberRoleUpdateOutcome,
+        #[allow(dead_code)]
+        sent_revision: Option<String>,
+        projection: Option<SpaceMembersProjection>,
     },
     SpaceMemberInviteRequested {
         request_id: u64,

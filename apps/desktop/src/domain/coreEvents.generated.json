@@ -513,6 +513,19 @@
     },
     "kind": "Room"
   },
+  "spaceMemberRoleUpdateSettled": {
+    "event": {
+      "SpaceMemberRoleUpdateSettled": {
+        "generation": 4,
+        "outcome": "succeeded",
+        "request_id": {
+          "connection_id": 3,
+          "sequence": 7
+        }
+      }
+    },
+    "kind": "Room"
+  },
   "roomReportCompleted": {
     "event": {
       "ReportCompleted": {

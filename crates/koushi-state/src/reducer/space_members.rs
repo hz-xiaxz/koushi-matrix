@@ -2,8 +2,9 @@ use crate::{
     effect::{AppEffect, UiEvent},
     state::{
         AppState, SpaceMemberEntry, SpaceMemberInviteOutcome, SpaceMemberMembership,
-        SpaceMembersOperationState, SpaceMembersProjection, SpaceMembersState,
-        refresh_space_member_display_projection, resolve_space_members_projection, sort_entries,
+        SpaceMemberRoleUpdateOutcome, SpaceMembersOperationState, SpaceMembersProjection,
+        SpaceMembersState, admit_space_member_role, refresh_space_member_display_projection,
+        resolve_space_members_projection, sort_entries,
     },
 };
 
@@ -28,6 +29,10 @@ pub(crate) fn handle_load_requested(
     generation: u64,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state)
+        || matches!(
+            state.space_members.operation,
+            SpaceMembersOperationState::UpdatingRole { .. }
+        )
         || generation < state.space_members.generation
         || state
             .space_members
@@ -239,6 +244,28 @@ pub(crate) fn handle_background_projection_reconciled(
                 state.space_members.operation = SpaceMembersOperationState::Idle;
             }
         }
+        SpaceMembersOperationState::UpdatingRole { .. } => {
+            apply_projection_during_role_update(state, projection);
+        }
+        SpaceMembersOperationState::RoleUpdateFailed {
+            user_id,
+            power_level: requested_power_level,
+            expected_power_levels_revision,
+            ..
+        } => {
+            let projection_revision = projection.power_levels_revision.clone();
+            apply_projection_during_role_update(state, projection);
+            let target_matches = state.space_members.space_joined.iter().any(|entry| {
+                entry.user_id == user_id && entry.power_level == Some(requested_power_level)
+            });
+            let revision_is_authoritative =
+                projection_revision.as_deref().is_some_and(|revision| {
+                    Some(revision) != expected_power_levels_revision.as_deref()
+                });
+            if target_matches && revision_is_authoritative {
+                state.space_members.operation = SpaceMembersOperationState::Idle;
+            }
+        }
         SpaceMembersOperationState::Loading { .. } => unreachable!(
             "background Space member projections are fenced while an explicit load is active"
         ),
@@ -348,6 +375,15 @@ fn apply_reconciled_projection_during_cancellation(
     apply_projection(&mut state.space_members, resolved);
 }
 
+fn apply_projection_during_role_update(state: &mut AppState, projection: SpaceMembersProjection) {
+    let mut resolved = resolve_space_members_projection(projection, &state.profile);
+    if resolved.incomplete_child_room_count > 0 {
+        merge_incomplete_projection(&state.space_members, &mut resolved);
+    }
+    sort_projection(&mut resolved);
+    apply_projection(&mut state.space_members, resolved);
+}
+
 pub(crate) fn handle_load_failed(
     state: &mut AppState,
     request_id: u64,
@@ -379,6 +415,108 @@ pub(crate) fn handle_load_failed(
     vec![AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged)]
 }
 
+pub(crate) fn handle_role_update_requested(
+    state: &mut AppState,
+    request_id: u64,
+    space_id: String,
+    user_id: String,
+    generation: u64,
+    expected_power_levels_revision: Option<String>,
+    expected_power_level: i64,
+    power_level: i64,
+    confirmed: bool,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state)
+        || admit_space_member_role(
+            state,
+            &space_id,
+            &user_id,
+            generation,
+            expected_power_levels_revision.as_deref(),
+            expected_power_level,
+            power_level,
+            confirmed,
+        )
+        .is_err()
+    {
+        return Vec::new();
+    }
+
+    state.space_members.operation = SpaceMembersOperationState::UpdatingRole {
+        request_id,
+        space_id,
+        user_id,
+        generation,
+        expected_power_levels_revision,
+        expected_power_level,
+        power_level,
+        confirmed,
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged)]
+}
+
+pub(crate) fn handle_role_update_settled(
+    state: &mut AppState,
+    request_id: u64,
+    space_id: String,
+    user_id: String,
+    generation: u64,
+    outcome: SpaceMemberRoleUpdateOutcome,
+    sent_revision: Option<String>,
+    projection: Option<SpaceMembersProjection>,
+) -> Vec<AppEffect> {
+    let SpaceMembersOperationState::UpdatingRole {
+        request_id: active_request_id,
+        space_id: active_space_id,
+        user_id: active_user_id,
+        generation: active_generation,
+        expected_power_levels_revision,
+        expected_power_level,
+        power_level,
+        confirmed: _,
+    } = state.space_members.operation.clone()
+    else {
+        return Vec::new();
+    };
+    if !is_session_ready(state)
+        || active_request_id != request_id
+        || active_space_id != space_id
+        || active_user_id != user_id
+        || active_generation != generation
+        || state.space_members.selected_space_id.as_deref() != Some(space_id.as_str())
+        || state.space_members.generation != generation
+    {
+        return Vec::new();
+    }
+
+    if let Some(projection) = projection {
+        let mut resolved = resolve_space_members_projection(projection, &state.profile);
+        if resolved.incomplete_child_room_count > 0 {
+            merge_incomplete_projection(&state.space_members, &mut resolved);
+        }
+        sort_projection(&mut resolved);
+        apply_projection(&mut state.space_members, resolved);
+    }
+
+    state.space_members.operation = match outcome {
+        SpaceMemberRoleUpdateOutcome::Succeeded => SpaceMembersOperationState::Idle,
+        SpaceMemberRoleUpdateOutcome::Failed(kind) => {
+            SpaceMembersOperationState::RoleUpdateFailed {
+                request_id,
+                space_id,
+                user_id,
+                generation,
+                expected_power_levels_revision,
+                expected_power_level,
+                power_level,
+                sent_revision,
+                kind,
+            }
+        }
+    };
+    vec![AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged)]
+}
+
 pub(crate) fn handle_invite_requested(
     state: &mut AppState,
     request_id: u64,
@@ -392,6 +530,9 @@ pub(crate) fn handle_invite_requested(
         || matches!(
             state.space_members.operation,
             SpaceMembersOperationState::Inviting { .. }
+                | SpaceMembersOperationState::CancellingInvite { .. }
+                | SpaceMembersOperationState::UpdatingRole { .. }
+                | SpaceMembersOperationState::RoleUpdateFailed { .. }
         )
     {
         return Vec::new();
@@ -675,6 +816,14 @@ fn operation_matches_request(state: &AppState, request_id: u64) -> bool {
             | SpaceMembersOperationState::CancellingInvite {
                 request_id: active_request_id,
                 ..
+            }
+            | SpaceMembersOperationState::UpdatingRole {
+                request_id: active_request_id,
+                ..
+            }
+            | SpaceMembersOperationState::RoleUpdateFailed {
+                request_id: active_request_id,
+                ..
             } if active_request_id == request_id
     )
 }
@@ -697,6 +846,16 @@ fn background_reconciliation_operation_matches(
             ..
         }
         | SpaceMembersOperationState::Failed {
+            space_id: operation_space_id,
+            generation: operation_generation,
+            ..
+        }
+        | SpaceMembersOperationState::UpdatingRole {
+            space_id: operation_space_id,
+            generation: operation_generation,
+            ..
+        }
+        | SpaceMembersOperationState::RoleUpdateFailed {
             space_id: operation_space_id,
             generation: operation_generation,
             ..
@@ -724,6 +883,8 @@ fn apply_projection(state: &mut SpaceMembersState, projection: SpaceMembersProje
     state.child_room_count = projection.child_room_count;
     state.complete_child_room_count = projection.complete_child_room_count;
     state.incomplete_child_room_count = projection.incomplete_child_room_count;
+    state.power_levels_revision = projection.power_levels_revision;
+    state.can_edit_roles = projection.can_edit_roles;
 }
 
 fn merge_incomplete_projection(previous: &SpaceMembersState, next: &mut SpaceMembersProjection) {
@@ -776,6 +937,8 @@ fn clear_projection(state: &mut SpaceMembersState) {
     state.child_room_count = 0;
     state.complete_child_room_count = 0;
     state.incomplete_child_room_count = 0;
+    state.power_levels_revision = None;
+    state.can_edit_roles = false;
 }
 
 fn remove_entry(state: &mut SpaceMembersState, user_id: &str) -> Option<SpaceMemberEntry> {
@@ -803,5 +966,6 @@ fn fallback_entry(user_id: &str, membership: SpaceMemberMembership) -> SpaceMemb
         membership,
         child_room_ids: Vec::new(),
         invite_pending: false,
+        role_options: Vec::new(),
     }
 }

@@ -80,6 +80,7 @@ function member(
     membership,
     child_room_ids: [],
     invite_pending: false,
+    role_options: [],
     ...overrides
   };
 }
@@ -102,6 +103,8 @@ function state(overrides: Partial<SpaceMembersState> = {}): SpaceMembersState {
     child_room_count: 2,
     complete_child_room_count: 2,
     incomplete_child_room_count: 0,
+    power_levels_revision: null,
+    can_edit_roles: false,
     operation: { kind: "idle" },
     ...overrides
   };
@@ -1091,4 +1094,178 @@ describe("SpaceMembersPanel", () => {
       expect(joined).not.toContain(privateValue);
     }
   });
+
+  it("renders a native role select for authorized options and dispatches a selected role", () => {
+    const onUpdateRole = vi.fn();
+    render(
+      <SpaceMembersPanel
+        state={state({
+          power_levels_revision: "revision-1",
+          can_edit_roles: true,
+          space_joined: [
+            member("@alice:example.invalid", "Alice", "space_joined", {
+              power_level: 0,
+              role: "user",
+              role_options: [
+                { power_level: 50, role: "moderator", requires_confirmation: false },
+                { power_level: 100, role: "administrator", requires_confirmation: true }
+              ]
+            })
+          ]
+        })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onUpdateRole={onUpdateRole}
+      />
+    );
+
+    const select = screen.getByRole("combobox", { name: "Role for Alice" });
+    expect(select).toBeTruthy();
+    fireEvent.change(select, { target: { value: "50" } });
+    expect((select as HTMLSelectElement).value).toBe("0");
+    expect(onUpdateRole).toHaveBeenCalledWith("@alice:example.invalid", {
+      power_level: 50,
+      role: "moderator",
+      requires_confirmation: false
+    });
+  });
+
+  it("requires confirmation for an administrator change and keeps Cancel inert", () => {
+    const onUpdateRole = vi.fn();
+    render(
+      <SpaceMembersPanel
+        state={state({
+          power_levels_revision: "revision-1",
+          can_edit_roles: true,
+          space_joined: [
+            member("@alice:example.invalid", "Alice", "space_joined", {
+              power_level: 0,
+              role: "user",
+              role_options: [
+                { power_level: 100, role: "administrator", requires_confirmation: true }
+              ]
+            })
+          ]
+        })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onUpdateRole={onUpdateRole}
+      />
+    );
+
+    const select = screen.getByRole("combobox", { name: "Role for Alice" });
+    fireEvent.change(select, { target: { value: "100" } });
+    expect(screen.getByRole("dialog", { name: "Confirm role change" })).toBeTruthy();
+    expect(onUpdateRole).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onUpdateRole).not.toHaveBeenCalled();
+    expect((select as HTMLSelectElement).value).toBe("0");
+
+    fireEvent.change(select, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm role change" }));
+    expect(onUpdateRole).toHaveBeenCalledWith("@alice:example.invalid", {
+      power_level: 100,
+      role: "administrator",
+      requires_confirmation: true
+    });
+  });
+
+  it("does not render role controls for an unauthorized Space projection", () => {
+    render(
+      <SpaceMembersPanel
+        state={state({
+          can_edit_roles: false,
+          space_joined: [
+            member("@alice:example.invalid", "Alice", "space_joined", {
+              power_level: 0,
+              role_options: [{ power_level: 50, role: "moderator", requires_confirmation: false }]
+            })
+          ]
+        })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("keeps authorized role controls enabled while child rooms are syncing", () => {
+    render(
+      <SpaceMembersPanel
+        state={state({
+          incomplete_child_room_count: 1,
+          can_edit_roles: true,
+          power_levels_revision: "revision-1",
+          space_joined: [
+            member("@alice:example.invalid", "Alice", "space_joined", {
+              power_level: 0,
+              role_options: [{ power_level: 50, role: "moderator", requires_confirmation: false }]
+            })
+          ]
+        })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("status").textContent).toContain("Some child rooms are still syncing");
+    expect(screen.getByRole("combobox", { name: "Role for Alice" })).toHaveProperty(
+      "disabled",
+      false
+    );
+  });
+
+  it.each(["forbidden", "stale", "network"] as const)(
+    "shows a %s role failure while preserving the exact retry target",
+    (failureKind) => {
+      const onUpdateRole = vi.fn();
+      render(
+        <SpaceMembersPanel
+          state={state({
+            can_edit_roles: true,
+            power_levels_revision: "revision-1",
+            space_joined: [
+              member("@alice:example.invalid", "Alice", "space_joined", {
+                power_level: 0,
+                role_options: [{ power_level: 50, role: "moderator", requires_confirmation: false }]
+              })
+            ],
+            operation: {
+              kind: "roleUpdateFailed",
+              request_id: 9,
+              space_id: "!space:example.invalid",
+              user_id: "@alice:example.invalid",
+              generation: 4,
+              expected_power_levels_revision: "revision-1",
+              expected_power_level: 0,
+              power_level: 50,
+              sent_revision: null,
+              failureKind
+            }
+          })}
+          canInvite={true}
+          onInviteUser={vi.fn()}
+          onOpenProfile={vi.fn()}
+          onUpdateRole={onUpdateRole}
+        />
+      );
+
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Could not update this member's role. Try again."
+      );
+      const select = screen.getByRole("combobox", { name: "Role for Alice" });
+      fireEvent.change(select, { target: { value: "50" } });
+      expect(onUpdateRole).toHaveBeenCalledWith("@alice:example.invalid", {
+        power_level: 50,
+        role: "moderator",
+        requires_confirmation: false
+      });
+    }
+  );
 });

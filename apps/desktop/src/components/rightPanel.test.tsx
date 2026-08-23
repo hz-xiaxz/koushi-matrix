@@ -118,6 +118,7 @@ function spaceMember(
     membership,
     child_room_ids: [],
     invite_pending: false,
+    role_options: [],
     ...overrides
   };
 }
@@ -137,6 +138,8 @@ const spaceMembers: SpaceMembersState = {
   child_room_count: 1,
   complete_child_room_count: 1,
   incomplete_child_room_count: 0,
+  power_levels_revision: null,
+  can_edit_roles: false,
   operation: { kind: "idle" }
 };
 

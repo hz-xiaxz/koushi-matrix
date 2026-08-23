@@ -100,9 +100,10 @@ pub use profile::{
 
 // ── Re-exports: space members ─────────────────────────────────────────────
 pub use space_members::{
-    SpaceMemberEntry, SpaceMemberInviteOutcome, SpaceMemberMembership,
-    SpaceMembersCommandRejection, SpaceMembersOperationState, SpaceMembersProjection,
-    SpaceMembersState, admit_space_member_cancellation, admit_space_member_invite,
+    SpaceMemberEntry, SpaceMemberInviteOutcome, SpaceMemberMembership, SpaceMemberRoleFailureKind,
+    SpaceMemberRoleOption, SpaceMemberRoleUpdateOutcome, SpaceMembersCommandRejection,
+    SpaceMembersOperationState, SpaceMembersProjection, SpaceMembersState,
+    admit_space_member_cancellation, admit_space_member_invite, admit_space_member_role,
     admit_space_members_load, refresh_space_member_display_projection,
     resolve_space_members_projection, sort_entries,
 };

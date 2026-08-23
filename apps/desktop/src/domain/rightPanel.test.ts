@@ -254,6 +254,8 @@ function snapshotForPanelMode(
           child_room_count: 0,
           complete_child_room_count: 0,
           incomplete_child_room_count: 0,
+          power_levels_revision: null,
+          can_edit_roles: false,
           operation: { kind: "idle" }
         },
         sync: "stopped",

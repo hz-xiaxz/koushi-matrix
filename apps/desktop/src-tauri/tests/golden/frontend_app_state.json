@@ -648,6 +648,7 @@
         "kind": "idle"
       },
       "space_members": {
+        "can_edit_roles": false,
         "child_room_count": 0,
         "child_room_only": [],
         "complete_child_room_count": 0,
@@ -656,6 +657,7 @@
         "operation": {
           "kind": "idle"
         },
+        "power_levels_revision": null,
         "selected_space_id": null,
         "space_invited": [],
         "space_joined": []

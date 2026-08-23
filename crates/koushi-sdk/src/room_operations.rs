@@ -1,15 +1,17 @@
 use crate::room_projection::{
     matrix_public_room_from_chunk, matrix_room, matrix_room_operation_failure_kind,
-    matrix_room_settings_snapshot, non_empty_name, room_settings_snapshot_with_change,
-    room_settings_snapshot_with_member_power_level, sdk_history_visibility,
-    sdk_join_rule_for_update,
+    matrix_room_settings_snapshot, matrix_space_members_projection, non_empty_name,
+    room_settings_snapshot_with_change, room_settings_snapshot_with_member_power_level,
+    sdk_history_visibility, sdk_join_rule_for_update,
 };
-use crate::{MatrixClientSession, MatrixRoomMemberSummary, MatrixRoomTagKind};
+use crate::{
+    MatrixClientSession, MatrixRoomMemberSummary, MatrixRoomTagKind, MatrixSpaceMembersProjection,
+};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticLevel};
 #[cfg(test)]
 use koushi_state::SessionInfo;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{fmt, time::Duration};
 use thiserror::Error;
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -68,6 +70,25 @@ pub enum MatrixRoomOperationFailureKind {
 pub enum MatrixSpaceInviteCancellationOutcome {
     Cancelled,
     NotInvited,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixSpaceMemberRoleFailureKind {
+    Forbidden,
+    Stale,
+    NotFound,
+    Network,
+    Timeout,
+    Invalid,
+    Sdk,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MatrixSpaceMemberRoleUpdateResult {
+    pub succeeded: bool,
+    pub failure_kind: Option<MatrixSpaceMemberRoleFailureKind>,
+    pub sent_revision: Option<String>,
+    pub projection: Option<MatrixSpaceMembersProjection>,
 }
 
 impl fmt::Display for MatrixRoomOperationFailureKind {
@@ -300,6 +321,374 @@ pub async fn moderate_room_member(
         MatrixRoomModerationAction::Unban => room.unban_user(&target_user_id, reason).await,
     }
     .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
+struct RawSpacePowerLevels {
+    revision: Option<String>,
+    content: matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent,
+}
+
+async fn raw_space_power_levels(
+    room: &matrix_sdk::Room,
+) -> Result<RawSpacePowerLevels, MatrixRoomOperationError> {
+    let event = room
+        .get_state_event_static::<
+            matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent,
+        >()
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    let Some(event) = event else {
+        return Ok(RawSpacePowerLevels {
+            revision: None,
+            content: matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent::new(
+                &matrix_sdk::ruma::room_version_rules::AuthorizationRules::V1,
+            ),
+        });
+    };
+    let state = event
+        .deserialize()
+        .map_err(|_| MatrixRoomOperationError::InvalidRoomSetting)?;
+    let revision = state.event_id().map(ToString::to_string);
+    let content = state
+        .original_content()
+        .cloned()
+        .ok_or(MatrixRoomOperationError::InvalidRoomSetting)?;
+    Ok(RawSpacePowerLevels { revision, content })
+}
+
+fn effective_space_power_level(
+    content: &matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent,
+    user_id: &matrix_sdk::ruma::UserId,
+) -> i64 {
+    content
+        .users
+        .get(user_id)
+        .copied()
+        .unwrap_or(content.users_default)
+        .into()
+}
+
+fn unrelated_power_levels_equal(
+    left: &matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent,
+    right: &matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent,
+    target_user_id: &matrix_sdk::ruma::UserId,
+) -> bool {
+    left.ban == right.ban
+        && left.events == right.events
+        && left.events_default == right.events_default
+        && left.invite == right.invite
+        && left.kick == right.kick
+        && left.redact == right.redact
+        && left.state_default == right.state_default
+        && left.users_default == right.users_default
+        && left.notifications.room == right.notifications.room
+        && left
+            .users
+            .iter()
+            .filter(|(user_id, _)| *user_id != target_user_id)
+            .eq(right
+                .users
+                .iter()
+                .filter(|(user_id, _)| *user_id != target_user_id))
+}
+
+fn set_space_power_level(
+    content: &mut matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent,
+    target_user_id: matrix_sdk::ruma::OwnedUserId,
+    power_level: i64,
+) -> Result<(), MatrixRoomOperationError> {
+    let power_level = matrix_sdk::ruma::Int::try_from(power_level)
+        .map_err(|_| MatrixRoomOperationError::InvalidRoomSetting)?;
+    if power_level == content.users_default {
+        content.users.remove(&target_user_id);
+    } else {
+        content.users.insert(target_user_id, power_level);
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SpaceRoleConvergenceDecision {
+    Waiting,
+    Succeeded,
+    Failed(MatrixSpaceMemberRoleFailureKind),
+}
+
+fn classify_space_role_observation(
+    observed_revision: Option<&str>,
+    expected_revision: Option<&str>,
+    sent_revision: &str,
+    target_matches: bool,
+    unrelated_matches: bool,
+) -> SpaceRoleConvergenceDecision {
+    if observed_revision == expected_revision {
+        SpaceRoleConvergenceDecision::Waiting
+    } else if observed_revision == Some(sent_revision) {
+        if target_matches && unrelated_matches {
+            SpaceRoleConvergenceDecision::Succeeded
+        } else {
+            SpaceRoleConvergenceDecision::Failed(MatrixSpaceMemberRoleFailureKind::Stale)
+        }
+    } else if observed_revision.is_some() {
+        SpaceRoleConvergenceDecision::Failed(MatrixSpaceMemberRoleFailureKind::Stale)
+    } else {
+        SpaceRoleConvergenceDecision::Waiting
+    }
+}
+
+fn rederive_space_role_outcome(
+    proven_success: bool,
+    provisional_failure: MatrixSpaceMemberRoleFailureKind,
+    latest_revision: Option<&str>,
+    expected_revision: Option<&str>,
+    sent_revision: &str,
+    latest_target_matches: bool,
+) -> SpaceRoleConvergenceDecision {
+    let latest_revision_is_authoritative = latest_revision == Some(sent_revision)
+        || (latest_revision.is_some() && latest_revision != expected_revision);
+    if (proven_success || latest_revision_is_authoritative) && latest_target_matches {
+        SpaceRoleConvergenceDecision::Succeeded
+    } else if latest_target_matches {
+        SpaceRoleConvergenceDecision::Failed(provisional_failure)
+    } else {
+        SpaceRoleConvergenceDecision::Failed(MatrixSpaceMemberRoleFailureKind::Stale)
+    }
+}
+
+async fn send_space_power_levels(
+    room: &matrix_sdk::Room,
+    content: matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsEventContent,
+) -> Result<String, MatrixRoomOperationError> {
+    room.send_state_event(content)
+        .await
+        .map(|response| response.event_id.to_string())
+        .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
+fn role_update_result(
+    succeeded: bool,
+    failure_kind: Option<MatrixSpaceMemberRoleFailureKind>,
+    sent_revision: Option<String>,
+    projection: Option<MatrixSpaceMembersProjection>,
+) -> MatrixSpaceMemberRoleUpdateResult {
+    MatrixSpaceMemberRoleUpdateResult {
+        succeeded,
+        failure_kind,
+        sent_revision,
+        projection,
+    }
+}
+
+fn projection_target_power_level(
+    projection: &MatrixSpaceMembersProjection,
+    target_user_id: &str,
+) -> Option<i64> {
+    projection
+        .space_joined
+        .iter()
+        .find(|entry| entry.user_id == target_user_id)
+        .and_then(|entry| entry.power_level)
+}
+
+fn projection_target_has_option(
+    projection: &MatrixSpaceMembersProjection,
+    target_user_id: &str,
+    power_level: i64,
+    confirmed: bool,
+) -> bool {
+    projection
+        .space_joined
+        .iter()
+        .find(|entry| entry.user_id == target_user_id)
+        .and_then(|entry| {
+            entry
+                .role_options
+                .iter()
+                .find(|option| option.power_level == power_level)
+        })
+        .is_some_and(|option| !option.requires_confirmation || confirmed)
+}
+
+const SPACE_MEMBER_ROLE_UPDATE_DEADLINE: Duration = Duration::from_secs(10);
+
+/// Update one directly-joined Space member with a revision-scoped, event-driven
+/// convergence wait. The returned projection is always a fresh SDK projection;
+/// no local role patch is returned.
+pub async fn update_space_member_power_level(
+    session: &MatrixClientSession,
+    space_id: &str,
+    target_user_id: &str,
+    expected_power_levels_revision: Option<&str>,
+    expected_power_level: i64,
+    power_level: i64,
+    confirmed: bool,
+) -> Result<MatrixSpaceMemberRoleUpdateResult, MatrixRoomOperationError> {
+    let room = matrix_room(session, space_id)?;
+    let target_user_id = matrix_sdk::ruma::UserId::parse(target_user_id)
+        .map_err(|_| MatrixRoomOperationError::InvalidUserId)?;
+    let initial_projection = matrix_space_members_projection(session, space_id).await?;
+    if initial_projection.power_levels_revision.as_deref() != expected_power_levels_revision {
+        return Ok(role_update_result(
+            false,
+            Some(MatrixSpaceMemberRoleFailureKind::Stale),
+            None,
+            Some(initial_projection),
+        ));
+    }
+    if !initial_projection.can_edit_roles {
+        return Ok(role_update_result(
+            false,
+            Some(MatrixSpaceMemberRoleFailureKind::Forbidden),
+            None,
+            Some(initial_projection),
+        ));
+    }
+    if projection_target_power_level(&initial_projection, target_user_id.as_str())
+        != Some(expected_power_level)
+    {
+        return Ok(role_update_result(
+            false,
+            Some(MatrixSpaceMemberRoleFailureKind::Stale),
+            None,
+            Some(initial_projection),
+        ));
+    }
+    if !projection_target_has_option(
+        &initial_projection,
+        target_user_id.as_str(),
+        power_level,
+        confirmed,
+    ) {
+        return Ok(role_update_result(
+            false,
+            Some(MatrixSpaceMemberRoleFailureKind::Invalid),
+            None,
+            Some(initial_projection),
+        ));
+    }
+
+    // Subscribe before the final preflight: a cached immediate read is not a
+    // terminal observation and may still show expected_revision.
+    let mut updates = room.subscribe_to_updates();
+    let final_raw = raw_space_power_levels(&room).await?;
+    let final_projection = matrix_space_members_projection(session, space_id).await?;
+    if final_raw.revision.as_deref() != expected_power_levels_revision
+        || final_projection.power_levels_revision.as_deref() != expected_power_levels_revision
+        || projection_target_power_level(&final_projection, target_user_id.as_str())
+            != Some(expected_power_level)
+    {
+        return Ok(role_update_result(
+            false,
+            Some(MatrixSpaceMemberRoleFailureKind::Stale),
+            None,
+            Some(final_projection),
+        ));
+    }
+    if !final_projection.can_edit_roles
+        || !projection_target_has_option(
+            &final_projection,
+            target_user_id.as_str(),
+            power_level,
+            confirmed,
+        )
+    {
+        return Ok(role_update_result(
+            false,
+            Some(MatrixSpaceMemberRoleFailureKind::Forbidden),
+            None,
+            Some(final_projection),
+        ));
+    }
+
+    let mut send_content = final_raw.content.clone();
+    set_space_power_level(&mut send_content, target_user_id.to_owned(), power_level)?;
+    let sent_revision = send_space_power_levels(&room, send_content.clone()).await?;
+
+    let mut proven_success = false;
+    let mut provisional_failure = MatrixSpaceMemberRoleFailureKind::Timeout;
+    let deadline = tokio::time::Instant::now() + SPACE_MEMBER_ROLE_UPDATE_DEADLINE;
+    loop {
+        let observed = raw_space_power_levels(&room).await?;
+        let target_matches =
+            effective_space_power_level(&observed.content, &target_user_id) == power_level;
+        let unrelated_matches =
+            unrelated_power_levels_equal(&observed.content, &send_content, &target_user_id);
+        match classify_space_role_observation(
+            observed.revision.as_deref(),
+            expected_power_levels_revision,
+            &sent_revision,
+            target_matches,
+            unrelated_matches,
+        ) {
+            SpaceRoleConvergenceDecision::Waiting => {}
+            SpaceRoleConvergenceDecision::Succeeded => {
+                proven_success = true;
+                break;
+            }
+            SpaceRoleConvergenceDecision::Failed(kind) => {
+                provisional_failure = kind;
+                break;
+            }
+        }
+
+        match tokio::time::timeout_at(deadline, updates.recv()).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
+                provisional_failure = MatrixSpaceMemberRoleFailureKind::Network;
+                break;
+            }
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                provisional_failure = MatrixSpaceMemberRoleFailureKind::Network;
+                break;
+            }
+            Err(_) => {
+                provisional_failure = MatrixSpaceMemberRoleFailureKind::Timeout;
+                break;
+            }
+        }
+    }
+
+    let latest_raw = raw_space_power_levels(&room).await?;
+    let latest_projection = matrix_space_members_projection(session, space_id).await?;
+    let latest_target = projection_target_power_level(&latest_projection, target_user_id.as_str());
+    let latest_target_matches = latest_target == Some(power_level)
+        && latest_projection.power_levels_revision == latest_raw.revision
+        && latest_raw
+            .content
+            .users
+            .get(&target_user_id)
+            .copied()
+            .unwrap_or(latest_raw.content.users_default)
+            == matrix_sdk::ruma::Int::try_from(power_level)
+                .map_err(|_| MatrixRoomOperationError::InvalidRoomSetting)?;
+
+    match rederive_space_role_outcome(
+        proven_success,
+        provisional_failure,
+        latest_raw.revision.as_deref(),
+        expected_power_levels_revision,
+        &sent_revision,
+        latest_target_matches,
+    ) {
+        SpaceRoleConvergenceDecision::Succeeded => Ok(role_update_result(
+            true,
+            None,
+            Some(sent_revision),
+            Some(latest_projection),
+        )),
+        SpaceRoleConvergenceDecision::Failed(kind) => Ok(role_update_result(
+            false,
+            Some(kind),
+            Some(sent_revision),
+            Some(latest_projection),
+        )),
+        SpaceRoleConvergenceDecision::Waiting => Ok(role_update_result(
+            false,
+            Some(provisional_failure),
+            Some(sent_revision),
+            Some(latest_projection),
+        )),
+    }
 }
 
 pub async fn update_room_member_power_level(
@@ -1069,7 +1458,8 @@ mod tests {
         MatrixRoomSettingsSnapshot, create_public_directory_room, create_room_request,
         get_room_settings_snapshot, join_room_target, matrix_room_preview_from_sdk,
         moderate_room_member, query_public_room_directory, resolve_join_target,
-        update_room_member_power_level, update_room_setting,
+        set_space_power_level, unrelated_power_levels_equal, update_room_member_power_level,
+        update_room_setting,
     };
 
     use crate::room_projection::{
@@ -1401,6 +1791,67 @@ mod tests {
         let _create_public_fn = create_public_directory_room;
     }
     #[test]
+    fn space_role_power_content_preserves_unrelated_fields_and_removes_default_target() {
+        use matrix_sdk::ruma::{
+            events::room::power_levels::RoomPowerLevelsEventContent,
+            room_version_rules::AuthorizationRules,
+        };
+        let target = matrix_sdk::ruma::user_id!("@target:example.invalid").to_owned();
+        let other = matrix_sdk::ruma::user_id!("@other:example.invalid").to_owned();
+        let mut content = RoomPowerLevelsEventContent::new(&AuthorizationRules::V1);
+        content.events_default = matrix_sdk::ruma::Int::from(7);
+        content.users_default = matrix_sdk::ruma::Int::from(10);
+        content.users.insert(other, matrix_sdk::ruma::Int::from(50));
+        content
+            .users
+            .insert(target.clone(), matrix_sdk::ruma::Int::from(50));
+        let before = content.clone();
+        set_space_power_level(&mut content, target.clone(), 0).expect("valid level");
+        assert_eq!(
+            content.users.get(&target),
+            Some(&matrix_sdk::ruma::Int::from(0))
+        );
+        assert_eq!(content.events_default, before.events_default);
+        assert_eq!(
+            content
+                .users
+                .get(&matrix_sdk::ruma::user_id!("@other:example.invalid").to_owned()),
+            before
+                .users
+                .get(&matrix_sdk::ruma::user_id!("@other:example.invalid").to_owned())
+        );
+        set_space_power_level(&mut content, target.clone(), 0).expect("valid default level");
+        content.users_default = matrix_sdk::ruma::Int::from(0);
+        set_space_power_level(&mut content, target.clone(), 0).expect("default removes target");
+        assert!(!content.users.contains_key(&target));
+    }
+
+    #[test]
+    fn space_role_unrelated_comparison_ignores_only_target_user_entry() {
+        use matrix_sdk::ruma::{
+            events::room::power_levels::RoomPowerLevelsEventContent,
+            room_version_rules::AuthorizationRules,
+        };
+        let target = matrix_sdk::ruma::user_id!("@target:example.invalid").to_owned();
+        let mut left = RoomPowerLevelsEventContent::new(&AuthorizationRules::V1);
+        let mut right = left.clone();
+        left.users
+            .insert(target.clone(), matrix_sdk::ruma::Int::from(0));
+        right.users.insert(target, matrix_sdk::ruma::Int::from(50));
+        assert!(unrelated_power_levels_equal(
+            &left,
+            &right,
+            matrix_sdk::ruma::user_id!("@target:example.invalid")
+        ));
+        right.events_default = matrix_sdk::ruma::Int::from(9);
+        assert!(!unrelated_power_levels_equal(
+            &left,
+            &right,
+            matrix_sdk::ruma::user_id!("@target:example.invalid")
+        ));
+    }
+
+    #[test]
     fn room_management_wrappers_use_settings_privacy_and_moderation_apis() {
         let _snapshot = MatrixRoomSettingsSnapshot {
             room_id: "!room:example.invalid".to_owned(),
@@ -1552,5 +2003,163 @@ mod tests {
             MatrixRoomMemberRole::Administrator
         );
         assert_eq!(matrix_room_member_role(None), MatrixRoomMemberRole::Creator);
+    }
+}
+
+#[cfg(test)]
+mod space_member_role_convergence_tests {
+    use super::{
+        MatrixClientSession, MatrixSpaceMemberRoleFailureKind, SpaceRoleConvergenceDecision,
+        classify_space_role_observation, rederive_space_role_outcome, send_space_power_levels,
+    };
+    use matrix_sdk::{
+        ruma::{
+            event_id,
+            events::{StateEventType, room::power_levels::RoomPowerLevelsEventContent},
+            room_id,
+            room_version_rules::AuthorizationRules,
+        },
+        test_utils::mocks::MatrixMockServer,
+    };
+    async fn session_for(server: &MatrixMockServer) -> MatrixClientSession {
+        let client = server.client_builder().build().await;
+        let info = koushi_state::SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client.user_id().expect("mock user").to_string(),
+            device_id: client.device_id().expect("mock device").to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        };
+        MatrixClientSession { client, info }
+    }
+
+    #[test]
+    fn convergence_classifier_covers_expected_sent_unrelated_and_unknown_revisions() {
+        let waiting = SpaceRoleConvergenceDecision::Waiting;
+        let stale = SpaceRoleConvergenceDecision::Failed(MatrixSpaceMemberRoleFailureKind::Stale);
+        assert_eq!(
+            classify_space_role_observation(
+                Some("$expected"),
+                Some("$expected"),
+                "$sent",
+                false,
+                false
+            ),
+            waiting
+        );
+        assert_eq!(
+            classify_space_role_observation(Some("$sent"), Some("$expected"), "$sent", true, true),
+            SpaceRoleConvergenceDecision::Succeeded
+        );
+        assert_eq!(
+            classify_space_role_observation(Some("$sent"), Some("$expected"), "$sent", true, false),
+            stale
+        );
+        assert_eq!(
+            classify_space_role_observation(Some("$sent"), Some("$expected"), "$sent", false, true),
+            stale
+        );
+        assert_eq!(
+            classify_space_role_observation(Some("$other"), Some("$expected"), "$sent", true, true),
+            stale
+        );
+        assert_eq!(
+            classify_space_role_observation(None, Some("$expected"), "$sent", false, false),
+            waiting
+        );
+    }
+
+    #[test]
+    fn final_fetch_rederivation_covers_success_upgrade_and_closed_failures() {
+        let stale = MatrixSpaceMemberRoleFailureKind::Stale;
+        let network = MatrixSpaceMemberRoleFailureKind::Network;
+        assert_eq!(
+            rederive_space_role_outcome(
+                true,
+                stale,
+                Some("$later"),
+                Some("$expected"),
+                "$sent",
+                true
+            ),
+            SpaceRoleConvergenceDecision::Succeeded
+        );
+        assert_eq!(
+            rederive_space_role_outcome(
+                false,
+                network,
+                Some("$sent"),
+                Some("$expected"),
+                "$sent",
+                true
+            ),
+            SpaceRoleConvergenceDecision::Succeeded
+        );
+        assert_eq!(
+            rederive_space_role_outcome(
+                false,
+                network,
+                Some("$later"),
+                Some("$expected"),
+                "$sent",
+                true
+            ),
+            SpaceRoleConvergenceDecision::Succeeded
+        );
+        assert_eq!(
+            rederive_space_role_outcome(
+                false,
+                network,
+                Some("$expected"),
+                Some("$expected"),
+                "$sent",
+                true
+            ),
+            SpaceRoleConvergenceDecision::Failed(network)
+        );
+        assert_eq!(
+            rederive_space_role_outcome(
+                false,
+                network,
+                Some("$sent"),
+                Some("$expected"),
+                "$sent",
+                false
+            ),
+            SpaceRoleConvergenceDecision::Failed(stale)
+        );
+        assert_eq!(
+            rederive_space_role_outcome(
+                false,
+                MatrixSpaceMemberRoleFailureKind::Timeout,
+                None,
+                Some("$expected"),
+                "$sent",
+                true
+            ),
+            SpaceRoleConvergenceDecision::Failed(MatrixSpaceMemberRoleFailureKind::Timeout)
+        );
+    }
+
+    #[tokio::test]
+    async fn send_space_power_levels_returns_the_mocked_event_id() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let room_id = room_id!("!role-send:example.org");
+        let room = server.sync_joined_room(&session.client(), room_id).await;
+        let event_id = event_id!("$role-send:example.org");
+        server
+            .mock_room_send_state()
+            .for_type(StateEventType::RoomPowerLevels)
+            .ok(event_id)
+            .expect(1)
+            .mount()
+            .await;
+
+        let mut content = RoomPowerLevelsEventContent::new(&AuthorizationRules::V1);
+        content.events_default = 7.into();
+        let sent = send_space_power_levels(&room, content)
+            .await
+            .expect("mocked state event send");
+        assert_eq!(sent, event_id.to_string());
     }
 }

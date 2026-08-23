@@ -854,6 +854,7 @@ pub fn run() {
             commands::room::update_room_setting,
             commands::room::moderate_room_member,
             commands::room::update_room_member_role,
+            commands::room::update_space_member_role,
             commands::activity::open_activity,
             commands::activity::close_activity,
             commands::activity::set_activity_tab,

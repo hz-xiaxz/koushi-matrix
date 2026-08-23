@@ -17,10 +17,11 @@ use matrix_sdk::{
     deserialized_responses::SyncOrStrippedState,
     room::ParentSpace,
     ruma::events::{
-        SyncStateEvent,
+        StateEventType, SyncStateEvent,
         direct::DirectEventContent,
         fully_read::FullyReadEventContent,
         receipt::{ReceiptThread, ReceiptType},
+        room::power_levels::{RoomPowerLevelsEventContent, UserPowerLevel},
         space::child::SpaceChildEventContent,
     },
 };
@@ -261,6 +262,14 @@ impl fmt::Debug for MatrixUserProfile {
 /// This deliberately preserves the distinction between a Space `JOIN`, a
 /// Space `INVITE`, and a child-room-only `JOIN`. Consumers must not infer these
 /// classes from a flattened `ACTIVE` member list.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatrixSpaceMemberRoleOption {
+    pub power_level: i64,
+    pub role: MatrixRoomMemberRole,
+    pub requires_confirmation: bool,
+}
+
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixSpaceMembersProjection {
     pub space_id: String,
@@ -285,6 +294,10 @@ pub struct MatrixSpaceMembersProjection {
     pub child_room_count: usize,
     pub complete_child_room_count: usize,
     pub incomplete_child_room_count: usize,
+    #[serde(default)]
+    pub power_levels_revision: Option<String>,
+    #[serde(default)]
+    pub can_edit_roles: bool,
 }
 
 impl fmt::Debug for MatrixSpaceMembersProjection {
@@ -310,6 +323,11 @@ impl fmt::Debug for MatrixSpaceMembersProjection {
                 "incomplete_child_room_count",
                 &self.incomplete_child_room_count,
             )
+            .field(
+                "power_levels_revision",
+                &self.power_levels_revision.as_ref().map(|_| "EventId(..)"),
+            )
+            .field("can_edit_roles", &self.can_edit_roles)
             .finish()
     }
 }
@@ -322,6 +340,8 @@ pub struct MatrixSpaceMemberEntry {
     pub power_level: Option<i64>,
     pub role: MatrixRoomMemberRole,
     pub child_room_ids: Vec<String>,
+    #[serde(default)]
+    pub role_options: Vec<MatrixSpaceMemberRoleOption>,
 }
 
 impl fmt::Debug for MatrixSpaceMemberEntry {
@@ -340,6 +360,7 @@ impl fmt::Debug for MatrixSpaceMemberEntry {
             .field("power_level", &self.power_level)
             .field("role", &self.role)
             .field("child_room_count", &self.child_room_ids.len())
+            .field("role_option_count", &self.role_options.len())
             .finish()
     }
 }
@@ -862,6 +883,7 @@ mod space_member_projection_tests {
             power_level: Some(100),
             role: super::MatrixRoomMemberRole::Administrator,
             child_room_ids: vec!["!child:example.invalid".to_owned()],
+            role_options: Vec::new(),
         };
         let projection = super::MatrixSpaceMembersProjection {
             space_id: "!space:example.invalid".to_owned(),
@@ -878,6 +900,8 @@ mod space_member_projection_tests {
             child_room_count: 1,
             complete_child_room_count: 1,
             incomplete_child_room_count: 0,
+            power_levels_revision: None,
+            can_edit_roles: false,
         };
 
         for debug in [format!("{entry:?}"), format!("{projection:?}")] {
@@ -918,6 +942,59 @@ mod space_member_projection_tests {
                 "{debug}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod space_member_role_option_matrix_tests {
+    use super::{MatrixRoomMemberRole, role_options_for_powers};
+    use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
+
+    fn levels(
+        caller: UserPowerLevel,
+        target: UserPowerLevel,
+        target_is_self: bool,
+        can_edit_roles: bool,
+    ) -> Vec<i64> {
+        role_options_for_powers(caller, target, target_is_self, can_edit_roles)
+            .into_iter()
+            .map(|option| option.power_level)
+            .collect()
+    }
+
+    #[test]
+    fn direct_space_role_options_cover_finite_and_infinite_power_matrix() {
+        let int = |value: i32| UserPowerLevel::Int(value.into());
+        assert_eq!(levels(int(100), int(0), false, true), vec![50]);
+        assert_eq!(levels(int(50), int(0), false, true), Vec::<i64>::new());
+        assert_eq!(levels(int(100), int(50), false, true), vec![0]);
+        assert_eq!(
+            levels(UserPowerLevel::Infinite, int(0), false, true),
+            vec![50, 100]
+        );
+        assert_eq!(
+            levels(int(100), UserPowerLevel::Infinite, false, true),
+            Vec::<i64>::new()
+        );
+        assert_eq!(
+            levels(UserPowerLevel::Infinite, int(100), false, true),
+            vec![0, 50]
+        );
+        assert_eq!(levels(int(100), int(100), false, true), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn direct_space_role_options_reject_self_and_non_editable_callers() {
+        let int = |value: i32| UserPowerLevel::Int(value.into());
+        assert_eq!(levels(int(100), int(0), true, true), Vec::<i64>::new());
+        assert_eq!(levels(int(100), int(0), false, false), Vec::<i64>::new());
+        let options = role_options_for_powers(int(150), int(100), false, true);
+        assert!(
+            options
+                .iter()
+                .all(|option| option.role != MatrixRoomMemberRole::Creator)
+        );
+        assert!(options.iter().all(|option| option.power_level < 150));
     }
 }
 
@@ -1229,6 +1306,7 @@ fn matrix_space_member_entry_from_room_member(
         power_level,
         role: matrix_room_member_role(power_level),
         child_room_ids,
+        role_options: Vec::new(),
     }
 }
 
@@ -1479,6 +1557,21 @@ pub async fn matrix_space_members_projection(
 
     let mut local_lookup_success_count = 0usize;
     let mut local_lookup_failure_count = 0usize;
+    let power_levels = space_room.power_levels_or_default().await;
+    let power_levels_revision = space_room
+        .get_state_event_static::<RoomPowerLevelsEventContent>()
+        .await
+        .ok()
+        .flatten()
+        .and_then(|event| {
+            event
+                .deserialize()
+                .ok()
+                .and_then(|state| state.event_id().map(ToString::to_string))
+        });
+    let can_edit_roles = space_room.state() == matrix_sdk::RoomState::Joined
+        && power_levels
+            .user_can_send_state(space_room.own_user_id(), StateEventType::RoomPowerLevels);
 
     let space_joined_members = match space_room
         .members_no_sync(matrix_sdk::RoomMemberships::JOIN)
@@ -1618,11 +1711,17 @@ pub async fn matrix_space_members_projection(
         child_room_membership_refs,
     );
 
-    let space_joined: Vec<_> = facts
+    let mut space_joined: Vec<_> = facts
         .space_joined_ids
         .iter()
         .filter_map(|user_id| space_joined_by_user.remove(user_id))
         .collect();
+    if can_edit_roles {
+        for entry in &mut space_joined {
+            entry.role_options =
+                direct_space_role_options(&space_room, &power_levels, &entry.user_id);
+        }
+    }
     let space_invited: Vec<_> = facts
         .space_invited_ids
         .iter()
@@ -1675,6 +1774,8 @@ pub async fn matrix_space_members_projection(
         child_room_count,
         complete_child_room_count,
         incomplete_child_room_count,
+        power_levels_revision,
+        can_edit_roles,
     })
 }
 
@@ -1873,6 +1974,69 @@ pub(super) fn matrix_room_member_role(power_level: Option<i64>) -> MatrixRoomMem
         Some(level) if level >= 50 => MatrixRoomMemberRole::Moderator,
         Some(_) => MatrixRoomMemberRole::User,
     }
+}
+
+fn finite_power_level(power_level: UserPowerLevel) -> Option<i64> {
+    match power_level {
+        UserPowerLevel::Infinite => None,
+        UserPowerLevel::Int(value) => Some(value.into()),
+        _ => None,
+    }
+}
+
+fn direct_space_role_options(
+    room: &matrix_sdk::Room,
+    power_levels: &matrix_sdk::ruma::events::room::power_levels::RoomPowerLevels,
+    target_user_id: &str,
+) -> Vec<MatrixSpaceMemberRoleOption> {
+    let Ok(target_user_id) = matrix_sdk::ruma::UserId::parse(target_user_id) else {
+        return Vec::new();
+    };
+    let own_power = power_levels.for_user(room.own_user_id());
+    let target_power = power_levels.for_user(&target_user_id);
+    let can_edit_roles =
+        power_levels.user_can_send_state(room.own_user_id(), StateEventType::RoomPowerLevels);
+    role_options_for_powers(
+        own_power,
+        target_power,
+        &target_user_id == room.own_user_id(),
+        can_edit_roles,
+    )
+}
+
+fn role_options_for_powers(
+    own_power: UserPowerLevel,
+    target_power: UserPowerLevel,
+    target_is_self: bool,
+    can_edit_roles: bool,
+) -> Vec<MatrixSpaceMemberRoleOption> {
+    if target_is_self || !can_edit_roles {
+        return Vec::new();
+    }
+    // No one may edit a creator/infinite target, and a finite caller must be
+    // strictly above both the existing target and every proposed level.
+    if target_power == UserPowerLevel::Infinite || own_power <= target_power {
+        return Vec::new();
+    }
+    let Some(current) = finite_power_level(target_power) else {
+        return Vec::new();
+    };
+    [0_i64, 50, 100]
+        .into_iter()
+        .filter(|candidate| {
+            *candidate != current
+                && match own_power {
+                    UserPowerLevel::Infinite => true,
+                    UserPowerLevel::Int(value) => *candidate < i64::from(value),
+                    _ => false,
+                }
+        })
+        .map(|power_level| MatrixSpaceMemberRoleOption {
+            power_level,
+            role: matrix_room_member_role(Some(power_level)),
+            requires_confirmation: current >= 100 || power_level >= 100,
+        })
+        .collect()
 }
 
 pub(super) fn room_settings_snapshot_with_change(

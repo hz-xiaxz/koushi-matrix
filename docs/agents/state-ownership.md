@@ -674,6 +674,24 @@ carry tokens and counts only. The full prohibited list is in
   the failed `room_management` snapshot; event delivery can lead the connection
   snapshot by one `StateDelta` generation.
 
+## Space member roles
+
+- `AppState.space_members` is the authoritative Space-member projection. Rust
+  owns direct-Space membership, power-level revision, `can_edit_roles`,
+  `role_options`, role authorization, request/generation/revision fences, and
+  role operation/failure state. React renders those DTOs and dispatches the
+  typed `update_space_member_role` command; it must not derive options from
+  role labels, child-room completion, or local permission guesses.
+- The Space Members panel may own only confirmation-dialog visibility and DOM
+  focus. A select remains on the projected current role until a later Rust
+  snapshot projects the requested role; failure/retry leaves the authoritative
+  role and options intact. Incomplete child-room sync is a notice, not a local
+  disablement of a directly authorized control.
+- Tauri and Browser Fake paths mirror the same command shape and admission
+  guards. Browser-headless tests must exercise full projection replacement,
+  failure/retry, confirmation cancellation, and role-option rederivation rather
+  than patching React state after an invoke.
+
 ## Media
 
 - Media GUI rendering is DTO-only. React may display `TimelineItem.media`

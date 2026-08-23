@@ -1077,6 +1077,28 @@ impl RoomActor {
                 )
                 .await;
             }
+            RoomCommand::UpdateSpaceMemberRole {
+                request_id,
+                space_id,
+                user_id,
+                generation,
+                expected_power_levels_revision,
+                expected_power_level,
+                power_level,
+                confirmed,
+            } => {
+                self.handle_update_space_member_role(
+                    request_id,
+                    space_id,
+                    user_id,
+                    generation,
+                    expected_power_levels_revision,
+                    expected_power_level,
+                    power_level,
+                    confirmed,
+                )
+                .await;
+            }
             RoomCommand::SelectSpace {
                 request_id: _,
                 space_id,

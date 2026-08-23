@@ -61,6 +61,8 @@ fn state_space_members_projection(
         child_room_count: projection.child_room_count,
         complete_child_room_count: projection.complete_child_room_count,
         incomplete_child_room_count: projection.incomplete_child_room_count,
+        power_levels_revision: projection.power_levels_revision,
+        can_edit_roles: projection.can_edit_roles,
     }
 }
 
@@ -95,6 +97,26 @@ fn state_space_member_entry(
         membership,
         child_room_ids: entry.child_room_ids,
         invite_pending: false,
+        role_options: entry
+            .role_options
+            .into_iter()
+            .map(|option| koushi_state::SpaceMemberRoleOption {
+                power_level: option.power_level,
+                role: match option.role {
+                    koushi_sdk::MatrixRoomMemberRole::Creator => {
+                        koushi_state::RoomMemberRole::Creator
+                    }
+                    koushi_sdk::MatrixRoomMemberRole::Administrator => {
+                        koushi_state::RoomMemberRole::Administrator
+                    }
+                    koushi_sdk::MatrixRoomMemberRole::Moderator => {
+                        koushi_state::RoomMemberRole::Moderator
+                    }
+                    koushi_sdk::MatrixRoomMemberRole::User => koushi_state::RoomMemberRole::User,
+                },
+                requires_confirmation: option.requires_confirmation,
+            })
+            .collect(),
     }
 }
 
@@ -455,6 +477,60 @@ fn record_core_space_members_load_failure(trigger: &'static str, generation: u64
         .field(DiagnosticField::token("output_count", "counts_unavailable"))
         .field(DiagnosticField::token("freshness_status", "not_tracked")),
     );
+}
+
+fn space_member_role_failure_kind(
+    kind: koushi_sdk::MatrixSpaceMemberRoleFailureKind,
+) -> koushi_state::SpaceMemberRoleFailureKind {
+    match kind {
+        koushi_sdk::MatrixSpaceMemberRoleFailureKind::Forbidden => {
+            koushi_state::SpaceMemberRoleFailureKind::Forbidden
+        }
+        koushi_sdk::MatrixSpaceMemberRoleFailureKind::Stale => {
+            koushi_state::SpaceMemberRoleFailureKind::Stale
+        }
+        koushi_sdk::MatrixSpaceMemberRoleFailureKind::NotFound => {
+            koushi_state::SpaceMemberRoleFailureKind::NotFound
+        }
+        koushi_sdk::MatrixSpaceMemberRoleFailureKind::Network => {
+            koushi_state::SpaceMemberRoleFailureKind::Network
+        }
+        koushi_sdk::MatrixSpaceMemberRoleFailureKind::Timeout => {
+            koushi_state::SpaceMemberRoleFailureKind::Timeout
+        }
+        koushi_sdk::MatrixSpaceMemberRoleFailureKind::Invalid => {
+            koushi_state::SpaceMemberRoleFailureKind::Invalid
+        }
+        koushi_sdk::MatrixSpaceMemberRoleFailureKind::Sdk => {
+            koushi_state::SpaceMemberRoleFailureKind::Sdk
+        }
+    }
+}
+
+fn space_member_role_failure_from_error(
+    error: &MatrixRoomOperationError,
+) -> koushi_state::SpaceMemberRoleFailureKind {
+    match error {
+        MatrixRoomOperationError::InvalidUserId
+        | MatrixRoomOperationError::InvalidRoomId
+        | MatrixRoomOperationError::InvalidRoomSetting => {
+            koushi_state::SpaceMemberRoleFailureKind::Invalid
+        }
+        MatrixRoomOperationError::RoomUnavailable => {
+            koushi_state::SpaceMemberRoleFailureKind::NotFound
+        }
+        MatrixRoomOperationError::Sdk(kind) => match kind {
+            koushi_sdk::MatrixRoomOperationFailureKind::Forbidden
+            | koushi_sdk::MatrixRoomOperationFailureKind::AuthenticationRequired => {
+                koushi_state::SpaceMemberRoleFailureKind::Forbidden
+            }
+            koushi_sdk::MatrixRoomOperationFailureKind::Http => {
+                koushi_state::SpaceMemberRoleFailureKind::Network
+            }
+            _ => koushi_state::SpaceMemberRoleFailureKind::Sdk,
+        },
+        _ => koushi_state::SpaceMemberRoleFailureKind::Sdk,
+    }
 }
 
 fn record_core_space_members_operation(
@@ -846,6 +922,74 @@ impl RoomActor {
         }));
     }
 
+    pub(super) async fn handle_update_space_member_role(
+        &self,
+        request_id: RequestId,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        expected_power_levels_revision: Option<String>,
+        expected_power_level: i64,
+        power_level: i64,
+        confirmed: bool,
+    ) {
+        let result = match &self.session {
+            Some(session) => {
+                koushi_sdk::update_space_member_power_level(
+                    session,
+                    &space_id,
+                    &user_id,
+                    expected_power_levels_revision.as_deref(),
+                    expected_power_level,
+                    power_level,
+                    confirmed,
+                )
+                .await
+            }
+            None => Err(MatrixRoomOperationError::RoomUnavailable),
+        };
+        let (outcome, sent_revision, projection) = match result {
+            Ok(result) => {
+                let outcome = if result.succeeded {
+                    koushi_state::SpaceMemberRoleUpdateOutcome::Succeeded
+                } else {
+                    koushi_state::SpaceMemberRoleUpdateOutcome::Failed(
+                        result
+                            .failure_kind
+                            .map(space_member_role_failure_kind)
+                            .unwrap_or(koushi_state::SpaceMemberRoleFailureKind::Sdk),
+                    )
+                };
+                let projection = result
+                    .projection
+                    .map(|projection| state_space_members_projection(projection, generation));
+                (outcome, result.sent_revision, projection)
+            }
+            Err(error) => (
+                koushi_state::SpaceMemberRoleUpdateOutcome::Failed(
+                    space_member_role_failure_from_error(&error),
+                ),
+                None,
+                None,
+            ),
+        };
+        self.reduce_reliable(vec![AppAction::SpaceMemberRoleUpdateSettled {
+            request_id: request_id.sequence,
+            space_id: space_id.clone(),
+            user_id,
+            generation,
+            outcome: outcome.clone(),
+            sent_revision,
+            projection,
+        }])
+        .await;
+        self.emit(CoreEvent::Room(RoomEvent::SpaceMemberRoleUpdateSettled {
+            request_id,
+            generation,
+            outcome,
+        }));
+    }
+
     pub(super) async fn handle_cancel_space_invite(
         &self,
         request_id: RequestId,
@@ -943,6 +1087,7 @@ mod tests {
         SpaceMemberDemand, SpaceMemberRefreshFence, record_core_profile_resolution,
         record_core_space_members_load_failure, record_core_space_members_projection,
         should_clear_space_member_demand, space_member_refresh_fence_is_current,
+        space_member_role_failure_from_error, space_member_role_failure_kind,
         space_members_refresh_is_current, space_members_update_affects_demand,
         state_space_members_projection, user_profiles_from_space_projection,
     };
@@ -1091,6 +1236,7 @@ mod tests {
                 power_level: Some(0),
                 role: MatrixRoomMemberRole::User,
                 child_room_ids: vec!["!child:example.invalid".to_owned()],
+                role_options: Vec::new(),
             }],
             child_room_profiles: Vec::new(),
             space_joined_input_count: 0,
@@ -1101,6 +1247,8 @@ mod tests {
             child_room_count: 1,
             complete_child_room_count: 1,
             incomplete_child_room_count: 0,
+            power_levels_revision: None,
+            can_edit_roles: false,
         };
 
         let profiles = user_profiles_from_space_projection(&raw);
@@ -1241,12 +1389,15 @@ mod tests {
                 membership: SpaceMemberMembership::SpaceJoined,
                 child_room_ids: Vec::new(),
                 invite_pending: false,
+                role_options: Vec::new(),
             }],
             space_invited: Vec::new(),
             child_room_only: Vec::new(),
             child_room_count: 0,
             complete_child_room_count: 0,
             incomplete_child_room_count: 0,
+            power_levels_revision: None,
+            can_edit_roles: false,
         };
         record_core_space_members_projection("load", 4, &projection, "success");
         record_core_profile_resolution(&projection);
@@ -1268,5 +1419,83 @@ mod tests {
                 .iter()
                 .any(|record| record.event.source == "core.profile_resolution")
         );
+    }
+
+    #[test]
+    fn role_failure_mapping_is_closed_and_raw_sdk_values_do_not_escape() {
+        use koushi_sdk::{
+            MatrixRoomOperationError, MatrixRoomOperationFailureKind,
+            MatrixSpaceMemberRoleFailureKind,
+        };
+
+        for (kind, expected) in [
+            (
+                MatrixSpaceMemberRoleFailureKind::Forbidden,
+                koushi_state::SpaceMemberRoleFailureKind::Forbidden,
+            ),
+            (
+                MatrixSpaceMemberRoleFailureKind::Stale,
+                koushi_state::SpaceMemberRoleFailureKind::Stale,
+            ),
+            (
+                MatrixSpaceMemberRoleFailureKind::NotFound,
+                koushi_state::SpaceMemberRoleFailureKind::NotFound,
+            ),
+            (
+                MatrixSpaceMemberRoleFailureKind::Network,
+                koushi_state::SpaceMemberRoleFailureKind::Network,
+            ),
+            (
+                MatrixSpaceMemberRoleFailureKind::Timeout,
+                koushi_state::SpaceMemberRoleFailureKind::Timeout,
+            ),
+            (
+                MatrixSpaceMemberRoleFailureKind::Invalid,
+                koushi_state::SpaceMemberRoleFailureKind::Invalid,
+            ),
+            (
+                MatrixSpaceMemberRoleFailureKind::Sdk,
+                koushi_state::SpaceMemberRoleFailureKind::Sdk,
+            ),
+        ] {
+            assert_eq!(space_member_role_failure_kind(kind), expected);
+        }
+        assert_eq!(
+            space_member_role_failure_from_error(&MatrixRoomOperationError::RoomUnavailable),
+            koushi_state::SpaceMemberRoleFailureKind::NotFound
+        );
+        assert_eq!(
+            space_member_role_failure_from_error(&MatrixRoomOperationError::InvalidUserId),
+            koushi_state::SpaceMemberRoleFailureKind::Invalid
+        );
+        assert_eq!(
+            space_member_role_failure_from_error(&MatrixRoomOperationError::Sdk(
+                MatrixRoomOperationFailureKind::Forbidden,
+            )),
+            koushi_state::SpaceMemberRoleFailureKind::Forbidden
+        );
+        assert_eq!(
+            space_member_role_failure_from_error(&MatrixRoomOperationError::Sdk(
+                MatrixRoomOperationFailureKind::Http,
+            )),
+            koushi_state::SpaceMemberRoleFailureKind::Network
+        );
+    }
+
+    #[test]
+    fn role_settlement_debug_is_identifier_free() {
+        let event = crate::event::RoomEvent::SpaceMemberRoleUpdateSettled {
+            request_id: make_request_id(42),
+            generation: 7,
+            outcome: koushi_state::SpaceMemberRoleUpdateOutcome::Failed(
+                koushi_state::SpaceMemberRoleFailureKind::Stale,
+            ),
+        };
+        let debug = format!("{event:?}");
+        assert!(debug.contains("SpaceMemberRoleUpdateSettled"));
+        assert!(debug.contains("generation"));
+        assert!(!debug.contains("@"));
+        assert!(!debug.contains("!"));
+        assert!(!debug.contains("EventId"));
     }
 }

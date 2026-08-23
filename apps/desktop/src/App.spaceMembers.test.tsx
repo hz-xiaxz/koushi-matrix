@@ -890,6 +890,193 @@ describe("App Space Members integration", () => {
       expect(dialog.textContent).not.toContain(privateValue);
     }
   });
+
+  test("requires admin confirmation and keeps Cancel inert", async () => {
+    const api = createBrowserFakeApi();
+    const updateSpaceMemberRole = vi.spyOn(api, "updateSpaceMemberRole");
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    const select = screen.getByRole("combobox", { name: "Role for Joined Member" });
+    await act(async () => {
+      fireEvent.change(select, { target: { value: "100" } });
+    });
+    expect(screen.getByRole("dialog", { name: "Confirm role change" })).toBeTruthy();
+    expect(updateSpaceMemberRole).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    });
+    expect(updateSpaceMemberRole).not.toHaveBeenCalled();
+    expect((select as HTMLSelectElement).value).toBe("0");
+
+    await act(async () => {
+      fireEvent.change(select, { target: { value: "100" } });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm role change" }));
+    });
+    await waitFor(() => expect(updateSpaceMemberRole).toHaveBeenCalledTimes(1));
+    expect(updateSpaceMemberRole).toHaveBeenCalledWith(
+      "!space-alpha:example.invalid",
+      "@joined:example.invalid",
+      1,
+      "revision-1",
+      0,
+      100,
+      true
+    );
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
+          .value
+      ).toBe("100")
+    );
+  });
+
+  test("does not optimistically change a pending role and applies the success projection", async () => {
+    const api = createBrowserFakeApi({ spaceMemberRoleUpdateOutcome: "pending" });
+    const updateSpaceMemberRole = vi.spyOn(api, "updateSpaceMemberRole");
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    const select = screen.getByRole("combobox", { name: "Role for Joined Member" });
+    await act(async () => {
+      fireEvent.change(select, { target: { value: "50" } });
+    });
+    await waitFor(() => expect(updateSpaceMemberRole).toHaveBeenCalledTimes(1));
+    expect((select as HTMLSelectElement).value).toBe("0");
+    expect(screen.getByRole("combobox", { name: "Role for Joined Member" })).toHaveProperty(
+      "disabled",
+      true
+    );
+    expect((await api.getSnapshot()).state.domain.space_members.space_joined[0]?.power_level).toBe(0);
+  });
+
+  test("applies the authoritative success projection without a local role patch", async () => {
+    const api = createBrowserFakeApi();
+    const updateSpaceMemberRole = vi.spyOn(api, "updateSpaceMemberRole");
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    const select = screen.getByRole("combobox", { name: "Role for Joined Member" });
+    await act(async () => {
+      fireEvent.change(select, { target: { value: "50" } });
+    });
+    await waitFor(() => expect(updateSpaceMemberRole).toHaveBeenCalledTimes(1));
+    expect(updateSpaceMemberRole).toHaveBeenCalledWith(
+      "!space-alpha:example.invalid",
+      "@joined:example.invalid",
+      1,
+      "revision-1",
+      0,
+      50,
+      false
+    );
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
+          .value
+      ).toBe("50")
+    );
+    expect(screen.getByText("Joined Member")).toBeTruthy();
+  });
+
+  test.each(["forbidden", "stale", "network"] as const)(
+    "surfaces %s and retries the exact role operation",
+    async (failureKind) => {
+      const api = createBrowserFakeApi({
+        spaceMemberRoleUpdateOutcomes: [failureKind, "success"]
+      });
+      const updateSpaceMemberRole = vi.spyOn(api, "updateSpaceMemberRole");
+      await renderAppWithApi(api);
+      await openSpaceMembersFromSidebar();
+
+      const select = screen.getByRole("combobox", { name: "Role for Joined Member" });
+      await act(async () => {
+        fireEvent.change(select, { target: { value: "50" } });
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("alert").textContent).toBe(
+          "Could not update this member's role. Try again."
+        )
+      );
+      expect((await api.getSnapshot()).state.domain.space_members.space_joined[0]?.power_level).toBe(0);
+
+      await act(async () => {
+        fireEvent.change(select, { target: { value: "50" } });
+      });
+      await waitFor(() => expect(updateSpaceMemberRole).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(
+          (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
+            .value
+        ).toBe("50")
+      );
+      expect(updateSpaceMemberRole.mock.calls[1]).toEqual([
+        "!space-alpha:example.invalid",
+        "@joined:example.invalid",
+        1,
+        failureKind === "stale" ? "revision-1001" : "revision-1",
+        0,
+        50,
+        false
+      ]);
+    }
+  );
+
+  test("reloads the same Space generation from a stale role failure", async () => {
+    const api = createBrowserFakeApi({ spaceMemberRoleUpdateOutcome: "stale" });
+    const loadSpaceMembers = vi.spyOn(api, "loadSpaceMembers");
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    await waitFor(() => expect(loadSpaceMembers).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Role for Joined Member" }), {
+        target: { value: "50" }
+      });
+    });
+    await screen.findByRole("alert");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reload roles" }));
+    });
+    await waitFor(() => expect(loadSpaceMembers).toHaveBeenCalledTimes(2));
+    await waitFor(async () =>
+      expect((await api.getSnapshot()).state.domain.space_members.operation.kind).toBe("idle")
+    );
+  });
+
+  test("omits role controls when the exact Space permissions deny role edits", async () => {
+    const api = createBrowserFakeApi({
+      roomPermissions: {
+        "!space-alpha:example.invalid": {
+          can_edit_settings: true,
+          can_edit_roles: false,
+          can_invite: true,
+          can_kick: true,
+          can_ban: true,
+          can_unban: true
+        }
+      }
+    });
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    expect(
+      screen.queryByRole("combobox", { name: "Role for Joined Member" })
+    ).toBeNull();
+  });
+
+  test("keeps role controls enabled while child-room sync is incomplete", async () => {
+    const api = createBrowserFakeApi();
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    expect(screen.getByText("Some child rooms are still syncing")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Role for Joined Member" })).toHaveProperty(
+      "disabled",
+      false
+    );
+  });
 });
 
 function deferred<T>() {

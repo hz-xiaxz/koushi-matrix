@@ -33,6 +33,7 @@ import type {
   EncryptionDebugOperationOutcome,
   SearchCrawlerFailureKind,
   SidebarModel,
+  SpaceMemberRoleUpdateOutcome,
   ThreadSnapshot,
   ThreadsListItem,
   TimelineMessage
@@ -676,6 +677,13 @@ export type RoomEvent =
         room_id: string;
         target_user_id: string;
         power_level: number;
+      };
+    }
+  | {
+      SpaceMemberRoleUpdateSettled: {
+        request_id: RequestId;
+        generation: number;
+        outcome: SpaceMemberRoleUpdateOutcome;
       };
     }
   | { MarkedAsRead: { request_id: RequestId; room_id: string } }

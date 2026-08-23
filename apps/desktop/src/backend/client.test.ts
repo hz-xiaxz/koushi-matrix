@@ -557,6 +557,25 @@ describe("TauriDesktopApi", () => {
       userId: "@target:example.invalid",
       generation: 4
     });
+
+    await api.updateSpaceMemberRole(
+      "!space:example.invalid",
+      "@target:example.invalid",
+      4,
+      "revision-1",
+      0,
+      50,
+      false
+    );
+    expect(invoke).toHaveBeenCalledWith("update_space_member_role", {
+      spaceId: "!space:example.invalid",
+      userId: "@target:example.invalid",
+      generation: 4,
+      expectedPowerLevelsRevision: "revision-1",
+      expectedPowerLevel: 0,
+      powerLevel: 50,
+      confirmed: false
+    });
   });
 
   test("passes activity actions to Rust-owned activity commands", async () => {

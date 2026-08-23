@@ -651,6 +651,150 @@ describe("BrowserFakeApi Space member audit", () => {
 
     expect(stale).toEqual(before);
   });
+
+  test("validates the exact Space role fence and target option before mutation", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+    const unchanged = async (generation: number, revision: string | null, level: number) =>
+      api.updateSpaceMemberRole(spaceId, "@joined:example.invalid", generation, revision, level, 50, false);
+
+    expect(await unchanged(0, "revision-1", 0)).toEqual(before);
+    expect(await unchanged(1, "stale-revision", 0)).toEqual(before);
+    expect(await unchanged(1, "revision-1", 50)).toEqual(before);
+    expect(
+      await api.updateSpaceMemberRole(spaceId, "@child-only:example.invalid", 1, "revision-1", 0, 50, false)
+    ).toEqual(before);
+    expect(
+      await api.updateSpaceMemberRole(spaceId, "@joined:example.invalid", 1, "revision-1", 0, 75, false)
+    ).toEqual(before);
+    expect(
+      await api.updateSpaceMemberRole(spaceId, "@joined:example.invalid", 1, "revision-1", 0, 100, false)
+    ).toEqual(before);
+  });
+
+  test("omits all role options when exact Space permissions deny role edits", async () => {
+    const api = createBrowserFakeApi({
+      roomPermissions: {
+        [spaceId]: {
+          can_edit_settings: true,
+          can_edit_roles: false,
+          can_invite: true,
+          can_kick: true,
+          can_ban: true,
+          can_unban: true
+        }
+      }
+    });
+    const members = (await api.getSnapshot()).state.domain.space_members;
+    expect(members.can_edit_roles).toBe(false);
+    expect(members.space_joined.every((entry) => entry.role_options.length === 0)).toBe(true);
+  });
+
+  test("replaces the full fake projection and re-derives target role options on success", async () => {
+    const api = createBrowserFakeApi();
+    const before = await api.getSnapshot();
+    const target = before.state.domain.space_members.space_joined.find(
+      (entry) => entry.user_id === "@joined:example.invalid"
+    );
+    if (!target) throw new Error("expected joined role target");
+
+    const after = await api.updateSpaceMemberRole(
+      spaceId,
+      target.user_id,
+      before.state.domain.space_members.generation,
+      before.state.domain.space_members.power_levels_revision,
+      target.power_level!,
+      50,
+      false
+    );
+    const members = after.state.domain.space_members;
+    expect(members.operation).toEqual({ kind: "idle" });
+    expect(members.power_levels_revision).toBe("revision-1000");
+    expect(members.space_invited).toEqual(before.state.domain.space_members.space_invited);
+    expect(members.child_room_only).toEqual(before.state.domain.space_members.child_room_only);
+    expect(members.child_room_count).toBe(before.state.domain.space_members.child_room_count);
+    expect(members.incomplete_child_room_count).toBe(
+      before.state.domain.space_members.incomplete_child_room_count
+    );
+    expect(members.space_joined).toEqual([
+      {
+        ...target,
+        power_level: 50,
+        role: "moderator",
+        role_options: [
+          { power_level: 0, role: "user", requires_confirmation: false },
+          { power_level: 100, role: "administrator", requires_confirmation: true }
+        ]
+      }
+    ]);
+  });
+
+  test.each(["forbidden", "stale", "network"] as const)(
+    "injects a %s role failure without changing authoritative members",
+    async (failureKind) => {
+      const api = createBrowserFakeApi({ spaceMemberRoleUpdateOutcome: failureKind });
+      const before = await api.getSnapshot();
+      const after = await api.updateSpaceMemberRole(
+        spaceId,
+        "@joined:example.invalid",
+        1,
+        "revision-1",
+        0,
+        50,
+        false
+      );
+      expect(after.state.domain.space_members.space_joined).toEqual(
+        before.state.domain.space_members.space_joined
+      );
+      expect(after.state.domain.space_members.operation).toMatchObject({
+        kind: "roleUpdateFailed",
+        failureKind,
+        space_id: spaceId,
+        user_id: "@joined:example.invalid",
+        generation: 1,
+        expected_power_levels_revision: "revision-1",
+        expected_power_level: 0,
+        power_level: 50
+      });
+    }
+  );
+
+  test("retries a stale role operation against the current revision", async () => {
+    const api = createBrowserFakeApi({
+      spaceMemberRoleUpdateOutcomes: ["stale", "success"]
+    });
+    const failed = await api.updateSpaceMemberRole(
+      spaceId,
+      "@joined:example.invalid",
+      1,
+      "revision-1",
+      0,
+      50,
+      false
+    );
+    expect(failed.state.domain.space_members.operation).toMatchObject({
+      kind: "roleUpdateFailed",
+      expected_power_levels_revision: "revision-1",
+      expected_power_level: 0,
+      power_level: 50
+    });
+    expect(failed.state.domain.space_members.power_levels_revision).toBe("revision-1000");
+
+    const retried = await api.updateSpaceMemberRole(
+      spaceId,
+      "@joined:example.invalid",
+      1,
+      failed.state.domain.space_members.power_levels_revision,
+      0,
+      50,
+      false
+    );
+    expect(retried.state.domain.space_members.operation).toEqual({ kind: "idle" });
+    expect(retried.state.domain.space_members.space_joined[0]).toMatchObject({
+      power_level: 50,
+      role: "moderator"
+    });
+  });
 });
 
 describe("BrowserFakeApi secure backup gate fixtures", () => {
@@ -2289,6 +2433,8 @@ describe("BrowserFakeApi settings preview", () => {
       child_room_count: 0,
       complete_child_room_count: 0,
       incomplete_child_room_count: 0,
+      power_levels_revision: null,
+      can_edit_roles: false,
       operation: { kind: "idle" }
     });
     expect(removed.state.ui.threads_list).toEqual({ kind: "closed" });

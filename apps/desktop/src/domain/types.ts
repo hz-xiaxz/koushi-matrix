@@ -791,6 +791,8 @@ export interface SpaceMembersState {
   child_room_count: number;
   complete_child_room_count: number;
   incomplete_child_room_count: number;
+  power_levels_revision: string | null;
+  can_edit_roles: boolean;
   operation: SpaceMembersOperationState;
 }
 
@@ -820,6 +822,13 @@ export interface SpaceMemberEntry {
   membership: SpaceMemberMembership;
   child_room_ids: string[];
   invite_pending: boolean;
+  role_options: SpaceMemberRoleOption[];
+}
+
+export interface SpaceMemberRoleOption {
+  power_level: number;
+  role: RoomMemberRole;
+  requires_confirmation: boolean;
 }
 
 export type SpaceMemberMembership =
@@ -856,7 +865,43 @@ export type SpaceMembersOperationState =
       user_id: string | null;
       generation: number;
       failureKind: OperationFailureKind;
+    }
+  | {
+      kind: "updatingRole";
+      request_id: number;
+      space_id: string;
+      user_id: string;
+      generation: number;
+      expected_power_levels_revision: string | null;
+      expected_power_level: number;
+      power_level: number;
+      confirmed: boolean;
+    }
+  | {
+      kind: "roleUpdateFailed";
+      request_id: number;
+      space_id: string;
+      user_id: string;
+      generation: number;
+      expected_power_levels_revision: string | null;
+      expected_power_level: number;
+      power_level: number;
+      sent_revision: string | null;
+      failureKind: SpaceMemberRoleFailureKind;
     };
+
+export type SpaceMemberRoleFailureKind =
+  | "forbidden"
+  | "stale"
+  | "not_found"
+  | "network"
+  | "timeout"
+  | "invalid"
+  | "sdk";
+
+export type SpaceMemberRoleUpdateOutcome =
+  | "succeeded"
+  | { failed: SpaceMemberRoleFailureKind };
 
 export type RoomTagKind = "favourite" | "lowPriority";
 
