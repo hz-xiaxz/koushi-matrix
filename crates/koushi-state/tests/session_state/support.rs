@@ -1,9 +1,10 @@
 use koushi_state::{
-    AppState, BasicOperationState, InviteOperationState, InviteScopeSelection,
-    InviteTargetQueryState, InviteWorkflowState, SearchCrawlerLastActive,
-    SearchCrawlerLastActiveStatus, SearchCrawlerRoomState, SearchCrawlerState, SessionInfo,
-    SessionState, SyncState, VerificationAccountKind, VerificationGateState,
-    VerificationMethodCapability,
+    AppState, BasicOperationState, CurrentSessionBackupState, CurrentSessionStatusDetails,
+    CurrentSessionStatusState, CurrentSessionSyncState, FocusedContextState, InviteOperationState,
+    InviteScopeSelection, InviteTargetQueryState, InviteWorkflowState, OwnIdentityVerification,
+    SearchCrawlerLastActive, SearchCrawlerLastActiveStatus, SearchCrawlerRoomState,
+    SearchCrawlerState, SessionInfo, SessionState, SyncState, VerificationAccountKind,
+    VerificationGateState, VerificationMethodCapability,
 };
 
 pub(super) fn session_info() -> SessionInfo {
@@ -71,6 +72,44 @@ pub(super) fn assert_session_scoped_workflows_cleared(state: &AppState) {
     assert_eq!(state.basic_operation, BasicOperationState::Idle);
     assert_eq!(state.invite_workflow, InviteWorkflowState::default());
     assert_eq!(state.search_crawler, SearchCrawlerState::default());
+}
+
+pub(super) fn visible_session_views_state() -> AppState {
+    AppState {
+        session: SessionState::Ready(session_info()),
+        sync: SyncState::Running,
+        current_session_status: CurrentSessionStatusState::Ready {
+            request_id: 41,
+            details: CurrentSessionStatusDetails::new(
+                Some("Synthetic device".to_owned()),
+                "DEVICE".to_owned(),
+                koushi_state::SessionAuthenticationMethod::Unknown,
+                CurrentSessionSyncState::Running,
+                true,
+                OwnIdentityVerification::Verified,
+                CurrentSessionBackupState::Ready,
+                1_000,
+            ),
+        },
+        timeline: koushi_state::TimelinePaneState {
+            room_id: Some("room-a".to_owned()),
+            ..Default::default()
+        },
+        invite_workflow: InviteWorkflowState {
+            query: InviteTargetQueryState {
+                room_id: Some("room-a".to_owned()),
+                query: "synthetic".to_owned(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        focused_context: FocusedContextState::Open {
+            room_id: "room-a".to_owned(),
+            event_id: "$event:example.invalid".to_owned(),
+            is_subscribed: true,
+        },
+        ..AppState::default()
+    }
 }
 
 pub(super) fn recovery_gate() -> VerificationGateState {

@@ -51,6 +51,78 @@ fn operation<'a>(state: &'a AppState, room_id: &str) -> &'a EncryptionDebugOpera
 }
 
 #[test]
+fn settled_and_failed_operations_are_admitted_in_transient_session_contexts() {
+    let info = SessionInfo {
+        homeserver: "https://matrix.example.invalid".to_owned(),
+        user_id: "@debug:example.invalid".to_owned(),
+        device_id: "DEBUG".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    for session in [
+        SessionState::Locked(info.clone()),
+        SessionState::SwitchingAccount { info: info.clone() },
+    ] {
+        let mut settled = ready_state();
+        with_room(&mut settled, "!r:example.invalid");
+        reduce(
+            &mut settled,
+            AppAction::EncryptionDebugOperationStarted {
+                request_id: 7,
+                room_id: "!r:example.invalid".to_owned(),
+                kind: EncryptionDebugOperationKind::ShareIndex0Key,
+            },
+        );
+        settled.session = session.clone();
+        let effects = reduce(
+            &mut settled,
+            AppAction::EncryptionDebugOperationSettled {
+                request_id: 7,
+                room_id: "!r:example.invalid".to_owned(),
+                kind: EncryptionDebugOperationKind::ShareIndex0Key,
+                outcome: EncryptionDebugOperationOutcome::Completed,
+            },
+        );
+        assert!(matches!(
+            operation(&settled, "!r:example.invalid"),
+            EncryptionDebugOperationState::Settled { request_id: 7, .. }
+        ));
+        assert_eq!(
+            effects,
+            vec![AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged)]
+        );
+
+        let mut failed = ready_state();
+        with_room(&mut failed, "!r:example.invalid");
+        reduce(
+            &mut failed,
+            AppAction::EncryptionDebugOperationStarted {
+                request_id: 8,
+                room_id: "!r:example.invalid".to_owned(),
+                kind: EncryptionDebugOperationKind::ResendIndex0Key,
+            },
+        );
+        failed.session = session;
+        let effects = reduce(
+            &mut failed,
+            AppAction::EncryptionDebugOperationFailed {
+                request_id: 8,
+                room_id: "!r:example.invalid".to_owned(),
+                kind: EncryptionDebugOperationKind::ResendIndex0Key,
+                outcome: EncryptionDebugOperationOutcome::CancelledStale,
+            },
+        );
+        assert!(matches!(
+            operation(&failed, "!r:example.invalid"),
+            EncryptionDebugOperationState::Failed { request_id: 8, .. }
+        ));
+        assert_eq!(
+            effects,
+            vec![AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged)]
+        );
+    }
+}
+
+#[test]
 fn start_is_admitted_from_idle_and_pending_starts_are_rejected() {
     let mut state = ready_state();
     with_room(&mut state, "!r:example.invalid");

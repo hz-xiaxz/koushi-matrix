@@ -91,6 +91,46 @@ fn room_tag_snapshot_updates_are_rust_owned_and_require_ready_session() {
 }
 
 #[test]
+fn room_tag_projections_are_whole_state_inert_in_locked_and_switching_contexts() {
+    for session in [
+        SessionState::Locked(session_info()),
+        SessionState::SwitchingAccount {
+            info: session_info(),
+        },
+    ] {
+        let actions = [
+            AppAction::RoomTagsUpdated {
+                room_id: "!room:example.invalid".to_owned(),
+                tags: RoomTags {
+                    favourite: Some(tag_info("0.4")),
+                    low_priority: None,
+                },
+            },
+            AppAction::RoomTagSet {
+                room_id: "!room:example.invalid".to_owned(),
+                tag: RoomTagKind::LowPriority,
+                info: tag_info("0.8"),
+            },
+            AppAction::RoomTagRemoved {
+                room_id: "!room:example.invalid".to_owned(),
+                tag: RoomTagKind::Favourite,
+            },
+        ];
+
+        for action in actions {
+            let mut state = ready_state();
+            state.session = session.clone();
+            if matches!(&action, AppAction::RoomTagRemoved { .. }) {
+                state.rooms[0].tags.favourite = Some(tag_info("0.1"));
+            }
+            let before = state.clone();
+            assert!(reduce(&mut state, action).is_empty());
+            assert_eq!(state, before);
+        }
+    }
+}
+
+#[test]
 fn room_tag_set_and_remove_are_mutually_exclusive_for_favourite_and_low_priority() {
     let mut state = ready_state();
 

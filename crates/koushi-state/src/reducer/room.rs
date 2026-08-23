@@ -30,6 +30,9 @@ pub(crate) fn handle_room_list_updated(
     spaces: Vec<crate::state::SpaceSummary>,
     rooms: Vec<crate::state::RoomSummary>,
 ) -> Vec<AppEffect> {
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
     if matches!(state.room_list.readiness, RoomListReadiness::Uninitialized) {
         state.room_list.readiness = RoomListReadiness::Ready {
             source: RoomListSource::Cache,
@@ -50,7 +53,7 @@ fn handle_room_list_updated_with_crawler(
     // trustworthy enough to forget a user's selection" is how memory got erased.
     authoritative: bool,
 ) -> Vec<AppEffect> {
-    if !has_session_projection_context(state) {
+    if !is_session_ready(state) {
         return Vec::new();
     }
 
@@ -231,9 +234,7 @@ pub(crate) fn handle_room_list_bootstrap_started(
     generation: u64,
     source: RoomListSource,
 ) -> Vec<AppEffect> {
-    if !has_session_projection_context(state)
-        || generation <= room_list_generation(&state.room_list.readiness)
-    {
+    if !is_session_ready(state) || generation <= room_list_generation(&state.room_list.readiness) {
         return Vec::new();
     }
     state.room_list.readiness = RoomListReadiness::Loading { source, generation };
@@ -249,6 +250,9 @@ pub(crate) fn handle_room_list_snapshot_provisional(
     rooms: Vec<crate::state::RoomSummary>,
     invites: Vec<crate::state::InvitePreview>,
 ) -> Vec<AppEffect> {
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
     if !room_list_provisional_matches_current(&state.room_list.readiness, generation, source)
         || (spaces.is_empty() && rooms.is_empty() && invites.is_empty())
     {
@@ -303,6 +307,9 @@ pub(crate) fn handle_room_list_snapshot_authoritative(
     rooms: Vec<crate::state::RoomSummary>,
     invites: Vec<crate::state::InvitePreview>,
 ) -> Vec<AppEffect> {
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
     if !room_list_authoritative_matches_current(&state.room_list.readiness, generation, source) {
         return Vec::new();
     }
@@ -500,7 +507,7 @@ pub(crate) fn handle_room_tags_updated(
     room_id: String,
     tags: crate::state::RoomTags,
 ) -> Vec<AppEffect> {
-    if !has_session_projection_context(state) {
+    if !is_session_ready(state) {
         return Vec::new();
     }
 
@@ -522,7 +529,7 @@ pub(crate) fn handle_room_tag_set(
     tag: RoomTagKind,
     info: RoomTagInfo,
 ) -> Vec<AppEffect> {
-    if !has_session_projection_context(state) {
+    if !is_session_ready(state) {
         return Vec::new();
     }
 
@@ -545,7 +552,7 @@ pub(crate) fn handle_room_tag_removed(
     room_id: String,
     tag: RoomTagKind,
 ) -> Vec<AppEffect> {
-    if !has_session_projection_context(state) {
+    if !is_session_ready(state) {
         return Vec::new();
     }
 

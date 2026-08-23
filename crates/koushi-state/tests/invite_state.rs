@@ -120,6 +120,42 @@ fn invite_list_requires_exact_ready_and_clears_on_logout() {
 /// invite from an ignored user. This guards the `visible_invites_for_ignored_users`
 /// helper path in the reducer.
 #[test]
+fn invite_list_update_is_whole_state_inert_in_locked_and_switching_contexts() {
+    for session in [
+        SessionState::Locked(SessionInfo {
+            homeserver: "http://127.0.0.1:6167".to_owned(),
+            user_id: "@qa:localhost".to_owned(),
+            device_id: "LOCALDEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        SessionState::SwitchingAccount {
+            info: SessionInfo {
+                homeserver: "http://127.0.0.1:6167".to_owned(),
+                user_id: "@qa:localhost".to_owned(),
+                device_id: "LOCALDEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+        },
+    ] {
+        let mut state = ready_state();
+        state.session = session;
+        state.invites = vec![invite_preview("!existing:localhost", false)];
+        let before = state.clone();
+
+        assert!(
+            reduce(
+                &mut state,
+                AppAction::InviteListUpdated {
+                    invites: vec![invite_preview("!incoming:localhost", true)],
+                },
+            )
+            .is_empty()
+        );
+        assert_eq!(state, before);
+    }
+}
+
+#[test]
 fn invite_list_filters_invites_from_ignored_inviters_in_room_list_projection() {
     let mut state = ready_state();
 

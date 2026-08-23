@@ -3,7 +3,7 @@ use super::support::{
     session_info, spaces,
 };
 use koushi_state::{
-    AppAction, AppEffect, AppState, AvatarImage, AvatarThumbnailState,
+    AppAction, AppEffect, AppState, AvatarImage, AvatarThumbnailState, InvitePreview,
     NativeAttentionObservationKind, NativeAttentionProjectionInput, RoomListFilter, RoomSummary,
     RoomTags, SessionState, SpaceSummary, ThreadPaneState, TimelinePaneState, UiEvent, UserProfile,
     compose_sidebar, native_attention_state_from_rooms, reduce,
@@ -433,6 +433,102 @@ fn room_list_update_is_ignored_while_session_is_locked() {
     assert!(state.spaces.is_empty());
     assert!(state.rooms.is_empty());
     assert!(effects.is_empty());
+}
+
+#[test]
+fn transient_room_list_update_is_whole_state_inert_before_readiness_bump() {
+    for session in [
+        SessionState::Locked(session_info()),
+        SessionState::SwitchingAccount {
+            info: session_info(),
+        },
+    ] {
+        let mut state = ready_state();
+        state.session = session;
+        state.room_list.readiness = koushi_state::RoomListReadiness::Uninitialized;
+        state.spaces = spaces();
+        state.rooms = rooms();
+        let before = state.clone();
+
+        assert!(
+            reduce(
+                &mut state,
+                AppAction::RoomListUpdated {
+                    spaces: spaces(),
+                    rooms: rooms(),
+                },
+            )
+            .is_empty()
+        );
+        assert_eq!(state, before);
+    }
+}
+
+#[test]
+fn transient_room_list_snapshots_are_whole_state_inert_before_invites_write() {
+    let existing_invite = InvitePreview {
+        room_id: "!existing:example.invalid".to_owned(),
+        display_name: "Existing invite".to_owned(),
+        avatar: None,
+        topic: None,
+        inviter_display_name: None,
+        inviter_user_id: None,
+        is_dm: false,
+    };
+
+    for session in [
+        SessionState::Locked(session_info()),
+        SessionState::SwitchingAccount {
+            info: session_info(),
+        },
+    ] {
+        let mut provisional = ready_state();
+        provisional.session = session.clone();
+        provisional.room_list.readiness = koushi_state::RoomListReadiness::Uninitialized;
+        provisional.invites = vec![existing_invite.clone()];
+        provisional.spaces = spaces();
+        provisional.rooms = rooms();
+        let before = provisional.clone();
+        assert!(
+            reduce(
+                &mut provisional,
+                AppAction::RoomListSnapshotProvisional {
+                    generation: 0,
+                    source: koushi_state::RoomListSource::Cache,
+                    spaces: spaces(),
+                    rooms: rooms(),
+                    invites: vec![],
+                },
+            )
+            .is_empty()
+        );
+        assert_eq!(provisional, before);
+
+        let mut authoritative = ready_state();
+        authoritative.session = session;
+        authoritative.room_list.readiness = koushi_state::RoomListReadiness::Ready {
+            source: koushi_state::RoomListSource::Cache,
+            generation: 0,
+        };
+        authoritative.invites = vec![existing_invite.clone()];
+        authoritative.spaces = spaces();
+        authoritative.rooms = rooms();
+        let before = authoritative.clone();
+        assert!(
+            reduce(
+                &mut authoritative,
+                AppAction::RoomListSnapshotAuthoritative {
+                    generation: 0,
+                    source: koushi_state::RoomListSource::Cache,
+                    spaces: vec![],
+                    rooms: vec![],
+                    invites: vec![],
+                },
+            )
+            .is_empty()
+        );
+        assert_eq!(authoritative, before);
+    }
 }
 
 #[test]

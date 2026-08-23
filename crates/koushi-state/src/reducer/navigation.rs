@@ -9,8 +9,8 @@ use crate::{
 use super::{
     apply_space_order_preference,
     avatar::{collect_known_avatar_thumbnails, preserve_avatar_thumbnail},
-    clear_active_room_for_navigation, has_session_projection_context, is_complete_space_order,
-    is_session_ready, preferred_selection_in_space, recompute_room_list_projection,
+    clear_active_room_for_navigation, is_complete_space_order, is_session_ready,
+    preferred_selection_in_space, recompute_room_list_projection,
     remember_active_room_for_current_space, reorder_visible_space_order,
     select_active_room_for_navigation,
 };
@@ -21,7 +21,7 @@ pub(crate) fn handle_invite_list_updated(
     state: &mut AppState,
     mut invites: Vec<crate::state::InvitePreview>,
 ) -> Vec<AppEffect> {
-    if !has_session_projection_context(state) {
+    if !is_session_ready(state) {
         return Vec::new();
     }
 

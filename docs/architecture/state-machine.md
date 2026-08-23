@@ -46,10 +46,12 @@ states never authorize room, timeline, thread, search, composer, directory,
 notification, attention, or normal sync actions.
 
 Actor-delivered projections and request-correlated settles use a wider
-"session projection context". It may include verification-gate states only for
-gate rendering and request-correlated recovery/SAS/trust settles; it must never
-be reused as a normal command-admission predicate. Logout, rejection, trust
-loss, and session-clear transitions explicitly reset session-scoped state.
+"session projection context": exactly `Ready`, `Locked`, or
+`SwitchingAccount` for normal session-scoped projections/terminals. Verification
+gate rendering and recovery/SAS/trust settles use their separate gate predicate.
+Neither predicate may be reused as normal command admission. Fresh room-list,
+invite-list, and room-tag projections remain Ready-only. Logout, rejection,
+trust loss, and session-clear transitions explicitly reset session-scoped state.
 
 ## Maintenance Contract
 
@@ -329,10 +331,17 @@ replacement generation, or actor cancellation clears any partial proof pair.
 Explicit stop reaches `Stopped` and never auto-restarts. Stale generation
 success/failure/drop observations are inert.
 
-Logout, lock, and account switch clear navigation, room lists, the main
-timeline, thread pane, search state, search crawler status, invite workflow,
-and basic operation pendings. The reducer emits UI events for any cleared
-visible panes or crawler status.
+Logout, lock, account switch, rejection, and recovery-required transitions
+atomically clear navigation, room lists, the main timeline, thread pane, focused
+context, search state, search crawler status, invite workflow, and basic
+operation pendings. Additional UI events are emitted only for projections that
+were visible/non-default, including `InviteWorkflowChanged` and
+`FocusedContextChanged`; the pre-existing unconditional `RoomListChanged` and
+selected-room `TimelineChanged` remain in the fixed cleanup order. Every admitted Ready →
+Locked path (`SessionLocked`, current trust loss, or authoritative trust loss)
+also resets `current_session_status` to Idle in that same reducer action. A
+duplicate trust-loss/lock observation outside Ready is inert and cannot reset a
+newer status projection.
 
 `SessionLocked` and `LogoutRequested` emit `AppEffect::StopSync`; the core
 runtime must execute it through the canonical sync actor command path.
@@ -1660,6 +1669,9 @@ stateDiagram-v2
   pin/unpin. It does not synthesize a room summary and does not settle a
   pending operation by itself. It is applied in session projection context so a
   transient `Locked` or `SwitchingAccount` state cannot lose the projection.
+  Because cleanup may already have cleared profiles, this bounded transient
+  projection can use the safe raw-sender fallback and remain orphaned until the
+  next authoritative pinned refresh; it never recreates room/list/tag state.
 - `PinEventRequested` and `UnpinEventRequested` are accepted only for a Ready
   session, a known room, a non-empty event id, and an `Idle` or recoverable
   `Failed` pin operation. Requests while another pin/unpin is pending are
@@ -2929,10 +2941,12 @@ stateDiagram-v2
   ignored from an already-reset state. Signed-out, restoring, locked, and
   logging-out states ignore E2EE trust actions.
 - Session-view clearing transitions (`LogoutRequested`, `SessionLocked`,
-  `SwitchAccountRequested`) reset `AppState.e2ee_trust` to its default
-  private-data-free unknowns and emit `E2eeTrustChanged` when trust state was
-  non-default. Verification targets from one account must not remain visible in
-  snapshots for another account or a signed-out/locked surface.
+  `SwitchAccountRequested`, provisional rejection, and recovery-required entry)
+  reset `AppState.e2ee_trust` to its default private-data-free unknowns and emit
+  `E2eeTrustChanged` when trust state was non-default. The same atomic cleanup
+  emits `InviteWorkflowChanged` and `FocusedContextChanged` only when those
+  projections were non-default. Verification targets from one account must not
+  remain visible in snapshots for another account or a signed-out/locked surface.
 - Verification start is accepted only when no verification is active
   (`Idle`, `Done`, or `Failed`). A second request while `Requested`,
   `Accepted`, `SasPresented`, or `Confirming` is ignored.

@@ -1,8 +1,8 @@
 use koushi_state::{
-    AppAction, AppEffect, AppState, CurrentSessionBackupState, CurrentSessionStatusDetails,
-    CurrentSessionStatusFailureKind, CurrentSessionStatusState, CurrentSessionSyncState,
-    CurrentSessionVerification, OwnIdentityVerification, SessionAuthenticationMethod, SessionInfo,
-    SessionState, SessionStatusRefreshTrigger, reduce,
+    AppAction, AppEffect, AppState, CurrentDeviceTrustState, CurrentSessionBackupState,
+    CurrentSessionStatusDetails, CurrentSessionStatusFailureKind, CurrentSessionStatusState,
+    CurrentSessionSyncState, CurrentSessionVerification, OwnIdentityVerification,
+    SessionAuthenticationMethod, SessionInfo, SessionState, SessionStatusRefreshTrigger, reduce,
 };
 
 fn ready_state() -> AppState {
@@ -181,6 +181,54 @@ fn stale_completion_cannot_replace_the_current_request() {
         state.current_session_status,
         CurrentSessionStatusState::Checking { request_id: 8, .. }
     ));
+}
+
+#[test]
+fn trust_loss_clears_status_and_late_completions_stay_idle() {
+    let mut state = ready_state();
+    state.current_session_status = CurrentSessionStatusState::Checking {
+        request_id: 41,
+        trigger: SessionStatusRefreshTrigger::Manual,
+    };
+
+    reduce(
+        &mut state,
+        AppAction::CurrentDeviceTrustChanged(CurrentDeviceTrustState::Unverified),
+    );
+    assert_eq!(
+        state.current_session_status,
+        CurrentSessionStatusState::Idle
+    );
+
+    let details = CurrentSessionStatusDetails::new(
+        None,
+        "DEVICE".to_owned(),
+        SessionAuthenticationMethod::Unknown,
+        CurrentSessionSyncState::Running,
+        true,
+        OwnIdentityVerification::Verified,
+        CurrentSessionBackupState::Ready,
+        2_000,
+    );
+    reduce(
+        &mut state,
+        AppAction::CurrentSessionStatusRefreshed {
+            request_id: 41,
+            details,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::CurrentSessionStatusRefreshFailed {
+            request_id: 41,
+            kind: CurrentSessionStatusFailureKind::Sdk,
+            checked_at_ms: 2_001,
+        },
+    );
+    assert_eq!(
+        state.current_session_status,
+        CurrentSessionStatusState::Idle
+    );
 }
 
 #[test]
