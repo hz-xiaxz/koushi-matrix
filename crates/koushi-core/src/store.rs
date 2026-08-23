@@ -24,7 +24,7 @@ mod test_support;
 use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(any(test, feature = "test-hooks"))]
-use std::sync::Mutex;
+use std::sync::{Mutex, atomic::AtomicUsize};
 
 use koushi_key::{LocalUnlockSecret, SessionKeyId};
 use koushi_sdk::{
@@ -110,6 +110,7 @@ struct ComposerDraftIoProbe {
     save_completed: Option<tokio::sync::oneshot::Sender<()>>,
     load_started: Option<tokio::sync::oneshot::Sender<()>>,
     load_completed: Option<tokio::sync::oneshot::Sender<()>>,
+    load_attempt_count: Arc<AtomicUsize>,
 }
 
 impl StoreActor {

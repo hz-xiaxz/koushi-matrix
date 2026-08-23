@@ -36,6 +36,8 @@ pub use connection::{CommandSubmitError, CoreCommandHandle, CoreConnection, Even
 use std::collections::{BTreeSet, HashMap};
 use std::future;
 use std::path::PathBuf;
+#[cfg(any(test, feature = "test-hooks"))]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, atomic::AtomicU64};
 use std::time::{Duration, Instant};
 
@@ -321,6 +323,7 @@ pub struct ComposerDraftIoBarrierForTesting {
     save_completed: oneshot::Receiver<()>,
     load_started: oneshot::Receiver<()>,
     load_completed: oneshot::Receiver<()>,
+    load_attempt_count: Arc<AtomicUsize>,
 }
 
 #[cfg(any(test, feature = "test-hooks"))]
@@ -329,6 +332,10 @@ impl ComposerDraftIoBarrierForTesting {
         (&mut self.save_started)
             .await
             .expect("composer draft save-start probe must remain available");
+    }
+
+    pub fn load_attempt_count(&self) -> usize {
+        self.load_attempt_count.load(Ordering::Acquire)
     }
 
     pub fn load_started_before_release(&mut self) -> bool {
@@ -620,6 +627,7 @@ impl CoreRuntime {
         let (save_completed_tx, save_completed) = oneshot::channel();
         let (load_started_tx, load_started) = oneshot::channel();
         let (load_completed_tx, load_completed) = oneshot::channel();
+        let load_attempt_count = Arc::new(AtomicUsize::new(0));
         self.composer_draft_store_actor_for_testing
             .install_composer_draft_io_probe(
                 save_started_tx,
@@ -627,6 +635,7 @@ impl CoreRuntime {
                 save_completed_tx,
                 load_started_tx,
                 load_completed_tx,
+                Arc::clone(&load_attempt_count),
             );
         ComposerDraftIoBarrierForTesting {
             save_started,
@@ -634,6 +643,7 @@ impl CoreRuntime {
             save_completed,
             load_started,
             load_completed,
+            load_attempt_count,
         }
     }
 
