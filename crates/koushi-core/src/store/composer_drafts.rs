@@ -787,6 +787,7 @@ impl StoreActor {
         save_completed: tokio::sync::oneshot::Sender<()>,
         load_started: tokio::sync::oneshot::Sender<()>,
         load_completed: tokio::sync::oneshot::Sender<()>,
+        load_attempt_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     ) {
         *self
             .composer_draft_io_probe
@@ -797,6 +798,7 @@ impl StoreActor {
             save_completed: Some(save_completed),
             load_started: Some(load_started),
             load_completed: Some(load_completed),
+            load_attempt_count,
         });
     }
 
@@ -835,12 +837,19 @@ impl StoreActor {
 
     #[cfg(any(test, feature = "test-hooks"))]
     fn notify_composer_draft_load_started_for_testing(&self) {
-        let started = self
-            .composer_draft_io_probe
-            .lock()
-            .expect("composer draft I/O probe mutex")
-            .as_mut()
-            .and_then(|probe| probe.load_started.take());
+        let started = {
+            let mut probe = self
+                .composer_draft_io_probe
+                .lock()
+                .expect("composer draft I/O probe mutex");
+            let Some(probe) = probe.as_mut() else {
+                return;
+            };
+            probe
+                .load_attempt_count
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
+            probe.load_started.take()
+        };
         if let Some(started) = started {
             let _ = started.send(());
         }

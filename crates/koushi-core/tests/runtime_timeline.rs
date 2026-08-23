@@ -980,6 +980,7 @@ async fn composer_drafts_persist_after_debounce_and_load_on_restart() {
 }
 
 static CORRUPT_COMPOSER_LOAD_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+const SAME_SESSION_LOAD_STRESS_UPDATES: usize = 64;
 
 fn composer_load_diagnostic_count(stage: &str) -> usize {
     koushi_diagnostics::snapshot()
@@ -991,6 +992,15 @@ fn composer_load_diagnostic_count(stage: &str) -> usize {
         .count()
 }
 
+struct PreparedCorruptComposerLoadFixture {
+    _data_dir: tempfile::TempDir,
+    _credential_dir: tempfile::TempDir,
+    room_id: &'static str,
+    payload_path: std::path::PathBuf,
+    corrupt_payload: Vec<u8>,
+    valid_payload: Vec<u8>,
+}
+
 struct CorruptComposerLoadFixture {
     _data_dir: tempfile::TempDir,
     _credential_dir: tempfile::TempDir,
@@ -1000,11 +1010,11 @@ struct CorruptComposerLoadFixture {
     payload_path: std::path::PathBuf,
     corrupt_payload: Vec<u8>,
     valid_payload: Vec<u8>,
-    failed_before: usize,
+    failed_load_probe: koushi_core::runtime::ComposerDraftIoBarrierForTesting,
 }
 
 impl CorruptComposerLoadFixture {
-    async fn start() -> Self {
+    async fn prepare() -> PreparedCorruptComposerLoadFixture {
         let data_dir = tempfile::tempdir().expect("data dir");
         let credential_dir = tempfile::tempdir().expect("credential dir");
         let room_id = "!room:example.test";
@@ -1025,18 +1035,36 @@ impl CorruptComposerLoadFixture {
             .expect("encrypted composer payload is nonempty") ^= 0x01;
         std::fs::write(&payload_path, &corrupt_payload)
             .expect("corrupt encrypted composer payload");
-        let failed_before = composer_load_diagnostic_count("load_failed");
 
+        PreparedCorruptComposerLoadFixture {
+            _data_dir: data_dir,
+            _credential_dir: credential_dir,
+            room_id,
+            payload_path,
+            corrupt_payload,
+            valid_payload,
+        }
+    }
+
+    async fn start(prepared: PreparedCorruptComposerLoadFixture) -> Self {
+        let PreparedCorruptComposerLoadFixture {
+            _data_dir,
+            _credential_dir,
+            room_id,
+            payload_path,
+            corrupt_payload,
+            valid_payload,
+        } = prepared;
         let runtime = CoreRuntime::start_with_data_dir_and_file_credentials(
-            data_dir.path().to_path_buf(),
-            credential_dir.path().to_path_buf(),
+            _data_dir.path().to_path_buf(),
+            _credential_dir.path().to_path_buf(),
         );
         let mut connection = runtime.attach();
-        let mut failed_load = runtime.install_composer_draft_io_barrier_for_testing();
+        let mut failed_load_probe = runtime.install_composer_draft_io_barrier_for_testing();
         runtime
             .inject_actions(restore_ready_room_actions(room_id, [room_id.to_owned()]))
             .await;
-        wait_for_composer_load_io(&mut failed_load, "first corrupt").await;
+        wait_for_composer_load_io(&mut failed_load_probe, "first corrupt").await;
         wait_for_ready_room(&mut connection, room_id).await;
         let failed_state = connection.snapshot();
         assert_eq!(
@@ -1047,10 +1075,6 @@ impl CorruptComposerLoadFixture {
                 .map(koushi_state::ComposerDocument::plain_body),
             None
         );
-        assert_eq!(
-            composer_load_diagnostic_count("load_failed"),
-            failed_before + 1
-        );
         assert!(koushi_diagnostics::snapshot().records.iter().all(|record| {
             record.event.source != "core.composer_draft"
                 || record.event.stage != "load_failed"
@@ -1058,15 +1082,15 @@ impl CorruptComposerLoadFixture {
         }));
 
         Self {
-            _data_dir: data_dir,
-            _credential_dir: credential_dir,
+            _data_dir,
+            _credential_dir,
             runtime,
             connection,
             room_id,
             payload_path,
             corrupt_payload,
             valid_payload,
-            failed_before,
+            failed_load_probe,
         }
     }
 
@@ -1081,42 +1105,92 @@ impl CorruptComposerLoadFixture {
     }
 }
 
+impl PreparedCorruptComposerLoadFixture {
+    async fn start(self) -> CorruptComposerLoadFixture {
+        CorruptComposerLoadFixture::start(self).await
+    }
+}
+
 #[tokio::test]
 async fn corrupt_load_attempts_once_per_session() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let mut fixture = CorruptComposerLoadFixture::start().await;
-    let benign_room = "!benign:example.test";
+    let prepared = CorruptComposerLoadFixture::prepare().await;
+    let mut fixture = prepared.start().await;
+    let sentinel_room = "!sentinel:example.test";
     let mut unexpected_reload = fixture
         .runtime
         .install_composer_draft_io_barrier_for_testing();
-    fixture
-        .runtime
-        .inject_actions(vec![AppAction::RoomListUpdated {
-            spaces: vec![],
-            rooms: vec![room_summary(fixture.room_id), room_summary(benign_room)],
-        }])
-        .await;
+    for update in 0..SAME_SESSION_LOAD_STRESS_UPDATES {
+        let rooms = if update + 1 == SAME_SESSION_LOAD_STRESS_UPDATES {
+            vec![room_summary(fixture.room_id), room_summary(sentinel_room)]
+        } else {
+            vec![room_summary(fixture.room_id)]
+        };
+        fixture
+            .runtime
+            .inject_actions(vec![AppAction::RoomListUpdated {
+                spaces: vec![],
+                rooms,
+            }])
+            .await;
+    }
     wait_for_state_event(&mut fixture.connection, |state| {
-        state.rooms.iter().any(|room| room.room_id == benign_room)
+        state.rooms.iter().any(|room| room.room_id == sentinel_room)
     })
     .await;
+    assert_eq!(fixture.failed_load_probe.load_attempt_count(), 1);
+    assert_eq!(unexpected_reload.load_attempt_count(), 0);
     assert!(
         !unexpected_reload.load_started_before_release(),
         "same-session benign state changes must not retry a failed composer load"
     );
-    assert_eq!(
-        composer_load_diagnostic_count("load_failed"),
-        fixture.failed_before + 1
-    );
     fixture.shutdown().await;
+}
+
+#[tokio::test]
+async fn concurrent_corrupt_runtime_evidence_is_owner_scoped() {
+    let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let first_prepared = CorruptComposerLoadFixture::prepare().await;
+    let second_prepared = CorruptComposerLoadFixture::prepare().await;
+    let failed_before = composer_load_diagnostic_count("load_failed");
+    let (first, second) = tokio::join!(first_prepared.start(), second_prepared.start());
+    let first_settled = {
+        let state = first.connection.snapshot();
+        matches!(state.session, SessionState::Ready(_))
+            && state.composer_drafts.rooms.get(first.room_id).is_none()
+    };
+    let second_settled = {
+        let state = second.connection.snapshot();
+        matches!(state.session, SessionState::Ready(_))
+            && state.composer_drafts.rooms.get(second.room_id).is_none()
+    };
+    assert!(
+        first_settled && second_settled,
+        "both corrupt runtimes must settle before attribution read: first_settled={first_settled} second_settled={second_settled}"
+    );
+    let owner_counts = [
+        first.failed_load_probe.load_attempt_count(),
+        second.failed_load_probe.load_attempt_count(),
+    ];
+    assert_eq!(owner_counts, [1, 1]);
+    let actual = composer_load_diagnostic_count("load_failed");
+    let actual_delta = actual.saturating_sub(failed_before);
+    assert_eq!(
+        actual,
+        failed_before + 2,
+        "global composer-load count expected_delta=2 actual_delta={actual_delta} baseline={failed_before} first_settled={first_settled} second_settled={second_settled}"
+    );
+    first.shutdown().await;
+    second.shutdown().await;
 }
 
 #[tokio::test]
 async fn revision_commands_fail_while_composer_load_failed() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let mut fixture = CorruptComposerLoadFixture::start().await;
+    let mut fixture = CorruptComposerLoadFixture::prepare().await.start().await;
     let before = fixture.connection.snapshot();
     let set_request_id = fixture.connection.next_request_id();
     submit_composer_command(
@@ -1168,9 +1242,9 @@ async fn revision_commands_fail_while_composer_load_failed() {
 async fn lock_unlock_retries_repaired_composer_payload() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let mut fixture = CorruptComposerLoadFixture::start().await;
+    let mut fixture = CorruptComposerLoadFixture::prepare().await.start().await;
     std::fs::write(&fixture.payload_path, &fixture.valid_payload)
-        .expect("install repaired valid encrypted payload");
+        .expect("install repaired valid encrypted composer payload");
     fixture
         .runtime
         .inject_actions(vec![AppAction::SessionLocked])
@@ -1200,6 +1274,8 @@ async fn lock_unlock_retries_repaired_composer_payload() {
                 .is_some_and(|document| document.plain_body() == "persisted before corruption")
     })
     .await;
+    assert_eq!(fixture.failed_load_probe.load_attempt_count(), 1);
+    assert_eq!(repaired_load.load_attempt_count(), 1);
     fixture.shutdown().await;
 }
 
