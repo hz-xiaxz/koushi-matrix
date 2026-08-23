@@ -153,7 +153,234 @@ fn stale_pin_completion_is_ignored() {
 }
 
 #[test]
-fn pin_completion_is_ignored_after_session_leaves_ready() {
+fn pin_completion_settles_in_ready_locked_and_switching_contexts() {
+    let info = SessionInfo {
+        homeserver: "https://server.example.invalid".to_owned(),
+        user_id: "@alice:example.invalid".to_owned(),
+        device_id: "ALICEDEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let sessions = vec![
+        SessionState::Ready(info.clone()),
+        SessionState::Locked(info.clone()),
+        SessionState::SwitchingAccount { info: info.clone() },
+        SessionState::CapabilityBlocked {
+            info: info.clone(),
+            failure: koushi_state::SlidingSyncCapabilityFailureKind::Unsupported,
+        },
+        SessionState::SignedOut,
+    ];
+
+    for session in sessions {
+        let mut state = ready_state();
+        reduce(
+            &mut state,
+            AppAction::PinEventRequested {
+                request_id: 7,
+                room_id: "!room:example.invalid".to_owned(),
+                event_id: "$event:example.invalid".to_owned(),
+            },
+        );
+        state.session = session.clone();
+
+        let effects = reduce(
+            &mut state,
+            AppAction::PinEventCompleted {
+                request_id: 7,
+                room_id: "!room:example.invalid".to_owned(),
+            },
+        );
+
+        if matches!(
+            &session,
+            SessionState::CapabilityBlocked { .. } | SessionState::SignedOut
+        ) {
+            assert_eq!(effects, Vec::new());
+            assert!(matches!(
+                state
+                    .room_interactions
+                    .get("!room:example.invalid")
+                    .expect("room interaction state")
+                    .pin_operation,
+                PinOperationState::Pending { request_id: 7, .. }
+            ));
+        } else {
+            assert_eq!(
+                state
+                    .room_interactions
+                    .get("!room:example.invalid")
+                    .expect("room interaction state")
+                    .pin_operation,
+                PinOperationState::Idle
+            );
+            assert_eq!(
+                effects,
+                vec![AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged)]
+            );
+        }
+    }
+}
+
+#[test]
+fn pin_and_unpin_failures_settle_in_locked_and_switching_contexts() {
+    let info = SessionInfo {
+        homeserver: "https://server.example.invalid".to_owned(),
+        user_id: "@alice:example.invalid".to_owned(),
+        device_id: "ALICEDEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    for session in [
+        SessionState::Locked(info.clone()),
+        SessionState::SwitchingAccount { info: info.clone() },
+    ] {
+        let mut pin = ready_state();
+        reduce(
+            &mut pin,
+            AppAction::PinEventRequested {
+                request_id: 7,
+                room_id: "!room:example.invalid".to_owned(),
+                event_id: "$event:example.invalid".to_owned(),
+            },
+        );
+        pin.session = session.clone();
+        let effects = reduce(
+            &mut pin,
+            AppAction::PinEventFailed {
+                request_id: 7,
+                room_id: "!room:example.invalid".to_owned(),
+                kind: OperationFailureKind::Network,
+            },
+        );
+        assert!(matches!(
+            pin.room_interactions["!room:example.invalid"].pin_operation,
+            PinOperationState::Failed { op: PinOp::Pin, .. }
+        ));
+        assert_eq!(
+            effects,
+            vec![
+                AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged),
+                AppEffect::EmitUiEvent(UiEvent::ErrorChanged),
+            ]
+        );
+
+        let mut unpin = ready_state();
+        reduce(
+            &mut unpin,
+            AppAction::UnpinEventRequested {
+                request_id: 8,
+                room_id: "!room:example.invalid".to_owned(),
+                event_id: "$event:example.invalid".to_owned(),
+            },
+        );
+        unpin.session = session;
+        let effects = reduce(
+            &mut unpin,
+            AppAction::UnpinEventFailed {
+                request_id: 8,
+                room_id: "!room:example.invalid".to_owned(),
+                kind: OperationFailureKind::Network,
+            },
+        );
+        assert!(matches!(
+            unpin.room_interactions["!room:example.invalid"].pin_operation,
+            PinOperationState::Failed {
+                op: PinOp::Unpin,
+                ..
+            }
+        ));
+        assert_eq!(
+            effects,
+            vec![
+                AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged),
+                AppEffect::EmitUiEvent(UiEvent::ErrorChanged),
+            ]
+        );
+    }
+}
+
+#[test]
+fn pin_completion_stale_wrong_room_and_opposite_operation_are_inert_in_every_context() {
+    let info = SessionInfo {
+        homeserver: "https://server.example.invalid".to_owned(),
+        user_id: "@alice:example.invalid".to_owned(),
+        device_id: "ALICEDEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let sessions = vec![
+        SessionState::Ready(info.clone()),
+        SessionState::Locked(info.clone()),
+        SessionState::SwitchingAccount { info: info.clone() },
+        SessionState::CapabilityBlocked {
+            info: info.clone(),
+            failure: koushi_state::SlidingSyncCapabilityFailureKind::Unsupported,
+        },
+        SessionState::SignedOut,
+    ];
+
+    for session in sessions {
+        let mut stale = ready_state();
+        reduce(
+            &mut stale,
+            AppAction::PinEventRequested {
+                request_id: 7,
+                room_id: "!room:example.invalid".to_owned(),
+                event_id: "$event:example.invalid".to_owned(),
+            },
+        );
+        stale.session = session.clone();
+        let before = stale.clone();
+        assert!(
+            reduce(
+                &mut stale,
+                AppAction::PinEventCompleted {
+                    request_id: 8,
+                    room_id: "!room:example.invalid".to_owned(),
+                },
+            )
+            .is_empty()
+        );
+        assert_eq!(stale, before);
+
+        let before = stale.clone();
+        assert!(
+            reduce(
+                &mut stale,
+                AppAction::PinEventCompleted {
+                    request_id: 7,
+                    room_id: "!other:example.invalid".to_owned(),
+                },
+            )
+            .is_empty()
+        );
+        assert_eq!(stale, before);
+
+        let mut opposite = ready_state();
+        reduce(
+            &mut opposite,
+            AppAction::UnpinEventRequested {
+                request_id: 7,
+                room_id: "!room:example.invalid".to_owned(),
+                event_id: "$event:example.invalid".to_owned(),
+            },
+        );
+        opposite.session = session.clone();
+        let before = opposite.clone();
+        assert!(
+            reduce(
+                &mut opposite,
+                AppAction::PinEventCompleted {
+                    request_id: 7,
+                    room_id: "!room:example.invalid".to_owned(),
+                },
+            )
+            .is_empty()
+        );
+        assert_eq!(opposite, before);
+    }
+}
+
+#[test]
+fn pinned_projection_is_admitted_in_locked_and_switching_contexts() {
     for session in [
         SessionState::Locked(SessionInfo {
             homeserver: "https://server.example.invalid".to_owned(),
@@ -171,38 +398,22 @@ fn pin_completion_is_ignored_after_session_leaves_ready() {
         },
     ] {
         let mut state = ready_state();
-        reduce(
-            &mut state,
-            AppAction::PinEventRequested {
-                request_id: 7,
-                room_id: "!room:example.invalid".to_owned(),
-                event_id: "$event:example.invalid".to_owned(),
-            },
-        );
         state.session = session;
-
         let effects = reduce(
             &mut state,
-            AppAction::PinEventCompleted {
-                request_id: 7,
+            AppAction::RoomPinnedEventsUpdated {
                 room_id: "!room:example.invalid".to_owned(),
+                pinned: vec![pinned("$transient:example.invalid", Some("pinned"))],
             },
         );
-
         assert_eq!(
-            state
-                .room_interactions
-                .get("!room:example.invalid")
-                .expect("room interaction state")
-                .pin_operation,
-            PinOperationState::Pending {
-                request_id: 7,
-                room_id: "!room:example.invalid".to_owned(),
-                event_id: "$event:example.invalid".to_owned(),
-                op: koushi_state::PinOp::Pin,
-            }
+            state.room_interactions["!room:example.invalid"].pinned_events,
+            vec![pinned("$transient:example.invalid", Some("pinned"))]
         );
-        assert!(effects.is_empty());
+        assert_eq!(
+            effects,
+            vec![AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged)]
+        );
     }
 }
 

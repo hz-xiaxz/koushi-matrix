@@ -1,9 +1,10 @@
 use super::support::{
     alternate_session_info, assert_session_scoped_workflows_cleared, session_info,
-    state_with_session_scoped_workflows,
+    state_with_session_scoped_workflows, visible_session_views_state,
 };
 use koushi_state::{
     AppAction, AppEffect, AppState, ComposerSubmissionTarget, ComposerSubmissionTerminalOutcome,
+    CurrentDeviceTrustState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,
     NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionState, NativeAttentionSummary, NavigationState, RoomAttentionKind, RoomSummary,
     RoomTags, SearchScope, SearchState, SessionState, SpaceSummary, SubmissionId, SyncState,
@@ -450,6 +451,163 @@ fn switch_account_clears_session_scoped_workflows_and_crawler_state() {
 
     assert_session_scoped_workflows_cleared(&state);
     assert!(effects.contains(&AppEffect::EmitUiEvent(UiEvent::SearchCrawlerChanged)));
+}
+
+#[test]
+fn trust_loss_resets_status_and_visible_views_once_with_ordered_effects() {
+    let actions = [
+        AppAction::CurrentDeviceTrustChanged(CurrentDeviceTrustState::Unverified),
+        AppAction::CurrentDeviceTrustChanged(CurrentDeviceTrustState::Unknown),
+        AppAction::AuthoritativeDeviceTrustChanged {
+            generation: 7,
+            transition_id: 9,
+            trust: CurrentDeviceTrustState::Unverified,
+        },
+        AppAction::AuthoritativeDeviceTrustChanged {
+            generation: 8,
+            transition_id: 10,
+            trust: CurrentDeviceTrustState::Unknown,
+        },
+        AppAction::SessionLocked,
+    ];
+
+    for action in actions {
+        let mut state = visible_session_views_state();
+        let effects = reduce(&mut state, action);
+
+        assert!(matches!(state.session, SessionState::Locked(_)));
+        assert_eq!(state.sync, SyncState::Stopped);
+        assert_eq!(
+            state.current_session_status,
+            koushi_state::CurrentSessionStatusState::Idle
+        );
+        assert_eq!(
+            state.invite_workflow,
+            koushi_state::InviteWorkflowState::default()
+        );
+        assert_eq!(
+            state.focused_context,
+            koushi_state::FocusedContextState::Closed
+        );
+        assert_eq!(
+            effects,
+            vec![
+                AppEffect::StopSync,
+                AppEffect::EmitUiEvent(UiEvent::SessionChanged),
+                AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
+                AppEffect::EmitUiEvent(UiEvent::InviteWorkflowChanged),
+                AppEffect::EmitUiEvent(UiEvent::TimelineChanged {
+                    room_id: "room-a".to_owned(),
+                }),
+                AppEffect::EmitUiEvent(UiEvent::FocusedContextChanged),
+            ]
+        );
+
+        let stale_details = CurrentSessionStatusDetails::new(
+            Some("Stale device".to_owned()),
+            "STALE".to_owned(),
+            koushi_state::SessionAuthenticationMethod::Unknown,
+            koushi_state::CurrentSessionSyncState::Running,
+            true,
+            koushi_state::OwnIdentityVerification::Verified,
+            koushi_state::CurrentSessionBackupState::Ready,
+            2_000,
+        );
+        assert!(
+            reduce(
+                &mut state,
+                AppAction::CurrentSessionStatusRefreshed {
+                    request_id: 41,
+                    details: stale_details,
+                }
+            )
+            .is_empty()
+        );
+        assert!(
+            reduce(
+                &mut state,
+                AppAction::CurrentSessionStatusRefreshFailed {
+                    request_id: 41,
+                    kind: CurrentSessionStatusFailureKind::Sdk,
+                    checked_at_ms: 2_001,
+                }
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            state.current_session_status,
+            koushi_state::CurrentSessionStatusState::Idle
+        );
+    }
+}
+
+#[test]
+fn duplicate_session_locked_does_not_reset_newer_status_or_emit_effects() {
+    let mut state = visible_session_views_state();
+    state.session = SessionState::Locked(session_info());
+    state.current_session_status = koushi_state::CurrentSessionStatusState::Checking {
+        request_id: 99,
+        trigger: koushi_state::SessionStatusRefreshTrigger::Manual,
+    };
+
+    let before = state.clone();
+    let effects = reduce(&mut state, AppAction::SessionLocked);
+
+    assert!(effects.is_empty());
+    assert_eq!(state, before);
+}
+
+#[test]
+fn verified_observation_and_non_ready_trust_loss_are_inert_for_status() {
+    let mut ready = visible_session_views_state();
+    let before_status = ready.current_session_status.clone();
+    assert!(
+        reduce(
+            &mut ready,
+            AppAction::CurrentDeviceTrustChanged(CurrentDeviceTrustState::Verified)
+        )
+        .is_empty()
+    );
+    assert_eq!(ready.current_session_status, before_status);
+
+    let mut locked = visible_session_views_state();
+    locked.session = SessionState::Locked(session_info());
+    locked.current_session_status = koushi_state::CurrentSessionStatusState::Ready {
+        request_id: 100,
+        details: CurrentSessionStatusDetails::new(
+            None,
+            "DEVICE".to_owned(),
+            koushi_state::SessionAuthenticationMethod::Unknown,
+            koushi_state::CurrentSessionSyncState::Running,
+            true,
+            koushi_state::OwnIdentityVerification::Verified,
+            koushi_state::CurrentSessionBackupState::Ready,
+            3_000,
+        ),
+    };
+    let before = locked.clone();
+    assert!(
+        reduce(
+            &mut locked,
+            AppAction::CurrentDeviceTrustChanged(CurrentDeviceTrustState::Unverified)
+        )
+        .is_empty()
+    );
+    assert_eq!(locked, before);
+
+    let before = locked.clone();
+    assert!(
+        reduce(
+            &mut locked,
+            AppAction::AuthoritativeDeviceTrustChanged {
+                generation: 11,
+                transition_id: 12,
+                trust: CurrentDeviceTrustState::Unknown,
+            }
+        )
+        .is_empty()
+    );
+    assert_eq!(locked, before);
 }
 
 #[test]

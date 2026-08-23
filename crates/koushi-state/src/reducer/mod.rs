@@ -4,10 +4,10 @@ use crate::{
     state::{
         AccountManagementCapabilities, AccountManagementState, ActivityState, AppState,
         DeviceSessionListState, DirectoryState, E2eeKeyManagementState, E2eeTrustState,
-        FilesViewState, FocusedContextState, LocalEncryptionState, NavigationState, QrLoginState,
-        SearchState, SessionState, SoftLogoutReauthState, SpaceConversationSurface,
-        SpaceNavigationSelection, ThreadAttentionState, ThreadPaneState, ThreadsListState,
-        TimelinePaneState, VerificationFlowState, compute_room_list_projection,
+        FilesViewState, FocusedContextState, InviteWorkflowState, LocalEncryptionState,
+        NavigationState, QrLoginState, SearchState, SessionState, SoftLogoutReauthState,
+        SpaceConversationSurface, SpaceNavigationSelection, ThreadAttentionState, ThreadPaneState,
+        ThreadsListState, TimelinePaneState, VerificationFlowState, compute_room_list_projection,
     },
 };
 
@@ -98,12 +98,30 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             session::handle_login_succeeded(state, attempt_id, info)
         }
         AppAction::CurrentDeviceTrustChanged(trust) => {
+            if matches!(state.session, SessionState::Ready(_))
+                && matches!(
+                    trust,
+                    crate::state::CurrentDeviceTrustState::Unknown
+                        | crate::state::CurrentDeviceTrustState::Unverified
+                )
+            {
+                session_status::reset(state);
+            }
             session::handle_current_device_trust_changed(state, trust)
         }
         AppAction::SecureBackupGateChanged(gate) => {
             session::handle_secure_backup_gate_changed(state, gate)
         }
         AppAction::AuthoritativeDeviceTrustChanged { trust, .. } => {
+            if matches!(state.session, SessionState::Ready(_))
+                && matches!(
+                    trust,
+                    crate::state::CurrentDeviceTrustState::Unknown
+                        | crate::state::CurrentDeviceTrustState::Unverified
+                )
+            {
+                session_status::reset(state);
+            }
             session::handle_authoritative_device_trust_changed(state, trust)
         }
         AppAction::VerificationMethodsDiscovered(gate) => {
@@ -357,7 +375,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             session::handle_session_persistence_failed(state, message)
         }
         AppAction::SessionLocked => {
-            session_status::reset(state);
+            if matches!(state.session, SessionState::Ready(_)) {
+                session_status::reset(state);
+            }
             session::handle_session_locked(state)
         }
         AppAction::LogoutRequested => {
@@ -1651,7 +1671,10 @@ pub(crate) fn is_session_ready(state: &AppState) -> bool {
 }
 
 pub(crate) fn has_session_projection_context(state: &AppState) -> bool {
-    matches!(state.session, SessionState::Ready(_))
+    matches!(
+        state.session,
+        SessionState::Ready(_) | SessionState::Locked(_) | SessionState::SwitchingAccount { .. }
+    )
 }
 
 pub(crate) fn has_verification_gate_projection_context(state: &AppState) -> bool {
@@ -1706,6 +1729,8 @@ pub(crate) fn current_session_info(state: &AppState) -> Option<crate::state::Ses
 
 pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     let previous_room_id = state.timeline.room_id.clone();
+    let had_invite_workflow = state.invite_workflow != InviteWorkflowState::default();
+    let had_focused_context = state.focused_context != FocusedContextState::Closed;
     let had_thread = state.thread != ThreadPaneState::Closed
         || state.thread_attention != ThreadAttentionState::Closed;
     let had_search = state.search != SearchState::Closed;
@@ -1775,11 +1800,17 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.room_notification_settings.clear();
 
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
+    if had_invite_workflow {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::InviteWorkflowChanged));
+    }
     if let Some(room_id) = previous_room_id {
         effects.push(AppEffect::EmitUiEvent(UiEvent::TimelineChanged { room_id }));
     }
     if had_thread {
         effects.push(AppEffect::EmitUiEvent(UiEvent::ThreadChanged));
+    }
+    if had_focused_context {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::FocusedContextChanged));
     }
     if had_search {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SearchChanged));

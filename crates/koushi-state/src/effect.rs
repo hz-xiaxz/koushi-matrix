@@ -172,6 +172,8 @@ pub enum UiEvent {
     LinkPreviewSettingsChanged,
     ProfileChanged,
     RoomListChanged,
+    InviteWorkflowChanged,
+    FocusedContextChanged,
     SpaceMembersChanged,
     TimelineChanged { room_id: String },
     ThreadChanged,

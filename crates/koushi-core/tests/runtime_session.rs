@@ -8,9 +8,11 @@ use koushi_core::{
     TimelineCommand, TimelineKey, executor,
 };
 use koushi_state::{
-    AppAction, AuthSecret, LoginAttemptId, LoginRequest, RecoveryMethod, RecoveryRequest,
-    SessionState, SlidingSyncCapabilityState, StagedUploadCompressionChoice, StagedUploadItem,
-    StagedUploadKind,
+    AppAction, AuthSecret, CurrentDeviceTrustState, CurrentSessionBackupState,
+    CurrentSessionStatusDetails, CurrentSessionStatusState, CurrentSessionSyncState,
+    LoginAttemptId, LoginRequest, OwnIdentityVerification, RecoveryMethod, RecoveryRequest,
+    SessionState, SessionStatusRefreshTrigger, SlidingSyncCapabilityState,
+    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
 };
 use matrix_sdk::{
     ruma::{device_id, user_id},
@@ -429,6 +431,115 @@ async fn actor_projected_session_lock_executes_stop_sync_effect() {
         start_failure, stop_failure,
         "lock should produce a distinct stop-sync routing attempt"
     );
+}
+
+#[tokio::test]
+async fn authoritative_trust_loss_publishes_one_atomic_reset_delta_after_setup_quiesces() {
+    let runtime = CoreRuntime::start_with_event_capacity(128);
+    let mut connection = runtime.attach();
+    let room_id = "!room:example.invalid".to_owned();
+    let event_id = "$focused:example.invalid".to_owned();
+    let mut setup = restore_ready_actions();
+    setup.extend([
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms: vec![support::room_summary(&room_id)],
+        },
+        AppAction::SelectRoom {
+            room_id: room_id.clone(),
+        },
+        AppAction::CurrentSessionStatusRefreshRequested {
+            request_id: 41,
+            trigger: SessionStatusRefreshTrigger::Manual,
+        },
+        AppAction::CurrentSessionStatusRefreshed {
+            request_id: 41,
+            details: CurrentSessionStatusDetails::new(
+                Some("Synthetic device".to_owned()),
+                "DEVICE".to_owned(),
+                koushi_state::SessionAuthenticationMethod::Unknown,
+                CurrentSessionSyncState::Running,
+                true,
+                OwnIdentityVerification::Verified,
+                CurrentSessionBackupState::Ready,
+                1_000,
+            ),
+        },
+        AppAction::InviteWorkflowOpened {
+            room_id: room_id.clone(),
+        },
+        AppAction::OpenFocusedContext {
+            room_id: room_id.clone(),
+            event_id: event_id.clone(),
+        },
+        AppAction::FocusedContextSubscribed {
+            room_id: room_id.clone(),
+            event_id,
+        },
+    ]);
+    runtime.inject_actions(setup).await;
+
+    let setup_state = wait_for_state_event(&mut connection, |state| {
+        matches!(state.session, SessionState::Ready(_))
+            && state.timeline.room_id.as_deref() == Some(room_id.as_str())
+            && matches!(
+                &state.current_session_status,
+                CurrentSessionStatusState::Ready { request_id: 41, .. }
+            )
+            && state.invite_workflow != koushi_state::InviteWorkflowState::default()
+            && state.focused_context != koushi_state::FocusedContextState::Closed
+    })
+    .await;
+    assert!(matches!(setup_state.session, SessionState::Ready(_)));
+
+    runtime
+        .inject_actions(vec![AppAction::AuthoritativeDeviceTrustChanged {
+            generation: 7,
+            transition_id: 9,
+            trust: CurrentDeviceTrustState::Unverified,
+        }])
+        .await;
+
+    let delta = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = connection
+                .recv_event()
+                .await
+                .expect("runtime event stream must remain open");
+            let CoreEvent::StateDelta(delta) = event else {
+                continue;
+            };
+            let changed = &delta.changed;
+            if changed.session.is_some()
+                && changed.current_session_status.is_some()
+                && changed.invite_workflow.is_some()
+                && changed.focused_context.is_some()
+            {
+                break delta;
+            }
+        }
+    })
+    .await
+    .expect("trust-loss reset delta must arrive before the event deadline");
+
+    assert!(matches!(
+        delta.changed.session.as_ref(),
+        Some(SessionState::Locked(_))
+    ));
+    assert_eq!(
+        delta.changed.current_session_status.as_ref(),
+        Some(&CurrentSessionStatusState::Idle)
+    );
+    assert_eq!(
+        delta.changed.invite_workflow.as_ref(),
+        Some(&koushi_state::InviteWorkflowState::default())
+    );
+    assert_eq!(
+        delta.changed.focused_context.as_ref(),
+        Some(&koushi_state::FocusedContextState::Closed)
+    );
+    drop(connection);
+    runtime.shutdown().await;
 }
 
 async fn next_session_required_failure(
