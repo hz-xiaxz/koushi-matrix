@@ -11,6 +11,8 @@ import {
   seedTimelineItems
 } from "./support/basicOperations";
 
+const LIVE_SIGNALS_EVENT_ID = "$live-signals-latest:example.invalid";
+
 test("timeline action tooltip remains available", async ({ page }) => {
   await gotoReadyShell(page);
   const replyButton = page.getByRole("button", { name: "Reply to message" }).first();
@@ -809,8 +811,32 @@ test("live signals render from Rust state and dispatch read/typing commands", as
   page
 }) => {
   await gotoReadyShell(page);
+  await page.evaluate(() => window.__harness.clearInvocations());
 
-  await page.evaluate(() => {
+  await seedTimelineItems(
+    page,
+    [
+      {
+        id: { Event: { event_id: LIVE_SIGNALS_EVENT_ID } },
+        sender: HARNESS_ACCOUNT_KEY,
+        body: "Fresh live signal message",
+        timestamp_ms: 1_800_000_001_000,
+        in_reply_to_event_id: null,
+        thread_root: null,
+        thread_summary: null,
+        reactions: [],
+        can_react: false,
+        is_redacted: false,
+        is_hidden: false,
+        can_redact: false,
+        is_edited: false,
+        can_edit: false
+      }
+    ],
+    2
+  );
+
+  await page.evaluate((eventId) => {
     const snapshot = window.__harness.currentSnapshot();
     window.__harness.setSnapshot({
       ...snapshot,
@@ -822,40 +848,40 @@ test("live signals render from Rust state and dispatch read/typing commands", as
             rooms: {
               "!harness-room:example.invalid": {
                 receipts_by_event: {
-                  "$seed-event:example.invalid": {
-                  readers: [
-                    {
-                      user_id: "@reader:example.invalid",
-                      display_name: "Reader",
-                      avatar: null,
-                      timestamp_ms: 1_800_000_000_500
-                    }
-                  ],
-                  total_count: 1,
-                  overflow_count: 0
-                }
-              },
-              fully_read_event_id: "$seed-event:example.invalid",
-              typing_user_ids: ["@typing-user:example.invalid"],
-              typing_users: [
-                {
-                  user_id: "@typing-user:example.invalid",
-                  display_label: "Typing User"
-                }
-              ]
+                  [eventId]: {
+                    readers: [
+                      {
+                        user_id: "@reader:example.invalid",
+                        display_name: "Reader",
+                        avatar: null,
+                        timestamp_ms: 1_800_000_001_500
+                      }
+                    ],
+                    total_count: 1,
+                    overflow_count: 0
+                  }
+                },
+                fully_read_event_id: eventId,
+                typing_user_ids: ["@typing-user:example.invalid"],
+                typing_users: [
+                  {
+                    user_id: "@typing-user:example.invalid",
+                    display_label: "Typing User"
+                  }
+                ]
+              }
+            },
+            presence: {
+              "@harness-user:example.invalid": "online"
             }
-          },
-          presence: {
-            "@harness-user:example.invalid": "online"
           }
         }
       }
-    }
     });
     window.__harness.pushStateChanged();
-  });
+  }, LIVE_SIGNALS_EVENT_ID);
 
-  const row = page.locator('[data-event-id="$seed-event:example.invalid"]');
+  const row = page.locator(`[data-event-id="${LIVE_SIGNALS_EVENT_ID}"]`);
   await expect(row.locator(".presence-dot[data-presence='online']")).toBeVisible();
   await expect(row.locator(".message-receipts")).toHaveAttribute("aria-label", /Read by 1/);
   await expect(page.getByText("Read up to here", { exact: true })).toBeVisible();
@@ -863,8 +889,21 @@ test("live signals render from Rust state and dispatch read/typing commands", as
   await expect(page.locator(".typing-indicator")).not.toContainText(
     "@typing-user:example.invalid"
   );
-  await expect.poll(() => invocationCount(page, "send_read_receipt")).toBeGreaterThanOrEqual(1);
-  await expect.poll(() => invocationCount(page, "set_fully_read")).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => invocationCount(page, "send_read_receipt")).toBe(1);
+  await expect.poll(() => invocationCount(page, "set_fully_read")).toBe(1);
+  await expect
+    .poll(async () => page.evaluate(() => window.__harness.invocationsOf("send_read_receipt")[0]?.args))
+    .toEqual({
+      roomId: HARNESS_ROOM_ID,
+      eventId: LIVE_SIGNALS_EVENT_ID,
+      threadRootEventId: undefined
+    });
+  await expect
+    .poll(async () => page.evaluate(() => window.__harness.invocationsOf("set_fully_read")[0]?.args))
+    .toEqual({
+      roomId: HARNESS_ROOM_ID,
+      eventId: LIVE_SIGNALS_EVENT_ID
+    });
 
   await page.evaluate(() => window.__harness.clearInvocations());
   await page.getByRole("textbox", { name: "Message composer" }).fill("Typing signal");
@@ -873,7 +912,7 @@ test("live signals render from Rust state and dispatch read/typing commands", as
   await expect
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("set_typing")[0]?.args))
     .toEqual({
-      roomId: "!harness-room:example.invalid",
+      roomId: HARNESS_ROOM_ID,
       isTyping: true
     });
 });
