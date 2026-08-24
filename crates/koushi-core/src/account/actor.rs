@@ -56,7 +56,9 @@ use super::profile::AVATAR_DOWNLOAD_CONCURRENCY;
 use super::recovery_backup::{
     PendingRecoveryCompletion, PendingRecoveryTask, secure_backup_monitor_wakeup_is_current,
 };
-use super::session_lifecycle::{PendingOidcFlow, PendingSessionTeardown, SessionChangeObservation};
+use super::session_lifecycle::{
+    PendingOidcFlow, PendingSessionTeardown, SessionChangeObservation, SessionInvalidationReason,
+};
 use super::sliding_sync::{
     PendingSlidingSyncAdmission, PendingSlidingSyncRetry, StoredSlidingSyncAdmissionContext,
 };
@@ -66,11 +68,11 @@ use super::trust_gate::{
     OwnedVerificationMethodDiscoveryTask, PendingTrustTransition, RecoveryStateObservation,
     TrustLifecycleDecision, VerificationMethodDiscoveryResult,
     active_own_user_sas_flow_for_provisional_encryption_sync,
-    first_provisional_encryption_sync_is_current, method_discovery_is_current,
-    own_user_sas_recheck_is_current, record_verification_admission_event,
-    record_verification_method_discovery_event, retry_should_restart_method_discovery,
-    unknown_verification_gate, verification_admission_event, verification_gate_failure_token,
-    verification_method_discovery_event,
+    current_device_trust_recheck_failure_token, first_provisional_encryption_sync_is_current,
+    method_discovery_is_current, own_user_sas_recheck_is_current,
+    record_verification_admission_event, record_verification_method_discovery_event,
+    retry_should_restart_method_discovery, unknown_verification_gate, verification_admission_event,
+    verification_gate_failure_token, verification_method_discovery_event,
 };
 use super::verification::{
     INCOMING_VERIFICATION_FLOW_ID_BASE, IncomingVerificationObservation, PendingSasVerification,
@@ -463,7 +465,7 @@ pub(crate) enum AccountMessage {
         handle: koushi_sdk::MatrixVerificationRequestHandle,
     },
     SessionInvalidated {
-        soft_logout: bool,
+        reason: SessionInvalidationReason,
     },
     IdentityResetAuthTimedOut {
         flow_id: u64,
@@ -1427,11 +1429,15 @@ impl AccountActor {
                         }
                         Err(_) => "trust_recheck_finished_failed",
                     };
-                    record_verification_admission_event(verification_admission_event(
-                        settled_stage,
-                        generation,
-                        0,
-                    ));
+                    let mut settlement_event =
+                        verification_admission_event(settled_stage, generation, 0);
+                    if let Some(error) = result.as_ref().err() {
+                        settlement_event = settlement_event.field(DiagnosticField::token(
+                            "failure_kind",
+                            current_device_trust_recheck_failure_token(error),
+                        ));
+                    }
+                    record_verification_admission_event(settlement_event);
                     self.trust_recheck_task = None;
                     let replay_after_settlement = self.trust_recheck_pending;
                     self.trust_recheck_pending = false;
@@ -1961,8 +1967,8 @@ impl AccountActor {
                             .await;
                     }
                 }
-                AccountMessage::SessionInvalidated { soft_logout } => {
-                    self.handle_session_invalidated(soft_logout).await;
+                AccountMessage::SessionInvalidated { reason } => {
+                    self.handle_session_invalidated(reason).await;
                 }
                 AccountMessage::IdentityResetAuthTimedOut { flow_id } => {
                     self.handle_identity_reset_auth_timeout(flow_id).await;

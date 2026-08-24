@@ -735,12 +735,25 @@ describe("appStore projection cache", () => {
   });
 });
 
+describe("session lock reason delta merge", () => {
+  test("applies an explicit nested null clear instead of retaining the previous reason", () => {
+    const snapshot = makeSnapshot();
+    snapshot.state.domain.session_lock_reason = { kind: "unknownToken", soft_logout: true };
+    const next = applyDeltaToState(snapshot, {
+      generation: 1,
+      changed: { state: { domain: { session_lock_reason: null } } }
+    });
+    expect(next?.state.domain.session_lock_reason).toBeNull();
+  });
+});
+
 function makeSnapshot(): DesktopSnapshot {
   return {
     state: {
       schema_version: 4,
       domain: {
         session: { kind: "ready", homeserver: "https://example.invalid", user_id: "@user:example.invalid", device_id: "DEVICE" },
+        session_lock_reason: null,
         secure_backup_gate: { kind: "ready" },
         current_session_status: { status: "idle" },
         device_cleanup: { kind: "idle" },

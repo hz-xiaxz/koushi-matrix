@@ -582,6 +582,7 @@
         "kind": "ready",
         "user_id": "@fixture:example.invalid"
       },
+      "session_lock_reason": null,
       "settings": {
         "persistence": {
           "kind": "idle"

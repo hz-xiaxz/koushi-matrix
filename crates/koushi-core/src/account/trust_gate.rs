@@ -59,6 +59,17 @@ pub(super) fn current_device_trust_token(
     }
 }
 
+pub(super) fn current_device_trust_recheck_failure_token(
+    error: &koushi_sdk::CurrentDeviceTrustRecheckError,
+) -> &'static str {
+    match error {
+        koushi_sdk::CurrentDeviceTrustRecheckError::Authentication => "authentication",
+        koushi_sdk::CurrentDeviceTrustRecheckError::Network => "network",
+        koushi_sdk::CurrentDeviceTrustRecheckError::Server => "server",
+        koushi_sdk::CurrentDeviceTrustRecheckError::Sdk => "sdk",
+    }
+}
+
 pub(super) fn record_verification_method_discovery_event(event: DiagnosticEvent) {
     koushi_diagnostics::record(event);
 }
@@ -1758,6 +1769,53 @@ mod tests {
             inspect_session_runtime(&handle).await,
             (true, false, false, true)
         );
+        let _ = handle.send(AccountMessage::Shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn network_trust_recheck_settlement_records_generation_without_authentication_lock() {
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let (handle, mut action_rx) = login_gated_actor().await;
+        consume_initial_unknown_trust_projection(&mut action_rx).await;
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await;
+        acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+        let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
+            .records
+            .len();
+
+        handle
+            .send(AccountMessage::CurrentDeviceTrustRecheckFinished {
+                generation: 2,
+                result: Err(koushi_sdk::CurrentDeviceTrustRecheckError::Network),
+            })
+            .await;
+        assert_eq!(
+            inspect_session_runtime(&handle).await,
+            (true, true, true, true)
+        );
+
+        let expected =
+            "stage=trust_recheck_finished_failed generation=2 transition_id=0 failure_kind=network";
+        assert!(
+            koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+                .iter()
+                .any(|record| koushi_diagnostics::format_event(&record.event) == expected),
+            "missing exact trust-recheck settlement diagnostic: {expected}"
+        );
+        while let Ok(actions) = action_rx.try_recv() {
+            assert!(
+                !matches!(
+                    actions.as_slice(),
+                    [AppAction::SessionAuthenticationInvalidated { .. }]
+                ),
+                "network trust failure must not emit authentication invalidation"
+            );
+        }
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
 

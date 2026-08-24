@@ -62,9 +62,9 @@ pub use session::{
     DeviceSessionListState, DeviceSessionSummary, LoginAttemptId, LoginFlow, LoginFlowKind,
     PendingKeyCountBucket, ProvisionalPhase, QrLoginState, RecoveryMethod,
     SecureBackupGateFailureKind, SecureBackupGateState, SessionAuthenticationMethod, SessionInfo,
-    SessionState, SoftLogoutReauthState, VerificationAccountKind, VerificationGateFailureKind,
-    VerificationGateRejectReason, VerificationGateState, VerificationMethod,
-    VerificationMethodCapability,
+    SessionLockReason, SessionState, SoftLogoutReauthState, VerificationAccountKind,
+    VerificationGateFailureKind, VerificationGateRejectReason, VerificationGateState,
+    VerificationMethod, VerificationMethodCapability,
 };
 pub use session_status::{
     CurrentSessionBackupState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,
@@ -256,6 +256,8 @@ pub(crate) fn default_true() -> bool {
 pub struct AppState {
     pub session: SessionState,
     #[serde(default)]
+    pub session_lock_reason: Option<SessionLockReason>,
+    #[serde(default)]
     pub secure_backup_gate: SecureBackupGateState,
     #[serde(skip)]
     pub sliding_sync_account_epoch: u64,
@@ -337,6 +339,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             session: SessionState::SignedOut,
+            session_lock_reason: None,
             secure_backup_gate: SecureBackupGateState::Inactive,
             sliding_sync_account_epoch: 0,
             sliding_sync_capability: SlidingSyncCapabilityState::Unknown,

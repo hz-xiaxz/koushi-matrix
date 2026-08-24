@@ -267,6 +267,29 @@ describe("BrowserFakeApi session-view reset", () => {
     }
   );
 
+  test("failed submitLogin clears a stale UnknownToken lock reason", async () => {
+    const api = createBrowserFakeApi({ session: "locked" });
+    const mutable = api as unknown as { snapshot: DesktopSnapshot };
+    mutable.snapshot.state.domain.session_lock_reason = {
+      kind: "unknownToken",
+      soft_logout: true
+    };
+
+    const snapshot = await api.submitLogin(
+      "https://example.invalid",
+      "user",
+      "password",
+      "device",
+      "linux"
+    );
+
+    expect(snapshot.state.domain.session).toEqual({ kind: "signedOut" });
+    expect(snapshot.state.domain.session_lock_reason).toBeNull();
+    expect(snapshot.state.ui.errors).toContainEqual(
+      expect.objectContaining({ code: "login_failed" })
+    );
+  });
+
   test.each(["completeOidcLogin", "switchAccount"] as const)(
     "%s replacement returns canonical ready projections",
     async (operation) => {

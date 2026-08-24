@@ -1,6 +1,6 @@
 use koushi_state::{
     AppAction, AppEffect, AppError, AppState, LoginAttemptId, SessionAuthenticationMethod,
-    SessionInfo, SessionState, SlidingSyncAdmission, SlidingSyncAdmissionKind,
+    SessionInfo, SessionLockReason, SessionState, SlidingSyncAdmission, SlidingSyncAdmissionKind,
     SlidingSyncAdmissionSource, SlidingSyncCapabilityFailureKind, SlidingSyncCapabilityResult,
     SlidingSyncCapabilityState, SlidingSyncPositiveEvidence, SlidingSyncRevalidationState, reduce,
 };
@@ -344,6 +344,7 @@ fn blocking_preserves_local_identity_and_positive_support_evidence() {
         ..AppState::default()
     };
     start_restore_attempt(&mut state, REQUEST_ID, Some(evidence.clone()));
+    state.session_lock_reason = Some(SessionLockReason::DeviceTrust);
 
     complete(
         &mut state,
@@ -352,6 +353,7 @@ fn blocking_preserves_local_identity_and_positive_support_evidence() {
         SlidingSyncCapabilityResult::Unsupported,
     );
 
+    assert_eq!(state.session_lock_reason, None);
     assert_eq!(
         state.session,
         SessionState::CapabilityBlocked {
@@ -847,6 +849,8 @@ fn cached_restore_revalidation_blocks_only_explicit_unsupported() {
             request_id: REQUEST_ID + 2,
         },
     );
+    state.session = SessionState::Locked(session_info());
+    state.session_lock_reason = Some(SessionLockReason::UnknownToken { soft_logout: false });
     let blocked = reduce(
         &mut state,
         AppAction::SlidingSyncCapabilityRevalidationCompleted {
@@ -862,6 +866,7 @@ fn cached_restore_revalidation_blocks_only_explicit_unsupported() {
             ..
         }
     ));
+    assert_eq!(state.session_lock_reason, None);
     assert!(
         blocked.contains(&AppEffect::SettleSlidingSyncCapabilityRevalidation {
             account_epoch: ACCOUNT_EPOCH,

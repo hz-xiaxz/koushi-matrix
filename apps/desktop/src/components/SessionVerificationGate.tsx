@@ -146,6 +146,9 @@ export function SessionVerificationGate({
   operations?: SessionVerificationGateOperations;
 }) {
   const session = snapshot.state.domain.session;
+  const authenticationInvalidated =
+    session.kind === "locked" &&
+    snapshot.state.domain.session_lock_reason?.kind === "unknownToken";
   const operations = {
     ...defaultSessionVerificationGateOperations,
     ...providedOperations
@@ -352,7 +355,9 @@ export function SessionVerificationGate({
       operations.eraseLocalDataAnyway ?? (() => api.eraseLocalDataAnyway())
     );
   };
-  const heading = secureBackupGateRequired
+  const heading = authenticationInvalidated
+    ? t("gate.sessionExpired")
+    : secureBackupGateRequired
     ? secureBackupGateHeading(secureBackupGate)
     : checking
       ? t("gate.checking")
@@ -485,7 +490,11 @@ export function SessionVerificationGate({
     )}
     {discovering && <p>{t("gate.discovering")}</p>}
     {session.kind === "rejecting" && <p>{t("gate.rejecting")}</p>}
-    {session.kind === "locked" && <p>{t("gate.locked")}</p>}
+    {authenticationInvalidated ? (
+      <p>{t("gate.sessionExpiredCopy")}</p>
+    ) : session.kind === "locked" ? (
+      <p>{t("gate.locked")}</p>
+    ) : null}
     {session.gate?.failureKind && <p role="alert">{gateFailureLabel(session.gate.failureKind)}</p>}
     {preparationFailure && <p role="alert">{gateFailureLabel(preparationFailure)}</p>}
     {operationError && !session.gate?.failureKind && !preparationFailure && <p role="alert">{operationError}</p>}

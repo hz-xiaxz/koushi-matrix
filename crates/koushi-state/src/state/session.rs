@@ -3,6 +3,13 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SessionLockReason {
+    DeviceTrust,
+    UnknownToken { soft_logout: bool },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SessionState {
     SignedOut,
     Restoring,

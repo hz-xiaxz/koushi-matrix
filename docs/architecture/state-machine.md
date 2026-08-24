@@ -96,13 +96,29 @@ stateDiagram-v2
     Verifying --> Ready: AuthoritativeDeviceTrustChanged(Verified)
     Verifying --> Rejecting: RejectSession
     Rejecting --> SignedOut: ProvisionalSessionDiscarded
-    Ready --> Locked: CurrentDeviceTrustChanged(non-Verified) / SessionLocked
+    Ready --> Locked: CurrentDeviceTrustChanged(non-Verified) / SessionLocked [DeviceTrust]
+    Ready --> Locked: SessionAuthenticationInvalidated [UnknownToken + soft_logout]
     Ready --> CapabilityBlocked: Revalidation Unsupported(matching epoch + request)
     Ready --> LoggingOut: LogoutRequested
     Locked --> LoggingOut: LogoutRequested
     Locked --> CapabilityBlocked: in-flight revalidation Unsupported(matching epoch + request)
     LoggingOut --> SignedOut: LogoutFinished
 ```
+
+`session_lock_reason` is an optional, separate Rust-owned lock projection.
+E2EE trust loss records `DeviceTrust`; the Matrix SDK session-change observer
+records `UnknownToken { soft_logout }` through a distinct action. UnknownToken
+renders authentication-expired/sign-out copy and is never inferred from a
+trust-query failure. The representation permits `Locked + None` for restored
+legacy/manual state, while `CapabilityBlocked` is a distinct session variant;
+therefore `session_lock_reason` is not an iff indicator for
+`SessionState::Locked` and the reducer must not synthesize a reason. Unlock,
+restore, logout, account switch/reset, and either
+`Locked → CapabilityBlocked` path clear a recorded reason. Structured
+diagnostics keep SDK recheck failure classification (`authentication`,
+`network`, `server`, or `sdk`) separate from `core.account` UnknownToken
+receipt/admission, correlated by trust generation where available and without
+IDs, tokens, or response text.
 
 Simplified Sliding Sync capability admission is a Rust-owned state slice that
 fences every completion by both account epoch and request ID. It runs before

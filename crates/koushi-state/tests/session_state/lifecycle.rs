@@ -7,8 +7,9 @@ use koushi_state::{
     CurrentDeviceTrustState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,
     NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionState, NativeAttentionSummary, NavigationState, RoomAttentionKind, RoomSummary,
-    RoomTags, SearchScope, SearchState, SessionState, SpaceSummary, SubmissionId, SyncState,
-    ThreadAttentionState, ThreadPaneState, TimelinePaneState, UiEvent, reduce,
+    RoomTags, SearchScope, SearchState, SessionLockReason, SessionState, SpaceSummary,
+    SubmissionId, SyncState, ThreadAttentionState, ThreadPaneState, TimelinePaneState, UiEvent,
+    reduce,
 };
 
 #[test]
@@ -290,6 +291,94 @@ fn logout_clears_native_attention_state_and_notifies_ui() {
             AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged),
         ]
     );
+}
+
+#[test]
+fn authentication_invalidation_locks_ready_with_closed_reason_and_preserves_soft_logout() {
+    for soft_logout in [true, false] {
+        let mut state = AppState {
+            session: SessionState::Ready(session_info()),
+            sync: SyncState::Running,
+            session_lock_reason: None,
+            ..AppState::default()
+        };
+        state.spaces.push(SpaceSummary {
+            space_id: "space-a".to_owned(),
+            display_name: "Space A".to_owned(),
+            avatar: None,
+            child_room_ids: Vec::new(),
+        });
+        let effects = reduce(
+            &mut state,
+            AppAction::SessionAuthenticationInvalidated { soft_logout },
+        );
+        assert_eq!(state.session, SessionState::Locked(session_info()));
+        assert_eq!(
+            state.session_lock_reason,
+            Some(SessionLockReason::UnknownToken { soft_logout })
+        );
+        assert_eq!(state.sync, SyncState::Stopped);
+        assert!(state.spaces.is_empty());
+        assert!(effects.contains(&AppEffect::StopSync));
+    }
+}
+
+#[test]
+fn ordinary_session_lock_records_device_trust_reason() {
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        ..AppState::default()
+    };
+    reduce(&mut state, AppAction::SessionLocked);
+    assert_eq!(
+        state.session_lock_reason,
+        Some(SessionLockReason::DeviceTrust)
+    );
+}
+
+#[test]
+fn stale_authentication_invalidation_is_whole_state_inert() {
+    let mut state = AppState {
+        session: SessionState::Locked(session_info()),
+        session_lock_reason: Some(SessionLockReason::DeviceTrust),
+        ..AppState::default()
+    };
+    let before = state.clone();
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::SessionAuthenticationInvalidated { soft_logout: true }
+        )
+        .is_empty()
+    );
+    assert_eq!(state, before);
+}
+
+#[test]
+fn unlocking_or_logout_clears_session_lock_reason() {
+    let mut unlocked = AppState {
+        session: SessionState::Locked(session_info()),
+        session_lock_reason: Some(SessionLockReason::UnknownToken { soft_logout: true }),
+        ..AppState::default()
+    };
+    reduce(
+        &mut unlocked,
+        AppAction::AuthoritativeDeviceTrustChanged {
+            generation: 0,
+            transition_id: 0,
+            trust: CurrentDeviceTrustState::Verified,
+        },
+    );
+    assert_eq!(unlocked.session, SessionState::Ready(session_info()));
+    assert_eq!(unlocked.session_lock_reason, None);
+
+    let mut logged_out = AppState {
+        session: SessionState::Ready(session_info()),
+        session_lock_reason: Some(SessionLockReason::DeviceTrust),
+        ..AppState::default()
+    };
+    reduce(&mut logged_out, AppAction::LogoutRequested);
+    assert_eq!(logged_out.session_lock_reason, None);
 }
 
 #[test]

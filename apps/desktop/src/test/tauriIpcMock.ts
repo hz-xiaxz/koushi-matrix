@@ -176,6 +176,10 @@ function defaultSnapshotResponse() {
   // domain/ui sections at runtime so the mock matches the nested IPC contract.
   const flatState: Record<string, unknown> = {
       session: { kind: "signedOut" },
+      session_lock_reason: null,
+      secure_backup_gate: { kind: "inactive" },
+      current_session_status: { status: "idle" },
+      device_cleanup: { kind: "idle" },
       auth: { kind: "unknown" },
       settings: {
         values: {
@@ -211,7 +215,14 @@ function defaultSnapshotResponse() {
             // settings-toggle tests drive the rootEvent -> latestReply
             // transition from this seeded user choice.
             thread_root_order: { kind: "rootEvent" }
-          }
+          },
+          search_crawler: {
+            speed: "standard",
+            include_media_captions: true,
+            include_filenames: true
+          },
+          thread_list_order: { kind: "latestReply" },
+          room_list_sort: { kind: "activity" }
         },
         persistence: { kind: "idle" }
       },
@@ -241,6 +252,19 @@ function defaultSnapshotResponse() {
         ignored_user_ids: [],
         ignored_user_update: { kind: "idle" },
         update: { kind: "idle" }
+      },
+      space_members: {
+        selected_space_id: null,
+        generation: 0,
+        power_levels_revision: null,
+        can_edit_roles: false,
+        space_joined: [],
+        space_invited: [],
+        child_room_only: [],
+        child_room_count: 0,
+        complete_child_room_count: 0,
+        incomplete_child_room_count: 0,
+        operation: { kind: "idle" }
       },
       sync: "stopped",
       navigation: { active_space_id: null, active_room_id: null },
@@ -280,6 +304,7 @@ function defaultSnapshotResponse() {
       room_management: { selected_room_id: null, settings: null, operation: { kind: "idle" } },
       mention_candidates: { targets: [] },
       activity: { kind: "closed" },
+      search_crawler: { rooms: {}, last_active: null },
       timeline: {
         room_id: null,
         is_subscribed: false,
@@ -359,13 +384,13 @@ function defaultSnapshotResponse() {
       }
   };
   const DOMAIN_KEYS = new Set([
-    "session", "auth", "device_sessions", "account_management",
-    "account_management_capabilities", "soft_logout_reauth", "qr_login", "settings",
-    "link_preview_settings", "room_preferences", "locale_profile", "typography_profile", "profile", "sync",
-    "spaces", "rooms", "invites", "invite_workflow", "room_notification_settings",
-    "room_interactions", "directory", "room_management", "activity", "thread_attention",
-    "search", "search_crawler", "live_signals", "e2ee_trust", "local_encryption",
-    "native_attention", "cjk_text_policy"
+    "session", "session_lock_reason", "secure_backup_gate", "current_session_status", "device_cleanup",
+    "auth", "device_sessions", "account_management", "account_management_capabilities",
+    "soft_logout_reauth", "qr_login", "settings", "link_preview_settings", "room_preferences",
+    "locale_profile", "typography_profile", "profile", "space_members", "sync", "spaces", "rooms",
+    "invites", "invite_workflow", "room_notification_settings", "room_interactions", "directory",
+    "room_management", "mention_candidates", "activity", "thread_attention", "search", "search_crawler",
+    "live_signals", "e2ee_trust", "local_encryption", "native_attention", "cjk_text_policy"
   ]);
   const domain: Record<string, unknown> = {};
   const ui: Record<string, unknown> = {};

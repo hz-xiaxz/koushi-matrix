@@ -380,6 +380,12 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             }
             session::handle_session_locked(state)
         }
+        AppAction::SessionAuthenticationInvalidated { soft_logout } => {
+            if matches!(state.session, SessionState::Ready(_)) {
+                session_status::reset(state);
+            }
+            session::handle_session_authentication_invalidated(state, soft_logout)
+        }
         AppAction::LogoutRequested => {
             session_status::reset(state);
             session::handle_logout_requested(state)

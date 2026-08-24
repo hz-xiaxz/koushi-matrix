@@ -81,6 +81,49 @@ describe("SessionVerificationGate interactions", () => {
 
   afterEach(cleanup);
 
+  test.each([true, false])(
+    "renders authentication-specific locked copy and sign-out-only controls for soft_logout=%s",
+    async (soft_logout) => {
+      const snapshot = await createBrowserFakeApi({ session: "locked" }).getSnapshot();
+      snapshot.state.domain.session_lock_reason = { kind: "unknownToken", soft_logout };
+
+      render(
+        <SessionVerificationGate
+          snapshot={snapshot}
+          onSnapshot={() => undefined}
+          onSignOut={() => undefined}
+        />
+      );
+
+      expect(screen.getByRole("heading", { name: "Session expired" })).toBeTruthy();
+      expect(
+        screen.getByText(
+          "This session has expired or was revoked. Sign in again to continue."
+        )
+      ).toBeTruthy();
+      expect(screen.getAllByRole("button")).toHaveLength(1);
+      expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+      expect(screen.queryByText("This session must be verified again.")).toBeNull();
+      expect(screen.queryByRole("button", { name: /verify|recovery|remove|backup/i })).toBeNull();
+    }
+  );
+
+  test("keeps device-trust lock copy for the separate lock reason", async () => {
+    const snapshot = await createBrowserFakeApi({ session: "locked" }).getSnapshot();
+    snapshot.state.domain.session_lock_reason = { kind: "deviceTrust" };
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onSnapshot={() => undefined}
+        onSignOut={() => undefined}
+      />
+    );
+
+    expect(screen.getByText("This session must be verified again.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+  });
+
   test("production requires warning confirmation before starting device verification", async () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.domain.session = {
