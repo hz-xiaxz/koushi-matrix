@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::{AppState, ProfileState, RoomMemberRole, errors::OperationFailureKind};
+use super::{AppState, ProfileState, RoomMemberRole, SessionState, errors::OperationFailureKind};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -24,6 +24,42 @@ pub enum SpaceMembersCommandRejection {
     AlreadyInvited,
     NotInvited,
     NotChildRoomOnly,
+    RoleUpdateAlreadyInFlight,
+    RoleNotEditable,
+    RoleTargetInvalid,
+    RoleOptionUnavailable,
+    RoleRevisionMismatch,
+    RoleCurrentPowerMismatch,
+    RoleConfirmationRequired,
+    RoleSessionRequired,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceMemberRoleOption {
+    pub power_level: i64,
+    pub role: RoomMemberRole,
+    pub requires_confirmation: bool,
+}
+
+/// Closed, private-data-free failure kinds for a Space-member role update.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceMemberRoleFailureKind {
+    Forbidden,
+    Stale,
+    NotFound,
+    Network,
+    Timeout,
+    Invalid,
+    Sdk,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceMemberRoleUpdateOutcome {
+    Succeeded,
+    Failed(SpaceMemberRoleFailureKind),
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -42,6 +78,8 @@ pub struct SpaceMemberEntry {
     pub child_room_ids: Vec<String>,
     #[serde(default)]
     pub invite_pending: bool,
+    #[serde(default)]
+    pub role_options: Vec<SpaceMemberRoleOption>,
 }
 
 impl fmt::Debug for SpaceMemberEntry {
@@ -64,6 +102,7 @@ impl fmt::Debug for SpaceMemberEntry {
             .field("membership", &self.membership)
             .field("child_room_count", &self.child_room_ids.len())
             .field("invite_pending", &self.invite_pending)
+            .field("role_option_count", &self.role_options.len())
             .finish()
     }
 }
@@ -78,6 +117,10 @@ pub struct SpaceMembersProjection {
     pub child_room_count: usize,
     pub complete_child_room_count: usize,
     pub incomplete_child_room_count: usize,
+    #[serde(default)]
+    pub power_levels_revision: Option<String>,
+    #[serde(default)]
+    pub can_edit_roles: bool,
 }
 
 impl fmt::Debug for SpaceMembersProjection {
@@ -95,6 +138,11 @@ impl fmt::Debug for SpaceMembersProjection {
                 "incomplete_child_room_count",
                 &self.incomplete_child_room_count,
             )
+            .field(
+                "power_levels_revision",
+                &self.power_levels_revision.as_ref().map(|_| "EventId(..)"),
+            )
+            .field("can_edit_roles", &self.can_edit_roles)
             .finish()
     }
 }
@@ -139,6 +187,31 @@ pub enum SpaceMembersOperationState {
         generation: u64,
         #[serde(rename = "failureKind")]
         kind: OperationFailureKind,
+    },
+    UpdatingRole {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        #[serde(default)]
+        expected_power_levels_revision: Option<String>,
+        expected_power_level: i64,
+        power_level: i64,
+        confirmed: bool,
+    },
+    RoleUpdateFailed {
+        request_id: u64,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        #[serde(default)]
+        expected_power_levels_revision: Option<String>,
+        expected_power_level: i64,
+        power_level: i64,
+        #[serde(default)]
+        sent_revision: Option<String>,
+        #[serde(rename = "failureKind")]
+        kind: SpaceMemberRoleFailureKind,
     },
 }
 
@@ -197,6 +270,38 @@ impl fmt::Debug for SpaceMembersOperationState {
                 .field("generation", generation)
                 .field("kind", kind)
                 .finish(),
+            Self::UpdatingRole {
+                request_id,
+                generation,
+                expected_power_level,
+                power_level,
+                ..
+            } => formatter
+                .debug_struct("UpdatingRole")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("user_id", &"UserId(..)")
+                .field("generation", generation)
+                .field("expected_power_level", expected_power_level)
+                .field("power_level", power_level)
+                .finish(),
+            Self::RoleUpdateFailed {
+                request_id,
+                generation,
+                expected_power_level,
+                power_level,
+                kind,
+                ..
+            } => formatter
+                .debug_struct("RoleUpdateFailed")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("user_id", &"UserId(..)")
+                .field("generation", generation)
+                .field("expected_power_level", expected_power_level)
+                .field("power_level", power_level)
+                .field("kind", kind)
+                .finish(),
         }
     }
 }
@@ -211,6 +316,10 @@ pub struct SpaceMembersState {
     pub child_room_count: usize,
     pub complete_child_room_count: usize,
     pub incomplete_child_room_count: usize,
+    #[serde(default)]
+    pub power_levels_revision: Option<String>,
+    #[serde(default)]
+    pub can_edit_roles: bool,
     pub operation: SpaceMembersOperationState,
 }
 
@@ -225,6 +334,8 @@ impl Default for SpaceMembersState {
             child_room_count: 0,
             complete_child_room_count: 0,
             incomplete_child_room_count: 0,
+            power_levels_revision: None,
+            can_edit_roles: false,
             operation: SpaceMembersOperationState::Idle,
         }
     }
@@ -291,6 +402,8 @@ pub fn resolve_space_members_projection(
         child_room_count: projection.child_room_count,
         complete_child_room_count: projection.complete_child_room_count,
         incomplete_child_room_count: projection.incomplete_child_room_count,
+        power_levels_revision: projection.power_levels_revision,
+        can_edit_roles: projection.can_edit_roles,
     }
 }
 
@@ -388,6 +501,8 @@ pub fn admit_space_member_invite(
         state.operation,
         SpaceMembersOperationState::Inviting { .. }
             | SpaceMembersOperationState::CancellingInvite { .. }
+            | SpaceMembersOperationState::UpdatingRole { .. }
+            | SpaceMembersOperationState::RoleUpdateFailed { .. }
     ) {
         return Err(SpaceMembersCommandRejection::InviteAlreadyInFlight);
     }
@@ -456,6 +571,89 @@ pub fn admit_space_member_cancellation(
     Ok(())
 }
 
+pub fn admit_space_member_role(
+    state: &AppState,
+    space_id: &str,
+    user_id: &str,
+    generation: u64,
+    expected_power_levels_revision: Option<&str>,
+    expected_power_level: i64,
+    power_level: i64,
+    confirmed: bool,
+) -> Result<(), SpaceMembersCommandRejection> {
+    if !matches!(state.session, SessionState::Ready(_)) {
+        return Err(SpaceMembersCommandRejection::RoleSessionRequired);
+    }
+    if state.navigation.active_space_id.as_deref() != Some(space_id)
+        || state.space_members.selected_space_id.as_deref() != Some(space_id)
+    {
+        return Err(SpaceMembersCommandRejection::WrongSpace);
+    }
+    if state.space_members.generation != generation {
+        return Err(SpaceMembersCommandRejection::StaleGeneration);
+    }
+    let retry_matches = match &state.space_members.operation {
+        SpaceMembersOperationState::Idle => true,
+        SpaceMembersOperationState::RoleUpdateFailed {
+            space_id: failed_space_id,
+            user_id: failed_user_id,
+            generation: failed_generation,
+            power_level: failed_new_power,
+            ..
+        } => {
+            failed_space_id == space_id
+                && failed_user_id == user_id
+                && *failed_generation == generation
+                && *failed_new_power == power_level
+        }
+        _ => false,
+    };
+    if !retry_matches {
+        return Err(SpaceMembersCommandRejection::RoleUpdateAlreadyInFlight);
+    }
+    if !state.space_members.can_edit_roles {
+        return Err(SpaceMembersCommandRejection::RoleNotEditable);
+    }
+    if state.space_members.power_levels_revision.as_deref() != expected_power_levels_revision {
+        return Err(SpaceMembersCommandRejection::RoleRevisionMismatch);
+    }
+    let Some(target) = state
+        .space_members
+        .space_joined
+        .iter()
+        .find(|entry| entry.user_id == user_id)
+    else {
+        return Err(SpaceMembersCommandRejection::RoleTargetInvalid);
+    };
+    let own_user_id = match &state.session {
+        SessionState::Ready(info) => Some(info.user_id.as_str()),
+        _ => None,
+    };
+    if own_user_id == Some(user_id)
+        || target.membership != SpaceMemberMembership::SpaceJoined
+        || target.power_level.is_none()
+    {
+        return Err(SpaceMembersCommandRejection::RoleTargetInvalid);
+    }
+    if target.power_level != Some(expected_power_level) {
+        return Err(SpaceMembersCommandRejection::RoleCurrentPowerMismatch);
+    }
+    let Some(option) = target
+        .role_options
+        .iter()
+        .find(|option| option.power_level == power_level)
+    else {
+        return Err(SpaceMembersCommandRejection::RoleOptionUnavailable);
+    };
+    if option.power_level == expected_power_level {
+        return Err(SpaceMembersCommandRejection::RoleOptionUnavailable);
+    }
+    if option.requires_confirmation && !confirmed {
+        return Err(SpaceMembersCommandRejection::RoleConfirmationRequired);
+    }
+    Ok(())
+}
+
 pub fn admit_space_members_load(
     state: &AppState,
     space_id: &str,
@@ -480,6 +678,7 @@ pub fn admit_space_members_load(
         state.space_members.operation,
         SpaceMembersOperationState::Inviting { .. }
             | SpaceMembersOperationState::CancellingInvite { .. }
+            | SpaceMembersOperationState::UpdatingRole { .. }
     ) {
         return Err(SpaceMembersCommandRejection::LoadBlockedByInvite);
     }

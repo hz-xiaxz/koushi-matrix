@@ -13,7 +13,8 @@ import { composeBrowserFakeSidebar, emptySidebar } from "./browser-fake/sidebar"
 import {
   compareSpaceMemberEntries,
   emptyBrowserFakeSpaceMembersState,
-  createBrowserFakeSpaceMembersState
+  createBrowserFakeSpaceMembersState,
+  spaceMemberRoleOptionsForPowerLevel
 } from "./browser-fake/spaceMembers";
 import {
   INVITE_ALREADY_IN_SPACE_MESSAGE,
@@ -125,6 +126,7 @@ import type {
   FilesViewScope,
   UserProfile,
   SpaceMemberEntry,
+  SpaceMemberRoleFailureKind,
   SpaceMembersState,
   SecureBackupGateState,
   EncryptionDebugOperationOutcome
@@ -493,6 +495,15 @@ export interface DesktopApi {
     targetUserId: string,
     powerLevel: number
   ): Promise<DesktopSnapshot>;
+  updateSpaceMemberRole(
+    spaceId: string,
+    userId: string,
+    generation: number,
+    expectedPowerLevelsRevision: string | null,
+    expectedPowerLevel: number,
+    powerLevel: number,
+    confirmed: boolean
+  ): Promise<DesktopSnapshot>;
   createRoom(request: CreateRoomRequest): Promise<DesktopSnapshot>;
   createSpace(name: string): Promise<DesktopSnapshot>;
   setSpaceChild(spaceId: string, childRoomId: string, viaServer: string): Promise<DesktopSnapshot>;
@@ -548,7 +559,14 @@ export interface BrowserFakeApiOptions {
   spaceMemberInviteCancellationOutcomes?: Array<
     NonNullable<BrowserFakeApiOptions["spaceMemberInviteCancellationOutcome"]>
   >;
+  spaceMemberRoleUpdateOutcome?: BrowserFakeSpaceMemberRoleUpdateOutcome;
+  spaceMemberRoleUpdateOutcomes?: BrowserFakeSpaceMemberRoleUpdateOutcome[];
 }
+
+export type BrowserFakeSpaceMemberRoleUpdateOutcome =
+  | "success"
+  | SpaceMemberRoleFailureKind
+  | "pending";
 
 export type BrowserFakeApiContract = DesktopApi &
   Required<
@@ -581,6 +599,8 @@ class BrowserFakeApi implements DesktopApi {
   private readonly spaceMemberInviteCancellationOutcomes: Array<
     NonNullable<BrowserFakeApiOptions["spaceMemberInviteCancellationOutcome"]>
   >;
+  private readonly spaceMemberRoleUpdateOutcome: BrowserFakeSpaceMemberRoleUpdateOutcome;
+  private readonly spaceMemberRoleUpdateOutcomes: BrowserFakeSpaceMemberRoleUpdateOutcome[];
   private requestSequence = 1_000;
   private composerRendererGeneration = 0n;
   private nextComposerLeaseId = 0n;
@@ -747,7 +767,18 @@ class BrowserFakeApi implements DesktopApi {
     this.spaceMemberInviteCancellationOutcomes = [
       ...(options.spaceMemberInviteCancellationOutcomes ?? [])
     ];
+    this.spaceMemberRoleUpdateOutcome = options.spaceMemberRoleUpdateOutcome ?? "success";
+    this.spaceMemberRoleUpdateOutcomes = [...(options.spaceMemberRoleUpdateOutcomes ?? [])];
     this.snapshot = createInitialSnapshot(initialSession(options), options.secureBackupGate);
+    const spaceMembers = this.snapshot.state.domain.space_members;
+    const spacePermissions = this.roomPermissions[spaceMembers.selected_space_id ?? ""];
+    if (spacePermissions && !spacePermissions.can_edit_roles) {
+      this.snapshot.state.domain.space_members = {
+        ...spaceMembers,
+        can_edit_roles: false,
+        space_joined: spaceMembers.space_joined.map((entry) => ({ ...entry, role_options: [] }))
+      };
+    }
   }
 
   async getSnapshot(): Promise<DesktopSnapshot> {
@@ -3600,6 +3631,110 @@ class BrowserFakeApi implements DesktopApi {
       settings: updatedSettings,
       operation: { kind: "idle" }
     };
+    return this.getSnapshot();
+  }
+
+  async updateSpaceMemberRole(
+    spaceId: string,
+    userId: string,
+    generation: number,
+    expectedPowerLevelsRevision: string | null,
+    expectedPowerLevel: number,
+    powerLevel: number,
+    confirmed: boolean
+  ): Promise<DesktopSnapshot> {
+    if (!this.canUseSyncedViews() || !spaceId.trim() || !userId.trim()) {
+      return this.getSnapshot();
+    }
+
+    const normalizedSpaceId = spaceId.trim();
+    const normalizedUserId = userId.trim();
+    const current = this.snapshot.state.domain.space_members;
+    const target = current.space_joined.find((entry) => entry.user_id === normalizedUserId);
+    const retryable =
+      current.operation.kind === "idle" ||
+      (current.operation.kind === "roleUpdateFailed" &&
+        current.operation.space_id === normalizedSpaceId &&
+        current.operation.user_id === normalizedUserId &&
+        current.operation.generation === generation);
+    if (
+      current.selected_space_id !== normalizedSpaceId ||
+      current.generation !== generation ||
+      !retryable ||
+      !current.can_edit_roles ||
+      !target ||
+      target.membership !== "space_joined" ||
+      target.power_level !== expectedPowerLevel ||
+      current.power_levels_revision !== expectedPowerLevelsRevision
+    ) {
+      return this.getSnapshot();
+    }
+    const option = target.role_options.find((candidate) => candidate.power_level === powerLevel);
+    if (!option || (option.requires_confirmation && !confirmed)) {
+      return this.getSnapshot();
+    }
+
+    const requestId = this.nextRequestId();
+    this.snapshot.state.domain.space_members = {
+      ...current,
+      operation: {
+        kind: "updatingRole",
+        request_id: requestId,
+        space_id: normalizedSpaceId,
+        user_id: normalizedUserId,
+        generation,
+        expected_power_levels_revision: expectedPowerLevelsRevision,
+        expected_power_level: expectedPowerLevel,
+        power_level: powerLevel,
+        confirmed
+      }
+    };
+
+    const outcome =
+      this.spaceMemberRoleUpdateOutcomes.shift() ?? this.spaceMemberRoleUpdateOutcome;
+    if (outcome === "pending") {
+      return this.getSnapshot();
+    }
+    if (outcome !== "success") {
+      this.snapshot.state.domain.space_members = {
+        ...this.snapshot.state.domain.space_members,
+        power_levels_revision:
+          outcome === "stale"
+            ? `revision-${requestId}`
+            : this.snapshot.state.domain.space_members.power_levels_revision,
+        operation: {
+          kind: "roleUpdateFailed",
+          request_id: requestId,
+          space_id: normalizedSpaceId,
+          user_id: normalizedUserId,
+          generation,
+          expected_power_levels_revision: expectedPowerLevelsRevision,
+          expected_power_level: expectedPowerLevel,
+          power_level: powerLevel,
+          sent_revision: null,
+          failureKind: outcome
+        }
+      };
+      return this.getSnapshot();
+    }
+
+    const nextRevision = `revision-${requestId}`;
+    const nextProjection: SpaceMembersState = {
+      ...this.snapshot.state.domain.space_members,
+      power_levels_revision: nextRevision,
+      space_joined: this.snapshot.state.domain.space_members.space_joined.map((entry) =>
+        entry.user_id === normalizedUserId
+          ? {
+              ...entry,
+              power_level: powerLevel,
+              role: roomMemberRoleFromPowerLevel(powerLevel),
+              role_options: spaceMemberRoleOptionsForPowerLevel(powerLevel)
+            }
+          : entry
+      ),
+      operation: { kind: "idle" }
+    };
+    this.snapshot.state.domain.space_members = nextProjection;
     return this.getSnapshot();
   }
 

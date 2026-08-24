@@ -108,14 +108,15 @@ pub use room_operations::{
     MatrixRoomHistoryVisibility, MatrixRoomJoinRule, MatrixRoomMemberRole,
     MatrixRoomModerationAction, MatrixRoomOperationError, MatrixRoomOperationFailureKind,
     MatrixRoomPermissionFacts, MatrixRoomPreview, MatrixRoomSettingChange,
-    MatrixRoomSettingsSnapshot, MatrixSpaceInviteCancellationOutcome, MatrixUserTrustState,
+    MatrixRoomSettingsSnapshot, MatrixSpaceInviteCancellationOutcome,
+    MatrixSpaceMemberRoleFailureKind, MatrixSpaceMemberRoleUpdateResult, MatrixUserTrustState,
     cancel_space_invite, create_public_directory_room, create_room, create_space, forget_room,
     get_room_settings_snapshot, invite_user_to_room, join_room_by_id, join_room_target, leave_room,
     load_pinned_event_ids, mark_room_as_read, mark_room_as_unread, moderate_room_member, pin_event,
     preview_join_target, query_public_room_directory, remove_room_tag, room_can_send_text_message,
     room_has_active_member_no_sync, room_id_server_name, room_is_joined,
     set_room_notification_mode, set_room_tag, set_space_child, start_direct_message, unpin_event,
-    update_room_member_power_level, update_room_setting,
+    update_room_member_power_level, update_room_setting, update_space_member_power_level,
 };
 
 pub use room_projection::{
@@ -123,11 +124,12 @@ pub use room_projection::{
     MatrixDirectTargetsByRoom, MatrixInvitePreview, MatrixJoinedMemberSnapshot,
     MatrixRoomLatestEventSummary, MatrixRoomListError, MatrixRoomListRoom, MatrixRoomListSnapshot,
     MatrixRoomListSpace, MatrixRoomMemberSummary, MatrixRoomTagInfo, MatrixRoomTagKind,
-    MatrixRoomTags, MatrixSpaceMemberEntry, MatrixSpaceMembersProjection, MatrixUserProfile,
-    cached_direct_account_data_targets_by_room, direct_account_data_targets_by_room,
-    matrix_space_members_projection, room_attention_summary_from_counts,
-    room_attention_summary_from_room, room_list_snapshot, room_list_snapshot_blocking,
-    room_list_snapshot_from_sdk_rooms, room_list_snapshot_from_sdk_rooms_with_direct_targets,
+    MatrixRoomTags, MatrixSpaceMemberEntry, MatrixSpaceMemberRoleOption,
+    MatrixSpaceMembersProjection, MatrixUserProfile, cached_direct_account_data_targets_by_room,
+    direct_account_data_targets_by_room, matrix_space_members_projection,
+    room_attention_summary_from_counts, room_attention_summary_from_room, room_list_snapshot,
+    room_list_snapshot_blocking, room_list_snapshot_from_sdk_rooms,
+    room_list_snapshot_from_sdk_rooms_with_direct_targets,
     room_list_snapshot_from_sdk_rooms_with_invites,
 };
 

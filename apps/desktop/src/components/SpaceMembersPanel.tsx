@@ -1,11 +1,12 @@
 import { UserPlus, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 
 import type {
   InviteTargetCandidate,
   SpaceInviteAvailabilityReason,
   SpaceInviteCancellationAvailabilityReason,
   SpaceMemberEntry,
+  SpaceMemberRoleOption,
   SpaceMembersState,
   UserProfile
 } from "../domain/types";
@@ -37,6 +38,8 @@ export interface SpaceMembersPanelProps {
   /** Resets the shared Rust-owned invite-workflow state the space search uses. */
   onResetInviteSearch?: () => void;
   onCancelInvite?: (userId: string) => void;
+  onUpdateRole?: (userId: string, option: SpaceMemberRoleOption) => void;
+  onReloadRoles?: () => void;
   onOpenProfile: (userId: string) => void;
   onOpenContextMenu?: OpenContextMenu;
   onDiagnostic?: (message: string) => void;
@@ -44,6 +47,7 @@ export interface SpaceMembersPanelProps {
   canCancelInvite?: boolean;
   cancelAvailabilityReason?: SpaceInviteCancellationAvailabilityReason;
   cancelInviteFailure?: boolean;
+  roleUpdateFailure?: boolean;
 }
 
 interface SpaceMembersSection {
@@ -69,6 +73,19 @@ function memberRoleLabel(role: SpaceMemberEntry["role"]): string | null {
   }
 }
 
+function roleOptionLabel(role: SpaceMemberEntry["role"]): string {
+  switch (role) {
+    case "creator":
+      return t("room.roleCreator");
+    case "administrator":
+      return t("room.roleAdministrator");
+    case "moderator":
+      return t("room.roleModerator");
+    case "user":
+      return t("room.roleUser");
+  }
+}
+
 function matchesSearch(entry: SpaceMemberEntry, query: string): boolean {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   if (!normalizedQuery) {
@@ -84,7 +101,8 @@ function hasPendingOperation(state: SpaceMembersState): boolean {
   return (
     state.operation.kind === "loading" ||
     state.operation.kind === "inviting" ||
-    state.operation.kind === "cancellingInvite"
+    state.operation.kind === "cancellingInvite" ||
+    state.operation.kind === "updatingRole"
   );
 }
 
@@ -172,13 +190,16 @@ export function SpaceMembersPanel({
   onSearchInviteTargets = noopSearchInviteTargets,
   onResetInviteSearch = () => undefined,
   onCancelInvite = () => undefined,
+  onUpdateRole = () => undefined,
+  onReloadRoles = () => undefined,
   onOpenProfile,
   onOpenContextMenu,
   onDiagnostic,
   inviteAvailabilityReason,
   canCancelInvite = false,
   cancelAvailabilityReason,
-  cancelInviteFailure = false
+  cancelInviteFailure = false,
+  roleUpdateFailure = false
 }: SpaceMembersPanelProps) {
   const [query, setQuery] = useState("");
   // #508: space-only invite search — inviting a brand-new user to the Space
@@ -187,8 +208,14 @@ export function SpaceMembersPanel({
   const [inviteQuery, setInviteQuery] = useState("");
   const [inviteCandidates, setInviteCandidates] = useState<InviteTargetCandidate[]>([]);
   const [inviteSearching, setInviteSearching] = useState(false);
+  const [pendingRoleChange, setPendingRoleChange] = useState<{
+    userId: string;
+    option: SpaceMemberRoleOption;
+  } | null>(null);
   const inviteSearchRequestRef = useRef(0);
   const panelRef = useRef<HTMLElement | null>(null);
+  const roleSelectRefs = useRef(new Map<string, HTMLSelectElement>());
+  const previousOperationRef = useRef(state.operation);
   const sections = useMemo<SpaceMembersSection[]>(
     () => [
       {
@@ -221,6 +248,29 @@ export function SpaceMembersPanel({
       ? "operation_pending"
       : inviteAvailabilityReason ?? "available";
   const failedOperation = state.operation.kind === "failed" ? state.operation : null;
+  const roleUpdateFailed =
+    state.operation.kind === "roleUpdateFailed" ? state.operation : null;
+
+  const focusRoleSelect = (userId: string) => {
+    queueMicrotask(() => roleSelectRefs.current.get(userId)?.focus());
+  };
+
+  useEffect(() => {
+    const previous = previousOperationRef.current;
+    if (previous.kind === "updatingRole" && state.operation.kind !== "updatingRole") {
+      focusRoleSelect(previous.user_id);
+    }
+    previousOperationRef.current = state.operation;
+  }, [state.operation]);
+
+  useEffect(() => {
+    if (
+      pendingRoleChange &&
+      !state.space_joined.some((entry) => entry.user_id === pendingRoleChange.userId)
+    ) {
+      setPendingRoleChange(null);
+    }
+  }, [pendingRoleChange, state.space_joined]);
 
   useEffect(() => {
     onDiagnostic?.(
@@ -396,14 +446,21 @@ export function SpaceMembersPanel({
         </div>
       ) : null}
 
-      {failedOperation !== null || cancelInviteFailure ? (
+      {failedOperation !== null || cancelInviteFailure || roleUpdateFailure || roleUpdateFailed !== null ? (
         <p className="space-members-invite-failure" role="alert">
-          {cancelInviteFailure || cancellationFailureIsVisible(state)
-            ? t("spaceMembers.cancelInviteFailed")
-            : failedOperation !== null && failedOperation.user_id !== null
-              ? t("spaceMembers.inviteFailed")
-              : t("spaceMembers.loadFailed")}
+          {roleUpdateFailure || roleUpdateFailed !== null
+            ? t("spaceMembers.roleUpdateFailed")
+            : cancelInviteFailure || cancellationFailureIsVisible(state)
+              ? t("spaceMembers.cancelInviteFailed")
+              : failedOperation !== null && failedOperation.user_id !== null
+                ? t("spaceMembers.inviteFailed")
+                : t("spaceMembers.loadFailed")}
         </p>
+      ) : null}
+      {roleUpdateFailed !== null ? (
+        <button className="dialog-button" type="button" onClick={onReloadRoles}>
+          {t("spaceMembers.roleReload")}
+        </button>
       ) : null}
 
       {state.incomplete_child_room_count > 0 ? (
@@ -442,6 +499,14 @@ export function SpaceMembersPanel({
                       inviteAvailabilityReason={inviteAvailabilityReason}
                       cancelAvailabilityReason={cancelAvailabilityReason}
                       onCancelInvite={onCancelInvite}
+                      onUpdateRole={(entry, option) => {
+                        if (option.requires_confirmation) {
+                          setPendingRoleChange({ userId: entry.user_id, option });
+                        } else {
+                          onUpdateRole(entry.user_id, option);
+                        }
+                      }}
+                      roleSelectRefs={roleSelectRefs}
                       onRequestAvatarThumbnail={onRequestAvatarThumbnail}
                     />
                   ))}
@@ -456,6 +521,53 @@ export function SpaceMembersPanel({
         <p className="space-members-empty" role="status">
           {t("spaceMembers.noResults")}
         </p>
+      ) : null}
+
+      {pendingRoleChange ? (
+        <div
+          className="dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="space-member-role-confirm-title"
+        >
+          <div className="dialog-box">
+            <h2 id="space-member-role-confirm-title">
+              {t("spaceMembers.roleConfirmTitle")}
+            </h2>
+            <p>
+              {t("spaceMembers.roleConfirmCopy", {
+                name:
+                  state.space_joined.find((entry) => entry.user_id === pendingRoleChange.userId)
+                    ?.display_label ?? "",
+                role: roleOptionLabel(pendingRoleChange.option.role)
+              })}
+            </p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="dialog-button"
+                onClick={() => {
+                  const userId = pendingRoleChange.userId;
+                  setPendingRoleChange(null);
+                  focusRoleSelect(userId);
+                }}
+              >
+                {t("action.cancel")}
+              </button>
+              <button
+                type="button"
+                className="dialog-button danger"
+                onClick={() => {
+                  const change = pendingRoleChange;
+                  setPendingRoleChange(null);
+                  onUpdateRole(change.userId, change.option);
+                }}
+              >
+                {t("spaceMembers.roleConfirmAction")}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   );
@@ -477,6 +589,8 @@ interface SpaceMemberRowProps {
   inviteAvailabilityReason?: SpaceInviteAvailabilityReason;
   cancelAvailabilityReason?: SpaceInviteCancellationAvailabilityReason;
   onCancelInvite: (userId: string) => void;
+  onUpdateRole: (entry: SpaceMemberEntry, option: SpaceMemberRoleOption) => void;
+  roleSelectRefs: MutableRefObject<Map<string, HTMLSelectElement>>;
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void>;
 }
 
@@ -496,6 +610,8 @@ function SpaceMemberRow({
   inviteAvailabilityReason,
   cancelAvailabilityReason,
   onCancelInvite,
+  onUpdateRole,
+  roleSelectRefs,
   onRequestAvatarThumbnail
 }: SpaceMemberRowProps) {
   const rowRef = useRef<HTMLLIElement>(null);
@@ -647,7 +763,49 @@ function SpaceMemberRow({
           ) : null}
         </span>
       </button>
-      {sectionId === "child-only" ? (
+      {sectionId === "joined" && state.can_edit_roles && entry.role_options.length > 0 ? (
+        <label className="space-members-role-control">
+          <span className="visually-hidden">
+            {t("spaceMembers.roleSelect", { name: entry.display_label })}
+          </span>
+          <select
+            ref={(element) => {
+              if (element) {
+                roleSelectRefs.current.set(entry.user_id, element);
+              } else {
+                roleSelectRefs.current.delete(entry.user_id);
+              }
+            }}
+            aria-label={t("spaceMembers.roleSelect", { name: entry.display_label })}
+            value={entry.power_level === null ? "" : String(entry.power_level)}
+            disabled={hasPendingOperation(state)}
+            onChange={(event) => {
+              const select = event.currentTarget;
+              const option = entry.role_options.find(
+                (candidate) => String(candidate.power_level) === event.target.value
+              );
+              if (option) {
+                onUpdateRole(entry, option);
+                // The visible value is Rust-owned. Restore it until the next
+                // authoritative snapshot projects the requested level.
+                select.value = entry.power_level === null ? "" : String(entry.power_level);
+              }
+            }}
+          >
+            {entry.power_level !== null &&
+            !entry.role_options.some((option) => option.power_level === entry.power_level) ? (
+              <option value={String(entry.power_level)} disabled>
+                {roleOptionLabel(entry.role)}
+              </option>
+            ) : null}
+            {entry.role_options.map((option) => (
+              <option key={`${option.power_level}-${option.role}`} value={String(option.power_level)}>
+                {roleOptionLabel(option.role)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : sectionId === "child-only" ? (
         <button
           className="space-members-invite"
           type="button"

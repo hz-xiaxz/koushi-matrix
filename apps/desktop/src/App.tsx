@@ -174,6 +174,7 @@ import type {
   SavedSessionInfo,
   SearchScopeKind,
   SettingsPatch,
+  SpaceMemberRoleOption,
   ThreadOpenIntent,
   ThreadsListScope,
   PinnedEventNavigation
@@ -985,6 +986,8 @@ export function App() {
   const timelineDiagnosticsRef = useRef<QaTimelineDiagnostics>(INITIAL_TIMELINE_DIAGNOSTICS);
   const [spaceMembersCancelFailure, setSpaceMembersCancelFailure] =
     useState<SpaceMemberFence | null>(null);
+  const [spaceMembersRoleTransportFailure, setSpaceMembersRoleTransportFailure] =
+    useState<SpaceMemberFence | null>(null);
   const [savedSessions, setSavedSessions] = useState<SavedSessionInfo[]>([]);
   const [contextMenu, setContextMenu] = useState<ActiveContextMenu | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -1110,6 +1113,7 @@ export function App() {
   const spaceMembersOpenRequestRef = useRef(0);
   const spaceMembersInviteRequestRef = useRef(0);
   const spaceMembersCancelRequestRef = useRef(0);
+  const spaceMembersRoleRequestRef = useRef(0);
   const spaceMembersLoadInFlightRef = useRef<Map<string, Promise<DesktopSnapshot | null>>>(
     new Map()
   );
@@ -4866,6 +4870,75 @@ export function App() {
     }
   }
 
+  async function reloadSpaceMemberRoles(): Promise<void> {
+    const fence = spaceMembersFenceForSnapshot(snapshotRef.current);
+    const operation = snapshotRef.current?.state.domain.space_members.operation;
+    if (!fence || operation?.kind !== "roleUpdateFailed") {
+      return;
+    }
+    spaceMembersLoadedRef.current.delete(`${fence.spaceId}\u0000${fence.generation}`);
+    await ensureSpaceMembersLoaded(fence.spaceId, fence.generation);
+  }
+
+  async function updateSpaceMemberRole(
+    userId: string,
+    option: SpaceMemberRoleOption
+  ): Promise<void> {
+    const currentSnapshot = snapshotRef.current;
+    const fence = spaceMembersFenceForSnapshot(currentSnapshot);
+    const members = currentSnapshot?.state.domain.space_members;
+    const entry = members?.space_joined.find((candidate) => candidate.user_id === userId);
+    if (
+      !fence ||
+      !members ||
+      !entry ||
+      members.operation.kind === "updatingRole" ||
+      !members.can_edit_roles ||
+      entry.power_level === null ||
+      !entry.role_options.some(
+        (candidateOption) => candidateOption.power_level === option.power_level
+      )
+    ) {
+      return;
+    }
+
+    const requestId = ++spaceMembersRoleRequestRef.current;
+    setSpaceMembersRoleTransportFailure(null);
+    appendSpaceMembersDiagnosticLog("role trigger=select");
+    try {
+      const nextSnapshot = await api.updateSpaceMemberRole(
+        fence.spaceId,
+        userId,
+        fence.generation,
+        members.power_levels_revision,
+        entry.power_level,
+        option.power_level,
+        option.requires_confirmation
+      );
+      if (
+        spaceMembersRoleRequestRef.current !== requestId ||
+        !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
+        !spaceMembersSnapshotMatches(nextSnapshot, fence)
+      ) {
+        return;
+      }
+      setSpaceMembersRoleTransportFailure(null);
+      setSnapshot(nextSnapshot);
+      const operation = nextSnapshot.state.domain.space_members.operation;
+      appendSpaceMembersDiagnosticLog(
+        `role outcome=${operation.kind === "roleUpdateFailed" ? "failed" : operation.kind === "updatingRole" ? "pending" : "settled"}`
+      );
+    } catch {
+      if (
+        spaceMembersRoleRequestRef.current === requestId &&
+        spaceMembersSnapshotMatches(snapshotRef.current, fence)
+      ) {
+        setSpaceMembersRoleTransportFailure(fence);
+        appendSpaceMembersDiagnosticLog("role outcome=transport_rejected");
+      }
+    }
+  }
+
   async function closeFocusedContextPanel() {
     if (rightPanelMode === "files") {
       await closeFilesViewPanel();
@@ -5787,6 +5860,16 @@ export function App() {
           canCancelInvite={canCancelInvite}
           cancelAvailabilityReason={cancelAvailabilityReason}
           cancelInviteFailure={cancelInviteFailure}
+          roleUpdateFailure={
+            spaceMembersRoleTransportFailure !== null &&
+            spaceMembersSnapshotMatches(snapshot, spaceMembersRoleTransportFailure)
+          }
+          onUpdateSpaceMemberRole={(userId, option) => {
+            void updateSpaceMemberRole(userId, option);
+          }}
+          onReloadSpaceMemberRoles={() => {
+            void reloadSpaceMemberRoles();
+          }}
           onOpenPeople={async () => {
             const roomId = snapshotRef.current?.state.ui.navigation.active_room_id;
             const navigationRequestId = roomNavigationRequestRef.current;

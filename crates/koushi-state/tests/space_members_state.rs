@@ -33,6 +33,7 @@ fn child_only_entry() -> SpaceMemberEntry {
         membership: SpaceMemberMembership::ChildRoomOnly,
         child_room_ids: vec![CHILD_ROOM_ID.to_owned()],
         invite_pending: false,
+        role_options: Vec::new(),
     }
 }
 
@@ -46,6 +47,8 @@ fn projection(generation: u64, child_only: Vec<SpaceMemberEntry>) -> SpaceMember
         child_room_count: 1,
         complete_child_room_count: 1,
         incomplete_child_room_count: 0,
+        power_levels_revision: None,
+        can_edit_roles: false,
     }
 }
 

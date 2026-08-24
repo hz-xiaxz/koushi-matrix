@@ -774,6 +774,26 @@ class TauriDesktopApi implements DesktopApi {
     });
   }
 
+  async updateSpaceMemberRole(
+    spaceId: string,
+    userId: string,
+    generation: number,
+    expectedPowerLevelsRevision: string | null,
+    expectedPowerLevel: number,
+    powerLevel: number,
+    confirmed: boolean
+  ): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("update_space_member_role", {
+      spaceId,
+      userId,
+      generation,
+      expectedPowerLevelsRevision,
+      expectedPowerLevel,
+      powerLevel,
+      confirmed
+    });
+  }
+
   async openActivity(): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("open_activity");
   }

@@ -51,6 +51,7 @@ import {
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
 import { computeBrowserRoomListProjection } from "../backend/roomListProjection";
+import { spaceMemberRoleOptionsForPowerLevel } from "../backend/browser-fake/spaceMembers";
 import { composeSidebar } from "../domain/desktopModel";
 import {
   COMPOSER_DRAFT_REVISION_ZERO,
@@ -176,7 +177,7 @@ function readySnapshot(
           locale_profile: defaultLocaleDisplayProfile(),
           typography_profile: defaultTypographyDisplayProfile(),
           profile: { own: { display_name: "Harness User", avatar: null }, users: {}, room_users: {}, local_aliases: {}, local_alias_update: { kind: "idle" }, ignored_user_ids: [], ignored_user_update: { kind: "idle" }, update: { kind: "idle" } },
-          space_members: { selected_space_id: activeSpaceId, generation: 1, space_joined: [], space_invited: [], child_room_only: [], child_room_count: 0, complete_child_room_count: 0, incomplete_child_room_count: 0, operation: { kind: "idle" } },
+          space_members: { selected_space_id: activeSpaceId, generation: 1, space_joined: [], space_invited: [], child_room_only: [], child_room_count: 0, complete_child_room_count: 0, incomplete_child_room_count: 0, power_levels_revision: null, can_edit_roles: false, operation: { kind: "idle" } },
           sync: "running",
           spaces, rooms, invites: [],
           invite_workflow: {
@@ -1098,6 +1099,8 @@ mock.setCommandResponse("select_space", ({ spaceId }: { spaceId: string | null }
                 child_room_count: 0,
                 complete_child_room_count: 0,
                 incomplete_child_room_count: 0,
+                power_levels_revision: null,
+                can_edit_roles: false,
                 operation: { kind: "idle" }
               }
       },
@@ -2596,7 +2599,21 @@ mock.setCommandResponse(
                 role: "administrator",
                 membership: "space_joined",
                 child_room_ids: [],
-                invite_pending: false
+                invite_pending: false,
+                role_options: []
+              },
+              {
+                user_id: "@harness-role-target:example.invalid",
+                display_name: "Harness Role Target",
+                display_label: "Harness Role Target",
+                original_display_label: "Harness Role Target",
+                avatar_url: null,
+                power_level: 0,
+                role: "user",
+                membership: "space_joined",
+                child_room_ids: [],
+                invite_pending: false,
+                role_options: spaceMemberRoleOptionsForPowerLevel(0)
               }
             ],
             space_invited: [
@@ -2610,7 +2627,8 @@ mock.setCommandResponse(
                 role: "user",
                 membership: "space_invited",
                 child_room_ids: [],
-                invite_pending: true
+                invite_pending: true,
+                role_options: []
               }
             ],
             child_room_only: [
@@ -2624,12 +2642,54 @@ mock.setCommandResponse(
                 role: "user",
                 membership: "child_room_only",
                 child_room_ids: [ROOM_ID],
-                invite_pending: false
+                invite_pending: false,
+                role_options: []
               }
             ],
             child_room_count: 1,
-            complete_child_room_count: 1,
-            incomplete_child_room_count: 0,
+            complete_child_room_count: 0,
+            incomplete_child_room_count: 1,
+            power_levels_revision: "revision-1",
+            can_edit_roles: true,
+            operation: { kind: "idle" }
+          }
+        }
+      }
+    });
+  }
+);
+mock.setCommandResponse(
+  "update_space_member_role",
+  ({ spaceId, userId, generation, powerLevel }: { spaceId: string; userId: string; generation: number; powerLevel: number }) => {
+    const members = currentSnapshot.state.domain.space_members;
+    const target = members.space_joined.find((entry) => entry.user_id === userId);
+    if (
+      !target ||
+      members.selected_space_id !== spaceId ||
+      members.generation !== generation
+    ) {
+      return currentSnapshot;
+    }
+    const role = powerLevel === 100 ? "administrator" : powerLevel === 50 ? "moderator" : "user";
+    return setCurrentSnapshot({
+      ...currentSnapshot,
+      state: {
+        ...currentSnapshot.state,
+        domain: {
+          ...currentSnapshot.state.domain,
+          space_members: {
+            ...members,
+            power_levels_revision: `revision-${generation + 1}`,
+            space_joined: members.space_joined.map((entry) =>
+              entry.user_id === userId
+                ? {
+                    ...entry,
+                    power_level: powerLevel,
+                    role,
+                    role_options: spaceMemberRoleOptionsForPowerLevel(powerLevel)
+                  }
+                : entry
+            ),
             operation: { kind: "idle" }
           }
         }

@@ -301,6 +301,145 @@ test("space rail separates system buttons, reorders Spaces, and leaves a Space h
   ).toHaveCount(0);
 });
 
+test("Space member roles use authoritative success, failure retry, confirmation, and child-sync barriers", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.getByRole("button", { name: "Harness Space", exact: true }).click({ force: true });
+  const membersButton = page.getByRole("button", { name: /^Members,/ });
+  await expect(membersButton).toBeVisible();
+  await membersButton.click();
+  await expect(page.getByRole("heading", { name: "Space members", level: 2 })).toBeVisible();
+  await expect(page.getByText("Some child rooms are still syncing")).toBeVisible();
+
+  await page.evaluate(() => {
+    let attempts = 0;
+    window.__harness.setCommandResponse(
+      "update_space_member_role",
+      ({ spaceId, userId, generation, expectedPowerLevelsRevision, expectedPowerLevel, powerLevel }) => {
+        attempts += 1;
+        const current = window.__harness.currentSnapshot();
+        const members = current.state.domain.space_members;
+        const target = members.space_joined.find((entry) => entry.user_id === String(userId));
+        if (
+          !target ||
+          members.selected_space_id !== String(spaceId) ||
+          members.generation !== Number(generation) ||
+          members.power_levels_revision !== (expectedPowerLevelsRevision ?? null) ||
+          target.power_level !== Number(expectedPowerLevel)
+        ) {
+          return current;
+        }
+        if (attempts === 1) {
+          return {
+            ...current,
+            state: {
+              ...current.state,
+              domain: {
+                ...current.state.domain,
+                space_members: {
+                  ...members,
+                  power_levels_revision: "revision-2",
+                  operation: {
+                    kind: "roleUpdateFailed",
+                    request_id: 7_001,
+                    space_id: String(spaceId),
+                    user_id: String(userId),
+                    generation: Number(generation),
+                    expected_power_levels_revision: expectedPowerLevelsRevision ?? null,
+                    expected_power_level: Number(expectedPowerLevel),
+                    power_level: Number(powerLevel),
+                    sent_revision: null,
+                    failureKind: "stale"
+                  }
+                }
+              }
+            }
+          };
+        }
+        const nextPower = Number(powerLevel);
+        const nextRole = nextPower === 100 ? "administrator" : nextPower === 50 ? "moderator" : "user";
+        return {
+          ...current,
+          state: {
+            ...current.state,
+            domain: {
+              ...current.state.domain,
+              space_members: {
+                ...members,
+                power_levels_revision: `revision-${attempts}`,
+                space_joined: members.space_joined.map((entry) =>
+                  entry.user_id === userId
+                    ? {
+                        ...entry,
+                        power_level: nextPower,
+                        role: nextRole,
+                        role_options: [0, 50, 100]
+                          .filter((candidate) => candidate !== nextPower)
+                          .map((candidate) => ({
+                            power_level: candidate,
+                            role: candidate === 100 ? "administrator" : candidate === 50 ? "moderator" : "user",
+                            requires_confirmation: nextPower >= 100 || candidate >= 100
+                          }))
+                      }
+                    : entry
+                ),
+                operation: { kind: "idle" }
+              }
+            }
+          }
+        };
+      }
+    );
+    window.__harness.clearInvocations();
+  });
+
+  const select = page.getByRole("combobox", { name: "Role for Harness Role Target" });
+  await expect(select).toBeEnabled();
+  await select.selectOption("50");
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("update_space_member_role").length))
+    .toBe(1);
+  await expect(page.getByRole("alert")).toHaveText("Could not update this member's role. Try again.");
+  await expect(select).toHaveValue("0");
+
+  await select.selectOption("50");
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("update_space_member_role").length))
+    .toBe(2);
+  await expect(select).toHaveValue("50");
+
+  await select.selectOption("100");
+  const dialog = page.getByRole("dialog", { name: "Confirm role change" });
+  await expect(dialog).toBeVisible();
+  const invocationCountBeforeCancel = await page.evaluate(
+    () => window.__harness.invocationsOf("update_space_member_role").length
+  );
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("update_space_member_role").length))
+    .toBe(invocationCountBeforeCancel);
+  await expect(select).toHaveValue("50");
+
+  await select.selectOption("100");
+  await page.getByRole("dialog", { name: "Confirm role change" })
+    .getByRole("button", { name: "Confirm role change" })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("update_space_member_role").at(-1)?.args))
+    .toMatchObject({
+      spaceId: "!harness-space:example.invalid",
+      userId: "@harness-role-target:example.invalid",
+      generation: 2,
+      expectedPowerLevelsRevision: "revision-2",
+      expectedPowerLevel: 50,
+      powerLevel: 100,
+      confirmed: true
+    });
+  await expect(select).toHaveValue("100");
+  console.log("space_member_role=ok");
+});
+
 test("invites view accepts a seeded invite and New DM renders the returned direct room", async ({
   page
 }) => {

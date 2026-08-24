@@ -1159,6 +1159,12 @@ export type MessageId =
   | "spaceMembers.loadFailed"
   | "spaceMembers.syncIncomplete"
   | "spaceMembers.noResults"
+  | "spaceMembers.roleSelect"
+  | "spaceMembers.roleUpdateFailed"
+  | "spaceMembers.roleReload"
+  | "spaceMembers.roleConfirmTitle"
+  | "spaceMembers.roleConfirmCopy"
+  | "spaceMembers.roleConfirmAction"
   | "threads.empty"
   | "threads.error"
   | "threads.loading"
@@ -2498,6 +2504,12 @@ const en: Catalog = {
   "spaceMembers.loadFailed": "Member load failed. Try again.",
   "spaceMembers.syncIncomplete": "Some child rooms are still syncing",
   "spaceMembers.noResults": "No space members found",
+  "spaceMembers.roleSelect": "Role for {name}",
+  "spaceMembers.roleUpdateFailed": "Could not update this member's role. Try again.",
+  "spaceMembers.roleReload": "Reload roles",
+  "spaceMembers.roleConfirmTitle": "Confirm role change",
+  "spaceMembers.roleConfirmCopy": "Change {name}'s role to {role}?",
+  "spaceMembers.roleConfirmAction": "Confirm role change",
   "threads.empty": "No threads",
   "threads.error": "Could not load threads",
   "threads.loading": "Loading threads…",
@@ -3721,6 +3733,12 @@ const ja: Catalog = {
   "spaceMembers.loadFailed": "メンバーの読み込みに失敗しました。もう一度お試しください。",
   "spaceMembers.syncIncomplete": "一部の子ルームを同期中です",
   "spaceMembers.noResults": "スペースのメンバーが見つかりません",
+  "spaceMembers.roleSelect": "{name}のロール",
+  "spaceMembers.roleUpdateFailed": "このメンバーのロールを変更できませんでした。もう一度お試しください。",
+  "spaceMembers.roleReload": "ロールを再読み込み",
+  "spaceMembers.roleConfirmTitle": "ロール変更の確認",
+  "spaceMembers.roleConfirmCopy": "{name}のロールを{role}に変更しますか？",
+  "spaceMembers.roleConfirmAction": "ロールを変更",
   "threads.empty": "スレッドがありません",
   "threads.error": "スレッドを読み込めませんでした",
   "threads.loading": "スレッドを読み込み中…",

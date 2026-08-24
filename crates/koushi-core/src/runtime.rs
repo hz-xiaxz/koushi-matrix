@@ -47,8 +47,8 @@ use koushi_state::{
     ComposerDraftStore, ComposerTarget, LoginAttemptId, NavigationState, OperationFailureKind,
     ProfileUpdateRequest, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem,
     SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection, ThreadPaneState,
-    UiEvent, admit_space_member_cancellation, admit_space_member_invite, admit_space_members_load,
-    reduce,
+    UiEvent, admit_space_member_cancellation, admit_space_member_invite, admit_space_member_role,
+    admit_space_members_load, reduce,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -167,18 +167,34 @@ fn record_space_member_command_rejection(
         SpaceMembersCommandRejection::AlreadyInvited => "already_invited",
         SpaceMembersCommandRejection::NotInvited => "not_invited",
         SpaceMembersCommandRejection::NotChildRoomOnly => "not_child_room_only",
+        SpaceMembersCommandRejection::RoleUpdateAlreadyInFlight => "role_update_already_in_flight",
+        SpaceMembersCommandRejection::RoleNotEditable => "role_not_editable",
+        SpaceMembersCommandRejection::RoleTargetInvalid => "role_target_invalid",
+        SpaceMembersCommandRejection::RoleOptionUnavailable => "role_option_unavailable",
+        SpaceMembersCommandRejection::RoleRevisionMismatch => "role_revision_mismatch",
+        SpaceMembersCommandRejection::RoleCurrentPowerMismatch => "role_current_power_mismatch",
+        SpaceMembersCommandRejection::RoleConfirmationRequired => "role_confirmation_required",
+        SpaceMembersCommandRejection::RoleSessionRequired => "role_session_required",
     };
     let outcome = match rejection {
         SpaceMembersCommandRejection::StaleGeneration => "stale_generation",
         SpaceMembersCommandRejection::InviteAlreadyInFlight
         | SpaceMembersCommandRejection::CancellationAlreadyInFlight
         | SpaceMembersCommandRejection::AlreadyJoined
-        | SpaceMembersCommandRejection::AlreadyInvited => "duplicate",
+        | SpaceMembersCommandRejection::AlreadyInvited
+        | SpaceMembersCommandRejection::RoleUpdateAlreadyInFlight => "duplicate",
         SpaceMembersCommandRejection::NoSelectedSpace
         | SpaceMembersCommandRejection::WrongSpace
         | SpaceMembersCommandRejection::LoadBlockedByInvite
         | SpaceMembersCommandRejection::NotInvited
-        | SpaceMembersCommandRejection::NotChildRoomOnly => "rejected",
+        | SpaceMembersCommandRejection::NotChildRoomOnly
+        | SpaceMembersCommandRejection::RoleNotEditable
+        | SpaceMembersCommandRejection::RoleTargetInvalid
+        | SpaceMembersCommandRejection::RoleOptionUnavailable
+        | SpaceMembersCommandRejection::RoleRevisionMismatch
+        | SpaceMembersCommandRejection::RoleCurrentPowerMismatch
+        | SpaceMembersCommandRejection::RoleConfirmationRequired
+        | SpaceMembersCommandRejection::RoleSessionRequired => "rejected",
     };
     record(
         DiagnosticEvent::new(
@@ -238,6 +254,26 @@ pub(crate) fn space_member_forward_failure_action(
                 user_id: user_id.clone(),
                 generation: *generation,
                 outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+            },
+        )),
+        crate::command::RoomCommand::UpdateSpaceMemberRole {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+            ..
+        } => Some((
+            *request_id,
+            AppAction::SpaceMemberRoleUpdateSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                user_id: user_id.clone(),
+                generation: *generation,
+                outcome: koushi_state::SpaceMemberRoleUpdateOutcome::Failed(
+                    koushi_state::SpaceMemberRoleFailureKind::Sdk,
+                ),
+                sent_revision: None,
+                projection: None,
             },
         )),
         _ => None,
@@ -2863,6 +2899,78 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
+                    crate::command::RoomCommand::UpdateSpaceMemberRole {
+                        request_id,
+                        space_id,
+                        user_id,
+                        generation,
+                        expected_power_levels_revision,
+                        expected_power_level,
+                        power_level,
+                        confirmed,
+                    } => {
+                        if let Err(rejection) = admit_space_member_role(
+                            &self.state,
+                            space_id,
+                            user_id,
+                            *generation,
+                            expected_power_levels_revision.as_deref(),
+                            *expected_power_level,
+                            *power_level,
+                            *confirmed,
+                        ) {
+                            record_space_member_command_rejection("role_update", rejection);
+                            let failure =
+                                if rejection == SpaceMembersCommandRejection::RoleSessionRequired {
+                                    CoreFailure::SessionRequired
+                                } else {
+                                    CoreFailure::RoomOperationFailed {
+                                        kind: match rejection {
+                                            SpaceMembersCommandRejection::RoleNotEditable => {
+                                                RoomFailureKind::Forbidden
+                                            }
+                                            SpaceMembersCommandRejection::RoleTargetInvalid => {
+                                                RoomFailureKind::NotFound
+                                            }
+                                            _ => RoomFailureKind::Sdk,
+                                        },
+                                    }
+                                };
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure,
+                            });
+                            return false;
+                        }
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceMemberRoleUpdateRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                                user_id: user_id.clone(),
+                                generation: *generation,
+                                expected_power_levels_revision: expected_power_levels_revision
+                                    .clone(),
+                                expected_power_level: *expected_power_level,
+                                power_level: *power_level,
+                                confirmed: *confirmed,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            record_space_member_command_rejection(
+                                "role_update",
+                                SpaceMembersCommandRejection::RoleUpdateAlreadyInFlight,
+                            );
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
                     _ => {}
                 }
                 // User-intent lane: for SelectRoom, record the request_id→room_id
@@ -4231,6 +4339,15 @@ mod tests {
             membership,
             child_room_ids: Vec::new(),
             invite_pending: false,
+            role_options: if matches!(membership, SpaceMemberMembership::SpaceJoined) {
+                vec![koushi_state::SpaceMemberRoleOption {
+                    power_level: 50,
+                    role: koushi_state::RoomMemberRole::Moderator,
+                    requires_confirmation: false,
+                }]
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -4277,6 +4394,8 @@ mod tests {
                     child_room_count: 0,
                     complete_child_room_count: 0,
                     incomplete_child_room_count: 0,
+                    power_levels_revision: None,
+                    can_edit_roles: matches!(membership, SpaceMemberMembership::SpaceJoined),
                 },
             },
         ]
@@ -4368,13 +4487,17 @@ mod tests {
         .await
         .expect("closed actor forwarding should emit a correlated failure");
         let final_state = wait_for_runtime_snapshot(&mut connection, |snapshot| {
-            matches!(
-                snapshot.space_members.operation,
+            match snapshot.space_members.operation {
                 koushi_state::SpaceMembersOperationState::Failed {
                     request_id: failed_request_id,
                     ..
-                } if failed_request_id == request_id.sequence
-            )
+                }
+                | koushi_state::SpaceMembersOperationState::RoleUpdateFailed {
+                    request_id: failed_request_id,
+                    ..
+                } => failed_request_id == request_id.sequence,
+                _ => false,
+            }
         })
         .await;
 
@@ -4495,6 +4618,68 @@ mod tests {
             } if failed_request_id == request_id
                 && failed_user_id == "@closed-forward-user:example.invalid"
         ));
+    }
+
+    #[tokio::test]
+    async fn closed_account_forwarding_rolls_back_space_member_role_once() {
+        let (state, failure, request_id) = run_closed_space_member_forwarding_case(
+            SpaceMemberMembership::SpaceJoined,
+            |request_id| crate::command::RoomCommand::UpdateSpaceMemberRole {
+                request_id,
+                space_id: "!closed-forward-space:example.invalid".to_owned(),
+                user_id: "@closed-forward-user:example.invalid".to_owned(),
+                generation: 9,
+                expected_power_levels_revision: None,
+                expected_power_level: 0,
+                power_level: 50,
+                confirmed: false,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            failure,
+            CoreFailure::RoomOperationFailed {
+                kind: RoomFailureKind::Sdk
+            }
+        );
+        assert_eq!(
+            state
+                .space_members
+                .space_joined
+                .iter()
+                .find(|entry| entry.user_id == "@closed-forward-user:example.invalid")
+                .and_then(|entry| entry.power_level),
+            Some(0)
+        );
+        assert!(matches!(
+            state.space_members.operation,
+            koushi_state::SpaceMembersOperationState::RoleUpdateFailed {
+                request_id: failed_request_id,
+                kind: koushi_state::SpaceMemberRoleFailureKind::Sdk,
+                ..
+            } if failed_request_id == request_id
+        ));
+    }
+
+    #[test]
+    fn role_command_reduces_pending_before_one_account_route() {
+        let source = include_str!("runtime.rs");
+        let marker = "crate::command::RoomCommand::UpdateSpaceMemberRole {\n                        request_id";
+        let start = source.find(marker).expect("role command branch");
+        let branch = source[start..]
+            .split("CoreCommand::Timeline(timeline_command)")
+            .next()
+            .expect("role command forwarding block");
+        let pending = branch
+            .find("SpaceMemberRoleUpdateRequested")
+            .expect("role command must enter pending state");
+        let route_marker = ".account_actor\n                    .send";
+        let route = branch
+            .find(route_marker)
+            .expect("role command must route to AccountActor");
+        assert!(pending < route, "pending state must precede SDK routing");
+        assert_eq!(branch.matches(route_marker).count(), 1);
     }
 
     pub(super) fn unread_diagnostic_room(room_id: &str) -> RoomSummary {
@@ -4715,11 +4900,14 @@ mod tests {
                             membership: SpaceMemberMembership::SpaceInvited,
                             child_room_ids: Vec::new(),
                             invite_pending: false,
+                            role_options: Vec::new(),
                         }],
                         child_room_only: Vec::new(),
                         child_room_count: 0,
                         complete_child_room_count: 0,
                         incomplete_child_room_count: 0,
+                        power_levels_revision: None,
+                        can_edit_roles: false,
                     },
                 },
             ])

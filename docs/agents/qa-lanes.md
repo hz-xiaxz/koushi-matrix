@@ -215,6 +215,20 @@ The full-app harness (`apps/desktop/src/test/appHarnessMain.tsx`) must import
 `../styles.css`, matching production `main.tsx`. Otherwise visibility/layout
 assertions can pass against unstyled DOM and miss real production CSS issues.
 
+The Space Members role contract is a Browser-headless gate, not a live-server
+scenario. Run the focused harness test with:
+
+```bash
+npm --prefix apps/desktop exec -- playwright test e2e/room-space-invites.spec.ts \
+  -g "Space member roles" --workers=1
+```
+
+It waits on invoke-count and snapshot/DOM barriers (never sleeps) and records
+the fixed, private-data-free evidence token `space_member_role=ok`. The test
+covers authorized success, stale failure/retry, admin confirmation with inert
+Cancel, and child-sync independence. It must not be replaced by a real-account
+or live-homeserver scenario.
+
 Harness and spec rules that have each caused a real failure are collected in
 [troubleshooting.md](troubleshooting.md#browser-headless-harness).
 

@@ -19,6 +19,7 @@ import type {
   SavedSessionInfo,
   SearchResult,
   SettingsPatch,
+  SpaceMemberRoleOption,
   PinnedEventNavigation,
   ThreadOpenIntent,
   ThreadsListScope
@@ -111,6 +112,7 @@ export function ContextualRightPanel({
   canCancelInvite = false,
   cancelAvailabilityReason,
   cancelInviteFailure = false,
+  roleUpdateFailure = false,
   onOpenPeople: _onOpenPeople,
   onOpenProfile,
   onBackToPeople,
@@ -134,6 +136,8 @@ export function ContextualRightPanel({
   onSetRoomNotificationMode = () => undefined,
   onStartDirectMessage = () => undefined,
   onUpdateMemberRole = () => undefined,
+  onUpdateSpaceMemberRole = () => undefined,
+  onReloadSpaceMemberRoles = () => undefined,
   onReshareRoomKey,
   onForceNewOutboundSession,
   onShareIndex0RoomKey,
@@ -240,6 +244,7 @@ export function ContextualRightPanel({
   canCancelInvite?: boolean;
   cancelAvailabilityReason?: SpaceInviteCancellationAvailabilityReason;
   cancelInviteFailure?: boolean;
+  roleUpdateFailure?: boolean;
   onOpenPeople?: () => void;
   onOpenProfile?: (userId: string) => void;
   onBackToPeople?: () => void;
@@ -274,6 +279,8 @@ export function ContextualRightPanel({
     targetUserId: string,
     powerLevel: number
   ) => void;
+  onUpdateSpaceMemberRole?: (userId: string, option: SpaceMemberRoleOption) => void;
+  onReloadSpaceMemberRoles?: () => void;
   onReshareRoomKey?: (roomId: string) => Promise<RoomKeyReshareOutcome>;
   onForceNewOutboundSession?: (
     roomId: string
@@ -624,6 +631,8 @@ export function ContextualRightPanel({
             onSearchInviteTargets={onSearchSpaceInviteTargets}
             onResetInviteSearch={onResetSpaceInviteSearch}
             onCancelInvite={onCancelInvite}
+            onUpdateRole={onUpdateSpaceMemberRole}
+            onReloadRoles={onReloadSpaceMemberRoles}
             canCancelInvite={canCancelInvite}
             onOpenProfile={onOpenProfile ?? (() => undefined)}
             onOpenContextMenu={onOpenContextMenu}
@@ -631,6 +640,7 @@ export function ContextualRightPanel({
             inviteAvailabilityReason={spaceInviteAvailabilityReason}
             cancelAvailabilityReason={cancelAvailabilityReason}
             cancelInviteFailure={cancelInviteFailure}
+            roleUpdateFailure={roleUpdateFailure}
           />
         ) : (
           <PeoplePanel

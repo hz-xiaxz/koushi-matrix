@@ -239,6 +239,16 @@ pub enum RoomCommand {
         target_user_id: String,
         power_level: i64,
     },
+    UpdateSpaceMemberRole {
+        request_id: RequestId,
+        space_id: String,
+        user_id: String,
+        generation: u64,
+        expected_power_levels_revision: Option<String>,
+        expected_power_level: i64,
+        power_level: i64,
+        confirmed: bool,
+    },
     SelectSpace {
         request_id: RequestId,
         space_id: Option<String>,
@@ -527,6 +537,24 @@ impl fmt::Debug for RoomCommand {
                 .field("room_id", &"RoomId(..)")
                 .field("target_user_id", &"UserId(..)")
                 .field("power_level", power_level)
+                .finish(),
+            Self::UpdateSpaceMemberRole {
+                request_id,
+                generation,
+                expected_power_level,
+                power_level,
+                confirmed,
+                ..
+            } => formatter
+                .debug_struct("UpdateSpaceMemberRole")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("user_id", &"UserId(..)")
+                .field("generation", generation)
+                .field("expected_power_levels_revision", &"EventId(..)")
+                .field("expected_power_level", expected_power_level)
+                .field("power_level", power_level)
+                .field("confirmed", confirmed)
                 .finish(),
             Self::SelectSpace {
                 request_id,

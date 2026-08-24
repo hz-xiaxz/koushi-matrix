@@ -2563,6 +2563,77 @@ stateDiagram-v2
   `moderation=ok`. The lane uses a disposable management room so timeline and
   room/space stages are not disrupted.
 
+## Space Members
+
+Space-member membership, role options, and role-update settlement are a
+Space-local Rust-owned projection. The selected Space and member generation
+fence every load, invite, cancellation, background refresh, and role result;
+React owns only the confirmation dialog's visibility and transient focus.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Loading: Load [Ready + selected Space]
+    Failed --> Loading: Retry load [exact selected Space + generation]
+    RoleUpdateFailed --> Loading: Reload [exact selected Space + generation]
+    Loading --> Idle: Loaded [matching request + Space + generation]
+    Loading --> Failed: Load failed [matching request + Space + generation]
+    Idle --> Inviting: Invite [exact generation + child-only target]
+    Idle --> CancellingInvite: Cancel invite [exact invited target]
+    Idle --> UpdatingRole: Update role [exact revision/current option + confirmation]
+    Inviting --> Idle: Settled + authoritative projection
+    CancellingInvite --> Idle: Settled + authoritative projection
+    Inviting --> Failed: Failure
+    CancellingInvite --> Failed: Failure
+    UpdatingRole --> Idle: Sent revision + requested target + untouched unrelated fields
+    UpdatingRole --> RoleUpdateFailed: Forbidden/Stale/Network/Timeout/Invalid/SDK
+    RoleUpdateFailed --> UpdatingRole: Exact retry [same Space/user/generation/requested power + current revision/current target power]
+    RoleUpdateFailed --> Idle: Background projection proves requested level [any revision]
+    Failed --> Idle: Matching authoritative refresh
+    Loading --> Idle: Selection/session cleanup / clear projection
+    Idle --> Idle: Selection/session cleanup / clear projection
+    Inviting --> Idle: Selection/session cleanup / clear projection
+    CancellingInvite --> Idle: Selection/session cleanup / clear projection
+    UpdatingRole --> Idle: Selection/session cleanup / clear projection
+    RoleUpdateFailed --> Idle: Selection/session cleanup / clear projection
+    Failed --> Idle: Selection/session cleanup / clear projection
+```
+
+- `Load` is admitted only for a Ready session with the exact selected Space and
+  generation. Matching request, Space, and generation are required for every
+  load, invite, cancellation, and role settlement; late or duplicate results
+  are inert. Selection, lock, logout, account replacement, and session cleanup
+  clear the projection and return the operation to `Idle`.
+- Invite and load admission reject `UpdatingRole`; invite also rejects
+  `RoleUpdateFailed`, while an explicit **Reload roles** action admits the
+  documented `RoleUpdateFailed → Loading` recovery for the same Space and
+  generation. These guards prevent either command from replacing a correlated
+  role settlement.
+- A role command is admitted only from `Idle` or its exact retryable
+  `RoleUpdateFailed` state, for the same Space/user/generation/requested power
+  identity as the failed attempt. The retry's expected revision and current
+  target power come from the current Rust projection, whose revision, target
+  power, and Rust-projected option must still match the command; SDK preflight
+  remains authoritative. The confirmation bit is required for an
+  administrator grant or removal. Generic invite/cancel/load `Failed` states
+  do not admit a role command.
+- `role_options` and `can_edit_roles` are derived from direct Space power-level
+  state in Rust. Child-room completion is not an authorization input: an
+  incomplete child projection may show a sync notice while an authorized role
+  control remains enabled. Child-only and invited entries never receive role
+  options.
+- A matching authoritative success installs the full fresh Space Members
+  projection before settling `Idle`; React must not patch the target role.
+  Forbidden, stale, network, timeout, invalid, and SDK outcomes preserve the
+  authoritative role/options and enter `RoleUpdateFailed`. The failed
+  attempt's original expected revision/current power are not retry fences: a
+  retry must use the current projected revision and target power, while
+  preserving the same Space/user/generation/requested-power identity. A
+  background projection may settle that failure
+  to `Idle` when the requested level is proven at the sent revision or any
+  later authoritative revision; while `UpdatingRole`, background refresh may
+  replace member data but keeps the correlated operation pending.
+
 ## Public Directory
 
 Public room directory state is Rust-owned and split into three independent

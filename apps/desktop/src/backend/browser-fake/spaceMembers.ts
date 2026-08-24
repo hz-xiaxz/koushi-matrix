@@ -1,10 +1,30 @@
-import type { SpaceMemberEntry, SpaceMembersState } from "../../domain/types";
+import type {
+  SpaceMemberEntry,
+  SpaceMemberRoleOption,
+  SpaceMembersState
+} from "../../domain/types";
 
 export function compareSpaceMemberEntries(left: SpaceMemberEntry, right: SpaceMemberEntry): number {
   return (
     left.display_label.localeCompare(right.display_label) ||
     left.user_id.localeCompare(right.user_id)
   );
+}
+
+export function spaceMemberRoleOptionsForPowerLevel(
+  powerLevel: number | null,
+  callerPowerLevel = 101
+): SpaceMemberRoleOption[] {
+  if (powerLevel === null || callerPowerLevel <= powerLevel) {
+    return [];
+  }
+  return [0, 50, 100]
+    .filter((candidate) => candidate !== powerLevel && candidate < callerPowerLevel)
+    .map((candidate) => ({
+      power_level: candidate,
+      role: candidate === 100 ? "administrator" : candidate === 50 ? "moderator" : "user",
+      requires_confirmation: powerLevel >= 100 || candidate >= 100
+    }));
 }
 
 function browserFakeSpaceMemberEntry(
@@ -23,7 +43,8 @@ function browserFakeSpaceMemberEntry(
     role: "user",
     membership,
     child_room_ids: childRoomIds,
-    invite_pending: false
+    invite_pending: false,
+    role_options: []
   };
 }
 
@@ -37,17 +58,22 @@ export function emptyBrowserFakeSpaceMembersState(): SpaceMembersState {
     child_room_count: 0,
     complete_child_room_count: 0,
     incomplete_child_room_count: 0,
+    power_levels_revision: null,
+    can_edit_roles: false,
     operation: { kind: "idle" }
   };
 }
 
 export function createBrowserFakeSpaceMembersState(spaceId: string): SpaceMembersState {
   const spaceJoined = [
-    browserFakeSpaceMemberEntry(
-      "@joined:example.invalid",
-      "Joined Member",
-      "space_joined"
-    )
+    {
+      ...browserFakeSpaceMemberEntry(
+        "@joined:example.invalid",
+        "Joined Member",
+        "space_joined"
+      ),
+      role_options: spaceMemberRoleOptionsForPowerLevel(0)
+    }
   ];
   const spaceInvited = [
     browserFakeSpaceMemberEntry(
@@ -74,6 +100,8 @@ export function createBrowserFakeSpaceMembersState(spaceId: string): SpaceMember
     child_room_count: 2,
     complete_child_room_count: 1,
     incomplete_child_room_count: 1,
+    power_levels_revision: "revision-1",
+    can_edit_roles: true,
     operation: { kind: "idle" }
   };
 }

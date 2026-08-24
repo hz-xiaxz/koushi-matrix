@@ -175,6 +175,7 @@ impl CoreCommand {
                 | RoomCommand::UpdateRoomSetting { request_id, .. }
                 | RoomCommand::ModerateRoomMember { request_id, .. }
                 | RoomCommand::UpdateRoomMemberRole { request_id, .. }
+                | RoomCommand::UpdateSpaceMemberRole { request_id, .. }
                 | RoomCommand::SelectSpace { request_id, .. }
                 | RoomCommand::ReorderSpaces { request_id, .. }
                 | RoomCommand::SelectRoom { request_id, .. }

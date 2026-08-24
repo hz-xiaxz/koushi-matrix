@@ -1545,6 +1545,13 @@ mod tests {
                 power_level: 50,
             }))
             .expect("serialize room member role updated");
+        let space_member_role_update_settled =
+            serialize_core_event(&CoreEvent::Room(RoomEvent::SpaceMemberRoleUpdateSettled {
+                request_id,
+                generation: 4,
+                outcome: koushi_state::SpaceMemberRoleUpdateOutcome::Succeeded,
+            }))
+            .expect("serialize Space member role update settled");
         assert_eq!(
             room_settings_loaded["event"]["RoomSettingsLoaded"]["settings"]["permissions"]["can_edit_settings"],
             json!(true)
@@ -1564,6 +1571,10 @@ mod tests {
         assert_eq!(
             room_member_role_updated["event"]["RoomMemberRoleUpdated"]["power_level"],
             json!(50)
+        );
+        assert_eq!(
+            space_member_role_update_settled["event"]["SpaceMemberRoleUpdateSettled"]["outcome"],
+            json!("succeeded")
         );
 
         let e2ee_trust = serialize_core_event(&CoreEvent::E2eeTrust(
@@ -1961,6 +1972,7 @@ mod tests {
             "roomReportCompleted": room_report_completed,
             "roomMemberModerated": room_member_moderated,
             "roomMemberRoleUpdated": room_member_role_updated,
+            "spaceMemberRoleUpdateSettled": space_member_role_update_settled,
             "roomSettingUpdated": room_setting_updated,
             "roomSettingsLoaded": room_settings_loaded,
             "roomTagRemoved": room_tag_removed,
@@ -2103,6 +2115,7 @@ mod tests {
             "roomMarkedAsUnread",
             "roomMemberModerated",
             "roomMemberRoleUpdated",
+            "spaceMemberRoleUpdateSettled",
             "roomReportCompleted",
             "roomSettingUpdated",
             "roomSettingsLoaded",

@@ -129,6 +129,11 @@ pub enum RoomEvent {
         target_user_id: String,
         power_level: i64,
     },
+    SpaceMemberRoleUpdateSettled {
+        request_id: RequestId,
+        generation: u64,
+        outcome: koushi_state::SpaceMemberRoleUpdateOutcome,
+    },
     RoomKeyReshared {
         request_id: RequestId,
         room_id: String,
@@ -373,6 +378,16 @@ impl fmt::Debug for RoomEvent {
                 .field("target_user_id", &"UserId(..)")
                 .field("power_level", power_level)
                 .finish(),
+            Self::SpaceMemberRoleUpdateSettled {
+                request_id,
+                generation,
+                outcome,
+            } => formatter
+                .debug_struct("SpaceMemberRoleUpdateSettled")
+                .field("request_id", request_id)
+                .field("generation", generation)
+                .field("outcome", outcome)
+                .finish(),
             Self::RoomKeyReshared {
                 request_id,
                 outcome,
@@ -489,6 +504,7 @@ pub fn project_room_event_display_labels(event: &mut RoomEvent, state: &AppState
         | RoomEvent::DirectoryPreviewLoaded { .. }
         | RoomEvent::RoomMemberModerated { .. }
         | RoomEvent::RoomMemberRoleUpdated { .. }
+        | RoomEvent::SpaceMemberRoleUpdateSettled { .. }
         | RoomEvent::RoomKeyReshared { .. }
         | RoomEvent::OutboundSessionForced { .. }
         | RoomEvent::Index0RoomKeyShared { .. }

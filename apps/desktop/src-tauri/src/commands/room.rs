@@ -905,6 +905,38 @@ pub async fn invite_user_to_space(
 }
 
 #[tauri::command]
+pub async fn update_space_member_role(
+    space_id: String,
+    user_id: String,
+    generation: u64,
+    expected_power_levels_revision: Option<String>,
+    expected_power_level: i64,
+    power_level: i64,
+    confirmed: bool,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_update_space_member_role_command(
+            request_id,
+            space_id,
+            user_id,
+            generation,
+            expected_power_levels_revision,
+            expected_power_level,
+            power_level,
+            confirmed,
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    wait_for_space_member_role_update(&mut event_conn, request_id, generation).await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    current_snapshot(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn cancel_space_invite(
     space_id: String,
     user_id: String,
@@ -994,6 +1026,44 @@ pub(super) fn snapshot_contains_room(snapshot: &koushi_state::AppState, room_id:
     snapshot.rooms.iter().any(|room| room.room_id == room_id)
 }
 
+async fn wait_for_space_member_role_update(
+    event_conn: &mut CoreConnection,
+    operation_request_id: RequestId,
+    generation: u64,
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
+            .await
+            .map_err(|_| "Space member role update did not complete".to_owned())?;
+        match event {
+            Ok(CoreEvent::Room(RoomEvent::SpaceMemberRoleUpdateSettled {
+                request_id,
+                generation: event_generation,
+                outcome,
+            })) if request_id == operation_request_id && event_generation == generation => {
+                return match outcome {
+                    koushi_state::SpaceMemberRoleUpdateOutcome::Succeeded => Ok(()),
+                    koushi_state::SpaceMemberRoleUpdateOutcome::Failed(kind) => {
+                        Err(format!("Space member role update failed: {kind:?}"))
+                    }
+                };
+            }
+            Ok(CoreEvent::OperationFailed {
+                request_id,
+                failure,
+            }) if request_id == operation_request_id => {
+                return Err(invoke_error_from_core_failure(
+                    "Space member role update failed",
+                    failure,
+                ));
+            }
+            Ok(_) => {}
+            Err(_) => continue,
+        }
+    }
+}
+
 pub(super) async fn wait_for_room_operation<F>(
     event_conn: &mut CoreConnection,
     operation_request_id: RequestId,
@@ -1024,6 +1094,28 @@ where
             Err(_) => continue,
         }
     }
+}
+
+pub(super) fn build_update_space_member_role_command(
+    request_id: koushi_core::RequestId,
+    space_id: String,
+    user_id: String,
+    generation: u64,
+    expected_power_levels_revision: Option<String>,
+    expected_power_level: i64,
+    power_level: i64,
+    confirmed: bool,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::UpdateSpaceMemberRole {
+        request_id,
+        space_id,
+        user_id,
+        generation,
+        expected_power_levels_revision,
+        expected_power_level,
+        power_level,
+        confirmed,
+    })
 }
 
 pub(super) fn build_leave_room_command(
@@ -1337,6 +1429,10 @@ mod tests {
                 "pub async fn cancel_space_invite",
                 "space_member_invite_cancellation_settled_event_matches",
             ),
+            (
+                "pub async fn update_space_member_role",
+                "wait_for_space_member_role_update",
+            ),
         ] {
             let fn_offset = source
                 .find(fn_name)
@@ -1345,8 +1441,13 @@ mod tests {
             let end = rest.find("\n#[tauri::command]").unwrap_or(rest.len());
             let command_source = &rest[..end];
 
+            let waiter = if fn_name == "pub async fn update_space_member_role" {
+                "wait_for_space_member_role_update"
+            } else {
+                "wait_for_room_operation"
+            };
             assert!(
-                command_source.contains("wait_for_room_operation"),
+                command_source.contains(waiter),
                 "{fn_name} should wait for the correlated RoomEvent"
             );
             assert!(
@@ -1356,6 +1457,7 @@ mod tests {
             assert!(command_source.contains("current_snapshot"));
         }
         assert!(lib_source.contains("commands::room::cancel_space_invite"));
+        assert!(lib_source.contains("commands::room::update_space_member_role"));
 
         match super::build_load_space_members_command(
             fake_request_id(301),
@@ -1370,6 +1472,41 @@ mod tests {
                 assert_eq!(request_id, fake_request_id(301));
                 assert_eq!(space_id, "!space:example.org");
                 assert_eq!(generation, 4);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        match super::build_update_space_member_role_command(
+            fake_request_id(306),
+            "!space:example.org".to_owned(),
+            "@child:example.org".to_owned(),
+            4,
+            Some("$power:example.org".to_owned()),
+            0,
+            50,
+            false,
+        ) {
+            CoreCommand::Room(RoomCommand::UpdateSpaceMemberRole {
+                request_id,
+                space_id,
+                user_id,
+                generation,
+                expected_power_levels_revision,
+                expected_power_level,
+                power_level,
+                confirmed,
+            }) => {
+                assert_eq!(request_id, fake_request_id(306));
+                assert_eq!(space_id, "!space:example.org");
+                assert_eq!(user_id, "@child:example.org");
+                assert_eq!(generation, 4);
+                assert_eq!(
+                    expected_power_levels_revision.as_deref(),
+                    Some("$power:example.org")
+                );
+                assert_eq!(expected_power_level, 0);
+                assert_eq!(power_level, 50);
+                assert!(!confirmed);
             }
             other => panic!("unexpected command: {other:?}"),
         }
